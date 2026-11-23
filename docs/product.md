@@ -427,7 +427,9 @@ the ticket arrives in No project. When import links a project, it records an
 ordinary project membership change in the ticket's history. Project links remain
 locally editable.
 Refresh preserves the current link even when an issue moves to another repository.
-Changing or clearing a Project remote affects future imports.
+Changing or clearing a Project remote affects future imports. Each device keeps
+its own Project remotes alongside checkout and source settings. Workspace export
+and backups include them.
 [ADR 0021](adr/0021-route-external-tickets-to-projects-by-project-remote.md)
 
 After setting a Project remote, you can review and confirm a connection to GitHub.
@@ -440,8 +442,8 @@ the repository to add. Confirming applies the reviewed changes together. If the
 effect changes before confirmation, review the updated preview.
 
 GitHub source settings show the project each saved discovery repository routes to.
-Link an unclaimed repository to a project without a Project remote, or create a
-project from a checkout folder, then review backfill. Removing a repository from
+Link an unclaimed repository to a project with a local checkout and no Project
+remote, or create a project from a checkout folder, then review backfill. Removing a repository from
 discovery leaves its Project remote on the project.
 
 ### Workspace sync

@@ -41,6 +41,7 @@ const SEARCH_PAGES: usize = 5;
 
 pub(crate) struct GithubConnector {
     api_url: String,
+    web_host: Option<String>,
     transport: Box<dyn HttpTransport>,
     credentials: Box<dyn CredentialSource>,
 }
@@ -67,11 +68,51 @@ impl GithubConnector {
         transport: Box<dyn HttpTransport>,
         credentials: Box<dyn CredentialSource>,
     ) -> Self {
+        let api_url = api_url.into().trim_end_matches('/').to_owned();
+        let web_host = url::Url::parse(&api_url).ok().and_then(|api| {
+            api.host_str().map(|host| {
+                if host == "api.github.com" {
+                    "github.com"
+                } else {
+                    host
+                }
+                .to_owned()
+            })
+        });
         Self {
-            api_url: api_url.into().trim_end_matches('/').to_owned(),
+            api_url,
+            web_host,
             transport,
             credentials,
         }
+    }
+
+    fn issue_identity(&self, id: u64) -> Result<ExternalIdentity, SourceError> {
+        let host = self
+            .web_host
+            .as_deref()
+            .ok_or_else(|| SourceError::Protocol("the GitHub API has no valid host".into()))?;
+        Ok(ExternalIdentity {
+            provider: PROVIDER.into(),
+            id: issue_id(&id.to_string(), host),
+        })
+    }
+
+    fn check_issue_host(&self, reference: &ExternalRef) -> Result<(), SourceError> {
+        let host = issue_id_host(&reference.identity.id);
+        if let (Some(host), Some(configured)) = (host, self.web_host.as_deref()) {
+            if host == configured {
+                return Ok(());
+            }
+            return Err(SourceError::NotFound(format!(
+                "{} belongs to GitHub host {host}; the current source uses {configured}",
+                reference.locator
+            )));
+        }
+        Err(SourceError::NotFound(format!(
+            "the GitHub host of {} could not be identified",
+            reference.locator
+        )))
     }
 
     fn schema() -> ConfigSchema {
@@ -303,8 +344,9 @@ impl GithubConnector {
             // closed event; the marked event then appears only on the canonical's
             // timeline. A closure that names no issue leaves an earlier mark standing.
             if node.get("__typename").and_then(Value::as_str) == Some("ClosedEvent") {
-                if let Some((reference, url)) =
-                    node.get("duplicateOf").and_then(canonical_reference)
+                if let Some((reference, url)) = node
+                    .get("duplicateOf")
+                    .and_then(|issue| canonical_reference(self, issue))
                 {
                     target = Canonical::Named { reference, url };
                 }
@@ -318,7 +360,7 @@ impl GithubConnector {
                 continue;
             }
             target = match node.get("__typename").and_then(Value::as_str) {
-                Some("MarkedAsDuplicateEvent") => canonical_reference(node.get("canonical")?)
+                Some("MarkedAsDuplicateEvent") => canonical_reference(self, node.get("canonical")?)
                     .map_or(Canonical::NotSupplied, |(reference, url)| {
                         Canonical::Named { reference, url }
                     }),
@@ -590,11 +632,7 @@ impl Connector for GithubConnector {
     }
 
     fn repository_for_destination(&self, destination: &str) -> Option<String> {
-        let api = url::Url::parse(&self.api_url).ok()?;
-        let host = match api.host_str()? {
-            "api.github.com" => "github.com",
-            host => host,
-        };
+        let host = self.web_host.as_deref()?;
         crate::project_remote::normalize_project_remote(&format!("{host}/{destination}"))
     }
 
@@ -623,6 +661,16 @@ impl Connector for GithubConnector {
         text: &str,
     ) -> Result<ExternalIssue, SourceError> {
         let number = issue_number_in(text, destination)?;
+        if let Ok(url) = url::Url::parse(text.trim())
+            && url.host_str() != self.web_host.as_deref()
+        {
+            return Err(SourceError::InvalidConfiguration(vec![
+                super::schema::FieldIssue {
+                    field: "issue".into(),
+                    message: "use an issue link on the current GitHub host".into(),
+                },
+            ]));
+        }
         let url = format!(
             "{}/repos/{}/issues/{number}",
             self.api_url,
@@ -723,6 +771,7 @@ impl Connector for GithubConnector {
         _config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError> {
+        self.check_issue_host(reference)?;
         let (repository, number) = split_locator(&reference.locator)?;
         let url = format!(
             "{}/repos/{}/issues/{number}",
@@ -741,7 +790,11 @@ impl Connector for GithubConnector {
                 reason: ClosureReason::Duplicate,
             })
         {
-            let id = issue.reference.identity.id.parse().unwrap_or_default();
+            let id = value
+                .get("id")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| SourceError::Protocol("an issue had no id".into()))?;
+            let (repository, number) = split_locator(&issue.reference.locator)?;
             match self.canonical_of(repository, number, id) {
                 Canonical::Named { reference, url } => {
                     issue.duplicate_of = Some(reference);
@@ -759,6 +812,7 @@ impl Connector for GithubConnector {
         _config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<Conversation, SourceError> {
+        self.check_issue_host(reference)?;
         let (repository, number) = split_locator(&reference.locator)?;
         let subject = format!("issue {}", reference.locator);
         let base = format!(
@@ -930,6 +984,29 @@ fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {
         .ok_or_else(|| SourceError::Protocol("the issue locator is not valid".into()))
 }
 
+fn issue_id(id: &str, host: &str) -> String {
+    if host == "github.com" {
+        id.to_owned()
+    } else {
+        format!("@{host}:{id}")
+    }
+}
+
+pub(super) fn issue_id_host(id: &str) -> Option<&str> {
+    if id.parse::<u64>().is_ok() {
+        return Some("github.com");
+    }
+    let (host, number) = id.strip_prefix('@')?.rsplit_once(':')?;
+    (!host.is_empty() && number.parse::<u64>().is_ok()).then_some(host)
+}
+
+/// Legacy GitHub IDs were numeric for every host. Keep unverified IDs away from
+/// public GitHub's numeric range as well, without guessing where they came from.
+pub(super) fn scope_legacy_issue_id(id: &str, host: Option<&str>) -> Option<String> {
+    id.parse::<u64>().ok()?;
+    Some(issue_id(id, host.unwrap_or_default()))
+}
+
 /// Recover a legacy issue's host only when the saved web URL corroborates its locator.
 pub(super) fn repository_from_issue_url(locator: &str, issue_url: &str) -> Option<String> {
     let (repository, number) = split_locator(locator).ok()?;
@@ -1030,7 +1107,10 @@ canonical { __typename ... on Issue { databaseId number url repository { nameWit
 
 /// An issue named as canonical, or `None` for anything ticketd cannot track
 /// (a pull request, or a target the credential cannot read).
-fn canonical_reference(canonical: &Value) -> Option<(ExternalRef, Option<String>)> {
+fn canonical_reference(
+    connector: &GithubConnector,
+    canonical: &Value,
+) -> Option<(ExternalRef, Option<String>)> {
     if canonical.get("__typename").and_then(Value::as_str) != Some("Issue") {
         return None;
     }
@@ -1043,10 +1123,7 @@ fn canonical_reference(canonical: &Value) -> Option<(ExternalRef, Option<String>
         .map(str::to_owned);
     Some((
         ExternalRef {
-            identity: ExternalIdentity {
-                provider: PROVIDER.into(),
-                id: id.to_string(),
-            },
+            identity: connector.issue_identity(id).ok()?,
             locator: format!("{repository}#{number}"),
         },
         url,
@@ -1213,10 +1290,7 @@ fn translate_issue(
     let display = format!("{repository}#{number}");
     Ok(Some(ExternalIssue {
         reference: ExternalRef {
-            identity: ExternalIdentity {
-                provider: PROVIDER.into(),
-                id: id.to_string(),
-            },
+            identity: connector.issue_identity(id)?,
             locator: display.clone(),
         },
         display,

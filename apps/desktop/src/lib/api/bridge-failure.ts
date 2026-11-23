@@ -23,6 +23,8 @@ export const failureCodes = [
   "invalid_project_remote",
   "project_remote_taken",
   "project_source_host_mismatch",
+  "project_checkout_required",
+  "source_repository_not_listed",
   "too_large",
   "not_signed_in",
   "offline",

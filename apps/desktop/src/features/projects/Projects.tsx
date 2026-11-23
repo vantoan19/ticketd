@@ -162,6 +162,7 @@ export function Projects({
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
+  const sourceReview = useRef<string | null>(null);
   const [checkoutDrafts, setCheckoutDrafts] = useState<Record<string, string>>(
     {},
   );
@@ -247,7 +248,7 @@ export function Projects({
   function projectSaved(project: Project) {
     void onChange();
     if (project.remote && project.remote !== editing?.remote)
-      onConnectSource?.(project.id);
+      sourceReview.current = project.id;
   }
 
   async function registerCheckout() {
@@ -481,6 +482,11 @@ export function Projects({
         {...(editing && { project: editing })}
         onOpenChange={(next) => !next && setDialog(null)}
         onSaved={projectSaved}
+        onExitComplete={() => {
+          const projectId = sourceReview.current;
+          sourceReview.current = null;
+          if (projectId) onConnectSource?.(projectId);
+        }}
       />
       <DialogShell
         open={!!checkoutProject}

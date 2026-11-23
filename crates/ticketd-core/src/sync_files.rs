@@ -1051,7 +1051,21 @@ impl SyncRecord {
         let mut record = record.ok_or_else(|| bad("a sync file must start with a '---' line"))?;
         record.parts.sort_by(|a, b| a.order().cmp(&b.order()));
         record.validate()?;
+        record.scope_source_identity();
         Ok(record)
+    }
+
+    fn scope_source_identity(&mut self) {
+        let field = |key| text(&self.fields, key).unwrap_or_default();
+        if let Some(id) = crate::source::scope_saved_issue_identity(
+            field("source_provider"),
+            field("source_external_id"),
+            field("source_locator"),
+            field("source_url"),
+        ) {
+            self.fields
+                .insert("source_external_id".into(), SyncValue::Text(id));
+        }
     }
 
     /// Check a record built or merged in code the way a parsed file is checked.

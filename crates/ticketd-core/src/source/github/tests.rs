@@ -67,9 +67,13 @@ impl CredentialSource for Token {
 }
 
 fn setup(token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
+    setup_at(API, token)
+}
+
+fn setup_at(api: &str, token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
     let fixture = Arc::new(Fixture::default());
     let connector = GithubConnector::new(
-        API,
+        api,
         Box::new(Shared(fixture.clone())),
         Box::new(Token(token)),
     );
@@ -157,6 +161,127 @@ fn configured_repositories_use_the_github_web_host_without_network_access() {
 }
 
 #[test]
+fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = crate::Workspace::open(folder.path().join("workspace.db")).unwrap();
+    let values = config(json!({"repositories": ["o/one"]}));
+    let public_api = "https://api.github.com";
+    let (public, public_engine) = setup_at(public_api, Some(TOKEN));
+    let mut public_issue = issue(7, 7, "o/one");
+    public_issue["title"] = json!("Public issue");
+    public_issue["html_url"] = json!("https://github.com/o/one/issues/7");
+    let listed = |api| format!("{api}/repos/o/one/issues?state=open&per_page=100");
+    public.respond(&format!("{public_api}/user"), ok(json!({"login": "octo"})));
+    public.respond(&listed(public_api), ok(json!([public_issue])));
+    workspace
+        .save_source(&public_engine, "github", &values)
+        .unwrap();
+    public.respond(&listed(public_api), ok(json!([public_issue])));
+    for suffix in ["comments", "events"] {
+        public.respond(
+            &format!("{public_api}/repos/o/one/issues/7/{suffix}?per_page=100"),
+            ok(json!([])),
+        );
+    }
+    workspace
+        .refresh_sources(&public_engine, &Default::default())
+        .unwrap();
+    let public_ticket = workspace.list_tickets().unwrap().remove(0);
+    assert_eq!(public_ticket.title, "Public issue");
+    assert_eq!(
+        workspace.export().unwrap()["external_identities"][0]["external_id"],
+        "7"
+    );
+
+    let (enterprise, enterprise_engine) = setup(Some(TOKEN));
+    let mut enterprise_issue = issue(7, 7, "o/one");
+    enterprise_issue["title"] = json!("Enterprise issue");
+    enterprise.respond(&listed(API), ok(json!([enterprise_issue])));
+    for suffix in ["comments", "events"] {
+        enterprise.respond(
+            &format!("{API}/repos/o/one/issues/7/{suffix}?per_page=100"),
+            ok(json!([])),
+        );
+    }
+    workspace
+        .refresh_sources(&enterprise_engine, &Default::default())
+        .unwrap();
+    let tickets = workspace.list_tickets().unwrap();
+    assert_eq!(tickets.len(), 2);
+    assert!(tickets.iter().any(
+        |ticket| ticket.reference == public_ticket.reference && ticket.title == "Public issue"
+    ));
+    assert!(
+        tickets
+            .iter()
+            .any(|ticket| ticket.title == "Enterprise issue")
+    );
+    assert!(
+        !enterprise
+            .urls()
+            .contains(&format!("{API}/repos/o/one/issues/7"))
+    );
+}
+
+#[test]
+fn adding_a_repository_checks_it_even_when_the_first_repository_fills_the_preview() {
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = crate::Workspace::open(folder.path().join("workspace.db")).unwrap();
+    let (fixture, engine) = setup(Some(TOKEN));
+    let config = config(json!({"repositories": ["o/one"]}));
+    let first = format!("{API}/repos/o/one/issues?state=open&per_page=100");
+    let second = format!("{API}/repos/o/one/issues?page=2");
+    let target = format!("{API}/repos/o/target/issues?state=open&per_page=100");
+    let validate_account = || fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    validate_account();
+    fixture.respond(&first, ok(json!([])));
+    let saved = workspace
+        .save_source(&engine, "github", &config)
+        .unwrap()
+        .source;
+    let project = workspace
+        .create_project_with_remote(
+            "Target",
+            folder.path().to_str().unwrap(),
+            Some("api.example.test/o/target"),
+        )
+        .unwrap();
+    let preview = workspace
+        .preview_connect_source(&engine, "github", &project.id)
+        .unwrap();
+
+    validate_account();
+    fixture.respond(
+        &first,
+        ok_with(
+            json!(
+                (1..=100)
+                    .map(|id| issue(id, id, "o/one"))
+                    .collect::<Vec<_>>()
+            ),
+            &[("link", &format!("<{second}>; rel=\"next\""))],
+        ),
+    );
+    fixture.respond(
+        &second,
+        ok(json!(
+            (101..=200)
+                .map(|id| issue(id, id, "o/one"))
+                .collect::<Vec<_>>()
+        )),
+    );
+    validate_account();
+    fixture.respond(&target, status(404, json!({"message": "Not Found"}), &[]));
+
+    let refused = workspace
+        .connect_source(&engine, "github", &project.id, &preview.fingerprint)
+        .unwrap_err();
+    assert!(refused.to_string().contains("o/target"));
+    assert_eq!(workspace.saved_source("github").unwrap(), Some(saved));
+    assert!(fixture.urls().contains(&target));
+}
+
+#[test]
 fn discovery_pages_through_every_repository_and_skips_pull_requests() {
     let (fixture, engine) = setup(Some(TOKEN));
     let first = format!("{API}/repos/o/one/issues?state=open&per_page=100");
@@ -196,7 +321,7 @@ fn discovery_pages_through_every_repository_and_skips_pull_requests() {
         issues[2].repository.as_deref(),
         Some("api.example.test/o/two")
     );
-    assert_eq!(issues[0].reference.identity.id, "1");
+    assert_eq!(issues[0].reference.identity.id, "@api.example.test:1");
     assert_eq!(issues[0].assignees, ["octo"]);
     assert_eq!(issues[0].labels, ["bug", "plain"]);
     assert_eq!(issues[0].author.as_deref(), Some("alice"));
@@ -282,7 +407,7 @@ fn closure_reasons_map_to_neutral_states() {
         let reference = ExternalRef {
             identity: ExternalIdentity {
                 provider: "github".into(),
-                id: "7".into(),
+                id: "@api.example.test:7".into(),
             },
             locator: "o/one#7".into(),
         };
@@ -307,7 +432,7 @@ fn fetch_reports_the_repository_a_transferred_issue_is_now_in() {
     let reference = ExternalRef {
         identity: ExternalIdentity {
             provider: "github".into(),
-            id: "77".into(),
+            id: "@api.example.test:77".into(),
         },
         locator: "o/one#7".into(),
     };
@@ -340,7 +465,7 @@ fn fetch_refuses_a_pull_request_and_a_different_identity() {
     pull_request["pull_request"] = json!({});
     fixture.respond(&format!("{API}/repos/o/one/issues/7"), ok(pull_request));
     assert!(matches!(
-        engine.fetch("github", &values, &reference("7")),
+        engine.fetch("github", &values, &reference("@api.example.test:7")),
         Err(SourceError::NotFound(_))
     ));
     fixture.respond(
@@ -348,7 +473,7 @@ fn fetch_refuses_a_pull_request_and_a_different_identity() {
         ok(issue(8, 7, "o/one")),
     );
     assert!(matches!(
-        engine.fetch("github", &values, &reference("7")),
+        engine.fetch("github", &values, &reference("@api.example.test:7")),
         Err(SourceError::Protocol(_))
     ));
 }
@@ -413,7 +538,7 @@ fn a_gone_issue_is_not_found_not_an_unusable_answer() {
     let reference = ExternalRef {
         identity: ExternalIdentity {
             provider: "github".into(),
-            id: "7".into(),
+            id: "@api.example.test:7".into(),
         },
         locator: "o/one#7".into(),
     };
@@ -792,7 +917,7 @@ fn fetch_duplicate(
     let reference = ExternalRef {
         identity: ExternalIdentity {
             provider: "github".into(),
-            id: "7".into(),
+            id: "@api.example.test:7".into(),
         },
         locator: "o/one#7".into(),
     };
@@ -827,7 +952,7 @@ fn a_duplicate_names_its_canonical_issue_from_the_graphql_timeline_in_another_re
     );
     let target = fetched.duplicate_of.expect("a canonical issue");
     assert_eq!(target.identity.provider, "github");
-    assert_eq!(target.identity.id, "900");
+    assert_eq!(target.identity.id, "@api.example.test:900");
     assert_eq!(target.locator, "o/other#12");
     assert_eq!(
         fetched.duplicate_of_url.as_deref(),
@@ -873,7 +998,10 @@ fn only_events_about_this_issue_count_and_the_latest_wins() {
             marked(7, issue_node(900, 9, "o/one")),
         ])),
     );
-    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "900");
+    assert_eq!(
+        fetched.duplicate_of.unwrap().identity.id,
+        "@api.example.test:900"
+    );
     let fetched = fetch_duplicate(
         &fixture,
         &engine,
@@ -904,7 +1032,7 @@ fn closing_as_a_duplicate_names_the_canonical_on_the_duplicates_own_closed_event
         timeline(json!([closed_as_duplicate(issue_node(900, 12, "o/other"))])),
     );
     let target = fetched.duplicate_of.expect("the closed event names it");
-    assert_eq!(target.identity.id, "900");
+    assert_eq!(target.identity.id, "@api.example.test:900");
     assert_eq!(target.locator, "o/other#12");
     assert_eq!(
         fetched.duplicate_of_url.as_deref(),
@@ -919,7 +1047,10 @@ fn closing_as_a_duplicate_names_the_canonical_on_the_duplicates_own_closed_event
             closed_as_duplicate(issue_node(900, 9, "o/one")),
         ])),
     );
-    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "900");
+    assert_eq!(
+        fetched.duplicate_of.unwrap().identity.id,
+        "@api.example.test:900"
+    );
     let fetched = fetch_duplicate(
         &fixture,
         &engine,
@@ -928,7 +1059,10 @@ fn closing_as_a_duplicate_names_the_canonical_on_the_duplicates_own_closed_event
             marked(7, issue_node(900, 9, "o/one")),
         ])),
     );
-    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "900");
+    assert_eq!(
+        fetched.duplicate_of.unwrap().identity.id,
+        "@api.example.test:900"
+    );
     // A closure that names nothing leaves an earlier mark standing.
     let fetched = fetch_duplicate(
         &fixture,
@@ -938,7 +1072,10 @@ fn closing_as_a_duplicate_names_the_canonical_on_the_duplicates_own_closed_event
             closed_as_duplicate(Value::Null),
         ])),
     );
-    assert_eq!(fetched.duplicate_of.unwrap().identity.id, "800");
+    assert_eq!(
+        fetched.duplicate_of.unwrap().identity.id,
+        "@api.example.test:800"
+    );
 }
 
 #[test]
@@ -977,7 +1114,7 @@ fn only_duplicate_closures_ask_for_a_canonical_issue() {
     let reference = ExternalRef {
         identity: ExternalIdentity {
             provider: "github".into(),
-            id: "7".into(),
+            id: "@api.example.test:7".into(),
         },
         locator: "o/one#7".into(),
     };
@@ -1032,7 +1169,7 @@ fn publishing_posts_only_the_title_and_description_and_returns_the_created_issue
 
     let created = publish_to(&engine).unwrap();
 
-    assert_eq!(created.reference.identity.id, "77");
+    assert_eq!(created.reference.identity.id, "@api.example.test:77");
     assert_eq!(created.reference.locator, "o/r#12");
     assert_eq!(created.state, ExternalState::Open);
     let requests = fixture.requests.lock().unwrap();
@@ -1103,7 +1240,7 @@ fn conversation_of(engine: &Engine) -> Result<Conversation, SourceError> {
     let reference = ExternalRef {
         identity: ExternalIdentity {
             provider: "github".into(),
-            id: "7".into(),
+            id: "@api.example.test:7".into(),
         },
         locator: "o/one#7".into(),
     };
@@ -1241,7 +1378,7 @@ fn locating_reads_an_issue_only_inside_the_destination() {
         "#12",
         "o/r#12",
         "O/R#12",
-        "https://github.example/o/r/issues/12",
+        "https://api.example.test/o/r/issues/12",
     ] {
         let (fixture, engine) = setup(Some(TOKEN));
         fixture.respond(
@@ -1249,12 +1386,16 @@ fn locating_reads_an_issue_only_inside_the_destination() {
             ok(issue(77, 12, "o/r")),
         );
         let found = locate_in(&engine, text).unwrap();
-        assert_eq!(found.reference.identity.id, "77", "{text}");
+        assert_eq!(
+            found.reference.identity.id, "@api.example.test:77",
+            "{text}"
+        );
         assert_eq!(found.display, "o/r#12");
     }
     for text in [
         "other/repo#12",
         "https://github.example/other/repo/issues/12",
+        "https://github.com/o/r/issues/12",
         "abc",
         "0",
         "",
@@ -1332,7 +1473,11 @@ fn searching_reads_the_whole_window_and_matches_by_content() {
         .iter()
         .map(|i| i.reference.identity.id.as_str())
         .collect();
-    assert_eq!(ids, ["9", "6"], "title and normalized body match only");
+    assert_eq!(
+        ids,
+        ["@api.example.test:9", "@api.example.test:6"],
+        "title and normalized body match only"
+    );
 }
 
 #[test]
@@ -1366,7 +1511,7 @@ fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_matc
         .iter()
         .map(|i| i.reference.identity.id.as_str())
         .collect();
-    assert_eq!(ids, ["9"]);
+    assert_eq!(ids, ["@api.example.test:9"]);
 }
 
 #[test]

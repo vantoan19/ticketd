@@ -875,12 +875,18 @@ invalidates match membership until the next complete discovery walk.
 When a connector reports a repository, the import write matches its normalized
 `host/owner/name` against the Project remote. It saves the matching project link
 and a project membership history entry in the same transaction as the new ticket.
-Refresh of an existing ticket updates its external repository when reported and
-preserves its local project membership. GitHub derives the web host from the API
-host, using `github.com` for `api.github.com` and the configured host for Enterprise.
-Format version 87 populates the repository for legacy GitHub identities whose
-stored issue URL agrees with their locator. Workspace sync uses the same derivation
-when an incoming ticket gains or changes its external location.
+Refresh preserves existing project membership. It retains a previously observed
+repository while the issue's locator and URL stay the same. A changed location
+without a repository report clears the old observation. GitHub derives the web
+host from the API host, using `github.com` for `api.github.com` and the configured
+host for Enterprise. Enterprise issue identities include that host, so issues
+with the same numeric ID on different hosts stay separate after a source change.
+Public GitHub keeps its numeric IDs. Format version 87 populates the repository
+when a legacy issue URL agrees with its locator. Format version 88 qualifies
+legacy IDs using stored host evidence. A legacy ID without host evidence remains
+unverified. Drive sync applies the same qualification to older incoming issue
+records and derives their repository when a ticket gains or changes its external
+location.
 
 `Workspace::preview_connect_source` reads one local snapshot of the Project
 remote, the saved source, and the exact set of eligible ticket identities. It
@@ -890,8 +896,9 @@ rules and the account when confirmation would add a repository.
 `Workspace::connect_source` checks this
 fingerprint before contacting the provider, then rechecks under the write lock.
 When adding a repository, it shares the validation and persistence path of
-`save_source`. Provider validation and discovery preview finish before the lock.
-The transaction saves the new rules, invalidates discovery membership, and applies
+`save_source`. If the bounded preview stops early, a separate preview checks the
+added repository with the same filters. Provider validation and discovery preview
+finish before the lock. The transaction saves the new rules, invalidates discovery membership, and applies
 the reviewed project links using the ordinary history path. If the rules already
 list the repository, the transaction only applies the links and can run offline.
 A separate bounded match count for the new repository keeps the saved assignee

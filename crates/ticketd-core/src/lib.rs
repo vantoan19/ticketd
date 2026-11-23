@@ -162,10 +162,7 @@ pub use chats::{
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};
-pub use project_remote::{
-    ProjectRemoteCandidate, ProjectRemoteDetection, detect_project_remote,
-    normalize_project_remote_url,
-};
+pub use project_remote::{ProjectRemoteCandidate, ProjectRemoteDetection, detect_project_remote};
 pub use projects::{CheckoutRegistration, CheckoutRemoteMismatch, Project, ProjectRemoteChange};
 pub use readiness::Readiness;
 
@@ -309,7 +306,11 @@ pub enum Error {
     ProjectRemoteTaken { remote: String, project: String },
     #[error("{0} already has a Project remote. Choose a project without one.")]
     ProjectAlreadyHasRemote(String),
-    #[error("{0} is no longer in the saved discovery repositories.")]
+    #[error("Register a checkout for {0} before linking it to a discovery repository.")]
+    ProjectCheckoutRequired(String),
+    #[error(
+        "{0} is no longer in the saved discovery repositories. Reload the routes and choose a saved repository."
+    )]
     SourceRepositoryNotListed(String),
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),

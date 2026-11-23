@@ -141,6 +141,11 @@ const PlanList = lazyView(() =>
 const Projects = lazyView(() =>
   import("@/features/projects/Projects").then((module) => module.Projects),
 );
+const ProjectFormDialog = lazyView(() =>
+  import("@/features/projects/ProjectFormDialog").then(
+    (module) => module.ProjectFormDialog,
+  ),
+);
 const ConnectProjectSource = lazyView(() =>
   import("@/features/projects/ConnectProjectSource").then(
     (module) => module.ConnectProjectSource,
@@ -276,6 +281,7 @@ function AppContent() {
   const [projectSource, setProjectSource] = useState<
     | ({ mode: "setup" } & ProjectSourceSetup)
     | { mode: "review"; projectId: string; resumed?: boolean }
+    | { mode: "edit_remote"; projectId: string; exit?: "close" | "review" }
     | null
   >(null);
   useThemeSync();
@@ -718,6 +724,9 @@ function AppContent() {
   const pendingSourceSetup =
     projectSource?.mode === "setup" ? projectSource : null;
   const scopedProject = projects.find((item) => item.id === navigation.project);
+  const sourceProject = projects.find(
+    (item) => item.id === projectSource?.projectId,
+  );
   const githubSourceRevision =
     sourceEntries.find((entry) => entry.connector.provider === "github")?.saved
       ?.saved_at ?? "";
@@ -1282,7 +1291,6 @@ function AppContent() {
                                   />
                                   {projectSource?.mode === "review" && (
                                     <ConnectProjectSource
-                                      key={projectSource.projectId}
                                       projectId={projectSource.projectId}
                                       resumeAfterSetup={
                                         projectSource.resumed ?? false
@@ -1290,8 +1298,45 @@ function AppContent() {
                                       onClose={() => setProjectSource(null)}
                                       onSetup={setupProjectSource}
                                       onConnected={() => void reportChange()}
+                                      fallbackFocus={() => contentPanel}
+                                      {...(sourceProject && {
+                                        onEditRemote: () =>
+                                          setProjectSource({
+                                            mode: "edit_remote",
+                                            projectId: sourceProject.id,
+                                          }),
+                                      })}
                                     />
                                   )}
+                                  {projectSource?.mode === "edit_remote" &&
+                                    sourceProject && (
+                                      <ProjectFormDialog
+                                        project={sourceProject}
+                                        open={!projectSource.exit}
+                                        onOpenChange={(open) =>
+                                          !open &&
+                                          setProjectSource({
+                                            ...projectSource,
+                                            exit: "close",
+                                          })
+                                        }
+                                        onSaved={(project) => {
+                                          void reportChange();
+                                          if (project.remote)
+                                            setProjectSource({
+                                              ...projectSource,
+                                              exit: "review",
+                                            });
+                                        }}
+                                        onExitComplete={() => {
+                                          if (projectSource.exit === "review")
+                                            reviewProjectSource(
+                                              sourceProject.id,
+                                            );
+                                          else setProjectSource(null);
+                                        }}
+                                      />
+                                    )}
                                   <ViewRegion
                                     page={`${view}:${graphOrigin ?? ""}:${guideShown ? "first-run" : firstRunPending ? "pending" : ""}`}
                                   >

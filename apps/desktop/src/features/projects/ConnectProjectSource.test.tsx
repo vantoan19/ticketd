@@ -109,3 +109,90 @@ test("a changed connection effect requires a new confirmation", async () => {
     expectedFingerprint: "updated",
   });
 });
+
+test("a failed match count offers details and retries without connecting", async () => {
+  let countFailed = false;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "preview_connect_source") return preview;
+    if (command === "connect_source_match_count") {
+      if (countFailed) return { matched: 4, complete: true };
+      countFailed = true;
+      throw { code: "unavailable", message: "GitHub has timed out" };
+    }
+    throw new Error(`Unexpected command ${command}`);
+  });
+  render(<Review />);
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  expect(screen.getByRole("alert").textContent).toContain(
+    "Couldn't count matching issues",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Details" }));
+  expect(screen.getByText("GitHub has timed out")).toBeTruthy();
+  fireEvent.click(retry);
+  expect(
+    await screen.findByText("Import issues from github.com/team/app (4 match)"),
+  ).toBeTruthy();
+});
+
+test("changing projects disables confirmation until the new effect is reviewed", async () => {
+  const second = {
+    ...preview,
+    project_id: "p2",
+    source: "already_listed",
+    fingerprint: "second",
+  };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "preview_connect_source") {
+      if (args && "projectId" in args && args.projectId === "p2") return second;
+      return { ...preview, source: "already_listed" };
+    }
+    return { repository_added: false, linked_tickets: second.tickets };
+  });
+  const dialog = (projectId: string) => (
+    <ConnectProjectSource
+      projectId={projectId}
+      onClose={() => {}}
+      onConnected={() => {}}
+      onSetup={() => {}}
+    />
+  );
+  const view = render(dialog("p1"));
+  await screen.findByRole("button", { name: "Confirm" });
+  view.rerender(dialog("p2"));
+  expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("connect_source", {
+      provider: "github",
+      projectId: "p2",
+      expectedFingerprint: "second",
+    }),
+  );
+});
+
+test("a host mismatch names the remote and hands off to editing after the dialog closes", async () => {
+  vi.mocked(invoke).mockRejectedValue({
+    code: "project_source_host_mismatch",
+    message:
+      "Project remote enterprise.test/team/app is on a different host from the GitHub source. Select a remote on the source's host to connect it.",
+  });
+  const edit = vi.fn();
+  render(
+    <ConnectProjectSource
+      projectId="p1"
+      onClose={() => {}}
+      onConnected={() => {}}
+      onSetup={() => {}}
+      onEditRemote={edit}
+    />,
+  );
+  const action = await screen.findByRole("button", {
+    name: "Edit Project remote",
+  });
+  expect(screen.getByRole("alert").textContent).toContain(
+    "enterprise.test/team/app is on a different host",
+  );
+  fireEvent.click(action);
+  await waitFor(() => expect(edit).toHaveBeenCalledOnce());
+  expect(screen.queryByRole("dialog")).toBeNull();
+});

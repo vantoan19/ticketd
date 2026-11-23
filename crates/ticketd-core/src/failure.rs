@@ -112,6 +112,7 @@ impl Error {
             | Self::RequestConflict(_)
             | Self::ConnectSourceChanged
             | Self::ProjectAlreadyHasRemote(_)
+            | Self::ProjectCheckoutRequired(_)
             | Self::SourceRepositoryNotListed(_) => FailureKind::Conflict,
             Self::NotFound(_)
             | Self::DocumentNotFound(_)

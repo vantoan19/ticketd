@@ -73,7 +73,7 @@ fn opening_a_legacy_workspace_identifies_github_repositories_without_refreshing(
         let id = format!("legacy-{index}");
         let reference = format!("T-KQ{}", index + 1);
         connection.execute("INSERT INTO tickets (id, reference, title, status) VALUES (?1, ?2, 'Legacy issue', 'Todo')", rusqlite::params![id, reference]).unwrap();
-        connection.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin) VALUES (?1, ?2, ?1, ?3, ?3, ?4, 'imported')", rusqlite::params![id, provider, locator, url]).unwrap();
+        connection.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin) VALUES (?1, ?2, ?3, ?4, ?4, ?5, 'imported')", rusqlite::params![id, provider, (index + 1).to_string(), locator, url]).unwrap();
         connection
             .execute(
                 "INSERT INTO external_ownership (ticket_id, authority) VALUES (?1, 'external')",
@@ -87,6 +87,13 @@ fn opening_a_legacy_workspace_identifies_github_repositories_without_refreshing(
             )
             .unwrap();
     }
+    connection
+        .execute(
+            "UPDATE tickets SET status = 'Duplicate' WHERE id = 'legacy-1'",
+            [],
+        )
+        .unwrap();
+    connection.execute("INSERT INTO external_duplicate_targets (ticket_id, provider, external_id, locator, display) VALUES ('legacy-1', 'github', '8', 'acme/site#43', 'acme/site#43')", []).unwrap();
     drop(connection);
 
     let workspace = Workspace::open(&path).unwrap();
@@ -98,6 +105,27 @@ fn opening_a_legacy_workspace_identifies_github_repositories_without_refreshing(
         assert_eq!(identity["url"], url);
         assert_eq!(identity["repository"], serde_json::json!(expected), "{url}");
     }
+    let ids: Vec<_> = identities
+        .iter()
+        .map(|identity| identity["external_id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "1",
+            "@git.example.test:2",
+            "@:3",
+            "@:4",
+            "@:5",
+            "@:6",
+            "7",
+            "@git.example.test:8"
+        ]
+    );
+    let duplicate = workspace.show_ticket("T-KQ2").unwrap();
+    assert!(matches!(duplicate.source.unwrap().duplicate_target,
+        Some(ticketd_core::source::DuplicateTarget::External { ticket: Some(reference), .. }) if reference == "T-KQ8"
+    ));
     assert!(
         workspace
             .list_tickets()
@@ -107,7 +135,7 @@ fn opening_a_legacy_workspace_identifies_github_repositories_without_refreshing(
     );
 }
 
-const LEGACY_ISSUES: [(&str, &str, &str, Option<&str>); 7] = [
+const LEGACY_ISSUES: [(&str, &str, &str, Option<&str>); 8] = [
     (
         "github",
         "Owner/Site#42",
@@ -144,5 +172,11 @@ const LEGACY_ISSUES: [(&str, &str, &str, Option<&str>); 7] = [
         "acme/site#42",
         "https://github.com/acme/site/issues/42",
         None,
+    ),
+    (
+        "github",
+        "acme/site#43",
+        "https://git.example.test/acme/site/issues/43",
+        Some("git.example.test/acme/site"),
     ),
 ];

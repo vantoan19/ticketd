@@ -1,4 +1,5 @@
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useState } from "react";
+import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { toFailure } from "@/lib/api/bridge-failure";
@@ -24,32 +25,50 @@ type PreviewState =
   | { status: "failed"; failure: FailureDescription }
   | { status: "ready"; preview: ConnectSourcePreview };
 
+type Exit =
+  | { action: "skip" | "connected" | "edit" }
+  | { action: "setup"; setup: ProjectSourceSetup };
+
 const PROVIDER = "github";
 
-/** Review the exact effect, with a separate live count when adding discovery. */
-export function ConnectProjectSource({
-  projectId,
-  onClose,
-  onSetup,
-  onConnected,
-  resumeAfterSetup = false,
-}: {
+type ReviewProps = {
   projectId: string;
   onClose: () => void;
   onSetup: (setup: ProjectSourceSetup) => void;
   onConnected: () => void;
+  onEditRemote?: () => void;
+  fallbackFocus?: () => HTMLElement | null;
   /** A newly saved source only needs another dialog if there is something to review. */
   resumeAfterSetup?: boolean;
-}) {
+};
+
+export function ConnectProjectSource(props: ReviewProps) {
+  return <ProjectSourceReview key={props.projectId} {...props} />;
+}
+
+/** Review the exact effect, with a separate live count when adding discovery. */
+function ProjectSourceReview({
+  projectId,
+  onClose,
+  onSetup,
+  onConnected,
+  onEditRemote,
+  fallbackFocus,
+  resumeAfterSetup = false,
+}: ReviewProps) {
+  const [opener] = useState(() => document.activeElement);
+  const [exit, setExit] = useState<Exit | null>(null);
   const [revision, setRevision] = useState(0);
   const [state, setState] = useState<PreviewState>({ status: "loading" });
-  const [count, setCount] = useState<
-    ConnectSourceMatchCount | null | undefined
-  >();
+  const [countRevision, setCountRevision] = useState(0);
+  const [count, setCount] = useState<{
+    fingerprint: string;
+    result: ConnectSourceMatchCount | null;
+    failure: FailureDescription | null;
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [changed, setChanged] = useState(false);
-  const closeEmpty = useEffectEvent(onClose);
   useEffect(() => {
     let current = true;
     void sourcesClient.previewConnectSource(PROVIDER, projectId).then(
@@ -60,22 +79,10 @@ export function ConnectProjectSource({
           preview.source === "already_listed" &&
           !preview.tickets.length
         ) {
-          closeEmpty();
+          setExit({ action: "skip" });
           return;
         }
         setState({ status: "ready", preview });
-        if (preview.source === "add_repository") {
-          void sourcesClient
-            .connectSourceMatchCount(PROVIDER, projectId, preview.fingerprint)
-            .then(
-              (result) => {
-                if (current) setCount(result);
-              },
-              () => {
-                if (current) setCount(null);
-              },
-            );
-        }
       },
       (reason) => {
         if (current)
@@ -90,26 +97,65 @@ export function ConnectProjectSource({
     };
   }, [projectId, resumeAfterSetup, revision]);
 
-  function reload() {
-    setState({ status: "loading" });
-    setCount(undefined);
-    setRevision((previous) => previous + 1);
-  }
-
   const preview = state.status === "ready" ? state.preview : null;
   const needsSetup = preview?.source === "not_connected";
   const addsRepository = preview?.source === "add_repository";
+  const fingerprint = addsRepository ? preview.fingerprint : null;
+  const matchCount = count?.fingerprint === fingerprint ? count : null;
+  useEffect(() => {
+    if (!fingerprint || exit) return;
+    let current = true;
+    void sourcesClient
+      .connectSourceMatchCount(PROVIDER, projectId, fingerprint)
+      .then(
+        (result) => {
+          if (current) setCount({ fingerprint, result, failure: null });
+        },
+        (reason) => {
+          if (current)
+            setCount({
+              fingerprint,
+              result: null,
+              failure: describeFailure(reason, "count matching issues"),
+            });
+        },
+      );
+    return () => {
+      current = false;
+    };
+  }, [projectId, fingerprint, countRevision, exit]);
+
+  function reload() {
+    setState({ status: "loading" });
+    setCount(null);
+    setRevision((previous) => previous + 1);
+  }
+
+  function retryCount() {
+    if (matchCount?.failure?.action === "reload") {
+      setChanged(true);
+      reload();
+    } else {
+      setCount(null);
+      setCountRevision((previous) => previous + 1);
+    }
+  }
+
   const linkCount = preview?.tickets.length ?? 0;
   const hasEffect = needsSetup || addsRepository || linkCount > 0;
   const error = state.status === "failed" ? state.failure : failure;
+  const countFailure = matchCount?.failure;
 
   async function confirm() {
     if (!preview) return;
     if (preview.source === "not_connected") {
-      onSetup({
-        provider: preview.provider,
-        repository: preview.repository,
-        projectId,
+      setExit({
+        action: "setup",
+        setup: {
+          provider: preview.provider,
+          repository: preview.repository,
+          projectId,
+        },
       });
       return;
     }
@@ -122,6 +168,7 @@ export function ConnectProjectSource({
         projectId,
         preview.fingerprint,
       );
+      setExit({ action: "connected" });
     } catch (reason) {
       const error = toFailure(reason);
       if (error.code === "conflict") {
@@ -130,30 +177,47 @@ export function ConnectProjectSource({
       } else {
         setFailure(describeFailure(error, "connect the project to GitHub"));
       }
-      return;
     } finally {
       setBusy(false);
     }
-    onConnected();
-    onClose();
   }
 
   return (
     <DialogShell
-      open
-      onOpenChange={(open) => !open && onClose()}
+      open={exit === null}
+      onOpenChange={(open) => !open && setExit({ action: "skip" })}
+      onExitComplete={() => {
+        if (exit?.action === "setup") onSetup(exit.setup);
+        else if (exit?.action === "edit") onEditRemote?.();
+        else {
+          if (exit?.action === "connected") onConnected();
+          onClose();
+        }
+      }}
+      resolveReturnFocus={() =>
+        opener instanceof HTMLElement &&
+        opener !== document.body &&
+        opener.isConnected &&
+        !opener.closest("[hidden], [inert]")
+          ? opener
+          : (fallbackFocus?.() ?? null)
+      }
       title="Connect project to GitHub"
       primaryLabel={
         hasEffect ? (needsSetup ? "Set up GitHub" : "Confirm") : null
       }
-      cancelLabel="Skip"
+      cancelLabel={
+        error?.code === "project_source_host_mismatch" ? "Close" : "Skip"
+      }
       busy={busy}
       blockedReason={
         busy
           ? "Connecting…"
-          : addsRepository && count === undefined
+          : addsRepository && matchCount === null
             ? "Counting matching issues…"
-            : null
+            : countFailure?.action === "reload"
+              ? "Review the updated changes before confirming."
+              : null
       }
       onSubmit={() => void confirm()}
       error={
@@ -162,6 +226,19 @@ export function ConnectProjectSource({
             size="compact"
             failure={error}
             onRetry={state.status === "failed" ? reload : () => void confirm()}
+            actions={
+              error.code === "project_source_host_mismatch" &&
+              onEditRemote && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setExit({ action: "edit" })}
+                >
+                  Edit Project remote
+                </Button>
+              )
+            }
           />
         ) : changed && state.status === "ready" ? (
           "The preview changed. Review the updated changes before confirming."
@@ -181,12 +258,29 @@ export function ConnectProjectSource({
           {addsRepository && (
             <p role="status">
               Import issues from {preview.project_remote}
-              {count === undefined
-                ? ""
-                : count
-                  ? ` (${count.complete ? "" : "at least "}${count.matched} match)`
-                  : " (match count unavailable)"}
+              {matchCount?.result
+                ? ` (${matchCount.result.complete ? "" : "at least "}${matchCount.result.matched} match)`
+                : ""}
             </p>
+          )}
+          {countFailure && (
+            <FailureAlert
+              size="compact"
+              failure={countFailure}
+              onRetry={retryCount}
+              actions={
+                countFailure.action === "reload" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={retryCount}
+                  >
+                    Review updated changes
+                  </Button>
+                )
+              }
+            />
           )}
           {(!needsSetup || linkCount > 0) && (
             <p>

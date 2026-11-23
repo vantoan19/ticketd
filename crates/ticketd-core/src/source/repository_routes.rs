@@ -61,20 +61,49 @@ impl Workspace {
         project_id: &str,
     ) -> Result<Project, Error> {
         write_scope::run(&self.connection, |tx| {
-            if !saved_repositories(tx, provider)?
-                .iter()
-                .any(|saved| saved == repository)
-            {
-                return Err(Error::SourceRepositoryNotListed(repository.to_owned()));
-            }
-            let remote = engine
-                .repository_for_destination(provider, repository)?
-                .ok_or(SourceError::Unsupported(
-                    "linking a discovery repository to a project",
-                ))?;
+            let remote = saved_repository_remote(tx, engine, provider, repository)?;
             projects::link_remote_if_unset(tx, project_id, &remote)
         })
     }
+
+    /// Creates a project and its first checkout for a still-saved discovery repository.
+    pub fn create_source_repository_project(
+        &mut self,
+        engine: &Engine,
+        provider: &str,
+        repository: &str,
+        name: &str,
+        path: &str,
+    ) -> Result<Project, Error> {
+        let mut project = projects::prepare_create(name, path)?;
+        write_scope::run(&self.connection, |tx| {
+            let remote = saved_repository_remote(tx, engine, provider, repository)?;
+            project.remote = Some(
+                crate::project_remote::normalize_project_remote(&remote)
+                    .ok_or(Error::InvalidProjectRemote)?,
+            );
+            projects::insert(tx, project)
+        })
+    }
+}
+
+fn saved_repository_remote(
+    connection: &Connection,
+    engine: &Engine,
+    provider: &str,
+    repository: &str,
+) -> Result<String, Error> {
+    if !saved_repositories(connection, provider)?
+        .iter()
+        .any(|saved| saved == repository)
+    {
+        return Err(Error::SourceRepositoryNotListed(repository.to_owned()));
+    }
+    engine
+        .repository_for_destination(provider, repository)?
+        .ok_or_else(|| {
+            SourceError::Unsupported("linking a discovery repository to a project").into()
+        })
 }
 
 fn saved_repositories(connection: &Connection, provider: &str) -> Result<Vec<String>, Error> {

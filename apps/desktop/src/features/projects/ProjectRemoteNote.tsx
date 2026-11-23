@@ -8,6 +8,7 @@ import { useProjectRemoteDetection } from "@/features/projects/use-project-remot
 import { toFailure } from "@/lib/api/bridge-failure";
 import type { Project } from "@/lib/api/client";
 import { sourcesClient } from "@/lib/api/sources";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 
 /** The project's header offers setup after Skip, or a remote for a legacy project. */
 export function ProjectRemoteNote({
@@ -25,9 +26,11 @@ export function ProjectRemoteNote({
     () => new Set(),
   );
   const [editing, setEditing] = useState(false);
+  const [savedProject, setSavedProject] = useState<Project | null>(null);
+  const version = useWorkspaceChange();
   const [source, setSource] = useState<{
     key: string;
-    needsSetup: boolean;
+    action: "setup" | "backfill" | "none";
   } | null>(null);
   const { detection } = useProjectRemoteDetection(
     project && !project.remote ? project.path : "",
@@ -42,29 +45,39 @@ export function ProjectRemoteNote({
     void sourcesClient.previewConnectSource("github", projectId).then(
       (preview) => {
         if (current)
-          setSource({ key, needsSetup: preview.source !== "already_listed" });
+          setSource({
+            key,
+            action:
+              preview.source !== "already_listed"
+                ? "setup"
+                : preview.tickets.length
+                  ? "backfill"
+                  : "none",
+          });
       },
       (reason) => {
         if (current)
           setSource({
             key,
-            needsSetup:
-              toFailure(reason).code === "project_source_host_mismatch",
+            action:
+              toFailure(reason).code === "project_source_host_mismatch"
+                ? "setup"
+                : "none",
           });
       },
     );
     return () => {
       current = false;
     };
-  }, [key, projectId, sourceRevision]);
+  }, [key, projectId, sourceRevision, version]);
   if (!project) return null;
 
   const legacy = !remote && (suggested !== null || candidates.length > 0);
-  const needsSetup = key !== "" && source?.key === key && source.needsSetup;
+  const action = key !== "" && source?.key === key ? source.action : "none";
   const noticeKey = legacy
     ? JSON.stringify([projectId, suggested, candidates])
-    : key;
-  const show = (legacy || needsSetup) && !dismissed.has(noticeKey);
+    : JSON.stringify([key, action]);
+  const show = (legacy || action !== "none") && !dismissed.has(noticeKey);
   return (
     <>
       {show && (
@@ -74,17 +87,24 @@ export function ProjectRemoteNote({
               ? suggested
                 ? `Detected ${suggested}.`
                 : "Detected checkout remotes."
-              : "Issues from this repository aren't being imported."}{" "}
+              : action === "backfill"
+                ? "Existing GitHub tickets can be linked to this project."
+                : "Issues from this repository aren't being imported."}{" "}
             <Button
               type="button"
               variant="link"
               size="inline"
-              onClick={() => {
+              onClick={(event) => {
+                event.currentTarget.focus();
                 if (legacy) setEditing(true);
                 else onConnectSource(project.id);
               }}
             >
-              {legacy ? "Set as remote?" : "Set up"}
+              {legacy
+                ? "Set as remote?"
+                : action === "backfill"
+                  ? "Review links"
+                  : "Set up"}
             </Button>
           </AlertDescription>
           <IconButton
@@ -102,9 +122,12 @@ export function ProjectRemoteNote({
           project={project}
           {...(suggested && { initialRemote: suggested })}
           onOpenChange={setEditing}
-          onSaved={(saved) => {
+          onSaved={setSavedProject}
+          onExitComplete={() => {
+            if (!savedProject) return;
+            setSavedProject(null);
             onProjectChange();
-            if (saved.remote) onConnectSource(saved.id);
+            if (savedProject.remote) onConnectSource(savedProject.id);
           }}
         />
       )}

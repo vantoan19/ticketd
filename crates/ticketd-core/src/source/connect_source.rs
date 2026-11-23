@@ -134,12 +134,8 @@ impl Workspace {
         if effect.action != ConnectSourceAction::AddRepository {
             return Ok(None);
         }
-        let mut config = effect.saved.ok_or(Error::ConnectSourceChanged)?.config;
-        config.insert(
-            REPOSITORIES.into(),
-            Value::Array(vec![Value::String(effect.repository)]),
-        );
-        let preview = engine.preview(provider, &config)?;
+        let config = effect.saved.ok_or(Error::ConnectSourceChanged)?.config;
+        let preview = engine.preview(provider, &only_repository(config, effect.repository))?;
         Ok(Some(ConnectSourceMatchCount {
             matched: preview.matched,
             complete: preview.complete,
@@ -173,8 +169,15 @@ impl Workspace {
                     .ok_or(SourceError::Unsupported(
                         "configuring discovery repositories",
                     ))?
-                    .push(Value::String(initial.repository));
+                    .push(Value::String(initial.repository.clone()));
                 let (config, preview) = self.prepare_source_save(engine, provider, &config)?;
+                if !preview.complete {
+                    // Earlier repositories can fill the bounded preview before it reads this one.
+                    engine.preview(
+                        provider,
+                        &only_repository(config.clone(), initial.repository),
+                    )?;
+                }
                 Some((config, preview.account))
             }
             ConnectSourceAction::AlreadyListed => None,
@@ -219,6 +222,14 @@ impl Workspace {
             read_effect(connection, engine, provider, project_id)
         })
     }
+}
+
+fn only_repository(mut config: super::ConfigValues, repository: String) -> super::ConfigValues {
+    config.insert(
+        REPOSITORIES.into(),
+        Value::Array(vec![Value::String(repository)]),
+    );
+    config
 }
 
 fn read_effect(
