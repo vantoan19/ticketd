@@ -258,20 +258,13 @@ pub(crate) fn edit(
         if let Some(id) = project_id {
             projects::find(scope, id)?;
         }
-        if *project_id != ticket.project_id {
-            scope.execute(
-                "UPDATE tickets SET project_id = ?1 WHERE id = ?2",
-                params![project_id, ticket.id],
-            )?;
-            history::record(
-                scope,
-                &ticket.id,
-                "project",
-                ticket.project_id.as_deref().unwrap_or(""),
-                project_id.as_deref().unwrap_or(""),
-                patch.editing_agent.as_deref(),
-            )?;
-        }
+        set_project(
+            scope,
+            &ticket.id,
+            ticket.project_id.as_deref(),
+            project_id.as_deref(),
+            patch.editing_agent.as_deref(),
+        )?;
     }
     let status = patch.status.unwrap_or(ticket.status);
     if status != ticket.status {
@@ -298,6 +291,31 @@ pub(crate) fn edit(
             &ticket.status.to_string(),
             &status.to_string(),
             patch.editing_agent.as_deref(),
+        )?;
+    }
+    Ok(())
+}
+
+/// Updates a ticket's project and records the membership change after eligibility is checked.
+pub(crate) fn set_project(
+    scope: &WriteScope<'_>,
+    ticket_id: &str,
+    current: Option<&str>,
+    project_id: Option<&str>,
+    agent: Option<&str>,
+) -> Result<(), Error> {
+    if project_id != current {
+        scope.execute(
+            "UPDATE tickets SET project_id = ?1 WHERE id = ?2",
+            params![project_id, ticket_id],
+        )?;
+        history::record(
+            scope,
+            ticket_id,
+            "project",
+            current.unwrap_or(""),
+            project_id.unwrap_or(""),
+            agent,
         )?;
     }
     Ok(())

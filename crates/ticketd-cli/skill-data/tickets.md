@@ -96,6 +96,9 @@ with `--remote host/owner/name` to override it or `--no-remote` to skip detectio
 Registering a checkout with a different detected remote still succeeds and
 prints a warning to stderr. Paths are native to the OS; WSL interoperability is not validated.
 
+To connect a Project remote to GitHub discovery and backfill existing unlinked
+tickets, see `project connect-source` in `ticketd skills get sources`.
+
 `trash T-KQ1` hides a ticket while preserving its data and relationships.
 `trash-list` finds hidden tickets; `restore T-KQ1` returns one to ordinary visibility.
 A trashed ticket must be restored before editing. Ticket trash is distinct from

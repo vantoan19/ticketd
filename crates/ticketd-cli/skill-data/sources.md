@@ -34,6 +34,21 @@ These commands can contact the external service even though ticketd stores data
 locally. `source take-ownership` is an explicit authority change for an unavailable
 ticket, not a workaround for an ordinary edit rejection.
 
+## Connect a project to its source
+
+```sh
+ticketd project connect-source PROJECT_ID --preview
+ticketd project connect-source PROJECT_ID --expect FINGERPRINT
+```
+
+The preview is offline. It reports whether the Project remote's repository
+needs adding to GitHub discovery, which existing unlinked tickets would be
+linked, and the fingerprint. Use the fingerprint to confirm that effect. If it
+has changed, preview again. If the repository is already listed, confirmation
+only backfills the reviewed links and also works offline. If the preview reports
+`not_connected`, save the GitHub source with the preview's `repository` and
+get a fresh preview.
+
 ## Publication and uncertain outcomes
 
 Start by previewing the publication to inspect its exact payload and destination.

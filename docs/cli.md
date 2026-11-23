@@ -41,6 +41,21 @@ PATH` accepts `--remote host/owner/name` or `--clear-remote`. `project show` and
 `project list` include the `remote` field. Registering a checkout with a different
 detected remote still succeeds and prints a warning to stderr.
 
+When project creation sets a Project remote, stderr includes a hint to preview
+connecting the project to GitHub.
+
+```sh
+ticketd project connect-source PROJECT_ID --preview
+ticketd project connect-source PROJECT_ID --expect FINGERPRINT
+```
+
+The offline preview returns the discovery action in `source` (`add_repository`,
+`already_listed`, or `not_connected`), ticket references in `tickets`, and the
+`fingerprint` to pass with `--expect`. Confirmation returns `repository_added`
+and `linked_tickets`. If the effect changed, get a new preview. If no GitHub source
+is saved, connect it first with `ticketd source save github --set repositories=OWNER/NAME`
+using the preview's `repository`, then preview again.
+
 ## JSON output
 
 Most data commands print JSON on stdout. Direct commands usually return an

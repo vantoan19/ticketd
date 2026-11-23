@@ -309,6 +309,21 @@ pub enum Error {
     ProjectRemoteTaken { remote: String, project: String },
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
+    #[error("Set a Project remote on {0} before connecting its ticket source.")]
+    ProjectRemoteRequired(String),
+    #[error(
+        "Project remote {remote} is on a different host from the {provider} source. Select a remote on the source's host to connect it."
+    )]
+    ProjectSourceHostMismatch { remote: String, provider: String },
+    #[error(
+        "Connect the {provider} ticket source with {repository} in its discovery repositories, then preview again."
+    )]
+    ProjectSourceNotConnected {
+        provider: String,
+        repository: String,
+    },
+    #[error("The connection preview changed. Preview again before confirming.")]
+    ConnectSourceChanged,
     #[error("agent '{0}' was not found")]
     AutomationAgentNotFound(String),
     #[error("invalid agent: {0}")]
