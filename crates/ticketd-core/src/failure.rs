@@ -152,6 +152,8 @@ impl Error {
             | Self::CheckoutNotRegistered(_)
             | Self::InvalidCheckoutPath
             | Self::EmptyProject
+            | Self::InvalidProjectRemote
+            | Self::ProjectRemoteTaken { .. }
             | Self::DuplicateDependencies
             | Self::DuplicateNeedsCanonical
             | Self::DuplicateCanonicalUnresolved(_)

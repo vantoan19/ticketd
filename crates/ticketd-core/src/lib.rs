@@ -52,6 +52,7 @@ pub use retry::{WriteRequest, WriteResult};
 mod graph;
 mod hierarchy;
 pub use graph::{DependencyGraph, GraphEdge, GraphNode};
+mod project_remote;
 mod projects;
 mod relationships;
 pub use relationships::RelationshipKind;
@@ -161,7 +162,11 @@ pub use chats::{
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};
-pub use projects::Project;
+pub use project_remote::{
+    ProjectRemoteCandidate, ProjectRemoteDetection, detect_project_remote,
+    normalize_project_remote_url,
+};
+pub use projects::{CheckoutRegistration, CheckoutRemoteMismatch, Project, ProjectRemoteChange};
 pub use readiness::Readiness;
 
 mod format;
@@ -296,6 +301,12 @@ pub enum Error {
     InvalidCheckoutPath,
     #[error("project name and path must not be empty")]
     EmptyProject,
+    #[error("Enter a Project remote in host/owner/name format.")]
+    InvalidProjectRemote,
+    #[error(
+        "Project remote {remote} belongs to {project}. Choose another remote or clear it on that project."
+    )]
+    ProjectRemoteTaken { remote: String, project: String },
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
     #[error("agent '{0}' was not found")]
