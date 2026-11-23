@@ -882,6 +882,7 @@ A future server may call the same core workflow interface. Personal sync between
 - [Shared core and local workspace](adr/0004-shared-core-local-workspace.md)
 - [One warm Workspace session per process, WAL inside it](adr/0016-one-warm-workspace-session-per-process-wal-inside-it.md)
 - [Workspace sync through Google Drive](adr/0011-markdown-file-sync-through-google-drive.md)
+- [S3 sync storage, signed in through the AWS CLI](adr/0018-s3-sync-storage-signed-in-through-the-aws-cli.md)
 - [Sync file format](sync-file-format.md)
 
 A caller that needs retries uses the core `write` workflow with a typed write request and optional request ID. The CLI exposes the same workflow as `ticketd write --request-id ID FILE` (use `-` for standard input). For example, `{"operation":"create_ticket","title":"Investigate","project_id":null}` creates a ticket, and `{"operation":"batch","operations":[...]}` applies a batch. Results contain a `kind` and `value` (the delete result has no value). Existing individual commands remain available without retry IDs.
