@@ -2413,15 +2413,27 @@ fn source_command(
                 if connections.is_empty() {
                     sources.push(output::SourceListing {
                         development: registry.is_development(&description.descriptor.provider),
+                        unavailable: false,
                         connector: description,
                         saved: None,
                     });
                 } else {
                     sources.extend(connections.into_iter().map(|saved| output::SourceListing {
                         development: registry.is_development(&description.descriptor.provider),
+                        unavailable: false,
                         connector: description.clone(),
                         saved: Some(saved),
                     }));
+                }
+            }
+            for source in &saved {
+                if engine.description(&source.provider).is_err() {
+                    sources.push(output::SourceListing {
+                        development: false,
+                        unavailable: true,
+                        connector: workspace.unavailable_source_description(&source.provider)?,
+                        saved: Some(source),
+                    });
                 }
             }
             serde_json::to_string(&sources)?

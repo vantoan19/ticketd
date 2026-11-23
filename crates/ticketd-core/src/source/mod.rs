@@ -539,6 +539,28 @@ impl Workspace {
             .collect())
     }
 
+    /// Display metadata for a saved connection whose provider is no longer installed.
+    pub fn unavailable_source_description(
+        &self,
+        provider: &str,
+    ) -> Result<SourceDescription, Error> {
+        let mut description = cached_description(&self.connection, provider)?.map_or_else(
+            || SourceDescription {
+                descriptor: ConnectorDescriptor {
+                    provider: provider.to_owned(),
+                    name: provider.to_owned(),
+                    contract_version: CONTRACT_VERSION,
+                    capabilities: Vec::new(),
+                    schema: ConfigSchema { fields: Vec::new() },
+                },
+                presentation: SourcePresentation::default(),
+            },
+            Cow::into_owned,
+        );
+        description.descriptor.capabilities.clear();
+        Ok(description)
+    }
+
     pub fn source_connection(&self, id: &str) -> Result<SavedSource, Error> {
         self.saved_source(id)?.ok_or_else(|| unknown_connection(id))
     }

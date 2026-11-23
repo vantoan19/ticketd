@@ -138,6 +138,7 @@ const sourceEntrySchema = lazySchema(() =>
     saved: savedSourceSchema.nullable(),
     next_id: z.string().optional(),
     development: z.boolean().optional(),
+    unavailable: z.boolean().optional(),
   }),
 );
 export type SourceEntry = z.infer<typeof sourceEntrySchema>;

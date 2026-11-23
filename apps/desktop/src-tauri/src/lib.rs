@@ -1372,9 +1372,12 @@ impl From<ticketd_core::source::SourceError> for SourceFailure {
 struct SourceEntry {
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     development: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unavailable: bool,
     connector: ticketd_core::source::SourceDescription,
     saved: Option<ticketd_core::source::SavedSource>,
-    next_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_id: Option<String>,
 }
 
 type SourceRegistry = std::sync::Arc<ExtensionRegistry>;
@@ -1413,17 +1416,30 @@ fn list_sources(
                 .filter(|source| &source.provider == provider)
                 .map(|source| SourceEntry {
                     development,
+                    unavailable: false,
                     connector: connector.clone(),
                     saved: Some(source.clone()),
-                    next_id: next_id.clone(),
+                    next_id: Some(next_id.clone()),
                 }),
         );
         if entries.len() == first {
             entries.push(SourceEntry {
                 development,
+                unavailable: false,
                 connector,
                 saved: None,
-                next_id,
+                next_id: Some(next_id),
+            });
+        }
+    }
+    for source in saved {
+        if engine.description(&source.provider).is_err() {
+            entries.push(SourceEntry {
+                development: false,
+                unavailable: true,
+                connector: workspace.unavailable_source_description(&source.provider)?,
+                saved: Some(source),
+                next_id: None,
             });
         }
     }

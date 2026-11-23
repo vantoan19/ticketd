@@ -154,13 +154,13 @@ impl FailureCode {
             | Self::Forbidden
             | Self::NotFound
             | Self::Protocol
+            | Self::UnknownProvider
             | Self::NotConfigured => true,
             Self::RefreshCanceled
             | Self::RateLimited
             | Self::Rejected
             | Self::Unsupported
             | Self::InvalidConfiguration
-            | Self::UnknownProvider
             | Self::IncompatibleContract => false,
         }
     }

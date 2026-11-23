@@ -14,13 +14,16 @@ fn links_and_syncs_the_typescript_tracker() {
     for name in ["ticketd-source.json", "tracker.ts"] {
         std::fs::copy(sample.join(name), example.join(name)).unwrap();
     }
-    let run = |args: &[&str]| {
-        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+    let command = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ticketd"))
             .env("TICKETD_TEST_WORKSPACE", &workspace)
             .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
             .args(args)
             .output()
-            .unwrap();
+            .unwrap()
+    };
+    let run = |args: &[&str]| {
+        let output = command(args);
         assert!(
             output.status.success(),
             "{args:?}: {}",
@@ -76,6 +79,49 @@ fn links_and_syncs_the_typescript_tracker() {
             .unwrap()
             .starts_with("<svg")
     );
+    let reference = tickets[0]["reference"].as_str().unwrap();
+    run(&["source", "extension", "remove", "example-tracker"]);
+    let sources = run(&["source", "list"]);
+    let missing = sources
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["saved"]["id"] == "example-tracker")
+        .unwrap();
+    assert_eq!(missing["unavailable"], true);
+    assert_eq!(missing["connector"]["name"], "Example Tracker");
+    assert_eq!(missing["connector"]["capabilities"], serde_json::json!([]));
+    let failed = command(&["source", "example-tracker", "refresh"]);
+    assert!(!failed.status.success());
+    let report: Value = serde_json::from_slice(&failed.stdout).unwrap();
+    assert!(
+        report["failures"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["code"] == "unknown_provider")
+    );
+    let ticket = run(&["show", reference]);
+    assert_eq!(ticket["source"]["unavailable"]["code"], "unknown_provider");
+    let taken = run(&["source", "take-ownership", reference]);
+    assert_eq!(taken["source"]["ownership"], "local");
+
+    // Workspaces with missing presentation metadata keep their connection controls.
+    rusqlite::Connection::open(&workspace)
+        .unwrap()
+        .execute(
+            "DELETE FROM source_presentations WHERE provider = 'example-tracker'",
+            [],
+        )
+        .unwrap();
+    let sources = run(&["source", "list"]);
+    let missing = sources
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["saved"]["id"] == "example-tracker")
+        .unwrap();
+    assert_eq!(missing["connector"]["name"], "example-tracker");
 }
 
 #[test]
