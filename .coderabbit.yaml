@@ -53,7 +53,10 @@ reviews:
         This is a public repository. Pin actions to full commit SHAs, keep persist-credentials
         false, keep the default token read-only, and never expose secrets to pull_request jobs or
         use pull_request_target. All jobs run on GitHub-hosted runners; flag any self-hosted runner.
-        Distribution credentials belong only in the manual main-branch Package workflow.
+        Distribution credentials belong only in jobs that build reviewed main commits: the
+        manual main-branch Package workflow, and the Release workflow after Quality passes on a
+        push to main. Package builds may receive the updater signing key; among Release builds,
+        only one that will be drafted does.
     - path: "docs/adr/**"
       instructions: >-
         ADRs record decisions. Flag an edit that changes what an accepted decision means instead

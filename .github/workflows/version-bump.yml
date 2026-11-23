@@ -1,0 +1,93 @@
+name: Version bump
+
+# Opens the PR that starts a release: it sets one version everywhere and drafts the release notes.
+# When it merges and CI passes, the Release workflow drafts the release. See docs/releasing.md.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Version to release, such as 0.2.0 (SemVer, no leading v)
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: Open version-bump PR
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    # Writes a release/v<version> branch and its PR with the workflow token; no personal token.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      VERSION: ${{ inputs.version }}
+      BRANCH: release/v${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.23.4"
+      - name: Check the version
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release-version.mjs check-bump "$VERSION"
+          if git ls-remote --exit-code --heads origin "refs/heads/$BRANCH" > /dev/null; then
+            echo "::error::Branch $BRANCH already exists. Merge or close its PR and delete the branch first."
+            exit 1
+          fi
+      - name: Set the version
+        run: |
+          node scripts/release-version.mjs set "$VERSION"
+          node scripts/check-versions.mjs
+      - run: rustup show active-toolchain
+      - name: Check the lockfiles
+        # Fails if Cargo would change Cargo.lock beyond the version entries, or npm finds
+        # package-lock.json out of step with the package files. No install scripts run.
+        run: |
+          cargo update --workspace --locked
+          npm install --global npm@10.9.2
+          npm ci --ignore-scripts --no-audit --no-fund
+          git diff --stat
+      - name: Commit and push
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git commit --quiet --all --message "Release $VERSION"
+          gh auth setup-git
+          git push origin "$BRANCH"
+      - name: Open the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          body="$RUNNER_TEMP/body.md"
+          node scripts/release-notes.mjs pr-body --version "$VERSION" > "$body"
+          # The release label keeps this PR out of the generated notes (.github/release.yml).
+          gh label create release --repo "$REPO" --color 5319E7 --description "Version-bump PR that starts a release" --force
+          if url=$(gh pr create --repo "$REPO" --base main --head "$BRANCH" --title "Release $VERSION" --body-file "$body" --label release); then
+            echo "Opened $url. Close and reopen it to start CI." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          # Without "Allow GitHub Actions to create and approve pull requests" the token cannot open
+          # PRs. A PR the maintainer opens from this link runs CI without the close-and-reopen step.
+          link=$(node scripts/release-notes.mjs pr-link --version "$VERSION")
+          echo "::warning::The workflow token could not open the PR. Open it from the link in the run summary."
+          {
+            echo "The branch \`$BRANCH\` is pushed, but the workflow token could not open its PR."
+            echo
+            echo "[Open the version-bump PR]($link)"
+          } >> "$GITHUB_STEP_SUMMARY"

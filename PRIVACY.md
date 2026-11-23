@@ -104,13 +104,40 @@ Installing ticketd's discovery skill does not itself create a model-provider acc
 
 The GitHub connector reuses environment credentials or the GitHub CLI's existing
 authentication. It does not persist those tokens in the ticket workspace or export.
-See the [credential lookup implementation](crates/ticketd-core/src/source/github/credentials.rs)
+See the [credential lookup implementation](https://github.com/vantoan19/ticketd/blob/main/crates/ticketd-core/src/source/github/credentials.rs)
 for host-specific environment-variable precedence.
 
 Google authorization uses the OS secure store: Windows Credential Manager,
 macOS Keychain, or Linux Secret Service. There is no file-based credential fallback.
 The Google desktop app registration bundled by a publisher is separate from a user's
-access and refresh tokens. See [Google Drive setup](docs/install.md#google-drive-setup).
+access and refresh tokens. See [Google Drive setup](https://github.com/vantoan19/ticketd/blob/main/docs/install.md#google-drive-setup).
+
+## Google user data
+
+When you connect Google Drive, ticketd asks Google for one permission, the
+per-file `drive.file` scope. With it, ticketd can see and change only the Drive
+files it created for you and the files you select in Google's Picker. It cannot
+list or read the rest of your Drive.
+
+ticketd uses that access for two features you turn on yourself: Drive attachments
+and Workspace sync. It reads your Drive account's email address and permission ID
+to show which account is connected and to keep each grant tied to that account.
+It reads the names, sizes, checksums and versions of authorized files, and
+uploads or downloads their bytes when you attach, sync, retrieve or export them.
+
+Your Google access and refresh tokens stay in your OS secure store. File details
+and the account email stay in your local Workspace. A backup you save copies them
+too, and a JSON export includes the last-known Drive file details. ticketd has no server and
+sends none of this to its maintainers or to third parties. It does not sell this
+data, use it for advertising, or use it to train AI models. An agent you run
+yourself can read what the CLI prints, as described above. Revoke access at any time in your
+[Google Account's third-party connections](https://myaccount.google.com/connections).
+Then remove the local data as described below.
+
+ticketd's use and transfer to any other app of information received from Google
+APIs will adhere to the
+[Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy),
+including the Limited Use requirements.
 
 S3 sync stores no AWS credential. It gets credentials from the AWS CLI's profile
 you chose and keeps them only in memory. Diagnostics exports replace the AWS identity
@@ -137,7 +164,7 @@ lifecycle rule expires them.
 Uninstalling the desktop leaves workspace data behind. Backups and exports also
 remain wherever you saved them. A backup retains local workspace data and local
 attachment bytes, but not Google credentials or remote attachment bytes. Restoring
-it does not restore remote authorization. See [export and backup behavior](docs/export.md).
+it does not restore remote authorization. See [export and backup behavior](https://github.com/vantoan19/ticketd/blob/main/docs/export.md).
 
 For complete removal, close ticketd and other processes using the workspace,
 identify its location before deleting data, and account for separately saved backups,
@@ -148,5 +175,5 @@ may need recovery. Revoking access at a provider does not erase previously expor
 
 Use minimal synthetic examples in public reports. Remove tokens, authorization
 URLs, private ticket content, personal paths, and account identifiers from diagnostics.
-Do not attach your normal workspace database or backup. Follow [SECURITY.md](SECURITY.md)
+Do not attach your normal workspace database or backup. Follow [SECURITY.md](https://github.com/vantoan19/ticketd/blob/main/SECURITY.md)
 for suspected vulnerabilities.

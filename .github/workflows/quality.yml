@@ -107,8 +107,6 @@ jobs:
       - run: npm ci
       - run: ./scripts/check ui
       - name: Build and check the GitHub Pages site
-        env:
-          DOCS_PROJECT_PAGES: "1"
         run: |
           npm run build:docs
           node apps/docs/check-pages.mjs
@@ -176,10 +174,8 @@ jobs:
       - run: npm install --global npm@10.9.2
       - run: npm ci
       - run: npm run build
-      - name: Check nested Pages URLs on Windows
+      - name: Check Pages URLs on Windows
         if: runner.os == 'Windows'
-        env:
-          DOCS_PROJECT_PAGES: "1"
         run: |
           npm run build:docs
           node apps/docs/check-pages.mjs
