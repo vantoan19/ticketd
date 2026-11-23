@@ -735,4 +735,19 @@ mod tests {
         let only_logs = "2026-11-12T16:56:48.1Z  WARN a\n2026-11-12T16:56:49Z ERROR rmcp::transport::worker: worker quit\n";
         assert_eq!(readable_lines(only_logs), "");
     }
+
+    #[tokio::test]
+    async fn stderr_keeps_only_a_bounded_tail() {
+        let tail = StderrTail::default();
+        let mut noise = vec![b'a'; MAX_STDERR_TAIL_BYTES * 2];
+        noise.extend_from_slice(b"final line\n");
+
+        tail.clone()
+            .drain(noise.as_slice(), crate::Harness::Codex)
+            .await;
+
+        let snapshot = tail.snapshot();
+        assert!(snapshot.len() <= MAX_STDERR_TAIL_BYTES);
+        assert!(snapshot.ends_with("final line"));
+    }
 }
