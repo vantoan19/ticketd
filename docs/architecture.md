@@ -764,19 +764,16 @@ The desktop must detect writes committed by CLI processes and refresh affected v
 
 ## Verification and future evolution
 
-Future ticket source integrations use a ticketd-owned extension engine and a
-shared, versioned connector interface, beginning with a built-in GitHub Issues
-connector. Connectors handle provider-specific connection configuration,
-discovery, ticket/comment retrieval, external identity, status interpretation,
-and optional publication. ticketd owns scheduling, identity preservation, local
-data, and persistence; connectors do not modify the database directly.
+The built-in GitHub Issues connector runs through a ticketd-owned engine and a
+versioned connector interface. Connectors handle provider-specific configuration,
+discovery, ticket and comment retrieval, external identity, status interpretation,
+and optional publication. The core owns scheduling, identity preservation, local
+data, and persistence. ticketd renders provider-specific configuration and filter
+forms from schemas shared by the desktop and CLI.
 
-Provider-specific configuration and filter forms are described by schemas for
-fields, selectors, dynamic options, and validation, rendered by ticketd and
-usable through the CLI. Custom extension development, installation/distribution,
-and arbitrary extension-rendered UI are deferred. Keep the interface suitable for
-future providers without building a general plugin system. Exact interface
-signatures and execution mechanics are described next.
+The layers below describe the current built-in implementation. The decision
+to support locally installed, out-of-process ticket source extensions and to
+publish contract 2 is in [ADR 0021](adr/0021-ticket-source-extensions-run-out-of-process.md).
 
 ### Source connector layers
 

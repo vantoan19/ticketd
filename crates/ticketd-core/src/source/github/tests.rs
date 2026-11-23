@@ -14,6 +14,9 @@ use serde_json::{Value, json};
 use super::{credentials::Secret, transport::TransportError, *};
 use crate::source::{Engine, Surface, schema::ConfigValues};
 
+#[path = "conformance.rs"]
+mod conformance_fixture;
+
 const API: &str = "https://api.example.test";
 const TOKEN: &str = "ghp_secret_token_value";
 
@@ -68,14 +71,19 @@ impl CredentialSource for Token {
 
 fn setup(token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
     let fixture = Arc::new(Fixture::default());
-    let connector = GithubConnector::new(
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(connector(&fixture, token)))
+        .unwrap();
+    (fixture, engine)
+}
+
+fn connector(fixture: &Arc<Fixture>, token: Option<&'static str>) -> GithubConnector {
+    GithubConnector::new(
         API,
         Box::new(Shared(fixture.clone())),
         Box::new(Token(token)),
-    );
-    let mut engine = Engine::new();
-    engine.register(Box::new(connector)).unwrap();
-    (fixture, engine)
+    )
 }
 
 fn ok(body: Value) -> Result<HttpResponse, TransportError> {

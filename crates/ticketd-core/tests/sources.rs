@@ -7,157 +7,31 @@
 #[path = "support/old_workspace.rs"]
 mod old_workspace;
 
-use std::{
-    collections::VecDeque,
-    ops::ControlFlow,
-    sync::{Arc, Mutex},
-};
+#[path = "support/fake_source.rs"]
+mod fake_source;
+
+use std::ops::ControlFlow;
 
 use serde_json::{Value, json};
 use ticketd_core::{
-    Error, Workspace,
-    source::{
-        CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema, ConfigValues, ConnectionInfo,
-        Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest, Engine, ExternalIdentity,
-        ExternalIssue, ExternalRef, ExternalState, FieldKind, OptionSource, SchemaField,
-        SourceError, ValueFormat,
-    },
+    self, Error, Workspace,
+    source::{CONTRACT_VERSION, ConfigValues, Engine, ExternalIssue, SourceError},
 };
 
-#[derive(Default)]
-struct State {
-    /// Pages returned in order; each is (issues, has_more).
-    pages: VecDeque<Result<(Vec<ExternalIssue>, bool), String>>,
-    connection_error: Option<String>,
-    cursors_seen: Vec<Option<String>>,
-    configs_seen: Vec<ConfigValues>,
-    version: Option<u32>,
-}
-
-#[derive(Clone, Default)]
-struct Fake(Arc<Mutex<State>>);
-
-impl Connector for Fake {
-    fn descriptor(&self) -> ConnectorDescriptor {
-        ConnectorDescriptor {
-            provider: "fake".into(),
-            name: "Fake".into(),
-            contract_version: self.0.lock().unwrap().version.unwrap_or(CONTRACT_VERSION),
-            capabilities: vec![Capability::Discover, Capability::Fetch],
-            schema: ConfigSchema {
-                fields: vec![
-                    SchemaField {
-                        key: "repositories".into(),
-                        label: "Repositories".into(),
-                        help: None,
-                        required: true,
-                        kind: FieldKind::MultiSelect {
-                            options: OptionSource::Dynamic { depends_on: vec![] },
-                            allow_custom: true,
-                            min_items: 1,
-                            max_items: 3,
-                            format: Some(ValueFormat::OwnerName),
-                        },
-                    },
-                    SchemaField {
-                        key: "assignee".into(),
-                        label: "Assignee".into(),
-                        help: None,
-                        required: false,
-                        kind: FieldKind::Text {
-                            placeholder: None,
-                            format: Some(ValueFormat::Handle),
-                        },
-                    },
-                ],
-            },
-        }
-    }
-
-    fn check_connection(&self, _config: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        match self.0.lock().unwrap().connection_error.clone() {
-            Some(message) => Err(SourceError::Unauthenticated(message)),
-            None => Ok(ConnectionInfo {
-                account: "octo".into(),
-            }),
-        }
-    }
-
-    fn options(
-        &self,
-        _field: &str,
-        query: &str,
-        _config: &ConfigValues,
-    ) -> Result<Vec<ChoiceOption>, SourceError> {
-        Ok(vec![ChoiceOption {
-            value: format!("o/{query}"),
-            label: format!("o/{query}"),
-            description: None,
-        }])
-    }
-
-    fn discover(&self, request: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-        let mut state = self.0.lock().unwrap();
-        state.cursors_seen.push(request.cursor.map(str::to_owned));
-        state.configs_seen.push(request.config.clone());
-        match state.pages.pop_front() {
-            None => Ok(DiscoveryPage {
-                issues: Vec::new(),
-                next_cursor: None,
-                skipped: Vec::new(),
-            }),
-            Some(Err(message)) => Err(SourceError::Unavailable(message)),
-            Some(Ok((issues, more))) => {
-                let next = format!("page-{}", state.cursors_seen.len());
-                Ok(DiscoveryPage {
-                    issues,
-                    next_cursor: more.then_some(next),
-                    skipped: Vec::new(),
-                })
-            }
-        }
-    }
-
-    fn fetch(
-        &self,
-        _config: &ConfigValues,
-        _reference: &ExternalRef,
-    ) -> Result<ExternalIssue, SourceError> {
-        Err(SourceError::NotFound("gone".into()))
-    }
-}
+use fake_source::{FakeSource, discovery_page};
 
 fn issue(id: u64) -> ExternalIssue {
-    ExternalIssue {
-        reference: ExternalRef {
-            identity: ExternalIdentity {
-                provider: "fake".into(),
-                id: id.to_string(),
-            },
-            locator: format!("o/r#{id}"),
-        },
-        display: format!("o/r#{id}"),
-        url: format!("https://example.test/{id}"),
-        title: format!("Issue {id}"),
-        body: "private description".into(),
-        state: ExternalState::Open,
-        assignees: vec![],
-        labels: vec![],
-        created_at: String::new(),
-        updated_at: String::new(),
-        author: None,
-        duplicate_of: None,
-        duplicate_of_url: None,
-        duplicate_withdrawn: false,
-    }
+    let mut issue = fake_source::issue(id, &format!("Issue {id}"));
+    issue.body = "private description".into();
+    issue
 }
 
 fn values(value: Value) -> ConfigValues {
     value.as_object().unwrap().clone()
 }
 
-fn setup() -> (Fake, Engine) {
-    let fake = Fake::default();
+fn setup() -> (FakeSource, Engine) {
+    let fake = FakeSource::default();
     let mut engine = Engine::new();
     engine.register(Box::new(fake.clone())).unwrap();
     (fake, engine)
@@ -237,9 +111,11 @@ fn preview_walks_every_page_and_lists_without_importing() {
     let (fake, engine) = setup();
     {
         let mut state = fake.0.lock().unwrap();
-        state.pages.push_back(Ok((vec![issue(1), issue(2)], true)));
-        state.pages.push_back(Ok((vec![], true))); // an empty page is not the end
-        state.pages.push_back(Ok((vec![issue(2), issue(3)], false))); // 2 repeats
+        state.pages = vec![
+            Ok(discovery_page(vec![issue(1), issue(2)], Some("1".into()))),
+            Ok(discovery_page(vec![], Some("2".into()))),
+            Ok(discovery_page(vec![issue(2), issue(3)], None)),
+        ];
     }
     let (_dir, workspace) = workspace();
     let preview = engine
@@ -251,10 +127,7 @@ fn preview_walks_every_page_and_lists_without_importing() {
     assert_eq!(displays, ["o/r#1", "o/r#2", "o/r#3"]);
     // The continuation of each page was passed to the next request.
     let cursors = fake.0.lock().unwrap().cursors_seen.clone();
-    assert_eq!(
-        cursors,
-        [None, Some("page-1".into()), Some("page-2".into())]
-    );
+    assert_eq!(cursors, [None, Some("1".into()), Some("2".into())]);
     // Previewing imports nothing and the preview never carries descriptions.
     assert!(workspace.list_tickets().unwrap().is_empty());
     assert!(
@@ -282,9 +155,11 @@ fn a_large_preview_lists_a_page_and_says_the_count_is_partial() {
     let batch = |from: u64| (from..from + 100).map(issue).collect::<Vec<_>>();
     {
         let mut state = fake.0.lock().unwrap();
-        state.pages.push_back(Ok((batch(0), true)));
-        state.pages.push_back(Ok((batch(100), true)));
-        state.pages.push_back(Ok((batch(200), false)));
+        state.pages = vec![
+            Ok(discovery_page(batch(0), Some("1".into()))),
+            Ok(discovery_page(batch(100), Some("2".into()))),
+            Ok(discovery_page(batch(200), None)),
+        ];
     }
     let preview = engine
         .preview("fake", &values(json!({"repositories": ["o/r"]})))
@@ -306,56 +181,28 @@ fn provider_failures_surface_and_a_looping_connector_is_stopped() {
     assert_eq!(error.code(), "unauthenticated");
     fake.0.lock().unwrap().connection_error = None;
 
-    fake.0.lock().unwrap().pages.push_back(Err("down".into()));
+    fake.0.lock().unwrap().pages = vec![Err("down".into())];
     assert_eq!(
         engine.preview("fake", &config).unwrap_err().code(),
         "unavailable"
     );
 
-    // Always more pages, but a cursor that never changes would loop forever:
-    // the fake numbers cursors, so make them repeat via identical page counts.
-    let endless = Fake::default();
-    struct Stuck(Fake);
-    impl Connector for Stuck {
-        fn descriptor(&self) -> ConnectorDescriptor {
-            self.0.descriptor()
-        }
-        fn check_connection(&self, c: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-            self.0.check_connection(c)
-        }
-        fn options(
-            &self,
-            f: &str,
-            q: &str,
-            c: &ConfigValues,
-        ) -> Result<Vec<ChoiceOption>, SourceError> {
-            self.0.options(f, q, c)
-        }
-        fn discover(&self, _: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-            Ok(DiscoveryPage {
-                issues: vec![],
-                next_cursor: Some("same".into()),
-                skipped: Vec::new(),
-            })
-        }
-        fn fetch(&self, c: &ConfigValues, r: &ExternalRef) -> Result<ExternalIssue, SourceError> {
-            self.0.fetch(c, r)
-        }
-    }
-    let mut stuck = Engine::new();
-    stuck.register(Box::new(Stuck(endless))).unwrap();
-    let error = stuck.preview("fake", &config).unwrap_err();
+    // The returned continuation must advance on every page of a walk.
+    fake.0.lock().unwrap().pages = vec![
+        Ok(discovery_page(vec![], Some("1".into()))),
+        Ok(discovery_page(vec![], Some("1".into()))),
+    ];
+    let error = engine.preview("fake", &config).unwrap_err();
     assert_eq!(error.code(), "protocol");
 }
 
 #[test]
 fn the_engine_visitor_can_stop_early_and_foreign_identities_are_rejected() {
     let (fake, engine) = setup();
-    fake.0
-        .lock()
-        .unwrap()
-        .pages
-        .push_back(Ok(((1..=5).map(issue).collect(), true)));
+    fake.0.lock().unwrap().pages = vec![Ok(discovery_page(
+        (1..=5).map(issue).collect(),
+        Some("1".into()),
+    ))];
     let mut taken = 0;
     let summary = engine
         .discover("fake", &values(json!({"repositories": ["o/r"]})), |_| {
@@ -371,11 +218,7 @@ fn the_engine_visitor_can_stop_early_and_foreign_identities_are_rejected() {
 
     let mut foreign = issue(9);
     foreign.reference.identity.provider = "other".into();
-    fake.0
-        .lock()
-        .unwrap()
-        .pages
-        .push_back(Ok((vec![foreign], false)));
+    fake.0.lock().unwrap().pages = vec![Ok(discovery_page(vec![foreign], None))];
     let error = engine
         .discover("fake", &values(json!({"repositories": ["o/r"]})), |_| {
             ControlFlow::Continue(())
@@ -386,7 +229,7 @@ fn the_engine_visitor_can_stop_early_and_foreign_identities_are_rejected() {
 
 #[test]
 fn a_connector_with_another_contract_version_is_refused() {
-    let fake = Fake::default();
+    let fake = FakeSource::default();
     fake.0.lock().unwrap().version = Some(CONTRACT_VERSION + 1);
     let mut engine = Engine::new();
     let error = engine.register(Box::new(fake)).unwrap_err();
@@ -419,11 +262,7 @@ fn saved_configuration_survives_reopening_and_imports_nothing() {
     let (fake, engine) = setup();
     let (dir, mut workspace) = workspace();
     assert!(workspace.saved_source("fake").unwrap().is_none());
-    fake.0
-        .lock()
-        .unwrap()
-        .pages
-        .push_back(Ok((vec![issue(1)], false)));
+    fake.0.lock().unwrap().pages = vec![Ok(discovery_page(vec![issue(1)], None))];
 
     let outcome = workspace
         .save_source(
@@ -475,7 +314,7 @@ fn a_failed_validation_or_preview_leaves_the_saved_configuration_unchanged() {
             .is_err()
     );
     fake.0.lock().unwrap().connection_error = None;
-    fake.0.lock().unwrap().pages.push_back(Err("outage".into()));
+    fake.0.lock().unwrap().pages = vec![Err("outage".into())];
     assert!(
         workspace
             .save_source(

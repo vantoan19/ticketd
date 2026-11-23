@@ -4,8 +4,10 @@
 // share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
+#[path = "support/fake_source.rs"]
+mod fake_source;
+
 use std::{
-    collections::BTreeMap,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -15,166 +17,22 @@ use std::{
 
 use serde_json::json;
 use ticketd_core::{
-    Status, Workspace,
+    self, Status, Workspace,
     source::{
-        CONTRACT_VERSION, Capability, ChoiceOption, Clock, ClosureReason, ConfigSchema,
-        ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
-        DiscoveryRequest, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FailureScope, FieldKind, OptionSource, RefreshCoordinator, RefreshOptions, RefreshPolicy,
-        RefreshReport, Run, SchemaField, Skip, SkippedPartition, SourceError, SourceHealth,
-        TicketSource, ValueFormat,
+        Clock, ClosureReason, Engine, ExternalIssue, ExternalState, FailureScope,
+        RefreshCoordinator, RefreshOptions, RefreshPolicy, RefreshReport, Run, Skip, SourceHealth,
+        TicketSource,
     },
 };
 
-#[derive(Clone)]
-enum Failure {
-    Unavailable,
-    Forbidden,
-    RateLimited(Option<u64>),
-}
-
-#[derive(Default)]
-struct Remote {
-    issues: BTreeMap<u64, ExternalIssue>,
-    matching: Vec<u64>,
-    /// Fails discovery and every fetch.
-    outage: Option<Failure>,
-    /// Fails the fetch of these issues with NotFound.
-    deleted: Vec<u64>,
-    /// Fails the fetch of these issues with an unusable answer.
-    broken: Vec<u64>,
-    /// A repository discovery had to skip because nobody can read it.
-    skipped: Option<String>,
-    discover_calls: usize,
-    fetch_calls: Vec<u64>,
-}
-
-#[derive(Clone, Default)]
-struct Fake(Arc<Mutex<Remote>>);
-
-fn fail(failure: &Failure) -> SourceError {
-    match failure {
-        Failure::Unavailable => SourceError::Unavailable("network is down".into()),
-        Failure::Forbidden => SourceError::Forbidden("access was revoked".into()),
-        Failure::RateLimited(secs) => SourceError::RateLimited {
-            retry_after_secs: *secs,
-        },
-    }
-}
-
-impl Connector for Fake {
-    fn descriptor(&self) -> ConnectorDescriptor {
-        ConnectorDescriptor {
-            provider: "fake".into(),
-            name: "Fake".into(),
-            contract_version: CONTRACT_VERSION,
-            capabilities: vec![Capability::Discover, Capability::Fetch],
-            schema: ConfigSchema {
-                fields: vec![SchemaField {
-                    key: "repositories".into(),
-                    label: "Repositories".into(),
-                    help: None,
-                    required: true,
-                    kind: FieldKind::MultiSelect {
-                        options: OptionSource::Dynamic { depends_on: vec![] },
-                        allow_custom: true,
-                        min_items: 1,
-                        max_items: 3,
-                        format: Some(ValueFormat::OwnerName),
-                    },
-                }],
-            },
-        }
-    }
-    fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        Ok(ConnectionInfo {
-            account: "octo".into(),
-        })
-    }
-    fn options(
-        &self,
-        _: &str,
-        _: &str,
-        _: &ConfigValues,
-    ) -> Result<Vec<ChoiceOption>, SourceError> {
-        Ok(Vec::new())
-    }
-    fn discover(&self, _: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-        let mut remote = self.0.lock().unwrap();
-        remote.discover_calls += 1;
-        if let Some(failure) = &remote.outage {
-            return Err(fail(failure));
-        }
-        let issues = remote
-            .matching
-            .iter()
-            .filter_map(|id| remote.issues.get(id))
-            .filter(|issue| issue.state == ExternalState::Open)
-            .cloned()
-            .collect();
-        Ok(DiscoveryPage {
-            issues,
-            next_cursor: None,
-            skipped: remote
-                .skipped
-                .iter()
-                .map(|name| SkippedPartition {
-                    code: "not_found".into(),
-                    message: format!("{name}: was not found"),
-                    field: None,
-                    partition: name.clone(),
-                })
-                .collect(),
-        })
-    }
-    fn fetch(
-        &self,
-        _: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<ExternalIssue, SourceError> {
-        let mut remote = self.0.lock().unwrap();
-        let id: u64 = reference.identity.id.parse().unwrap();
-        remote.fetch_calls.push(id);
-        if let Some(failure) = &remote.outage {
-            return Err(fail(failure));
-        }
-        if remote.broken.contains(&id) {
-            return Err(SourceError::Protocol("answered with status 500".into()));
-        }
-        if remote.deleted.contains(&id) {
-            return Err(SourceError::NotFound("the issue was deleted".into()));
-        }
-        remote
-            .issues
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| SourceError::NotFound("gone".into()))
-    }
-}
+use fake_source::{Failure, FakeSource, Remote};
 
 fn issue(id: u64, updated_at: &str) -> ExternalIssue {
-    ExternalIssue {
-        reference: ExternalRef {
-            identity: ExternalIdentity {
-                provider: "fake".into(),
-                id: id.to_string(),
-            },
-            locator: format!("o/r#{id}"),
-        },
-        display: format!("o/r#{id}"),
-        url: format!("https://example.test/o/r/issues/{id}"),
-        title: format!("Issue {id}"),
-        body: "Body".into(),
-        state: ExternalState::Open,
-        assignees: vec![],
-        labels: vec![],
-        created_at: "2026-01-01T00:00:00Z".into(),
-        updated_at: updated_at.into(),
-        author: None,
-        duplicate_of: None,
-        duplicate_of_url: None,
-        duplicate_withdrawn: false,
-    }
+    let mut issue = fake_source::issue(id, &format!("Issue {id}"));
+    issue.body = "Body".into();
+    issue.author = None;
+    issue.updated_at = updated_at.into();
+    issue
 }
 
 const T0: &str = "2026-02-01T00:00:00Z";
@@ -185,7 +43,7 @@ const T3: &str = "2026-02-01T00:30:00Z";
 const DAY: u64 = 20_485 * 86_400;
 
 struct Fixture {
-    fake: Fake,
+    fake: FakeSource,
     engine: Engine,
     workspace: Workspace,
     dir: tempfile::TempDir,
@@ -193,7 +51,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let fake = Fake::default();
+        let fake = FakeSource::default();
         let mut engine = Engine::new();
         engine.register(Box::new(fake.clone())).unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -596,7 +454,7 @@ fn one_unreadable_issue_neither_stops_the_others_nor_backs_off_the_source() {
 fn an_unreadable_repository_is_skipped_visibly_without_stopping_discovery() {
     let mut f = Fixture::new();
     f.publish(issue(1, T0));
-    f.remote(|r| r.skipped = Some("o/gone".into()));
+    f.remote(|r| r.inaccessible = vec!["o/gone".into()]);
     let report = f.refresh_at(T0);
     assert_eq!(report.imported, vec!["T-KQ1".to_owned()]);
     assert_eq!(report.failures.len(), 1);
@@ -607,7 +465,7 @@ fn an_unreadable_repository_is_skipped_visibly_without_stopping_discovery() {
     assert!(status.partial_message.unwrap().contains("o/gone"));
     assert!(status.error.is_none());
 
-    f.remote(|r| r.skipped = None);
+    f.remote(|r| r.inaccessible.clear());
     f.refresh_at(T1);
     let status = f.workspace.source_statuses().unwrap().remove(0);
     assert_eq!(status.health, SourceHealth::Synced);

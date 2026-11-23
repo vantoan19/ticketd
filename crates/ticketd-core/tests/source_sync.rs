@@ -4,278 +4,27 @@
 // share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
-use std::{
-    collections::BTreeMap,
-    sync::{Arc, Condvar, Mutex, mpsc},
-};
+#[path = "support/fake_source.rs"]
+mod fake_source;
+
+use std::sync::{Arc, Condvar, Mutex, mpsc};
 
 use serde_json::json;
 use ticketd_core::{
-    ContextOptions, Error, Status, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    self, ContextOptions, Error, Status, Ticket, TicketChange, TicketFilter, TicketPatch,
+    Workspace,
     source::{
-        CONTRACT_VERSION, Capability, ChoiceOption, ClosureReason, ConfigSchema, ConfigValues,
-        ConnectionInfo, Connector, ConnectorDescriptor, Conversation, ConversationEntry,
-        DiscoveryPage, DiscoveryRequest, DuplicateTarget, Engine, ExternalComment, ExternalEvent,
-        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FailureScope, FieldKind, OptionSource, Ownership, RefreshOptions, RefreshReport,
-        SchemaField, SkippedPartition, SourceError, SourceFilter, SourceHealth, TargetProblem,
-        ValueFormat,
+        ClosureReason, Conversation, ConversationEntry, DuplicateTarget, Engine, ExternalComment,
+        ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
+        ExternalState, FailureScope, Ownership, RefreshOptions, RefreshReport, SourceFilter,
+        SourceHealth, TargetProblem,
     },
 };
 
-#[derive(Default)]
-struct Remote {
-    issues: BTreeMap<u64, ExternalIssue>,
-    /// Ids the discovery rules match (only open ones are listed, like GitHub).
-    matching: Vec<u64>,
-    matching_by_repository: BTreeMap<String, Vec<u64>>,
-    /// Repositories the account cannot read: discovery skips them and says so.
-    inaccessible: Vec<String>,
-    pause_next_discovery: Option<DiscoveryPause>,
-    page_size: usize,
-    outage: Option<String>,
-    discover_calls: usize,
-    fetch_calls: Vec<u64>,
-    conversations: BTreeMap<u64, Conversation>,
-    conversation_outage: Option<String>,
-    conversation_calls: Vec<u64>,
-    revision: u32,
-}
-
-#[derive(Clone)]
-struct DiscoveryPause {
-    entered: mpsc::SyncSender<()>,
-    release: Arc<(Mutex<bool>, Condvar)>,
-}
-
-impl DiscoveryPause {
-    fn wait(self) {
-        self.entered.send(()).unwrap();
-        let (released, changed) = &*self.release;
-        let mut released = released.lock().unwrap();
-        while !*released {
-            released = changed.wait(released).unwrap();
-        }
-    }
-}
-
-#[derive(Clone, Default)]
-struct Fake(Arc<Mutex<Remote>>);
-
-impl Connector for Fake {
-    fn descriptor(&self) -> ConnectorDescriptor {
-        ConnectorDescriptor {
-            provider: "fake".into(),
-            name: "Fake".into(),
-            contract_version: CONTRACT_VERSION,
-            capabilities: vec![
-                Capability::Discover,
-                Capability::Fetch,
-                Capability::Comments,
-            ],
-            schema: ConfigSchema {
-                fields: vec![
-                    SchemaField {
-                        key: "repositories".into(),
-                        label: "Repositories".into(),
-                        help: None,
-                        required: true,
-                        kind: FieldKind::MultiSelect {
-                            options: OptionSource::Dynamic { depends_on: vec![] },
-                            allow_custom: true,
-                            min_items: 1,
-                            max_items: 3,
-                            format: Some(ValueFormat::OwnerName),
-                        },
-                    },
-                    SchemaField {
-                        key: "labels".into(),
-                        label: "Labels".into(),
-                        help: None,
-                        required: false,
-                        kind: FieldKind::MultiSelect {
-                            options: OptionSource::Dynamic { depends_on: vec![] },
-                            allow_custom: true,
-                            min_items: 0,
-                            max_items: 3,
-                            format: None,
-                        },
-                    },
-                ],
-            },
-        }
-    }
-
-    fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        Ok(ConnectionInfo {
-            account: "octo".into(),
-        })
-    }
-
-    fn options(
-        &self,
-        _: &str,
-        _: &str,
-        _: &ConfigValues,
-    ) -> Result<Vec<ChoiceOption>, SourceError> {
-        Ok(Vec::new())
-    }
-
-    fn discover(&self, request: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-        let mut remote = self.0.lock().unwrap();
-        remote.discover_calls += 1;
-        if let Some(message) = remote.outage.clone() {
-            return Err(SourceError::Unavailable(message));
-        }
-        let repositories = request.config["repositories"].as_array().unwrap();
-        let matching = repositories
-            .first()
-            .and_then(|repository| repository.as_str())
-            .and_then(|repository| remote.matching_by_repository.get(repository))
-            .unwrap_or(&remote.matching);
-        let wanted = labels_of(request.config);
-        let listed: Vec<ExternalIssue> = matching
-            .iter()
-            .filter_map(|id| remote.issues.get(id))
-            .filter(|issue| issue.state == ExternalState::Open)
-            .filter(|issue| wanted.iter().all(|label| issue.labels.contains(label)))
-            .filter(|issue| {
-                !remote
-                    .inaccessible
-                    .contains(&repository_of(&issue.reference))
-            })
-            .cloned()
-            .collect();
-        // Said with the first page only: a connector reports a skipped part once.
-        let skipped = if request.cursor.is_none() {
-            remote.inaccessible.clone()
-        } else {
-            Vec::new()
-        }
-        .into_iter()
-        .map(|repository| SkippedPartition {
-            code: "not_found".into(),
-            message: format!("{repository} was not found"),
-            field: None,
-            partition: repository,
-        })
-        .collect();
-        let size = remote.page_size.max(1);
-        let pause = remote.pause_next_discovery.take();
-        drop(remote);
-        if let Some(pause) = pause {
-            pause.wait();
-        }
-        let start: usize = request.cursor.map_or(0, |c| c.parse().unwrap());
-        let end = (start + size).min(listed.len());
-        Ok(DiscoveryPage {
-            issues: listed[start..end].to_vec(),
-            next_cursor: (end < listed.len()).then(|| end.to_string()),
-            skipped,
-        })
-    }
-
-    fn partition(&self, reference: &ExternalRef) -> String {
-        repository_of(reference)
-    }
-
-    fn partitions(&self, config: &ConfigValues) -> Vec<String> {
-        config["repositories"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|repository| repository.as_str().unwrap().to_owned())
-            .collect()
-    }
-
-    fn discovery_scope(&self, config: &ConfigValues) -> String {
-        labels_of(config).join(",")
-    }
-
-    fn fetch(
-        &self,
-        _: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<ExternalIssue, SourceError> {
-        let mut remote = self.0.lock().unwrap();
-        let id: u64 = reference.identity.id.parse().unwrap();
-        remote.fetch_calls.push(id);
-        if let Some(message) = remote.outage.clone() {
-            return Err(SourceError::Unavailable(message));
-        }
-        remote
-            .issues
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| SourceError::NotFound("gone".into()))
-    }
-
-    fn conversation(
-        &self,
-        _: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<Conversation, SourceError> {
-        let mut remote = self.0.lock().unwrap();
-        let id: u64 = reference.identity.id.parse().unwrap();
-        remote.conversation_calls.push(id);
-        if let Some(message) = remote.conversation_outage.clone() {
-            return Err(SourceError::Unavailable(message));
-        }
-        Ok(remote.conversations.get(&id).cloned().unwrap_or_default())
-    }
-}
-
-/// The labels an issue must all have to be discovered; none means any issue.
-fn labels_of(config: &ConfigValues) -> Vec<String> {
-    config
-        .get("labels")
-        .and_then(|labels| labels.as_array())
-        .into_iter()
-        .flatten()
-        .map(|label| label.as_str().unwrap().to_owned())
-        .collect()
-}
-
-/// The repository of an issue the fake holds, read from its `owner/name#id` locator.
-fn repository_of(reference: &ExternalRef) -> String {
-    reference.locator.split('#').next().unwrap().to_owned()
-}
-
-/// An issue of `repository` instead of `o/r`.
-fn issue_in(repository: &str, id: u64, title: &str) -> ExternalIssue {
-    let mut issue = issue(id, title);
-    issue.reference.locator = format!("{repository}#{id}");
-    issue.display = issue.reference.locator.clone();
-    issue
-}
-
-fn issue(id: u64, title: &str) -> ExternalIssue {
-    ExternalIssue {
-        reference: ExternalRef {
-            identity: ExternalIdentity {
-                provider: "fake".into(),
-                id: id.to_string(),
-            },
-            locator: format!("o/r#{id}"),
-        },
-        display: format!("o/r#{id}"),
-        url: format!("https://example.test/o/r/issues/{id}"),
-        title: title.into(),
-        body: format!("Body of {title}"),
-        state: ExternalState::Open,
-        assignees: vec![],
-        labels: vec![],
-        created_at: "2026-01-01T00:00:00Z".into(),
-        updated_at: "2026-01-01T00:00:00Z".into(),
-        author: Some("alice".into()),
-        duplicate_of: None,
-        duplicate_of_url: None,
-        duplicate_withdrawn: false,
-    }
-}
+use fake_source::{Failure, FakeSource, Remote, issue, issue_in};
 
 struct Fixture {
-    fake: Fake,
+    fake: FakeSource,
     engine: Engine,
     workspace: Workspace,
     dir: tempfile::TempDir,
@@ -283,7 +32,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let fake = Fake::default();
+        let fake = FakeSource::default();
         let mut engine = Engine::new();
         engine.register(Box::new(fake.clone())).unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -367,7 +116,7 @@ fn retitle(title: &str) -> TicketPatch {
 #[test]
 fn matching_issues_import_as_todo_with_stable_identity_across_pages_and_repeats() {
     let mut f = Fixture::new();
-    f.remote(|r| r.page_size = 2);
+    f.remote(|r| r.page_size = Some(2));
     for id in 1..=5 {
         f.publish(issue(id, &format!("Issue {id}")), true);
     }
@@ -758,7 +507,7 @@ fn a_failed_refresh_keeps_saved_content_and_records_freshness_truthfully() {
     f.publish(issue(1, "Stable"), true);
     f.refresh_at("2026-02-01T00:00:00Z");
     f.publish(issue(1, "Changed upstream"), true);
-    f.remote(|r| r.outage = Some("GitHub is down".into()));
+    f.remote(|r| r.outage = Some(Failure::UnavailableWith("GitHub is down".into())));
 
     let report = f.refresh_at("2026-02-02T00:00:00Z");
     assert!(
@@ -1288,7 +1037,7 @@ fn local_notes_stay_separate_and_the_conversation_survives_failure_and_takeover(
     assert_eq!(f.fake.0.lock().unwrap().conversation_calls.len(), calls + 1);
 
     // The source goes down, the person takes ownership, and the conversation stays.
-    f.remote(|r| r.outage = Some("down".into()));
+    f.remote(|r| r.outage = Some(Failure::UnavailableWith("down".into())));
     f.refresh();
     f.workspace.take_ownership("T-KQ1", None).unwrap();
     assert_eq!(labels(&f.conversation(1)), vec!["comment c1"]);
@@ -1396,9 +1145,10 @@ fn a_failed_comment_read_is_recorded_apart_and_never_makes_a_confirmed_ticket_un
     f.publish(issue(1, "Talked about"), true);
     f.refresh();
     // The issue changed upstream, so its comments are due; reading them fails.
-    f.converse(1, Conversation::default());
     f.remote(|r| {
-        r.issues.get_mut(&1).unwrap().title = "Renamed upstream".into();
+        let issue = r.issues.get_mut(&1).unwrap();
+        issue.title = "Renamed upstream".into();
+        issue.updated_at = "2026-02-01T00:01:00Z".into();
         r.conversation_outage = Some("comments timed out".into());
     });
     f.publish(issue(2, "New and talked about"), true);
@@ -1719,10 +1469,15 @@ fn an_in_flight_refresh_does_not_apply_discovery_from_a_replaced_configuration()
     let (entered_tx, entered_rx) = mpsc::sync_channel(0);
     let release = Arc::new((Mutex::new(false), Condvar::new()));
     f.remote(|remote| {
-        remote.pause_next_discovery = Some(DiscoveryPause {
-            entered: entered_tx,
-            release: release.clone(),
-        });
+        let release = release.clone();
+        remote.after_discovery = Some(Arc::new(move || {
+            entered_tx.send(()).unwrap();
+            let (released, changed) = &*release;
+            let mut released = released.lock().unwrap();
+            while !*released {
+                released = changed.wait(released).unwrap();
+            }
+        }));
     });
     let path = f.path();
     let fake = f.fake.clone();

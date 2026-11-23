@@ -10,6 +10,8 @@
 //!   the engine first and write in one short transaction afterwards, so no
 //!   network I/O ever happens while the database is locked.
 
+#[cfg(test)]
+mod conformance;
 mod contract;
 mod conversation;
 mod engine;
