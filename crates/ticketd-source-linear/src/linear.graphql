@@ -272,7 +272,12 @@ query LinearDestinationTeam($team: String!) {
   }
 }
 
-query LinearPublicationSearch($team: ID!, $since: DateTimeOrDuration!, $first: Int!, $after: String) {
+query LinearPublicationSearch(
+  $team: ID!
+  $since: DateTimeOrDuration!
+  $first: Int!
+  $after: String
+) {
   issues(
     first: $first
     after: $after
