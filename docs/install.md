@@ -235,8 +235,8 @@ An S3-compatible service works when it supports Versioning, conditional writes
 (`If-None-Match` and `If-Match`) and SHA-256 checksums. Its endpoint comes from the
 profile's `endpoint_url`, and must be `https` unless the service runs on this computer
 (`localhost`). Setup checks that the profile's credentials can be exported rather than asking
-AWS who it is, since AWS knows nothing of a MinIO account. Reading an endpoint set in a service-specific `s3` section
-of the profile needs AWS CLI 2.34.22 or later. AWS S3, MinIO and Ceph RGW 20.x are
+AWS who it is, since AWS knows nothing of a MinIO account. A profile with a `services` section (a service-specific `s3` endpoint)
+needs AWS CLI 2.34.22 or later to be read; older CLIs ask you to update. AWS S3, MinIO and Ceph RGW 20.x are
 confirmed. Cloudflare R2 (no Versioning) and the Google Cloud Storage XML API (it
 ignores the conditional headers) do not work. The bucket check, not this list, decides
 for any other service.

@@ -496,8 +496,9 @@ Setup, IAM permissions and the lifecycle rule are in
   contract tests run in CI. Cloudflare R2 (no Versioning), the Google Cloud Storage XML
   API (it ignores conditional headers) and S3 directory buckets are refused. Because a
   list of services goes out of date, every bucket is checked at setup. Reading an
-  endpoint from a service-specific `s3` section of the profile needs AWS CLI 2.34.22;
-  older CLIs use the profile's `endpoint_url`.
+  endpoint of a profile that has a `services` section needs AWS CLI 2.34.22; an older
+  CLI asks the person to update it, and a profile without that section works with any
+  supported CLI.
 - **Folder layout.** The bucket holds the same record folders as Drive, one readable
   Markdown file per record, but keyed by GUID, since an S3 key cannot be renamed
   without deleting. The readable name is the object's download name in the console.
