@@ -3,8 +3,10 @@ name: Quality
 on:
   workflow_dispatch:
   pull_request:
-    # `labeled` makes adding the ci-full label start a run that runs everything.
-    types: [opened, synchronize, reopened, labeled]
+    # `labeled` and `unlabeled` make adding or removing the ci-full label start a run that plans
+    # accordingly. Any other label change restarts the run too: skipping the planned jobs on a label
+    # event could let CI result pass untested.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
   schedule:
@@ -103,7 +105,7 @@ jobs:
     # The Rust tests on all three release platforms, split into shards that run side by side.
     # Every shard compiles its own tests and runs its share of them; the shards of one OS share
     # one build cache. Shard 1 of each OS also runs the doc-tests; the last shard also builds the
-    # desktop and CLI (and checks the Pages URLs on Windows), so the extra work is not all in one shard.
+    # desktop and CLI, so the extra work is not all in one shard.
     name: Rust tests (${{ matrix.name }} ${{ matrix.shard }}/${{ matrix.shards }})
     needs: plan
     if: needs.plan.outputs.rust == 'true'
@@ -135,13 +137,6 @@ jobs:
           cache: test
       # Tauri embeds ../dist at compile time, so the frontend must be built before cargo runs.
       - run: npm run build
-      - name: Check nested Pages URLs on Windows
-        if: runner.os == 'Windows' && matrix.shard == matrix.shards
-        env:
-          DOCS_PROJECT_PAGES: "1"
-        run: |
-          npm run build:docs
-          node apps/docs/check-pages.mjs
       - name: Test Rust workspace
         run: ./scripts/check rust --partition ${{ matrix.shard }}/${{ matrix.shards }}
       - name: Upload test report
@@ -177,8 +172,36 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/prepare
       - run: ./scripts/check ui --partition ${{ matrix.shard }}/3
+      # The tests never bundle the app, so a broken vite.config.ts or a module that typechecks but
+      # does not bundle would pass. The Rust jobs build it too, but a frontend-only change skips them.
+      - name: Build the desktop frontend
+        if: matrix.shard == 1
+        run: npm run build
       - name: Build and check the GitHub Pages site
         if: matrix.shard == 1
+        env:
+          DOCS_PROJECT_PAGES: "1"
+        run: |
+          npm run build:docs
+          node apps/docs/check-pages.mjs
+
+  pages:
+    # The nested GitHub Pages URLs differ on Windows, so the site is built and checked there. It
+    # needs only Node, so it runs beside the frontend tests whenever the site or its inputs change.
+    name: Windows Pages check
+    needs: plan
+    if: needs.plan.outputs.frontend == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+      - name: Build and check the GitHub Pages site
         env:
           DOCS_PROJECT_PAGES: "1"
         run: |
@@ -191,7 +214,7 @@ jobs:
     # canceled or wrongly skipped job can never look like a pass.
     name: CI result
     if: always()
-    needs: [plan, fast, clippy, rust, ui]
+    needs: [plan, fast, clippy, rust, ui, pages]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

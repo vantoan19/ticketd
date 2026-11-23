@@ -113,8 +113,10 @@ fi
 
 if runs slow ui && [[ -f package.json ]]; then
   if [[ -n "$partition" ]]; then
-    # A shard of a small workspace can be empty; each test script passes --passWithNoTests.
-    npm run test --workspaces -- --shard "$shard/$shards"
+    # A shard of a small workspace can be empty, so only the sharded run passes with no tests.
+    # The flag is not in the test scripts: vitest rejects it twice, and an unsharded run with
+    # zero tests should fail.
+    npm run test --workspaces -- --shard "$shard/$shards" --passWithNoTests
   else
     npm test
   fi
