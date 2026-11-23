@@ -17,12 +17,16 @@ import { useHydrated } from "./components/useHydrated";
 import NotFound from "./routes/not-found";
 import { siteUrl } from "./links";
 import "./app.css";
-import favicon from "../../desktop/src-tauri/icons/32x32.png";
+import icon from "./art/brand/ticketd-icon.svg";
+import favicon from "./art/brand/ticketd-icon-32.png";
+import touchIcon from "./art/brand/apple-touch-icon.png";
 import regular from "../../desktop/src/assets/fonts/Geist-Regular.woff2";
 import medium from "../../desktop/src/assets/fonts/Geist-Medium.woff2";
 
 export const links: Route.LinksFunction = () => [
-  { rel: "icon", type: "image/png", href: favicon },
+  { rel: "icon", type: "image/svg+xml", href: icon },
+  { rel: "icon", type: "image/png", sizes: "32x32", href: favicon },
+  { rel: "apple-touch-icon", href: touchIcon },
   ...[regular, medium].map((href) => ({
     rel: "preload",
     as: "font",

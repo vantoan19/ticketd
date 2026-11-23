@@ -1,7 +1,8 @@
 name: Package
 
-# Manual builds of the installable packages. Kept out of the Quality workflow so its required
-# "CI result" check only has to account for the jobs of the change plan.
+# Manual builds of the installable packages from main, and the Linux native smoke test on any
+# branch. Kept out of the Quality workflow so its required "CI result" check only has to account
+# for the jobs of the change plan. The Release workflow builds every green main commit.
 on:
   workflow_dispatch:
     inputs:
@@ -108,111 +109,12 @@ jobs:
   distribution:
     # Credential-bearing builds use reviewed main only, never a PR or arbitrary branch.
     if: inputs.target != 'native-smoke' && github.ref == 'refs/heads/main'
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJSON(inputs.target == 'linux-distribution' && '[{"os":"ubuntu-24.04","platform":"ubuntu-24.04-x86_64","bundle":"deb","installer":"target/release/bundle/deb/*.deb","cli":"target/release/ticketd"}]' || '[{"os":"macos-26","platform":"macos-arm64","bundle":"dmg","installer":"target/release/bundle/dmg/*.dmg","cli":"target/release/ticketd"},{"os":"ubuntu-24.04","platform":"ubuntu-24.04-x86_64","bundle":"deb","installer":"target/release/bundle/deb/*.deb","cli":"target/release/ticketd"},{"os":"windows-2025","platform":"windows-x86_64","bundle":"msi","installer":"target/release/bundle/msi/*.msi","cli":"target/release/ticketd.exe"}]') }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    env:
-      # One Desktop app OAuth client serves every platform; it is a public client.
+    uses: ./.github/workflows/distribution.yml
+    with:
+      sha: ${{ github.sha }}
+      linux-only: ${{ inputs.target == 'linux-distribution' }}
+      retention-days: 7
+    secrets:
       TICKETD_GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.TICKETD_GOOGLE_OAUTH_CLIENT_JSON }}
-    defaults:
-      run:
-        shell: bash
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Require publisher Google app registration
-        run: |
-          if [[ -z "$TICKETD_GOOGLE_OAUTH_CLIENT_JSON" ]]; then
-            echo "::error::Configure the TICKETD_GOOGLE_OAUTH_CLIENT_JSON repository secret with the Desktop OAuth client JSON before building a distribution."
-            exit 1
-          fi
-      # Builds that ship to people restore no caches.
-      - uses: ./.github/actions/prepare
-        with:
-          rust: true
-          desktop: true
-          cache: none
-      - name: Check package versions
-        run: node scripts/check-versions.mjs
-      - name: Validate bundled Google app registration
-        run: cargo test -p ticketd-core --lib drive::oauth::tests::distribution_client_is_valid --locked
-      - name: Build CLI
-        run: cargo build --release --locked -p ticketd-cli
-      - name: Build desktop installer
-        id: installer
-        env:
-          TAURI_UPDATER_PUBLIC_KEY: ${{ vars.TAURI_UPDATER_PUBLIC_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
-          INSTALLER_BUNDLE: ${{ matrix.bundle }}
-        run: |
-          bundle="$INSTALLER_BUNDLE"
-          config=()
-          if [[ -n "$TAURI_UPDATER_PUBLIC_KEY" && -n "$TAURI_SIGNING_PRIVATE_KEY" && -n "$TAURI_SIGNING_PRIVATE_KEY_PASSWORD" ]]; then
-            updater_config="$RUNNER_TEMP/ticketd-updater.json"
-            node -p 'JSON.stringify({bundle:{createUpdaterArtifacts:true},plugins:{updater:{pubkey:process.env.TAURI_UPDATER_PUBLIC_KEY.trim()}}})' > "$updater_config"
-            config=(--config "$updater_config")
-            # The macOS updater archives the app bundle alongside the DMG installer.
-            if [[ "$bundle" == dmg ]]; then bundle=app,dmg; fi
-          else
-            echo "::warning::Skipping updater files. Configure TAURI_UPDATER_PUBLIC_KEY, TAURI_SIGNING_PRIVATE_KEY and TAURI_SIGNING_PRIVATE_KEY_PASSWORD to enable updater signing."
-          fi
-          npm run desktop -- build --bundles "$bundle" "${config[@]}" -- --locked
-          if [[ ${#config[@]} -gt 0 ]]; then echo 'signed_updater=true' >> "$GITHUB_OUTPUT"; fi
-      - name: Smoke-test installed Linux package
-        if: runner.os == 'Linux'
-        run: |
-          sudo apt-get install -y webkit2gtk-driver xvfb
-          cargo install tauri-driver --version 2.1.0 --locked
-          sudo apt-get install -y ./target/release/bundle/deb/*.deb
-          package=$(dpkg-deb -f target/release/bundle/deb/*.deb Package)
-          XDG_DATA_HOME="$(mktemp -d)"
-          export XDG_DATA_HOME
-          export TICKETD_SMOKE_CHECKOUT="$PWD"
-          export TICKETD_SMOKE_CLI=/usr/bin/ticketd
-          export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
-          trap 'rm -rf "$XDG_DATA_HOME"' EXIT
-          test "$("$TICKETD_SMOKE_CLI" --version)" = "$(target/release/ticketd --version)"
-          # shellcheck disable=SC2016 # $driver expands in the inner sh.
-          xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/install.mjs'
-          # shellcheck disable=SC2016 # $driver expands in the inner sh.
-          XDG_DATA_HOME="$XDG_DATA_HOME/refresh" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/refresh.mjs'
-          # shellcheck disable=SC2016 # $driver expands in the inner sh.
-          XDG_DATA_HOME="$XDG_DATA_HOME/workflow" xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/workflow.mjs'
-          sudo apt-get remove -y "$package"
-          test ! -e "$TICKETD_SMOKE_CLI"
-          target/release/ticketd list | node -e 'let s=""; process.stdin.on("data", x => s += x); process.stdin.on("end", () => { if (!JSON.parse(s).some(t => t.title === "Created while desktop was closed")) process.exit(1); });'
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: failure() && runner.os == 'Linux'
-        with:
-          name: installed-workflow-diagnostics
-          path: native-failure.*
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Assemble download
-        env:
-          SIGNED_UPDATER: ${{ steps.installer.outputs.signed_updater }}
-        run: |
-          mkdir -p distribution
-          cp ${{ matrix.installer }} distribution/
-          cp ${{ matrix.cli }} distribution/
-          cp docs/install.md distribution/INSTALL.md
-          if [[ "$SIGNED_UPDATER" == true ]]; then
-            if [[ "$RUNNER_OS" == macOS ]]; then
-              cp target/release/bundle/macos/*.app.tar.gz{,.sig} distribution/
-            else
-              cp ${{ matrix.installer }}.sig distribution/
-            fi
-          fi
-      - name: Smoke-test CLI installation and discovery
-        run: node tests/native/cli-install.mjs ${{ matrix.cli }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: ticketd-${{ matrix.platform }}
-          path: distribution/
-          if-no-files-found: error
-          retention-days: 7
+      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}

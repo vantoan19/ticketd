@@ -51,7 +51,7 @@ export function TicketDetail({
           <p>{report}</p>
           <div className="demo-detail-meta">
             <GitBranch size={13} />
-            auth/login-limiter <CircleCheck size={13} /> Boundary tests passed
+            api/rate-limiter <CircleCheck size={13} /> Boundary tests passed
           </div>
         </div>
       )}
@@ -76,9 +76,9 @@ export function TicketDetail({
           <button
             type="button"
             className="demo-inline"
-            onClick={() => open("T-LG14")}
+            onClick={() => open("T-RL14")}
           >
-            Subticket T-LG14 <ArrowRight size={13} />
+            Subticket T-RL14 <ArrowRight size={13} />
           </button>
           {stage < 3 && (
             <button

@@ -14,7 +14,7 @@ type Capture = {
 export const captures = {
   done: {
     title: "Completed board",
-    alt: "T-LG12 is in Done alongside the audit event. T-LG13 now has no open blockers.",
+    alt: "T-RL12 is in Done alongside the audit event. T-RL13 now has no open blockers.",
     frame: [230, 95, 1030],
     phoneWidth: 312,
   },
@@ -26,7 +26,7 @@ export const captures = {
   },
   plan: {
     title: "Plan flow",
-    alt: "Login hardening in Flow view. Rate-limit failed logins is ready in Now and blocks the alerting ticket in Next.",
+    alt: "API rate limits in Flow view. Rate-limit API requests is ready in Now and blocks the alerting ticket in Next.",
     frame: [230, 0, 1050],
     phoneWidth: 316,
   },
@@ -38,7 +38,7 @@ export const captures = {
   },
   board: {
     title: "Plan board",
-    alt: "The login limiter sits in In progress on the Login hardening board.",
+    alt: "The rate limiter sits in In progress on the API rate limits board.",
     frame: [230, 120, 1050],
     phoneWidth: 296,
   },

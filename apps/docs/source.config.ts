@@ -1,4 +1,5 @@
 import { defineConfig, defineDocs } from "fumadocs-mdx/config";
+import type { Nodes, Root } from "mdast";
 
 export const docs = defineDocs({
   dir: "content/docs",
@@ -43,8 +44,22 @@ const syntax = {
   ],
 };
 
+// The frontmatter title is each page's heading. An included repository file
+// such as PRIVACY.md brings its own, which would repeat it.
+function remarkDropTitle() {
+  const drop = (node: Nodes) => {
+    if (!("children" in node)) return;
+    node.children = node.children.filter(
+      (child) => child.type !== "heading" || child.depth !== 1,
+    ) as typeof node.children;
+    node.children.forEach(drop);
+  };
+  return (tree: Root) => drop(tree);
+}
+
 export default defineConfig({
   mdxOptions: {
+    remarkPlugins: [remarkDropTitle],
     rehypeCodeOptions: { themes: { light: syntax, dark: syntax } },
   },
 });

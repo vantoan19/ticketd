@@ -5,6 +5,7 @@ import type {
   CanUseTool,
   Options,
   PermissionResult,
+  PermissionUpdate,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
 import { describe, expect, it } from "vitest";
@@ -304,6 +305,16 @@ describe("open", () => {
     });
   });
 
+  it("opens in full access when the person picked it", async () => {
+    const fake = await harness().open(1, {
+      permission_mode: "bypassPermissions",
+    });
+    expect(fake.options).toMatchObject({
+      permissionMode: "bypassPermissions",
+      allowDangerouslySkipPermissions: true,
+    });
+  });
+
   it("starts the user's Claude Code with native settings and permissions intact", async () => {
     const h = harness();
     const fake = await h.open(1, { resume_session_id: "native-session" });
@@ -315,10 +326,11 @@ describe("open", () => {
       systemPrompt: { type: "preset", preset: "claude_code" },
       includePartialMessages: true,
     });
+    // Full access can be chosen later in the session; it is not in effect.
+    expect(fake.options.allowDangerouslySkipPermissions).toBe(true);
     // Left to Claude Code's own configuration, never overridden by the bridge.
     for (const untouched of [
       "permissionMode",
-      "allowDangerouslySkipPermissions",
       "mcpServers",
       "strictMcpConfig",
       "hooks",
@@ -338,20 +350,13 @@ describe("open", () => {
     });
   });
 
-  it("refuses to bypass permissions", async () => {
-    const h = harness();
-    await h.send({
-      cmd: "open",
-      generation: 1,
-      cwd: CWD,
-      claude_executable: CLAUDE,
+  it("never runs an unattended session in full access", async () => {
+    const fake = await harness().open(1, {
       permission_mode: "bypassPermissions",
+      unattended: { allowed_tools: [], disallowed_tools: [], max_turns: 5 },
     });
-    expect(h.events[0]).toMatchObject({
-      event: "command_rejected",
-      code: "invalid_command",
-    });
-    expect(h.queries).toHaveLength(0);
+    expect(fake.options.permissionMode).toBe("dontAsk");
+    expect(fake.options).not.toHaveProperty("allowDangerouslySkipPermissions");
   });
 
   it("runs an unattended session without asking and denies what is not allowed", async () => {
@@ -716,6 +721,61 @@ describe("permissions and questions", () => {
     expect(h.named("request_resolved")).toMatchObject([
       { request_id: request?.request_id, outcome: "allow" },
     ]);
+  });
+
+  it("never turns on full access by remembering an answer", async () => {
+    const h = harness();
+    const fake = await h.open();
+    const rule: PermissionUpdate = {
+      type: "addRules",
+      rules: [{ toolName: "Bash", ruleContent: "npm test" }],
+      behavior: "allow",
+      destination: "session",
+    };
+    const ask = fake.askPermission(
+      "ExitPlanMode",
+      { plan: "Ship it" },
+      {
+        suggestions: [
+          {
+            type: "setMode",
+            mode: "bypassPermissions",
+            destination: "session",
+          },
+          rule,
+        ],
+      },
+    );
+    await settle();
+    const [request] = h.named("permission_request");
+    await h.send({
+      cmd: "respond",
+      generation: 1,
+      request_id: request?.request_id,
+      decision: { kind: "allow", remember: true },
+    });
+    expect(await ask.result).toEqual({
+      behavior: "allow",
+      updatedInput: { plan: "Ship it" },
+      updatedPermissions: [rule],
+    });
+
+    // With nothing else to remember, remembering is not offered.
+    fake.askPermission(
+      "ExitPlanMode",
+      { plan: "Again" },
+      {
+        suggestions: [
+          {
+            type: "setMode",
+            mode: "bypassPermissions",
+            destination: "session",
+          },
+        ],
+      },
+    );
+    await settle();
+    expect(h.named("permission_request").at(-1)?.can_remember).toBe(false);
   });
 
   it("returns a denial with the user's message", async () => {
@@ -1242,7 +1302,7 @@ describe("reasoning, files, context and settings", () => {
     expect(h.named("compacted")).toHaveLength(1);
   });
 
-  it("changes a setting through the SDK and never takes bypassPermissions", async () => {
+  it("changes a setting through the SDK, full access included", async () => {
     const h = harness();
     const fake = await h.open();
     const set = (setting: object) =>
@@ -1251,12 +1311,14 @@ describe("reasoning, files, context and settings", () => {
     await set({ kind: "effort", value: "high" });
     await set({ kind: "permission", value: "acceptEdits" });
     await set({ kind: "permission", value: "bypassPermissions" });
+    await set({ kind: "permission", value: "dontAsk" });
     fake.settingError = new Error("unknown model");
     await set({ kind: "model", value: "nope" });
     expect(fake.settingsApplied).toEqual([
       { model: "opus" },
       { effortLevel: "high" },
       { mode: "acceptEdits" },
+      { mode: "bypassPermissions" },
     ]);
     expect(
       h.events
@@ -1266,7 +1328,14 @@ describe("reasoning, files, context and settings", () => {
             event.event === "command_rejected",
         )
         .map((event) => ("outcome" in event ? event.outcome : event.event)),
-    ).toEqual(["applied", "applied", "applied", "command_rejected", "refused"]);
+    ).toEqual([
+      "applied",
+      "applied",
+      "applied",
+      "applied",
+      "command_rejected",
+      "refused",
+    ]);
     expect(h.named("setting_result").at(-1)?.message).toBe("unknown model");
   });
 });

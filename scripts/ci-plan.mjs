@@ -50,7 +50,8 @@ const rules = [
   // A Rust test parses the examples in this document (tests/sync_files.rs).
   { match: oneOf("docs/sync-file-format.md"), frontend: false, rust: true },
   // The docs site includes this file (apps/docs/content/docs/reference/glossary.mdx).
-  { match: oneOf("GLOSSARY.md"), frontend: true, rust: false },
+  // It also includes PRIVACY.md (content/docs/reference/privacy.mdx).
+  { match: oneOf("GLOSSARY.md", "PRIVACY.md"), frontend: true, rust: false },
   // Documentation and files only people or the fast checks read.
   {
     match: (p) =>

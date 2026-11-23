@@ -2,14 +2,16 @@
 //!
 //! Codex keeps its own sign-in, configuration and instructions. For a person's Chat
 //! the adapter passes only the working directory, so the approval policy and sandbox
-//! are theirs too; it overrides the model or effort only when the person chose one in
-//! the Chat, from that Chat's next turn. For an unattended session (an Automation
-//! run) it turns approvals off, maps the agent's switches to Codex's shell and
-//! sandbox (writes only in the step's folder, or none), gives the agent ticketd's
+//! are theirs too; it overrides the model, the effort or the permissions only when the
+//! person chose them in the Chat, from that Chat's next turn. Full access is approval
+//! policy `never` and no sandbox, said again on every turn; leaving it gives the thread
+//! back the approval policy and sandbox it opened with. For an unattended session (an
+//! Automation run) it turns approvals off, maps the agent's switches to Codex's shell
+//! and sandbox (writes only in the step's folder, or none), gives the agent ticketd's
 //! own tool for its tickets, and starts none of the person's MCP servers, plugins or
-//! apps. A Chat taken over from a run resumes with the person's approvals and
-//! sandbox again. It never reads credentials, grants full access or chooses
-//! how the user is billed.
+//! apps; such a session never has full access. A Chat taken over from a run resumes
+//! with the person's approvals and sandbox again. It never reads credentials or
+//! chooses how the user is billed.
 
 mod discovery;
 mod mapping;
@@ -28,7 +30,7 @@ use serde_json::{Value, json};
 use crate::stdio::{Serving, spawn, version_output};
 use crate::{
     Harness, HarnessAdapter, HarnessOptions, Inspection, OpenRequest, OpenedRuntime, Problem,
-    ProblemKind, ProviderDetail, Unattended,
+    ProblemKind, ProviderDetail, Setting, Unattended,
 };
 use ticketd_core::AutomationAgentTools;
 
@@ -263,5 +265,21 @@ impl HarnessAdapter for CodexAdapter {
             resets_at: None,
         })?;
         runtime::open_over(io, &request, Options::default()).await
+    }
+
+    /// The choice opening applies: the pick, else the one the Chat's record kept.
+    fn permission_before_session(
+        &self,
+        recorded: Option<&str>,
+        picked: Option<&str>,
+    ) -> Option<Setting> {
+        let choice = picked
+            .map(str::to_owned)
+            .or_else(|| runtime::recorded_permission(recorded))?;
+        Some(report::permission_setting(choice))
+    }
+
+    fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
+        runtime::record_choice(recorded, value)
     }
 }

@@ -7,7 +7,8 @@
 //! unattended session (an Automation run) it also passes the agent's model, allowed
 //! tools and turn limit; Claude Code denies what is not allowed instead of asking,
 //! and the person's own settings files are left out so they cannot allow more. It
-//! never reads credentials and never asks for permissions to be skipped.
+//! never reads credentials. It asks for permissions to be skipped (Full access) only
+//! when the person picked that for their Chat, never for an unattended session.
 
 mod report;
 mod runtime;
@@ -25,7 +26,7 @@ use crate::install::{LaunchEnvironment, Os, parse_version};
 use crate::stdio::{Serving, spawn};
 use crate::{
     Capabilities, Capability, Harness, HarnessAdapter, HarnessOptions, Inspection, LoginState,
-    OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Unattended,
+    OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Setting, Unattended,
 };
 
 use runtime::Options;
@@ -126,6 +127,25 @@ impl HarnessAdapter for ClaudeAdapter {
         let io = spawn(&self.bridge, &[], Serving::of(&request))
             .map_err(|error| self.bridge_problem(&error))?;
         runtime::open_over(io, &request, &executable, self.options.clone()).await
+    }
+
+    /// The mode opening gives a person's Chat: the pick, else the offered mode its
+    /// record kept, else "Ask before edits" for a Chat that ran before. Without a
+    /// record Claude Code's own `defaultMode` would decide, which only a session shows.
+    fn permission_before_session(
+        &self,
+        recorded: Option<&str>,
+        picked: Option<&str>,
+    ) -> Option<Setting> {
+        let mode = picked
+            .map(str::to_owned)
+            .or_else(|| runtime::recorded_settings(recorded).permission)
+            .or_else(|| recorded.map(|_| report::DEFAULT_PERMISSION_MODE.to_owned()))?;
+        Some(report::permission_setting(mode))
+    }
+
+    fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
+        runtime::record_reopen_with(recorded, "permission_mode", value)
     }
 }
 

@@ -4,7 +4,7 @@ description: ticketd context returns a capped JSON snapshot of one ticket. Selec
 ---
 
 ```sh
-ticketd context T-LG12
+ticketd context T-RL12
 ```
 
 With no flags, the result holds the ticket itself: its reference, title,
@@ -25,7 +25,7 @@ description, status, availability and tags. Everything else is opt-in.
 | `--conversation`  | For a ticket from an external source, its comments and events. Read-only.               |
 
 ```sh
-ticketd context T-LG12 --latest-update --evidence --documents
+ticketd context T-RL12 --latest-update --evidence --documents
 ```
 
 The result includes only the scopes you request. For a ticket without a Plan,
@@ -46,8 +46,8 @@ when the ticket has no updates.
 ```json
 {
   "ticket": {
-    "reference": "T-LG12",
-    "title": { "text": "Rate-limit failed login attempts", "truncated": false },
+    "reference": "T-RL12",
+    "title": { "text": "Rate-limit API requests", "truncated": false },
     "status": "In review",
     "availability": null,
     "tags": {
@@ -60,7 +60,7 @@ when the ticket has no updates.
 
 <Callout type="warn" title="Do not edit from the bounded description">
   The description in `context` may be truncated. To edit a ticket, read the full
-  content with `ticketd show T-LG12` first.
+  content with `ticketd show T-RL12` first.
 </Callout>
 
 ## Fetching the full thing
@@ -70,11 +70,11 @@ it:
 
 | You need                    | Run                                        |
 | --------------------------- | ------------------------------------------ |
-| The whole ticket            | `ticketd show T-LG12`                      |
-| A page of the activity feed | `ticketd activity list T-LG12`             |
-| One complete update         | `ticketd activity show T-LG12 ACTIVITY_ID` |
+| The whole ticket            | `ticketd show T-RL12`                      |
+| A page of the activity feed | `ticketd activity list T-RL12`             |
+| One complete update         | `ticketd activity show T-RL12 ACTIVITY_ID` |
 | A page of a Document        | `ticketd document read DOCUMENT_ID`        |
-| A page of evidence          | `ticketd evidence list T-LG12`             |
+| A page of evidence          | `ticketd evidence list T-RL12`             |
 
 Each Document in the `documents` scope carries a `fetch` field with the exact
 command to read it.
@@ -93,7 +93,7 @@ stderr and a nonzero exit code. Nothing is printed on stdout.
 ```sh
 ticketd search "rate limit"
 ticketd list --status "In review" --latest-update
-ticketd backlinks T-LG12
+ticketd backlinks T-RL12
 ```
 
 `search` matches a literal substring. One or two characters search ticket

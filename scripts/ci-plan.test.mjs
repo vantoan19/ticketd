@@ -59,6 +59,10 @@ const table = [
   ["apps/docs/check-pages.mjs", FRONTEND],
   // The docs site includes the glossary (content/docs/reference/glossary.mdx).
   ["GLOSSARY.md", FRONTEND],
+  // The docs site includes the privacy policy (content/docs/reference/privacy.mdx).
+  ["PRIVACY.md", FRONTEND],
+  ["THIRD_PARTY_NOTICES.md", NONE],
+  ["DESIGN.md", NONE],
   // Embedded by Rust at compile time: both.
   ["apps/desktop/src/features/chats/client.ts", BOTH],
   ["apps/desktop/src/features/chats/Transcript.tsx", BOTH],

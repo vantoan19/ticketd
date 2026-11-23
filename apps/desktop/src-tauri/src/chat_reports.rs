@@ -206,7 +206,7 @@ pub struct SettingOptionView {
     pub is_default: bool,
     /// For a permission option: `read_only`, `ask`, `accept_edits` or `full_access`.
     pub permission: Option<&'static str>,
-    /// It can be chosen. Full access never can.
+    /// It can be chosen: the harness's own policy allows it.
     pub allowed: bool,
 }
 
@@ -249,28 +249,9 @@ fn permission_name(kind: PermissionKind) -> &'static str {
     }
 }
 
-fn setting(
-    key: SettingKey,
-    setting: Option<&Setting>,
-    live: &LiveSettings,
-    harness: &str,
-) -> Option<SettingView> {
+fn setting(key: SettingKey, setting: Option<&Setting>, live: &LiveSettings) -> Option<SettingView> {
     let setting = setting?;
-    let full_access = |id: &str| {
-        setting
-            .options
-            .iter()
-            .any(|option| option.id == id && option.permission == Some(PermissionKind::FullAccess))
-    };
-    // A session that began with full access keeps it: ticketd neither offers nor
-    // takes it away.
-    let reason = setting.unchangeable.clone().or_else(|| {
-        setting
-            .current
-            .as_deref()
-            .filter(|current| full_access(current))
-            .map(|_| format!("Set in {harness}'s settings"))
-    });
+    let reason = setting.unchangeable.clone();
     let change = live
         .changes
         .iter()
@@ -278,16 +259,7 @@ fn setting(
         .map(|change| change_view(&change.value, &change.state));
     Some(SettingView {
         current: setting.current.clone(),
-        options: setting
-            .options
-            .iter()
-            // Full access is shown only as what is in effect, never as a choice.
-            .filter(|option| {
-                option.permission != Some(PermissionKind::FullAccess)
-                    || setting.current.as_deref() == Some(option.id.as_str())
-            })
-            .map(option_view)
-            .collect(),
+        options: setting.options.iter().map(option_view).collect(),
         changeable: reason.is_none(),
         reason,
         applies_from: match setting.applies_from {
@@ -306,7 +278,7 @@ fn option_view(option: &ticketd_chat_host::SettingOption) -> SettingOptionView {
         description: option.description.clone(),
         is_default: option.is_default,
         permission: option.permission.map(permission_name),
-        allowed: option.allowed && option.permission != Some(PermissionKind::FullAccess),
+        allowed: option.allowed,
     }
 }
 
@@ -353,12 +325,7 @@ pub fn options_view(
                     runs_as: choice.runs_as.clone(),
                 })
                 .collect(),
-            permission: setting(
-                SettingKey::Permission,
-                options.permission.as_ref(),
-                &none,
-                harness,
-            ),
+            permission: setting(SettingKey::Permission, options.permission.as_ref(), &none),
             unavailable: options
                 .models
                 .is_empty()
@@ -375,7 +342,6 @@ pub fn options_view(
 
 impl HarnessOptionsView {
     /// Why New Chat's `pick` is not one this harness offered, or `None` when it is.
-    /// Full access is never a pick.
     pub fn refusal(
         &self,
         model: Option<&str>,
@@ -418,18 +384,13 @@ impl HarnessOptionsView {
     }
 }
 
-pub fn settings(live: &ChatLive, harness: &str) -> Option<SettingsView> {
+pub fn settings(live: &ChatLive) -> Option<SettingsView> {
     let live = live.settings.as_deref()?;
     let reported = &live.reported;
     Some(SettingsView {
-        model: setting(SettingKey::Model, reported.model.as_ref(), live, harness),
-        effort: setting(SettingKey::Effort, reported.effort.as_ref(), live, harness),
-        permission: setting(
-            SettingKey::Permission,
-            reported.permission.as_ref(),
-            live,
-            harness,
-        ),
+        model: setting(SettingKey::Model, reported.model.as_ref(), live),
+        effort: setting(SettingKey::Effort, reported.effort.as_ref(), live),
+        permission: setting(SettingKey::Permission, reported.permission.as_ref(), live),
     })
 }
 
@@ -493,31 +454,29 @@ mod tests {
     }
 
     #[test]
-    fn full_access_is_never_a_choice_and_a_session_begun_in_it_is_left_as_it_is() {
+    fn full_access_is_a_choice_in_and_out_of() {
         let view = |current: &str| {
             let live = permission(current);
             setting(
                 SettingKey::Permission,
                 live.reported.permission.as_ref(),
                 &live,
-                "Codex",
             )
             .unwrap()
         };
 
         let asking = view("ask");
-        assert_eq!(asking.options.len(), 1, "full access is not offered");
+        let full = asking.options.iter().find(|option| option.id == "full");
+        assert_eq!(
+            full.map(|option| (option.permission, option.allowed)),
+            Some((Some("full_access"), true))
+        );
         assert!(asking.changeable);
         assert_eq!(asking.change.unwrap().state, "held");
 
-        let full = view("full");
-        assert!(!full.changeable);
-        assert_eq!(full.reason.as_deref(), Some("Set in Codex's settings"));
-        assert!(
-            full.options
-                .iter()
-                .all(|option| option.id != "full" || !option.allowed)
-        );
+        let in_full = view("full");
+        assert!(in_full.changeable, "a Chat in Full access can leave it");
+        assert_eq!(in_full.reason, None);
     }
 
     #[test]

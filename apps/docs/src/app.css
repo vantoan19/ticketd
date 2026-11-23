@@ -132,8 +132,6 @@
   --base-ink: #f7f7ef;
   --base-muted: #c2c5ba;
   --base-rule: #4c5048;
-  --mark-track: #565a51;
-  --mark-disc: #f9f9f3;
   --gutter: clamp(1.15rem, 4.65vw, 5rem);
   --content-max: 1440px;
   --mono: "Geist Mono", ui-monospace, monospace;
@@ -167,8 +165,6 @@
     --cart-label: #f7f8f3;
     --base: #101311;
     --base-rule: #3b423b;
-    --mark-track: #aeb3a7;
-    --mark-disc: #222822;
   }
 }
 * {
@@ -341,8 +337,6 @@ a {
   background: var(--base);
   color: var(--base-ink);
   border-top: 1px solid var(--base-rule);
-  --mark-disc: var(--base);
-  --mark-track: #90988b;
 }
 .site-footer > .site-width {
   padding-block: 26px;
@@ -400,7 +394,7 @@ a {
     font-size: 20px;
     gap: 6px;
   }
-  .wordmark svg {
+  .wordmark img {
     width: 23px;
     height: 23px;
   }
