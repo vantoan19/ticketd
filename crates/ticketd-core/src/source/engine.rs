@@ -356,6 +356,17 @@ impl Engine {
         Ok(connector.destinations(&config))
     }
 
+    /// Maps a configured repository or publication destination to a Project remote, offline.
+    pub fn repository_for_destination(
+        &self,
+        provider: &str,
+        destination: &str,
+    ) -> Result<Option<String>, SourceError> {
+        Ok(self
+            .connector(provider)?
+            .repository_for_destination(destination))
+    }
+
     /// Whether `destination` is well formed for `provider`; no network call.
     pub fn check_destination(&self, provider: &str, destination: &str) -> Result<(), SourceError> {
         self.connector(provider)?.check_destination(destination)

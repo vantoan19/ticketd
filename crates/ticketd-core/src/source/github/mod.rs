@@ -589,6 +589,15 @@ impl Connector for GithubConnector {
         scope.join("&")
     }
 
+    fn repository_for_destination(&self, destination: &str) -> Option<String> {
+        let api = url::Url::parse(&self.api_url).ok()?;
+        let host = match api.host_str()? {
+            "api.github.com" => "github.com",
+            host => host,
+        };
+        crate::project_remote::normalize_project_remote(&format!("{host}/{destination}"))
+    }
+
     fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
         require_repository(destination)
     }

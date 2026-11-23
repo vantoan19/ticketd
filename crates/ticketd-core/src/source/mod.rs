@@ -213,15 +213,7 @@ pub(crate) fn populate_publication(
 impl Workspace {
     /// The saved configuration for `provider`, if one was saved.
     pub fn saved_source(&self, provider: &str) -> Result<Option<SavedSource>, Error> {
-        let row = self
-            .connection
-            .query_row(
-                "SELECT provider, configuration, account, saved_at FROM source_configurations WHERE provider = ?1",
-                [provider],
-                row_parts,
-            )
-            .optional()?;
-        row.map(into_saved).transpose()
+        saved_source(&self.connection, provider)
     }
 
     pub fn saved_sources(&self) -> Result<Vec<SavedSource>, Error> {
@@ -294,6 +286,20 @@ impl Workspace {
             })
         })
     }
+}
+
+fn saved_source(
+    connection: &rusqlite::Connection,
+    provider: &str,
+) -> Result<Option<SavedSource>, Error> {
+    let row = connection
+        .query_row(
+            "SELECT provider, configuration, account, saved_at FROM source_configurations WHERE provider = ?1",
+            [provider],
+            row_parts,
+        )
+        .optional()?;
+    row.map(into_saved).transpose()
 }
 
 fn row_parts(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String)> {

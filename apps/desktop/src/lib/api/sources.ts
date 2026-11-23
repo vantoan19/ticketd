@@ -203,6 +203,7 @@ const eligibilitySchema = lazySchema(() =>
         "internal_attachments",
         "invalid_destination",
         "destination_not_allowed",
+        "preview_required",
       ]),
       message: z.string(),
     }),

@@ -571,6 +571,13 @@ pub trait Connector: Send + Sync {
         Vec::new()
     }
 
+    /// The normalized `host/owner/name` of a repository named by a configuration
+    /// or publication destination. Offline, and absent for connectors without
+    /// a repository mapping or for a destination they cannot map.
+    fn repository_for_destination(&self, _destination: &str) -> Option<String> {
+        None
+    }
+
     /// Whether `destination` is a well-formed place to publish, judged without
     /// a network call. A preview reports a failure here as ineligible, and a
     /// publish refuses before recording an attempt, so both agree. The default

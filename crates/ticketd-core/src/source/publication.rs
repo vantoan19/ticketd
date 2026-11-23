@@ -44,7 +44,7 @@ use uuid::Uuid;
 
 use super::{
     ConfigValues, Engine, ExternalIdentity, ExternalIssue, ExternalRef, PublicationSearch,
-    PublishRequest, SourceError, SourceFailure, clock,
+    PublishRequest, SourceError, SourceFailure, clock, saved_source,
     tracking::{self, Origin, failure_of},
 };
 use crate::{Error, Status, Ticket, Workspace, activities, history};
@@ -132,6 +132,8 @@ pub enum IneligibleReason {
     /// The source lists the destinations it may publish to and the chosen one is
     /// not among them, so ticket text cannot be sent anywhere else.
     DestinationNotAllowed,
+    /// Executing with a destination chosen by Project remote needs a reviewed preview.
+    PreviewRequired,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -191,13 +193,14 @@ pub struct PublicationPreview {
 pub struct PublishOptions {
     pub provider: String,
     /// Connector-defined destination such as `owner/name`. Defaults to the
-    /// only suggested destination.
+    /// listed Project remote, or to the sole listed destination.
     pub destination: Option<String>,
     /// The time to record, as RFC 3339; the database clock when absent.
     pub now: Option<String>,
     /// The [`PublicationPreview::fingerprint`] the person reviewed. When given,
     /// publishing is refused if the title, description or destination changed
-    /// since, so exactly what was previewed is what is sent.
+    /// since, so exactly what was previewed is what is sent. Required when
+    /// publishing to the destination selected by Project remote.
     pub expected_fingerprint: Option<String>,
     /// Who asked, recorded on the history and on any note it keeps.
     pub agent: Option<String>,
@@ -522,15 +525,31 @@ fn predates(issue_created_at: &str, started_at: &str) -> bool {
 
 /// A stable fingerprint (FNV-1a, 64 bit) of what a publication would send. It
 /// detects change between a preview and the send; it is not a security measure.
-fn fingerprint(title: &str, body: &str, destination: Option<&str>) -> String {
+fn fingerprint(
+    engine: &Engine,
+    provider: &str,
+    ticket: &Subject,
+    destination: Option<&str>,
+) -> Result<String, Error> {
+    let repository = destination
+        .map(|destination| engine.repository_for_destination(provider, destination))
+        .transpose()?
+        .flatten();
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for part in [title, body, destination.unwrap_or("")] {
+    for part in [
+        ticket.title.as_str(),
+        ticket.body.as_str(),
+        destination.unwrap_or(""),
+    ]
+    .into_iter()
+    .chain(repository.as_deref())
+    {
         for byte in part.bytes().chain(std::iter::once(0)) {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x0100_0000_01b3);
         }
     }
-    format!("{hash:016x}")
+    Ok(format!("{hash:016x}"))
 }
 
 fn published(issue: &ExternalIssue) -> PublishedIssue {
@@ -721,12 +740,14 @@ struct Subject {
     body: String,
     status: Status,
     trashed: bool,
+    project_remote: Option<String>,
 }
 
 fn subject(connection: &Connection, reference: &str) -> Result<Subject, Error> {
     connection
         .query_row(
-            "SELECT id, reference, title, body, status, trashed FROM tickets WHERE reference = ?1",
+            "SELECT t.id, t.reference, t.title, t.body, t.status, t.trashed, p.remote \
+             FROM tickets t LEFT JOIN projects p ON p.id = t.project_id WHERE t.reference = ?1",
             [reference],
             |row| {
                 let status: String = row.get(4)?;
@@ -743,6 +764,7 @@ fn subject(connection: &Connection, reference: &str) -> Result<Subject, Error> {
                         )
                     })?,
                     trashed: row.get(5)?,
+                    project_remote: row.get(6)?,
                 })
             },
         )
@@ -913,24 +935,28 @@ fn require_target<'a>(
     })
 }
 
-/// A saved configuration's destination choices and the one to use.
+/// A saved configuration and its available destinations.
 struct Target {
     config: ConfigValues,
     destinations: Vec<String>,
 }
 
-impl Workspace {
-    fn publication_target(&self, engine: &Engine, provider: &str) -> Result<Option<Target>, Error> {
-        let Some(saved) = self.saved_source(provider)? else {
-            return Ok(None);
-        };
-        let destinations = engine.publish_destinations(provider, &saved.config)?;
-        Ok(Some(Target {
-            config: saved.config,
-            destinations,
-        }))
-    }
+fn publication_target(
+    connection: &Connection,
+    engine: &Engine,
+    provider: &str,
+) -> Result<Option<Target>, Error> {
+    let Some(saved) = saved_source(connection, provider)? else {
+        return Ok(None);
+    };
+    let destinations = engine.publish_destinations(provider, &saved.config)?;
+    Ok(Some(Target {
+        config: saved.config,
+        destinations,
+    }))
+}
 
+impl Workspace {
     /// What publishing `reference` would send and whether it is allowed. Makes no
     /// network call and writes nothing.
     pub fn preview_publication(
@@ -942,12 +968,19 @@ impl Workspace {
     ) -> Result<PublicationPreview, Error> {
         let descriptor = engine.descriptor(provider)?;
         let ticket = subject(&self.connection, reference)?;
-        let target = self.publication_target(engine, provider)?;
+        let target = publication_target(&self.connection, engine, provider)?;
         let destinations = target
             .as_ref()
             .map(|t| t.destinations.clone())
             .unwrap_or_default();
-        let destination = chosen_destination(destination, &destinations);
+        let choice = chosen_destination(
+            engine,
+            provider,
+            destination,
+            ticket.project_remote.as_deref(),
+            &destinations,
+        )?;
+        let destination = choice.value().map(str::to_owned);
         let mut eligibility = eligibility(&self.connection, &ticket, &descriptor.name, None)?;
         if matches!(eligibility, Eligibility::Eligible)
             && let Err((reason, message)) =
@@ -964,11 +997,12 @@ impl Workspace {
         {
             eligibility = ineligible(reason, message);
         }
+        let fingerprint = fingerprint(engine, provider, &ticket, destination.as_deref())?;
         Ok(PublicationPreview {
             reference: ticket.reference,
             provider: provider.to_owned(),
             provider_name: descriptor.name,
-            fingerprint: fingerprint(&ticket.title, &ticket.body, destination.as_deref()),
+            fingerprint,
             destination,
             destinations,
             title: ticket.title,
@@ -1020,7 +1054,6 @@ impl Workspace {
     ) -> Result<PublishOutcome, Error> {
         let provider = options.provider.as_str();
         let descriptor = engine.descriptor(provider)?;
-        let target = self.publication_target(engine, provider)?;
         // `Err` from the scope's operation is an attempt that already published the
         // ticket: it is replayed.
         let started = match crate::write_scope::run(&self.connection, |transaction| {
@@ -1049,37 +1082,59 @@ impl Workspace {
             )? {
                 return Err(refuse(reason, message));
             }
+            let target = publication_target(transaction, engine, provider)?;
             let target = match require_target(engine, provider, &descriptor.name, target.as_ref()) {
                 Ok(target) => target,
                 Err((reason, message)) => return Err(refuse(reason, message)),
             };
-            let Some(destination) =
-                chosen_destination(options.destination.as_deref(), &target.destinations)
-            else {
-                return Err(Error::Source(SourceError::InvalidConfiguration(vec![
-                    super::FieldIssue {
-                        field: "destination".into(),
-                        message: "choose where to publish".into(),
-                    },
-                ])));
-            };
-            // Refused before an attempt is recorded: nothing was tried.
-            engine.check_destination(provider, &destination)?;
-            if !engine.destination_allowed(provider, &destination, &target.destinations)? {
-                return Err(refuse(
-                    IneligibleReason::DestinationNotAllowed,
-                    not_allowed_message(&destination, &target.destinations),
-                ));
+            let choice = chosen_destination(
+                engine,
+                provider,
+                options.destination.as_deref(),
+                ticket.project_remote.as_deref(),
+                &target.destinations,
+            )?;
+            let destination = choice.value();
+            if let Some(destination) = destination {
+                engine.check_destination(provider, destination)?;
+                if !engine.destination_allowed(provider, destination, &target.destinations)? {
+                    return Err(refuse(
+                        IneligibleReason::DestinationNotAllowed,
+                        not_allowed_message(destination, &target.destinations),
+                    ));
+                }
             }
-            // Send exactly what was previewed, or nothing.
+            // A cleared Project remote can also invalidate the preview by leaving no choice.
             if let Some(expected) = &options.expected_fingerprint
-                && *expected != fingerprint(&ticket.title, &ticket.body, Some(&destination))
+                && *expected != fingerprint(engine, provider, &ticket, destination)?
             {
                 return Err(PublicationError::ChangedSincePreview {
                     reference: ticket.reference,
                 }
                 .into());
             }
+            if let DestinationChoice::ProjectRemote(destination) = &choice
+                && options.expected_fingerprint.is_none()
+            {
+                return Err(refuse(
+                    IneligibleReason::PreviewRequired,
+                    format!(
+                        "preview {} and supply its fingerprint to publish to the default repository {destination}",
+                        ticket.reference
+                    ),
+                ));
+            }
+            let destination = match choice {
+                DestinationChoice::ProjectRemote(destination)
+                | DestinationChoice::Other(destination) => destination,
+                DestinationChoice::Unselected => {
+                    return Err(SourceError::InvalidConfiguration(vec![super::FieldIssue {
+                        field: "destination".into(),
+                        message: "choose where to publish".into(),
+                    }])
+                    .into());
+                }
+            };
             let now = clock(transaction, options.now.as_deref())?;
             let attempt_id = Uuid::new_v4().to_string();
             transaction.execute(
@@ -2243,12 +2298,43 @@ fn not_allowed_message(chosen: &str, allowed: &[String]) -> String {
     )
 }
 
-fn chosen_destination(requested: Option<&str>, suggested: &[String]) -> Option<String> {
-    match requested.map(str::trim).filter(|d| !d.is_empty()) {
-        Some(destination) => Some(destination.to_owned()),
-        None => match suggested {
-            [only] => Some(only.clone()),
-            _ => None,
-        },
+enum DestinationChoice {
+    ProjectRemote(String),
+    Other(String),
+    Unselected,
+}
+
+impl DestinationChoice {
+    fn value(&self) -> Option<&str> {
+        match self {
+            Self::ProjectRemote(destination) | Self::Other(destination) => Some(destination),
+            Self::Unselected => None,
+        }
     }
+}
+
+fn chosen_destination(
+    engine: &Engine,
+    provider: &str,
+    requested: Option<&str>,
+    project_remote: Option<&str>,
+    suggested: &[String],
+) -> Result<DestinationChoice, Error> {
+    if let Some(destination) = requested.map(str::trim).filter(|d| !d.is_empty()) {
+        return Ok(DestinationChoice::Other(destination.to_owned()));
+    }
+    if let Some(remote) = project_remote {
+        for destination in suggested {
+            if engine
+                .repository_for_destination(provider, destination)?
+                .is_some_and(|repository| repository.eq_ignore_ascii_case(remote))
+            {
+                return Ok(DestinationChoice::ProjectRemote(destination.clone()));
+            }
+        }
+    }
+    Ok(match suggested {
+        [only] => DestinationChoice::Other(only.clone()),
+        _ => DestinationChoice::Unselected,
+    })
 }
