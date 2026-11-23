@@ -1010,6 +1010,12 @@ mod bundled_tests {
         let name = format!("fixture-source{}", std::env::consts::EXE_SUFFIX);
         let sidecar = root.path().join(&name);
         fs::write(&sidecar, "not an executable").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            // The registry checks the mode, while the invalid bytes prove it never launches.
+            fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o700)).unwrap();
+        }
         let description = crate::source::SourceDescription {
             descriptor: crate::source::ConnectorDescriptor {
                 provider: "fixture-source".into(),
