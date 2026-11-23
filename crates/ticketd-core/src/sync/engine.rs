@@ -341,8 +341,8 @@ fn withdraw_oversized(connection: &Connection, kind: SyncKind, id: &str) -> Resu
     Ok(())
 }
 
-/// The ticket of this Workspace, other than `record`, that holds the external
-/// source identity `record` carries.
+/// Detect a conflicting site for this external identity, or return its other
+/// holder if it can be treated as the same issue.
 fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<String>, Error> {
     let field = |name: &str| match record.fields.get(name) {
         Some(SyncValue::Text(text)) => Some(text.as_str()),
@@ -354,8 +354,8 @@ fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<
     };
     let holder: Option<(String, String)> = connection
         .query_row(
-            "SELECT ticket_id, url FROM external_identities WHERE provider = ?1 AND external_id = ?2 AND ticket_id != ?3",
-            params![provider, external, record.id],
+            "SELECT ticket_id, url FROM external_identities WHERE provider = ?1 AND external_id = ?2",
+            params![provider, external],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -369,7 +369,7 @@ fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<
             "the legacy issue identifier is already used by an issue at a different site".into(),
         ));
     }
-    Ok(Some(ticket))
+    Ok((ticket != record.id).then_some(ticket))
 }
 
 /// Take the source fields off a ticket and make it a Duplicate of `canonical`,
@@ -1153,6 +1153,9 @@ impl Workspace {
         self.applying_incoming(device.as_deref(), |workspace| {
             // A hand edit may name a ticket by its reference; records hold GUIDs.
             resolve_ticket_references(&workspace.connection, &mut remote)?;
+            // Check the incoming URL before merge can substitute the local
+            // one or preserve the conflicting URL for later review.
+            source_holder(&workspace.connection, &remote)?;
             let mut stored = stored(&workspace.connection, kind, id)?;
             stored.newer = false;
             if stored.file.as_deref().is_some_and(|known| known != from.file_id)

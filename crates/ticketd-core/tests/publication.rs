@@ -2013,10 +2013,14 @@ fn nothing_created_is_not_concluded_before_a_just_created_issue_could_be_listed(
     let ticket = f.lost_response("Never landed");
     f.fake.0.lock().unwrap().issues.clear();
 
-    // Right away: the read was complete but proves nothing yet.
+    // A search that begins too soon is refused before it can obtain a listing.
+    f.fake.0.lock().unwrap().after_lookup = Some(Arc::new(|| {
+        panic!("looked up issues before the listing delay ended")
+    }));
     let mut early = not_created();
     early.now = None;
     let error = publication_error(f.resolve(&ticket.reference, &early).unwrap_err());
+    f.fake.0.lock().unwrap().after_lookup = None;
     assert!(
         matches!(error, PublicationError::Unverified { .. }),
         "{error}"

@@ -1508,6 +1508,47 @@ fn sourced(state: &str, updated: &str) -> String {
 }
 
 #[test]
+fn a_synced_ticket_cannot_change_sites_under_the_same_legacy_issue_id() {
+    let mut devices = devices();
+    let id = "3f2c9a1e-0000-4000-8000-000000000001";
+    let original = sourced("open", "2026-01-03T00:00:00Z").replace("I_42", "42");
+    let key = RemoteKey::new(RemoteKind::Ticket, id);
+    devices
+        .remote
+        .write(
+            &devices.folder,
+            &key,
+            "Published.md",
+            None,
+            &mut Cursor::new(&original),
+        )
+        .unwrap();
+    devices.sync(0);
+    let incoming = original
+        .replace("example.test", "different-enterprise.test")
+        .replace("From the tracker.", "Another tracker’s description.");
+    devices.hand_edit(RemoteKind::Ticket, id, &incoming);
+
+    assert_eq!(devices.sync(0).skipped, 1);
+    let ticket = devices.workspaces[0].show_ticket("T-ZZ7").unwrap();
+    assert_eq!(ticket.body.trim(), "From the tracker.");
+    assert_eq!(
+        ticket.source.unwrap().url,
+        "https://example.test/acme/site/issues/42"
+    );
+    assert!(
+        devices.workspaces[0]
+            .sync_notices()
+            .unwrap()
+            .iter()
+            .any(|notice| {
+                matches!(&notice.notice, SyncNoticeKind::UnreadableFile { reason, .. }
+            if reason.contains("legacy issue identifier"))
+            })
+    );
+}
+
+#[test]
 fn a_format_one_cached_base_merges_a_format_two_observation_with_local_progress() {
     let mut devices = devices();
     let id = "3f2c9a1e-0000-4000-8000-000000000001";
