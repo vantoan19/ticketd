@@ -22,10 +22,11 @@ export function parseVersion(text) {
     );
   }
   const [, major, minor, patch, prerelease] = match;
+  // BigInt, so identifiers beyond 2^53 still compare exactly.
   return {
-    major: Number(major),
-    minor: Number(minor),
-    patch: Number(patch),
+    major: BigInt(major),
+    minor: BigInt(minor),
+    patch: BigInt(patch),
     prerelease: prerelease ? prerelease.split(".") : [],
   };
 }
@@ -49,7 +50,7 @@ export function compareVersions(left, right) {
     if (x === y) continue;
     const xNumeric = /^\d+$/.test(x);
     const yNumeric = /^\d+$/.test(y);
-    if (xNumeric && yNumeric) return Number(x) < Number(y) ? -1 : 1;
+    if (xNumeric && yNumeric) return BigInt(x) < BigInt(y) ? -1 : 1;
     if (xNumeric !== yNumeric) return xNumeric ? -1 : 1;
     return x < y ? -1 : 1;
   }
@@ -97,7 +98,7 @@ export function msiVersion(version) {
   if (
     prerelease.length === 1 &&
     /^\d+$/.test(prerelease[0]) &&
-    Number(prerelease[0]) <= 65535
+    BigInt(prerelease[0]) <= 65535n
   ) {
     return null;
   }

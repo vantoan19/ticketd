@@ -34,6 +34,28 @@ test("orders versions by SemVer precedence", () => {
   assert.equal(compareVersions("0.2.0", "0.2.0"), 0);
 });
 
+test("compares identifiers beyond 2^53 exactly", () => {
+  assert.equal(
+    compareVersions("0.2.0-9007199254740993", "0.2.0-9007199254740992"),
+    1,
+  );
+  assert.equal(
+    compareVersions("9007199254740993.0.0", "9007199254740992.0.0"),
+    1,
+  );
+  assert.equal(
+    compareVersions("0.9007199254740993.0", "0.9007199254740992.0"),
+    1,
+  );
+  assert.throws(
+    () =>
+      checkBump("0.2.0-9007199254740992", [
+        { tag_name: "v0.2.0-9007199254740993", draft: false },
+      ]),
+    /not newer/,
+  );
+});
+
 test("rejects versions that cannot name a release", () => {
   for (const version of ["v0.2.0", "0.2", "0.2.0+1", "01.2.0", "0.2.0-", ""]) {
     assert.throws(() => parseVersion(version), /not a release version/);
