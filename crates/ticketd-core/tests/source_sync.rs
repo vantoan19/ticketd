@@ -346,6 +346,7 @@ fn an_imported_duplicate_keeps_the_supplied_external_target_or_an_explicit_unkno
             id: "99".into(),
         },
         locator: "o/r#99".into(),
+        partition: "o/r".into(),
     });
     f.publish(named, true);
     f.set_state(2, closed(ClosureReason::Duplicate));
@@ -739,6 +740,7 @@ fn duplicate_of(id: u64, title: &str, canonical: Option<u64>) -> ExternalIssue {
             id: canonical.to_string(),
         },
         locator: format!("o/r#{canonical}"),
+        partition: "o/r".into(),
     });
     dup
 }
@@ -2150,16 +2152,12 @@ fn before_the_repositories_read_were_kept_one_with_imported_tickets_counts_as_re
 /// Format 82 replaces the configuration unreleased builds kept with the repositories read.
 #[test]
 fn a_format_81_workspace_gains_the_repositories_read_and_loses_the_configuration() {
-    let f = Fixture::new();
-    let path = f.path();
-    drop(f.workspace);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 81).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(
-        "ALTER TABLE source_status DROP COLUMN read_partitions; \
-         ALTER TABLE source_status ADD COLUMN refreshed_configuration TEXT; \
-         PRAGMA user_version = 81;",
-    )
-    .unwrap();
+    db.execute_batch("ALTER TABLE source_status ADD COLUMN refreshed_configuration TEXT;")
+        .unwrap();
     drop(db);
 
     drop(Workspace::open(&path).unwrap());

@@ -1035,3 +1035,10 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + table source_presentations
 + column source_presentations.description
 + column source_presentations.provider
+
+## 87
++ column external_identities.partition
++ column publication_attempts.partition
++ column source_configurations.derived_checked_at
++ column source_configurations.derived_configuration
++ column source_configurations.revision

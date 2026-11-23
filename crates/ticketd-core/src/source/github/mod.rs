@@ -16,10 +16,11 @@ use super::{
     FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourcePresentation, SummaryPart,
     TargetPresentation,
     contract::{
-        CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
-        ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment,
-        ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
+        CONTRACT_VERSION, Capability, ClosureReason, ConnectionCheck, ConnectionInfo, Connector,
+        ConnectorDescriptor, Conversation, DerivedConfiguration, DestinationRules,
+        DestinationValidation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
+        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        Publication, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
         SourceError,
     },
     schema::{
@@ -235,12 +236,10 @@ impl GithubConnector {
         match response.status {
             // The request was understood and declined (validation, issues
             // disabled, gone): the shared classification would call these protocol errors.
-            400 | 405 | 410 | 422 => {
-                Err(SourceError::Rejected(match response_message(&response) {
-                    Some(message) => format!("GitHub refused {subject}: {message}"),
-                    None => format!("GitHub refused {subject} (status {})", response.status),
-                }))
-            }
+            status @ (400 | 405 | 410 | 422) => Err(SourceError::Rejected(format!(
+                "GitHub refused {subject}; check that issues are enabled and the ticket content is accepted"
+            ))
+            .with_detail(format_args!("HTTP {status}"))),
             // Redirects, other 2xx and server errors prove nothing.
             _ => match classify(response, &subject) {
                 Ok(_) => Err(SourceError::Protocol(
@@ -494,7 +493,7 @@ impl Connector for GithubConnector {
         Ok(issues)
     }
 
-    fn check_connection(&self, _config: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
+    fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionCheck, SourceError> {
         let (user, _) = self.json(
             &format!("{}/user", self.api_url),
             "the signed-in GitHub user",
@@ -503,8 +502,11 @@ impl Connector for GithubConnector {
             .get("login")
             .and_then(Value::as_str)
             .ok_or_else(|| SourceError::Protocol("the user has no login".into()))?;
-        Ok(ConnectionInfo {
-            account: account.to_owned(),
+        Ok(ConnectionCheck {
+            connection: ConnectionInfo {
+                account: account.to_owned(),
+            },
+            derived: Self::derived_configuration(config),
         })
     }
 
@@ -635,6 +637,7 @@ impl Connector for GithubConnector {
                     next_cursor,
                     skipped: vec![SkippedPartition {
                         code: error.code().to_owned(),
+                        class: error.class(),
                         message: match error {
                             SourceError::NotFound(_) => {
                                 format!("{repository} was not found, or your account cannot see it")
@@ -681,53 +684,72 @@ impl Connector for GithubConnector {
         })
     }
 
-    fn destinations(&self, config: &ConfigValues) -> Vec<String> {
-        Self::repositories(config)
-    }
-
-    // GitHub does not tell `Owner/Name` from `owner/name`, so neither do these.
-    fn partition(&self, reference: &ExternalRef) -> String {
-        let repository = reference
-            .locator
-            .rsplit_once('#')
-            .map_or(reference.locator.as_str(), |(repository, _)| repository);
-        repository.to_lowercase()
-    }
-
-    fn partitions(&self, config: &ConfigValues) -> Vec<String> {
-        Self::repositories(config)
-            .iter()
-            .map(|repository| repository.to_lowercase())
-            .collect()
-    }
-
-    // GitHub matches logins and label names without regard to case.
-    fn discovery_scope(&self, config: &ConfigValues) -> String {
-        let mut scope = Vec::new();
-        if let Some(assignee) = config.get("assignee").and_then(Value::as_str) {
-            scope.push(format!("assignee={}", assignee.to_lowercase()));
+    fn fetch(
+        &self,
+        _config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<ExternalIssue, SourceError> {
+        let (repository, number) = split_locator(&reference.locator)?;
+        let url = format!(
+            "{}/repos/{}/issues/{number}",
+            self.api_url,
+            encode_path(repository)
+        );
+        let (value, _) = self.json(&url, &format!("issue {}", reference.locator))?;
+        let mut issue = translate_issue(&value, repository)?.ok_or_else(|| {
+            SourceError::NotFound(format!(
+                "{} is a pull request, not an issue",
+                reference.locator
+            ))
+        })?;
+        if issue.state
+            == (ExternalState::Closed {
+                reason: ClosureReason::Duplicate,
+            })
+        {
+            let id = issue.reference.identity.id.parse().unwrap_or_default();
+            match self.canonical_of(repository, number, id) {
+                Canonical::Named { reference, url } => {
+                    issue.duplicate_of = Some(reference);
+                    issue.duplicate_of_url = url;
+                }
+                Canonical::Withdrawn => issue.duplicate_withdrawn = true,
+                Canonical::NotSupplied => {}
+            }
         }
-        let mut labels: Vec<String> = strings(config.get("labels"))
-            .iter()
-            .map(|label| label.to_lowercase())
-            .collect();
-        labels.sort();
-        labels.dedup();
-        if !labels.is_empty() {
-            scope.push(format!("labels={}", labels.join(",")));
+        Ok(issue)
+    }
+
+    fn conversation(
+        &self,
+        _config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<Conversation, SourceError> {
+        let (repository, number) = split_locator(&reference.locator)?;
+        let subject = format!("issue {}", reference.locator);
+        let base = format!(
+            "{}/repos/{}/issues/{number}",
+            self.api_url,
+            encode_path(repository)
+        );
+        let mut conversation = Conversation::default();
+        for item in self.all_pages(&format!("{base}/comments?per_page=100"), &subject)? {
+            conversation.comments.push(translate_comment(&item)?);
         }
-        scope.join("&")
+        for item in self.all_pages(&format!("{base}/events?per_page=100"), &subject)? {
+            if let Some(event) = translate_event(&item)? {
+                conversation.events.push(event);
+            }
+        }
+        Ok(conversation)
     }
 
-    fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
-        require_repository(destination)
+    fn publication(&self) -> Option<&dyn Publication> {
+        Some(self)
     }
+}
 
-    // GitHub does not tell `Owner/Name` from `owner/name`.
-    fn same_destination(&self, a: &str, b: &str) -> bool {
-        a.eq_ignore_ascii_case(b)
-    }
-
+impl Publication for GithubConnector {
     fn publish(
         &self,
         _config: &ConfigValues,
@@ -838,69 +860,45 @@ impl Connector for GithubConnector {
             complete: url.is_none(),
         })
     }
-
-    fn fetch(
-        &self,
-        _config: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<ExternalIssue, SourceError> {
-        let (repository, number) = split_locator(&reference.locator)?;
-        let url = format!(
-            "{}/repos/{}/issues/{number}",
-            self.api_url,
-            encode_path(repository)
-        );
-        let (value, _) = self.json(&url, &format!("issue {}", reference.locator))?;
-        let mut issue = translate_issue(&value, repository)?.ok_or_else(|| {
-            SourceError::NotFound(format!(
-                "{} is a pull request, not an issue",
-                reference.locator
-            ))
-        })?;
-        if issue.state
-            == (ExternalState::Closed {
-                reason: ClosureReason::Duplicate,
-            })
-        {
-            let id = issue.reference.identity.id.parse().unwrap_or_default();
-            match self.canonical_of(repository, number, id) {
-                Canonical::Named { reference, url } => {
-                    issue.duplicate_of = Some(reference);
-                    issue.duplicate_of_url = url;
-                }
-                Canonical::Withdrawn => issue.duplicate_withdrawn = true,
-                Canonical::NotSupplied => {}
-            }
-        }
-        Ok(issue)
-    }
-
-    fn conversation(
-        &self,
-        _config: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<Conversation, SourceError> {
-        let (repository, number) = split_locator(&reference.locator)?;
-        let subject = format!("issue {}", reference.locator);
-        let base = format!(
-            "{}/repos/{}/issues/{number}",
-            self.api_url,
-            encode_path(repository)
-        );
-        let mut conversation = Conversation::default();
-        for item in self.all_pages(&format!("{base}/comments?per_page=100"), &subject)? {
-            conversation.comments.push(translate_comment(&item)?);
-        }
-        for item in self.all_pages(&format!("{base}/events?per_page=100"), &subject)? {
-            if let Some(event) = translate_event(&item)? {
-                conversation.events.push(event);
-            }
-        }
-        Ok(conversation)
-    }
 }
 
 impl GithubConnector {
+    /// Derived answers also keep older saved settings usable before the first
+    /// successful connection check under the new contract.
+    fn derived_configuration(config: &ConfigValues) -> DerivedConfiguration {
+        let destinations = Self::repositories(config);
+        let partitions = destinations
+            .iter()
+            .map(|repository| repository.to_lowercase())
+            .collect();
+        // GitHub matches logins and label names without regard to case.
+        let mut scope = Vec::new();
+        if let Some(assignee) = config.get("assignee").and_then(Value::as_str) {
+            scope.push(format!("assignee={}", assignee.to_lowercase()));
+        }
+        let mut labels: Vec<String> = strings(config.get("labels"))
+            .iter()
+            .map(|label| label.to_lowercase())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        if !labels.is_empty() {
+            scope.push(format!("labels={}", labels.join(",")));
+        }
+        DerivedConfiguration {
+            partitions,
+            discovery_scope: scope.join("&"),
+            publication: DestinationRules {
+                destinations,
+                case_insensitive: true,
+                validation: Some(DestinationValidation {
+                    format: ValueFormat::OwnerName,
+                    message: DESTINATION_FORMAT_MESSAGE.into(),
+                }),
+            },
+        }
+    }
+
     /// Every item of a paginated list, following `Link` headers that stay under the API.
     fn all_pages(&self, first: &str, subject: &str) -> Result<Vec<Value>, SourceError> {
         let mut items = Vec::new();
@@ -983,16 +981,31 @@ fn could_be_published(issue: &ExternalIssue, request: &PublishRequest) -> bool {
         || (!plain(&request.body).is_empty() && plain(&issue.body) == plain(&request.body))
 }
 
+pub(super) fn legacy_reference_partition(provider: &str, locator: &str) -> Option<String> {
+    (provider == PROVIDER).then(|| {
+        locator
+            .rsplit_once('#')
+            .map_or(locator, |(part, _)| part)
+            .to_lowercase()
+    })
+}
+
+pub(super) fn legacy_derived_configuration(
+    provider: &str,
+    config: &ConfigValues,
+) -> Option<DerivedConfiguration> {
+    (provider == PROVIDER).then(|| GithubConnector::derived_configuration(config))
+}
+
+const DESTINATION_FORMAT_MESSAGE: &str = "must be a repository in the form owner/name";
+
 /// A destination must be a repository in the form `owner/name`.
 fn require_repository(destination: &str) -> Result<(), SourceError> {
     if ValueFormat::OwnerName.is_valid(destination) {
         return Ok(());
     }
     Err(SourceError::InvalidConfiguration(vec![
-        super::schema::FieldIssue::for_field(
-            "destination",
-            "must be a repository in the form owner/name",
-        ),
+        FieldIssue::for_field("destination", DESTINATION_FORMAT_MESSAGE),
     ]))
 }
 
@@ -1138,6 +1151,7 @@ fn canonical_reference(canonical: &Value) -> Option<(ExternalRef, Option<String>
                 id: id.to_string(),
             },
             locator: format!("{repository}#{number}"),
+            partition: repository.to_lowercase(),
         },
         url,
     ))
@@ -1196,15 +1210,10 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
         return Ok(response);
     }
     let message = response_message(&response);
-    let detail = |text: &str| match &message {
-        Some(message) => format!("{text}: {message}"),
-        None => text.to_owned(),
-    };
-    match status {
-        401 => Err(SourceError::Unauthenticated(format!(
-            "{}. Run `gh auth login` to sign in again.",
-            detail("GitHub rejected the credential").trim_end_matches('.')
-        ))),
+    let error = match status {
+        401 => SourceError::Unauthenticated(
+            "GitHub rejected the credential. Run `gh auth login` to sign in again.".into(),
+        ),
         403 | 429 => {
             let limited = status == 429
                 || response.header("x-ratelimit-remaining") == Some("0")
@@ -1213,27 +1222,26 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
                     .as_deref()
                     .is_some_and(|m| m.to_lowercase().contains("rate limit"));
             if limited {
-                Err(SourceError::RateLimited {
+                SourceError::RateLimited {
                     retry_after_secs: retry_after(&response),
-                })
+                }
             } else {
-                Err(SourceError::Forbidden(detail(&format!(
+                SourceError::Forbidden(format!(
                     "GitHub denied access to {subject}; the credential needs permission to read issues there"
-                ))))
+                ))
             }
         }
-        // 410 Gone (a deleted issue, or a repository with issues disabled) is an
-        // answer about that one resource, the same as not found.
-        404 | 410 => Err(SourceError::NotFound(format!(
+        // A deleted issue, or a repository with issues disabled.
+        404 | 410 => SourceError::NotFound(format!(
             "{subject} was not found, or the credential cannot see it"
-        ))),
-        500..=599 => Err(SourceError::Unavailable(format!(
+        )),
+        500..=599 => SourceError::Unavailable(format!(
             "GitHub is unavailable (status {status}); retry later"
-        ))),
-        _ => Err(SourceError::Protocol(detail(&format!(
-            "GitHub answered {subject} with status {status}"
-        )))),
-    }
+        )),
+        _ => SourceError::Protocol(format!("GitHub answered {subject} with status {status}")),
+    };
+    // An arbitrary response message can echo credentials or submitted content.
+    Err(error.with_detail(format_args!("HTTP {status}")))
 }
 
 fn response_message(response: &HttpResponse) -> Option<String> {
@@ -1307,6 +1315,7 @@ fn translate_issue(
                 id: id.to_string(),
             },
             locator: display.clone(),
+            partition: repository.to_lowercase(),
         },
         display,
         url: text("html_url").unwrap_or_default().to_owned(),

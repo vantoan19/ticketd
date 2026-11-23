@@ -6,12 +6,13 @@
 //! when to call it, and ticketd's workflows persist whatever it returns.
 //! Connectors are compiled in; there is no user-installed extension runtime.
 //!
-//! Changing a signature or the meaning of a type here is a contract change and
-//! must bump [`CONTRACT_VERSION`]. Adding an optional capability is not.
+//! The contract remains internal while the first public version is being
+//! prepared. Once published, changes to existing operations and types require
+//! a version bump. Adding an optional capability keeps the version.
 
 use serde::{Deserialize, Serialize};
 
-use super::schema::{ChoiceOption, ConfigSchema, ConfigValues, FieldIssue};
+use super::schema::{ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, ValueFormat};
 use super::{SignInGuidance, SourcePresentation, SummaryPart};
 
 /// The contract version this build of ticketd speaks. The engine refuses to
@@ -26,7 +27,7 @@ pub enum Capability {
     Discover,
     /// Fetch one issue by identity, including its external state.
     Fetch,
-    /// Create an ordinary issue from a local ticket (optional).
+    /// Create an issue, locate it, and search for an uncertain creation (optional).
     Publish,
     /// Read an issue's comments and timeline events (optional).
     Comments,
@@ -48,6 +49,51 @@ pub struct ConnectionInfo {
     pub account: String,
 }
 
+/// The verified connection and answers derived from its settings.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConnectionCheck {
+    pub connection: ConnectionInfo,
+    pub derived: DerivedConfiguration,
+}
+
+/// Configuration answers that ticketd can keep for use without a connector call.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DerivedConfiguration {
+    /// Parts read by discovery, named as in [`ExternalRef::partition`].
+    pub partitions: Vec<String>,
+    /// A stable key for filters that narrow what discovery reads within each part.
+    /// An empty key means discovery does not narrow the part.
+    pub discovery_scope: String,
+    pub publication: DestinationRules,
+}
+
+impl Default for DerivedConfiguration {
+    fn default() -> Self {
+        Self {
+            partitions: vec![String::new()],
+            discovery_scope: String::new(),
+            publication: DestinationRules::default(),
+        }
+    }
+}
+
+/// Destination choices and the rules for checking a destination locally.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DestinationRules {
+    /// Accepted destinations in their canonical spelling. Empty when the
+    /// connector cannot enumerate them.
+    pub destinations: Vec<String>,
+    /// Whether destination matching ignores ASCII case.
+    pub case_insensitive: bool,
+    pub validation: Option<DestinationValidation>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DestinationValidation {
+    pub format: ValueFormat,
+    pub message: String,
+}
+
 /// An external issue's immutable identity. Titles, numbers and repository
 /// names can change; this cannot. Never match issues by display text.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -62,6 +108,9 @@ pub struct ExternalIdentity {
 pub struct ExternalRef {
     pub identity: ExternalIdentity,
     pub locator: String,
+    /// The part of discovery this issue belongs to, such as a repository.
+    /// An empty string denotes a source that is read as one whole.
+    pub partition: String,
 }
 
 impl ClosureReason {
@@ -209,12 +258,12 @@ pub struct DiscoveryPage {
 pub struct SkippedPartition {
     /// The failure code of the part (`not_found` or `forbidden`).
     pub code: String,
+    pub class: ErrorClass,
     pub message: String,
     /// The setting that named the part, so a preview can point at it.
     #[serde(default)]
     pub field: Option<String>,
-    /// The part, as [`Connector::partition`] names it. Additive to contract 1.
-    #[serde(default)]
+    /// The part, as [`ExternalRef::partition`] names it.
     pub partition: String,
 }
 
@@ -264,6 +313,27 @@ pub struct PublicationCandidates {
 pub enum Surface {
     Terminal,
     Desktop,
+}
+
+/// A broad cause that a caller can handle without knowing every failure code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ErrorClass {
+    Config,
+    Auth,
+    Transient,
+    System,
+}
+
+impl ErrorClass {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Config => "config",
+            Self::Auth => "auth",
+            Self::Transient => "transient",
+            Self::System => "system",
+        }
+    }
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -360,6 +430,19 @@ impl FailureCode {
         }
     }
 
+    pub(crate) fn class(self) -> ErrorClass {
+        match self {
+            Self::Unauthenticated | Self::Forbidden => ErrorClass::Auth,
+            Self::NotFound
+            | Self::Rejected
+            | Self::InvalidConfiguration
+            | Self::UnknownProvider
+            | Self::NotConfigured => ErrorClass::Config,
+            Self::RateLimited | Self::Unavailable => ErrorClass::Transient,
+            Self::Protocol | Self::Unsupported | Self::IncompatibleContract => ErrorClass::System,
+        }
+    }
+
     pub(crate) fn parse(code: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|known| known.as_str() == code)
     }
@@ -431,6 +514,23 @@ impl SourceError {
             Self::UnknownProvider(_) => FailureCode::UnknownProvider,
             Self::IncompatibleContract { .. } => FailureCode::IncompatibleContract,
         }
+    }
+
+    pub fn class(&self) -> ErrorClass {
+        self.failure_code().class()
+    }
+
+    /// Records an internal diagnostic without adding it to the error returned
+    /// to the workflow. The adapter must omit credentials and record content.
+    pub fn with_detail(self, detail: impl std::fmt::Display) -> Self {
+        tracing::debug!(
+            error_kind = self.code(),
+            error_class = self.class().as_str(),
+            error = %self,
+            error_detail = %detail,
+            "source operation failed"
+        );
+        self
     }
 
     /// A stable machine-readable kind, so clients can branch without parsing
@@ -535,8 +635,10 @@ pub trait Connector: Send + Sync {
         Ok(Vec::new())
     }
 
-    /// Verifies credentials and permissions and names the acting account.
-    fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionInfo, SourceError>;
+    /// Verifies credentials and permissions, and derives how ticketd will use
+    /// this configuration. A failed check leaves previously derived data valid
+    /// for offline workflows.
+    fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionCheck, SourceError>;
 
     /// Dynamic options for a schema field. `config` holds the current, not yet
     /// validated, values of the fields this field depends on.
@@ -559,29 +661,6 @@ pub trait Connector: Send + Sync {
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError>;
 
-    /// The part of the source an issue belongs to: what discovery reads or skips
-    /// as a whole (for GitHub, the repository). ticketd keeps which parts it has
-    /// read, so the first read of one can be told from the reads that follow. A
-    /// source read as one whole keeps the default, a single unnamed part.
-    fn partition(&self, _reference: &ExternalRef) -> String {
-        String::new()
-    }
-
-    /// Every part `config` asks discovery to read, named as [`Self::partition`]
-    /// names them.
-    fn partitions(&self, _config: &ConfigValues) -> Vec<String> {
-        vec![String::new()]
-    }
-
-    /// The rules in `config` that narrow which issues of a part discovery lists
-    /// (for GitHub, the assignee and labels), as one stable text; empty when
-    /// nothing narrows them. ticketd keeps a part as read under these rules, so
-    /// loosening them reads the part as if for the first time: the issues that
-    /// become visible are a backlog, not news.
-    fn discovery_scope(&self, _config: &ConfigValues) -> String {
-        String::new()
-    }
-
     /// Returns every comment and timeline event of one issue, following the
     /// provider's paging itself. Only called when the descriptor declares
     /// [`Capability::Comments`].
@@ -593,27 +672,16 @@ pub trait Connector: Send + Sync {
         Err(SourceError::Unsupported("comments"))
     }
 
-    /// Where an issue can be published for this configuration, as values for
-    /// [`PublishRequest::destination`]. Empty when the connector cannot say.
-    fn destinations(&self, _config: &ConfigValues) -> Vec<String> {
-        Vec::new()
+    /// Provides all three publication operations when the descriptor declares
+    /// [`Capability::Publish`]. This method does no provider work.
+    fn publication(&self) -> Option<&dyn Publication> {
+        None
     }
+}
 
-    /// Whether `destination` is a well-formed place to publish, judged without
-    /// a network call. A preview reports a failure here as ineligible, and a
-    /// publish refuses before recording an attempt, so both agree. The default
-    /// accepts anything.
-    fn check_destination(&self, _destination: &str) -> Result<(), SourceError> {
-        Ok(())
-    }
-
-    /// Whether two destination spellings name the same place. Exact match by
-    /// default; a provider that ignores case overrides it. Used to hold a
-    /// publish to the saved [`Connector::destinations`].
-    fn same_destination(&self, a: &str, b: &str) -> bool {
-        a == b
-    }
-
+/// Publication is optional as a whole. A connector that offers it must
+/// implement both creation and recovery.
+pub trait Publication: Send + Sync {
     /// Creates an ordinary open issue and returns it as the provider now reports
     /// it. Only called when the descriptor declares [`Capability::Publish`].
     ///
@@ -622,11 +690,9 @@ pub trait Connector: Send + Sync {
     /// was created only when that is certain.
     fn publish(
         &self,
-        _config: &ConfigValues,
-        _request: &PublishRequest,
-    ) -> Result<ExternalIssue, SourceError> {
-        Err(SourceError::Unsupported("publishing"))
-    }
+        config: &ConfigValues,
+        request: &PublishRequest,
+    ) -> Result<ExternalIssue, SourceError>;
 
     /// Reads one issue the person named (`text`: a number, a reference or a
     /// link), which must belong to `destination`. Used to attach an issue to an
@@ -634,20 +700,16 @@ pub trait Connector: Send + Sync {
     /// when the descriptor declares [`Capability::Publish`].
     fn locate(
         &self,
-        _config: &ConfigValues,
-        _destination: &str,
-        _text: &str,
-    ) -> Result<ExternalIssue, SourceError> {
-        Err(SourceError::Unsupported("looking up published issues"))
-    }
+        config: &ConfigValues,
+        destination: &str,
+        text: &str,
+    ) -> Result<ExternalIssue, SourceError>;
 
     /// Looks for issues in the destination that the described publish may have
     /// created. See [`PublicationCandidates::complete`] for what an answer proves.
     fn find_published(
         &self,
-        _config: &ConfigValues,
-        _search: &PublicationSearch,
-    ) -> Result<PublicationCandidates, SourceError> {
-        Err(SourceError::Unsupported("searching for published issues"))
-    }
+        config: &ConfigValues,
+        search: &PublicationSearch,
+    ) -> Result<PublicationCandidates, SourceError>;
 }

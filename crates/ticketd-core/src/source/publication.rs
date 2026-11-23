@@ -43,8 +43,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    ConfigValues, Engine, ExternalIdentity, ExternalIssue, ExternalRef, PublicationSearch,
-    PublishRequest, SourceError, SourceFailure, clock,
+    Capability, ConfigValues, ConfiguredSource, DestinationRules, Engine, ExternalIdentity,
+    ExternalIssue, ExternalRef, PublicationSearch, PublishRequest, SourceError, SourceFailure,
+    clock, configured_source,
     tracking::{self, Origin, failure_of},
 };
 use crate::{Error, Status, Ticket, Workspace, activities, history};
@@ -85,6 +86,9 @@ pub struct PublishedIssue {
     pub locator: String,
     pub display: String,
     pub url: String,
+    // Read back when resolving an attempt; the interface needs only the display.
+    #[serde(skip)]
+    partition: String,
 }
 
 /// One try at creating an external issue for a ticket. Holds exactly what was
@@ -537,6 +541,7 @@ fn published(issue: &ExternalIssue) -> PublishedIssue {
     PublishedIssue {
         identity: issue.reference.identity.clone(),
         locator: issue.reference.locator.clone(),
+        partition: issue.reference.partition.clone(),
         display: issue.display.clone(),
         url: issue.url.clone(),
     }
@@ -600,7 +605,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 
 const ATTEMPT_COLUMNS: &str = "a.id, t.reference, a.provider, a.destination, a.title, a.body, a.status, \
      a.started_at, a.updated_at, a.failure_code, a.failure_message, a.external_id, a.locator, \
-     a.display, a.url, a.lease_expires_at";
+     a.display, a.url, a.lease_expires_at, a.partition";
 
 /// Whether a lease has run out at `now`. Expiry is judged against the one
 /// effective clock of the call (the caller's `now`, else the database clock),
@@ -623,6 +628,7 @@ fn attempt_from_row(row: &rusqlite::Row<'_>, now: &str) -> rusqlite::Result<Publ
     let locator: Option<String> = row.get(12)?;
     let display: Option<String> = row.get(13)?;
     let url: Option<String> = row.get(14)?;
+    let partition: Option<String> = row.get(16)?;
     let mut failure = failure.map(|code| SourceFailure {
         code,
         message: message.unwrap_or_default(),
@@ -660,6 +666,8 @@ fn attempt_from_row(row: &rusqlite::Row<'_>, now: &str) -> rusqlite::Result<Publ
                     provider: provider.clone(),
                     id,
                 },
+                partition: partition
+                    .unwrap_or_else(|| super::legacy_reference_partition(&provider, &locator)),
                 locator,
                 display: display.unwrap_or_default(),
                 url: url.unwrap_or_default(),
@@ -896,12 +904,11 @@ fn publication_attachment_links(
 /// What must exist before anything can be published to `provider`: a connector
 /// that can create issues and a saved configuration to publish with.
 fn require_target<'a>(
-    engine: &Engine,
-    provider: &str,
+    can_publish: bool,
     provider_name: &str,
-    target: Option<&'a Target>,
-) -> Result<&'a Target, (IneligibleReason, String)> {
-    if !engine.can_publish(provider) {
+    target: Option<&'a ConfiguredSource>,
+) -> Result<&'a ConfiguredSource, (IneligibleReason, String)> {
+    if !can_publish {
         return Err((
             IneligibleReason::Unsupported,
             format!("{provider_name} cannot create issues from ticketd"),
@@ -915,24 +922,7 @@ fn require_target<'a>(
     })
 }
 
-/// A saved configuration's destination choices and the one to use.
-struct Target {
-    config: ConfigValues,
-    destinations: Vec<String>,
-}
-
 impl Workspace {
-    fn publication_target(&self, engine: &Engine, provider: &str) -> Result<Option<Target>, Error> {
-        let Some(saved) = self.saved_source(provider)? else {
-            return Ok(None);
-        };
-        let destinations = engine.publish_destinations(provider, &saved.config)?;
-        Ok(Some(Target {
-            config: saved.config,
-            destinations,
-        }))
-    }
-
     /// Selects an implicit publication provider when the choice is unambiguous.
     pub fn default_publication_provider(&self, engine: &Engine) -> Result<String, Error> {
         let publishing: Vec<_> = engine
@@ -976,16 +966,19 @@ impl Workspace {
     ) -> Result<PublicationPreview, Error> {
         let descriptor = engine.descriptor(provider)?;
         let ticket = subject(&self.connection, reference)?;
-        let target = self.publication_target(engine, provider)?;
-        let destinations = target
-            .as_ref()
-            .map(|t| t.destinations.clone())
+        let target = configured_source(&self.connection, provider)?;
+        let rules = target.as_ref().map(|source| &source.derived.publication);
+        let destinations = rules
+            .map(|rules| rules.destinations.clone())
             .unwrap_or_default();
         let destination = chosen_destination(destination, &destinations);
         let mut eligibility = eligibility(&self.connection, &ticket, None)?;
         if matches!(eligibility, Eligibility::Eligible)
-            && let Err((reason, message)) =
-                require_target(engine, provider, &descriptor.name, target.as_ref())
+            && let Err((reason, message)) = require_target(
+                descriptor.capabilities.contains(&Capability::Publish),
+                &descriptor.name,
+                target.as_ref(),
+            )
         {
             eligibility = ineligible(reason, message);
         }
@@ -993,8 +986,8 @@ impl Workspace {
         // publish refuses.
         if matches!(eligibility, Eligibility::Eligible)
             && let Some(chosen) = &destination
-            && let Some((reason, message)) =
-                destination_refusal(engine, provider, chosen, &destinations)?
+            && let Some(rules) = rules
+            && let Some((reason, message)) = destination_refusal(rules, chosen)
         {
             eligibility = ineligible(reason, message);
         }
@@ -1054,7 +1047,7 @@ impl Workspace {
     ) -> Result<PublishOutcome, Error> {
         let provider = options.provider.as_str();
         let descriptor = engine.descriptor(provider)?;
-        let target = self.publication_target(engine, provider)?;
+        let can_publish = descriptor.capabilities.contains(&Capability::Publish);
         // `Err` from the scope's operation is an attempt that already published the
         // ticket: it is replayed.
         let started = match crate::write_scope::run(&self.connection, |transaction| {
@@ -1080,23 +1073,26 @@ impl Workspace {
             {
                 return Err(refuse(reason, message));
             }
-            let target = match require_target(engine, provider, &descriptor.name, target.as_ref()) {
+            // Read the saved destinations under the same lock as the attempt.
+            let target = configured_source(transaction, provider)?;
+            let target = match require_target(can_publish, &descriptor.name, target.as_ref()) {
                 Ok(target) => target,
                 Err((reason, message)) => return Err(refuse(reason, message)),
             };
+            let rules = &target.derived.publication;
             let Some(destination) =
-                chosen_destination(options.destination.as_deref(), &target.destinations)
+                chosen_destination(options.destination.as_deref(), &rules.destinations)
             else {
                 return Err(Error::Source(SourceError::InvalidConfiguration(vec![
                     super::FieldIssue::for_field("destination", "choose where to publish"),
                 ])));
             };
             // Refused before an attempt is recorded: nothing was tried.
-            engine.check_destination(provider, &destination)?;
-            if !engine.destination_allowed(provider, &destination, &target.destinations)? {
+            check_destination(rules, &destination)?;
+            if !destination_allowed(rules, &destination) {
                 return Err(refuse(
                     IneligibleReason::DestinationNotAllowed,
-                    not_allowed_message(&destination, &target.destinations),
+                    not_allowed_message(&destination, &rules.destinations),
                 ));
             }
             // Send exactly what was previewed, or nothing.
@@ -1133,7 +1129,7 @@ impl Workspace {
                     body: ticket.body,
                     destination,
                 },
-                config: target.config.clone(),
+                config: target.saved.config.clone(),
                 agent: options.agent.clone(),
             }))
         })? {
@@ -1329,7 +1325,8 @@ impl Workspace {
             };
             transaction.execute(
             "UPDATE publication_attempts SET status = ?2, updated_at = ?3, failure_code = ?4, failure_message = ?5, \
-             external_id = COALESCE(?6, external_id), locator = COALESCE(?7, locator), display = COALESCE(?8, display), url = COALESCE(?9, url) \
+             external_id = COALESCE(?6, external_id), locator = COALESCE(?7, locator), display = COALESCE(?8, display), url = COALESCE(?9, url), \
+             partition = COALESCE(?11, partition) \
              WHERE id = ?1 AND (status IN ('in_flight', 'unresolved') \
                 OR (status = 'failed' AND failure_code = ?10 AND ?6 IS NOT NULL \
                     AND NOT EXISTS (SELECT 1 FROM publication_attempts o \
@@ -1345,6 +1342,7 @@ impl Workspace {
                 issue.map(|i| i.display.as_str()),
                 issue.map(|i| i.url.as_str()),
                 RULED_OUT,
+                issue.map(|i| i.reference.partition.as_str()),
             ],
         )?;
             if let Some((ticket, destination)) = first_unknown {
@@ -1657,6 +1655,7 @@ impl Workspace {
                             &ExternalRef {
                                 identity: known.identity.clone(),
                                 locator: known.locator.clone(),
+                                partition: known.partition.clone(),
                             },
                         )
                         .map_err(unverified)?,
@@ -2196,14 +2195,15 @@ fn complete_attempt(
     tracking::map_closure(transaction, sent.ticket_id, issue)?;
     transaction.execute(
         "UPDATE publication_attempts SET status = 'succeeded', updated_at = ?2, failure_code = NULL, failure_message = NULL, \
-         external_id = ?3, locator = ?4, display = ?5, url = ?6 WHERE id = ?1",
+         external_id = ?3, locator = ?4, display = ?5, url = ?6, partition = ?7 WHERE id = ?1",
         params![
             sent.attempt_id,
             now,
             identity.id,
             issue.reference.locator,
             issue.display,
-            issue.url
+            issue.url,
+            issue.reference.partition,
         ],
     )?;
     // An attach is recorded apart from a publication: the person linked an issue
@@ -2229,39 +2229,49 @@ fn complete_attempt(
     )?)
 }
 
-/// The reason a destination was refused, without the "invalid source
-/// configuration: destination" framing meant for settings.
-fn destination_problem(error: &SourceError) -> String {
-    match error.issues() {
-        [issue, ..] => issue.message.clone(),
-        [] => error.to_string(),
+fn check_destination(rules: &DestinationRules, chosen: &str) -> Result<(), SourceError> {
+    if let Some(validation) = &rules.validation
+        && !validation.format.is_valid(chosen)
+    {
+        return Err(SourceError::InvalidConfiguration(vec![
+            super::FieldIssue::for_field("destination", validation.message.clone()),
+        ]));
     }
+    Ok(())
 }
 
-/// Why `chosen` cannot be published to, if it cannot: malformed for the
-/// provider, or outside the destinations the saved source lists.
+fn destination_allowed(rules: &DestinationRules, chosen: &str) -> bool {
+    rules.destinations.is_empty()
+        || rules.destinations.iter().any(|destination| {
+            if rules.case_insensitive {
+                destination.eq_ignore_ascii_case(chosen)
+            } else {
+                destination == chosen
+            }
+        })
+}
+
+/// The same checks publication makes before it records an attempt.
 fn destination_refusal(
-    engine: &Engine,
-    provider: &str,
+    rules: &DestinationRules,
     chosen: &str,
-    allowed: &[String],
-) -> Result<Option<(IneligibleReason, String)>, Error> {
-    if let Err(error) = engine.check_destination(provider, chosen) {
-        return Ok(Some((
+) -> Option<(IneligibleReason, String)> {
+    if let Err(error) = check_destination(rules, chosen) {
+        let message = error
+            .issues()
+            .first()
+            .map_or_else(|| error.to_string(), |issue| issue.message.clone());
+        return Some((
             IneligibleReason::InvalidDestination,
-            format!(
-                "cannot publish to '{chosen}': {}",
-                destination_problem(&error)
-            ),
-        )));
+            format!("cannot publish to '{chosen}': {message}"),
+        ));
     }
-    if !engine.destination_allowed(provider, chosen, allowed)? {
-        return Ok(Some((
+    (!destination_allowed(rules, chosen)).then(|| {
+        (
             IneligibleReason::DestinationNotAllowed,
-            not_allowed_message(chosen, allowed),
-        )));
-    }
-    Ok(None)
+            not_allowed_message(chosen, &rules.destinations),
+        )
+    })
 }
 
 fn not_allowed_message(chosen: &str, allowed: &[String]) -> String {

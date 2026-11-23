@@ -1640,7 +1640,11 @@ impl Apply<'_> {
             c.execute("DELETE FROM external_identities WHERE ticket_id = ?1", [id])?;
             return Ok(());
         }
-        c.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin, linked_at = excluded.linked_at",
+        c.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin, linked_at = excluded.linked_at, \
+         partition = CASE WHEN external_identities.provider = excluded.provider \
+                       AND external_identities.external_id = excluded.external_id \
+                       AND external_identities.locator = excluded.locator \
+                     THEN external_identities.partition ELSE NULL END",
             params![id, values[0], values[1], values[2], values[3], values[4], values[5], values[6]])?;
         c.execute("INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3) ON CONFLICT(ticket_id) DO UPDATE SET authority = excluded.authority, changed_at = excluded.changed_at",
             params![id, values[7], values[8]])?;

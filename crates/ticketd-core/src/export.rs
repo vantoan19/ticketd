@@ -82,7 +82,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "external_identities",
-        "ticket_id, provider, external_id, locator, display, url, origin, linked_at",
+        "ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition",
     ),
     ("external_ownership", "ticket_id, authority, changed_at"),
     (
@@ -103,7 +103,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "publication_attempts",
-        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url",
+        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, partition",
     ),
     (
         "chats",
@@ -248,6 +248,21 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
 // Read by the test that keeps the export closed, and by people reviewing the format.
 #[cfg_attr(not(test), allow(dead_code))]
 const OMITTED_COLUMNS: &[(&str, &str, &str)] = &[
+    (
+        "source_configurations",
+        "derived_configuration",
+        "connection check answers can be regenerated from the saved settings",
+    ),
+    (
+        "source_configurations",
+        "revision",
+        "local compare-and-write bookkeeping for the saved settings",
+    ),
+    (
+        "source_configurations",
+        "derived_checked_at",
+        "local ordering of connection checks",
+    ),
     (
         "external_duplicate_targets",
         "url",

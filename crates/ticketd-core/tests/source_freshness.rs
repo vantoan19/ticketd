@@ -104,6 +104,25 @@ impl Fixture {
 }
 
 #[test]
+fn refresh_checks_the_connection_before_reading_discovery_or_tracked_issues() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    f.refresh_at(T0);
+    f.remote(|remote| {
+        remote.issues.get_mut(&1).unwrap().title = "Title without a verified connection".into();
+        remote.matching.clear();
+        remote.connection_error = Some("the credential expired".into());
+    });
+    let report = f.refresh_at(T1);
+    assert_eq!(report.failures[0].scope, FailureScope::Source);
+    assert_eq!(report.failures[0].code, "unauthenticated");
+    assert_eq!(f.workspace.show_ticket("T-KQ1").unwrap().title, "Issue 1");
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(status.last_refreshed_at.as_deref(), Some(T0));
+    assert_eq!(status.error.unwrap().code, "unauthenticated");
+}
+
+#[test]
 fn provider_checked_count_tracks_accepted_runs_and_survives_failures_and_reopen() {
     let mut f = Fixture::new();
     let status = f.workspace.source_statuses().unwrap().remove(0);
@@ -194,14 +213,23 @@ fn older_serialized_source_status_defaults_the_added_fields() {
 
 #[test]
 fn migration_from_28_keeps_freshness_but_does_not_invent_a_count() {
-    let mut f = Fixture::new();
-    f.publish(issue(1, T0));
-    f.refresh_at(T0);
-    let path = f.dir.path().join("workspace.sqlite3");
-    drop(f.workspace);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 28).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "ALTER TABLE source_status DROP COLUMN last_checked_tickets; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 28;",
+        "INSERT INTO tickets (id, title, status) VALUES ('issue-1', 'Old ticket', 'Todo');
+         INSERT INTO source_configurations (provider, configuration, account, contract_version)
+           VALUES ('fake', '{\"repositories\":[\"o/r\"]}', 'octo', 1);
+         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin)
+           VALUES ('issue-1', 'fake', '1', 'o/r#1', 'o/r#1', 'https://example.test/o/r/issues/1', 'imported');
+         INSERT INTO external_ownership (ticket_id, authority) VALUES ('issue-1', 'external');
+         INSERT INTO source_sync (ticket_id, external_state) VALUES ('issue-1', 'open');",
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO source_status (provider, last_refreshed_at) VALUES ('fake', ?1)",
+        [T0],
     )
     .unwrap();
     drop(db);

@@ -146,6 +146,115 @@ fn publication_error(error: Error) -> PublicationError {
 }
 
 #[test]
+fn publication_uses_the_last_successful_connection_answers_offline() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Ship this").unwrap();
+    f.fake.0.lock().unwrap().publish_destinations = Some(vec!["o/alternate".into()]);
+    // A connector can derive a destination other than the literal repository setting.
+    f.workspace
+        .save_source(&f.engine, "fake", &values(json!({"repositories": ["o/r"]})))
+        .unwrap();
+    let preview = |fixture: &Fixture| {
+        fixture
+            .workspace
+            .preview_publication(&fixture.engine, &ticket.reference, "fake", None)
+            .unwrap()
+    };
+    assert_eq!(preview(&f).destination.as_deref(), Some("o/alternate"));
+
+    f.fake.0.lock().unwrap().publish_destinations = Some(vec!["o/new".into()]);
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(preview(&f).destination.as_deref(), Some("o/new"));
+
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.publish_destinations = Some(vec!["o/unconfirmed".into()]);
+        remote.connection_error = Some("credentials expired".into());
+    }
+    let refreshed = f
+        .workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(refreshed.failures[0].code, "unauthenticated");
+    let mut f = f.reopen();
+    assert_eq!(preview(&f).destination.as_deref(), Some("o/new"));
+
+    f.fake.0.lock().unwrap().connection_error = None;
+    let sent = f.publish(&ticket.reference).unwrap();
+    assert_eq!(sent.attempt.destination, "o/new");
+}
+
+#[test]
+fn a_check_for_the_same_settings_cannot_overwrite_a_concurrent_save() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Ship this").unwrap();
+    let path = f.path();
+    let engine = f.engine.clone();
+    let fake = f.fake.clone();
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.publish_destinations = Some(vec!["o/old".into()]);
+        remote.after_check = Some(Arc::new(move || {
+            fake.0.lock().unwrap().publish_destinations = Some(vec!["o/saved".into()]);
+            Workspace::open(&path)
+                .unwrap()
+                .save_source(&engine, "fake", &values(json!({"repositories": ["o/r"]})))
+                .unwrap();
+        }));
+    }
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    assert_eq!(preview.destination.as_deref(), Some("o/saved"));
+}
+
+#[test]
+fn a_delayed_check_cannot_replace_the_answers_from_a_newer_refresh() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Ship this").unwrap();
+    let path = f.path();
+    let engine = f.engine.clone();
+    let fake = f.fake.clone();
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.publish_destinations = Some(vec!["o/old".into()]);
+        remote.after_check = Some(Arc::new(move || {
+            fake.0.lock().unwrap().publish_destinations = Some(vec!["o/new".into()]);
+            Workspace::open(&path)
+                .unwrap()
+                .refresh_sources(
+                    &engine,
+                    &RefreshOptions {
+                        now: Some("2026-02-02T00:00:00Z".into()),
+                        ..RefreshOptions::default()
+                    },
+                )
+                .unwrap();
+        }));
+    }
+    f.workspace
+        .refresh_sources(
+            &f.engine,
+            &RefreshOptions {
+                now: Some("2026-02-01T00:00:00Z".into()),
+                ..RefreshOptions::default()
+            },
+        )
+        .unwrap();
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    assert_eq!(preview.destination.as_deref(), Some("o/new"));
+}
+
+#[test]
 fn workspace_attachment_links_block_preview_and_publication_before_any_remote_write() {
     let mut f = Fixture::new();
     let source = f.dir.path().join("trace.log");

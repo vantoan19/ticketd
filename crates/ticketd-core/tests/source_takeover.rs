@@ -38,6 +38,7 @@ fn duplicate(id: u64, title: &str, canonical: u64) -> ExternalIssue {
             id: canonical.to_string(),
         },
         locator: format!("o/r#{canonical}"),
+        partition: "o/r".into(),
     });
     dup
 }

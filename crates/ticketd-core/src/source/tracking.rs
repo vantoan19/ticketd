@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    ClosureReason, Conversation, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
-    ExternalState, SourceError,
+    ClosureReason, Conversation, DerivedConfiguration, Engine, ExternalIdentity, ExternalIssue,
+    ExternalRef, ExternalState, SourceError,
     contract::FailureCode,
     conversation,
     freshness::{self, ProviderRun, SourceUnavailable},
@@ -790,7 +790,7 @@ struct Found {
 
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
-    configurations: HashMap<String, super::ConfigValues>,
+    configurations: HashMap<String, Option<CheckedConfiguration>>,
     discovery: Vec<(String, HashSet<String>)>,
     issues: Vec<ExternalIssue>,
     /// Conversations read this time, by (provider, external id). An issue absent
@@ -806,12 +806,18 @@ struct Gathered {
     imported_partitions: HashMap<String, HashSet<String>>,
 }
 
+struct CheckedConfiguration {
+    revision: String,
+    derived: Option<DerivedConfiguration>,
+}
+
 struct Tracked {
     ticket_id: String,
     reference: String,
     provider: String,
     external_id: String,
     locator: String,
+    partition: String,
 }
 
 pub(crate) fn failure_of(error: &SourceError) -> SourceFailure {
@@ -867,7 +873,7 @@ impl Workspace {
             partitions: HashMap::new(),
             imported_partitions: HashMap::new(),
         };
-        let saved = self.saved_sources()?;
+        let saved = super::configured_sources(&self.connection)?;
         let providers: Vec<String> = if options.ticket.is_some() {
             tracked
                 .iter()
@@ -876,7 +882,7 @@ impl Workspace {
                 .into_iter()
                 .collect()
         } else {
-            let mut all: Vec<String> = saved.iter().map(|s| s.provider.clone()).collect();
+            let mut all: Vec<String> = saved.iter().map(|s| s.saved.provider.clone()).collect();
             for t in &tracked {
                 if !all.contains(&t.provider) {
                     all.push(t.provider.clone());
@@ -887,12 +893,8 @@ impl Workspace {
         for provider in providers {
             // Every line about this source, until the end of its turn in the loop.
             let _source = tracing::info_span!("source", source_id = provider.as_str()).entered();
-            let config = saved.iter().find(|s| s.provider == provider);
-            if let Some(source) = config {
-                gathered
-                    .configurations
-                    .insert(provider.clone(), source.config.clone());
-            }
+            let configured = saved.iter().find(|s| s.saved.provider == provider);
+            let config = configured.map(|source| &source.saved.config);
             let first_issue = gathered.issues.len();
             let mut seen: HashSet<String> = HashSet::new();
             // Set when the source as a whole cannot be read, so asking for more
@@ -903,33 +905,57 @@ impl Workspace {
             let mut skipped: Vec<String> = Vec::new();
             let mut read_partitions: Vec<String> = Vec::new();
             let mut skipped_partitions: Vec<String> = Vec::new();
-            if let (None, Some(source)) = (&options.ticket, config) {
-                // Every part is named as read under these discovery rules, so a
-                // part read under narrower ones is not read under these.
-                let scope = engine.partition_scope(&provider, &source.config);
-                let scoped = |part: String| part + &scope;
+            let checked = configured.map(|source| {
+                let derived = match engine.check(&provider, &source.saved.config) {
+                    Ok(check) => Some(check.derived),
+                    Err(error) => {
+                        retry_after_secs = retry_secs(&error);
+                        let failure = failure_of(&error);
+                        gathered.failures.push(Found {
+                            scope: FailureScope::Source,
+                            reference: None,
+                            provider: provider.clone(),
+                            failure: failure.clone(),
+                        });
+                        blocked = Some(failure);
+                        None
+                    }
+                };
+                CheckedConfiguration {
+                    revision: source.revision.clone(),
+                    derived,
+                }
+            });
+            if let (None, Some(config), Some(derived)) = (
+                &options.ticket,
+                config,
+                checked
+                    .as_ref()
+                    .and_then(|checked| checked.derived.as_ref()),
+            ) {
+                // A part read under narrower rules is new to a broader discovery.
+                let scope = &derived.discovery_scope;
+                let scoped = |part: &str| {
+                    let mut part = part.replace('%', "%25").replace('?', "%3F");
+                    if !scope.is_empty() {
+                        part.push('?');
+                        part.push_str(scope);
+                    }
+                    part
+                };
                 gathered.imported_partitions.insert(
                     provider.clone(),
                     tracked
                         .iter()
                         .filter(|ticket| ticket.provider == provider)
-                        .map(|ticket| {
-                            let reference = ExternalRef {
-                                identity: ExternalIdentity {
-                                    provider: provider.clone(),
-                                    id: ticket.external_id.clone(),
-                                },
-                                locator: ticket.locator.clone(),
-                            };
-                            scoped(engine.partition(&provider, &reference))
-                        })
+                        .map(|ticket| scoped(&ticket.partition))
                         .collect(),
                 );
-                let result = engine.discover(&provider, &source.config, |issue| {
+                let result = engine.discover(&provider, config, |issue| {
                     seen.insert(issue.reference.identity.id.clone());
                     gathered.partitions.insert(
                         (provider.clone(), issue.reference.identity.id.clone()),
-                        scoped(engine.partition(&provider, &issue.reference)),
+                        scoped(&issue.reference.partition),
                     );
                     gathered.issues.push(issue);
                     ControlFlow::Continue(())
@@ -942,15 +968,10 @@ impl Workspace {
                         skipped_partitions = summary
                             .skipped
                             .iter()
-                            .map(|part| scoped(part.partition.clone()))
+                            .map(|part| scoped(&part.partition))
                             .collect();
-                        // Rules that cannot be read name no part, so none becomes read.
-                        read_partitions = engine
-                            .partitions(&provider, &source.config)
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(scoped)
-                            .collect();
+                        read_partitions =
+                            derived.partitions.iter().map(|part| scoped(part)).collect();
                         read_partitions.retain(|part| !skipped_partitions.contains(part));
                         for part in summary.skipped {
                             skipped.push(part.message.clone());
@@ -1004,7 +1025,7 @@ impl Workspace {
                     });
                     continue;
                 }
-                let Some(source) = config else {
+                let Some(config) = config else {
                     gathered.failures.push(Found {
                         scope: FailureScope::Ticket,
                         reference,
@@ -1024,11 +1045,12 @@ impl Workspace {
                         id: ticket.external_id.clone(),
                     },
                     locator: ticket.locator.clone(),
+                    partition: ticket.partition.clone(),
                 };
                 // Count an issue once whether it was discovered or fetched, and
                 // include attempted reads that returned a ticket-level failure.
                 seen.insert(ticket.external_id.clone());
-                match engine.fetch(&provider, &source.config, &external) {
+                match engine.fetch(&provider, config, &external) {
                     Ok(issue) => gathered.issues.push(issue),
                     Err(error) => {
                         let failure = failure_of(&error);
@@ -1045,15 +1067,10 @@ impl Workspace {
                     }
                 }
             }
-            if let (Some(source), None) = (config, &blocked) {
-                self.gather_conversations(
-                    engine,
-                    &source.config,
-                    &tracked,
-                    first_issue,
-                    &mut gathered,
-                )?;
+            if let (Some(config), None) = (config, &blocked) {
+                self.gather_conversations(engine, config, &tracked, first_issue, &mut gathered)?;
             }
+            gathered.configurations.insert(provider.clone(), checked);
             if options.ticket.is_none() && config.is_some() {
                 gathered.runs.push(ProviderRun {
                     provider: provider.clone(),
@@ -1169,19 +1186,24 @@ impl Workspace {
 
     fn tracked(&self, only: Option<&str>) -> Result<Vec<Tracked>, Error> {
         let mut statement = self.connection.prepare(
-            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator FROM external_identities i \
+            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator, i.partition FROM external_identities i \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
              JOIN tickets t ON t.id = i.ticket_id \
              WHERE (?1 IS NULL OR t.reference = ?1) ORDER BY t.number",
         )?;
         let rows = statement
             .query_map([only], |row| {
+                let provider: String = row.get(2)?;
+                let locator: String = row.get(4)?;
+                let stored_partition: Option<String> = row.get(5)?;
                 Ok(Tracked {
                     ticket_id: row.get(0)?,
-                    reference: row.get::<_, String>(1)?,
-                    provider: row.get(2)?,
+                    reference: row.get(1)?,
+                    partition: stored_partition
+                        .unwrap_or_else(|| super::legacy_reference_partition(&provider, &locator)),
+                    provider,
                     external_id: row.get(3)?,
-                    locator: row.get(4)?,
+                    locator,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -1211,19 +1233,31 @@ impl Workspace {
             // Re-read it under the same write lock as the results: old discovery
             // cannot import new tickets or describe the rules saved afterwards.
             let mut replaced = HashSet::new();
-            for (provider, used) in &gathered.configurations {
-                let stored: Option<String> = transaction
-                    .query_row(
-                        "SELECT configuration FROM source_configurations WHERE provider = ?1",
-                        [provider],
-                        |row| row.get(0),
-                    )
-                    .optional()?;
-                let current = stored
-                    .map(|raw| serde_json::from_str::<super::ConfigValues>(&raw))
-                    .transpose()?;
-                if current.as_ref() != Some(used) {
+            for (provider, checked) in &gathered.configurations {
+                let current = super::configured_source(transaction, provider)?;
+                if current.as_ref().map(|source| &source.revision)
+                    != checked.as_ref().map(|check| &check.revision)
+                {
                     replaced.insert(provider.clone());
+                    continue;
+                }
+                if let (Some(current), Some(derived)) = (
+                    current,
+                    checked.as_ref().and_then(|check| check.derived.as_ref()),
+                ) {
+                    let changed = transaction.execute(
+                        "UPDATE source_configurations SET derived_configuration = ?2, derived_checked_at = ?3 \
+                         WHERE provider = ?1 AND (derived_checked_at IS NULL OR julianday(derived_checked_at) <= julianday(?3))",
+                        params![provider, serde_json::to_string(derived)?, now],
+                    )?;
+                    if !super::same_discovery(&current.derived, derived) {
+                        if changed != 0 {
+                            super::clear_discovery_matches(transaction, provider)?;
+                        } else {
+                            // A newer check already established different discovery rules.
+                            replaced.insert(provider.clone());
+                        }
+                    }
                 }
             }
             let mut applied = Applied::default();
@@ -1397,6 +1431,7 @@ struct Existing {
     status: Status,
     authority: Option<String>,
     locator: String,
+    partition: Option<String>,
     display: String,
     url: String,
     /// `external_state:closure_reason` as last observed.
@@ -1418,7 +1453,7 @@ fn apply_issue(
         .query_row(
             "SELECT t.id, t.reference, t.title, t.body, t.status, o.authority, i.locator, i.display, i.url, \
                     COALESCE(s.external_state || ':' || COALESCE(s.closure_reason, ''), ''), \
-                    COALESCE(s.external_updated_at, '') \
+                    COALESCE(s.external_updated_at, ''), i.partition \
              FROM external_identities i \
              JOIN tickets t ON t.id = i.ticket_id \
              LEFT JOIN external_ownership o ON o.ticket_id = i.ticket_id \
@@ -1445,6 +1480,7 @@ fn apply_issue(
                     url: row.get(8)?,
                     state: row.get(9)?,
                     updated_at: row.get(10)?,
+                    partition: row.get(11)?,
                 })
             },
         )
@@ -1497,6 +1533,7 @@ fn apply_issue(
             body: old_body,
             status,
             locator,
+            partition,
             display,
             url,
             state: old_state,
@@ -1549,12 +1586,14 @@ fn apply_issue(
             if observed != old_state {
                 changed = true;
             }
-            if locator != issue.reference.locator || display != issue.display || url != issue.url {
+            let identity_changed =
+                locator != issue.reference.locator || display != issue.display || url != issue.url;
+            if identity_changed || partition.as_deref() != Some(&issue.reference.partition) {
                 connection.execute(
-                    "UPDATE external_identities SET locator = ?2, display = ?3, url = ?4 WHERE ticket_id = ?1",
-                    params![id, issue.reference.locator, issue.display, issue.url],
+                    "UPDATE external_identities SET locator = ?2, display = ?3, url = ?4, partition = ?5 WHERE ticket_id = ?1",
+                    params![id, issue.reference.locator, issue.display, issue.url, issue.reference.partition],
                 )?;
-                changed = true;
+                changed |= identity_changed;
             }
             // Who opened the issue and when is provenance, not a change to the
             // ticket; it also fills tickets tracked before it was stored.
@@ -1751,8 +1790,8 @@ pub(crate) fn link(
     let identity = &issue.reference.identity;
     let (state, reason) = state_parts(issue.state);
     connection.execute(
-        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             ticket_id,
             identity.provider,
@@ -1764,7 +1803,8 @@ pub(crate) fn link(
                 Origin::Imported => "imported",
                 Origin::Published => "published",
             },
-            now
+            now,
+            issue.reference.partition,
         ],
     )?;
     connection.execute(
