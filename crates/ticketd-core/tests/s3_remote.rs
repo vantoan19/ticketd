@@ -1310,6 +1310,110 @@ fn the_real_transport_refuses_a_request_for_another_host_without_sending_it() {
     );
 }
 
+/// A listing that answers every matching request with the same truncated page, as a broken
+/// endpoint can; it gives up with "offline" after a few, so a loop that never ends fails
+/// the test and does not hang it.
+struct Stuck<'a> {
+    inner: &'a S3Sim,
+    when: fn(&S3Request) -> bool,
+    page: &'static str,
+    asked: std::sync::atomic::AtomicUsize,
+}
+
+impl S3Transport for Stuck<'_> {
+    fn send(&self, request: S3Request) -> Result<S3Response, S3TransportError> {
+        if !(self.when)(&request) {
+            return self.inner.send(request);
+        }
+        if self.asked.fetch_add(1, std::sync::atomic::Ordering::SeqCst) >= 10 {
+            return Err(S3TransportError::Offline);
+        }
+        Ok(S3Response {
+            status: 200,
+            headers: vec![],
+            body: self.page.as_bytes().to_vec(),
+        })
+    }
+}
+
+#[test]
+fn a_listing_that_repeats_its_cursor_is_an_unreadable_response_not_an_endless_loop() {
+    let truncated = |root, next| {
+        let page: &'static str = Box::leak(
+            format!("<{root}><IsTruncated>true</IsTruncated>{next}</{root}>").into_boxed_str(),
+        );
+        page
+    };
+    let listing = |request: &S3Request| {
+        request.method == "GET" && request.url.contains("versions") && !request.url.contains("versionId")
+    };
+    let folders = |request: &S3Request| request.method == "GET" && request.url.contains("list-type");
+    let uploads = |request: &S3Request| request.method == "GET" && request.url.contains("uploads");
+    let cases: [(&str, fn(&S3Request) -> bool, &str); 4] = [
+        (
+            "versions",
+            listing,
+            truncated(
+                "ListVersionsResult",
+                "<NextKeyMarker>k</NextKeyMarker><NextVersionIdMarker>v</NextVersionIdMarker>",
+            ),
+        ),
+        (
+            "list",
+            listing,
+            truncated(
+                "ListVersionsResult",
+                "<NextKeyMarker>k</NextKeyMarker><NextVersionIdMarker>v</NextVersionIdMarker>",
+            ),
+        ),
+        (
+            "folders",
+            folders,
+            truncated(
+                "ListBucketResult",
+                "<NextContinuationToken>t</NextContinuationToken>",
+            ),
+        ),
+        (
+            "uploads",
+            uploads,
+            truncated(
+                "ListMultipartUploadsResult",
+                "<NextKeyMarker>k</NextKeyMarker><NextUploadIdMarker>u</NextUploadIdMarker>",
+            ),
+        ),
+    ];
+    for (name, when, page) in cases {
+        let bench = Bench::new();
+        let (folder, key) = (bench.folder(), attachment());
+        let stuck = Stuck {
+            inner: &bench.sim,
+            when,
+            page,
+            asked: 0.into(),
+        };
+        let remote = S3Remote::new(target(), "ticketd/", &bench.credentials, &stuck)
+            .unwrap()
+            .with_part_size(SMALL_PARTS)
+            .with_pause(|_| {});
+        let outcome = match name {
+            "versions" => remote.revisions(&folder, &key).map(drop),
+            "list" => remote.list(&folder).map(drop),
+            "folders" => remote.folders().map(drop),
+            _ => put(&remote, &folder, &key, None, &over_the_limit()).map(drop),
+        };
+        assert!(
+            matches!(&outcome, Err(RemoteError::Other(message)) if message.contains("unreadable")),
+            "{name}: {outcome:?}"
+        );
+        // The second page is the first repeated: no third request is made.
+        assert!(
+            stuck.asked.load(std::sync::atomic::Ordering::SeqCst) <= 2,
+            "{name}"
+        );
+    }
+}
+
 /// Passes requests to the simulator and keeps a copy of each.
 struct Spy<'a> {
     inner: &'a S3Sim,

@@ -107,6 +107,16 @@ fn unreadable() -> RemoteError {
     RemoteError::Other("S3 returned an unreadable response".into())
 }
 
+/// Moves a listing on to `next`, the cursor of its next page. A cursor that repeats would be
+/// requested for ever, so it is an unreadable response.
+fn advance<T: PartialEq>(cursor: &mut Option<T>, next: T) -> Result<(), RemoteError> {
+    if cursor.as_ref() == Some(&next) {
+        return Err(unreadable());
+    }
+    *cursor = Some(next);
+    Ok(())
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -423,10 +433,13 @@ impl<'a> S3Remote<'a> {
             if beyond || !page.truncated {
                 return Ok(found);
             }
-            markers = Some((
-                page.next_key_marker.ok_or_else(unreadable)?,
-                page.next_version_marker,
-            ));
+            advance(
+                &mut markers,
+                (
+                    page.next_key_marker.ok_or_else(unreadable)?,
+                    page.next_version_marker,
+                ),
+            )?;
         }
     }
 
@@ -601,10 +614,10 @@ impl RemoteStorage for S3Remote<'_> {
                     .strip_suffix('/')?;
                 valid_identifier(id).then(|| id.to_owned())
             }));
-            token = page.next_token;
-            if token.is_none() {
+            let Some(next) = page.next_token else {
                 break;
-            }
+            };
+            advance(&mut token, next)?;
         }
         ids.sort();
         let mut folders = Vec::new();
@@ -706,10 +719,13 @@ impl RemoteStorage for S3Remote<'_> {
             if !page.truncated {
                 break;
             }
-            cursor = Some((
-                page.next_key_marker.ok_or_else(unreadable)?,
-                page.next_version_marker,
-            ));
+            advance(
+                &mut cursor,
+                (
+                    page.next_key_marker.ok_or_else(unreadable)?,
+                    page.next_version_marker,
+                ),
+            )?;
         }
         if marker_live != Some(true) {
             return Err(self.forget(folder));

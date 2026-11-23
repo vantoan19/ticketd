@@ -376,10 +376,13 @@ impl S3Remote<'_> {
             if !page.truncated {
                 return Ok(found);
             }
-            markers = Some((
-                page.next_key_marker.ok_or_else(unreadable)?,
-                page.next_upload_marker,
-            ));
+            advance(
+                &mut markers,
+                (
+                    page.next_key_marker.ok_or_else(unreadable)?,
+                    page.next_upload_marker,
+                ),
+            )?;
         }
     }
 
@@ -407,7 +410,7 @@ impl S3Remote<'_> {
             if !page.truncated {
                 return Ok(Some(found));
             }
-            marker = Some(page.next_marker.ok_or_else(unreadable)?);
+            advance(&mut marker, page.next_marker.ok_or_else(unreadable)?)?;
         }
     }
 
