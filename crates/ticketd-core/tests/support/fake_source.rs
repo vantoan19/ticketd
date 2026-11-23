@@ -62,6 +62,8 @@ pub struct Remote {
     pub pages: Vec<Result<DiscoveryPage, String>>,
     pub outage: Option<Failure>,
     pub connection_error: Option<String>,
+    pub account_from_assignee: bool,
+    pub rate_limited_account: Option<String>,
     pub publish_destinations: Option<Vec<String>>,
     pub after_check: Option<Hook>,
     pub validate_config: Option<fn(&ConfigValues) -> Vec<FieldIssue>>,
@@ -166,12 +168,14 @@ impl Connector for FakeSource {
     }
 
     fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionCheck, SourceError> {
-        let (connection_error, choices, hook) = {
+        let (connection_error, choices, hook, account_from_assignee, rate_limited_account) = {
             let mut remote = self.0.lock().unwrap();
             (
                 remote.connection_error.clone(),
                 remote.publish_destinations.clone(),
                 remote.after_check.take(),
+                remote.account_from_assignee,
+                remote.rate_limited_account.clone(),
             )
         };
         if let Some(hook) = hook {
@@ -180,13 +184,24 @@ impl Connector for FakeSource {
         if let Some(message) = connection_error {
             return Err(SourceError::Unauthenticated(message));
         }
+        let account = if account_from_assignee {
+            config
+                .get("assignee")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("octo")
+        } else {
+            "octo"
+        };
+        if rate_limited_account.as_deref() == Some(account) {
+            return Err(Failure::RateLimited(Some(1800)).error());
+        }
         let partitions: Vec<String> = strings(config, "repositories")
             .into_iter()
             .map(str::to_owned)
             .collect();
         Ok(ConnectionCheck {
             connection: ConnectionInfo {
-                account: "octo".into(),
+                account: account.into(),
                 site: String::new(),
             },
             derived: DerivedConfiguration {

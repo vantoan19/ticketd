@@ -634,6 +634,11 @@ pub trait Connector: Send + Sync {
         None
     }
 
+    /// Site known locally before credentials are used, when the connector can tell.
+    fn effective_site(&self) -> Option<String> {
+        None
+    }
+
     /// How ticketd presents this provider and its settings.
     fn presentation(&self) -> SourcePresentation {
         SourcePresentation::default()

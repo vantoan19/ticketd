@@ -1,8 +1,11 @@
+#[path = "support/fake_source.rs"]
+mod fake_source;
+
 use std::path::Path;
 
 use rusqlite::Connection;
-use ticketd_core::source::{Engine, RefreshOptions};
-use ticketd_core::{FORMAT_VERSION, Workspace};
+use ticketd_core::source::{Clock, Engine, RefreshCoordinator, RefreshOptions, RefreshPolicy, Run};
+use ticketd_core::{self, FORMAT_VERSION, Workspace};
 
 const LOCAL_NAME: &str = "connection-backup-sentinel-5d53837c";
 
@@ -150,4 +153,156 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
         same.publication_attempts("T-QZ2").unwrap()[0].id,
         "pending-attempt"
     );
+}
+
+#[test]
+fn refresh_prefers_discovery_then_the_first_local_connection_covering_the_part() {
+    let remote = fake_source::FakeSource::default();
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote.account_from_assignee = true;
+        remote
+            .issues
+            .insert(1, fake_source::issue_in("owner/shared", 1, "Shared issue"));
+        remote.matching.push(1);
+    }
+    let mut engine = Engine::new();
+    engine.register(Box::new(remote.clone())).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let alice = values("alice", "owner/shared");
+    let bob = values("bob", "owner/shared");
+    workspace
+        .add_source_connection(&engine, "fake", None, None, &alice)
+        .unwrap();
+    workspace
+        .add_source_connection(&engine, "fake", None, None, &bob)
+        .unwrap();
+
+    let import = workspace
+        .refresh_connection(&engine, "fake-2", &RefreshOptions::default())
+        .unwrap();
+    let reference = import.imported[0].clone();
+    let only = RefreshOptions {
+        ticket: Some(reference.clone()),
+        now: None,
+    };
+    assert!(
+        workspace
+            .refresh_connection(&engine, "fake", &only)
+            .is_err()
+    );
+    assert!(
+        workspace
+            .refresh_connection(&engine, "fake-2", &only)
+            .unwrap()
+            .failures
+            .is_empty()
+    );
+    assert!(
+        workspace
+            .refresh_sources(&engine, &RefreshOptions::default())
+            .unwrap()
+            .imported
+            .is_empty()
+    );
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+
+    let backup = folder.path().join("portable.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let other = folder.path().join("other.sqlite3");
+    Workspace::restore(&other, &backup).unwrap();
+    let mut restored = Workspace::open(&other).unwrap();
+    restored
+        .add_source_connection(&engine, "fake", None, None, &alice)
+        .unwrap();
+    restored
+        .add_source_connection(&engine, "fake", None, None, &bob)
+        .unwrap();
+    assert!(
+        restored
+            .refresh_connection(&engine, "fake-2", &only)
+            .is_err()
+    );
+    assert!(
+        restored
+            .refresh_connection(&engine, "fake", &only)
+            .unwrap()
+            .failures
+            .is_empty()
+    );
+    assert!(
+        restored
+            .show_ticket(&reference)
+            .unwrap()
+            .source
+            .unwrap()
+            .unavailable
+            .is_none()
+    );
+}
+
+#[test]
+fn a_staggered_second_connection_runs_while_the_first_is_rate_limited() {
+    let remote = fake_source::FakeSource::default();
+    remote.0.lock().unwrap().account_from_assignee = true;
+    let mut engine = Engine::new();
+    engine.register(Box::new(remote.clone())).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("workspace.sqlite3");
+    let open = || Workspace::open(&path);
+    let mut workspace = open().unwrap();
+    workspace
+        .add_source_connection(&engine, "fake", None, None, &values("alice", "owner/alice"))
+        .unwrap();
+    workspace
+        .add_source_connection(&engine, "fake", None, None, &values("bob", "owner/bob"))
+        .unwrap();
+    drop(workspace);
+    remote.0.lock().unwrap().rate_limited_account = Some("alice".into());
+
+    let clock = std::sync::Arc::new(TestClock::default());
+    let coordinator = RefreshCoordinator::new(clock.clone(), RefreshPolicy::default());
+    let Run::Ran(first) = coordinator.tick(&engine, &open).unwrap() else {
+        unreachable!()
+    };
+    assert_eq!(first.failures[0].connection_id.as_deref(), Some("fake"));
+    let statuses = open().unwrap().source_statuses().unwrap();
+    assert_eq!(
+        statuses[1].health,
+        ticketd_core::source::SourceHealth::Waiting
+    );
+    clock.0.store(2, std::sync::atomic::Ordering::Relaxed);
+    let Run::Ran(second) = coordinator.tick(&engine, &open).unwrap() else {
+        unreachable!()
+    };
+    assert!(second.failures.is_empty());
+    let statuses = open().unwrap().source_statuses().unwrap();
+    assert_eq!(
+        statuses[0].health,
+        ticketd_core::source::SourceHealth::Delayed
+    );
+    assert_eq!(
+        statuses[1].health,
+        ticketd_core::source::SourceHealth::Synced
+    );
+}
+
+#[derive(Default)]
+struct TestClock(std::sync::atomic::AtomicU64);
+
+impl Clock for TestClock {
+    fn now_secs(&self) -> u64 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+fn values(account: &str, repository: &str) -> ticketd_core::source::ConfigValues {
+    [
+        ("assignee".into(), serde_json::json!(account)),
+        ("repositories".into(), serde_json::json!([repository])),
+    ]
+    .into_iter()
+    .collect()
 }

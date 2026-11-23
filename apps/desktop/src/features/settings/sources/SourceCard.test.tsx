@@ -191,15 +191,19 @@ test("preview lists matches, then Save turns discovery on without importing at o
   expect(panel.textContent).toContain("1 issue matches");
   expect(panel.textContent).toContain("First issue");
   expect(panel.textContent).toContain("nothing has been imported");
-  expect(sourcesClient.preview).toHaveBeenCalledWith("github", {
-    repositories: ["o/r"],
-  });
+  expect(sourcesClient.preview).toHaveBeenCalledWith(
+    "github",
+    { repositories: ["o/r"] },
+    undefined,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await screen.findByText(/Matching issues are imported on the next sync/);
-  expect(sourcesClient.save).toHaveBeenCalledWith("github", {
-    repositories: ["o/r"],
-  });
+  expect(sourcesClient.save).toHaveBeenCalledWith(
+    "github",
+    { repositories: ["o/r"] },
+    undefined,
+  );
   expect(panelStatus()).toBe("Saved configuration");
 });
 
@@ -373,9 +377,11 @@ test("conditional settings, advanced fields and setup links use the source schem
   fireEvent.change(screen.getByLabelText(/Site/), { target: { value: "" } });
   expect(screen.queryByRole("textbox", { name: "Project key" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
-  expect(sourcesClient.preview).toHaveBeenLastCalledWith("github", {
-    repositories: ["o/r"],
-  });
+  expect(sourcesClient.preview).toHaveBeenLastCalledWith(
+    "github",
+    { repositories: ["o/r"] },
+    undefined,
+  );
 });
 
 test("a saved configuration is shown as saved until edited", () => {
@@ -418,6 +424,7 @@ test("dynamic suggestions come from the connector and can be picked", async () =
     "repositories",
     "",
     {},
+    undefined,
   );
   fireEvent.click(screen.getByRole("button", { name: "Add o/alpha" }));
   expect(screen.getByRole("button", { name: "Remove o/alpha" })).toBeTruthy();

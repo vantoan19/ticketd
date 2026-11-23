@@ -153,6 +153,9 @@ pub(crate) fn migrate_contract_data(connection: &Connection) -> Result<(), Error
         ("external_identities", "partition", "TEXT"),
         ("publication_attempts", "partition", "TEXT"),
     ] {
+        if table == "source_configurations" && !crate::backup::table_exists(connection, table)? {
+            continue;
+        }
         crate::format::add_column_if_missing(connection, table, column, definition)?;
     }
     Ok(())
@@ -160,6 +163,9 @@ pub(crate) fn migrate_contract_data(connection: &Connection) -> Result<(), Error
 
 /// Device-local connection settings, affinity and connection-specific refresh state.
 pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> {
+    if crate::backup::table_exists(connection, "source_connections")? {
+        return Ok(());
+    }
     connection.execute_batch(
         "CREATE TABLE source_connections (
              id TEXT PRIMARY KEY, name TEXT NOT NULL, provider TEXT NOT NULL, site TEXT NOT NULL,
@@ -218,7 +224,10 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
         )?;
         connection.execute(
             "INSERT INTO publication_connections
-             SELECT id, ?2 FROM publication_attempts WHERE provider = ?1 AND status IN ('in_flight', 'unresolved')",
+             SELECT a.id, ?2 FROM publication_attempts a
+             JOIN source_configurations c ON c.provider = a.provider
+             WHERE a.provider = ?1 AND a.status IN ('in_flight', 'unresolved')
+               AND julianday(c.saved_at) <= julianday(a.started_at)",
             params![provider, id],
         )?;
     }
@@ -413,6 +422,17 @@ impl Workspace {
     }
 
     /// The ID an add operation will use unless another connection is added first.
+    pub fn test_source_connection(
+        &self,
+        engine: &Engine,
+        id: &str,
+    ) -> Result<ConnectionInfo, Error> {
+        let saved =
+            configured_source(&self.connection, id)?.ok_or_else(|| unknown_connection(id))?;
+        let engine = engine.for_connection(&saved.saved.provider, id, &saved.saved.config);
+        Ok(saved.check(&engine)?.connection)
+    }
+
     pub fn next_source_connection_id(&self, provider: &str) -> Result<String, Error> {
         next_connection_id(&self.connection, provider)
     }
@@ -523,6 +543,11 @@ impl Workspace {
             }
         };
         let engine = engine.for_connection(provider, id, raw);
+        if add.is_none()
+            && let Some(previous) = &previous
+        {
+            previous.verify_effective_site(&engine)?;
+        }
         let config = engine.validate_configuration(provider, raw)?;
         let (preview, derived, verified) =
             self.preview_source_with_config(&engine, provider, &config)?;
@@ -693,6 +718,31 @@ struct ConfiguredSource {
 }
 
 impl ConfiguredSource {
+    fn verify_effective_site(&self, engine: &Engine) -> Result<(), SourceError> {
+        if engine
+            .effective_site(&self.saved.provider)?
+            .is_some_and(|site| site != self.site)
+        {
+            return Err(SourceError::InvalidConfiguration(vec![
+                FieldIssue::for_field(
+                    "site",
+                    format!(
+                        "the provider's current site differs from the site saved for {}",
+                        self.saved.name
+                    ),
+                ),
+            ]));
+        }
+        Ok(())
+    }
+
+    fn check(&self, engine: &Engine) -> Result<ConnectionCheck, SourceError> {
+        self.verify_effective_site(engine)?;
+        let checked = engine.check(&self.saved.provider, &self.saved.config)?;
+        self.verify_account(&checked.connection)?;
+        Ok(checked)
+    }
+
     fn verify_account(&self, actual: &ConnectionInfo) -> Result<(), SourceError> {
         let provider = &self.saved.provider;
         if actual.site == self.site
@@ -917,17 +967,17 @@ pub(crate) fn retain_connections(
         )?;
     }
     let mut bindings = current.prepare(
-        "SELECT p.attempt_id, p.connection_id, a.provider, a.destination, a.started_at
+        "SELECT p.attempt_id, p.connection_id, a.provider, a.destination, a.started_at, a.title, a.body
          FROM publication_connections p JOIN publication_attempts a ON p.attempt_id = a.id",
     )?;
     let mut rows = bindings.query([])?;
     while let Some(row) = rows.next()? {
-        let values = (0..5)
+        let values = (0..7)
             .map(|index| row.get::<_, rusqlite::types::Value>(index))
             .collect::<Result<Vec<_>, _>>()?;
         restored.execute(
             "INSERT INTO publication_connections
-             SELECT id, ?2 FROM publication_attempts WHERE id = ?1 AND provider = ?3 AND destination = ?4 AND started_at = ?5",
+             SELECT id, ?2 FROM publication_attempts WHERE id = ?1 AND provider = ?3 AND destination = ?4 AND started_at = ?5 AND title = ?6 AND body = ?7",
             rusqlite::params_from_iter(values),
         )?;
     }

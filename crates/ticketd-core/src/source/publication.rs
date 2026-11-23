@@ -1160,11 +1160,9 @@ impl Workspace {
         // The remote write. Nothing is held open: another process may read or
         // write the workspace meanwhile and sees the attempt in flight.
         let scoped = engine.for_connection(provider, connection_id, &started.source.saved.config);
-        let verified = scoped
-            .check_connection(provider, &started.source.saved.config)
-            .and_then(|actual| started.source.verify_account(&actual));
+        let verified = started.source.check(&scoped);
         let (result, sent) = match verified {
-            Ok(()) => (
+            Ok(_) => (
                 scoped.publish(provider, &started.source.saved.config, &started.request),
                 true,
             ),
@@ -1542,6 +1540,8 @@ impl Workspace {
                 label: "Attach the created issue".into(),
                 detail: if running {
                     "Wait for the request to finish first.".into()
+                } else if source.is_none() {
+                    "The original publication connection is unavailable on this desktop.".into()
                 } else if let Some(conflict) = conflict {
                     format!("Not possible: {}", conflict.message)
                 } else if attempt.issue.is_some() {
@@ -1566,6 +1566,8 @@ impl Workspace {
                 label: "Confirm nothing was created".into(),
                 detail: if running {
                     "Wait for the request to finish first.".into()
+                } else if source.is_none() {
+                    "The original publication connection is unavailable on this desktop.".into()
                 } else if attempt.issue.is_some() {
                     "Not possible: the issue is known to exist.".into()
                 } else if !candidates.is_empty() {
@@ -2077,7 +2079,7 @@ fn verified_publication_engine(
 ) -> Result<Engine, SourceError> {
     let saved = &source.saved;
     let scoped = engine.for_connection(&saved.provider, &saved.id, &saved.config);
-    source.verify_account(&scoped.check_connection(&saved.provider, &saved.config)?)?;
+    source.check(&scoped)?;
     Ok(scoped)
 }
 

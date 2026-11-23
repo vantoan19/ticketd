@@ -137,7 +137,9 @@ test("an open external ticket offers only local progress and says progress stays
   ).toEqual(["Done", "Canceled", "Duplicate"]);
   expect(screen.getByText("Set by GitHub when the issue closes")).toBeTruthy();
   expect(
-    screen.getByText(/Your progress, kept in ticketd. GitHub controls when the issue closes/),
+    screen.getByText(
+      /Your progress, kept in ticketd. GitHub controls when the issue closes/,
+    ),
   ).toBeTruthy();
 });
 
@@ -196,9 +198,7 @@ test("an unrecognized closure is flagged instead of guessed", async () => {
     }),
   );
   expect(
-    screen.getByText(
-      /GitHub reported an unrecognized state/,
-    ),
+    screen.getByText(/GitHub reported an unrecognized state/),
   ).toBeTruthy();
   expect(screen.queryByText("Agent: github")).toBeNull();
   fireEvent.click(screen.getByRole("combobox", { name: "Status: Todo" }));

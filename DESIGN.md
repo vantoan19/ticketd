@@ -140,11 +140,11 @@ Ready and Blocked are availability indicators, not extra statuses. Canceled and 
 
 Each dot color keeps one meaning across every view:
 
-| Dot    | Value     | Meaning                                                                                                                      |
-| ------ | --------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Green  | `#45A557` | Ready, and other positive states such as an external source that is open and synced                                          |
+| Dot    | Value     | Meaning                                                                                                                     |
+| ------ | --------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Green  | `#45A557` | Ready, and other positive states such as an external source that is open and synced                                         |
 | Orange | `#FF990A` | Blocked, and other states that need attention: Source unavailable, an unrecognized tracker state, an unresolved publication |
-| Blue   | `#0062D1` | Unread                                                                                                                       |
+| Blue   | `#0062D1` | Unread                                                                                                                      |
 
 Transient and settled states, such as Refreshing GitHub… or Closed on GitHub, use words without a dot.
 
@@ -652,13 +652,13 @@ Settings is a dedicated page made of pages: the section nav opens exactly one se
 
 **Nav.** The nav is 232px wide. From the top: **Back to {the view Settings was opened from}** ("Back to tickets", "Back to Attachments"); a **Search settings** entry, a 32px nav row like the others (never drawn as an input), which shows a non-empty query as muted words and a ⌘F hint (Ctrl+F outside macOS) and opens the Search page, where that shortcut (⌘F on macOS, Ctrl+F elsewhere, never both) also leads while Settings is open; then the groups below. Each item has a 16px icon, the active item uses the accent fill with `aria-current="page"` (one `Glide` highlight that travels to the page that opens), and every item opens its own page. The open page's content fades out over `--dur-exit`, out of reach while it does (the page is `inert`: nothing in it takes focus or a click), then the next page arrives from a soft blur, its header first and the rest one `--stagger` behind (the Settings page's own entrance, section 10). Below 768px the nav is the navigation sheet (at most 280px, or the window less 32px), opened from the open page's name in the panel bar ("☰ Appearance ▾"), which carries an attention dot while a section needs setup. Links from elsewhere, such as the Attachment Library's, open the page that holds the setting.
 
-| Group       | Sections                                                                                         |
-| ----------- | ------------------------------------------------------------------------------------------------ |
-| Preferences | Appearance, Attention                                                                            |
-| Workspace   | Location, Attachments, Backups, Export                                                           |
-| Agents      | Command line, Agent skills, Chat (Experimental badge)                                            |
+| Group       | Sections                                                     |
+| ----------- | ------------------------------------------------------------ |
+| Preferences | Appearance, Attention                                        |
+| Workspace   | Location, Attachments, Backups, Export                       |
+| Agents      | Command line, Agent skills, Chat (Experimental badge)        |
 | Connections | Google Drive, Sources, then the available source connections |
-| Help        | Keyboard shortcuts, Diagnostics, About                                                           |
+| Help        | Keyboard shortcuts, Diagnostics, About                       |
 
 The list lives in `settings-sections.ts`; a section is added there with its page. Two indicators sit at the end of an item and carry a spoken label: an attention dot, "Needs setup", on Command line (the tool is not found or needs attention), on Agent skills (a detected agent lacks the skill, or its copy needs attention) and on Chat (Chat is on and no harness can start a Chat); and a positive dot, "Connected", on a source with a saved configuration. The page says the same words in the same tone. Pages that change what an indicator reads ask for it again, so the dot follows without reopening Settings.
 

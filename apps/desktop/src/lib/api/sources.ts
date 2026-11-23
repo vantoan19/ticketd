@@ -431,19 +431,17 @@ export const sourcesClient = {
     config: SourceConfig,
     connection?: string,
   ) {
-    return z
-      .array(choiceOptionSchema)
-      .parse(
-        await structured(
-          invoke("source_options", {
-            provider,
-            field,
-            query,
-            config,
-            ...(connection && { connection }),
-          }),
-        ),
-      );
+    return z.array(choiceOptionSchema).parse(
+      await structured(
+        invoke("source_options", {
+          provider,
+          field,
+          query,
+          config,
+          ...(connection && { connection }),
+        }),
+      ),
+    );
   },
   /** Lists what discovery would match. Imports and saves nothing. */
   async preview(provider: string, config: SourceConfig, connection?: string) {

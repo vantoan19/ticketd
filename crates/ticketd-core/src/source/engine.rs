@@ -103,6 +103,10 @@ impl Engine {
         }
     }
 
+    pub(super) fn effective_site(&self, provider: &str) -> Result<Option<String>, SourceError> {
+        Ok(self.connector(provider)?.effective_site())
+    }
+
     /// An engine with no connectors.
     pub fn new() -> Self {
         Self::default()

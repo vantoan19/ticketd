@@ -104,6 +104,13 @@ impl Drop for Running<'_> {
     }
 }
 
+fn timestamp(seconds: u64) -> Option<String> {
+    i64::try_from(seconds)
+        .ok()
+        .and_then(|seconds| chrono::DateTime::from_timestamp(seconds, 0))
+        .map(|time| time.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
+}
+
 impl RefreshCoordinator {
     /// The first scheduled tick is due immediately (desktop startup).
     pub fn new(clock: Arc<dyn Clock>, policy: RefreshPolicy) -> Self {
@@ -276,7 +283,11 @@ impl RefreshCoordinator {
             due
         };
         let _running = Running(self);
-        let result = workspace.refresh_selected(engine, &RefreshOptions::default(), Some(&due));
+        let options = RefreshOptions {
+            ticket: None,
+            now: timestamp(now),
+        };
+        let result = workspace.refresh_selected(engine, &options, Some(&due));
         self.feed_connections(&due, &result);
         result.map(Run::Ran)
     }
@@ -303,7 +314,7 @@ impl RefreshCoordinator {
             let workspace = workspace.borrow_mut();
             let options = RefreshOptions {
                 ticket: ticket.map(str::to_owned),
-                now: None,
+                now: timestamp(self.clock.now_secs()),
             };
             let due = if let Some(id) = connection {
                 vec![id.to_owned()]

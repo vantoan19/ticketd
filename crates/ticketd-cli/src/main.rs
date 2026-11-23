@@ -2326,9 +2326,7 @@ fn source_command(
             serde_json::to_string(&workspace.source_connection(&connection)?)?
         }
         SourceCommand::Test { connection } => {
-            let saved = workspace.source_connection(&connection)?;
-            let scoped = engine.for_connection(&saved.provider, &saved.id, &saved.config);
-            serde_json::to_string(&scoped.check_connection(&saved.provider, &saved.config)?)?
+            serde_json::to_string(&workspace.test_source_connection(&engine, &connection)?)?
         }
         SourceCommand::Options {
             connection,

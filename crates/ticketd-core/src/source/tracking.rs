@@ -1081,13 +1081,8 @@ fn gather_connection(
     let mut read_partitions: Vec<String> = Vec::new();
     let mut skipped_partitions: Vec<String> = Vec::new();
     let checked = configured.zip(engine).map(|(source, engine)| {
-        let derived = match engine
-            .check(&provider, &source.saved.config)
-            .and_then(|check| {
-                source.verify_account(&check.connection)?;
-                Ok(check.derived)
-            }) {
-            Ok(derived) => Some(derived),
+        let derived = match source.check(engine) {
+            Ok(checked) => Some(checked.derived),
             Err(error) => {
                 retry_after_secs = rate_limit_hold(&error);
                 let failure = failure_of(&error);

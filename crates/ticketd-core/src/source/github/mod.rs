@@ -404,6 +404,10 @@ impl Connector for GithubConnector {
             .then(|| Box::new(Self::ambient_for(Some(id), account)) as Box<dyn Connector>)
     }
 
+    fn effective_site(&self) -> Option<String> {
+        Some(self.site())
+    }
+
     fn descriptor(&self) -> ConnectorDescriptor {
         ConnectorDescriptor {
             provider: PROVIDER.into(),

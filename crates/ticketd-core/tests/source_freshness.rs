@@ -156,8 +156,8 @@ fn provider_checked_count_tracks_accepted_runs_and_survives_failures_and_reopen(
     );
     assert_eq!(status.last_refreshed_at.as_deref(), Some(T1));
     assert_eq!(
-        f.workspace.export().unwrap()["source_status"][0]["last_checked_tickets"],
-        3
+        f.workspace.export().unwrap()["source_status"],
+        serde_json::json!([])
     );
 
     // A single-ticket read is not a whole-provider run.
