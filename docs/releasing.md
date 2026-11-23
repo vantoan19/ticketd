@@ -211,7 +211,7 @@ Releases are **unsigned preview builds** until signing is set up; see
 [#534](https://github.com/vantoan19/ticketd/issues/534) for how comparable projects
 handle signing. Release notes and the install guide must say so and explain the
 platform warnings: on macOS, remove the quarantine attribute
-(`xattr -d com.apple.quarantine`) or use System Settings → Privacy & Security →
+(`/usr/bin/xattr -d com.apple.quarantine`) or use System Settings → Privacy & Security →
 Open Anyway; on Windows, SmartScreen's More info → Run anyway.
 
 For OS signing requirements, see the [Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/) and [Windows signing guide](https://v2.tauri.app/distribute/sign/windows/).
