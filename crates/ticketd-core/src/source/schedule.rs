@@ -18,6 +18,7 @@
 
 use std::{
     borrow::BorrowMut,
+    collections::HashMap,
     sync::{Arc, Condvar, Mutex, MutexGuard},
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -77,7 +78,12 @@ struct State {
     running: bool,
     next_due: u64,
     failures: u32,
-    hold_loaded: bool,
+    connections: HashMap<String, ConnectionSchedule>,
+}
+
+struct ConnectionSchedule {
+    next_due: u64,
+    failures: u32,
 }
 
 pub struct RefreshCoordinator {
@@ -109,7 +115,7 @@ impl RefreshCoordinator {
                 running: false,
                 next_due,
                 failures: 0,
-                hold_loaded: false,
+                connections: HashMap::new(),
             }),
             idle: Condvar::new(),
         }
@@ -211,20 +217,68 @@ impl RefreshCoordinator {
         result
     }
 
-    /// One scheduled tick against a workspace opened on demand, so nothing is
-    /// held between ticks. The first tick of a process also honors a rate-limit
-    /// hold persisted by earlier runs.
+    /// Refreshes only connections that are due. The first connection starts
+    /// immediately; the others join at two-second intervals on startup.
     pub fn tick<W: BorrowMut<Workspace>>(
         &self,
         engine: &Engine,
         open: &dyn Fn() -> Result<W, Error>,
     ) -> Result<Run<RefreshReport>, Error> {
-        self.load_hold(open)?;
-        self.run_if_due(|| {
-            open()?
-                .borrow_mut()
-                .refresh_sources(engine, &RefreshOptions::default())
-        })
+        if self.is_refreshing() {
+            return Ok(Run::Skipped(Skip::Running));
+        }
+        let mut workspace = open()?;
+        let workspace = workspace.borrow_mut();
+        let now = self.clock.now_secs();
+        let saved = workspace.saved_sources()?;
+        let statuses = workspace.source_statuses()?;
+        let due = {
+            let mut state = self.lock();
+            if state.running {
+                return Ok(Run::Skipped(Skip::Running));
+            }
+            let mut due = Vec::new();
+            let mut wait = u64::MAX;
+            for (index, source) in saved.into_iter().enumerate() {
+                let hold = statuses
+                    .iter()
+                    .find(|status| status.connection_id.as_deref() == Some(&source.id))
+                    .and_then(|status| status.retry_after.as_deref())
+                    .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
+                    .and_then(|time| u64::try_from(time.timestamp()).ok())
+                    .unwrap_or(0);
+                let schedule = state
+                    .connections
+                    .entry(source.id.clone())
+                    .or_insert_with(|| ConnectionSchedule {
+                        next_due: now.saturating_add(
+                            u64::try_from(index).unwrap_or(u64::MAX).saturating_mul(2),
+                        ),
+                        failures: 0,
+                    });
+                let next = schedule.next_due.max(hold);
+                if now >= next {
+                    due.push(source.id);
+                } else {
+                    wait = wait.min(next - now);
+                }
+            }
+            if due.is_empty() {
+                return Ok(Run::Skipped(Skip::NotDue {
+                    in_secs: if wait == u64::MAX {
+                        self.policy.interval_secs
+                    } else {
+                        wait
+                    },
+                }));
+            }
+            state.running = true;
+            due
+        };
+        let _running = Running(self);
+        let result = workspace.refresh_selected(engine, &RefreshOptions::default(), Some(&due));
+        self.feed_connections(&due, &result);
+        result.map(Run::Ran)
     }
 
     /// An explicit refresh of everything, or of one ticket by reference.
@@ -234,32 +288,76 @@ impl RefreshCoordinator {
         open: &dyn Fn() -> Result<W, Error>,
         ticket: Option<&str>,
     ) -> Result<RefreshReport, Error> {
-        self.run_explicit(ticket.is_none(), || {
-            open()?.borrow_mut().refresh_sources(
-                engine,
-                &RefreshOptions {
-                    ticket: ticket.map(str::to_owned),
-                    now: None,
-                },
-            )
+        self.refresh_connection_now(engine, open, None, ticket)
+    }
+
+    pub fn refresh_connection_now<W: BorrowMut<Workspace>>(
+        &self,
+        engine: &Engine,
+        open: &dyn Fn() -> Result<W, Error>,
+        connection: Option<&str>,
+        ticket: Option<&str>,
+    ) -> Result<RefreshReport, Error> {
+        self.run_explicit(false, || {
+            let mut workspace = open()?;
+            let workspace = workspace.borrow_mut();
+            let options = RefreshOptions {
+                ticket: ticket.map(str::to_owned),
+                now: None,
+            };
+            let due = if let Some(id) = connection {
+                vec![id.to_owned()]
+            } else {
+                workspace
+                    .saved_sources()?
+                    .into_iter()
+                    .map(|source| source.id)
+                    .collect()
+            };
+            let result = if let Some(id) = connection {
+                workspace.refresh_connection(engine, id, &options)
+            } else {
+                workspace.refresh_sources(engine, &options)
+            };
+            if ticket.is_none() {
+                self.feed_connections(&due, &result);
+            }
+            result
         })
     }
 
-    fn load_hold<W: BorrowMut<Workspace>>(
-        &self,
-        open: &dyn Fn() -> Result<W, Error>,
-    ) -> Result<(), Error> {
-        if self.lock().hold_loaded {
-            return Ok(());
-        }
-        let hold = open()?.borrow_mut().source_hold_until()?;
+    fn feed_connections(&self, due: &[String], result: &Result<RefreshReport, Error>) {
+        let now = self.clock.now_secs();
         let mut state = self.lock();
-        if !state.hold_loaded {
-            state.hold_loaded = true;
-            if let Some(until) = hold {
-                state.next_due = state.next_due.max(until);
-            }
+        for id in due {
+            let schedule = state
+                .connections
+                .entry(id.clone())
+                .or_insert(ConnectionSchedule {
+                    next_due: now,
+                    failures: 0,
+                });
+            let failure = result.as_ref().ok().and_then(|report| {
+                report.failures.iter().find(|failure| {
+                    failure.connection_id.as_deref() == Some(id) && failure.interrupts()
+                })
+            });
+            let wait = if failure.is_some() || result.is_err() {
+                schedule.failures = schedule.failures.saturating_add(1);
+                self.policy
+                    .interval_secs
+                    .saturating_mul(1_u64 << schedule.failures.min(20))
+                    .min(self.policy.max_backoff_secs)
+                    .max(
+                        failure
+                            .and_then(|failure| failure.retry_after_secs)
+                            .unwrap_or(0),
+                    )
+            } else {
+                schedule.failures = 0;
+                self.policy.interval_secs
+            };
+            schedule.next_due = now.saturating_add(wait);
         }
-        Ok(())
     }
 }

@@ -1371,29 +1371,53 @@ impl From<ticketd_core::source::SourceError> for SourceFailure {
 struct SourceEntry {
     connector: ticketd_core::source::SourceDescription,
     saved: Option<ticketd_core::source::SavedSource>,
+    next_id: String,
 }
 
-/// The built-in sources and what is saved for each. Network commands below run
-/// off the UI thread; none holds a database handle while it waits.
+/// The available connectors and each of their device-local connections.
 #[tauri::command(async)]
 fn list_sources() -> Result<Vec<SourceEntry>, SourceFailure> {
     let workspace = open_workspace()?;
     let engine = ticketd_core::source::Engine::builtin();
-    engine
-        .descriptions()
-        .into_iter()
-        .map(|connector| {
-            let saved = workspace.saved_source(&connector.descriptor.provider)?;
-            Ok(SourceEntry { connector, saved })
-        })
-        .collect()
+    let saved = workspace.saved_sources()?;
+    let mut entries = Vec::new();
+    for connector in engine.descriptions() {
+        let provider = &connector.descriptor.provider;
+        let next_id = workspace.next_source_connection_id(provider)?;
+        let first = entries.len();
+        entries.extend(
+            saved
+                .iter()
+                .filter(|source| &source.provider == provider)
+                .map(|source| SourceEntry {
+                    connector: connector.clone(),
+                    saved: Some(source.clone()),
+                    next_id: next_id.clone(),
+                }),
+        );
+        if entries.len() == first {
+            entries.push(SourceEntry {
+                connector,
+                saved: None,
+                next_id,
+            });
+        }
+    }
+    Ok(entries)
 }
 #[tauri::command(async)]
 fn source_check_connection(
     provider: String,
     config: ticketd_core::source::ConfigValues,
+    connection: Option<String>,
 ) -> Result<ticketd_core::source::ConnectionInfo, SourceFailure> {
-    Ok(ticketd_core::source::Engine::builtin().check_connection(&provider, &config)?)
+    let engine = ticketd_core::source::Engine::builtin();
+    let scoped = engine.for_connection(
+        &provider,
+        connection.as_deref().unwrap_or(&provider),
+        &config,
+    );
+    Ok(scoped.check_connection(&provider, &config)?)
 }
 #[tauri::command(async)]
 fn source_options(
@@ -1401,8 +1425,15 @@ fn source_options(
     field: String,
     query: String,
     config: ticketd_core::source::ConfigValues,
+    connection: Option<String>,
 ) -> Result<Vec<ticketd_core::source::ChoiceOption>, SourceFailure> {
-    Ok(ticketd_core::source::Engine::builtin().options(&provider, &field, &query, &config)?)
+    let engine = ticketd_core::source::Engine::builtin();
+    let scoped = engine.for_connection(
+        &provider,
+        connection.as_deref().unwrap_or(&provider),
+        &config,
+    );
+    Ok(scoped.options(&provider, &field, &query, &config)?)
 }
 #[tauri::command(async)]
 fn source_configuration_summary(
@@ -1415,20 +1446,50 @@ fn source_configuration_summary(
 fn source_preview(
     provider: String,
     config: ticketd_core::source::ConfigValues,
+    connection: Option<String>,
 ) -> Result<ticketd_core::source::DiscoveryPreview, SourceFailure> {
-    Ok(open_workspace()?.preview_source(
-        &ticketd_core::source::Engine::builtin(),
+    let engine = ticketd_core::source::Engine::builtin();
+    let scoped = engine.for_connection(
         &provider,
+        connection.as_deref().unwrap_or(&provider),
         &config,
-    )?)
+    );
+    Ok(open_workspace()?.preview_source(&scoped, &provider, &config)?)
 }
 #[tauri::command(async)]
 fn save_source(
     provider: String,
     config: ticketd_core::source::ConfigValues,
+    connection: Option<String>,
 ) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
     let mut workspace = open_workspace()?;
-    Ok(workspace.save_source(&ticketd_core::source::Engine::builtin(), &provider, &config)?)
+    let engine = ticketd_core::source::Engine::builtin();
+    match connection {
+        Some(id) => Ok(workspace.update_source_connection(&engine, &id, &config)?),
+        None => Ok(workspace.save_source(&engine, &provider, &config)?),
+    }
+}
+#[tauri::command(async)]
+fn add_source_connection(
+    provider: String,
+    connection: String,
+    name: String,
+    config: ticketd_core::source::ConfigValues,
+) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
+    Ok(open_workspace()?.add_source_connection(
+        &ticketd_core::source::Engine::builtin(),
+        &provider,
+        Some(&connection),
+        Some(&name),
+        &config,
+    )?)
+}
+#[tauri::command(async)]
+fn rename_source_connection(
+    connection: String,
+    name: String,
+) -> Result<ticketd_core::source::SavedSource, SourceFailure> {
+    Ok(open_workspace()?.rename_source(&connection, &name)?)
 }
 
 /// The one refresh coordinator of this process: the startup and periodic runs and
@@ -1442,11 +1503,13 @@ struct Refresher(std::sync::Arc<ticketd_core::source::RefreshCoordinator>);
 #[tauri::command(async)]
 fn refresh_sources(
     ticket: Option<String>,
+    connection: Option<String>,
     refresher: tauri::State<'_, Refresher>,
 ) -> Result<ticketd_core::source::RefreshReport, SourceFailure> {
-    Ok(refresher.0.refresh_now(
+    Ok(refresher.0.refresh_connection_now(
         &ticketd_core::source::Engine::builtin(),
         &open_workspace,
+        connection.as_deref(),
         ticket.as_deref(),
     )?)
 }
@@ -1980,6 +2043,8 @@ pub fn run() -> Result<(), tauri::Error> {
             source_configuration_summary,
             source_preview,
             save_source,
+            add_source_connection,
+            rename_source_connection,
             last_backup,
             workspace_info,
             workspace_location,

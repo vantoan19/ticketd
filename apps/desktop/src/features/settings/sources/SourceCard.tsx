@@ -7,6 +7,8 @@ import {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { AlignLeft, CircleDot, Link, RefreshCw, UserRound } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
 import { FailureDetails } from "@/components/ui/failure-alert";
@@ -195,21 +197,32 @@ function Readback({ parts }: { parts: SummaryPart[] }) {
 export function SourceCard({
   entry,
   hidden = false,
+  adding,
 }: {
   entry: SourceEntry;
+  adding?: {
+    id: string;
+    onAdded: (source: SavedSource) => void;
+    onCancel: () => void;
+  };
   /** Keeps the page mounted but out of sight, so its draft and preview survive. */
   hidden?: boolean;
 }) {
   const now = useNow();
   const { connector } = entry;
   const { presentation, provider } = connector;
+  const [saved, setSaved] = useState<SavedSource | null>(entry.saved);
+  const [name, setName] = useState(connector.name);
+  const connectionId = adding?.id ?? saved?.id;
   const publishes = connector.capabilities.includes("publish");
   const syncedFields = connector.capabilities.includes("comments")
     ? "title, description, state and comments"
     : "title, description and state";
   const schedule = useSourceActivity();
-  const health = schedule.sources.find(
-    (item) => item.provider === connector.provider,
+  const health = schedule.sources.find((item) =>
+    connectionId
+      ? item.connection_id === connectionId
+      : item.provider === provider,
   );
   const lastRefreshed = health?.last_refreshed_at;
   const syncing =
@@ -217,7 +230,6 @@ export function SourceCard({
     health.health === "synced" ||
     health.health === "waiting";
   const fields = connector.schema.fields;
-  const [saved, setSaved] = useState<SavedSource | null>(entry.saved);
   const [draft, setDraft] = useState<Draft>(() =>
     draftFromConfig(fields, entry.saved?.config),
   );
@@ -275,7 +287,8 @@ export function SourceCard({
     !secretDeclared &&
     preview !== null &&
     !working &&
-    (dirty || saved === null);
+    (dirty || saved === null) &&
+    (!adding || name.trim().length > 0);
   const fieldErrors = new Map<string, string[]>();
   const formErrors = secretDeclared
     ? [
@@ -299,7 +312,13 @@ export function SourceCard({
   }
 
   const loadOptions: LoadOptions = (field, query) =>
-    sourcesClient.options(connector.provider, field, query, config);
+    sourcesClient.options(
+      connector.provider,
+      field,
+      query,
+      config,
+      connectionId,
+    );
 
   function edit(fieldKey: string, value: string | string[]) {
     setDraft((current) => ({ ...current, [fieldKey]: value }));
@@ -337,6 +356,7 @@ export function SourceCard({
       const info = await sourcesClient.checkConnection(
         connector.provider,
         config,
+        connectionId,
       );
       next = { status: "signed_in", account: info.account };
     } catch (reason) {
@@ -358,10 +378,22 @@ export function SourceCard({
     checked.current = true;
     firstCheck();
   }, [hidden]);
+  const [syncingNow, setSyncingNow] = useState(false);
+  async function refreshConnection(id: string) {
+    setSyncingNow(true);
+    try {
+      const report = await sourcesClient.refresh(undefined, id);
+      if (report.failures.length > 0) throw report.failures[0];
+    } catch (reason) {
+      setNotice(describeFailure(reason, "sync this connection").sentence);
+    } finally {
+      setSyncingNow(false);
+    }
+  }
   const previewMatches = () =>
     run(
       "previewing",
-      () => sourcesClient.preview(connector.provider, config),
+      () => sourcesClient.preview(connector.provider, config, connectionId),
       (result) => {
         setPreviewed({ key, preview: result });
         // The preview ran as this account: that answers the check too.
@@ -372,9 +404,13 @@ export function SourceCard({
   const save = () =>
     run(
       "saving",
-      () => sourcesClient.save(connector.provider, config),
+      () =>
+        adding
+          ? sourcesClient.add(connector.provider, adding.id, name, config)
+          : sourcesClient.save(connector.provider, config, connectionId),
       (outcome) => {
         setSaved(outcome.source);
+        adding?.onAdded(outcome.source);
         setDraft(draftFromConfig(fields, outcome.source.config));
         setPreviewed({
           key: configKey(outcome.source.config),
@@ -449,14 +485,25 @@ export function SourceCard({
           {barText}
         </p>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={working || !dirty}
-        onClick={discard}
-      >
-        Discard changes
-      </Button>
+      {adding ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={working}
+          onClick={adding.onCancel}
+        >
+          Cancel
+        </Button>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={working || !dirty}
+          onClick={discard}
+        >
+          Discard changes
+        </Button>
+      )}
       {!preview && (
         <Button
           variant="outline"
@@ -468,7 +515,7 @@ export function SourceCard({
         </Button>
       )}
       <Button size="sm" disabled={!canSave} onClick={save}>
-        {busy === "saving" ? "Saving…" : "Save"}
+        {busy === "saving" ? "Saving…" : adding ? "Add connection" : "Save"}
       </Button>
     </div>
   );
@@ -519,7 +566,11 @@ export function SourceCard({
   return (
     <SettingsPage
       group="Connections"
-      label={connector.name}
+      label={
+        adding
+          ? `Add ${connector.name} connection`
+          : (entry.saved?.name ?? connector.name)
+      }
       icon={CircleDot}
       iconContent={<SourceIcon svg={presentation?.icon_svg} />}
       lede={`Bring matching ${connector.name} issues into this workspace. Their ${syncedFields} sync inward; ${connector.name} stays the place to edit them.`}
@@ -545,6 +596,22 @@ export function SourceCard({
         }
       >
         <SettingsList>
+          {adding && (
+            <SettingsRow variant="stacked">
+              <Field>
+                <FieldLabel htmlFor="source-connection-name">
+                  Connection name
+                </FieldLabel>
+                <Input
+                  id="source-connection-name"
+                  maxLength={100}
+                  value={name}
+                  disabled={working}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </Field>
+            </SettingsRow>
+          )}
           {/* Two facts, two rows: whether this workspace is connected (saved
               rules, as the ticket menu means it), and whose account the
               check reached (set SR-01). */}
@@ -658,8 +725,12 @@ export function SourceCard({
           <Button
             variant="ghost"
             size="sm"
-            disabled={schedule.refreshing || saved === null}
-            onClick={() => void schedule.refreshAll()}
+            disabled={schedule.refreshing || syncingNow || saved === null}
+            onClick={() =>
+              void (connectionId
+                ? refreshConnection(connectionId)
+                : schedule.refreshAll())
+            }
           >
             <RefreshCw aria-hidden="true" />
             Sync now
@@ -670,7 +741,7 @@ export function SourceCard({
           <SettingsRow
             title={
               <span role="status">
-                {schedule.refreshing
+                {schedule.refreshing || syncingNow
                   ? `Syncing ${connector.name}…`
                   : lastRefreshed
                     ? `${syncing ? "Synced" : "Last synced"} ${ago(lastRefreshed, now) ?? formatDateTime(lastRefreshed)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}`

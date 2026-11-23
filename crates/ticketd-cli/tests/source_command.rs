@@ -13,6 +13,7 @@ use std::{
 use serde_json::{Value, json};
 
 const TOKEN: &str = "ghp_cli_test_secret";
+const SECOND_TOKEN: &str = "ghp_second_cli_test_secret";
 
 /// Serves canned GitHub responses until the test process exits.
 fn serve() -> String {
@@ -44,9 +45,12 @@ fn serve() -> String {
             let mut body = vec![0; length];
             input.read_exact(&mut body).unwrap();
             let path = request.split_whitespace().nth(1).unwrap_or("").to_owned();
-            let authorized = request
-                .to_lowercase()
-                .contains(&format!("authorization: bearer {TOKEN}").to_lowercase());
+            let request_headers = request.to_lowercase();
+            let second = request_headers
+                .contains(&format!("authorization: bearer {SECOND_TOKEN}").to_lowercase());
+            let authorized = second
+                || request_headers
+                    .contains(&format!("authorization: bearer {TOKEN}").to_lowercase());
             let (status, body) = if !authorized {
                 ("401 Unauthorized", json!({"message": "Bad credentials"}))
             } else if request.starts_with("POST ") && path == "/repos/o/r/issues" {
@@ -78,7 +82,10 @@ fn serve() -> String {
                 // A repository the account can read but not create issues in.
                 ("200 OK", json!([]))
             } else if path == "/user" {
-                ("200 OK", json!({"login": "octo"}))
+                (
+                    "200 OK",
+                    json!({"login": if second { "other" } else { "octo" }}),
+                )
             } else if path.starts_with("/user/repos") {
                 (
                     "200 OK",
@@ -104,6 +111,16 @@ fn serve() -> String {
                     "200 OK",
                     json!([{"id": 601, "event": "closed", "actor": {"login": "bob"}, "state_reason": "completed",
                             "created_at": "2026-01-03T00:00:00Z"}]),
+                )
+            } else if path.starts_with("/repos/o/beta/issues") {
+                (
+                    "200 OK",
+                    if path.contains("/comments") || path.contains("/events") {
+                        json!([])
+                    } else {
+                        json!([{"id": 8, "number": 1, "title": "Other account issue", "state": "open",
+                        "html_url": "https://github.example/o/beta/issues/1", "created_at": "", "updated_at": ""}])
+                    },
                 )
             } else if path.starts_with("/repos/o/r/issues") {
                 (
@@ -143,6 +160,15 @@ impl Cli {
     }
 
     fn command(&self, args: &[&str], token: Option<&str>) -> Output {
+        self.command_with_second(args, token, None)
+    }
+
+    fn command_with_second(
+        &self,
+        args: &[&str],
+        token: Option<&str>,
+        second: Option<&str>,
+    ) -> Output {
         let mut command = Command::new(env!("CARGO_BIN_EXE_ticketd"));
         command
             .args(args)
@@ -156,9 +182,14 @@ impl Cli {
             .env("TICKETD_LOG", "ticketd_core::source=debug")
             .env_remove("GH_TOKEN")
             .env_remove("GITHUB_TOKEN")
-            .env_remove("TICKETD_GITHUB_TOKEN");
+            .env_remove("TICKETD_GITHUB_TOKEN")
+            .env_remove("TICKETD_SOURCE_GITHUB_TOKEN")
+            .env_remove("TICKETD_SOURCE_GITHUB_2_TOKEN");
         if let Some(token) = token {
             command.env("TICKETD_GITHUB_TOKEN", token);
+        }
+        if let Some(second) = second {
+            command.env("TICKETD_SOURCE_GITHUB_2_TOKEN", second);
         }
         command.output().unwrap()
     }
@@ -210,7 +241,7 @@ fn list_describes_the_github_connector_and_its_schema() {
         .iter()
         .map(|f| f["key"].as_str().unwrap())
         .collect();
-    assert_eq!(fields, ["repositories", "assignee", "labels"]);
+    assert_eq!(fields, ["repositories", "assignee", "labels", "account"]);
     let schema = &github["connector"]["schema"]["fields"];
     assert_eq!(schema[0]["required"], true);
     assert!(schema[0]["help"].is_string());
@@ -221,7 +252,14 @@ fn list_describes_the_github_connector_and_its_schema() {
 fn set_reports_required_pattern_and_connector_problems_before_preview() {
     let cli = Cli::new();
     let required = cli.fail(
-        &["source", "preview", "github", "--set", "assignee=octo"],
+        &[
+            "source",
+            "add",
+            "github",
+            "--preview",
+            "--set",
+            "assignee=octo",
+        ],
         Some(TOKEN),
     );
     assert!(required.contains("repositories are required"), "{required}");
@@ -229,8 +267,9 @@ fn set_reports_required_pattern_and_connector_problems_before_preview() {
     let pattern = cli.fail(
         &[
             "source",
-            "preview",
+            "add",
             "github",
+            "--preview",
             "--set",
             "repositories=o/r",
             "--set",
@@ -243,7 +282,7 @@ fn set_reports_required_pattern_and_connector_problems_before_preview() {
     let connector = cli.fail(
         &[
             "source",
-            "save",
+            "add",
             "github",
             "--set",
             "repositories=o/r",
@@ -257,12 +296,13 @@ second",
         connector.contains("labels") && connector.contains("without commas or line breaks"),
         "{connector}"
     );
-    assert!(cli.run(&["source", "show", "github"]).is_null());
+    assert!(cli.run(&["source", "list"])[0]["saved"].is_null());
 }
 
 #[test]
 fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it() {
     let cli = Cli::new();
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
     assert_eq!(cli.run(&["source", "test", "github"])["account"], "octo");
     let stderr = cli.fail(&["source", "test", "github"], Some("wrong-token"));
     let user_message = stderr
@@ -298,8 +338,9 @@ fn a_settings_file_that_cannot_be_used_is_named_with_what_was_wrong() {
     let stderr = cli.fail(
         &[
             "source",
-            "preview",
+            "add",
             "github",
+            "--preview",
             "--config-file",
             missing.to_str().unwrap(),
         ],
@@ -315,8 +356,9 @@ fn a_settings_file_that_cannot_be_used_is_named_with_what_was_wrong() {
     let stderr = cli.fail(
         &[
             "source",
-            "preview",
+            "add",
             "github",
+            "--preview",
             "--config-file",
             bad.to_str().unwrap(),
         ],
@@ -339,7 +381,14 @@ fn taking_over_a_local_ticket_says_it_is_already_local() {
 fn preview_lists_issues_without_pull_requests_and_without_descriptions() {
     let cli = Cli::new();
     let output = cli.command(
-        &["source", "preview", "github", "--set", "repositories=o/r"],
+        &[
+            "source",
+            "add",
+            "github",
+            "--preview",
+            "--set",
+            "repositories=o/r",
+        ],
         Some(TOKEN),
     );
     assert!(output.status.success());
@@ -351,16 +400,16 @@ fn preview_lists_issues_without_pull_requests_and_without_descriptions() {
     assert_eq!(preview["complete"], true);
     assert_eq!(preview["issues"][0]["display"], "o/r#1");
     // Previewing neither saves a source nor imports a ticket.
-    assert_eq!(cli.run(&["source", "show", "github"]), Value::Null);
+    assert!(cli.run(&["source", "list"])[0]["saved"].is_null());
     assert_eq!(cli.run(&["list"]), json!([]));
 }
 
 #[test]
-fn save_validates_previews_persists_and_imports_nothing() {
+fn add_validates_previews_persists_and_imports_nothing() {
     let cli = Cli::new();
     let saved = cli.run(&[
         "source",
-        "save",
+        "add",
         "github",
         "--set",
         "repositories=o/r",
@@ -385,37 +434,34 @@ fn save_validates_previews_persists_and_imports_nothing() {
 fn invalid_settings_and_provider_failures_do_not_save() {
     let cli = Cli::new();
     let stderr = cli.fail(
-        &["source", "save", "github", "--set", "repositories=nonsense"],
+        &["source", "add", "github", "--set", "repositories=nonsense"],
         Some(TOKEN),
     );
     assert!(stderr.contains("repositories"), "{stderr}");
     assert!(stderr.contains("owner/name"), "{stderr}");
     let stderr = cli.fail(
-        &["source", "save", "github", "--set", "bogus=1"],
+        &["source", "add", "github", "--set", "bogus=1"],
         Some(TOKEN),
     );
     assert!(stderr.contains("bogus"), "{stderr}");
-    let stderr = cli.fail(&["source", "save", "github"], Some(TOKEN));
+    let stderr = cli.fail(&["source", "add", "github"], Some(TOKEN));
     assert!(stderr.contains("are required"), "{stderr}");
     let stderr = cli.fail(
-        &[
-            "source",
-            "save",
-            "github",
-            "--set",
-            "repositories=o/missing",
-        ],
+        &["source", "add", "github", "--set", "repositories=o/missing"],
         Some(TOKEN),
     );
     assert!(stderr.contains("was not found"), "{stderr}");
     let stderr = cli.fail(
-        &["source", "save", "github", "--set", "repositories=o/r"],
+        &["source", "add", "github", "--set", "repositories=o/r"],
         Some("wrong"),
     );
     assert!(stderr.contains("rejected the credential"), "{stderr}");
-    assert_eq!(cli.run(&["source", "show", "github"]), Value::Null);
+    assert!(cli.run(&["source", "list"])[0]["saved"].is_null());
     let stderr = cli.fail(&["source", "show", "nowhere"], Some(TOKEN));
-    assert!(stderr.contains("no source named 'nowhere'"), "{stderr}");
+    assert!(
+        stderr.contains("no saved source connection named nowhere"),
+        "{stderr}"
+    );
 }
 
 #[test]
@@ -425,12 +471,14 @@ fn a_json_settings_file_and_option_suggestions_work_from_the_command_line() {
     std::fs::write(&file, r#"{"repositories": ["o/r"]}"#).unwrap();
     let preview = cli.run(&[
         "source",
-        "preview",
+        "add",
         "github",
+        "--preview",
         "--config-file",
         file.to_str().unwrap(),
     ]);
     assert_eq!(preview["matched"], 1);
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
     let options = cli.run(&[
         "source",
         "options",
@@ -445,8 +493,8 @@ fn a_json_settings_file_and_option_suggestions_work_from_the_command_line() {
 #[test]
 fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
-    let report = cli.run(&["source", "refresh"]);
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    let report = cli.run(&["source", "refresh", "github"]);
     assert_eq!(report["imported"], json!(["T-KQ1"]));
     assert_eq!(report["failures"], json!([]));
     let shown = cli.run(&["show", "T-KQ1"]);
@@ -489,13 +537,16 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     let stderr = cli.fail(&["list", "--source", "githb"], None);
     assert!(stderr.contains("unknown source 'githb'"), "{stderr}");
     // Refreshing the single ticket observes that the issue closed.
-    let report = cli.run(&["source", "refresh", "--ticket", "T-KQ1"]);
+    let report = cli.run(&["source", "refresh", "github", "--ticket", "T-KQ1"]);
     assert_eq!(report["updated"], json!(["T-KQ1"]));
     let shown = cli.run(&["show", "T-KQ1"]);
-    assert_eq!(shown["status"], "Done");
+    assert_eq!(shown["status", "github"], "Done");
     assert_eq!(shown["title"], "Real issue, renamed");
     // A failed refresh reports and fails, and leaves the saved content alone.
-    let output = cli.command(&["source", "refresh", "--ticket", "T-KQ1"], Some("wrong"));
+    let output = cli.command(
+        &["source", "refresh", "github", "--ticket", "T-KQ1"],
+        Some("wrong"),
+    );
     assert_eq!(output.status.code(), Some(1));
     let report: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(report["failures"][0]["code"], "unauthenticated");
@@ -509,8 +560,8 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
 #[test]
 fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_its_content() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
-    cli.run(&["source", "refresh"]);
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.run(&["source", "refresh", "github"]);
     let agent = ["--agent", "codex"];
 
     let stderr = cli.fail(
@@ -543,7 +594,7 @@ fn an_attributed_agent_records_progress_on_an_external_ticket_but_cannot_edit_it
     assert!(stderr.contains("GitHub"), "{stderr}");
 
     let changed = cli.run(&[&["change", "T-KQ1", "--status", "In progress"], &agent[..]].concat());
-    assert_eq!(changed["status"], "In progress");
+    assert_eq!(changed["status", "github"], "In progress");
     let activity = cli.run(
         &[
             &["activity", "add", "T-KQ1", "--brief", "Started"],
@@ -594,7 +645,7 @@ fn local_ticket(cli: &Cli) -> String {
 #[test]
 fn publish_reports_the_core_attachment_preflight_without_creating_an_issue() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
     let reference = local_ticket(&cli);
     let uri = "ticketd://attachment/foreign-workspace/trace-file";
     cli.run(&["change", &reference, "--body", &format!("[trace]({uri})")]);
@@ -613,7 +664,7 @@ fn publish_reports_the_core_attachment_preflight_without_creating_an_issue() {
 #[test]
 fn publish_previews_then_creates_one_issue_and_replays_without_another() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
     let reference = local_ticket(&cli);
 
     let preview = cli.run(&["source", "publish", &reference, "--preview"]);
@@ -643,7 +694,7 @@ fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
     let cli = Cli::new();
     cli.run(&[
         "source",
-        "save",
+        "add",
         "github",
         "--set",
         "repositories=o/r,o/denied",
@@ -667,7 +718,7 @@ fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
     let cli = Cli::new();
     cli.run(&[
         "source",
-        "save",
+        "add",
         "github",
         "--set",
         "repositories=o/r,o/flaky",
@@ -698,7 +749,7 @@ fn an_unclear_answer_is_unresolved_visible_and_blocks_publishing_again() {
 fn unresolved_ticket(cli: &Cli) -> String {
     cli.run(&[
         "source",
-        "save",
+        "add",
         "github",
         "--set",
         "repositories=o/r,o/flaky",
@@ -787,21 +838,21 @@ fn resolve_not_created_needs_evidence_and_then_allows_publishing_again() {
 #[test]
 fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
-    cli.run(&["source", "refresh"]);
-    let status = cli.run(&["source", "status"]);
-    assert_eq!(status[0]["provider"], "github");
-    assert_eq!(status[0]["error"], Value::Null);
-    assert!(status[0]["last_refreshed_at"].is_string());
-    assert_eq!(status[0]["unavailable_tickets"], 0);
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.run(&["source", "refresh", "github"]);
+    let status = cli.run(&["source", "status", "github"]);
+    assert_eq!(status["provider"], "github");
+    assert_eq!(status["error"], Value::Null);
+    assert!(status["last_refreshed_at"].is_string());
+    assert_eq!(status["unavailable_tickets"], 0);
 
     // A refresh that cannot read the source fails, keeps the ticket, and says so.
-    let output = cli.command(&["source", "refresh"], Some("wrong"));
+    let output = cli.command(&["source", "refresh", "github"], Some("wrong"));
     assert_eq!(output.status.code(), Some(1));
-    let status = cli.run(&["source", "status"]);
-    assert_eq!(status[0]["error"]["code"], "unauthenticated");
-    assert!(status[0]["failing_since"].is_string());
-    assert_eq!(status[0]["unavailable_tickets"], 1);
+    let status = cli.run(&["source", "status", "github"]);
+    assert_eq!(status["error"]["code"], "unauthenticated");
+    assert!(status["failing_since"].is_string());
+    assert_eq!(status["unavailable_tickets"], 1);
     let shown = cli.run(&["show", "T-KQ1"]);
     assert_eq!(shown["title"], "Real issue");
     assert_eq!(shown["source"]["unavailable"]["code"], "unauthenticated");
@@ -814,12 +865,12 @@ fn status_reports_freshness_and_what_is_unavailable_after_a_failed_refresh() {
 #[test]
 fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it() {
     let cli = Cli::new();
-    cli.run(&["source", "save", "github", "--set", "repositories=o/r"]);
-    cli.run(&["source", "refresh"]);
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    cli.run(&["source", "refresh", "github"]);
     // Reachable tickets are not taken over.
     let stderr = cli.fail(&["source", "take-ownership", "T-KQ1"], None);
     assert!(stderr.contains("can still be read"), "{stderr}");
-    cli.command(&["source", "refresh"], Some("wrong"));
+    cli.command(&["source", "refresh", "github"], Some("wrong"));
     let taken = cli.run(&["source", "take-ownership", "T-KQ1", "--agent", "tester"]);
     assert_eq!(taken["reference"], "T-KQ1");
     assert_eq!(taken["title"], "Real issue");
@@ -836,10 +887,10 @@ fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it()
     );
     cli.run(&["change", "T-KQ1", "--title", "Mine"]);
     // A later refresh with working access neither resumes nor re-imports it.
-    let report = cli.run(&["source", "refresh"]);
+    let report = cli.run(&["source", "refresh", "github"]);
     assert_eq!(report["imported"], json!([]));
     assert_eq!(cli.run(&["show", "T-KQ1"])["title"], "Mine");
-    let stderr = cli.fail(&["source", "refresh", "--ticket", "T-KQ1"], None);
+    let stderr = cli.fail(&["source", "refresh", "github", "--ticket", "T-KQ1"], None);
     assert!(
         stderr.contains("not owned by an external source"),
         "{stderr}"
@@ -849,4 +900,80 @@ fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it()
             .to_string()
             .contains("ownership")
     );
+}
+
+#[test]
+fn two_connections_refresh_once_per_issue_and_publish_requires_a_choice() {
+    let cli = Cli::new();
+    let first = cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    assert_eq!(first["source"]["id"], "github");
+    let duplicate = cli.fail(
+        &["source", "add", "github", "--set", "repositories=o/r"],
+        Some(TOKEN),
+    );
+    assert!(
+        duplicate.contains("octo is already connected"),
+        "{duplicate}"
+    );
+    let run_second = |args: &[&str]| {
+        let output = cli.command_with_second(args, Some(TOKEN), Some(SECOND_TOKEN));
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(!String::from_utf8_lossy(&output.stdout).contains(SECOND_TOKEN));
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+    let second = run_second(&[
+        "source",
+        "add",
+        "github",
+        "--name",
+        "Other GitHub",
+        "--set",
+        "repositories=o/r,o/beta",
+    ]);
+    assert_eq!(second["source"]["id"], "github-2");
+    assert_eq!(second["source"]["account"], "other");
+    assert_eq!(
+        cli.run(&["source", "refresh", "github"])["imported"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        run_second(&["source", "refresh", "github-2"])["imported"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(cli.run(&["list"]).as_array().unwrap().len(), 2);
+    assert_eq!(
+        cli.run(&["source", "rename", "github-2", "Work"])["name"],
+        "Work"
+    );
+    assert_eq!(cli.run(&["source", "show", "github-2"])["id"], "github-2");
+    let local = local_ticket(&cli);
+    let error = cli.fail(&["source", "publish", &local, "--preview"], Some(TOKEN));
+    assert!(error.contains("select --connection"), "{error}");
+    let preview = cli.run(&[
+        "source",
+        "publish",
+        &local,
+        "--connection",
+        "github-2",
+        "--destination",
+        "o/beta",
+        "--preview",
+    ]);
+    assert_eq!(preview["destination"], "o/beta");
+    assert_eq!(preview["eligibility"]["kind"], "eligible");
+    let error = cli.command(&["source", "refresh", "github-2"], Some(TOKEN));
+    assert_eq!(error.status.code(), Some(1));
+    let failure: Value = serde_json::from_slice(&error.stdout).unwrap();
+    assert_eq!(failure["failures"][0]["code"], "unauthenticated");
+    assert_eq!(cli.run(&["source", "status", "github"])["health"], "synced");
 }

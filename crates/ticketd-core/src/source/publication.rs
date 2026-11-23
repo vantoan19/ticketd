@@ -43,9 +43,9 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    Capability, ConfigValues, ConfiguredSource, DestinationRules, Engine, ExternalIdentity,
-    ExternalIssue, ExternalRef, PublicationSearch, PublishRequest, SourceError, SourceFailure,
-    clock, configured_source,
+    Capability, ConfiguredSource, DestinationRules, Engine, ExternalIdentity, ExternalIssue,
+    ExternalRef, PublicationSearch, PublishRequest, SourceError, SourceFailure, clock,
+    configured_source,
     tracking::{self, Origin, failure_of},
 };
 use crate::{Error, Status, Ticket, Workspace, activities, history};
@@ -526,9 +526,9 @@ fn predates(issue_created_at: &str, started_at: &str) -> bool {
 
 /// A stable fingerprint (FNV-1a, 64 bit) of what a publication would send. It
 /// detects change between a preview and the send; it is not a security measure.
-fn fingerprint(title: &str, body: &str, destination: Option<&str>) -> String {
+fn fingerprint(connection: &str, title: &str, body: &str, destination: Option<&str>) -> String {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
-    for part in [title, body, destination.unwrap_or("")] {
+    for part in [connection, title, body, destination.unwrap_or("")] {
         for byte in part.bytes().chain(std::iter::once(0)) {
             hash ^= u64::from(byte);
             hash = hash.wrapping_mul(0x0100_0000_01b3);
@@ -923,32 +923,24 @@ fn require_target<'a>(
 }
 
 impl Workspace {
-    /// Selects an implicit publication provider when the choice is unambiguous.
+    /// Selects the connection for publication when the choice is unambiguous.
     pub fn default_publication_provider(&self, engine: &Engine) -> Result<String, Error> {
-        let publishing: Vec<_> = engine
-            .connectors()
+        let connected: Vec<_> = self
+            .saved_sources()?
             .into_iter()
-            .filter(|connector| connector.capabilities.contains(&super::Capability::Publish))
-            .map(|connector| connector.provider)
-            .collect();
-        if let [provider] = publishing.as_slice() {
-            return Ok(provider.clone());
-        }
-        let saved = self.saved_sources()?;
-        let connected: Vec<_> = publishing
-            .iter()
-            .filter(|provider| saved.iter().any(|source| &source.provider == *provider))
+            .filter(|source| engine.can_publish(&source.provider))
+            .map(|source| source.id)
             .collect();
         match connected.as_slice() {
-            [provider] => Ok((*provider).clone()),
-            _ if publishing.is_empty() => Err(SourceError::Unsupported("publishing").into()),
+            [id] => Ok(id.clone()),
             _ => Err(
                 SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
-                    "provider",
-                    format!(
-                        "must be selected with --provider; choose one of: {}",
-                        publishing.join(", ")
-                    ),
+                    "connection",
+                    if connected.is_empty() {
+                        "add a source connection that can publish first".to_owned()
+                    } else {
+                        format!("select --connection from: {}", connected.join(", "))
+                    },
                 )])
                 .into(),
             ),
@@ -964,9 +956,13 @@ impl Workspace {
         provider: &str,
         destination: Option<&str>,
     ) -> Result<PublicationPreview, Error> {
+        let connection_id = provider;
+        let target = configured_source(&self.connection, connection_id)?;
+        let provider = target
+            .as_ref()
+            .map_or(connection_id, |source| source.saved.provider.as_str());
         let descriptor = engine.descriptor(provider)?;
         let ticket = subject(&self.connection, reference)?;
-        let target = configured_source(&self.connection, provider)?;
         let rules = target.as_ref().map(|source| &source.derived.publication);
         let destinations = rules
             .map(|rules| rules.destinations.clone())
@@ -995,7 +991,7 @@ impl Workspace {
             reference: ticket.reference,
             provider: provider.to_owned(),
             provider_name: descriptor.name,
-            fingerprint: fingerprint(&ticket.title, &ticket.body, destination.as_deref()),
+            fingerprint: fingerprint(connection_id, &ticket.title, &ticket.body, destination.as_deref()),
             destination,
             destinations,
             title: ticket.title,
@@ -1045,7 +1041,11 @@ impl Workspace {
         reference: &str,
         options: &PublishOptions,
     ) -> Result<PublishOutcome, Error> {
-        let provider = options.provider.as_str();
+        let connection_id = options.provider.as_str();
+        let configured = configured_source(&self.connection, connection_id)?;
+        let provider = configured
+            .as_ref()
+            .map_or(connection_id, |source| source.saved.provider.as_str());
         let descriptor = engine.descriptor(provider)?;
         let can_publish = descriptor.capabilities.contains(&Capability::Publish);
         // `Err` from the scope's operation is an attempt that already published the
@@ -1074,11 +1074,14 @@ impl Workspace {
                 return Err(refuse(reason, message));
             }
             // Read the saved destinations under the same lock as the attempt.
-            let target = configured_source(transaction, provider)?;
+            let target = configured_source(transaction, connection_id)?;
             let target = match require_target(can_publish, &descriptor.name, target.as_ref()) {
                 Ok(target) => target,
                 Err((reason, message)) => return Err(refuse(reason, message)),
             };
+            if target.saved.provider != provider {
+                return Err(super::unknown_connection(connection_id));
+            }
             let rules = &target.derived.publication;
             let Some(destination) =
                 chosen_destination(options.destination.as_deref(), &rules.destinations)
@@ -1097,7 +1100,13 @@ impl Workspace {
             }
             // Send exactly what was previewed, or nothing.
             if let Some(expected) = &options.expected_fingerprint
-                && *expected != fingerprint(&ticket.title, &ticket.body, Some(&destination))
+                && *expected
+                    != fingerprint(
+                        connection_id,
+                        &ticket.title,
+                        &ticket.body,
+                        Some(&destination),
+                    )
             {
                 return Err(PublicationError::ChangedSincePreview {
                     reference: ticket.reference,
@@ -1120,6 +1129,10 @@ impl Workspace {
                     format!("+{LEASE_SECONDS} seconds"),
                 ],
             )?;
+            transaction.execute(
+                "INSERT INTO publication_connections (attempt_id, connection_id) VALUES (?1, ?2)",
+                params![attempt_id, connection_id],
+            )?;
             Ok(Ok(Started {
                 attempt_id,
                 reference: ticket.reference,
@@ -1129,7 +1142,7 @@ impl Workspace {
                     body: ticket.body,
                     destination,
                 },
-                config: target.saved.config.clone(),
+                source: target.clone(),
                 agent: options.agent.clone(),
             }))
         })? {
@@ -1145,10 +1158,20 @@ impl Workspace {
 
         // The remote write. Nothing is held open: another process may read or
         // write the workspace meanwhile and sees the attempt in flight.
-        let result = engine.publish(provider, &started.config, &started.request);
+        let scoped = engine.for_connection(provider, connection_id, &started.source.saved.config);
+        let verified = scoped
+            .check_connection(provider, &started.source.saved.config)
+            .and_then(|actual| started.source.verify_account(&actual));
+        let (result, sent) = match verified {
+            Ok(()) => (
+                scoped.publish(provider, &started.source.saved.config, &started.request),
+                true,
+            ),
+            Err(error) => (Err(error), false),
+        };
         match result {
             Ok(issue) => self.finish_created(&started, &descriptor.name, &issue, options),
-            Err(error) if error.ruled_out_creation() => {
+            Err(error) if !sent || error.ruled_out_creation() => {
                 // If this write fails the attempt stays in flight, which is the
                 // safe direction: it blocks until it can be resolved.
                 let _ = self.settle(
@@ -1413,7 +1436,7 @@ impl Workspace {
             }
             .into());
         };
-        let name = engine.descriptor(&attempt.provider)?.name;
+        let name = super::provider_display_name(&self.connection, &attempt.provider)?;
         let running = attempt.state == AttemptState::InFlight;
         let mut known = vec![format!(
             "ticketd asked {name} to create \"{}\" in {}.",
@@ -1468,16 +1491,19 @@ impl Workspace {
         let mut candidates_complete = None;
         let mut lookup_failure = None;
         let settled = search_settled(&attempt.started_at, &now);
-        if search
-            && !running
-            && attempt.issue.is_none()
-            && let Some(saved) = self.saved_source(&attempt.provider)?
-        {
-            match engine.find_published(
-                &attempt.provider,
-                &saved.config,
-                &search_for(&attempt, Some(&saved.account)),
-            ) {
+        let source = publication_connection(&self.connection, &attempt)?;
+        if search && !running && attempt.issue.is_none() {
+            let search_result = match source.as_ref() {
+                Some(source) => verified_publication_engine(engine, source).and_then(|engine| {
+                    engine.find_published(
+                        &attempt.provider,
+                        &source.saved.config,
+                        &search_for(&attempt, Some(&source.saved.account)),
+                    )
+                }),
+                None => Err(publication_connection_missing()),
+            };
+            match search_result {
                 Ok(found) => {
                     candidates = found
                         .matches
@@ -1499,8 +1525,11 @@ impl Workspace {
         // nothing. A search that failed or read only part of the window proves
         // nothing, so the action is not offered then.
         let search_blocks = lookup_failure.is_some() || candidates_complete == Some(false);
-        let not_created_available =
-            !running && attempt.issue.is_none() && candidates.is_empty() && !search_blocks;
+        let not_created_available = !running
+            && source.is_some()
+            && attempt.issue.is_none()
+            && candidates.is_empty()
+            && !search_blocks;
         let conflict = attempt
             .failure
             .as_ref()
@@ -1508,7 +1537,7 @@ impl Workspace {
         let actions = vec![
             ResolutionAction {
                 kind: ActionKind::Attach,
-                available: !running && conflict.is_none(),
+                available: !running && source.is_some() && conflict.is_none(),
                 label: "Attach the created issue".into(),
                 detail: if running {
                     "Wait for the request to finish first.".into()
@@ -1613,17 +1642,10 @@ impl Workspace {
                 source,
             })
         };
-        let Some(saved) = self.saved_source(&attempt.provider)? else {
-            return Err(unverified(SourceError::InvalidConfiguration(vec![
-                super::FieldIssue::for_field(
-                    "source",
-                    format!(
-                        "connect {} again before resolving this publication",
-                        super::provider_display_name(&self.connection, &attempt.provider)?
-                    ),
-                ),
-            ])));
-        };
+        let source = publication_connection(&self.connection, &attempt)?
+            .ok_or_else(|| unverified(publication_connection_missing()))?;
+        let saved = source.saved.clone();
+        let engine = verified_publication_engine(engine, &source).map_err(unverified)?;
         match &options.resolution {
             Resolution::Attach { issue } => {
                 let found = match (
@@ -1681,7 +1703,7 @@ impl Workspace {
                 )
             }
             Resolution::NotCreated => self.rule_out(
-                engine,
+                &engine,
                 &ticket,
                 &attempt,
                 &saved,
@@ -2023,13 +2045,48 @@ fn search_for(attempt: &PublicationAttempt, account: Option<&str>) -> Publicatio
     }
 }
 
+fn publication_connection(
+    connection: &Connection,
+    attempt: &PublicationAttempt,
+) -> Result<Option<super::ConfiguredSource>, Error> {
+    let id: Option<String> = connection
+        .query_row(
+            "SELECT connection_id FROM publication_connections WHERE attempt_id = ?1",
+            [&attempt.id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(id
+        .map(|id| configured_source(connection, &id))
+        .transpose()?
+        .flatten()
+        .filter(|source| source.saved.provider == attempt.provider))
+}
+
+fn publication_connection_missing() -> SourceError {
+    SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
+        "connection",
+        "the connection originally used for this publication is unavailable on this desktop",
+    )])
+}
+
+fn verified_publication_engine(
+    engine: &Engine,
+    source: &super::ConfiguredSource,
+) -> Result<Engine, SourceError> {
+    let saved = &source.saved;
+    let scoped = engine.for_connection(&saved.provider, &saved.id, &saved.config);
+    source.verify_account(&scoped.check_connection(&saved.provider, &saved.config)?)?;
+    Ok(scoped)
+}
+
 /// An attempt that has been persisted and is about to call the connector.
 struct Started {
     attempt_id: String,
     reference: String,
     ticket_id: String,
     request: PublishRequest,
-    config: ConfigValues,
+    source: super::ConfiguredSource,
     agent: Option<String>,
 }
 
@@ -2189,6 +2246,16 @@ fn complete_attempt(
     match sent.adopt {
         Some(from) => adopt_identity(transaction, from, sent.ticket_id, sent.agent)?,
         None => tracking::link(transaction, sent.ticket_id, issue, Origin::Published, now)?,
+    }
+    let connection_id: Option<String> = transaction
+        .query_row(
+            "SELECT connection_id FROM publication_connections WHERE attempt_id = ?1",
+            [sent.attempt_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(connection_id) = connection_id {
+        super::bind_ticket(transaction, sent.ticket_id, &connection_id)?;
     }
     // An issue that is already closed (attached after the fact) brings its
     // closure with it, as a refresh would apply it.

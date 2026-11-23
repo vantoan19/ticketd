@@ -30,8 +30,8 @@ export function usePublishTarget(): {
   );
   return entry
     ? {
-        provider: entry.connector.provider,
-        name: entry.connector.name,
+        provider: entry.saved?.id ?? entry.connector.provider,
+        name: entry.saved?.name ?? entry.connector.name,
         saved: entry.saved?.saved_at ?? "",
       }
     : null;

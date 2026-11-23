@@ -732,37 +732,51 @@ struct SourceSettings {
 
 #[derive(Subcommand)]
 enum SourceCommand {
-    /// List available sources with their settings schema and saved configuration
+    /// List connections with their provider and settings schema
     List,
-    /// Show a source's saved configuration
-    Show { provider: String },
-    /// Verify credentials and permissions and name the account in use
-    Test { provider: String },
+    /// Show a connection's saved settings
+    Show { connection: String },
+    /// Verify the account used for this connection
+    Test { connection: String },
     /// Suggest values for a setting that offers them
     Options {
-        provider: String,
+        connection: String,
         field: String,
         #[arg(long, default_value = "")]
         query: String,
         #[command(flatten)]
         settings: SourceSettings,
     },
-    /// Preview the issues discovery would match; imports and saves nothing
+    /// Preview the issues discovery would match
     Preview {
-        provider: String,
+        connection: String,
         #[command(flatten)]
         settings: SourceSettings,
     },
-    /// Validate, preview, and save a source's discovery configuration; imports nothing
-    Save {
+    /// Validate settings and add a connection for this provider
+    Add {
         provider: String,
+        #[arg(long)]
+        name: Option<String>,
+        /// Preview without adding the connection
+        #[arg(long)]
+        preview: bool,
         #[command(flatten)]
         settings: SourceSettings,
     },
-    /// Show each source's last refresh, current failure, and how many tickets are unavailable
-    Status,
-    /// Import matching issues and refresh every externally owned ticket now, or one ticket
+    /// Validate and update a connection's settings
+    Configure {
+        connection: String,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
+    /// Change a connection's display name
+    Rename { connection: String, name: String },
+    /// Show this connection's last refresh and current failures
+    Status { connection: String },
+    /// Import matching issues and refresh tickets assigned to this connection
     Refresh {
+        connection: String,
         /// Refresh only this externally owned ticket, for example T-KQ12
         #[arg(long)]
         ticket: Option<String>,
@@ -779,9 +793,9 @@ enum SourceCommand {
     Publish {
         /// The local ticket to publish, for example T-KQ12
         ticket: String,
-        /// The source provider. Can be omitted when only one can publish
+        /// The source connection. Can be omitted when only one can publish
         #[arg(long)]
-        provider: Option<String>,
+        connection: Option<String>,
         /// Where to create the issue. Must be one of the source’s saved
         /// destinations. Can be omitted when there is only one
         #[arg(long)]
@@ -2084,11 +2098,12 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
         Command::Source {
-            command: SourceCommand::Refresh { ticket },
+            command: SourceCommand::Refresh { connection, ticket },
         } => {
             let engine = ticketd_core::source::Engine::builtin();
-            let report = workspace.refresh_sources(
+            let report = workspace.refresh_connection(
                 &engine,
+                &connection,
                 &ticketd_core::source::RefreshOptions { ticket, now: None },
             )?;
             // The report is always printed; a failed refresh also fails the command so
@@ -2116,7 +2131,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             command:
                 SourceCommand::Publish {
                     ticket,
-                    provider,
+                    connection,
                     destination,
                     preview,
                     expect,
@@ -2124,15 +2139,15 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 },
         } => {
             let engine = ticketd_core::source::Engine::builtin();
-            let provider = match provider {
-                Some(provider) => provider,
-                None => workspace.default_publication_provider(&engine)?,
+            let connection = match connection {
+                Some(id) => workspace.source_connection(&id)?,
+                None => workspace.source_connection(&workspace.default_publication_provider(&engine)?)?,
             };
             if preview {
                 serde_json::to_string(&workspace.preview_publication(
                     &engine,
                     &ticket,
-                    &provider,
+                    &connection.id,
                     destination.as_deref(),
                 )?)?
             } else {
@@ -2140,7 +2155,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     &engine,
                     &ticket,
                     &ticketd_core::source::PublishOptions {
-                        provider: provider.clone(),
+                        provider: connection.id.clone(),
                         destination,
                         now: None,
                         expected_fingerprint: expect,
@@ -2158,16 +2173,6 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                         writeln!(output, "{}", serde_json::to_string(attempt)?)?;
                     }
                     return Err(match error {
-                        ticketd_core::source::PublicationError::Ineligible {
-                            reason: ticketd_core::source::IneligibleReason::SourceNotConnected,
-                            ..
-                        } => {
-                            let target = engine.description(&provider)?.presentation.target;
-                            let example = target.map_or_else(String::new, |target| {
-                                format!(" --set {}={}", target.field, target.example)
-                            });
-                            format!("{error}; from the command line, run `ticketd source save {provider}{example}`")
-                        }
                         ticketd_core::source::PublicationError::Unresolved { .. } => format!(
                             "{error}. Do not publish {ticket} again by hand; run `ticketd source resolve {ticket}` to review the open attempt and settle it"
                         ),
@@ -2252,16 +2257,13 @@ fn source_command(
     use ticketd_core::source::{ConfigValues, Engine, SourceError};
     let engine = Engine::builtin();
     // Settings given on the command line, or else the saved configuration.
-    let resolve = |workspace: &Workspace,
-                   provider: &str,
+    let resolve = |provider: &str,
+                   saved: ConfigValues,
                    settings: SourceSettings|
      -> Result<ConfigValues, Box<dyn std::error::Error>> {
         let given = !settings.set.is_empty() || settings.config_file.is_some();
         if !given {
-            return Ok(workspace
-                .saved_source(provider)?
-                .map(|saved| saved.config)
-                .unwrap_or_default());
+            return Ok(saved);
         }
         let schema = engine.descriptor(provider)?.schema;
         // Name the file in every failure, so a script knows which option caused it.
@@ -2299,45 +2301,100 @@ fn source_command(
     };
     Ok(match command {
         SourceCommand::List => {
+            let saved = workspace.saved_sources()?;
             let mut sources = Vec::new();
             for description in engine.descriptions() {
-                let saved = workspace.saved_source(&description.descriptor.provider)?;
-                sources.push(output::SourceListing {
-                    connector: description,
-                    saved,
-                });
+                let connections: Vec<_> = saved
+                    .iter()
+                    .filter(|source| source.provider == description.descriptor.provider)
+                    .collect();
+                if connections.is_empty() {
+                    sources.push(output::SourceListing {
+                        connector: description,
+                        saved: None,
+                    });
+                } else {
+                    sources.extend(connections.into_iter().map(|saved| output::SourceListing {
+                        connector: description.clone(),
+                        saved: Some(saved),
+                    }));
+                }
             }
             serde_json::to_string(&sources)?
         }
-        SourceCommand::Show { provider } => {
-            engine.descriptor(&provider)?;
-            serde_json::to_string(&workspace.saved_source(&provider)?)?
+        SourceCommand::Show { connection } => {
+            serde_json::to_string(&workspace.source_connection(&connection)?)?
         }
-        SourceCommand::Test { provider } => {
-            let values = workspace
-                .saved_source(&provider)?
-                .map(|saved| saved.config)
-                .unwrap_or_default();
-            serde_json::to_string(&engine.check_connection(&provider, &values)?)?
+        SourceCommand::Test { connection } => {
+            let saved = workspace.source_connection(&connection)?;
+            let scoped = engine.for_connection(&saved.provider, &saved.id, &saved.config);
+            serde_json::to_string(&scoped.check_connection(&saved.provider, &saved.config)?)?
         }
         SourceCommand::Options {
-            provider,
+            connection,
             field,
             query,
             settings,
         } => {
-            let values = resolve(workspace, &provider, settings)?;
-            serde_json::to_string(&engine.options(&provider, &field, &query, &values)?)?
+            let saved = workspace.source_connection(&connection)?;
+            let values = resolve(&saved.provider, saved.config, settings)?;
+            let scoped = engine.for_connection(&saved.provider, &saved.id, &values);
+            serde_json::to_string(&scoped.options(&saved.provider, &field, &query, &values)?)?
         }
-        SourceCommand::Preview { provider, settings } => {
-            let values = resolve(workspace, &provider, settings)?;
-            serde_json::to_string(&workspace.preview_source(&engine, &provider, &values)?)?
+        SourceCommand::Preview {
+            connection,
+            settings,
+        } => {
+            let saved = workspace.source_connection(&connection)?;
+            let values = resolve(&saved.provider, saved.config, settings)?;
+            let scoped = engine.for_connection(&saved.provider, &saved.id, &values);
+            serde_json::to_string(&workspace.preview_source(&scoped, &saved.provider, &values)?)?
         }
-        SourceCommand::Save { provider, settings } => {
-            let values = resolve(workspace, &provider, settings)?;
-            serde_json::to_string(&workspace.save_source(&engine, &provider, &values)?)?
+        SourceCommand::Add {
+            provider,
+            name,
+            preview,
+            settings,
+        } => {
+            let values = resolve(&provider, ConfigValues::new(), settings)?;
+            let id = workspace.next_source_connection_id(&provider)?;
+            if preview {
+                let scoped = engine.for_connection(&provider, &id, &values);
+                serde_json::to_string(&workspace.preview_source(&scoped, &provider, &values)?)?
+            } else {
+                serde_json::to_string(&workspace.add_source_connection(
+                    &engine,
+                    &provider,
+                    Some(&id),
+                    name.as_deref(),
+                    &values,
+                )?)?
+            }
         }
-        SourceCommand::Status => serde_json::to_string(&workspace.source_statuses()?)?,
+        SourceCommand::Configure {
+            connection,
+            settings,
+        } => {
+            let saved = workspace.source_connection(&connection)?;
+            let values = resolve(&saved.provider, saved.config, settings)?;
+            serde_json::to_string(&workspace.update_source_connection(
+                &engine,
+                &connection,
+                &values,
+            )?)?
+        }
+        SourceCommand::Rename { connection, name } => {
+            serde_json::to_string(&workspace.rename_source(&connection, &name)?)?
+        }
+        SourceCommand::Status { connection } => {
+            workspace.source_connection(&connection)?;
+            serde_json::to_string(
+                &workspace
+                    .source_statuses()?
+                    .into_iter()
+                    .find(|status| status.connection_id.as_deref() == Some(&connection)),
+            )?
+        }
         SourceCommand::TakeOwnership { reference, agent } => {
             serde_json::to_string(&workspace.take_ownership(&reference, agent.as_deref())?)?
         }

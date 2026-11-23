@@ -65,6 +65,7 @@ export const SETTINGS_SECTIONS = [
     group: "Connections",
     icon: Cloud,
   },
+  { id: "sources", label: "Sources", group: "Connections", icon: CircleDot },
   {
     id: "keyboard-shortcuts",
     label: "Keyboard shortcuts",

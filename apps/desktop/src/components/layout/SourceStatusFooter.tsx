@@ -39,7 +39,10 @@ export function SourceStatusFooter() {
     >
       {synced && <SyncStatusLine />}
       {sources.map((status) => {
-        const name = providerName(status.provider, entries);
+        const id = status.connection_id ?? status.provider;
+        const name =
+          entries.find((entry) => entry.saved?.id === id)?.saved?.name ??
+          providerName(status.provider, entries);
         const state = sourceLine(status, refreshing);
         const synced = status.last_refreshed_at
           ? ago(status.last_refreshed_at, now)
@@ -73,14 +76,14 @@ export function SourceStatusFooter() {
                 ? `${name} last synced ${synced}`
                 : "Showing saved content"
               : `${synced ?? "Not synced yet"}${intervalSecs ? ` · every ${Math.round(intervalSecs / 60)} min` : ""}`;
-        const detailId = `sidebar-source-${status.provider}`;
+        const detailId = `sidebar-source-${id}`;
         return (
-          <div className="sidebar-source" key={status.provider}>
+          <div className="sidebar-source" key={id}>
             <Tooltip content={folded ? `${label} · ${detail}` : null}>
               <button
                 type="button"
                 className="sidebar-source-line"
-                onClick={() => openSettings(status.provider)}
+                onClick={() => openSettings(id)}
                 aria-describedby={detailId}
               >
                 <span className="sidebar-source-label">

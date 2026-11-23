@@ -117,9 +117,13 @@ export function useTicketWorkspace(
   const [source, setSourceFilter] = useState("all");
   // The connectors and what is saved for each. The source filter appears once one is saved.
   const [sourceEntries, setSourceEntries] = useState<SourceEntry[]>([]);
-  const configuredSources = sourceEntries
-    .filter((entry) => entry.saved)
-    .map((entry) => entry.connector.provider);
+  const configuredSources = [
+    ...new Set(
+      sourceEntries
+        .filter((entry) => entry.saved)
+        .map((entry) => entry.connector.provider),
+    ),
+  ];
   const [sourceCounts, setSourceCounts] = useState<SourceCounts | null>(null);
   // What the core persisted about each source's freshness, and whether a refresh
   // (startup, periodic or explicit) is running. Kept when a read fails, so a

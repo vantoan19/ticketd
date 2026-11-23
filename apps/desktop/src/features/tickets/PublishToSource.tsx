@@ -195,7 +195,7 @@ type Phase =
  */
 export function PublishDialog({
   ticket,
-  provider,
+  provider: defaultConnection,
   onOpenChange,
   refresh,
 }: {
@@ -205,6 +205,11 @@ export function PublishDialog({
   refresh: () => Promise<void>;
 }) {
   const { entries } = useSources();
+  const [provider, setProvider] = useState(defaultConnection);
+  const connections = entries.filter(
+    ({ connector, saved }) =>
+      saved && connector.capabilities.includes("publish"),
+  );
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
   const [destination, setDestination] = useState<string | undefined>();
   const [error, setError] = useState<FailureDescription | null>(null);
@@ -325,7 +330,7 @@ export function PublishDialog({
   }
 
   const connector = entries.find(
-    (entry) => entry.connector.provider === provider,
+    (entry) => (entry.saved?.id ?? entry.connector.provider) === provider,
   )?.connector;
   const name = preview?.provider_name ?? connector?.name ?? provider;
   const target = connector?.presentation?.target;
@@ -401,6 +406,40 @@ export function PublishDialog({
         } else if (phase.kind === "ready" && chosen) void publish();
       }}
     >
+      {connections.length > 1 && !recovering && (
+        <div className="publication-field">
+          <span className="publication-label" id="publication-connection">
+            Connection
+          </span>
+          <Select
+            value={provider}
+            disabled={publishing}
+            onValueChange={(id) => {
+              setProvider(id);
+              setDestination(undefined);
+              setError(null);
+              setPhase({ kind: "loading" });
+            }}
+          >
+            <SelectTrigger
+              className="publication-repository"
+              aria-labelledby="publication-connection"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {connections.map(({ connector, saved }) => {
+                const id = saved?.id ?? connector.provider;
+                return (
+                  <SelectItem key={id} value={id}>
+                    {saved?.name ?? connector.name} · {saved?.account}
+                  </SelectItem>
+                );
+              })}
+            </SelectContent>
+          </Select>
+        </div>
+      )}
       {phase.kind === "loading" && <p role="status">Preparing preview…</p>}
       {phase.kind === "blocked" && (
         <div className="publication-preview">

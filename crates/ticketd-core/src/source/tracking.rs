@@ -194,9 +194,45 @@ pub(crate) fn availability_projection(
     connection: &Connection,
     ticket_id: &str,
 ) -> Result<Option<SourceAvailability>, Error> {
-    Ok(connection.query_row("SELECT o.authority, s.last_error_code, s.last_error_message, s.failing_since, s.last_attempt_at FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1", [ticket_id], |row| {
-        Ok(SourceAvailability { unavailable: unavailable(&row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?.as_deref(), row.get::<_, Option<String>>(2)?.as_deref(), row.get::<_, Option<String>>(3)?.as_deref(), row.get::<_, Option<String>>(4)?.as_deref()) })
-    }).optional()?)
+    let mut query = connection.prepare_cached(
+        "SELECT o.authority, s.last_error_code, s.last_error_message, s.failing_since,
+                s.last_attempt_at, i.provider, i.locator, i.partition, i.linked_at
+         FROM external_identities i
+         JOIN external_ownership o ON o.ticket_id = i.ticket_id
+         JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1",
+    )?;
+    let mut rows = query.query([ticket_id])?;
+    let Some(row) = rows.next()? else {
+        return Ok(None);
+    };
+    let authority: String = row.get(0)?;
+    let provider: String = row.get(5)?;
+    let part = match row.get::<_, Option<String>>(7)? {
+        Some(part) => part,
+        None => super::legacy_reference_partition(&provider, &row.get::<_, String>(6)?),
+    };
+    let attempted: Option<String> = row.get(4)?;
+    let unavailable = if authority == "external"
+        && super::selected_connection(connection, ticket_id, &provider, &part)?.is_none()
+    {
+        Some(SourceUnavailable {
+            code: FailureCode::NotConfigured.as_str().into(),
+            message: "Not connected on this desktop".into(),
+            since: match attempted {
+                Some(time) => time,
+                None => row.get(8)?,
+            },
+        })
+    } else {
+        unavailable(
+            &authority,
+            row.get::<_, Option<String>>(1)?.as_deref(),
+            row.get::<_, Option<String>>(2)?.as_deref(),
+            row.get::<_, Option<String>>(3)?.as_deref(),
+            attempted.as_deref(),
+        )
+    };
+    Ok(Some(SourceAvailability { unavailable }))
 }
 
 /// Restricts a ticket list to externally owned or local tickets.
@@ -252,6 +288,8 @@ pub enum FailureScope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefreshFailure {
     pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_id: Option<String>,
     /// The ticket that could not be refreshed; absent when discovery itself failed
     /// or the issue has no ticket yet.
     pub reference: Option<String>,
@@ -485,7 +523,6 @@ struct SourceRow {
     attempted: Option<String>,
     error_code: Option<String>,
     error_message: Option<String>,
-    failing_since: Option<String>,
     conversation_error_code: Option<String>,
     conversation_error_message: Option<String>,
     author: Option<String>,
@@ -497,7 +534,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         .prepare_cached(
             "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, o.authority, \
                     s.external_state, s.closure_reason, s.last_refreshed_at, \
-                    s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since, \
+                    s.last_attempt_at, s.last_error_code, s.last_error_message, \
                     s.conversation_error_code, s.conversation_error_message, s.discovery_matches, o.changed_at, \
                     s.external_author, s.external_created_at \
              FROM external_identities i \
@@ -522,13 +559,12 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                     attempted: row.get(10)?,
                     error_code: row.get(11)?,
                     error_message: row.get(12)?,
-                    failing_since: row.get(13)?,
-                    conversation_error_code: row.get(14)?,
-                    conversation_error_message: row.get(15)?,
-                    discovery_matches: row.get(16)?,
-                    ownership_changed_at: row.get(17)?,
-                    author: row.get(18)?,
-                    created_at: row.get(19)?,
+                    conversation_error_code: row.get(13)?,
+                    conversation_error_message: row.get(14)?,
+                    discovery_matches: row.get(15)?,
+                    ownership_changed_at: row.get(16)?,
+                    author: row.get(17)?,
+                    created_at: row.get(18)?,
                 })
             },
         )
@@ -563,13 +599,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     };
     let duplicate_target = duplicate_target(connection, &ticket.id)?;
     let closed_at = conversation::closed_at(connection, &ticket.id)?;
-    let unavailable = unavailable(
-        &row.authority,
-        row.error_code.as_deref(),
-        row.error_message.as_deref(),
-        row.failing_since.as_deref(),
-        row.attempted.as_deref(),
-    );
+    let unavailable =
+        availability_projection(connection, &ticket.id)?.and_then(|value| value.unavailable);
     let description = super::cached_description(connection, &row.provider)?;
     let (provider_name, place, number, place_label) = super::display_parts(
         description.as_deref(),
@@ -790,6 +821,8 @@ struct Found {
 
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
+    read_conversations: bool,
+    retry_limit: Option<u64>,
     configurations: HashMap<String, Option<CheckedConfiguration>>,
     discovery: Vec<(String, HashSet<String>)>,
     issues: Vec<ExternalIssue>,
@@ -811,13 +844,15 @@ struct CheckedConfiguration {
     derived: Option<DerivedConfiguration>,
 }
 
-struct Tracked {
-    ticket_id: String,
+pub(super) struct Tracked {
+    pub(super) ticket_id: String,
     reference: String,
-    provider: String,
+    pub(super) provider: String,
     external_id: String,
     locator: String,
-    partition: String,
+    pub(super) partition: String,
+    pub(super) affinity: Option<String>,
+    pub(super) error_code: Option<String>,
 }
 
 pub(crate) fn failure_of(error: &SourceError) -> SourceFailure {
@@ -827,9 +862,11 @@ pub(crate) fn failure_of(error: &SourceError) -> SourceFailure {
     }
 }
 
-fn retry_secs(error: &SourceError) -> Option<u64> {
+fn rate_limit_hold(error: &SourceError) -> Option<u64> {
     match error {
-        SourceError::RateLimited { retry_after_secs } => *retry_after_secs,
+        SourceError::RateLimited { retry_after_secs } => {
+            Some(retry_after_secs.unwrap_or(freshness::DEFAULT_RATE_LIMIT_SECS))
+        }
         _ => None,
     }
 }
@@ -859,374 +896,556 @@ impl Workspace {
         engine: &Engine,
         options: &RefreshOptions,
     ) -> Result<RefreshReport, Error> {
-        let _refresh =
-            tracing::info_span!("source_refresh", ticket_ref = options.ticket.as_deref()).entered();
+        self.refresh_selected(engine, options, None)
+    }
+
+    /// Refreshes a single connection and the tickets routed to it.
+    pub fn refresh_connection(
+        &mut self,
+        engine: &Engine,
+        id: &str,
+        options: &RefreshOptions,
+    ) -> Result<RefreshReport, Error> {
+        self.source_connection(id)?;
+        self.refresh_selected(engine, options, Some(&[id.to_owned()]))
+    }
+
+    pub(super) fn refresh_selected(
+        &mut self,
+        engine: &Engine,
+        options: &RefreshOptions,
+        selected: Option<&[String]>,
+    ) -> Result<RefreshReport, Error> {
         let started = super::clock(&self.connection, options.now.as_deref())?;
-        let tracked = self.tracked(options.ticket.as_deref())?;
-        let mut gathered = Gathered {
-            issues: Vec::new(),
-            conversations: HashMap::new(),
-            failures: Vec::new(),
-            runs: Vec::new(),
-            discovery: Vec::new(),
-            configurations: HashMap::new(),
-            partitions: HashMap::new(),
-            imported_partitions: HashMap::new(),
+        let tracked = tracked(&self.connection, options.ticket.as_deref())?;
+        let sources = super::configured_sources(&self.connection)?;
+        let routed = |ticket: &Tracked| {
+            super::select_connection(
+                &sources,
+                ticket.affinity.as_deref(),
+                &ticket.provider,
+                &ticket.partition,
+            )
+            .map(|source| source.saved.id.as_str())
         };
-        let saved = super::configured_sources(&self.connection)?;
-        let providers: Vec<String> = if options.ticket.is_some() {
+        if let (Some(selected), Some(ticket)) = (selected, tracked.first())
+            && options.ticket.is_some()
+            && !routed(ticket).is_some_and(|id| selected.iter().any(|selection| selection == id))
+        {
+            return Err(
+                SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
+                    "connection",
+                    "this ticket is routed to a different connection or has no covering connection",
+                )])
+                .into(),
+            );
+        }
+        let jobs: Vec<_> = sources
+            .iter()
+            .filter(|source| {
+                selected.is_none_or(|ids| ids.contains(&source.saved.id))
+                    && (options.ticket.is_none()
+                        || tracked
+                            .iter()
+                            .any(|ticket| routed(ticket) == Some(&source.saved.id)))
+            })
+            .collect();
+        let gather = |source: &super::ConfiguredSource| {
+            gather_connection(
+                engine,
+                options,
+                &tracked,
+                &sources,
+                &source.saved.provider,
+                Some(source),
+            )
+        };
+        let mut report = RefreshReport {
+            imported: Vec::new(),
+            updated: Vec::new(),
+            unchanged: 0,
+            failures: Vec::new(),
+            refreshed_at: started.clone(),
+        };
+        let mut merge = |batch: RefreshReport| {
+            report.imported.extend(batch.imported);
+            report.updated.extend(batch.updated);
+            report.unchanged = report.unchanged.saturating_add(batch.unchanged);
+            report.failures.extend(batch.failures);
+        };
+        for pair in jobs.chunks(2) {
+            let batches = if let [first, second] = pair {
+                std::thread::scope(|scope| {
+                    let first_worker = scope.spawn(|| gather(first));
+                    let second_batch = gather(second);
+                    let first_batch = first_worker.join().map_err(|_| {
+                        Error::Source(SourceError::Protocol(
+                            "a source refresh worker stopped".into(),
+                        ))
+                    })?;
+                    Ok::<_, Error>(vec![(*first, first_batch?), (*second, second_batch?)])
+                })?
+            } else {
+                pair.iter()
+                    .map(|source| {
+                        Ok((
+                            *source,
+                            gather_connection(
+                                engine,
+                                options,
+                                &tracked,
+                                &sources,
+                                &source.saved.provider,
+                                Some(source),
+                            )?,
+                        ))
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?
+            };
+            for (source, mut batch) in batches {
+                if batch.read_conversations {
+                    // The earlier connection may have imported a shared issue
+                    // already. Do not read its conversation a second time.
+                    let mut issues = Vec::with_capacity(batch.issues.len());
+                    for issue in std::mem::take(&mut batch.issues) {
+                        let reference = &issue.reference;
+                        let route = ticket_for_identity(&self.connection, &reference.identity)?
+                            .map(|ticket| {
+                                super::selected_connection(
+                                    &self.connection,
+                                    &ticket,
+                                    &reference.identity.provider,
+                                    &reference.partition,
+                                )
+                            })
+                            .transpose()?;
+                        if route.is_none() || route.flatten().as_deref() == Some(&source.saved.id) {
+                            issues.push(issue);
+                        }
+                    }
+                    batch.issues = issues;
+                    let scoped = engine.for_connection(
+                        &source.saved.provider,
+                        &source.saved.id,
+                        &source.saved.config,
+                    );
+                    gather_conversations(
+                        &self.connection,
+                        &scoped,
+                        &source.saved.config,
+                        &tracked,
+                        &mut batch,
+                    )?;
+                }
+                merge(self.apply_refresh(batch, &started, &tracked, Some(&source.saved.id))?);
+            }
+        }
+        if selected.is_none() {
+            let missing: HashSet<_> = tracked
+                .iter()
+                .filter(|ticket| routed(ticket).is_none())
+                .map(|ticket| ticket.provider.as_str())
+                .collect();
+            for provider in missing {
+                let batch = gather_connection(engine, options, &tracked, &sources, provider, None)?;
+                merge(self.apply_refresh(batch, &started, &tracked, None)?);
+            }
+        }
+        Ok(report)
+    }
+}
+
+fn gather_connection(
+    engine: &Engine,
+    options: &RefreshOptions,
+    tracked: &[Tracked],
+    sources: &[super::ConfiguredSource],
+    provider: &str,
+    configured: Option<&super::ConfiguredSource>,
+) -> Result<Gathered, Error> {
+    let engine = configured
+        .map(|source| engine.for_connection(provider, &source.saved.id, &source.saved.config));
+    let source_id = configured.map(|source| source.saved.id.as_str());
+    let assigned = |ticket: &Tracked| {
+        super::select_connection(
+            sources,
+            ticket.affinity.as_deref(),
+            provider,
+            &ticket.partition,
+        )
+        .map(|source| source.saved.id.as_str())
+            == source_id
+    };
+    let _source =
+        tracing::info_span!("source", source_id = source_id.unwrap_or(provider)).entered();
+    let provider = provider.to_owned();
+    let mut gathered = Gathered {
+        read_conversations: false,
+        retry_limit: None,
+        issues: Vec::new(),
+        conversations: HashMap::new(),
+        failures: Vec::new(),
+        runs: Vec::new(),
+        discovery: Vec::new(),
+        configurations: HashMap::new(),
+        partitions: HashMap::new(),
+        imported_partitions: HashMap::new(),
+    };
+    let engine = engine.as_ref();
+    let config = configured.map(|source| &source.saved.config);
+    let mut seen: HashSet<String> = HashSet::new();
+    // Set when the source as a whole cannot be read, so asking for more
+    // tickets would only repeat the failure.
+    let mut blocked: Option<SourceFailure> = None;
+    let mut retry_after_secs: Option<u64> = None;
+    let mut discovery_failed: Option<SourceFailure> = None;
+    let mut skipped: Vec<String> = Vec::new();
+    let mut read_partitions: Vec<String> = Vec::new();
+    let mut skipped_partitions: Vec<String> = Vec::new();
+    let checked = configured.zip(engine).map(|(source, engine)| {
+        let derived = match engine
+            .check(&provider, &source.saved.config)
+            .and_then(|check| {
+                source.verify_account(&check.connection)?;
+                Ok(check.derived)
+            }) {
+            Ok(derived) => Some(derived),
+            Err(error) => {
+                retry_after_secs = rate_limit_hold(&error);
+                let failure = failure_of(&error);
+                gathered.failures.push(Found {
+                    scope: FailureScope::Source,
+                    reference: None,
+                    provider: provider.clone(),
+                    failure: failure.clone(),
+                });
+                blocked = Some(failure);
+                None
+            }
+        };
+        CheckedConfiguration {
+            revision: source.revision.clone(),
+            derived,
+        }
+    });
+    if let (None, Some(config), Some(derived), Some(engine)) = (
+        &options.ticket,
+        config,
+        checked
+            .as_ref()
+            .and_then(|checked| checked.derived.as_ref()),
+        engine,
+    ) {
+        // A part read under narrower rules is new to a broader discovery.
+        let scope = &derived.discovery_scope;
+        let scoped = |part: &str| {
+            let mut part = part.replace('%', "%25").replace('?', "%3F");
+            if !scope.is_empty() {
+                part.push('?');
+                part.push_str(scope);
+            }
+            part
+        };
+        gathered.imported_partitions.insert(
+            provider.clone(),
             tracked
                 .iter()
-                .map(|t| t.provider.clone())
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .collect()
-        } else {
-            let mut all: Vec<String> = saved.iter().map(|s| s.saved.provider.clone()).collect();
-            for t in &tracked {
-                if !all.contains(&t.provider) {
-                    all.push(t.provider.clone());
-                }
+                .filter(|ticket| ticket.provider == provider && assigned(ticket))
+                .map(|ticket| scoped(&ticket.partition))
+                .collect(),
+        );
+        let result = engine.discover(&provider, config, |issue| {
+            if tracked
+                .iter()
+                .find(|ticket| {
+                    ticket.provider == provider && ticket.external_id == issue.reference.identity.id
+                })
+                .is_some_and(|ticket| !assigned(ticket))
+            {
+                return ControlFlow::Continue(());
             }
-            all
-        };
-        for provider in providers {
-            // Every line about this source, until the end of its turn in the loop.
-            let _source = tracing::info_span!("source", source_id = provider.as_str()).entered();
-            let configured = saved.iter().find(|s| s.saved.provider == provider);
-            let config = configured.map(|source| &source.saved.config);
-            let first_issue = gathered.issues.len();
-            let mut seen: HashSet<String> = HashSet::new();
-            // Set when the source as a whole cannot be read, so asking for more
-            // tickets would only repeat the failure.
-            let mut blocked: Option<SourceFailure> = None;
-            let mut retry_after_secs: Option<u64> = None;
-            let mut discovery_failed: Option<SourceFailure> = None;
-            let mut skipped: Vec<String> = Vec::new();
-            let mut read_partitions: Vec<String> = Vec::new();
-            let mut skipped_partitions: Vec<String> = Vec::new();
-            let checked = configured.map(|source| {
-                let derived = match engine.check(&provider, &source.saved.config) {
-                    Ok(check) => Some(check.derived),
-                    Err(error) => {
-                        retry_after_secs = retry_secs(&error);
-                        let failure = failure_of(&error);
-                        gathered.failures.push(Found {
-                            scope: FailureScope::Source,
-                            reference: None,
-                            provider: provider.clone(),
-                            failure: failure.clone(),
-                        });
-                        blocked = Some(failure);
-                        None
-                    }
-                };
-                CheckedConfiguration {
-                    revision: source.revision.clone(),
-                    derived,
+            seen.insert(issue.reference.identity.id.clone());
+            gathered.partitions.insert(
+                (provider.clone(), issue.reference.identity.id.clone()),
+                scoped(&issue.reference.partition),
+            );
+            gathered.issues.push(issue);
+            ControlFlow::Continue(())
+        });
+        match result {
+            Ok(summary) => {
+                if summary.complete && summary.skipped.is_empty() {
+                    gathered.discovery.push((provider.clone(), seen.clone()));
                 }
-            });
-            if let (None, Some(config), Some(derived)) = (
-                &options.ticket,
-                config,
-                checked
-                    .as_ref()
-                    .and_then(|checked| checked.derived.as_ref()),
-            ) {
-                // A part read under narrower rules is new to a broader discovery.
-                let scope = &derived.discovery_scope;
-                let scoped = |part: &str| {
-                    let mut part = part.replace('%', "%25").replace('?', "%3F");
-                    if !scope.is_empty() {
-                        part.push('?');
-                        part.push_str(scope);
-                    }
-                    part
-                };
-                gathered.imported_partitions.insert(
-                    provider.clone(),
-                    tracked
-                        .iter()
-                        .filter(|ticket| ticket.provider == provider)
-                        .map(|ticket| scoped(&ticket.partition))
-                        .collect(),
-                );
-                let result = engine.discover(&provider, config, |issue| {
-                    seen.insert(issue.reference.identity.id.clone());
-                    gathered.partitions.insert(
-                        (provider.clone(), issue.reference.identity.id.clone()),
-                        scoped(&issue.reference.partition),
-                    );
-                    gathered.issues.push(issue);
-                    ControlFlow::Continue(())
-                });
-                match result {
-                    Ok(summary) => {
-                        if summary.complete && summary.skipped.is_empty() {
-                            gathered.discovery.push((provider.clone(), seen.clone()));
-                        }
-                        skipped_partitions = summary
-                            .skipped
-                            .iter()
-                            .map(|part| scoped(&part.partition))
-                            .collect();
-                        read_partitions =
-                            derived.partitions.iter().map(|part| scoped(part)).collect();
-                        read_partitions.retain(|part| !skipped_partitions.contains(part));
-                        for part in summary.skipped {
-                            skipped.push(part.message.clone());
-                            gathered.failures.push(Found {
-                                scope: FailureScope::Partition,
-                                reference: None,
-                                provider: provider.clone(),
-                                failure: SourceFailure {
-                                    code: part.code,
-                                    message: part.message,
-                                },
-                            });
-                        }
-                    }
-                    Err(error) => {
-                        let failure = failure_of(&error);
-                        gathered.failures.push(Found {
-                            scope: FailureScope::Source,
-                            reference: None,
-                            provider: provider.clone(),
-                            failure: failure.clone(),
-                        });
-                        retry_after_secs = retry_secs(&error);
-                        discovery_failed = Some(failure.clone());
-                        if error.failure_code().interrupts_source() {
-                            blocked = Some(failure);
-                        }
-                    }
-                }
-            }
-            for ticket in tracked.iter().filter(|t| t.provider == provider) {
-                if seen.contains(&ticket.external_id) {
-                    continue;
-                }
-                let reference = Some(ticket.reference.clone());
-                if let Some(cause) = &blocked {
-                    // Not asked, because the source as a whole could not be read.
-                    // The cause is the source's, and is said to be, never passed
-                    // off as this issue's own answer.
+                skipped_partitions = summary
+                    .skipped
+                    .iter()
+                    .map(|part| scoped(&part.partition))
+                    .collect();
+                read_partitions = derived.partitions.iter().map(|part| scoped(part)).collect();
+                read_partitions.retain(|part| !skipped_partitions.contains(part));
+                for part in summary.skipped {
+                    skipped.push(part.message.clone());
                     gathered.failures.push(Found {
-                        scope: FailureScope::Ticket,
-                        reference,
+                        scope: FailureScope::Partition,
+                        reference: None,
                         provider: provider.clone(),
                         failure: SourceFailure {
-                            code: cause.code.clone(),
-                            message: format!(
-                                "not refreshed because the source could not be read: {}",
-                                cause.message
-                            ),
+                            code: part.code,
+                            message: part.message,
                         },
                     });
-                    continue;
-                }
-                let Some(config) = config else {
-                    gathered.failures.push(Found {
-                        scope: FailureScope::Ticket,
-                        reference,
-                        provider: provider.clone(),
-                        failure: SourceFailure {
-                            code: FailureCode::NotConfigured.as_str().into(),
-                            message: format!(
-                                "no saved configuration for {provider}; save the source to refresh this ticket"
-                            ),
-                        },
-                    });
-                    continue;
-                };
-                let external = ExternalRef {
-                    identity: ExternalIdentity {
-                        provider: provider.clone(),
-                        id: ticket.external_id.clone(),
-                    },
-                    locator: ticket.locator.clone(),
-                    partition: ticket.partition.clone(),
-                };
-                // Count an issue once whether it was discovered or fetched, and
-                // include attempted reads that returned a ticket-level failure.
-                seen.insert(ticket.external_id.clone());
-                match engine.fetch(&provider, config, &external) {
-                    Ok(issue) => gathered.issues.push(issue),
-                    Err(error) => {
-                        let failure = failure_of(&error);
-                        if error.failure_code().interrupts_source() {
-                            retry_after_secs = retry_secs(&error);
-                            blocked = Some(failure.clone());
-                        }
-                        gathered.failures.push(Found {
-                            scope: FailureScope::Ticket,
-                            reference,
-                            provider: provider.clone(),
-                            failure,
-                        });
-                    }
                 }
             }
-            if let (Some(config), None) = (config, &blocked) {
-                self.gather_conversations(engine, config, &tracked, first_issue, &mut gathered)?;
-            }
-            gathered.configurations.insert(provider.clone(), checked);
-            if options.ticket.is_none() && config.is_some() {
-                gathered.runs.push(ProviderRun {
+            Err(error) => {
+                let failure = failure_of(&error);
+                gathered.failures.push(Found {
+                    scope: FailureScope::Source,
+                    reference: None,
                     provider: provider.clone(),
-                    failure: discovery_failed.or(blocked),
-                    retry_after_secs,
-                    skipped,
-                    read_partitions,
-                    skipped_partitions,
-                    checked_tickets: u32::try_from(seen.len()).unwrap_or(u32::MAX),
+                    failure: failure.clone(),
+                });
+                retry_after_secs = rate_limit_hold(&error);
+                discovery_failed = Some(failure.clone());
+                if error.failure_code().interrupts_source() {
+                    blocked = Some(failure);
+                }
+            }
+        }
+    }
+    for ticket in tracked
+        .iter()
+        .filter(|t| t.provider == provider && assigned(t))
+    {
+        if seen.contains(&ticket.external_id) {
+            continue;
+        }
+        let reference = Some(ticket.reference.clone());
+        if let Some(cause) = &blocked {
+            // Not asked, because the source as a whole could not be read.
+            // The cause is the source's, and is said to be, never passed
+            // off as this issue's own answer.
+            gathered.failures.push(Found {
+                scope: FailureScope::Ticket,
+                reference,
+                provider: provider.clone(),
+                failure: SourceFailure {
+                    code: cause.code.clone(),
+                    message: format!(
+                        "not refreshed because the source could not be read: {}",
+                        cause.message
+                    ),
+                },
+            });
+            continue;
+        }
+        let (Some(config), Some(engine)) = (config, engine) else {
+            gathered.failures.push(Found {
+                scope: FailureScope::Ticket,
+                reference,
+                provider: provider.clone(),
+                failure: SourceFailure {
+                    code: FailureCode::NotConfigured.as_str().into(),
+                    message: format!("{provider} is not connected on this desktop for this ticket"),
+                },
+            });
+            continue;
+        };
+        let external = ExternalRef {
+            identity: ExternalIdentity {
+                provider: provider.clone(),
+                id: ticket.external_id.clone(),
+            },
+            locator: ticket.locator.clone(),
+            partition: ticket.partition.clone(),
+        };
+        // Count an issue once whether it was discovered or fetched, and
+        // include attempted reads that returned a ticket-level failure.
+        seen.insert(ticket.external_id.clone());
+        match engine.fetch(&provider, config, &external) {
+            Ok(issue) => gathered.issues.push(issue),
+            Err(error) => {
+                let failure = failure_of(&error);
+                if error.failure_code().interrupts_source() {
+                    retry_after_secs = rate_limit_hold(&error);
+                    blocked = Some(failure.clone());
+                }
+                gathered.failures.push(Found {
+                    scope: FailureScope::Ticket,
+                    reference,
+                    provider: provider.clone(),
+                    failure,
                 });
             }
         }
-        self.apply_refresh(gathered, &started, &tracked)
     }
+    gathered.read_conversations = config.is_some() && blocked.is_none();
+    gathered.retry_limit = retry_after_secs;
+    gathered.configurations.insert(provider.clone(), checked);
+    if options.ticket.is_none() && config.is_some() {
+        gathered.runs.push(ProviderRun {
+            provider: provider.clone(),
+            connection_id: source_id.unwrap_or(&provider).to_owned(),
+            failure: discovery_failed.or(blocked),
+            retry_after_secs,
+            skipped,
+            read_partitions,
+            skipped_partitions,
+            checked_tickets: u32::try_from(seen.len()).unwrap_or(u32::MAX),
+        });
+    }
+    Ok(gathered)
+}
 
-    /// Reads the conversation of each issue gathered since `first_issue` whose
-    /// stored conversation is older than the issue itself. A failure keeps what
-    /// was stored and leaves the issue due again next time. It is recorded as a
-    /// conversation failure only: the issue itself was read, so it never makes a
-    /// ticket unavailable. Only a failure of the source as a whole stops further
-    /// reads.
-    fn gather_conversations(
-        &self,
-        engine: &Engine,
-        config: &super::ConfigValues,
-        tracked: &[Tracked],
-        first_issue: usize,
-        gathered: &mut Gathered,
-    ) -> Result<(), Error> {
-        let due: Vec<ExternalIssue> = gathered.issues[first_issue..].to_vec();
-        for issue in due {
-            let identity = &issue.reference.identity;
-            if !conversation::needs_reading(
-                &self.connection,
-                &identity.provider,
-                &identity.id,
-                &issue.updated_at,
-            )? {
-                continue;
-            }
-            match engine.conversation(&identity.provider, config, &issue.reference) {
-                Ok(Some(mut read)) => {
-                    // REST timeline closes may omit a reason. Only the latest
-                    // state event can borrow the issue's currently observed closure.
-                    // An unreadable time makes the latest event unknown, and
-                    // offsets must be compared as instants, not text.
-                    let latest = read
-                        .events
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, event)| {
-                            matches!(
-                                event.kind,
-                                super::ExternalEventKind::Closed(_)
-                                    | super::ExternalEventKind::Reopened
-                            )
-                        })
-                        .map(|(index, event)| {
-                            chrono::DateTime::parse_from_rfc3339(&event.created_at)
-                                .map(|time| (index, time))
-                        })
-                        .collect::<Result<Vec<_>, _>>()
-                        .ok()
-                        .and_then(|events| events.into_iter().max_by(|a, b| a.1.cmp(&b.1)))
-                        .map(|(index, _)| index);
-                    if let ExternalState::Closed { reason } = issue.state
-                        && let Some(index) = latest
-                        && let Some(event) = read.events.get_mut(index)
-                        && matches!(event.kind, super::ExternalEventKind::Closed(_))
+/// Reads the conversation of each gathered issue whose
+/// stored conversation is older than the issue itself. A failure keeps what
+/// was stored and leaves the issue due again next time. It is recorded as a
+/// conversation failure only: the issue itself was read, so it never makes a
+/// ticket unavailable. Only a failure of the source as a whole stops further
+/// reads.
+fn gather_conversations(
+    connection: &Connection,
+    engine: &Engine,
+    config: &super::ConfigValues,
+    tracked: &[Tracked],
+    gathered: &mut Gathered,
+) -> Result<(), Error> {
+    let due: Vec<ExternalIssue> = gathered.issues.clone();
+    for issue in due {
+        let identity = &issue.reference.identity;
+        if !conversation::needs_reading(
+            connection,
+            &identity.provider,
+            &identity.id,
+            &issue.updated_at,
+        )? {
+            continue;
+        }
+        match engine.conversation(&identity.provider, config, &issue.reference) {
+            Ok(Some(mut read)) => {
+                // REST timeline closes may omit a reason. Only the latest
+                // state event can borrow the issue's currently observed closure.
+                // An unreadable time makes the latest event unknown, and
+                // offsets must be compared as instants, not text.
+                let latest = read
+                    .events
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, event)| {
+                        matches!(
+                            event.kind,
+                            super::ExternalEventKind::Closed(_)
+                                | super::ExternalEventKind::Reopened
+                        )
+                    })
+                    .map(|(index, event)| {
+                        chrono::DateTime::parse_from_rfc3339(&event.created_at)
+                            .map(|time| (index, time))
+                    })
+                    .collect::<Result<Vec<_>, _>>()
+                    .ok()
+                    .and_then(|events| events.into_iter().max_by(|a, b| a.1.cmp(&b.1)))
+                    .map(|(index, _)| index);
+                if let ExternalState::Closed { reason } = issue.state
+                    && let Some(index) = latest
+                    && let Some(event) = read.events.get_mut(index)
+                    && matches!(event.kind, super::ExternalEventKind::Closed(_))
+                {
+                    if event.kind == super::ExternalEventKind::Closed(ClosureReason::Unknown) {
+                        event.kind = super::ExternalEventKind::Closed(reason);
+                    }
+                    if event.kind == super::ExternalEventKind::Closed(ClosureReason::Duplicate)
+                        && event.subject.is_none()
                     {
-                        if event.kind == super::ExternalEventKind::Closed(ClosureReason::Unknown) {
-                            event.kind = super::ExternalEventKind::Closed(reason);
-                        }
-                        if event.kind == super::ExternalEventKind::Closed(ClosureReason::Duplicate)
-                            && event.subject.is_none()
-                        {
-                            event.subject = issue
-                                .duplicate_of
-                                .as_ref()
-                                .map(|target| target.locator.clone());
-                        }
+                        event.subject = issue
+                            .duplicate_of
+                            .as_ref()
+                            .map(|target| target.locator.clone());
                     }
-                    gathered
-                        .conversations
-                        .insert((identity.provider.clone(), identity.id.clone()), read);
                 }
-                Ok(None) => break,
-                Err(error) => {
-                    let failure = failure_of(&error);
-                    let known = tracked
-                        .iter()
-                        .find(|t| t.provider == identity.provider && t.external_id == identity.id);
-                    gathered.failures.push(Found {
-                        scope: FailureScope::Conversation,
-                        reference: known.map(|t| t.reference.clone()),
-                        provider: identity.provider.clone(),
-                        failure: SourceFailure {
-                            code: failure.code,
-                            message: format!(
-                                "comments of {} could not be read: {}",
-                                issue.display, failure.message
-                            ),
-                        },
-                    });
-                    if error.failure_code().interrupts_source() {
-                        break;
-                    }
+                gathered
+                    .conversations
+                    .insert((identity.provider.clone(), identity.id.clone()), read);
+            }
+            Ok(None) => break,
+            Err(error) => {
+                let failure = failure_of(&error);
+                let known = tracked
+                    .iter()
+                    .find(|t| t.provider == identity.provider && t.external_id == identity.id);
+                gathered.failures.push(Found {
+                    scope: FailureScope::Conversation,
+                    reference: known.map(|t| t.reference.clone()),
+                    provider: identity.provider.clone(),
+                    failure: SourceFailure {
+                        code: failure.code,
+                        message: format!(
+                            "comments of {} could not be read: {}",
+                            issue.display, failure.message
+                        ),
+                    },
+                });
+                if error.failure_code() == FailureCode::RateLimited {
+                    gathered.retry_limit = rate_limit_hold(&error);
+                }
+                if error.failure_code().interrupts_source() {
+                    break;
                 }
             }
         }
-        Ok(())
     }
+    Ok(())
+}
 
-    fn tracked(&self, only: Option<&str>) -> Result<Vec<Tracked>, Error> {
-        let mut statement = self.connection.prepare(
-            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator, i.partition FROM external_identities i \
+pub(super) fn tracked(connection: &Connection, only: Option<&str>) -> Result<Vec<Tracked>, Error> {
+    let mut statement = connection.prepare(
+            "SELECT t.id, t.reference, i.provider, i.external_id, i.locator, i.partition, c.connection_id, s.last_error_code FROM external_identities i \
+             LEFT JOIN source_connection_tickets c ON c.ticket_id = i.ticket_id \
+             LEFT JOIN source_sync s ON s.ticket_id = i.ticket_id \
              JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
              JOIN tickets t ON t.id = i.ticket_id \
              WHERE (?1 IS NULL OR t.reference = ?1) ORDER BY t.number",
         )?;
-        let rows = statement
-            .query_map([only], |row| {
-                let provider: String = row.get(2)?;
-                let locator: String = row.get(4)?;
-                let stored_partition: Option<String> = row.get(5)?;
-                Ok(Tracked {
-                    ticket_id: row.get(0)?,
-                    reference: row.get(1)?,
-                    partition: stored_partition
-                        .unwrap_or_else(|| super::legacy_reference_partition(&provider, &locator)),
-                    provider,
-                    external_id: row.get(3)?,
-                    locator,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        if let (Some(reference), true) = (only, rows.is_empty()) {
-            let exists: bool = self.connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM tickets WHERE reference = ?1)",
-                [reference],
-                |row| row.get(0),
-            )?;
-            return Err(if exists {
-                Error::NotSynchronized(reference.to_owned())
-            } else {
-                Error::NotFound(reference.to_owned())
-            });
-        }
-        Ok(rows)
+    let rows = statement
+        .query_map([only], |row| {
+            let provider: String = row.get(2)?;
+            let locator: String = row.get(4)?;
+            let stored_partition: Option<String> = row.get(5)?;
+            Ok(Tracked {
+                ticket_id: row.get(0)?,
+                reference: row.get(1)?,
+                partition: stored_partition
+                    .unwrap_or_else(|| super::legacy_reference_partition(&provider, &locator)),
+                provider,
+                external_id: row.get(3)?,
+                locator,
+                affinity: row.get(6)?,
+                error_code: row.get(7)?,
+            })
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    if let (Some(reference), true) = (only, rows.is_empty()) {
+        let exists: bool = connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tickets WHERE reference = ?1)",
+            [reference],
+            |row| row.get(0),
+        )?;
+        return Err(if exists {
+            Error::NotSynchronized(reference.to_owned())
+        } else {
+            Error::NotFound(reference.to_owned())
+        });
     }
+    Ok(rows)
+}
 
+impl Workspace {
     fn apply_refresh(
         &mut self,
         gathered: Gathered,
         now: &str,
         tracked: &[Tracked],
+        source_id: Option<&str>,
     ) -> Result<RefreshReport, Error> {
         crate::write_scope::run(&self.connection, |transaction| {
             // Configuration can change while the connector is on the network.
@@ -1234,7 +1453,10 @@ impl Workspace {
             // cannot import new tickets or describe the rules saved afterwards.
             let mut replaced = HashSet::new();
             for (provider, checked) in &gathered.configurations {
-                let current = super::configured_source(transaction, provider)?;
+                let current = source_id
+                    .map(|id| super::configured_source(transaction, id))
+                    .transpose()?
+                    .flatten();
                 if current.as_ref().map(|source| &source.revision)
                     != checked.as_ref().map(|check| &check.revision)
                 {
@@ -1246,13 +1468,13 @@ impl Workspace {
                     checked.as_ref().and_then(|check| check.derived.as_ref()),
                 ) {
                     let changed = transaction.execute(
-                        "UPDATE source_configurations SET derived_configuration = ?2, derived_checked_at = ?3 \
-                         WHERE provider = ?1 AND (derived_checked_at IS NULL OR julianday(derived_checked_at) <= julianday(?3))",
-                        params![provider, serde_json::to_string(derived)?, now],
+                        "UPDATE source_connections SET derived_configuration = ?2, derived_checked_at = ?3 \
+                         WHERE id = ?1 AND (derived_checked_at IS NULL OR julianday(derived_checked_at) <= julianday(?3))",
+                        params![current.saved.id, serde_json::to_string(derived)?, now],
                     )?;
                     if !super::same_discovery(&current.derived, derived) {
                         if changed != 0 {
-                            super::clear_discovery_matches(transaction, provider)?;
+                            super::clear_discovery_matches(transaction, &current)?;
                         } else {
                             // A newer check already established different discovery rules.
                             replaced.insert(provider.clone());
@@ -1284,17 +1506,36 @@ impl Workspace {
                 if !read_before.contains_key(provider.as_str()) {
                     let read = freshness::read_partitions(
                         transaction,
-                        provider,
+                        source_id.unwrap_or(provider),
                         gathered.imported_partitions.get(provider),
                     )?;
                     read_before.insert(provider, read);
                 }
             }
             for issue in &gathered.issues {
-                if replaced.contains(&issue.reference.identity.provider)
-                    && ticket_for_identity(transaction, &issue.reference.identity)?.is_none()
-                {
+                let existing = ticket_for_identity(transaction, &issue.reference.identity)?;
+                let replaced_config = replaced.contains(&issue.reference.identity.provider);
+                if replaced_config && existing.is_none() {
                     continue;
+                }
+                if let Some(id) = &existing {
+                    let part = tracked
+                        .iter()
+                        .find(|ticket| &ticket.ticket_id == id)
+                        .map_or(issue.reference.partition.as_str(), |ticket| {
+                            ticket.partition.as_str()
+                        });
+                    if super::selected_connection(
+                        transaction,
+                        id,
+                        &issue.reference.identity.provider,
+                        part,
+                    )?
+                    .as_deref()
+                        != source_id
+                    {
+                        continue;
+                    }
                 }
                 let key = (
                     issue.reference.identity.provider.clone(),
@@ -1322,19 +1563,39 @@ impl Workspace {
                     now,
                     &mut applied,
                 )?;
+                if let Some(source_id) = source_id
+                    && !replaced_config
+                    && gathered.partitions.contains_key(&key)
+                    && let Some(ticket_id) =
+                        ticket_for_identity(transaction, &issue.reference.identity)?
+                {
+                    super::bind_ticket(transaction, &ticket_id, source_id)?;
+                }
             }
             crate::events::set_actor(transaction, own_actor)?;
             for (provider, seen) in &gathered.discovery {
                 if replaced.contains(provider) {
                     continue;
                 }
-                let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
+                let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id, i.locator, i.partition FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
                 let identities = statement
                     .query_map([provider], |row| {
-                        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, Option<String>>(3)?,
+                        ))
                     })?
                     .collect::<Result<Vec<_>, _>>()?;
-                for (id, external_id) in identities {
+                for (id, external_id, locator, part) in identities {
+                    let part = part
+                        .unwrap_or_else(|| super::legacy_reference_partition(provider, &locator));
+                    if super::selected_connection(transaction, &id, provider, &part)?.as_deref()
+                        != source_id
+                    {
+                        continue;
+                    }
                     transaction.execute("UPDATE source_sync SET discovery_matches = ?2 WHERE ticket_id = ?1 AND (last_attempt_at IS NULL OR last_attempt_at <= ?3)", params![id, seen.contains(&external_id), now])?;
                 }
             }
@@ -1347,6 +1608,17 @@ impl Workspace {
                 }
                 let ticket = found.reference.as_deref().and_then(|r| by_reference.get(r));
                 if let Some(ticket) = ticket {
+                    if super::selected_connection(
+                        transaction,
+                        &ticket.ticket_id,
+                        &ticket.provider,
+                        &ticket.partition,
+                    )?
+                    .as_deref()
+                        != source_id
+                    {
+                        continue;
+                    }
                     match found.scope {
                         FailureScope::Conversation => {
                             transaction.execute(
@@ -1389,17 +1661,13 @@ impl Workspace {
                 }
                 failures.push(RefreshFailure {
                     provider: found.provider.clone(),
+                    connection_id: source_id.map(str::to_owned),
                     reference: found.reference.clone(),
                     code: found.failure.code.clone(),
                     message: found.failure.message.clone(),
-                    retry_after_secs: gathered
-                        .runs
-                        .iter()
-                        .find(|run| {
-                            run.provider == found.provider
-                                && found.failure.code == FailureCode::RateLimited.as_str()
-                        })
-                        .and_then(|run| run.retry_after_secs),
+                    retry_after_secs: (found.failure.code == FailureCode::RateLimited.as_str())
+                        .then_some(gathered.retry_limit)
+                        .flatten(),
                     scope: found.scope,
                 });
             }
@@ -1410,6 +1678,11 @@ impl Workspace {
                 let none = HashSet::new();
                 let read = read_before.get(run.provider.as_str()).unwrap_or(&none);
                 freshness::record_run(transaction, run, read, now)?;
+            }
+            if let (Some(id), Some(seconds)) = (source_id, gathered.retry_limit)
+                && replaced.is_empty()
+            {
+                freshness::record_hold(transaction, id, now, seconds)?;
             }
             Ok(RefreshReport {
                 imported: applied.imported,

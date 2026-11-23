@@ -21,6 +21,7 @@ import {
   SearchPage,
 } from "@/features/settings/pages/SearchPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
+import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { useFadeThrough } from "@/features/settings/fade-through";
 // The keyframes of the page's own entrance (settings-layout.css plays them).
 import "@/components/ui/enter";
@@ -108,11 +109,16 @@ export function SettingsView({
       {selected === "diagnostics" && <DiagnosticsPage />}
       {selected === "about" && <AboutPage />}
       {selected === "search" && <SearchPage />}
+      {selected === "sources" && (
+        <SourcesPage onOpen={(id) => onSelect?.(`source-${id}`)} />
+      )}
       {sources.map((entry) => (
         <SourcePage
-          key={`${restores}:${entry.connector.provider}`}
+          key={`${restores}:${entry.saved?.id ?? entry.connector.provider}`}
           entry={entry}
-          active={selected === `source-${entry.connector.provider}`}
+          active={
+            selected === `source-${entry.saved?.id ?? entry.connector.provider}`
+          }
         />
       ))}
     </div>

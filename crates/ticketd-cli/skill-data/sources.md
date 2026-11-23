@@ -15,35 +15,36 @@ proof that the ticket is now local. Core errors explain which changes are allowe
 
 ```sh
 ticketd source list
-ticketd source show PROVIDER
-ticketd source status
+ticketd source add PROVIDER --set KEY=VALUE --preview
+ticketd source add PROVIDER --name "Work" --set KEY=VALUE
+ticketd source show CONNECTION
+ticketd source status CONNECTION
+ticketd source refresh CONNECTION --ticket T-KQ1
 ticketd context T-KQ1 --conversation
 ```
 
-`source list` returns available connectors, descriptions, configuration schemas, and saved
-settings. Use `source options` for supported field values, `source test` to check
-the connection, and `source preview` to inspect discovery results before saving
-configuration. See each command's help for `--set` and `--config-file`.
-Credentials use the connector's authentication path, not authored ticket content.
+`source list` returns connection IDs, providers, and the providers' settings schemas.
+Use a saved connection ID for `source show`, `test`, `options`, `configure`, `rename`,
+`preview`, `status` and `refresh`. `source add` takes a provider ID. Use
+`source add --preview` to check a new connection before adding it. See each command's
+help for `--set` and `--config-file`.
 
-`source save` stores settings without importing. `source refresh` imports matches
-and updates externally owned tickets (titles are made one line of at most 1000
-characters; the source keeps the original); `--ticket T-KQ1` refreshes one ticket. Refresh
-can return a JSON report with failures and a nonzero exit code: inspect both.
-These commands can contact the external service even though ticketd stores data
-locally. `source take-ownership` is an explicit authority change for an unavailable
-ticket, not a workaround for an ordinary edit rejection.
+`source add` and `source configure` validate and store settings without importing.
+`source refresh CONNECTION` discovers matching issues and updates tickets routed to
+that connection. Refresh can return a JSON report with failures and a nonzero exit
+code. `source take-ownership T-KQ1` explicitly changes authority for an unavailable
+ticket. Connections and their credentials stay on the local device.
 
 ## Publication and uncertain outcomes
 
 When publication is requested, first inspect its exact payload and destination:
 
 ```sh
-ticketd source publish T-KQ1 --provider PROVIDER --destination DESTINATION --preview
+ticketd source publish T-KQ1 --connection CONNECTION --destination DESTINATION --preview
 ```
 
 A saved source publishes to its allowed destinations. The preview checks your
-choice before anything is sent. Omit `--provider` when only one source can publish.
+choice before anything is sent. Omit `--connection` when only one connection can publish.
 
 Use the returned fingerprint with `--expect FINGERPRINT` when executing the
 publication. It creates an external issue and transfers authority while preserving

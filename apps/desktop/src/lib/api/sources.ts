@@ -119,6 +119,8 @@ export type SourceConfig = z.infer<typeof configSchema>;
 
 const savedSourceSchema = lazySchema(() =>
   z.object({
+    id: z.string().optional(),
+    name: z.string().optional(),
     provider: z.string(),
     config: configSchema,
     account: z.string(),
@@ -131,6 +133,7 @@ const sourceEntrySchema = lazySchema(() =>
   z.object({
     connector: connectorSchema,
     saved: savedSourceSchema.nullable(),
+    next_id: z.string().optional(),
   }),
 );
 export type SourceEntry = z.infer<typeof sourceEntrySchema>;
@@ -212,6 +215,7 @@ const sourceStatusSchema = lazySchema(() =>
   z.object({
     provider: z.string(),
     health: z.enum(sourceHealthValues),
+    connection_id: z.string().optional(),
     last_attempt_at: z.string().nullable(),
     /** The last run in which the source could be read. */
     last_refreshed_at: z.string().nullable(),
@@ -308,9 +312,14 @@ export const sourcesClient = {
    * `ticket`. Saved content stays in place when the source cannot be reached; the
    * report names what failed.
    */
-  async refresh(ticket?: string) {
+  async refresh(ticket?: string, connection?: string) {
     return refreshReportSchema.parse(
-      await structured(invoke("refresh_sources", { ticket: ticket ?? null })),
+      await structured(
+        invoke("refresh_sources", {
+          ticket: ticket ?? null,
+          ...(connection && { connection }),
+        }),
+      ),
     );
   },
   /** Persisted freshness of each source and whether a refresh is running. No network I/O. */
@@ -391,9 +400,19 @@ export const sourcesClient = {
       .array(sourceEntrySchema)
       .parse(await structured(invoke("list_sources")));
   },
-  async checkConnection(provider: string, config: SourceConfig) {
+  async checkConnection(
+    provider: string,
+    config: SourceConfig,
+    connection?: string,
+  ) {
     return connectionSchema.parse(
-      await structured(invoke("source_check_connection", { provider, config })),
+      await structured(
+        invoke("source_check_connection", {
+          provider,
+          config,
+          ...(connection && { connection }),
+        }),
+      ),
     );
   },
   async configurationSummary(provider: string, config: SourceConfig) {
@@ -410,25 +429,68 @@ export const sourcesClient = {
     field: string,
     query: string,
     config: SourceConfig,
+    connection?: string,
   ) {
     return z
       .array(choiceOptionSchema)
       .parse(
         await structured(
-          invoke("source_options", { provider, field, query, config }),
+          invoke("source_options", {
+            provider,
+            field,
+            query,
+            config,
+            ...(connection && { connection }),
+          }),
         ),
       );
   },
   /** Lists what discovery would match. Imports and saves nothing. */
-  async preview(provider: string, config: SourceConfig) {
+  async preview(provider: string, config: SourceConfig, connection?: string) {
     return previewSchema.parse(
-      await structured(invoke("source_preview", { provider, config })),
+      await structured(
+        invoke("source_preview", {
+          provider,
+          config,
+          ...(connection && { connection }),
+        }),
+      ),
     );
   },
   /** Validates, previews, and saves the discovery configuration. Imports nothing. */
-  async save(provider: string, config: SourceConfig) {
+  async save(provider: string, config: SourceConfig, connection?: string) {
     return saveOutcomeSchema.parse(
-      await structured(invoke("save_source", { provider, config })),
+      await structured(
+        invoke("save_source", {
+          provider,
+          config,
+          ...(connection && { connection }),
+        }),
+      ),
+    );
+  },
+  async add(
+    provider: string,
+    connection: string,
+    name: string,
+    config: SourceConfig,
+  ) {
+    return saveOutcomeSchema.parse(
+      await structured(
+        invoke("add_source_connection", {
+          provider,
+          connection,
+          name,
+          config,
+        }),
+      ),
+    );
+  },
+  async rename(connection: string, name: string) {
+    return savedSourceSchema.parse(
+      await structured(
+        invoke("rename_source_connection", { connection, name }),
+      ),
     );
   },
 };

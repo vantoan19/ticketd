@@ -47,23 +47,30 @@ pub(crate) struct GithubConnector {
     api_url: String,
     transport: Box<dyn HttpTransport>,
     credentials: Box<dyn CredentialSource>,
+    ambient: bool,
 }
 
 impl GithubConnector {
     /// The connector as the application uses it: real network, ambient
     /// credentials, and the API address from [`API_URL_VARIABLE`] if set.
     pub(crate) fn ambient() -> Self {
+        Self::ambient_for(None, None)
+    }
+
+    fn ambient_for(id: Option<&str>, account: Option<&str>) -> Self {
         let custom = std::env::var(API_URL_VARIABLE)
             .ok()
             .map(|url| url.trim().trim_end_matches('/').to_owned())
             .filter(|url| !url.is_empty());
         // github.com tokens are for github.com: another host gets its own.
         let custom_host = custom.as_deref().map(host_of);
-        Self::new(
+        let mut connector = Self::new(
             custom.unwrap_or_else(|| DEFAULT_API_URL.to_owned()),
             Box::new(UreqTransport::new()),
-            Box::new(AmbientCredentials::new(custom_host)),
-        )
+            Box::new(AmbientCredentials::new(custom_host, id, account)),
+        );
+        connector.ambient = true;
+        connector
     }
 
     pub(crate) fn new(
@@ -75,6 +82,19 @@ impl GithubConnector {
             api_url: api_url.into().trim_end_matches('/').to_owned(),
             transport,
             credentials,
+            ambient: false,
+        }
+    }
+
+    fn site(&self) -> String {
+        let host = host_of(&self.api_url).to_ascii_lowercase();
+        if matches!(
+            host.as_str(),
+            "api.github.com" | "github.com" | "localhost" | "127.0.0.1" | "[::1]"
+        ) {
+            String::new()
+        } else {
+            host
         }
     }
 
@@ -136,6 +156,17 @@ impl GithubConnector {
                         max_items: 10,
                         format: None,
                     },
+                },
+                SchemaField {
+                    key: "account".into(),
+                    label: "GitHub CLI account".into(),
+                    help: Some("Choose a username already signed in with gh. Leave empty to use the active account.".into()),
+                    required: false,
+                    placeholder: Some("e.g. octocat".into()),
+                    pattern: None,
+                    advanced: true,
+                    show_if: None,
+                    kind: FieldKind::Text { format: Some(ValueFormat::Handle) },
                 },
             ],
         }
@@ -363,6 +394,16 @@ impl GithubConnector {
 }
 
 impl Connector for GithubConnector {
+    fn for_connection(&self, id: &str, config: &ConfigValues) -> Option<Box<dyn Connector>> {
+        let account = config
+            .get("account")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| ValueFormat::Handle.is_valid(name));
+        self.ambient
+            .then(|| Box::new(Self::ambient_for(Some(id), account)) as Box<dyn Connector>)
+    }
+
     fn descriptor(&self) -> ConnectorDescriptor {
         ConnectorDescriptor {
             provider: PROVIDER.into(),
@@ -502,9 +543,21 @@ impl Connector for GithubConnector {
             .get("login")
             .and_then(Value::as_str)
             .ok_or_else(|| SourceError::Protocol("the user has no login".into()))?;
+        if config
+            .get("account")
+            .and_then(Value::as_str)
+            .is_some_and(|expected| {
+                !expected.trim().is_empty() && !expected.trim().eq_ignore_ascii_case(account)
+            })
+        {
+            return Err(SourceError::Unauthenticated(
+                "the GitHub credential belongs to a different account".into(),
+            ));
+        }
         Ok(ConnectionCheck {
             connection: ConnectionInfo {
                 account: account.to_owned(),
+                site: self.site(),
             },
             derived: Self::derived_configuration(config),
         })

@@ -187,6 +187,7 @@ impl Connector for FakeSource {
         Ok(ConnectionCheck {
             connection: ConnectionInfo {
                 account: "octo".into(),
+                site: String::new(),
             },
             derived: DerivedConfiguration {
                 publication: DestinationRules {

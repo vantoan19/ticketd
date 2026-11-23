@@ -77,17 +77,13 @@ const EXPORTED: &[(&str, &str)] = &[
     ("contextual_relationships", "kind, source_id, target_id"),
     ("ticket_parents", "child_id, parent_id"),
     (
-        "source_configurations",
-        "provider, configuration, account, contract_version, saved_at",
-    ),
-    (
         "external_identities",
         "ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition",
     ),
     ("external_ownership", "ticket_id, authority, changed_at"),
     (
         "source_sync",
-        "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since, discovery_matches, external_author, external_created_at",
+        "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since, external_author, external_created_at",
     ),
     (
         "external_duplicate_targets",
@@ -222,6 +218,22 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
         "bookkeeping that makes a retried write return its first result",
     ),
     (
+        "source_connections",
+        "device-local settings and credential references",
+    ),
+    (
+        "source_connection_status",
+        "device-local refresh scheduling and coverage",
+    ),
+    (
+        "source_connection_tickets",
+        "device-local discovery affinity",
+    ),
+    (
+        "publication_connections",
+        "device-local publication connection binding",
+    ),
+    (
         "source_presentations",
         "device-local copies of installed ticket source descriptions",
     ),
@@ -249,19 +261,9 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
 #[cfg_attr(not(test), allow(dead_code))]
 const OMITTED_COLUMNS: &[(&str, &str, &str)] = &[
     (
-        "source_configurations",
-        "derived_configuration",
-        "connection check answers can be regenerated from the saved settings",
-    ),
-    (
-        "source_configurations",
-        "revision",
-        "local compare-and-write bookkeeping for the saved settings",
-    ),
-    (
-        "source_configurations",
-        "derived_checked_at",
-        "local ordering of connection checks",
+        "source_sync",
+        "discovery_matches",
+        "membership depends on the local connection's settings",
     ),
     (
         "external_duplicate_targets",

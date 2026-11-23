@@ -47,6 +47,9 @@ pub struct ConnectorDescriptor {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ConnectionInfo {
     pub account: String,
+    /// Canonical site identity. Empty when the provider has only one site.
+    #[serde(default)]
+    pub site: String,
 }
 
 /// The verified connection and answers derived from its settings.
@@ -486,17 +489,6 @@ impl FailureCode {
             | Self::NotConfigured => false,
         }
     }
-
-    /// A quoted, comma-separated SQL list of the codes for which
-    /// [`Self::is_unavailable`] holds.
-    pub(crate) fn unavailable_sql_list() -> String {
-        Self::ALL
-            .into_iter()
-            .filter(|code| code.is_unavailable())
-            .map(|code| format!("'{}'", code.as_str()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    }
 }
 
 impl SourceError {
@@ -617,6 +609,11 @@ fn describe_issues(issues: &[FieldIssue]) -> String {
 /// network; the engine never calls one while holding a database transaction.
 pub trait Connector: Send + Sync {
     fn descriptor(&self) -> ConnectorDescriptor;
+
+    /// Supplies connection-specific credentials where the connector supports them.
+    fn for_connection(&self, _id: &str, _config: &ConfigValues) -> Option<Box<dyn Connector>> {
+        None
+    }
 
     /// How ticketd presents this provider and its settings.
     fn presentation(&self) -> SourcePresentation {

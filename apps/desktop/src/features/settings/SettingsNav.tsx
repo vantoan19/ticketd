@@ -56,10 +56,10 @@ function useSettingsNavItems() {
     ...SETTINGS_SECTIONS.filter(
       (section) => section.id !== "automations" || chat.enabled,
     ),
-    ...entries.map(({ connector }) =>
+    ...entries.map(({ connector, saved }) =>
       sourceSection(
-        connector.provider,
-        connector.name,
+        saved?.id ?? connector.provider,
+        saved?.name ?? connector.name,
         connector.presentation?.icon_svg,
       ),
     ),
@@ -74,7 +74,9 @@ function useSettingsNavItems() {
       return { label: "Needs setup", tone: "attention" };
     if (
       entries.some(
-        (entry) => `source-${entry.connector.provider}` === id && entry.saved,
+        (entry) =>
+          `source-${entry.saved?.id ?? entry.connector.provider}` === id &&
+          entry.saved,
       )
     )
       return { label: "Connected", tone: "positive" };

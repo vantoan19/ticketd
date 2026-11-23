@@ -815,15 +815,21 @@ instructions, settings fields and summary, required target, and network hosts.
 Clients render those descriptions using their own components. Saving a source
 caches its description locally so existing tickets can still name their source.
 
-Saved source configuration is workspace data (`source_configurations`), is
-included in export and backups, and is separate from any imported ticket.
-Saving and refreshing start with a connection check. Its account result confirms
-the connection, and its derived answers describe the discovery parts, filters
-and publication destinations. The core caches the latest successful answers for
-offline previews and compares them with publication requests in the write that
-records an attempt. A failed connection check keeps the cached answers. External
-issue references carry the discovery part so ticketd can compare it without
-interpreting the source's locator.
+Each device stores its named source connections in `source_connections`. The
+verified account and site are unique per provider. A connection check returns
+the account, site, discovery parts, filters, and publication destinations. The
+core caches successful answers for offline routing and previews. GitHub can
+use the active GitHub CLI account, a named account already signed in with it,
+or a connection-specific token override such as `TICKETD_SOURCE_GITHUB_2_TOKEN`.
+Each request that can change authority checks the saved account and site first.
+
+External identity remains provider plus opaque ID. A device refreshes a ticket
+through its local discovery connection, or the first saved connection that
+covers the issue's part. Tickets with no covering connection keep their cached
+source content. Connection settings, discovery affinity and refresh scheduling
+stay off portable backups, SQLite exports, and Workspace sync. A restore keeps
+the destination device's settings. The private copy taken before a migration
+keeps the pre-migration Workspace intact.
 
 An imported ticket stores three things apart, each keyed by the ticket:
 `external_identities` (provenance: which external issue it is or was, never
@@ -834,9 +840,9 @@ ordinary ticket columns. `Workspace::refresh_sources` gathers through the engine
 with no transaction open and then applies the result in one short write that
 re-reads each ticket's ownership; the core rejects title, description and
 closure-owned status edits to externally owned tickets. The same write re-reads
-the saved configuration. If it changed during the network work, successful reads
-of existing tickets can still apply, while discovery imports, membership, failures
-and source-run health from the replaced rules are discarded. Saving changed rules
+the connection. If its rules changed during network work, a successful read
+can still update a ticket that remains assigned to it. The old rules cannot
+import tickets or change discovery membership, failures, or run health. Saving changed rules
 invalidates match membership until the next complete discovery walk.
 
 The source conversation (an external ticket's comments and timeline events) is
@@ -848,10 +854,10 @@ an editing agent, and the rows survive takeover as provenance. Agents read it
 with `ticketd context T-KQ1 --conversation`.
 
 Freshness and availability are persisted, not inferred: `source_sync` records the
-start of each ticket's failure streak and `source_status` records each source's
+start of each ticket's failure streak and `source_connection_status` records each connection's
 last run, current error and any rate-limit hold. A ticket reads _Source
-unavailable_ exactly when its latest recorded attempt failed with an unreachable,
-unauthenticated, forbidden, missing, unusable or unconfigured answer; a rate
+unavailable_ when it has no local connection or its latest attempt failed with an
+unreachable, unauthenticated, forbidden, missing or unusable answer; a rate
 limit is delayed, not unavailable. Neither changes content, status or ownership.
 A successful or partial whole-source run persists its distinct checked-issue
 count with its refresh time; a failed or single-ticket run does not replace it.
@@ -861,15 +867,16 @@ observed source update; missing or stale evidence remains unknown.
 A refresh ignores an observation older than the one it holds, so a slower
 overlapping run cannot move confirmed state backwards. The desktop starts
 refreshing on launch and periodically through one in-process
-`RefreshCoordinator` (one run at a time, exponential backoff on failure, rate
-limits honored across restarts); there is no daemon, and `ticketd source refresh`
-and `ticketd source status` work without the desktop.
+`RefreshCoordinator`. Startup work is staggered. Up to two connections
+refresh at once, with serial calls within a connection. Failure backoff and
+persisted rate-limit holds apply to each connection. CLI refresh and status
+take a connection ID and work without the desktop.
 
 Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks
 eligibility and saves the attempt as `in_flight` with the exact title,
-description and destination; a unique partial index allows one open attempt per
-ticket. The connector's create call then runs with no transaction open. A second
+description and destination. It binds the attempt to the original connection
+on that device. A unique partial index allows one open attempt per ticket. The connector's create call then runs with no transaction open. A second
 short write links the confirmed issue (`external_identities` with origin
 `published`, ownership `external`) and marks the attempt `succeeded`. A refusal
 the provider proves (`SourceError::ruled_out_creation`) marks it `failed` and
@@ -877,7 +884,9 @@ leaves the ticket local. Anything else (timeout, server error, unreadable
 answer, an issue that could not be recorded, a crash) leaves it `in_flight` past
 its lease or `unresolved`: the ticket stays local and a second create is
 refused until the attempt is resolved. Replaying a request for an already
-published ticket returns it without calling the connector.
+published ticket returns it without calling the connector. The attempt remains
+readable on a restored device without the original binding. An unavailable
+connection cannot establish that the original create failed.
 
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only

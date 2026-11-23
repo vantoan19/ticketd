@@ -393,10 +393,15 @@ A ticket source connects an external tracker; GitHub Issues is the provider
 ([ADR 0006](adr/0006-external-ticket-authority.md)). The first connector is built in
 and run through a shared extension interface.
 
+- Add and name source connections under Settings → Sources. Several accounts can
+  connect to the same provider. Connections stay on this device and are excluded
+  from Workspace sync, portable backups, and JSON exports.
 - Discovery rules (selected repositories, optional assignee and label filters) can be
   previewed before saving, and matching issues are imported automatically. Refresh runs
   at desktop startup, periodically while the desktop is open, and on demand
-  (`ticketd source refresh`). Synchronized content stays available offline.
+  (`ticketd source refresh CONNECTION`). When connections overlap, one ticket is
+  imported and refreshed through one connection. Synchronized content remains
+  readable without a local connection.
 - A synchronized ticket is **externally owned**: its title, description, and status
   are read-only and flow one way, from the tracker into ticketd. Plan membership,
   relationships, tags, Activities, and Documents stay local and are never overwritten.
@@ -412,8 +417,9 @@ and run through a shared extension interface.
   links block publication until removed. Ongoing synchronization is inbound only.
 - If a source ticket becomes unavailable, ticketd keeps its content and local work and
   warns; **Take ownership** makes it local and stops synchronization.
-- CLI: the `source` command group (`save`, `refresh`, `take-ownership`,
-  `publish --preview`, `resolve`, and more).
+- Use `ticketd source add PROVIDER` to add a connection and `ticketd source list`
+  to find its ID. When several connections can publish, pass
+  `ticketd source publish T-XYZ --connection CONNECTION --preview`.
 
 ### Workspace sync
 

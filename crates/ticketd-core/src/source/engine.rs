@@ -80,10 +80,28 @@ pub struct DiscoverySummary {
 
 #[derive(Default)]
 pub struct Engine {
-    connectors: Vec<Box<dyn Connector>>,
+    connectors: Vec<std::sync::Arc<dyn Connector>>,
 }
 
 impl Engine {
+    /// An engine using the credential associated with one local connection.
+    pub fn for_connection(&self, provider: &str, id: &str, config: &ConfigValues) -> Self {
+        Self {
+            connectors: self
+                .connectors
+                .iter()
+                .map(|connector| {
+                    if connector.descriptor().provider == provider
+                        && let Some(bound) = connector.for_connection(id, config)
+                    {
+                        return bound.into();
+                    }
+                    connector.clone()
+                })
+                .collect(),
+        }
+    }
+
     /// An engine with no connectors.
     pub fn new() -> Self {
         Self::default()
@@ -96,7 +114,7 @@ impl Engine {
         // test registers it through `register` to prove it), so it is added directly
         // rather than through a check whose failure could only be ignored.
         Self {
-            connectors: vec![Box::new(GithubConnector::ambient())],
+            connectors: vec![std::sync::Arc::new(GithubConnector::ambient())],
         }
     }
 
@@ -127,7 +145,7 @@ impl Engine {
                 "the source must declare and implement publication together".into(),
             ));
         }
-        self.connectors.push(connector);
+        self.connectors.push(connector.into());
         Ok(())
     }
 
@@ -321,7 +339,7 @@ impl Engine {
     ) -> Result<DiscoveryPreview, SourceError> {
         let config = self.validate_configuration(provider, raw)?;
         self.preview_with(provider, &config, |_| None)
-            .map(|(preview, _)| preview)
+            .map(|(preview, _, _)| preview)
     }
 
     pub(crate) fn preview_with(
@@ -329,7 +347,7 @@ impl Engine {
         provider: &str,
         config: &ConfigValues,
         mut existing: impl FnMut(&ExternalIdentity) -> Option<String>,
-    ) -> Result<(DiscoveryPreview, DerivedConfiguration), SourceError> {
+    ) -> Result<(DiscoveryPreview, DerivedConfiguration, ConnectionInfo), SourceError> {
         let ConnectionCheck {
             connection,
             derived,
@@ -383,14 +401,14 @@ impl Engine {
         let complete = summary.complete;
         let preview = DiscoveryPreview {
             provider: provider.to_owned(),
-            account: connection.account,
+            account: connection.account.clone(),
             issues,
             matched,
             new: matched - already_here,
             already_here,
             complete,
         };
-        Ok((preview, derived))
+        Ok((preview, derived, connection))
     }
 
     /// Re-reads one issue by reference.
