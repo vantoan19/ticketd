@@ -952,14 +952,16 @@ impl Workspace {
         match connected.as_slice() {
             [provider] => Ok((*provider).clone()),
             _ if publishing.is_empty() => Err(SourceError::Unsupported("publishing").into()),
-            _ => Err(SourceError::InvalidConfiguration(vec![super::FieldIssue {
-                field: "provider".into(),
-                message: format!(
-                    "must be selected with --provider; choose one of: {}",
-                    publishing.join(", ")
-                ),
-            }])
-            .into()),
+            _ => Err(
+                SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
+                    "provider",
+                    format!(
+                        "must be selected with --provider; choose one of: {}",
+                        publishing.join(", ")
+                    ),
+                )])
+                .into(),
+            ),
         }
     }
 
@@ -1086,10 +1088,7 @@ impl Workspace {
                 chosen_destination(options.destination.as_deref(), &target.destinations)
             else {
                 return Err(Error::Source(SourceError::InvalidConfiguration(vec![
-                    super::FieldIssue {
-                        field: "destination".into(),
-                        message: "choose where to publish".into(),
-                    },
+                    super::FieldIssue::for_field("destination", "choose where to publish"),
                 ])));
             };
             // Refused before an attempt is recorded: nothing was tried.
@@ -1618,13 +1617,13 @@ impl Workspace {
         };
         let Some(saved) = self.saved_source(&attempt.provider)? else {
             return Err(unverified(SourceError::InvalidConfiguration(vec![
-                super::FieldIssue {
-                    field: "source".into(),
-                    message: format!(
+                super::FieldIssue::for_field(
+                    "source",
+                    format!(
                         "connect {} again before resolving this publication",
                         super::provider_display_name(&self.connection, &attempt.provider)?
                     ),
-                },
+                ),
             ])));
         };
         match &options.resolution {

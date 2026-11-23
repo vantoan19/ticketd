@@ -787,7 +787,13 @@ The code lives in `ticketd_core::source`, from the inside out:
   is an optional capability with a default "unsupported" implementation.
 - **Schema** (`schema.rs`): fields, selectors, dynamic options, and validation,
   shared by every client. Desktop forms and CLI `--set key=value` flags both build
-  raw values that `ConfigSchema::validate` checks and normalizes.
+  raw values that `ConfigSchema::validate` checks and normalizes. A `show_if`
+  condition names another input. The dependent value is omitted when that input
+  or any input it depends on is empty. Advanced settings use the same validation
+  rules. Links are display metadata, and the desktop only opens HTTPS addresses.
+  A schema declaring a secret is refused until keychain-backed settings ship.
+  Preview and Save run connector validation after normalization, before discovery.
+  Connector problems can point to an input or describe the whole form.
 - **Engine** (`engine.rs`): the only caller of connectors. It validates
   configuration, walks pages with a progress guard, de-duplicates by external
   identity, bounds previews, and holds no database handle.

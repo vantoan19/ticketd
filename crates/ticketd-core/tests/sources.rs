@@ -53,7 +53,7 @@ fn schema_validation_reports_every_problem_and_normalizes_values() {
             json!({"repositories": ["bad", "a/b/c"], "assignee": "-x-", "extra": 1}),
         ))
         .unwrap_err();
-    let fields: Vec<_> = issues.iter().map(|i| i.field.as_str()).collect();
+    let fields: Vec<_> = issues.iter().map(|i| i.field.as_deref().unwrap()).collect();
     assert_eq!(
         fields,
         ["extra", "repositories", "repositories", "assignee"]
@@ -103,6 +103,125 @@ fn command_line_assignments_build_the_same_values_as_a_form() {
         schema
             .values_from_assignments(&["assignee=a".into(), "assignee=b".into()])
             .is_err()
+    );
+}
+
+#[test]
+fn richer_schema_validates_active_fields_and_never_saves_link_values() {
+    let schema: ticketd_core::source::ConfigSchema = serde_json::from_value(json!({
+        "fields": [
+            {"type": "text", "key": "project", "label": "Project", "show_if": "team",
+             "advanced": true, "required": true, "placeholder":"ENG-1", "help":"Enter the project key.",
+             "pattern": {"regex": "^ENG-[0-9]+$", "message": "must start with ENG- and end in digits"}},
+            {"type": "text", "key": "team", "label": "Team", "show_if": "site"},
+            {"type": "text", "key": "site", "label": "Site"},
+            {"type": "link", "key": "help", "label": "Set up an account", "url": "https://example.com/setup"}
+        ]
+    })).unwrap();
+    let description = serde_json::to_value(&schema).unwrap();
+    assert_eq!(description["fields"][0]["placeholder"], "ENG-1");
+    assert_eq!(description["fields"][0]["help"], "Enter the project key.");
+    assert_eq!(description["fields"][0]["advanced"], true);
+    assert_eq!(description["fields"][3]["url"], "https://example.com/setup");
+
+    let settings = |assignments: &[&str]| {
+        schema
+            .values_from_assignments(
+                &assignments
+                    .iter()
+                    .map(|entry| (*entry).to_owned())
+                    .collect::<Vec<_>>(),
+            )
+            .unwrap()
+    };
+    assert!(
+        schema
+            .validate(&settings(&["team=eng", "project=bad"]))
+            .unwrap()
+            .is_empty()
+    );
+    let errors = schema
+        .validate(&settings(&["site=example", "team=eng"]))
+        .unwrap_err();
+    assert_eq!(errors[0].field.as_deref(), Some("project"));
+    assert_eq!(errors[0].message, "is required");
+    let errors = schema
+        .validate(&settings(&["site=example", "team=eng", "project=bad"]))
+        .unwrap_err();
+    assert_eq!(errors[0].message, "must start with ENG- and end in digits");
+    let valid = schema
+        .validate(&settings(&["site=example", "team=eng", "project= ENG-1 "]))
+        .unwrap();
+    assert_eq!(valid["project"], "ENG-1");
+    assert!(
+        schema
+            .values_from_assignments(&["help=https://example.com".into()])
+            .is_err()
+    );
+    assert!(
+        schema
+            .validate(&values(json!({"help":"https://example.com"})))
+            .is_err()
+    );
+}
+
+#[test]
+fn a_declared_secret_is_refused_even_without_a_value() {
+    let schema: ticketd_core::source::ConfigSchema = serde_json::from_value(json!({
+        "fields": [{"type": "secret", "key": "api_key", "label": "API key"}]
+    }))
+    .unwrap();
+    let errors = schema.validate(&ConfigValues::new()).unwrap_err();
+    assert_eq!(errors[0].field.as_deref(), Some("api_key"));
+    assert!(
+        errors[0]
+            .message
+            .contains("secret settings are not supported yet")
+    );
+
+    let fake = FakeSource::default();
+    fake.0.lock().unwrap().extra_fields = schema.fields;
+    let mut engine = Engine::new();
+    let error = engine.register(Box::new(fake)).unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("api_key secret settings are not supported yet")
+    );
+    assert!(engine.connectors().is_empty());
+}
+
+#[test]
+fn source_validation_sees_normalized_values_and_prevents_save() {
+    use ticketd_core::source::FieldIssue;
+
+    let (fake, engine) = setup();
+    let (_dir, mut workspace) = workspace();
+    fake.0.lock().unwrap().validate_config = Some(|config| {
+        assert_eq!(config["repositories"], json!(["o/r"]));
+        vec![
+            FieldIssue::for_field("repositories", "must include your project"),
+            FieldIssue::for_form("Choose a different account and try again."),
+        ]
+    });
+    let raw = values(json!({"repositories":[" o/r ", "o/r"]}));
+    let error = workspace.save_source(&engine, "fake", &raw).unwrap_err();
+    let Error::Source(error) = error else {
+        panic!("{error}");
+    };
+    assert_eq!(error.issues()[0].field.as_deref(), Some("repositories"));
+    assert_eq!(error.issues()[1].field, None);
+    assert!(error.to_string().contains("Choose a different account"));
+    assert_eq!(fake.0.lock().unwrap().discover_calls, 0);
+    assert!(workspace.saved_source("fake").unwrap().is_none());
+
+    // Signing in is possible while a draft is incomplete.
+    assert_eq!(
+        engine
+            .check_connection("fake", &ConfigValues::new())
+            .unwrap()
+            .account,
+        "octo"
     );
 }
 

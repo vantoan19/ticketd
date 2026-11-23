@@ -61,10 +61,12 @@ pub struct Remote {
     pub pages: Vec<Result<DiscoveryPage, String>>,
     pub outage: Option<Failure>,
     pub connection_error: Option<String>,
+    pub validate_config: Option<fn(&ConfigValues) -> Vec<FieldIssue>>,
     pub version: Option<u32>,
     pub display_name: Option<String>,
     pub presentation: SourcePresentation,
     pub repositories_optional: bool,
+    pub extra_fields: Vec<SchemaField>,
     pub discover_calls: usize,
     pub cursors_seen: Vec<Option<String>>,
     pub fetch_calls: Vec<u64>,
@@ -120,7 +122,7 @@ impl Connector for FakeSource {
                 Capability::Publish,
             ],
             schema: ConfigSchema {
-                fields: vec![
+                fields: [
                     multi_select(
                         "repositories",
                         "Repositories",
@@ -132,19 +134,32 @@ impl Connector for FakeSource {
                         label: "Assignee".into(),
                         help: None,
                         required: false,
+                        placeholder: None,
+                        pattern: None,
+                        advanced: false,
+                        show_if: None,
                         kind: FieldKind::Text {
-                            placeholder: None,
                             format: Some(ValueFormat::Handle),
                         },
                     },
                     multi_select("labels", "Labels", None, false),
-                ],
+                ]
+                .into_iter()
+                .chain(remote.extra_fields.iter().cloned())
+                .collect(),
             },
         }
     }
 
     fn presentation(&self) -> SourcePresentation {
         self.0.lock().unwrap().presentation.clone()
+    }
+
+    fn validate(&self, config: &ConfigValues) -> Result<Vec<FieldIssue>, SourceError> {
+        let validate = self.0.lock().unwrap().validate_config;
+        Ok(validate
+            .map(|validate| validate(config))
+            .unwrap_or_default())
     }
 
     fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
@@ -390,6 +405,10 @@ fn multi_select(
         label: label.into(),
         help: None,
         required,
+        placeholder: None,
+        pattern: None,
+        advanced: false,
+        show_if: None,
         kind: FieldKind::MultiSelect {
             options: OptionSource::Dynamic { depends_on: vec![] },
             allow_custom: true,
@@ -401,10 +420,7 @@ fn multi_select(
 }
 
 fn configuration_error(field: &str, message: String) -> SourceError {
-    SourceError::InvalidConfiguration(vec![FieldIssue {
-        field: field.into(),
-        message,
-    }])
+    SourceError::InvalidConfiguration(vec![FieldIssue::for_field(field, message)])
 }
 
 fn issue_id(reference: &ExternalRef) -> Result<u64, SourceError> {

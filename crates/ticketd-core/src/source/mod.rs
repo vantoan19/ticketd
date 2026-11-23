@@ -51,8 +51,8 @@ pub use publication::{
 };
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
-    ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
-    ValueFormat,
+    ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, FieldPattern, OptionSource,
+    SchemaField, ValueFormat,
 };
 pub(crate) use tracking::duplicate_target;
 pub use tracking::{

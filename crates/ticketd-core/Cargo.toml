@@ -27,6 +27,7 @@ uuid = { version = "1", features = ["v4", "v5", "serde"] }
 pulldown-cmark = "0.13"
 ureq = "3"
 url = "2"
+regex = "1"
 base64 = "0.23"
 saphyr = { version = "0.3", default-features = false }
 

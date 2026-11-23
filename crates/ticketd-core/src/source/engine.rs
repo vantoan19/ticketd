@@ -109,6 +109,10 @@ impl Engine {
                 found: descriptor.contract_version,
             });
         }
+        descriptor
+            .schema
+            .check_definition()
+            .map_err(SourceError::InvalidConfiguration)?;
         if self.find(&descriptor.provider).is_some() {
             return Err(SourceError::Protocol(format!(
                 "source '{}' is registered twice",
@@ -169,6 +173,22 @@ impl Engine {
             .map_err(SourceError::InvalidConfiguration)
     }
 
+    /// Checks both the schema and the provider's rules for a complete draft.
+    pub fn validate_configuration(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<ConfigValues, SourceError> {
+        let config = self.validate(provider, raw)?;
+        let connector = self.connector(provider)?;
+        let issues = with_guidance(connector, connector.validate(&config))?;
+        if issues.is_empty() {
+            Ok(config)
+        } else {
+            Err(SourceError::InvalidConfiguration(issues))
+        }
+    }
+
     /// Verifies credentials and permissions for validated or unvalidated values.
     pub fn check_connection(
         &self,
@@ -198,10 +218,7 @@ impl Engine {
             }) => {}
             _ => {
                 return Err(SourceError::InvalidConfiguration(vec![
-                    super::schema::FieldIssue {
-                        field: field.to_owned(),
-                        message: "does not offer dynamic options".into(),
-                    },
+                    super::schema::FieldIssue::for_field(field, "does not offer dynamic options"),
                 ]));
             }
         }
@@ -295,7 +312,7 @@ impl Engine {
         raw: &ConfigValues,
         mut existing: impl FnMut(&ExternalIdentity) -> Option<String>,
     ) -> Result<DiscoveryPreview, SourceError> {
-        let config = self.validate(provider, raw)?;
+        let config = self.validate_configuration(provider, raw)?;
         let account = self.check_connection(provider, &config)?.account;
         let issue_name = self.description(provider)?.presentation.issue_name;
         let mut issues = Vec::new();
@@ -330,10 +347,10 @@ impl Engine {
             // Name the setting, once, so the person is pointed at the field.
             if let Some(field) = &part.field {
                 return Err(SourceError::InvalidConfiguration(vec![
-                    super::schema::FieldIssue {
-                        field: field.clone(),
-                        message: format!("cannot be used: {}", part.message),
-                    },
+                    super::schema::FieldIssue::for_field(
+                        field,
+                        format!("cannot be used: {}", part.message),
+                    ),
                 ]));
             }
             return Err(if part.code == "forbidden" {

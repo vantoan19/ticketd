@@ -505,7 +505,10 @@ fn rate_limit_message(retry_after_secs: Option<u64>) -> String {
 fn describe_issues(issues: &[FieldIssue]) -> String {
     issues
         .iter()
-        .map(|issue| format!("{} {}", issue.field, issue.message))
+        .map(|issue| match &issue.field {
+            Some(field) => format!("{field} {}", issue.message),
+            None => issue.message.clone(),
+        })
         .collect::<Vec<_>>()
         .join("; ")
 }
@@ -524,6 +527,12 @@ pub trait Connector: Send + Sync {
     /// this operation does not validate, contact the provider, or save anything.
     fn configuration_summary(&self, _config: &ConfigValues) -> Vec<SummaryPart> {
         Vec::new()
+    }
+
+    /// Checks normalized settings before previewing or saving them. A problem
+    /// can point at one field, or describe the configuration as a whole.
+    fn validate(&self, _config: &ConfigValues) -> Result<Vec<FieldIssue>, SourceError> {
+        Ok(Vec::new())
     }
 
     /// Verifies credentials and permissions and names the acting account.

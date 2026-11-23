@@ -23,7 +23,8 @@ use super::{
         SourceError,
     },
     schema::{
-        ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
+        ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, FieldPattern,
+        OptionSource, SchemaField, ValueFormat,
     },
 };
 
@@ -84,6 +85,10 @@ impl GithubConnector {
                     label: "Repositories".into(),
                     help: Some("Issues from these repositories are discovered, and tickets can be published only to them. Type owner/name, then press Enter.".into()),
                     required: true,
+                    placeholder: Some("e.g. acme/billing-api".into()),
+                    pattern: None,
+                    advanced: false,
+                    show_if: None,
                     kind: FieldKind::MultiSelect {
                         options: OptionSource::Dynamic { depends_on: vec![] },
                         allow_custom: true,
@@ -100,10 +105,14 @@ impl GithubConnector {
                             .into(),
                     ),
                     required: false,
-                    kind: FieldKind::Text {
-                        placeholder: Some("username".into()),
-                        format: Some(ValueFormat::Handle),
-                    },
+                    placeholder: Some("e.g. octocat".into()),
+                    pattern: Some(FieldPattern {
+                        regex: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$".into(),
+                        message: "must be a username of letters, digits and hyphens".into(),
+                    }),
+                    advanced: false,
+                    show_if: None,
+                    kind: FieldKind::Text { format: None },
                 },
                 SchemaField {
                     key: "labels".into(),
@@ -113,6 +122,10 @@ impl GithubConnector {
                             .into(),
                     ),
                     required: false,
+                    placeholder: Some("e.g. bug, payments".into()),
+                    pattern: None,
+                    advanced: false,
+                    show_if: None,
                     kind: FieldKind::MultiSelect {
                         options: OptionSource::Dynamic {
                             depends_on: vec!["repositories".into()],
@@ -120,7 +133,7 @@ impl GithubConnector {
                         allow_custom: true,
                         min_items: 0,
                         max_items: 10,
-                        format: Some(ValueFormat::Label),
+                        format: None,
                     },
                 },
             ],
@@ -142,10 +155,10 @@ impl GithubConnector {
     ) -> Result<HttpResponse, SourceError> {
         if !credential_may_travel(&self.api_url) {
             return Err(SourceError::InvalidConfiguration(vec![
-                super::schema::FieldIssue {
-                    field: API_URL_VARIABLE.into(),
-                    message: "must be an https address (plain http is allowed only for localhost), so a credential is never sent in the clear".into(),
-                },
+                super::schema::FieldIssue::for_field(
+                    API_URL_VARIABLE,
+                    "must be an https address (plain http is allowed only for localhost), so a credential is never sent in the clear",
+                ),
             ]));
         }
         let mut url = url.to_owned();
@@ -456,6 +469,29 @@ impl Connector for GithubConnector {
         ));
         summary.push(plain("."));
         summary
+    }
+
+    fn validate(&self, config: &ConfigValues) -> Result<Vec<FieldIssue>, SourceError> {
+        let mut issues = Vec::new();
+        if let Some(assignee) = config.get("assignee").and_then(Value::as_str)
+            && !ValueFormat::Handle.is_valid(assignee)
+        {
+            issues.push(FieldIssue::for_field(
+                "assignee",
+                "must be a username of letters, digits and hyphens",
+            ));
+        }
+        for label in strings(config.get("labels")) {
+            if !ValueFormat::Label.is_valid(&label) {
+                issues.push(FieldIssue::for_field(
+                    "labels",
+                    format!(
+                        "'{label}' must be at most 50 characters without commas or line breaks"
+                    ),
+                ));
+            }
+        }
+        Ok(issues)
     }
 
     fn check_connection(&self, _config: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
@@ -892,10 +928,10 @@ impl GithubConnector {
 }
 
 fn not_in_destination(destination: &str) -> SourceError {
-    SourceError::InvalidConfiguration(vec![super::schema::FieldIssue {
-        field: "issue".into(),
-        message: format!("is not in {destination}"),
-    }])
+    SourceError::InvalidConfiguration(vec![super::schema::FieldIssue::for_field(
+        "issue",
+        format!("is not in {destination}"),
+    )])
 }
 
 /// The issue number in `text`, which may be `12`, `#12`, `owner/name#12` or an
@@ -903,10 +939,10 @@ fn not_in_destination(destination: &str) -> SourceError {
 fn issue_number_in(text: &str, destination: &str) -> Result<u64, SourceError> {
     let text = text.trim();
     let invalid = || {
-        SourceError::InvalidConfiguration(vec![super::schema::FieldIssue {
-            field: "issue".into(),
-            message: "must be an issue number, owner/name#number or an issue link".into(),
-        }])
+        SourceError::InvalidConfiguration(vec![super::schema::FieldIssue::for_field(
+            "issue",
+            "must be an issue number, owner/name#number or an issue link",
+        )])
     };
     let (repository, number) = if let Some((_, path)) = text
         .strip_prefix("https://")
@@ -953,10 +989,10 @@ fn require_repository(destination: &str) -> Result<(), SourceError> {
         return Ok(());
     }
     Err(SourceError::InvalidConfiguration(vec![
-        super::schema::FieldIssue {
-            field: "destination".into(),
-            message: "must be a repository in the form owner/name".into(),
-        },
+        super::schema::FieldIssue::for_field(
+            "destination",
+            "must be a repository in the form owner/name",
+        ),
     ]))
 }
 

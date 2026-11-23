@@ -423,7 +423,7 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
     // The refusal points at the repositories field and names the repository once.
     let error = engine.preview("github", &values).unwrap_err();
     assert_eq!(error.issues().len(), 1);
-    assert_eq!(error.issues()[0].field, "repositories");
+    assert_eq!(error.issues()[0].field.as_deref(), Some("repositories"));
     assert_eq!(
         error.issues()[0].message,
         "cannot be used: o/gone was not found, or your account cannot see it"
@@ -1462,7 +1462,11 @@ fn only_owner_name_destinations_can_be_published_to() {
     assert!(engine.check_destination("github", "o/r").is_ok());
     for bad in ["nonsense", "a b/c", "o/"] {
         let error = engine.check_destination("github", bad).unwrap_err();
-        assert_eq!(error.issues()[0].field, "destination", "{bad}");
+        assert_eq!(
+            error.issues()[0].field.as_deref(),
+            Some("destination"),
+            "{bad}"
+        );
     }
 }
 

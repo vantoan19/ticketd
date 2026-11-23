@@ -4978,6 +4978,7 @@ dependencies = [
  "fs2",
  "keyring",
  "pulldown-cmark",
+ "regex",
  "rusqlite",
  "saphyr",
  "serde",

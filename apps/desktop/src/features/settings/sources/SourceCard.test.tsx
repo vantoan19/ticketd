@@ -281,6 +281,103 @@ test("field problems from the core appear beside their fields", async () => {
   );
 });
 
+test("conditional settings, advanced fields and setup links use the source schema", async () => {
+  const richer: SourceEntry = {
+    ...entry,
+    connector: {
+      ...entry.connector,
+      schema: {
+        fields: [
+          ...entry.connector.schema.fields,
+          { key: "site", label: "Site", type: "text", required: false },
+          {
+            key: "project",
+            label: "Project key",
+            type: "text",
+            show_if: "site",
+            advanced: true,
+            required: true,
+            placeholder: "ENG-1",
+            help: "Use the key from the project settings.",
+            pattern: {
+              regex: "^ENG-[0-9]+$",
+              message: "must use an engineering key",
+            },
+          },
+          {
+            key: "setup",
+            label: "Set up the connection",
+            required: false,
+            type: "link",
+            url: "https://example.com/setup",
+          },
+          {
+            key: "unsafe",
+            label: "Unsafe link",
+            required: false,
+            type: "link",
+            url: "http://example.com/setup",
+          },
+          {
+            key: "unbound",
+            label: "Unbound link",
+            required: false,
+            type: "link",
+            url: "https:example.com/setup",
+          },
+        ],
+      },
+    },
+  };
+  vi.mocked(sourcesClient.preview).mockRejectedValue({
+    code: "invalid_configuration",
+    message: "configuration invalid",
+    fields: [
+      { message: "This account and site cannot be used together." },
+      { field: "project", message: "must use an engineering key" },
+    ],
+  });
+  render(<SourceCard entry={richer} />);
+  expect(
+    screen
+      .getByRole("link", { name: "Set up the connection" })
+      .getAttribute("href"),
+  ).toBe("https://example.com/setup");
+  expect(screen.queryByRole("link", { name: "Unsafe link" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Unbound link" })).toBeNull();
+  expect(screen.queryByRole("textbox", { name: "Project key" })).toBeNull();
+
+  await addRepository("o/r");
+  fireEvent.change(screen.getByLabelText(/Site/), {
+    target: { value: "example" },
+  });
+  expect(screen.queryByRole("textbox", { name: "Project key" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Advanced settings" }));
+  const project = screen.getByLabelText(/Project key/);
+  expect(project.getAttribute("placeholder")).toBe("ENG-1");
+  expect(project.getAttribute("aria-required")).toBe("true");
+  expect(
+    screen.getByText("Use the key from the project settings."),
+  ).toBeTruthy();
+  fireEvent.change(project, { target: { value: "bad" } });
+  fireEvent.click(screen.getByRole("button", { name: "Advanced settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByText("This account and site cannot be used together.");
+  expect(
+    screen.getByText("Project key must use an engineering key"),
+  ).toBeTruthy();
+  expect(
+    screen.getByLabelText(/Project key/).getAttribute("aria-invalid"),
+  ).toBe("true");
+
+  fireEvent.change(screen.getByLabelText(/Site/), { target: { value: "" } });
+  expect(screen.queryByRole("textbox", { name: "Project key" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  expect(sourcesClient.preview).toHaveBeenLastCalledWith("github", {
+    repositories: ["o/r"],
+  });
+});
+
 test("a saved configuration is shown as saved until edited", () => {
   render(
     <SourceCard
