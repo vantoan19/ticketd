@@ -5,7 +5,7 @@ use std::path::Path;
 
 use rusqlite::Connection;
 use ticketd_core::source::{Clock, Engine, RefreshCoordinator, RefreshOptions, RefreshPolicy, Run};
-use ticketd_core::{self, FORMAT_VERSION, Workspace};
+use ticketd_core::{self, Status, SyncKind, SyncRecord, TicketPatch, Workspace};
 
 const LOCAL_NAME: &str = "connection-backup-sentinel-5d53837c";
 
@@ -13,7 +13,7 @@ const LOCAL_NAME: &str = "connection-backup-sentinel-5d53837c";
 fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("workspace.sqlite3");
-    ticketd_core::create_workspace_at_format_version(&path, FORMAT_VERSION - 1).unwrap();
+    ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
     let old = Connection::open(&path).unwrap();
     old.execute_batch(
         "INSERT INTO tickets (id, reference, title, status) VALUES
@@ -77,7 +77,7 @@ fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
     let format: i64 = raw
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(format, FORMAT_VERSION - 1);
+    assert_eq!(format, 88);
     let account: String = raw
         .query_row("SELECT account FROM source_configurations", [], |row| {
             row.get(0)
@@ -245,6 +245,236 @@ fn refresh_prefers_discovery_then_the_first_local_connection_covering_the_part()
 }
 
 #[test]
+fn removing_a_connection_preserves_work_and_only_rediscovery_resumes_sync() {
+    let remote = fake_source::FakeSource::default();
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote.account_from_assignee = true;
+        remote
+            .issues
+            .insert(1, fake_source::issue_in("owner/shared", 1, "Original"));
+        remote.issues.insert(
+            2,
+            fake_source::issue_in("owner/shared", 2, "Take this one over"),
+        );
+        remote.matching = vec![1, 2];
+    }
+    let mut engine = Engine::new();
+    engine.register(Box::new(remote.clone())).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            "fake",
+            None,
+            None,
+            &values("alice", "owner/shared"),
+        )
+        .unwrap();
+    workspace
+        .add_source_connection(&engine, "fake", None, None, &values("bob", "owner/shared"))
+        .unwrap();
+    let import = workspace
+        .refresh_connection(&engine, "fake", &RefreshOptions::default())
+        .unwrap();
+    let first = &import.imported[0];
+    let second = &import.imported[1];
+    workspace
+        .change_ticket(
+            first,
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    workspace
+        .add_activity(first, "My local work", None)
+        .unwrap();
+    let original = workspace.show_ticket(first).unwrap();
+
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote.matching.clear();
+        let changed = remote.issues.get_mut(&1).unwrap();
+        changed.title = "Edited at the source".into();
+        changed.updated_at = "2026-03-01T00:00:00Z".into();
+    }
+    // A refresh that finished discovery before removal cannot restore the old connection.
+    let removal_path = path.clone();
+    remote.0.lock().unwrap().before_discovery = Some(std::sync::Arc::new(move || {
+        Workspace::open(&removal_path)
+            .unwrap()
+            .remove_source_connection("fake")
+            .unwrap();
+    }));
+    workspace
+        .refresh_connection(&engine, "fake", &RefreshOptions::default())
+        .unwrap();
+
+    assert!(workspace.source_connection("fake").is_err());
+    let detached = workspace.show_ticket(first).unwrap();
+    assert_eq!(detached.title, original.title);
+    assert_eq!(detached.body, original.body);
+    assert_eq!(detached.status, Status::InProgress);
+    assert_eq!(detached.latest_update, original.latest_update);
+    let detached_source = detached.source.unwrap();
+    assert_eq!(detached_source.id, original.source.unwrap().id);
+    assert_eq!(
+        detached_source.unavailable.unwrap().code,
+        "connection_removed"
+    );
+    assert!(detached_source.content_locked);
+
+    remote.0.lock().unwrap().fetch_calls.clear();
+    workspace
+        .refresh_connection(&engine, "fake-2", &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(workspace.show_ticket(first).unwrap().title, "Original");
+    assert_eq!(
+        workspace
+            .show_ticket(first)
+            .unwrap()
+            .source
+            .unwrap()
+            .unavailable
+            .unwrap()
+            .code,
+        "connection_removed"
+    );
+    assert!(remote.0.lock().unwrap().fetch_calls.is_empty());
+
+    workspace.take_ownership(second, None).unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            "fake",
+            None,
+            None,
+            &values("alice", "owner/shared"),
+        )
+        .unwrap();
+    assert_eq!(
+        workspace
+            .show_ticket(first)
+            .unwrap()
+            .source
+            .unwrap()
+            .unavailable
+            .unwrap()
+            .code,
+        "connection_removed"
+    );
+    remote.0.lock().unwrap().matching = vec![1, 2];
+    let result = workspace
+        .refresh_connection(&engine, "fake", &RefreshOptions::default())
+        .unwrap();
+    assert!(result.imported.is_empty());
+    let resumed = workspace.show_ticket(first).unwrap();
+    assert_eq!(resumed.id, original.id);
+    assert_eq!(resumed.title, "Edited at the source");
+    assert_eq!(resumed.status, Status::InProgress);
+    assert!(resumed.source.unwrap().unavailable.is_none());
+    let local = workspace.show_ticket(second).unwrap().source.unwrap();
+    assert_eq!(local.ownership, ticketd_core::source::Ownership::Local);
+    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+}
+
+#[test]
+fn a_synced_ticket_without_a_connection_uses_its_cached_provider_and_allows_takeover() {
+    const LOCAL_GUIDANCE: &str = "device-local-provider-guidance-8d1a8858";
+    const ICON: &str = r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/></svg>"#;
+    let remote = fake_source::FakeSource::default();
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote.display_name = Some("Beacon Tracker".into());
+        remote.presentation.icon_svg = Some(ICON.into());
+        remote.presentation.sign_in.desktop_instruction = Some(LOCAL_GUIDANCE.into());
+        remote
+            .issues
+            .insert(1, fake_source::issue_in("owner/shared", 1, "Original"));
+        remote.matching = vec![1];
+    }
+    let mut engine = Engine::new();
+    engine.register(Box::new(remote)).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("origin.sqlite3");
+    let mut origin = Workspace::open(&path).unwrap();
+    origin
+        .add_source_connection(
+            &engine,
+            "fake",
+            None,
+            Some(LOCAL_NAME),
+            &values("alice", "owner/shared"),
+        )
+        .unwrap();
+    let import = origin
+        .refresh_connection(&engine, "fake", &RefreshOptions::default())
+        .unwrap();
+    let reference = &import.imported[0];
+    let id = origin.show_ticket(reference).unwrap().id;
+    origin.remove_source_connection("fake").unwrap();
+    let markdown = origin
+        .export_sync_record(SyncKind::Ticket, &id)
+        .unwrap()
+        .to_markdown();
+    assert!(!markdown.contains(LOCAL_NAME));
+    assert!(!markdown.contains("connection_removed"));
+    assert!(!markdown.contains(LOCAL_GUIDANCE));
+    let backup = folder.path().join("portable.sqlite3");
+    origin.backup(&backup).unwrap();
+    let mut remote = Workspace::open(folder.path().join("other.sqlite3")).unwrap();
+    remote
+        .apply_sync_record(&SyncRecord::parse(&markdown).unwrap())
+        .unwrap();
+    let ticket = remote.show_ticket(reference).unwrap();
+    assert_eq!(ticket.title, "Original");
+    let source = ticket.source.unwrap();
+    assert_eq!(source.provider_name, "Beacon Tracker");
+    assert_eq!(source.provider_icon_svg.as_deref(), Some(ICON));
+    assert!(source.content_locked);
+    assert_eq!(source.unavailable.unwrap().code, "not_configured");
+    assert_eq!(
+        remote
+            .take_ownership(reference, None)
+            .unwrap()
+            .source
+            .unwrap()
+            .ownership,
+        ticketd_core::source::Ownership::Local,
+    );
+
+    drop(origin);
+    Workspace::restore(&path, &backup).unwrap();
+    assert_eq!(
+        Workspace::open(&path)
+            .unwrap()
+            .show_ticket(reference)
+            .unwrap()
+            .source
+            .unwrap()
+            .unavailable
+            .unwrap()
+            .code,
+        "connection_removed",
+    );
+    let portable_path = folder.path().join("restored.sqlite3");
+    Workspace::restore(&portable_path, &backup).unwrap();
+    let portable = Workspace::open(&portable_path)
+        .unwrap()
+        .show_ticket(reference)
+        .unwrap()
+        .source
+        .unwrap();
+    assert_eq!(portable.provider_name, "Beacon Tracker");
+    assert_eq!(portable.provider_icon_svg.as_deref(), Some(ICON));
+    assert_eq!(portable.unavailable.unwrap().code, "not_configured");
+}
+
+#[test]
 fn a_staggered_second_connection_runs_while_the_first_is_rate_limited() {
     let remote = fake_source::FakeSource::default();
     remote.0.lock().unwrap().account_from_assignee = true;
@@ -314,7 +544,7 @@ fn restoring_a_legacy_backup_preserves_the_devices_own_settings() {
     let backup = folder.path().join("legacy-backup.sqlite3");
     let current = folder.path().join("legacy-workspace.sqlite3");
     for (path, account) in [(&backup, "backup-account"), (&current, "device-account")] {
-        ticketd_core::create_workspace_at_format_version(path, FORMAT_VERSION - 1).unwrap();
+        ticketd_core::create_workspace_at_format_version(path, 88).unwrap();
         Connection::open(path)
             .unwrap()
             .execute(

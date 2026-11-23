@@ -1248,6 +1248,7 @@ function AppContent() {
                                           onSelect={setSettingsSection}
                                           onOpenInbox={() => setView("inbox")}
                                           onRestore={replaceWorkspace}
+                                          onSourcesChanged={refresh}
                                         />
                                       )}
                                     {view === "attachments" &&

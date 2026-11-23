@@ -307,13 +307,9 @@ impl Workspace {
         let sources = super::configured_sources(&self.connection)?;
         let mut counts = std::collections::HashMap::<(String, Option<String>), (u32, u32)>::new();
         for ticket in super::tracking::tracked(&self.connection, None)? {
-            let id = super::select_connection(
-                &sources,
-                ticket.affinity.as_deref(),
-                &ticket.provider,
-                &ticket.partition,
-            )
-            .map(|source| source.saved.id.clone());
+            let id = ticket
+                .connection(&sources)
+                .map(|source| source.saved.id.clone());
             let count = counts.entry((ticket.provider, id.clone())).or_default();
             count.0 += 1;
             if id.is_none()
@@ -321,7 +317,7 @@ impl Workspace {
                     .error_code
                     .as_deref()
                     .and_then(FailureCode::parse)
-                    .is_some_and(FailureCode::is_unavailable)
+                    .is_some_and(|code| code != FailureCode::NotConfigured && code.is_unavailable())
             {
                 count.1 += 1;
             }

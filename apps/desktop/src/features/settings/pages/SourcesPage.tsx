@@ -1,6 +1,7 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { FailureAlert } from "@/components/ui/failure-alert";
@@ -22,10 +23,26 @@ import {
   type SourceEntry,
 } from "@/lib/api/sources";
 
-export function SourcesPage({ onOpen }: { onOpen: (id: string) => void }) {
+export function SourcesPage({
+  onOpen,
+  onChanged,
+}: {
+  onOpen: (id: string) => void;
+  onChanged?: (() => Promise<void>) | undefined;
+}) {
   const { entries, loading } = useSources();
   const [adding, setAdding] = useState<SourceEntry | null>(null);
   const [changes, setChanges] = useState<SourceEntry[]>([]);
+  const [removed, setRemoved] = useState<string[]>([]);
+  const [removing, setRemoving] = useState<{ id: string; name: string } | null>(
+    null,
+  );
+  const [removalPending, setRemovalPending] = useState(false);
+  const [removalFailure, setRemovalFailure] = useState<ReturnType<
+    typeof describeFailure
+  > | null>(null);
+  const nextAction = useRef<HTMLButtonElement>(null);
+  const removalTrigger = useRef<HTMLButtonElement>(null);
   const [rename, setRename] = useState<{ id: string; name: string } | null>(
     null,
   );
@@ -41,8 +58,10 @@ export function SourcesPage({ onOpen }: { onOpen: (id: string) => void }) {
     if (entry.saved)
       connections.set(entry.saved.id ?? entry.connector.provider, entry);
   }
+  for (const id of removed) connections.delete(id);
 
   function record(entry: SourceEntry, source: SavedSource) {
+    setRemoved((current) => current.filter((id) => id !== source.id));
     setChanges((current) => [
       ...current.filter(({ saved }) => saved?.id !== source.id),
       { ...entry, saved: source },
@@ -59,6 +78,22 @@ export function SourcesPage({ onOpen }: { onOpen: (id: string) => void }) {
       setRenameFailure(describeFailure(reason, "rename this connection"));
     } finally {
       setSavingName(false);
+    }
+  }
+
+  async function remove(id: string) {
+    setRemovalPending(true);
+    setRemovalFailure(null);
+    try {
+      await sourcesClient.remove(id);
+      setRemoved((current) => [...current, id]);
+      setChanges((current) => current.filter(({ saved }) => saved?.id !== id));
+      setRemoving(null);
+      await onChanged?.();
+    } catch (reason) {
+      setRemovalFailure(describeFailure(reason, "remove this connection"));
+    } finally {
+      setRemovalPending(false);
     }
   }
 
@@ -131,6 +166,18 @@ export function SourcesPage({ onOpen }: { onOpen: (id: string) => void }) {
                           >
                             <Pencil aria-hidden="true" />
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            aria-label={`Remove ${name}`}
+                            onClick={(event) => {
+                              removalTrigger.current = event.currentTarget;
+                              setRemovalFailure(null);
+                              setRemoving({ id, name });
+                            }}
+                          >
+                            Remove…
+                          </Button>
                         </>
                       )
                     }
@@ -190,8 +237,9 @@ export function SourcesPage({ onOpen }: { onOpen: (id: string) => void }) {
           </SettingsSection>
           {[...byProvider.values()]
             .filter(({ next_id }) => next_id)
-            .map((entry) => (
+            .map((entry, index) => (
               <Button
+                ref={index === 0 ? nextAction : undefined}
                 key={entry.connector.provider}
                 variant="outline"
                 size="sm"
@@ -201,6 +249,32 @@ export function SourcesPage({ onOpen }: { onOpen: (id: string) => void }) {
                 connection
               </Button>
             ))}
+          {removing && (
+            <DialogShell
+              open
+              onOpenChange={(open) => {
+                if (!open && !removalPending) setRemoving(null);
+              }}
+              size="sm"
+              title={`Remove ${removing.name}?`}
+              description="Its tickets keep their last synced content, local work, and links to their issues. You can take ownership of a ticket to edit it here. Sync resumes if a connection discovers the issue again."
+              primaryLabel={removalPending ? "Removing…" : "Remove connection"}
+              primaryVariant="destructive"
+              blockedReason={null}
+              busy={removalPending}
+              resolveReturnFocus={() =>
+                removalTrigger.current?.isConnected
+                  ? removalTrigger.current
+                  : nextAction.current
+              }
+              error={
+                removalFailure && (
+                  <FailureAlert size="compact" failure={removalFailure} />
+                )
+              }
+              onSubmit={() => void remove(removing.id)}
+            />
+          )}
         </>
       )}
     </SettingsPage>

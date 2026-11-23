@@ -847,6 +847,8 @@ enum SourceConnectionCommand {
         /// The new display name
         name: String,
     },
+    /// Remove this connection and pause its tickets until discovery finds them again
+    Remove,
     /// Show the connection's last refresh and current failures
     Status,
     /// Import matching issues and refresh tickets assigned to this connection
@@ -2353,6 +2355,10 @@ fn run_source_connection(
         }
         SourceConnectionCommand::Rename { name } => {
             serde_json::to_string(&workspace.rename_source(connection, &name)?)?
+        }
+        SourceConnectionCommand::Remove => {
+            workspace.remove_source_connection(connection)?;
+            serde_json::json!({ "ok": true }).to_string()
         }
         SourceConnectionCommand::Status => serde_json::to_string(
             &workspace

@@ -1492,6 +1492,11 @@ fn rename_source_connection(
     Ok(open_workspace()?.rename_source(&connection, &name)?)
 }
 
+#[tauri::command(async)]
+fn remove_source_connection(connection: String) -> Result<(), SourceFailure> {
+    Ok(open_workspace()?.remove_source_connection(&connection)?)
+}
+
 /// The one refresh coordinator of this process: the startup and periodic runs and
 /// every explicit refresh go through it, so they never overlap or retry in a tight loop.
 struct Refresher(std::sync::Arc<ticketd_core::source::RefreshCoordinator>);
@@ -2045,6 +2050,7 @@ pub fn run() -> Result<(), tauri::Error> {
             save_source,
             add_source_connection,
             rename_source_connection,
+            remove_source_connection,
             last_backup,
             workspace_info,
             workspace_location,

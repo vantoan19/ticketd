@@ -52,6 +52,10 @@ impl Workspace {
                  WHERE ticket_id = ?1",
                 [&id],
             )?;
+                transaction.execute(
+                    "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
+                    [&id],
+                )?;
                 history::record(transaction, &id, "ownership", &provider, "local", agent)?;
             }
             crate::read_ticket(transaction, reference)

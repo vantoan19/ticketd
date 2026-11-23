@@ -45,6 +45,7 @@ function isFindShortcut(event: KeyboardEvent) {
 export function SettingsView({
   onRestore,
   onOpenInbox,
+  onSourcesChanged,
   onSelect,
   selected: chosen = "appearance",
 }: {
@@ -54,6 +55,7 @@ export function SettingsView({
   /** Called after anything replaced the Workspace: a restore, or a download from Drive. */
   onRestore: () => Promise<void>;
   onOpenInbox: () => void;
+  onSourcesChanged?: () => Promise<void>;
 }) {
   // The parent mounts this only while Settings is open, so every page reads
   // fresh data on each visit. A restore or a download replaces the workspace
@@ -110,7 +112,10 @@ export function SettingsView({
       {selected === "about" && <AboutPage />}
       {selected === "search" && <SearchPage />}
       {selected === "sources" && (
-        <SourcesPage onOpen={(id) => onSelect?.(`source-${id}`)} />
+        <SourcesPage
+          onOpen={(id) => onSelect?.(`source-${id}`)}
+          onChanged={onSourcesChanged}
+        />
       )}
       {sources.map((entry) => (
         <SourcePage

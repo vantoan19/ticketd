@@ -5,6 +5,7 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import type { Ticket } from "@/lib/api/client";
 import { TakeOwnership } from "./TakeOwnership";
 import { useTicketRefresh } from "./useTicketRefresh";
@@ -36,10 +37,15 @@ export function SourceUnavailableNotice({
     <Alert
       tone="attention"
       role="region"
-      aria-label="Source unavailable"
+      aria-label={notice.title}
       className="mb-6"
     >
-      <AlertTitle>{notice.title}</AlertTitle>
+      <AlertTitle>
+        {notice.canRetry === false && source.provider_icon_svg && (
+          <SourceIcon svg={source.provider_icon_svg} size={16} />
+        )}
+        {notice.title}
+      </AlertTitle>
       <AlertDescription>
         {notice.detail.split(source.display).map((part, index) => (
           <span key={index}>
@@ -49,18 +55,22 @@ export function SourceUnavailableNotice({
         ))}
       </AlertDescription>
       <AlertActions>
-        <Button
-          variant="outline"
-          size="sm"
-          disabled={retrying}
-          onClick={() => void retry()}
-        >
-          Retry now
-        </Button>
+        {notice.canRetry !== false && (
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={retrying}
+            onClick={() => void retry()}
+          >
+            Retry now
+          </Button>
+        )}
         <TakeOwnership ticket={ticket} refresh={refresh} variant="outline" />
         <SourceLink url={source.url}>Open on {name}</SourceLink>
-        {retrying && <span role="status">Refreshing {name}…</span>}
-        {failure && !retrying && (
+        {notice.canRetry !== false && retrying && (
+          <span role="status">Refreshing {name}…</span>
+        )}
+        {notice.canRetry !== false && failure && !retrying && (
           <span role="alert">Still unavailable. {failure.sentence}</span>
         )}
       </AlertActions>

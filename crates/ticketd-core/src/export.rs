@@ -78,7 +78,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ("ticket_parents", "child_id, parent_id"),
     (
         "external_identities",
-        "ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition",
+        "ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition, provider_name, provider_icon_svg",
     ),
     ("external_ownership", "ticket_id, authority, changed_at"),
     (
@@ -232,6 +232,10 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     (
         "publication_connections",
         "device-local publication connection binding",
+    ),
+    (
+        "source_connection_removals",
+        "device-local tickets paused after removing a connection",
     ),
     (
         "source_presentations",

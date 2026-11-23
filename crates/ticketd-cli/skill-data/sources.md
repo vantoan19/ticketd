@@ -20,6 +20,7 @@ ticketd source add PROVIDER --name "Work" --set KEY=VALUE
 ticketd source CONNECTION show
 ticketd source CONNECTION status
 ticketd source CONNECTION refresh --ticket T-KQ1
+ticketd source CONNECTION remove
 ticketd context T-KQ1 --conversation
 ```
 
@@ -34,6 +35,12 @@ help for `--set` and `--config-file`.
 that connection. Refresh can return a JSON report with failures and a nonzero exit
 code. `source take-ownership T-KQ1` explicitly changes authority for an unavailable
 ticket. Connections and their credentials stay on the local device.
+
+Removing a connection keeps the ticket’s last synced content, local work, and
+external identity. Its tickets read Connection removed on this desktop until a
+covering connection discovers the issue again. Taking ownership makes a ticket
+local. That authority decision persists after rediscovery. Unresolved publications
+remain recorded and block a second create.
 
 ## Publication and uncertain outcomes
 

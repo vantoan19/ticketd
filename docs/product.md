@@ -400,8 +400,9 @@ and run through a shared extension interface.
   previewed before saving, and matching issues are imported automatically. Refresh runs
   at desktop startup, periodically while the desktop is open, and on demand
   (`ticketd source CONNECTION refresh`). When connections overlap, one ticket is
-  imported and refreshed through one connection. Synchronized content remains
-  readable without a local connection.
+  imported and refreshed through one connection. When no local connection covers
+  a ticket, it shows its last synced content and says the provider isn’t connected
+  on this desktop. The ticket carries the provider’s display name and icon.
 - A synchronized ticket is **externally owned**: its title, description, and status
   are read-only and flow one way, from the tracker into ticketd. Plan membership,
   relationships, tags, Activities, and Documents stay local and are never overwritten.
@@ -419,7 +420,14 @@ and run through a shared extension interface.
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
 - If an issue disappears or becomes unavailable, ticketd keeps its status, content,
-  and local work and shows a warning; **Take ownership** makes it local and stops synchronization.
+  and local work and shows a warning. **Take ownership** makes it local and stops
+  synchronization.
+- Remove a connection in Settings → Sources or with
+  `ticketd source CONNECTION remove`. Its tickets keep their external identity,
+  last synced content, status and local work, and show **Connection removed** on
+  this desktop. Discovery of the same issue through a covering connection resumes
+  sync unless you took ownership. Any unresolved publication stays recorded
+  and continues to block a second create.
 - Use `ticketd source add PROVIDER` to add a connection and `ticketd source list`
   to find its ID. When several connections can publish, pass
   `ticketd source publish T-XYZ --connection CONNECTION --preview`.

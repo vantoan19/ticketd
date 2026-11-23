@@ -33,6 +33,7 @@ vi.mock("@/lib/api/sources", async (importOriginal) => ({
     save: vi.fn(),
     add: vi.fn(),
     rename: vi.fn(),
+    remove: vi.fn(),
   },
 }));
 
@@ -955,4 +956,46 @@ test("Sources adds a named connection and renames it without changing its ID", a
   await screen.findByText("Work issues");
   expect(sourcesClient.rename).toHaveBeenCalledWith("github-2", "Work issues");
   expect(screen.getByText(/github-2/)).toBeTruthy();
+});
+
+test("removing a connection needs confirmation and removes only that connection", async () => {
+  const saved = {
+    provider: "github",
+    account: "octo",
+    config: { repositories: ["o/r"] },
+    saved_at: "2026-01-01T00:00:00Z",
+  };
+  vi.mocked(sourcesClient.list).mockResolvedValue([
+    {
+      ...githubSource,
+      saved: { ...saved, id: "github", name: "Work" },
+    },
+    {
+      ...githubSource,
+      saved: { ...saved, id: "github-2", name: "Personal" },
+    },
+  ]);
+  vi.mocked(sourcesClient.remove).mockResolvedValue(undefined);
+  const onChanged = vi.fn(async () => {});
+  render(<SourcesPage onOpen={vi.fn()} onChanged={onChanged} />);
+  const remove = await screen.findByRole("button", { name: "Remove Work" });
+  fireEvent.click(remove);
+  const dialog = screen.getByRole("dialog", { name: "Remove Work?" });
+  expect(
+    within(dialog).getByText(/last synced content, local work/),
+  ).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(sourcesClient.remove).not.toHaveBeenCalled();
+
+  fireEvent.click(remove);
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Remove Work?" })).getByRole(
+      "button",
+      { name: "Remove connection" },
+    ),
+  );
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  expect(sourcesClient.remove).toHaveBeenCalledExactlyOnceWith("github");
+  expect(screen.queryByRole("button", { name: "Remove Work" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Remove Personal" })).toBeTruthy();
 });
