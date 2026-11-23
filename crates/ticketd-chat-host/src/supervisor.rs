@@ -499,6 +499,31 @@ impl Supervisor {
         self.resend = None;
     }
 
+    /// Keeps the person's latest permission change the runtime has not answered (held
+    /// for the turn's end, or on its way) for the next session, saved with the Chat: the
+    /// runtime it was meant for is going away, and the next one must not open with the
+    /// mode they left.
+    fn keep_unanswered_permission(&mut self) {
+        let unanswered = self.runtime.as_ref().and_then(|runtime| {
+            runtime
+                .setting_changes
+                .iter()
+                .rfind(|change| {
+                    change.setting == SettingKey::Permission
+                        && matches!(
+                            change.state,
+                            SettingChangeState::Held | SettingChangeState::Sent
+                        )
+                })
+                .map(|change| change.value.clone())
+        });
+        if let Some(value) = unanswered {
+            // Kept for the next session whether or not it could be saved.
+            let _saved = self.record_permission(&value);
+            self.start_settings.permission = Some(value);
+        }
+    }
+
     /// A setting change is on its way to the harness. Nothing is dispatched until it
     /// is answered, so the next turn runs on the settings the person last chose.
     fn setting_on_its_way(&self) -> bool {
@@ -596,9 +621,11 @@ impl Supervisor {
                 None => SettingChangeState::Sent,
             },
         };
+        // A change still on its way stays tracked until the harness answers it, whatever
+        // is asked meanwhile: nothing is dispatched before then (`setting_on_its_way`).
         runtime
             .setting_changes
-            .retain(|change| change.setting != setting);
+            .retain(|change| change.setting != setting || change.state == SettingChangeState::Sent);
         runtime.setting_changes.push(LiveSettingChange {
             setting,
             value: value.clone(),
@@ -1163,6 +1190,7 @@ impl Supervisor {
         } else {
             None
         };
+        self.keep_unanswered_permission();
         self.runtime = None;
         self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
         if let Some(reason) = &unconfirmed {
@@ -1223,21 +1251,7 @@ impl Supervisor {
                 && self.unconfirmed_start.is_none()
                 && self.interactions.is_empty()
                 && !self.setting_on_its_way());
-        // A permission change the lost process never answered is still the person's
-        // choice: the next session opens with it, not with the mode they left.
-        let unanswered = self.runtime.as_ref().and_then(|runtime| {
-            runtime
-                .setting_changes
-                .iter()
-                .find(|change| {
-                    change.setting == SettingKey::Permission
-                        && matches!(
-                            change.state,
-                            SettingChangeState::Held | SettingChangeState::Sent
-                        )
-                })
-                .map(|change| change.value.clone())
-        });
+        self.keep_unanswered_permission();
         self.record(Vec::new());
         self.runtime = None;
         if self.closing {
@@ -1245,11 +1259,6 @@ impl Supervisor {
             return;
         }
         self.runtime_gone(&TurnEnding::ContactLost(Some(detail.clone())));
-        if let Some(value) = unanswered {
-            // Kept for the next session whether or not it could be saved.
-            let _saved = self.record_permission(&value);
-            self.start_settings.permission = Some(value);
-        }
         if !quiet {
             self.pause(ChatProblem::RuntimeLost { detail });
         }

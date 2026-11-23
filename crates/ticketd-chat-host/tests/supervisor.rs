@@ -2188,6 +2188,76 @@ async fn an_idle_pick_that_cannot_be_saved_is_refused() {
     assert_eq!(shown.current.as_deref(), Some("full"));
 }
 
+/// A runtime closed for an explicit resume while a permission change waits for its turn
+/// to end: the replacement session opens with that change, saved with the Chat.
+#[tokio::test(start_paused = true)]
+async fn a_resume_opens_with_a_permission_change_the_closed_runtime_never_answered() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    let held = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(held, SettingChangeState::Held);
+
+    f.host.resume(&f.chat.id, ResumeMode::Native).await.unwrap();
+
+    let reopened = f.fake.opens()[1].clone();
+    assert_eq!(reopened.settings.permission.as_deref(), Some("ask"));
+    assert_eq!(
+        f.core()
+            .chat(&f.chat.id)
+            .unwrap()
+            .effective_settings
+            .as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+}
+
+/// A request refused while an earlier change is still on its way leaves that change
+/// tracked: nothing is dispatched until the harness answers it.
+#[tokio::test(start_paused = true)]
+async fn a_refused_request_keeps_a_change_on_its_way_holding_dispatch() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    let sent = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    assert_eq!(sent, SettingChangeState::Sent);
+    let refused = f
+        .host
+        .change_setting(&f.chat.id, SettingKey::Permission, "nope")
+        .await
+        .unwrap();
+    assert!(matches!(
+        refused,
+        SettingChangeState::Done(SettingOutcome::Refused { .. })
+    ));
+    f.send("second").await;
+    assert_eq!(
+        written_kinds(&f),
+        ["submit", "setting"],
+        "the message waits"
+    );
+
+    answer.send(SettingOutcome::Applied).unwrap();
+    settle().await;
+    assert_eq!(written_kinds(&f), ["submit", "setting", "submit"]);
+}
+
 /// A record that could not be saved is not shown: the idle Chat keeps showing what its
 /// next session will open with, the saved record.
 #[tokio::test(start_paused = true)]
