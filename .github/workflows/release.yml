@@ -73,9 +73,12 @@ jobs:
       version: ${{ needs.plan.outputs.override }}
       retention-days: 14
     secrets:
+      # The Desktop OAuth client is public and every distribution build embeds it.
       TICKETD_GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.TICKETD_GOOGLE_OAUTH_CLIENT_JSON }}
-      TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+      # The updater signing key reaches only a build that will be drafted. Other per-commit
+      # builds get empty values, so Distribution warns and builds them without updater files.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ needs.plan.outputs.draft == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.plan.outputs.draft == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
 
   draft:
     name: Draft release

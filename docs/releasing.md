@@ -127,7 +127,8 @@ Distribution workflow, which builds only `main` commits:
 - Package runs it only when dispatched on `main`.
 - Release runs it for a `workflow_run` only when Quality succeeded for a `push` to
   this repository's `main`. A dispatch must be on `main` and names a commit that
-  is on `main` and passed Quality.
+  is on `main` and passed Quality. Release passes the updater signing key only to
+  a build that will be drafted; other per-commit packages carry no updater files.
 - The job that writes the draft release has `contents: write`, `id-token: write`
   and `attestations: write`. It reads no build secrets and runs only this
   repository's scripts on the downloaded packages. The Version bump job can push
