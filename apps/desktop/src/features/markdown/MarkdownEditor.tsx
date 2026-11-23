@@ -1365,7 +1365,15 @@ export function MarkdownEditor({
     focusAfterInsertion.current = false;
     const frame = window.requestAnimationFrame(() => {
       if (source) sourceEditor.current?.view?.focus();
-      else editor.tf.focus();
+      else {
+        editor.tf.focus();
+        // Slate skips focusing while it believes the editor has focus, which it
+        // can after the picker took focus: it ignores a blur during its own
+        // selection update, and counts a focus attempt a dialog refused (#533).
+        container.current
+          ?.querySelector<HTMLElement>(".rich-document")
+          ?.focus();
+      }
     });
     return () => window.cancelAnimationFrame(frame);
   }, [attachmentPicker, source, editor]);
