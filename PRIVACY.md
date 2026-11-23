@@ -111,7 +111,8 @@ It reads the names, sizes, checksums and versions of authorized files, and
 uploads or downloads their bytes when you attach, sync, retrieve or export them.
 
 Your Google access and refresh tokens stay in your OS secure store. File details
-and the account email stay in your local Workspace. ticketd has no server and
+and the account email stay in your local Workspace. A backup you save copies them
+too, and a JSON export includes the last-known Drive file details. ticketd has no server and
 sends none of this to its maintainers or to third parties. It does not sell this
 data, use it for advertising, or use it to train AI models. An agent you run
 yourself can read what the CLI prints, as described above. Revoke access at any time in your
