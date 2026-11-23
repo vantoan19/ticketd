@@ -204,7 +204,7 @@ test("an unrecognized closure is flagged instead of guessed", async () => {
   fireEvent.click(screen.getByRole("combobox", { name: "Status: Todo" }));
   expect(
     await screen.findByText(
-      "Choose Done or Canceled here, or reopen it on GitHub.",
+      "Choose Done or Canceled here, or check the issue on GitHub.",
     ),
   ).toBeTruthy();
   expect(

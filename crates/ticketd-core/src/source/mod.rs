@@ -245,6 +245,14 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
 /// Format version 88: preserve the last typed observation and source label
 /// independently of the local ticket's status and workflow history.
 pub(crate) fn migrate_state_categories(connection: &rusqlite::Connection) -> Result<(), Error> {
+    let legacy: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('source_sync') WHERE name = 'external_state')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !legacy {
+        return Ok(());
+    }
     connection.execute_batch(
         "ALTER TABLE source_sync ADD COLUMN state_category TEXT NOT NULL DEFAULT 'unknown'
              CHECK (state_category IN ('open', 'completed', 'not_planned', 'duplicate', 'unknown'));
