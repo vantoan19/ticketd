@@ -20,7 +20,7 @@ use std::{
 
 use serde_json::json;
 use ticketd_core::{
-    Error, Status, Ticket, TicketPatch, Workspace,
+    Error, Project, ProjectRemoteChange, Status, Ticket, TicketPatch, Workspace,
     source::{
         ActionKind, AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema,
         ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
@@ -65,20 +65,23 @@ struct Remote {
 }
 
 #[derive(Clone)]
-struct Fake(Arc<Mutex<Remote>>);
+struct Fake(Arc<Mutex<Remote>>, &'static str);
 
 impl Fake {
     fn new() -> Self {
-        Self(Arc::new(Mutex::new(Remote {
-            mode: Mode::Create,
-            created: Vec::new(),
-            issues: BTreeMap::new(),
-            hook: None,
-            lookup_down: false,
-            search_complete: true,
-            lookup_hook: None,
-            recent: Vec::new(),
-        })))
+        Self(
+            Arc::new(Mutex::new(Remote {
+                mode: Mode::Create,
+                created: Vec::new(),
+                issues: BTreeMap::new(),
+                hook: None,
+                lookup_down: false,
+                search_complete: true,
+                lookup_hook: None,
+                recent: Vec::new(),
+            })),
+            "example.test",
+        )
     }
 }
 
@@ -231,6 +234,10 @@ impl Connector for Fake {
         }
     }
 
+    fn repository_for_destination(&self, destination: &str) -> Option<String> {
+        Some(format!("{}/{destination}", self.1))
+    }
+
     // Like GitHub, owner and repository names ignore case.
     fn same_destination(&self, a: &str, b: &str) -> bool {
         a.eq_ignore_ascii_case(b)
@@ -359,6 +366,18 @@ impl Fixture {
 
     fn ticket(&self, reference: &str) -> Ticket {
         self.workspace.show_ticket(reference).unwrap()
+    }
+
+    fn project_ticket(&mut self, remote: Option<&str>) -> (Project, Ticket) {
+        let project = self
+            .workspace
+            .create_project_with_remote("Web", self.dir.path().to_str().unwrap(), remote)
+            .unwrap();
+        let ticket = self
+            .workspace
+            .create_ticket_in_project("Fix the log-in screen", Some(&project.id))
+            .unwrap();
+        (project, ticket)
     }
 
     fn reopen(self) -> Self {
@@ -712,6 +731,181 @@ fn preview_shows_exactly_what_would_be_sent_and_does_not_send_it() {
     assert_eq!(preview.destinations, vec!["o/r".to_owned()]);
     assert_eq!(preview.provider_name, "Fake");
     assert_eq!(preview.eligibility, Eligibility::Eligible);
+    assert_eq!(f.created(), 0);
+}
+
+#[test]
+fn publication_to_the_project_remote_requires_its_reviewed_preview() {
+    let mut f = Fixture::new();
+    save_repositories(&mut f, &["acme/api", "Acme/Web"]);
+    let (_, ticket) = f.project_ticket(Some("example.test/ACME/web"));
+
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    assert_eq!(preview.eligibility, Eligibility::Eligible);
+    assert_eq!(preview.destination.as_deref(), Some("Acme/Web"));
+    assert_eq!(f.created(), 0);
+
+    let error = f.publish(&ticket.reference).unwrap_err();
+    assert!(matches!(
+        error,
+        Error::Publication(PublicationError::Ineligible {
+            reason: IneligibleReason::PreviewRequired,
+            ..
+        })
+    ));
+    assert!(error.to_string().contains("fingerprint"), "{error}");
+    assert!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(f.created(), 0);
+
+    let publish = PublishOptions {
+        expected_fingerprint: Some(preview.fingerprint),
+        ..options()
+    };
+    let outcome = f
+        .workspace
+        .publish_ticket(&f.engine, &ticket.reference, &publish)
+        .unwrap();
+    assert_eq!(outcome.attempt.destination, "Acme/Web");
+    assert_eq!(f.fake.0.lock().unwrap().created[0].destination, "Acme/Web");
+}
+
+#[test]
+fn publication_keeps_its_fallbacks_without_a_matching_project_remote() {
+    for (has_project, remote) in [
+        (false, None),
+        (true, None),
+        (true, Some("example.test/acme/unlisted")),
+        (true, Some("other.example.test/acme/web")),
+    ] {
+        let mut f = Fixture::new();
+        let ticket = if has_project {
+            f.project_ticket(remote).1
+        } else {
+            f.workspace.create_ticket("Fix the log-in screen").unwrap()
+        };
+        save_repositories(&mut f, &["acme/api", "acme/web"]);
+        let preview = f
+            .workspace
+            .preview_publication(&f.engine, &ticket.reference, "fake", None)
+            .unwrap();
+        assert_eq!(preview.destination, None, "remote: {remote:?}");
+        assert!(matches!(
+            f.publish(&ticket.reference),
+            Err(Error::Source(SourceError::InvalidConfiguration(_)))
+        ));
+        assert_eq!(f.created(), 0);
+
+        save_repositories(&mut f, &["acme/api"]);
+        let preview = f
+            .workspace
+            .preview_publication(&f.engine, &ticket.reference, "fake", None)
+            .unwrap();
+        assert_eq!(preview.destination.as_deref(), Some("acme/api"));
+        let outcome = f.publish(&ticket.reference).unwrap();
+        assert_eq!(outcome.attempt.destination, "acme/api");
+    }
+}
+
+#[test]
+fn an_explicit_destination_takes_precedence_over_the_project_remote() {
+    let mut f = Fixture::new();
+    save_repositories(&mut f, &["acme/api", "acme/web"]);
+    let (_, ticket) = f.project_ticket(Some("example.test/acme/web"));
+
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", Some("acme/api"))
+        .unwrap();
+    assert_eq!(preview.destination.as_deref(), Some("acme/api"));
+    assert_eq!(preview.eligibility, Eligibility::Eligible);
+    assert_eq!(
+        preview_reason(&f, &ticket.reference, "acme/unlisted"),
+        Some(IneligibleReason::DestinationNotAllowed)
+    );
+
+    let publish = PublishOptions {
+        destination: Some("acme/api".into()),
+        ..options()
+    };
+    let outcome = f
+        .workspace
+        .publish_ticket(&f.engine, &ticket.reference, &publish)
+        .unwrap();
+    assert_eq!(outcome.attempt.destination, "acme/api");
+}
+
+#[test]
+fn changing_or_clearing_the_default_invalidates_its_preview() {
+    let mut f = Fixture::new();
+    save_repositories(&mut f, &["acme/api", "acme/web"]);
+    let (project, ticket) = f.project_ticket(Some("example.test/acme/web"));
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    let publish = PublishOptions {
+        expected_fingerprint: Some(preview.fingerprint),
+        ..options()
+    };
+
+    let mut second_workspace = Workspace::open(f.path()).unwrap();
+    for edit in [
+        ProjectRemoteChange::Set("example.test/acme/api"),
+        ProjectRemoteChange::Clear,
+    ] {
+        second_workspace
+            .edit_project_with_remote(&project.id, &project.name, &project.path, edit)
+            .unwrap();
+        assert!(matches!(
+            f.workspace
+                .publish_ticket(&f.engine, &ticket.reference, &publish),
+            Err(Error::Publication(
+                PublicationError::ChangedSincePreview { .. }
+            ))
+        ));
+    }
+    assert!(
+        f.workspace
+            .publication_attempts(&ticket.reference)
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(f.created(), 0);
+}
+
+#[test]
+fn a_preview_cannot_be_used_with_the_same_repository_name_on_another_host() {
+    let mut f = Fixture::new();
+    save_repositories(&mut f, &["acme/web"]);
+    let (_, ticket) = f.project_ticket(Some("example.test/acme/web"));
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    let publish = PublishOptions {
+        expected_fingerprint: Some(preview.fingerprint),
+        ..options()
+    };
+    let mut other_engine = Engine::new();
+    other_engine
+        .register(Box::new(Fake(f.fake.0.clone(), "other.example.test")))
+        .unwrap();
+
+    assert!(matches!(
+        f.workspace
+            .publish_ticket(&other_engine, &ticket.reference, &publish),
+        Err(Error::Publication(
+            PublicationError::ChangedSincePreview { .. }
+        ))
+    ));
     assert_eq!(f.created(), 0);
 }
 

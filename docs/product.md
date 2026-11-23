@@ -406,9 +406,12 @@ and run through a shared extension interface.
   issue stays open, people and agents manage Todo, In progress, and In review
   locally without writing to GitHub. A reopened issue returns to Todo.
 - A **locally owned** ticket in Todo, In progress, or In review can be published once
-  as a normal issue. Preview shows exactly what would be sent; ownership transfers
-  only after ticketd confirms the issue exists, and an uncertain result is resolved
-  before any retry so no second issue is created. Local Activities, Plan membership,
+  as a normal issue. The preview shows exactly what would be sent. When the saved
+  source lists the ticket's Project remote on the matching host, the preview selects
+  that repository. The person can choose a different allowed destination. Publishing
+  with the Project remote as the default requires the preview's fingerprint. Ownership
+  transfers only after ticketd confirms the issue exists, and an uncertain result is
+  resolved before any retry so no second issue is created. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
 - If a source ticket becomes unavailable, ticketd keeps its content and local work and

@@ -782,16 +782,16 @@ enum SourceCommand {
         ticket: String,
         #[arg(long, default_value = "github")]
         provider: String,
-        /// Where to create the issue, for example owner/name; optional when only
-        /// one repository is configured. Must be one of the saved source's
-        /// repositories (case-insensitive); anything else is refused
+        /// Where to create the issue, for example owner/name. Defaults to the
+        /// ticket's Project remote when listed by the source, or to the only
+        /// listed repository. A configured list limits where issues can be sent
         #[arg(long)]
         destination: Option<String>,
         /// Print the title, description, destination and eligibility; create nothing
         #[arg(long)]
         preview: bool,
-        /// The `fingerprint` printed by --preview. When given, nothing is sent if the
-        /// title, description or destination changed since
+        /// The fingerprint printed by --preview. Required to use a Project remote
+        /// as the default. Refuses publication if the previewed issue changed
         #[arg(long)]
         expect: Option<String>,
         #[arg(long)]

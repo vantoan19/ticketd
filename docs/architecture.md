@@ -910,9 +910,12 @@ and `ticketd source status` work without the desktop.
 
 Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks
-eligibility and saves the attempt as `in_flight` with the exact title,
-description and destination; a unique partial index allows one open attempt per
-ticket. The connector's create call then runs with no transaction open. A second
+eligibility, resolves the destination against the current ticket and saved source,
+and saves the attempt as `in_flight` with the exact title, description and
+destination. A unique partial index allows one open attempt per ticket. The
+connector supplies the host for matching the Project remote to a listed
+repository. When using this default, the write also requires a matching preview
+fingerprint. The connector's create call runs with no transaction open. A second
 short write links the confirmed issue (`external_identities` with origin
 `published`, ownership `external`) and marks the attempt `succeeded`. A refusal
 the provider proves (`SourceError::ruled_out_creation`) marks it `failed` and
