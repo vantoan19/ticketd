@@ -131,7 +131,7 @@ impl AppServer {
             CodexPeer::default(),
             generation,
             json_rpc::Options {
-                harness: crate::Harness::Codex,
+                harness: &ticketd_core::harnesses::CODEX,
                 include_version: false,
                 reply_timeout: options.rpc_timeout,
             },

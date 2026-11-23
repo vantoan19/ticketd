@@ -39,6 +39,31 @@ use runtime::Options;
 /// Windows) to [`ClaudeAdapter::new`].
 pub const BRIDGE_SIDECAR_NAME: &str = "ticketd-chat-bridge-claude";
 
+pub(crate) fn make_adapter(
+    resources: &crate::HostResources,
+) -> Result<Arc<dyn HarnessAdapter>, Problem> {
+    let missing = |message: &str| Problem {
+        kind: ProblemKind::NotInstalled,
+        message: message.to_owned(),
+        detail: None,
+        resets_at: None,
+    };
+    let folder = resources.executable_directory.as_ref().ok_or_else(|| {
+        missing("Claude Code is unavailable: ticketd could not find its own folder to look for its Claude bridge.")
+    })?;
+    let bridge = folder.join(format!(
+        "{BRIDGE_SIDECAR_NAME}{}",
+        std::env::consts::EXE_SUFFIX
+    ));
+    if bridge.is_file() {
+        Ok(Arc::new(ClaudeAdapter::new(bridge)))
+    } else {
+        Err(missing(
+            "Claude Code is unavailable: ticketd's Claude bridge is missing from this installation. Reinstall ticketd to restore it.",
+        ))
+    }
+}
+
 /// Hosts Chats on the Claude Code installation found in the launch environment, or
 /// on an executable the user selected, through the bridge at the given path.
 #[derive(Debug, Clone)]
@@ -87,7 +112,7 @@ impl ClaudeAdapter {
 #[async_trait]
 impl HarnessAdapter for ClaudeAdapter {
     fn harness(&self) -> Harness {
-        Harness::ClaudeCode
+        &ticketd_core::harnesses::CLAUDE_CODE
     }
 
     async fn inspect(&self) -> Inspection {
@@ -312,11 +337,10 @@ fn verdict(executable: &Path, inspection: &Value) -> Inspection {
                 executable: executable.to_owned(),
                 version: version.map(str::to_owned),
                 login: LoginState::Unknown,
-                capabilities: capabilities(None),
+                capabilities: capabilities(),
             },
         };
     };
-    let sdk = text("sdk_version").unwrap_or("unknown");
     let built_for_text = text("sdk_claude_code_version").unwrap_or_default();
     if installed < built_for {
         return Inspection::Incompatible {
@@ -325,43 +349,22 @@ fn verdict(executable: &Path, inspection: &Value) -> Inspection {
             requirement: format!("Claude Code {built_for_text} or newer"),
         };
     }
-    let pairing = if installed == built_for {
-        format!("Claude Code {built_for_text} is the version Agent SDK {sdk} was built for")
-    } else {
-        format!(
-            "Claude Code {} is newer than {built_for_text}, the version Agent SDK {sdk} was \
-             built for",
-            version.unwrap_or_default()
-        )
-    };
     Inspection::Installed {
         executable: executable.to_owned(),
         version: version.map(str::to_owned),
         // Sign-in stays with Claude Code; ticketd reads no credential to find out.
         login: LoginState::Unknown,
-        capabilities: capabilities(Some(&pairing)),
+        capabilities: capabilities(),
     }
 }
 
-/// What a session supports. `pairing` describes a readable version pair.
-fn capabilities(pairing: Option<&str>) -> Capabilities {
+/// What a session supports.
+fn capabilities() -> Capabilities {
     Capabilities {
         steering: Capability::Unknown {
             reason: "The bridge can add input to a running turn, but this has not been \
                      validated against a live Claude Code; follow-ups stay queued"
                 .to_owned(),
-        },
-        native_resume: match pairing {
-            Some(pairing) => Capability::Supported {
-                behavior: (),
-                evidence: format!(
-                    "The bridge passes the session to the Agent SDK's `resume` option; \
-                     {pairing}; not yet confirmed against a live session"
-                ),
-            },
-            None => Capability::Unknown {
-                reason: "Claude Code did not report a version ticketd can read".to_owned(),
-            },
         },
     }
 }

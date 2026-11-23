@@ -1,3 +1,4 @@
+import { useHarnessCatalog } from "@/features/chats/harness-catalog";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Bot, ChevronDown, Folder, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -9,10 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import {
-  HARNESS_NAMES,
-  type AutomationAgent,
-} from "@/features/automations/client";
+import { type AutomationAgent } from "@/features/automations/client";
 import { agentReach, folderName } from "@/features/automations/automation-text";
 import {
   harnessStanding,
@@ -102,11 +100,14 @@ export function RunAgentFields({
   const agent = agents.find((item) => item.id === agentId);
   const agentName = agent ? agent.name.trim() || "New agent" : null;
   const statusOf = useHarnessStatus();
+  const catalog = useHarnessCatalog();
+  const info = (harness: string) =>
+    catalog.find((entry) => entry.id === harness);
   // A hint only: the Automation may sync to a desktop that has the harness,
   // and a run that cannot start here says why.
   const harnessMissing =
     agent && !harnessStanding(statusOf(agent.harness)).usable
-      ? `${HARNESS_NAMES[agent.harness]} ${
+      ? `${info(agent.harness)?.name ?? agent.harness} ${
           statusOf(agent.harness) === "not_installed"
             ? "is not installed on"
             : "cannot run on"
@@ -143,7 +144,7 @@ export function RunAgentFields({
               >
                 <span className="flow-menu-item-text">
                   {item.name.trim() || "New agent"}
-                  <small>{HARNESS_NAMES[item.harness]}</small>
+                  <small>{info(item.harness)?.name ?? item.harness}</small>
                 </span>
               </DropdownMenuItem>
             ))}
@@ -155,7 +156,7 @@ export function RunAgentFields({
         </DropdownMenu>
         {agent && (
           <p className="flow-panel-note">
-            {agentReach(agent)}{" "}
+            {agentReach(agent, info(agent.harness))}{" "}
             <button
               type="button"
               className="settings-link"

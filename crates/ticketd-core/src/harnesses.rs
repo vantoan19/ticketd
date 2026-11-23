@@ -86,14 +86,17 @@ pub enum UnattendedSupport {
     Supported(UnattendedCapabilities),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct UnattendedCapabilities {
     pub commands: CommandControl,
     pub reads: ReadControl,
+    pub edits_in_step_folder_only: bool,
+    pub tool_note: Option<&'static str>,
     pub native_turn_limit: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum CommandControl {
     /// The harness can turn commands off, restrict them to a list, or allow any.
     AllowlistOrAny,
@@ -101,7 +104,8 @@ pub enum CommandControl {
     OffOrAny,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ReadControl {
     /// The harness can grant a file read tool independently of commands.
     Independent,
@@ -109,7 +113,8 @@ pub enum ReadControl {
     RequiresCommands,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PermissionSemantics {
     OwnSettings,
     Ask,
@@ -118,7 +123,8 @@ pub enum PermissionSemantics {
     FullAccess,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum PermissionAvailability {
     /// The adapter can offer this choice according to its current policy and capabilities.
     Adapter,
@@ -128,7 +134,7 @@ pub enum PermissionAvailability {
 
 /// A declared permission choice. The adapter reports which choices actually apply or
 /// are available for a given session.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub struct PermissionChoice {
     /// The existing mode identifier used in setting picks and stored settings.
     pub id: &'static str,
@@ -139,7 +145,7 @@ pub struct PermissionChoice {
     pub is_default: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HarnessDescriptor {
     pub key: HarnessKey,
     pub name: &'static str,
@@ -172,6 +178,10 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
     unattended: UnattendedSupport::Supported(UnattendedCapabilities {
         commands: CommandControl::AllowlistOrAny,
         reads: ReadControl::Independent,
+        edits_in_step_folder_only: false,
+        tool_note: Some(
+            "Claude Code may still run shell commands that only read in the step’s folder, such as listing it or printing a file there, with “Read files” and “Run commands” off. ticketd cannot switch that off.",
+        ),
         native_turn_limit: true,
     }),
     permissions: &[
@@ -226,6 +236,10 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
     unattended: UnattendedSupport::Supported(UnattendedCapabilities {
         commands: CommandControl::OffOrAny,
         reads: ReadControl::RequiresCommands,
+        edits_in_step_folder_only: true,
+        tool_note: Some(
+            "With Run commands on, Codex can read any file you can. Your global AGENTS.md, personal skills and “always allow” rules still apply.",
+        ),
         native_turn_limit: false,
     }),
     permissions: &[

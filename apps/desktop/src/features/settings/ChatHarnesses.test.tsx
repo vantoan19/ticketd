@@ -66,11 +66,13 @@ test("each harness is a row with its status in words", async () => {
           status: "not_signed_in",
           command: "codex login",
         },
+        { id: "fixture-harness", name: "Fixture Harness", status: "ready" },
       ],
     }),
   );
   const list = await screen.findByRole("list", { name: "Harnesses" });
   const [claude, codex] = within(list).getAllByRole("listitem");
+  expect(within(list).getByText("Fixture Harness")).toBeTruthy();
   expect(claude?.textContent).toContain("Ready");
   expect(claude?.textContent).toContain("Version 2.1.3.");
   expect(codex?.textContent).toContain("Not signed in");

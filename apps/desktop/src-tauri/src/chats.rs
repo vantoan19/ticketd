@@ -12,10 +12,10 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use ticketd_chat_host::{
-    Activity, ChatHost, ChatLive, ChatProblem, ChatUpdate, ContextSource, HarnessAdapter,
+    Activity, ChatHost, ChatLive, ChatProblem, ChatUpdate, ContextSource, Harness, HarnessAdapter,
     HostError, Inspection, InteractionAnswer, InteractionKind, LoginState, ProblemKind,
-    QuestionAnswer, ResumeMode, SendMode, SettingKey, StartSettings, StopReason, Subscription,
-    TurnEnding, UnconfirmedCleanup, WorkspaceOpener, harness_key,
+    QuestionAnswer, REGISTRATIONS, ResumeMode, SendMode, SettingKey, StartSettings, StopReason,
+    Subscription, TurnEnding, UnconfirmedCleanup, WorkspaceOpener,
 };
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
@@ -27,8 +27,8 @@ use tokio::sync::oneshot;
 use crate::chat_reports::{self, HarnessOptionsView, SettingChangeView};
 use crate::chat_view::HarnessFound;
 use crate::chat_view::{
-    self, ChatState, FreshHistory, HARNESSES, Item, LinkedRecord, ProjectRef, Queued, Summary,
-    Surroundings, Tracker, harness_name,
+    self, ChatState, FreshHistory, Item, LinkedRecord, ProjectRef, Queued, Summary, Surroundings,
+    Tracker, harness_name,
 };
 use crate::folder_probe;
 use ticketd_chat_host::attention::Rank;
@@ -290,6 +290,7 @@ impl Stopping {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct HarnessStatus {
+    pub mark_id: &'static str,
     pub id: &'static str,
     pub name: &'static str,
     pub status: HarnessState,
@@ -306,6 +307,34 @@ pub struct HarnessStatus {
     pub path: Option<String>,
     /// The version number it reported ("2.1.322"), when it was found and said one.
     pub version: Option<String>,
+}
+
+#[derive(Serialize)]
+pub struct HarnessInfo {
+    id: &'static str,
+    name: &'static str,
+    mark_id: &'static str,
+    editing_agent_aliases: &'static [&'static str],
+    unattended: Option<ticketd_core::harnesses::UnattendedCapabilities>,
+    permissions: &'static [ticketd_core::harnesses::PermissionChoice],
+}
+
+impl From<Harness> for HarnessInfo {
+    fn from(descriptor: Harness) -> Self {
+        use ticketd_core::harnesses::UnattendedSupport;
+        let unattended = match descriptor.unattended {
+            UnattendedSupport::Supported(reach) => Some(reach),
+            UnattendedSupport::Unsupported { .. } => None,
+        };
+        Self {
+            id: descriptor.key.as_str(),
+            name: descriptor.name,
+            mark_id: descriptor.mark_id,
+            editing_agent_aliases: descriptor.editing_agent_aliases,
+            unattended,
+            permissions: descriptor.permissions,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -357,7 +386,9 @@ fn version_number(output: &str) -> &str {
         .unwrap_or(output)
 }
 
-fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) -> HarnessStatus {
+fn harness_status(descriptor: Harness, inspection: Inspection) -> HarnessStatus {
+    let id = descriptor.key.as_str();
+    let name = descriptor.name;
     let found = |executable: &PathBuf, version: &Option<String>| {
         format!(
             "{name} {} at {}",
@@ -365,7 +396,7 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             executable.display()
         )
     };
-    let sign_in = chat_view::login_command(id).map(str::to_owned);
+    let sign_in = Some(descriptor.sign_in_command.to_owned());
     let (status, message, command) = match &inspection {
         Inspection::Installed {
             executable,
@@ -429,8 +460,7 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
             status,
             HarnessState::NotInstalled | HarnessState::Incompatible
         )
-        .then(|| chat_view::help_url(id).map(str::to_owned))
-        .flatten(),
+        .then(|| descriptor.help_url.to_owned()),
         path: match &inspection {
             Inspection::Installed { executable, .. }
             | Inspection::Incompatible { executable, .. } => Some(executable.display().to_string()),
@@ -438,6 +468,7 @@ fn harness_status(id: &'static str, name: &'static str, inspection: Inspection) 
         },
     };
     HarnessStatus {
+        mark_id: descriptor.mark_id,
         id,
         name,
         status,
@@ -1314,43 +1345,74 @@ impl Chats {
     /// Probes installation and sign-in again on every call.
     pub async fn harnesses(&self) -> Outcome<Vec<HarnessStatus>> {
         let host = self.host()?;
-        // Each check starts its harness: run them side by side, so the slower one
-        // does not hold up the other.
-        let (first, second) =
-            tokio::join!(host.inspect(HARNESSES[0].0), host.inspect(HARNESSES[1].0));
+        let mut probes = tokio::task::JoinSet::new();
+        for (index, descriptor) in self.catalog().into_iter().enumerate() {
+            let host = host.clone();
+            probes.spawn(async move {
+                (
+                    index,
+                    descriptor,
+                    host.inspect(descriptor.key.as_str()).await,
+                )
+            });
+        }
         let mut statuses = Vec::new();
-        for ((id, name), inspected) in HARNESSES.into_iter().zip([first, second]) {
-            statuses.push(match inspected {
+        while let Some(result) = probes.join_next().await {
+            let (index, descriptor, inspected) =
+                result.map_err(|error| failed(error.to_string()))?;
+            let id = descriptor.key.as_str();
+            let name = descriptor.name;
+            let status = match inspected {
                 Ok(inspection) => {
-                    let status = harness_status(id, name, inspection);
+                    let status = harness_status(descriptor, inspection);
                     lock(&self.versions).insert(id, status.version.clone());
                     status
                 }
-                Err(_) => HarnessStatus {
-                    id,
-                    name,
-                    status: HarnessState::Unavailable,
-                    usable: false,
-                    word: HarnessState::Unavailable.word(),
-                    problem: Some(chat_view::Problem::for_harness(
+                Err(_) => {
+                    let reason = self.unavailable(id);
+                    HarnessStatus {
+                        mark_id: descriptor.mark_id,
+                        id,
                         name,
-                        ChatProblemKind::Unavailable,
-                        &HarnessFound {
-                            message: Some(self.unavailable(id)),
-                            command: None,
-                            help_url: None,
-                            path: None,
-                        },
-                    )),
-                    message: Some(self.unavailable(id)),
-                    command: None,
-                    help_url: None,
-                    path: None,
-                    version: None,
-                },
-            });
+                        status: HarnessState::Unavailable,
+                        usable: false,
+                        word: HarnessState::Unavailable.word(),
+                        problem: Some(chat_view::Problem::for_harness(
+                            name,
+                            ChatProblemKind::Unavailable,
+                            &HarnessFound {
+                                message: Some(reason.clone()),
+                                command: None,
+                                help_url: None,
+                                path: None,
+                            },
+                        )),
+                        message: Some(reason),
+                        command: None,
+                        help_url: None,
+                        path: None,
+                        version: None,
+                    }
+                }
+            };
+            statuses.push((index, status));
         }
-        Ok(statuses)
+        statuses.sort_unstable_by_key(|(index, _)| *index);
+        Ok(statuses.into_iter().map(|(_, status)| status).collect())
+    }
+
+    fn catalog(&self) -> Vec<Harness> {
+        let mut descriptors: Vec<_> = REGISTRATIONS.iter().map(|entry| entry.descriptor).collect();
+        for descriptor in self.adapters.iter().map(|adapter| adapter.harness()) {
+            if !descriptors.iter().any(|entry| entry.key == descriptor.key) {
+                descriptors.push(descriptor);
+            }
+        }
+        descriptors
+    }
+
+    pub fn harness_catalog(&self) -> Vec<HarnessInfo> {
+        self.catalog().into_iter().map(HarnessInfo::from).collect()
     }
 
     /// What the installed harness offers before a session: its models with their
@@ -1358,11 +1420,13 @@ impl Chats {
     /// version the last check found; nothing is sent to a model.
     pub async fn options(&self, harness_id: &str) -> Outcome<HarnessOptionsView> {
         let host = self.host()?;
-        let (id, name) = HARNESSES
-            .iter()
-            .copied()
-            .find(|(id, _)| *id == harness_id)
+        let descriptor = self
+            .catalog()
+            .into_iter()
+            .find(|descriptor| descriptor.key.as_str() == harness_id)
             .ok_or_else(|| failed(self.unavailable(harness_id)))?;
+        let id = descriptor.key.as_str();
+        let name = descriptor.name;
         let version = lock(&self.versions).get(id).cloned().flatten();
         if let Some((asked_at, view)) = lock(&self.options).get(id)
             && *asked_at == version
@@ -1411,7 +1475,7 @@ impl Chats {
         let command_id = uuid::Uuid::parse_str(&input.command_id)
             .map_err(|_| failed("the request id must be a UUID"))?
             .to_string();
-        let served = |adapter: &Arc<dyn HarnessAdapter>| harness_key(adapter.harness());
+        let served = |adapter: &Arc<dyn HarnessAdapter>| adapter.harness().key.as_str();
         if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
             return Err(failed(self.unavailable(&input.harness_id)));
         }
@@ -1997,11 +2061,12 @@ impl Chats {
         }
         let items = workspace.chat_snapshot(chat_id, SUMMARY_ITEMS)?.items;
         drop(workspace);
-        let (id, name) = HARNESSES
+        let descriptor = self
+            .catalog()
             .into_iter()
-            .find(|(id, _)| *id == chat.harness)
+            .find(|descriptor| descriptor.key.as_str() == chat.harness)
             .ok_or_else(|| failed(format!("unknown harness '{}'", chat.harness)))?;
-        let status = harness_status(id, name, host.inspect(id).await?);
+        let status = harness_status(descriptor, host.inspect(descriptor.key.as_str()).await?);
         if !status.usable {
             return Err(failed(status.message.unwrap_or_default()));
         }

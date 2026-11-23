@@ -890,7 +890,6 @@ async fn inspection_judges_the_pairing_without_opening_a_session() {
         "the check lists its options too"
     );
     assert!(matches!(capabilities.steering, Capability::Unknown { .. }));
-    assert!(capabilities.native_resume.behavior().is_some());
 }
 
 #[test]
@@ -993,7 +992,7 @@ async fn the_built_bridge_answers_hello() {
         &bridge,
         &[],
         crate::stdio::Serving::Nothing,
-        crate::Harness::ClaudeCode,
+        &ticketd_core::harnesses::CLAUDE_CODE,
         None,
     )
     .expect("the bridge starts");

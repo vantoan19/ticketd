@@ -182,6 +182,7 @@ export type ChatOverview = z.infer<typeof chatOverviewSchema>;
 export const harnessStatusSchema = z.object({
   id: z.string(),
   name: z.string(),
+  mark_id: z.string().optional(),
   status: z.enum([
     "ready",
     "not_installed",
@@ -211,6 +212,39 @@ export const harnessStatusSchema = z.object({
   version: z.string().nullish(),
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
+
+export const harnessInfoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  mark_id: z.string(),
+  editing_agent_aliases: z.array(z.string()),
+  unattended: z
+    .object({
+      commands: z.enum(["allowlist_or_any", "off_or_any"]),
+      reads: z.enum(["independent", "requires_commands"]),
+      edits_in_step_folder_only: z.boolean(),
+      tool_note: z.string().nullable(),
+      native_turn_limit: z.boolean(),
+    })
+    .nullable(),
+  permissions: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      description: z.string().nullable(),
+      semantics: z.enum([
+        "own_settings",
+        "ask",
+        "accept_edits",
+        "read_only",
+        "full_access",
+      ]),
+      availability: z.enum(["adapter", "native"]),
+      is_default: z.boolean(),
+    }),
+  ),
+});
+export type HarnessInfo = z.infer<typeof harnessInfoSchema>;
 
 const stepTargetSchema = z.object({
   /** A path relative to the Chat's folder, a pattern, a query or a page. */
@@ -769,6 +803,8 @@ export interface ChatClient {
   listChats(scope: Retention): Promise<ChatSummary[]>;
   /** Probes installation and sign-in again on every call. */
   harnesses(): Promise<HarnessStatus[]>;
+  /** Compiled-in harness data, without probing installations or starting Chat. */
+  harnessCatalog(): Promise<HarnessInfo[]>;
   /** What a harness offers before a session; asked of the harness once per version. */
   harnessOptions(harnessId: string): Promise<HarnessOptions>;
   /** The native folder dialog; null when dismissed. */

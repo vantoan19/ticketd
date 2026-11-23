@@ -14,8 +14,8 @@ use std::thread;
 
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
+use crate::Harness;
 use crate::stdio::{Io, Reader, Serving, Writer};
-use crate::{Harness, harness_key};
 
 pub(super) const SWITCH: &str = "TICKETD_RECORD_HARNESS";
 const HEADER: &[u8] = b"ticketd-harness-recording-v1\n";
@@ -30,15 +30,11 @@ pub fn prepare_harness_recording(
     let Some(selected) = env::var_os(SWITCH) else {
         return Ok(());
     };
-    let harness = match selected.to_str() {
-        Some("claude-code") => Harness::ClaudeCode,
-        Some("codex") => Harness::Codex,
-        _ => {
-            return Err(io::Error::other(
-                "Choose claude-code or codex for harness recording",
-            ));
-        }
-    };
+    let harness = selected
+        .to_str()
+        .and_then(crate::registration)
+        .map(|entry| entry.descriptor)
+        .ok_or_else(|| io::Error::other("Choose a registered harness for recording"))?;
 
     let requested = env::var_os("TICKETD_TEST_WORKSPACE")
         .map(PathBuf::from)
@@ -198,7 +194,7 @@ impl RecordingRun {
     }
 
     pub(super) fn tap(&self, mut io: Io) -> io::Result<Io> {
-        let sender = start(&self.directory, harness_key(self.harness))?;
+        let sender = start(&self.directory, self.harness.key.as_str())?;
         io.stdout = Box::new(TappedReader(io.stdout, Arc::clone(&sender)));
         io.stdin = Box::new(TappedWriter(io.stdin, sender));
         Ok(io)

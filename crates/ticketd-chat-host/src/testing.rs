@@ -139,7 +139,7 @@ impl FakeAdapter {
     /// Steering supported without interrupting tools; native resume supported.
     pub fn codex() -> Self {
         Self::new(
-            Harness::Codex,
+            &ticketd_core::harnesses::CODEX,
             Capabilities {
                 steering: Capability::Supported {
                     behavior: SteeringBehavior {
@@ -147,7 +147,6 @@ impl FakeAdapter {
                     },
                     evidence: "fake".to_owned(),
                 },
-                native_resume: supported_resume(),
             },
         )
     }
@@ -157,12 +156,11 @@ impl FakeAdapter {
     /// [`crate::DeliveryEvidence::Processing`] that shows the input arrived.
     pub fn claude() -> Self {
         let fake = Self::new(
-            Harness::ClaudeCode,
+            &ticketd_core::harnesses::CLAUDE_CODE,
             Capabilities {
                 steering: Capability::Unknown {
                     reason: "fake harness that cannot steer".to_owned(),
                 },
-                native_resume: supported_resume(),
             },
         );
         fake.state().acknowledges_new_turn = false;
@@ -171,12 +169,11 @@ impl FakeAdapter {
 
     pub fn without_steering() -> Self {
         Self::new(
-            Harness::Codex,
+            &ticketd_core::harnesses::CODEX,
             Capabilities {
                 steering: Capability::Unsupported {
                     reason: "fake harness without steering".to_owned(),
                 },
-                native_resume: supported_resume(),
             },
         )
     }
@@ -313,13 +310,6 @@ impl FakeAdapter {
 
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-fn supported_resume() -> Capability<()> {
-    Capability::Supported {
-        behavior: (),
-        evidence: "fake".to_owned(),
     }
 }
 

@@ -108,15 +108,10 @@ const SHORT_LIST = 6;
 /** "Default (recommended)" reads as "Default" in the trigger; the menu says it all. */
 const shortName = (label: string) => label.replace(/\s*\([^)]*\)$/, "");
 
-/** The harnesses ticketd hosts. */
-const HARNESSES: PickerHarness[] = [
-  { id: "claude-code", name: "Claude Code", ready: true },
-  { id: "codex", name: "Codex", ready: true },
-];
-
 /** One harness as the picker's tabs show it. */
 export type PickerHarness = {
   id: string;
+  markId?: string | undefined;
   name: string;
   /** The one word said when it isn't ready ("Not signed in"). */
   word?: string | null;
@@ -125,6 +120,7 @@ export type PickerHarness = {
 
 const pickerHarness = (status: HarnessStatus): PickerHarness => ({
   id: status.id,
+  markId: status.mark_id,
   name: status.name,
   word: status.word?.word ?? null,
   ready: status.usable,
@@ -376,6 +372,7 @@ export function HarnessPicker({
           >
             <HarnessMark
               harness={harnessId}
+              markId={harness?.markId}
               name={harness?.name ?? harnessId}
               dim={harness ? !harness.ready : false}
               decorative
@@ -432,6 +429,7 @@ export function HarnessPicker({
               >
                 <HarnessMark
                   harness={item.id}
+                  markId={item.markId}
                   name={item.name}
                   dim={!item.ready}
                   decorative
@@ -740,10 +738,7 @@ export function ComposerControls({
           reason: `From ${chat.harness.name}'s first message`,
         }
       : null);
-  const tabs = [
-    { id: chat.harness.id, name: chat.harness.name, ready: true },
-    ...HARNESSES.filter((item) => item.id !== chat.harness.id),
-  ];
+  const tabs = [{ id: chat.harness.id, name: chat.harness.name, ready: true }];
   const changeable = Boolean(model?.changeable || effort?.changeable);
   const permissionId = permission ? shownOf(permission) : null;
   const starting = `${chat.harness.name} lists its models once the Chat's session starts.`;

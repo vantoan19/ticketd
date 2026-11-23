@@ -481,7 +481,16 @@ test("cancelling or dismissing the agent delete dialog returns focus to Agent ac
 });
 
 test("with Codex chosen, the switches are live, say briefly what Codex does with them, and the turn limit is hidden; Claude Code brings the command list back", async () => {
-  await open(undefined, [
+  const catalog = await createMockChatClient().harnessCatalog();
+  catalog.push({
+    id: "fixture-harness",
+    name: "Fixture Harness",
+    mark_id: "fixture-mark",
+    editing_agent_aliases: [],
+    unattended: null,
+    permissions: [],
+  });
+  await open(createMockChatClient({ catalog }), [
     {
       id: "a1",
       ...DEFAULTS,
@@ -494,6 +503,9 @@ test("with Codex chosen, the switches are live, say briefly what Codex does with
   const form = await screen.findByRole("region", { name: "Triage" });
   const control = (role: "switch" | "spinbutton", name: string) =>
     within(form).getByRole(role, { name }) as HTMLButtonElement;
+  expect(
+    within(form).queryByRole("radio", { name: /Fixture Harness/ }),
+  ).toBeNull();
 
   // Every switch is the agent's own, and none is locked.
   for (const [name, on] of [
@@ -536,6 +548,12 @@ test("with Codex chosen, the switches are live, say briefly what Codex does with
   expect(within(form).queryByText(/Codex can read any file/)).toBeNull();
   expect(control("spinbutton", "Turns").disabled).toBe(false);
   await waitFor(() => expect(stored[0]?.harness).toBe("claude-code"));
+
+  fireEvent.click(within(form).getByRole("radio", { name: /Codex/ }));
+  await waitFor(() => expect(stored[0]?.harness).toBe("codex"));
+  expect(control("switch", "Run commands").getAttribute("aria-checked")).toBe(
+    "false",
+  );
 });
 
 test("the Runs view lists every run under Now, Needs you and Earlier, naming its Automation, and opens the one chosen", async () => {

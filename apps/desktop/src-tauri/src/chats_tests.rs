@@ -24,6 +24,51 @@ struct Fixture {
     chats: Arc<Chats>,
 }
 
+#[tokio::test]
+async fn probes_a_third_registered_adapter_and_exposes_its_declared_reach() {
+    use std::sync::LazyLock;
+    use ticketd_core::harnesses::{CLAUDE_CODE, HarnessDescriptor, UnattendedSupport};
+
+    static THIRD: LazyLock<HarnessDescriptor> = LazyLock::new(|| HarnessDescriptor {
+        key: "fixture-harness".parse().unwrap(),
+        name: "Fixture Harness",
+        mark_id: "fixture-mark",
+        unattended: UnattendedSupport::Unsupported {
+            reason: "This fixture is for a person’s Chat.",
+        },
+        ..CLAUDE_CODE.clone()
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    drop(Workspace::open(&path).unwrap());
+    let third = FakeAdapter::new(
+        &THIRD,
+        ticketd_chat_host::Capabilities {
+            steering: ticketd_chat_host::Capability::Unknown {
+                reason: String::new(),
+            },
+        },
+    );
+    let chats = Chats::new(
+        Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
+        vec![
+            Arc::new(FakeAdapter::claude()),
+            Arc::new(FakeAdapter::codex()),
+            Arc::new(third),
+        ],
+        Vec::new(),
+        None,
+    );
+    let catalog = serde_json::to_value(chats.harness_catalog()).unwrap();
+    assert_eq!(catalog[2]["unattended"], serde_json::Value::Null);
+    chats.set_enabled(true).await;
+    let statuses = chats.harnesses().await.unwrap();
+    assert_eq!(statuses.len(), 3);
+    assert!(statuses.iter().all(|status| status.usable));
+    assert_eq!(statuses[2].id, "fixture-harness");
+    assert_eq!(statuses[2].mark_id, "fixture-mark");
+}
+
 /// Lets every task run until all of them wait. The clock is paused.
 async fn settle() {
     tokio::time::sleep(Duration::from_millis(1)).await;
@@ -824,21 +869,19 @@ async fn an_uncertain_submission_waits_for_the_person_and_is_resent_only_when_th
 
 #[test]
 fn missing_harness_guidance_includes_install_help_and_its_own_sign_in_command() {
-    for (id, name, command, help) in [
+    for (descriptor, command, help) in [
         (
-            "codex",
-            "Codex",
+            &ticketd_core::harnesses::CODEX,
             "codex login",
             "https://developers.openai.com/codex/cli",
         ),
         (
-            "claude-code",
-            "Claude Code",
+            &ticketd_core::harnesses::CLAUDE_CODE,
             "claude /login",
             "https://code.claude.com/docs/en/setup",
         ),
     ] {
-        let status = harness_status(id, name, Inspection::NotInstalled);
+        let status = harness_status(descriptor, Inspection::NotInstalled);
         assert_eq!(status.status, HarnessState::NotInstalled);
         assert_eq!(status.command.as_deref(), Some(command));
         assert_eq!(status.help_url.as_deref(), Some(help));
@@ -1169,12 +1212,9 @@ async fn api_key_and_unknown_sign_in_are_their_own_statuses_with_an_explanation(
                 steering: ticketd_chat_host::Capability::Unknown {
                     reason: String::new(),
                 },
-                native_resume: ticketd_chat_host::Capability::Unknown {
-                    reason: String::new(),
-                },
             },
         };
-        harness_status("claude-code", "Claude Code", inspection)
+        harness_status(&ticketd_core::harnesses::CLAUDE_CODE, inspection)
     };
 
     let ready = status(LoginState::SignedIn);
@@ -1574,9 +1614,6 @@ async fn checking_again_after_a_past_sign_in_failure_reports_what_the_probe_find
         login,
         capabilities: ticketd_chat_host::Capabilities {
             steering: ticketd_chat_host::Capability::Unknown {
-                reason: String::new(),
-            },
-            native_resume: ticketd_chat_host::Capability::Unknown {
                 reason: String::new(),
             },
         },
@@ -2138,8 +2175,7 @@ async fn a_folder_that_comes_back_clears_the_missing_folder_state() {
 #[test]
 fn an_incompatible_harness_says_what_was_found_and_needed_once() {
     let status = harness_status(
-        "codex",
-        "Codex",
+        &ticketd_core::harnesses::CODEX,
         Inspection::Incompatible {
             executable: PathBuf::from("/opt/bin/codex"),
             version: Some("codex-cli 0.150.0".to_owned()),

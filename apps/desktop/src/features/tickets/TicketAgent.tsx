@@ -13,7 +13,7 @@ import { Button } from "@/components/ui/button";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Badge } from "@/components/ui/badge";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { editingHarness } from "@/features/chats/editing-harness";
+import { useEditingHarness } from "@/features/chats/editing-harness";
 import {
   useChat,
   useChatFeature,
@@ -219,6 +219,7 @@ function IdleAgent({
   onOpenUpdate?: ((id: string) => void) | undefined;
 }) {
   const now = useNow();
+  const editingHarness = useEditingHarness();
   if (!update) return null;
   const name = update.editing_agent ?? "You";
   return (

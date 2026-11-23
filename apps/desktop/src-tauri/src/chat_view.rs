@@ -24,33 +24,18 @@ use crate::chat_ticketd::{self, Call};
 use crate::folder_probe::Branch;
 use ticketd_chat_host::step_kind;
 
-pub const HARNESSES: [(&str, &str); 2] = [("claude-code", "Claude Code"), ("codex", "Codex")];
-
 pub fn harness_name(id: &str) -> &str {
-    HARNESSES
-        .iter()
-        .find(|(key, _)| *key == id)
-        .map_or(id, |(_, name)| name)
+    ticketd_core::harnesses::descriptor(id).map_or(id, |descriptor| descriptor.name)
 }
 
 /// The harness's own sign-in, as a command the person runs in a terminal.
 pub fn login_command(harness: &str) -> Option<&'static str> {
-    match harness {
-        // ponytail: `claude /login` starts Claude Code at its sign-in; confirm against
-        // a live installation in #264.
-        "claude-code" => Some("claude /login"),
-        "codex" => Some("codex login"),
-        _ => None,
-    }
+    ticketd_core::harnesses::descriptor(harness).map(|descriptor| descriptor.sign_in_command)
 }
 
 /// Where the harness's publisher explains installing and updating it.
 pub fn help_url(harness: &str) -> Option<&'static str> {
-    match harness {
-        "claude-code" => Some("https://code.claude.com/docs/en/setup"),
-        "codex" => Some("https://developers.openai.com/codex/cli"),
-        _ => None,
-    }
+    ticketd_core::harnesses::descriptor(harness).map(|descriptor| descriptor.help_url)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]

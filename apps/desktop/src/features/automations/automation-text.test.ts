@@ -1,3 +1,4 @@
+import { createMockChatClient } from "@/features/chats/mock-client";
 import { expect, test } from "vitest";
 import {
   agentReach,
@@ -25,10 +26,13 @@ const agent = (patch: Partial<AutomationAgent>): AutomationAgent => ({
   ...patch,
 });
 
-test("a Codex agent reads by running commands and never has a list of them", () => {
+test("a Codex agent reads by running commands and never has a list of them", async () => {
+  const catalog = await createMockChatClient().harnessCatalog();
+  const harness = catalog.find((item) => item.id === "codex");
   const codex = (tools: Partial<ReturnType<typeof agent>["tools"]>) =>
     agentReach(
       agent({ harness: "codex", tools: { ...agent({}).tools, ...tools } }),
+      harness,
     );
   // Read files alone gives Codex nothing to read with.
   expect(codex({ read_files: true })).toBe(
@@ -54,20 +58,26 @@ test("a card's text marks each field as one, by a short name", () => {
   );
 });
 
-test("a Claude Code agent that may edit files may read them too", () => {
+test("a Claude Code agent that may edit files may read them too", async () => {
+  const catalog = await createMockChatClient().harnessCatalog();
   expect(
     agentReach(
       agent({
         tools: { ...agent({}).tools, read_files: false, edit_files: true },
       }),
+      catalog.find((item) => item.id === "claude-code"),
     ),
   ).toBe(
     "Claude Code. Can read files and edit files, and use the ticketd command line.",
   );
 });
 
-test("a Claude Code agent's reach is its own switches", () => {
-  expect(agentReach(agent({}))).toBe(
-    "Claude Code. Can read files, and use the ticketd command line.",
-  );
+test("a Claude Code agent's reach is its own switches", async () => {
+  const catalog = await createMockChatClient().harnessCatalog();
+  expect(
+    agentReach(
+      agent({}),
+      catalog.find((item) => item.id === "claude-code"),
+    ),
+  ).toBe("Claude Code. Can read files, and use the ticketd command line.");
 });

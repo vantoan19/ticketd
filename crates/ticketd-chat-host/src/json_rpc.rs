@@ -500,7 +500,7 @@ mod tests {
             EchoPeer,
             RuntimeGeneration(1),
             Options {
-                harness: Harness::ClaudeCode,
+                harness: &ticketd_core::harnesses::CLAUDE_CODE,
                 include_version: true,
                 reply_timeout: Duration::from_secs(5),
             },

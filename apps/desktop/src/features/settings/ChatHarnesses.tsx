@@ -130,6 +130,7 @@ export function ChatHarnesses() {
                       <SettingsRowTile>
                         <HarnessMark
                           harness={harness.id}
+                          markId={harness.mark_id}
                           name={harness.name}
                           dim={harness.status === "not_installed"}
                           decorative

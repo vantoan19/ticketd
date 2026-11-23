@@ -607,7 +607,7 @@ fn an_agent_file_edited_by_hand_in_ordinary_yaml_is_accepted() {
     let directory = tempfile::tempdir().unwrap();
     let (mut workspace, _, agent) = workspace_with_files(&directory);
     let edited = format!(
-        "---\nkind: automation_agent\nid: {agent}\nname: Triage\nharness: codex\nmodel: gpt-5\nturn_limit: \"12\"\ntime_limit_minutes: 5\nrun_commands: true\nallowed_commands: [npm test]\n---\nLabel it.\n"
+        "---\nkind: automation_agent\nid: {agent}\nname: Triage\nharness: codex\nmodel: gpt-5\nturn_limit: \"12\"\ntime_limit_minutes: 5\nrun_commands: true\nany_command: true\nallowed_commands: [npm test]\n---\nLabel it.\n"
     );
 
     workspace
@@ -619,9 +619,26 @@ fn an_agent_file_edited_by_hand_in_ordinary_yaml_is_accepted() {
     assert_eq!(settings.model.as_deref(), Some("gpt-5"));
     assert_eq!((settings.turn_limit, settings.time_limit_minutes), (12, 5));
     assert_eq!(settings.tools.allowed_commands, ["npm test"]);
+    assert!(settings.tools.any_command);
     // A true-or-false field that is left out is false.
     assert!(!settings.tools.read_files && settings.tools.run_commands);
     assert_eq!(settings.instructions, "Label it.");
+}
+
+#[test]
+fn a_synced_harness_change_cannot_implicitly_widen_a_command_list() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut workspace, _, agent) = workspace_with_files(&directory);
+    let content = format!(
+        "---\nkind: automation_agent\nid: {agent}\nname: Triage\nharness: claude-code\nturn_limit: 12\ntime_limit_minutes: 5\nrun_commands: true\nallowed_commands: [npm test]\n---\nLabel it.\n"
+    );
+    workspace
+        .apply_sync_record(&SyncRecord::parse(&content).unwrap())
+        .unwrap();
+    let before = workspace.automation_agent(&agent).unwrap();
+    let widened = SyncRecord::parse(&content.replace("claude-code", "codex")).unwrap();
+    assert!(workspace.apply_sync_record(&widened).is_err());
+    assert_eq!(workspace.automation_agent(&agent).unwrap(), before);
 }
 
 #[test]

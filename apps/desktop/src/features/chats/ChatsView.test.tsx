@@ -1984,6 +1984,7 @@ test("New Chat picks harness, model and effort in one composer picker and starts
       status: "not_signed_in",
       command: "codex login",
     },
+    { id: "fixture-harness", name: "Fixture Harness", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   // No radios: the harness is the picker's, beside Send.
@@ -1996,6 +1997,9 @@ test("New Chat picks harness, model and effort in one composer picker and starts
   // A harness that isn't ready is dimmed with its word.
   expect(
     within(tabs).getByRole("tab", { name: /Codex.*Not signed in/ }),
+  ).toBeTruthy();
+  expect(
+    within(tabs).getByRole("tab", { name: "Fixture Harness" }),
   ).toBeTruthy();
   fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
   fireEvent.click(await screen.findByRole("radio", { name: "High" }));

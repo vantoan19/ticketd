@@ -55,11 +55,8 @@ string_id!(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RuntimeGeneration(pub u64);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Harness {
-    ClaudeCode,
-    Codex,
-}
+/// A registered harness's stable identity and declared policy.
+pub type Harness = &'static ticketd_core::harnesses::HarnessDescriptor;
 
 // ---------------------------------------------------------------------------
 // Inspection and capabilities
@@ -124,8 +121,6 @@ pub struct SteeringBehavior {
 pub struct Capabilities {
     /// Adding input to the active turn. Without it the supervisor queues.
     pub steering: Capability<SteeringBehavior>,
-    /// Reopening a native session in a replacement process.
-    pub native_resume: Capability<()>,
 }
 
 // ---------------------------------------------------------------------------
@@ -629,6 +624,29 @@ pub struct SettingOption {
     pub permission: Option<PermissionKind>,
     /// The harness's own policy allows choosing it.
     pub allowed: bool,
+}
+
+impl SettingOption {
+    pub(crate) fn from_permission(
+        choice: &ticketd_core::harnesses::PermissionChoice,
+        allowed: bool,
+    ) -> Self {
+        use ticketd_core::harnesses::PermissionSemantics;
+        Self {
+            id: choice.id.to_owned(),
+            label: choice.label.to_owned(),
+            description: choice.description.map(str::to_owned),
+            is_default: choice.is_default,
+            permission: match choice.semantics {
+                PermissionSemantics::OwnSettings => None,
+                PermissionSemantics::Ask => Some(PermissionKind::Ask),
+                PermissionSemantics::AcceptEdits => Some(PermissionKind::AcceptEdits),
+                PermissionSemantics::ReadOnly => Some(PermissionKind::ReadOnly),
+                PermissionSemantics::FullAccess => Some(PermissionKind::FullAccess),
+            },
+            allowed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -1,3 +1,4 @@
+import type { HarnessInfo } from "@/features/chats/client";
 import type { ReactNode } from "react";
 import {
   Bell,
@@ -18,7 +19,6 @@ import {
 } from "@/features/automations/automation-text";
 import { TRIGGER_ID } from "@/features/automations/canvas-layout";
 import {
-  HARNESS_NAMES,
   type AutomationAgent,
   type AutomationCheck,
   type AutomationDefinition,
@@ -160,6 +160,7 @@ export function stepCard(
   step: AutomationStep,
   agents: AutomationAgent[],
   projects?: Project[],
+  catalog?: readonly HarnessInfo[],
 ): Card {
   const kind = STEP_KINDS[step.kind];
   if (step.kind === "change_ticket") {
@@ -224,7 +225,9 @@ export function stepCard(
     kind,
     title: agent ? agent.name.trim() || "New agent" : "Choose an agent",
     ...(agent && {
-      detail: [HARNESS_NAMES[agent.harness], where].filter(Boolean).join(" · "),
+      detail: [catalog?.find((item) => item.id === agent.harness)?.name, where]
+        .filter(Boolean)
+        .join(" · "),
     }),
     icon: "agent",
     unset: !agent,

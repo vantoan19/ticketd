@@ -133,12 +133,8 @@ impl From<StepAction> for ToolStep {
 
 /// Interpret saved evidence without opening the harness.
 pub fn read_tool_steps(harness: &str, evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
-    use ticketd_core::harnesses::HarnessKey;
-
-    if harness == HarnessKey::ClaudeCode.as_str() {
-        crate::claude::read_claude_steps(evidence)
-    } else if harness == HarnessKey::Codex.as_str() {
-        crate::codex::steps::read_codex_steps(evidence)
+    if let Some(entry) = crate::registration(harness) {
+        (entry.read_steps)(evidence)
     } else {
         vec![
             StepAction::Other {

@@ -1,3 +1,4 @@
+import { useHarnessCatalog } from "@/features/chats/harness-catalog";
 import {
   createContext,
   use,
@@ -553,6 +554,7 @@ export function FlowCanvas({
   /** A one-line bar across the top of the canvas. */
   notice?: ReactNode;
 } & Actions) {
+  const catalog = useHarnessCatalog();
   const { trigger, steps } = definition;
   // Every step and every path, so that a path added with nothing on it counts.
   const shape = JSON.stringify(flowSteps(steps));
@@ -573,7 +575,9 @@ export function FlowCanvas({
     const cards = new Map(
       [
         triggerCard(trigger, only),
-        ...everyStep(steps).map((step) => stepCard(step, agents, projects)),
+        ...everyStep(steps).map((step) =>
+          stepCard(step, agents, projects, catalog),
+        ),
       ].map((card) => [card.id, card]),
     );
     // Only a step that can fail takes a failure path: not an If, not the trigger.
@@ -649,7 +653,17 @@ export function FlowCanvas({
       }),
     }));
     return { nodes, edges };
-  }, [trigger, only, steps, agents, projects, problems, selected, arrived]);
+  }, [
+    trigger,
+    only,
+    steps,
+    agents,
+    projects,
+    problems,
+    selected,
+    arrived,
+    catalog,
+  ]);
   const {
     onSelect,
     onChooseTrigger,

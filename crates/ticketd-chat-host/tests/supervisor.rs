@@ -13,13 +13,13 @@ use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities,
     Capability, ChatHost, ChatProblem, ChatUpdate, CloseOutcome, DELIVERY_CONFIRMATION_TIMEOUT,
-    DeliveryEvidence, EventKind, Harness, HarnessAdapter, HostError, INTERRUPT_TIMEOUT,
-    InteractionAnswer, InteractionKind, InteractionRequest, InteractionResolution, NativeItemId,
-    NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind,
-    ProviderDetail, ResumeMode, RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode,
-    SessionStart, StopReason, StopState, Submission, SubmissionId, SubmissionKind, Subscription,
-    TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, ToolStatus, TurnEnding, TurnOutcome,
-    UnconfirmedCleanup, WorkspaceOpener, problem_kind,
+    DeliveryEvidence, EventKind, HarnessAdapter, HostError, INTERRUPT_TIMEOUT, InteractionAnswer,
+    InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
+    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, ResumeMode,
+    RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopReason, StopState,
+    Submission, SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL,
+    TEXT_UPDATE_INTERVAL, ToolStatus, TurnEnding, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener,
+    problem_kind,
 };
 use ticketd_chat_host::{
     AppliesFrom, ContextUsage, FileChange, FileChangeKind, HarnessSettings, PermissionKind, Plan,
@@ -60,10 +60,7 @@ impl Fixture {
     fn new(fake: FakeAdapter) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
-        let harness = match fake.harness() {
-            Harness::ClaudeCode => "claude-code",
-            Harness::Codex => "codex",
-        };
+        let harness = fake.harness().key.as_str();
         let chat = new_chat(&mut Workspace::open(&path).unwrap(), harness);
         let storage_up = Arc::new(AtomicBool::new(true));
         let host = start_host(&path, &storage_up, &fake);
@@ -945,12 +942,9 @@ async fn chats_run_at_the_same_time_each_in_its_own_runtime() {
     drop(core);
     let codex = FakeAdapter::codex();
     let claude = FakeAdapter::new(
-        Harness::ClaudeCode,
+        &ticketd_core::harnesses::CLAUDE_CODE,
         Capabilities {
             steering: Capability::Unknown {
-                reason: "not probed".to_owned(),
-            },
-            native_resume: Capability::Unknown {
                 reason: "not probed".to_owned(),
             },
         },

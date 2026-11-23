@@ -1,9 +1,10 @@
 import { SquareTerminal } from "lucide-react";
 import { cn } from "cn";
+import { useHarnessCatalog } from "./harness-catalog";
 
 /**
  * The publishers' own marks, copied verbatim and drawn in `currentColor`
- * (THIRD_PARTY_NOTICES.md). Keyed by the host's harness id.
+ * (THIRD_PARTY_NOTICES.md). Keyed by mark id.
  */
 const MARKS: Record<string, { viewBox: string; d: string; evenOdd: boolean }> =
   {
@@ -27,6 +28,7 @@ const MARKS: Record<string, { viewBox: string; d: string; evenOdd: boolean }> =
  */
 export function HarnessMark({
   harness,
+  markId,
   name,
   dim = false,
   decorative = false,
@@ -34,12 +36,15 @@ export function HarnessMark({
 }: {
   /** The host's harness id. */
   harness: string | null | undefined;
+  markId?: string | undefined;
   name: string;
   dim?: boolean;
   decorative?: boolean;
   className?: string;
 }) {
-  const mark = harness ? MARKS[harness] : undefined;
+  const catalog = useHarnessCatalog();
+  const id = markId ?? catalog.find((item) => item.id === harness)?.mark_id;
+  const mark = id && Object.hasOwn(MARKS, id) ? MARKS[id] : undefined;
   const label = decorative
     ? ({ "aria-hidden": true } as const)
     : ({ role: "img", "aria-label": name } as const);

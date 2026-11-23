@@ -9,8 +9,8 @@ use std::time::Duration;
 use ticketd_automation_runner::Runner;
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
-    ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
-    HostError, InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
+    ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, HarnessAdapter, HostError,
+    InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
     NativeTurnId, Problem, ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey,
     SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
 };
@@ -80,10 +80,9 @@ impl Fixture {
                 }
             }
             FakeAdapter::new(
-                Harness::ClaudeCode,
+                &ticketd_core::harnesses::CLAUDE_CODE,
                 Capabilities {
                     steering: unknown(),
-                    native_resume: unknown(),
                 },
             )
         };

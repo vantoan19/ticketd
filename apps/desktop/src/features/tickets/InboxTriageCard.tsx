@@ -24,7 +24,7 @@ import { inboxClient } from "@/lib/api/inbox";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { useChatClient } from "@/features/chats/client";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { editingHarness } from "@/features/chats/editing-harness";
+import { useEditingHarness } from "@/features/chats/editing-harness";
 import { Time } from "@/components/ui/time";
 import {
   shortcutLabel,
@@ -47,6 +47,7 @@ export function InboxTriageCard() {
   const triage = useInboxTriage();
   const attention = useInboxAttention();
   const chats = useChatClient();
+  const editingHarness = useEditingHarness();
   const agentContext = useContext(AgentContext);
   const blocked = editingBlockedReason(useWorkspaceState());
   const [snoozeRequest, setSnoozeRequest] = useState(0);

@@ -1720,6 +1720,18 @@ impl Apply<'_> {
                 (created, true)
             }
         };
+        if record.kind == SyncKind::AutomationAgent && !created {
+            let runs =
+                |fields: &Fields| matches!(fields.get("run_commands"), Some(SyncValue::Flag(true)));
+            let any =
+                |fields: &Fields| matches!(fields.get("any_command"), Some(SyncValue::Flag(true)));
+            let previous = text(&current.fields, "harness").unwrap_or_default();
+            let next = text(&record.fields, "harness").unwrap_or_default();
+            crate::automation_agents::validate_command_transition(
+                (previous, runs(&current.fields), any(&current.fields)),
+                (next, runs(&record.fields), any(&record.fields)),
+            )?;
+        }
         let (schema, _) = shape(Block::Record(record.kind));
         for name in schema.iter().map(|field| field.0).chain(["body"]) {
             if present(&current.fields, name) != present(&record.fields, name) {

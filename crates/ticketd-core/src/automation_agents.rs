@@ -5,7 +5,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::harnesses::{
-    HARNESS_DESCRIPTORS, HarnessDescriptor, InvalidHarnessKey, UnattendedSupport, find_descriptor,
+    CommandControl, HARNESS_DESCRIPTORS, HarnessDescriptor, InvalidHarnessKey, UnattendedSupport,
+    find_descriptor,
 };
 use crate::{Error, Workspace, automations::AUTOMATION_NAME_LIMIT};
 
@@ -158,6 +159,31 @@ fn validated(
     Ok(settings)
 }
 
+pub(crate) fn validate_command_transition(
+    before: (&str, bool, bool),
+    after: (&str, bool, bool),
+) -> Result<(), Error> {
+    let (previous, ran_commands, allowed_any) = before;
+    let (next, runs_commands, allows_any) = after;
+    let command_control = |key: &str| match crate::harnesses::descriptor(key)?.unattended {
+        UnattendedSupport::Supported(reach) => Some(reach.commands),
+        UnattendedSupport::Unsupported { .. } => None,
+    };
+    if ran_commands
+        && !allowed_any
+        && runs_commands
+        && !allows_any
+        && command_control(previous) == Some(CommandControl::AllowlistOrAny)
+        && command_control(next) == Some(CommandControl::OffOrAny)
+    {
+        return Err(Error::InvalidAutomationAgent(
+            "the new harness cannot enforce a command list. Turn commands off or explicitly allow any command."
+                .to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 fn read(row: &Row<'_>) -> rusqlite::Result<(AutomationAgent, String, String)> {
     Ok((
         AutomationAgent {
@@ -262,7 +288,24 @@ impl Workspace {
         settings: AutomationAgentSettings,
     ) -> Result<AutomationAgent, Error> {
         let s = validated(settings, HARNESS_DESCRIPTORS)?;
-        let changed = self.connection.execute(
+        let transaction = self.connection.transaction()?;
+        let (harness, run_commands, any_command): (String, bool, bool) = transaction
+            .query_row(
+                "SELECT harness, run_commands, any_command FROM automation_agents WHERE id = ?1 AND trashed = 0",
+                [id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?
+            .ok_or_else(|| Error::AutomationAgentNotFound(id.to_owned()))?;
+        validate_command_transition(
+            (&harness, run_commands, any_command),
+            (
+                s.harness.as_str(),
+                s.tools.run_commands,
+                s.tools.any_command,
+            ),
+        )?;
+        let changed = transaction.execute(
             "UPDATE automation_agents SET name = ?2, harness = ?3, model = ?4, instructions = ?5, read_files = ?6, edit_files = ?7, run_commands = ?8, allowed_commands = ?9, use_web = ?10, turn_limit = ?11, time_limit_minutes = ?12, any_command = ?13 WHERE id = ?1 AND trashed = 0",
             params![
                 id,
@@ -283,6 +326,7 @@ impl Workspace {
         if changed == 0 {
             return Err(Error::AutomationAgentNotFound(id.to_owned()));
         }
+        transaction.commit()?;
         Ok(AutomationAgent {
             id: id.to_owned(),
             settings: s,

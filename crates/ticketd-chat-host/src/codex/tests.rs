@@ -18,10 +18,10 @@ use crate::conformance::{NewTurn, Provider};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
-    ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
-    HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome,
-    InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
-    OpenRequest, OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
+    ApprovalDecision, CloseOutcome, DispatchOutcome, EventKind, EventStream, HarnessAdapter,
+    HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome, InterruptRequest,
+    LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
+    OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
     RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
     TurnOutcome,
 };
@@ -658,10 +658,6 @@ async fn resuming_reports_the_native_session_and_a_missing_one_as_unavailable_hi
         seen(&mut opened.events).await,
         ["session thr_1", SETTINGS, "notice EffectiveSettings"]
     );
-    assert!(matches!(
-        opened.capabilities.native_resume,
-        Capability::Supported { .. }
-    ));
 
     let (mut peer, missing) = open_with(fixture!("resume_missing"), resume("thr_gone")).await;
 

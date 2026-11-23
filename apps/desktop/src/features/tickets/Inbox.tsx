@@ -91,12 +91,13 @@ import { useInboxAttention } from "./use-inbox-attention";
 import { useChatClient } from "@/features/chats/client";
 import { useChatFeature } from "@/features/chats/use-chats";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { editingHarness } from "@/features/chats/editing-harness";
+import { useEditingHarness } from "@/features/chats/editing-harness";
 import { Count } from "@/components/ui/count";
 const PAGE_SIZE = 50;
 const MARK_BATCH = 100;
 
 function EntryIcon({ entry }: { entry: Entry }) {
+  const editingHarness = useEditingHarness();
   if (entry.kind === "reminder") return <AlarmClock aria-hidden="true" />;
   if (entry.kind === "activity") {
     const harness = editingHarness(entry.editing_agent);

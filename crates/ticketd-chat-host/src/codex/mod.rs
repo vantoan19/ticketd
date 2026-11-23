@@ -194,7 +194,7 @@ fn too_old(reported: &str) -> Option<Problem> {
 #[async_trait]
 impl HarnessAdapter for CodexAdapter {
     fn harness(&self) -> Harness {
-        Harness::Codex
+        &ticketd_core::harnesses::CODEX
     }
 
     async fn inspect(&self) -> Inspection {

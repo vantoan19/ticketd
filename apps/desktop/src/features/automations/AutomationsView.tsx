@@ -1,3 +1,4 @@
+import { useHarnessCatalog } from "@/features/chats/harness-catalog";
 import {
   use,
   useCallback,
@@ -45,7 +46,6 @@ import { AutomationEditor } from "@/features/automations/AutomationEditor";
 import {
   automationsClient,
   type ReportRead,
-  HARNESS_NAMES,
   type Automation,
   type AutomationAgent,
   type AutomationAgentSettings,
@@ -172,6 +172,7 @@ export function AutomationsView({
    */
   onRunOpened?: () => void;
 }) {
+  const harnessCatalog = useHarnessCatalog();
   const [tab, setTab] = useState<Tab>("automations");
   /** The run open in place of its Automation. */
   const [run, setRun] = useState<string | null>(null);
@@ -666,7 +667,11 @@ export function AutomationsView({
                   </Tooltip>
                   <span className="chat-row-time" />
                   <span className="chat-row-sub">
-                    <span>{HARNESS_NAMES[agent.harness]}</span>
+                    <span>
+                      {harnessCatalog.find(
+                        (entry) => entry.id === agent.harness,
+                      )?.name ?? agent.harness}
+                    </span>
                   </span>
                 </button>
               </li>

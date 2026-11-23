@@ -201,7 +201,7 @@ impl Connection {
             connection
                 .stderr
                 .clone()
-                .spawn_drain(stderr, crate::Harness::ClaudeCode);
+                .spawn_drain(stderr, &ticketd_core::harnesses::CLAUDE_CODE);
         }
         let (sender, events) = mpsc::channel(EVENT_BUFFER);
         tokio::spawn(Arc::clone(&connection).read(io.stdout, sender));

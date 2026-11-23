@@ -11,9 +11,9 @@ use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
 use crate::{
-    ContextUsage, Harness, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessSettings,
-    Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey,
-    SettingOutcome, StartSettings, SteeringBehavior, Subscription, Unattended,
+    ContextUsage, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessSettings, Inspection,
+    InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey, SettingOutcome,
+    StartSettings, SteeringBehavior, Subscription, Unattended,
 };
 use crate::{StopReason, TurnEnding};
 
@@ -58,14 +58,6 @@ pub const AGENT_CHANGES_RECORD_NAME: &str = "ticketd changes";
 
 /// The detail recorded on a turn ticketd itself stopped on Quit (see [`crate::StopReason`]).
 pub const STOPPED_BY_TICKETD: &str = "ticketd stopped this Chat";
-
-/// The `Chat.harness` value an adapter serves.
-pub fn harness_key(harness: Harness) -> &'static str {
-    match harness {
-        Harness::ClaudeCode => "claude-code",
-        Harness::Codex => "codex",
-    }
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum HostError {
@@ -406,7 +398,7 @@ impl ChatHost {
                 }),
                 adapters: adapters
                     .into_iter()
-                    .map(|adapter| (harness_key(adapter.harness()), adapter))
+                    .map(|adapter| (adapter.harness().key.as_str(), adapter))
                     .collect(),
                 chats: Mutex::new(HashMap::new()),
                 unattended: Mutex::new(HashMap::new()),
@@ -808,6 +800,20 @@ impl ChatHost {
         self.closed()?;
         let chat = (self.inner.open_workspace)()?.chat(chat_id)?;
         let adapter = self.inner.adapters.get(chat.harness.as_str()).cloned();
+        let descriptor = adapter
+            .as_ref()
+            .map(|adapter| adapter.harness())
+            .or_else(|| ticketd_core::harnesses::descriptor(&chat.harness));
+        if let Some(descriptor) = descriptor
+            && let ticketd_core::harnesses::UnattendedSupport::Unsupported { reason } =
+                descriptor.unattended
+        {
+            return Err(Error::InvalidAutomationAgent(format!(
+                "{} does not support Automations. {reason}",
+                descriptor.name
+            ))
+            .into());
+        }
         let mut chats = self.chats();
         self.closed()?;
         let Some(unattended) = self.settings(chat_id) else {

@@ -41,7 +41,7 @@ import { HiddenContext } from "@/lib/workspace-reads/visibility-context";
 import { StatusIcon } from "./StatusIcon";
 import { RowTags } from "./RowTags";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { editingHarness } from "@/features/chats/editing-harness";
+import { useEditingHarness } from "@/features/chats/editing-harness";
 import { progressBrief } from "./progress-brief";
 import { ago, externalSource } from "./ticket-source";
 import { useKnownTicket, useTicket } from "./open-ticket";
@@ -666,6 +666,7 @@ function RowDetails({
   const contextLabel =
     context?.label ?? (ticket.project_id ? "" : "No project");
   const update = ticket.progress_summary;
+  const editingHarness = useEditingHarness();
   const harness = editingHarness(update?.editing_agent);
   const due = reminder && Date.parse(reminder) <= now;
   const live = chat?.status.rank;

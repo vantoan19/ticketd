@@ -18,7 +18,7 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 use tracing::Instrument;
 
-use crate::{CloseOutcome, EventKind, Harness, harness_key};
+use crate::{CloseOutcome, EventKind, Harness};
 
 pub(crate) const MAX_STDERR_TAIL_BYTES: usize = 8 * 1024;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -147,7 +147,7 @@ impl LogLines {
     fn new(harness: Harness) -> Self {
         Self {
             line: Vec::new(),
-            harness: harness_key(harness),
+            harness: harness.key.as_str(),
         }
     }
 
@@ -587,7 +587,7 @@ mod tests {
                 let chat = tracing::info_span!("chat", chat_id = "chat-1");
                 let drain = chat.in_scope(|| {
                     tail.clone()
-                        .spawn_drain(stderr.as_bytes(), crate::Harness::ClaudeCode)
+                        .spawn_drain(stderr.as_bytes(), &ticketd_core::harnesses::CLAUDE_CODE)
                 });
                 drain.await.expect("drain");
             });
@@ -684,7 +684,7 @@ mod tests {
                         Path::new("/bin/cat"),
                         &[],
                         chat(None),
-                        Harness::Codex,
+                        &ticketd_core::harnesses::CODEX,
                         Some(cwd),
                     )
                 };
@@ -702,15 +702,15 @@ mod tests {
                 }
                 let canonical = work.canonicalize().expect("work directory");
                 for (serving, harness) in [
-                    (Serving::Nothing, Harness::Codex),
-                    (chat(Some("run-1")), Harness::Codex),
-                    (chat(None), Harness::ClaudeCode),
-                    (chat(None), Harness::Codex),
-                    (chat(None), Harness::Codex),
+                    (Serving::Nothing, &ticketd_core::harnesses::CODEX),
+                    (chat(Some("run-1")), &ticketd_core::harnesses::CODEX),
+                    (chat(None), &ticketd_core::harnesses::CLAUDE_CODE),
+                    (chat(None), &ticketd_core::harnesses::CODEX),
+                    (chat(None), &ticketd_core::harnesses::CODEX),
                 ] {
                     let mut io = if mode == "enabled"
                         && serving == chat(None)
-                        && harness == Harness::Codex
+                        && harness == &ticketd_core::harnesses::CODEX
                     {
                         spawn(
                             Path::new("/bin/sh"),
@@ -844,7 +844,7 @@ mod tests {
         noise.extend_from_slice(b"final line\n");
 
         tail.clone()
-            .drain(noise.as_slice(), crate::Harness::Codex)
+            .drain(noise.as_slice(), &ticketd_core::harnesses::CODEX)
             .await;
 
         let snapshot = tail.snapshot();

@@ -96,7 +96,6 @@ pub(super) fn capabilities(version: Option<&str>) -> Capabilities {
             },
             "turn/steer",
         ),
-        native_resume: gate(version, (), "thread/resume"),
     }
 }
 
@@ -162,10 +161,6 @@ mod tests {
         assert!(matches!(
             capabilities(Some("0.100.0")).steering,
             Capability::Unsupported { .. }
-        ));
-        assert!(matches!(
-            capabilities(None).native_resume,
-            Capability::Unknown { .. }
         ));
     }
 }

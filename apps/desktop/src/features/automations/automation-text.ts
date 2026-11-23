@@ -1,5 +1,5 @@
+import type { HarnessInfo } from "@/features/chats/client";
 import {
-  HARNESS_NAMES,
   WEEKDAYS,
   type AutomationAgent,
   type AutomationCondition,
@@ -163,27 +163,27 @@ export function folderName(path: string): string {
 }
 
 /** What an agent may do, in a sentence: its reach, shown where it is used. */
-export function agentReach(agent: AutomationAgent): string {
+export function agentReach(
+  agent: AutomationAgent,
+  harness: HarnessInfo | undefined,
+): string {
+  if (!harness?.unattended) return harness?.name ?? agent.harness;
   const tools = agent.tools;
-  // Codex has no read tool and no list of commands: it reads by running commands, and
-  // with Run commands on it runs any.
-  const codex = agent.harness === "codex";
+  const reach = harness.unattended;
   const commands = tools.allowed_commands.length;
   const may = [
-    // Editing lets Claude Code read too: it changes only a file it has read.
-    (codex ? tools.run_commands : tools.read_files || tools.edit_files) &&
-      "read files",
+    (reach.reads === "requires_commands"
+      ? tools.run_commands
+      : tools.read_files || tools.edit_files) && "read files",
     tools.edit_files && "edit files",
-    // "Any command" is said outright; an empty list allows none.
     tools.run_commands &&
-      (codex || tools.any_command
+      (reach.commands === "off_or_any" || tools.any_command
         ? "run any command"
         : commands > 0 &&
           `run ${commands} ${commands === 1 ? "command" : "commands"}`),
     tools.use_web && "use the web",
   ].filter((item) => typeof item === "string");
-  const harness = HARNESS_NAMES[agent.harness];
   return may.length === 0
-    ? `${harness}. Can only use the ticketd command line.`
-    : `${harness}. Can ${LIST.format(may)}, and use the ticketd command line.`;
+    ? `${harness.name}. Can only use the ticketd command line.`
+    : `${harness.name}. Can ${LIST.format(may)}, and use the ticketd command line.`;
 }

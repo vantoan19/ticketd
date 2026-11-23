@@ -13,8 +13,7 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WindowEvent};
 use tauri_plugin_notification::NotificationExt;
 use ticketd_chat_host::{
-    BRIDGE_SIDECAR_NAME, ClaudeAdapter, CodexAdapter, ContextSource, HarnessAdapter, SendMode,
-    SettingKey, cli, context,
+    ContextSource, HostResources, REGISTRATIONS, SendMode, SettingKey, cli, context,
 };
 use ticketd_core::ChatListFilter;
 
@@ -58,21 +57,6 @@ struct OpenRequest {
     retention: &'static str,
 }
 
-/// The Claude bridge is shipped as a sidecar beside the application executable. In
-/// development, copy the built bridge there (see `apps/chat-bridge-claude`).
-fn claude_bridge() -> Result<PathBuf, String> {
-    let name = format!("{BRIDGE_SIDECAR_NAME}{}", std::env::consts::EXE_SUFFIX);
-    let folder = std::env::current_exe()
-        .ok()
-        .and_then(|executable| Some(executable.parent()?.to_owned()));
-    match folder.map(|folder| folder.join(&name)) {
-        Some(bridge) if bridge.is_file() => Ok(bridge),
-        Some(_) => Err(
-            "Claude Code is unavailable: ticketd's Claude bridge is missing from this installation. Reinstall ticketd to restore it.".to_owned()),
-        None => Err("Claude Code is unavailable: ticketd could not find its own folder to look for its Claude bridge.".to_owned()),
-    }
-}
-
 /// The linked-record reference text a new harness session starts with (#266). It is
 /// built when the session starts, so it names the CLI and the records as they are then.
 fn context_source(app_version: String) -> ContextSource {
@@ -91,13 +75,18 @@ fn context_source(app_version: String) -> ContextSource {
 
 impl ChatBridge {
     pub fn new(app_version: String) -> Self {
-        // The harnesses this run can use, and why any other is unavailable. A new
-        // harness is registered here.
-        let mut adapters: Vec<Arc<dyn HarnessAdapter>> = vec![Arc::new(CodexAdapter::new())];
+        let resources = HostResources {
+            executable_directory: std::env::current_exe()
+                .ok()
+                .and_then(|exe| exe.parent().map(std::path::Path::to_owned)),
+        };
+        let mut adapters = Vec::new();
         let mut unavailable = Vec::new();
-        match claude_bridge() {
-            Ok(bridge) => adapters.push(Arc::new(ClaudeAdapter::new(bridge))),
-            Err(reason) => unavailable.push(("claude-code", reason)),
+        for entry in REGISTRATIONS {
+            match (entry.make_adapter)(&resources) {
+                Ok(adapter) => adapters.push(adapter),
+                Err(problem) => unavailable.push((entry.descriptor.key.as_str(), problem.message)),
+            }
         }
         Self {
             chats: Chats::new(
@@ -401,6 +390,12 @@ pub async fn chat_list(
 #[tauri::command]
 pub async fn chat_harnesses(bridge: State<'_, ChatBridge>) -> Outcome<Vec<HarnessStatus>> {
     bridge.chats.harnesses().await
+}
+
+/// The compiled-in harnesses and their declared policies, even when Chat is off.
+#[tauri::command]
+pub fn chat_harness_catalog(bridge: State<'_, ChatBridge>) -> Vec<crate::chats::HarnessInfo> {
+    bridge.chats.harness_catalog()
 }
 
 /// What one harness offers before a session: models, efforts and permission modes.

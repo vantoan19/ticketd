@@ -297,3 +297,23 @@ fn a_name_longer_than_an_automation_name_may_be_is_refused() {
     ));
     assert_eq!(workspace.automation_agents().unwrap(), vec![saved]);
 }
+
+#[test]
+fn changing_harnesses_cannot_turn_a_command_list_into_any_command_implicitly() {
+    let (_dir, mut workspace) = workspace();
+    let mut settings = triage();
+    settings.harness = AgentHarness::ClaudeCode;
+    let agent = workspace.create_automation_agent(settings.clone()).unwrap();
+
+    settings.harness = AgentHarness::Codex;
+    assert!(matches!(
+        workspace.update_automation_agent(&agent.id, settings.clone()),
+        Err(Error::InvalidAutomationAgent(_))
+    ));
+    assert_eq!(workspace.automation_agent(&agent.id).unwrap(), agent);
+
+    settings.tools.any_command = true;
+    workspace
+        .update_automation_agent(&agent.id, settings)
+        .unwrap();
+}

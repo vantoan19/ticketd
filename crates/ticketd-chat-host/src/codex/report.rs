@@ -11,8 +11,8 @@ use crate::wire::{capitalized, text};
 
 use crate::{
     AppliesFrom, ContextUsage, EventKind, FileChange, FileChangeKind, HarnessOptions,
-    HarnessSettings, ModelChoice, NativeItemId, NativeTurnId, PermissionKind, Plan, PlanStep,
-    PlanStepStatus, Setting, SettingKey, SettingOption,
+    HarnessSettings, ModelChoice, NativeItemId, NativeTurnId, Plan, PlanStep, PlanStepStatus,
+    Setting, SettingKey, SettingOption,
 };
 
 /// What a `*/list` request has returned so far.
@@ -593,24 +593,13 @@ fn permission_options(profiles: &Listing) -> Vec<SettingOption> {
             .is_none_or(|profile| profile["allowed"] == true),
         _ => true,
     };
-    vec![
-        SettingOption {
-            id: OWN_SETTINGS.to_owned(),
-            label: "Codex settings".to_owned(),
-            description: None,
-            is_default: true,
-            permission: None,
-            allowed: true,
-        },
-        SettingOption {
-            id: FULL_ACCESS.to_owned(),
-            label: "Full access".to_owned(),
-            description: Some("Never asks, and runs without a sandbox".to_owned()),
-            is_default: false,
-            permission: Some(PermissionKind::FullAccess),
-            allowed: full_access_allowed,
-        },
-    ]
+    ticketd_core::harnesses::CODEX
+        .permissions
+        .iter()
+        .map(|choice| {
+            SettingOption::from_permission(choice, choice.id != FULL_ACCESS || full_access_allowed)
+        })
+        .collect()
 }
 
 /// A model Codex lists and does not hide.
