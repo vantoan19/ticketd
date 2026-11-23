@@ -214,7 +214,13 @@ impl HarnessAdapter for CodexAdapter {
                 requirement: discovery::version_requirement(),
             };
         }
-        let login = match spawn(&executable, ARGUMENTS, Serving::Nothing) {
+        let login = match spawn(
+            &executable,
+            ARGUMENTS,
+            Serving::Nothing,
+            self.harness(),
+            None,
+        ) {
             Ok(io) => runtime::probe_login(io, Options::default()).await,
             Err(_) => crate::LoginState::Unknown,
         };
@@ -230,8 +236,14 @@ impl HarnessAdapter for CodexAdapter {
         let executable = self
             .executable()
             .ok_or_else(|| "Codex was not found".to_owned())?;
-        let io =
-            spawn(&executable, ARGUMENTS, Serving::Nothing).map_err(|error| error.to_string())?;
+        let io = spawn(
+            &executable,
+            ARGUMENTS,
+            Serving::Nothing,
+            self.harness(),
+            None,
+        )
+        .map_err(|error| error.to_string())?;
         runtime::probe_options(io, Options::default()).await
     }
 
@@ -257,7 +269,14 @@ impl HarnessAdapter for CodexAdapter {
         if let Some(problem) = too_old(&reported) {
             return Err(problem);
         }
-        let io = spawn(&executable, ARGUMENTS, Serving::of(&request)).map_err(|error| Problem {
+        let io = spawn(
+            &executable,
+            ARGUMENTS,
+            Serving::of(&request),
+            self.harness(),
+            Some(&request.working_directory),
+        )
+        .map_err(|error| Problem {
             kind: ProblemKind::Other,
             message: format!("Could not start {}: {error}", executable.display()),
             detail: Some(ProviderDetail::new("spawn", &error.to_string())),

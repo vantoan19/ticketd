@@ -278,15 +278,41 @@ impl<'a> Serving<'a> {
 /// that Chat's ID in `CHAT_ID_VARIABLE`, one for an Automation run the run's ID in
 /// `AUTOMATION_RUN_ID_VARIABLE`, and the ticketd CLI's folder first on `PATH`, and
 /// nothing else; the commands the harness runs inherit them.
-pub(crate) fn spawn(executable: &Path, arguments: &[&str], serving: Serving) -> io::Result<Io> {
-    let mut child = command(executable, arguments, serving).spawn()?;
+pub(crate) fn spawn(
+    executable: &Path,
+    arguments: &[&str],
+    serving: Serving,
+    harness: Harness,
+    working_directory: Option<&Path>,
+) -> io::Result<Io> {
+    #[cfg(all(debug_assertions, unix))]
+    let recording = crate::recording::before_spawn(harness, serving, working_directory)?;
+    #[cfg(all(debug_assertions, unix))]
+    let recorded_executable = recording
+        .map(|_| std::path::absolute(executable))
+        .transpose()?;
+    #[cfg(all(debug_assertions, unix))]
+    let executable = recorded_executable.as_deref().unwrap_or(executable);
+    #[cfg(not(all(debug_assertions, unix)))]
+    let _ = (harness, working_directory);
+    let mut command = command(executable, arguments, serving);
+    #[cfg(all(debug_assertions, unix))]
+    if let Some(recording) = recording {
+        command.current_dir(recording.work());
+    }
+    let mut child = command.spawn()?;
     let missing = || io::Error::other("the process has no standard streams");
-    Ok(Io {
+    let io = Io {
         stdin: Box::new(child.stdin.take().ok_or_else(missing)?),
         stdout: Box::new(child.stdout.take().ok_or_else(missing)?),
         stderr: child.stderr.take().map(|stderr| Box::new(stderr) as Reader),
         child: Box::new(Process(child)),
-    })
+    };
+    #[cfg(all(debug_assertions, unix))]
+    if let Some(recording) = recording {
+        return recording.tap(io);
+    }
+    Ok(io)
 }
 
 /// The command `spawn` starts, for a caller that also needs its working directory.
@@ -319,6 +345,8 @@ pub(crate) fn command(executable: &Path, arguments: &[&str], serving: Serving) -
             None => command.env_remove(variable),
         };
     }
+    #[cfg(all(debug_assertions, unix))]
+    command.env_remove(crate::recording::SWITCH);
     hide_console(&mut command);
     command
 }
@@ -602,6 +630,202 @@ mod tests {
             assert_eq!(event["target"], "ticketd_chat_host::harness_stderr");
             assert_eq!(event["spans"][0]["name"], "chat");
             assert_eq!(event["spans"][0]["chat_id"], "chat-1");
+        }
+    }
+
+    #[cfg(all(debug_assertions, unix))]
+    #[test]
+    fn only_opted_in_interactive_harnesses_record_in_their_prepared_run() {
+        use std::os::unix::fs::{PermissionsExt, symlink};
+        use std::process::Command as TestCommand;
+
+        const CHILD: &str = "TICKETD_SYNTHETIC_RECORDING_CHILD";
+        const STIMULUS: &[u8] = b"{\"message\":\"synthetic\"}\n";
+        let captures = |directory: &Path| {
+            std::fs::read_dir(directory)
+                .expect("capture directory")
+                .map(|entry| entry.expect("entry").path())
+                .filter(|path| path.extension().is_some_and(|ext| ext == "wire"))
+                .collect::<Vec<_>>()
+        };
+        if let Some(mode) = std::env::var_os(CHILD) {
+            let workspace = std::env::var_os("TICKETD_TEST_WORKSPACE").expect("test Workspace");
+            let directory = Path::new(&workspace).parent().expect("private folder");
+            let work = directory.join("work");
+            let prepare = || {
+                crate::prepare_harness_recording(|| {
+                    ticketd_core::Workspace::open_default()?
+                        .workspace_info()
+                        .map(|info| info.path.into())
+                })
+            };
+            if mode == "wrong-workspace" {
+                let prepared =
+                    crate::prepare_harness_recording(|| Ok(directory.join("another.sqlite3")));
+                assert!(prepared.is_err());
+                return;
+            }
+            if ["inside-git", "existing-workspace", "linked-work"]
+                .iter()
+                .any(|value| mode == *value)
+            {
+                assert!(prepare().is_err());
+                return;
+            }
+            prepare().expect("prepare test recording");
+
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("runtime");
+            runtime.block_on(async {
+                let selected = |cwd: &Path| {
+                    spawn(
+                        Path::new("/bin/cat"),
+                        &[],
+                        chat(None),
+                        Harness::Codex,
+                        Some(cwd),
+                    )
+                };
+                if mode == "enabled" {
+                    assert!(selected(directory).is_err());
+                    let outside = directory.join("synthetic-outside.txt");
+                    let linked = work.join("linked.txt");
+                    std::fs::write(&outside, STIMULUS).expect("synthetic file");
+                    symlink(&outside, &linked).expect("symlink");
+                    assert!(selected(&work).is_err());
+                    std::fs::remove_file(&linked).expect("remove symlink");
+                    std::fs::hard_link(&outside, &linked).expect("hard link");
+                    assert!(selected(&work).is_err());
+                    std::fs::remove_file(&linked).expect("remove hard link");
+                }
+                let canonical = work.canonicalize().expect("work directory");
+                for (serving, harness) in [
+                    (Serving::Nothing, Harness::Codex),
+                    (chat(Some("run-1")), Harness::Codex),
+                    (chat(None), Harness::ClaudeCode),
+                    (chat(None), Harness::Codex),
+                    (chat(None), Harness::Codex),
+                ] {
+                    let mut io = if mode == "enabled"
+                        && serving == chat(None)
+                        && harness == Harness::Codex
+                    {
+                        spawn(
+                            Path::new("/bin/sh"),
+                            &[
+                                "-c",
+                                "test \"$(pwd -P)\" = \"$1\" && exec /bin/cat",
+                                "test",
+                                canonical.to_str().expect("UTF-8 path"),
+                            ],
+                            serving,
+                            harness,
+                            Some(&work),
+                        )
+                    } else {
+                        spawn(Path::new("/bin/cat"), &[], serving, harness, None)
+                    }
+                    .expect("spawn");
+                    io.stdin.write_all(STIMULUS).await.expect("send");
+                    drop(io.stdin);
+                    let mut echoed = Vec::new();
+                    io.stdout.read_to_end(&mut echoed).await.expect("receive");
+                    assert_eq!(echoed, STIMULUS);
+                    drop(io.stdout);
+                    assert_eq!(io.child.wait().await, Some(0));
+                }
+                if mode == "enabled" {
+                    std::fs::hard_link(&workspace, directory.join("linked-workspace.sqlite3"))
+                        .expect("hard link to disposable Workspace");
+                    assert!(selected(&work).is_err());
+                }
+            });
+            if mode == "enabled" {
+                let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                while captures(directory).len() < 2 && std::time::Instant::now() < deadline {
+                    std::thread::sleep(Duration::from_millis(10));
+                }
+            }
+            return;
+        }
+
+        let private_run = || {
+            tempfile::Builder::new()
+                .permissions(std::fs::Permissions::from_mode(0o700))
+                .tempdir_in("/tmp")
+                .expect("private temporary Workspace")
+        };
+        let invoke = |mode, directory: &Path| {
+            let mut command = TestCommand::new(std::env::current_exe().expect("test executable"));
+            command.args([
+                "--exact",
+                "stdio::tests::only_opted_in_interactive_harnesses_record_in_their_prepared_run",
+            ])
+            .env(CHILD, mode)
+            .env("TICKETD_TEST_WORKSPACE", directory.join("workspace.sqlite3"))
+            .env_remove("TICKETD_RECORD_HARNESS");
+            if mode != "disabled" {
+                command.env("TICKETD_RECORD_HARNESS", "codex");
+            }
+            let output = command.output().expect("test child");
+            assert!(
+                output.status.success(),
+                "{}{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        };
+
+        for mode in [
+            "inside-git",
+            "existing-workspace",
+            "linked-work",
+            "wrong-workspace",
+        ] {
+            let directory = private_run();
+            let work = directory.path().join("work");
+            if mode == "linked-work" {
+                let other = private_run();
+                symlink(other.path(), &work).expect("linked folder");
+                invoke(mode, directory.path());
+            } else {
+                std::fs::create_dir(&work).expect("work folder");
+                if mode == "inside-git" {
+                    std::fs::create_dir(directory.path().join(".git")).expect("Git marker");
+                } else if mode == "existing-workspace" {
+                    ticketd_core::Workspace::open(directory.path().join("workspace.sqlite3"))
+                        .expect("existing synthetic Workspace");
+                }
+                invoke(mode, directory.path());
+            }
+            assert!(captures(directory.path()).is_empty());
+        }
+        let directory = private_run();
+        std::fs::create_dir(directory.path().join("work")).expect("work folder");
+        invoke("disabled", directory.path());
+        assert_eq!(
+            std::fs::read_dir(directory.path())
+                .expect("run contents")
+                .count(),
+            1
+        );
+        invoke("enabled", directory.path());
+        let files = captures(directory.path());
+        assert_eq!(files.len(), 2);
+        for file in files {
+            let mut expected = b"ticketd-harness-recording-v1\n".to_vec();
+            for direction in [1, 2] {
+                expected.push(direction);
+                expected.extend((STIMULUS.len() as u32).to_le_bytes());
+                expected.extend(STIMULUS);
+            }
+            assert_eq!(std::fs::read(&file).expect("recording"), expected);
+            assert_eq!(
+                file.metadata().expect("metadata").permissions().mode() & 0o777,
+                0o600
+            );
         }
     }
 

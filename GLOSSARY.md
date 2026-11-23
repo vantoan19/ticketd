@@ -21,6 +21,9 @@ _Avoid_: Provider, model, agent (for the program itself)
 **Turn**:
 One run of the harness from a message the person sent until it ends: completed, failed, stopped by the person, or cut off. A steer joins the running turn instead of starting another. A turn that ended is not evidence that its task succeeded.
 
+**Step**:
+One thing the harness did in a turn, in ticketd's words, whatever the harness called it.
+
 **Steer**:
 A message sent while a turn runs that the harness takes into that turn, where its capabilities allow, instead of waiting for the turn to end. What steering does to running tools is the harness's own behaviour and is said before the person chooses it.
 

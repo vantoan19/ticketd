@@ -18,7 +18,10 @@ mod host;
 mod install;
 mod json_rpc;
 mod outcome;
+#[cfg(all(debug_assertions, unix))]
+mod recording;
 pub mod records;
+mod runtime;
 #[cfg(test)]
 mod scripted;
 mod stdio;
@@ -34,6 +37,8 @@ pub use claude::{BRIDGE_SIDECAR_NAME, ClaudeAdapter};
 pub use codex::CodexAdapter;
 pub use contract::*;
 pub use host::*;
+#[cfg(all(debug_assertions, unix))]
+pub use recording::prepare_harness_recording;
 pub use subscription::{
     ChatUpdate, SUBSCRIBER_BACKLOG_BYTES, SUBSCRIBER_BACKLOG_ITEMS, Subscription,
 };

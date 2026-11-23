@@ -91,7 +91,7 @@ impl HarnessAdapter for ClaudeAdapter {
         let Some(executable) = self.executable() else {
             return Inspection::NotInstalled;
         };
-        match spawn(&self.bridge, &[], Serving::Nothing) {
+        match spawn(&self.bridge, &[], Serving::Nothing, self.harness(), None) {
             Ok(io) => {
                 let (inspection, offered) =
                     runtime::probe(io, &executable, self.options.clone()).await;
@@ -117,15 +117,21 @@ impl HarnessAdapter for ClaudeAdapter {
         let executable = self
             .executable()
             .ok_or_else(|| "Claude Code was not found".to_owned())?;
-        let io = spawn(&self.bridge, &[], Serving::Nothing)
+        let io = spawn(&self.bridge, &[], Serving::Nothing, self.harness(), None)
             .map_err(|error| self.bridge_problem(&error).message)?;
         runtime::probe_options(io, &executable, self.options.clone()).await
     }
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
         let executable = self.executable().ok_or_else(not_installed)?;
-        let io = spawn(&self.bridge, &[], Serving::of(&request))
-            .map_err(|error| self.bridge_problem(&error))?;
+        let io = spawn(
+            &self.bridge,
+            &[],
+            Serving::of(&request),
+            self.harness(),
+            Some(&request.working_directory),
+        )
+        .map_err(|error| self.bridge_problem(&error))?;
         runtime::open_over(io, &request, &executable, self.options.clone()).await
     }
 
