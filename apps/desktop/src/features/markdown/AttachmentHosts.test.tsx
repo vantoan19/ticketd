@@ -116,8 +116,9 @@ async function insertInto(label: string) {
     );
   }
   fireEvent.click(screen.getByRole("button", { name: "Choose files" }));
+  // "Attach file", or "Attach to T-KQ1" from a ticket.
   await waitFor(() =>
-    expect(screen.queryByRole("dialog", { name: "Attach file" })).toBeNull(),
+    expect(screen.queryByRole("dialog", { name: /^Attach / })).toBeNull(),
   );
   await waitFor(() => expect(editor.textContent).toContain("Trace"));
   await waitFor(() =>
