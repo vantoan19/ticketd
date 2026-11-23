@@ -744,9 +744,9 @@ enum SourceCommand {
         #[command(subcommand)]
         command: ExtensionCommand,
     },
-    /// Check a linked extension against the ticket source contract
+    /// Check a registered extension against the ticket source contract
     Conformance {
-        /// The provider ID of a linked extension
+        /// The provider ID of an installed or linked extension
         extension: String,
         /// Allow creating one issue in the named destination to check publication and recovery
         #[arg(long, value_name = "DESTINATION")]
@@ -757,7 +757,7 @@ enum SourceCommand {
         #[command(flatten)]
         settings: SourceSettings,
     },
-    /// List connections with their provider and settings schema
+    /// List available providers, settings schemas and saved connections
     List,
     /// Validate settings and add a connection for this provider
     Add {
