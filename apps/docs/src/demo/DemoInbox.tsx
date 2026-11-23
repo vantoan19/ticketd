@@ -72,8 +72,7 @@ export function DemoInbox({
                   )}
                   <span>
                     <span className="demo-entry-title">
-                      <Reference>{featureRef}</Reference>Rate-limit failed
-                      logins
+                      <Reference>{featureRef}</Reference>Rate-limit API requests
                     </span>
                     <small>{summary(entry, stage)}</small>
                   </span>
@@ -87,7 +86,7 @@ export function DemoInbox({
         })}
         {!entries.length && (
           <p className="demo-empty">
-            Updates to the followed login ticket will appear here.
+            Updates to the followed limiter ticket will appear here.
           </p>
         )}
       </div>

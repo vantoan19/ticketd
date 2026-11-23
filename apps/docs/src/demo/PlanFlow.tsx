@@ -11,7 +11,7 @@ import "./plan-flow.css";
 
 const laneNames = ["Now", "Next", "Later"];
 const captions = ["No open blockers", "Waits on Now", "Waits on Next"];
-const focusChain = [featureRef, dependentRef, "T-LG10"];
+const focusChain = [featureRef, dependentRef, "T-RL10"];
 // The card layout and the desktop link curves use the same row measurements.
 const rowHeight = 64,
   rowGap = 5,
