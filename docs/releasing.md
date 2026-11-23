@@ -101,6 +101,11 @@ requests disabled. Use `pull_request` for contribution checks; privileged
 workflows must not check out or execute unreviewed PR content. Distribution
 credentials belong only in the manual `main` build path.
 
+Every job sets up its runner through the [prepare action](../.github/actions/prepare/action.yml).
+Only `main` writes its caches (the Rust build and `node_modules`); pull request
+runs read them and never write, so a contribution cannot plant a cache entry
+that `main` later restores. Distribution builds restore no caches.
+
 At public launch, configure and verify these settings:
 
 - Require workflow approval for all outside collaborators. This is an execution
