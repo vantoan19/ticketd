@@ -116,9 +116,7 @@ test("clippy runs on its own", () => {
 test("ui partition k/n becomes a vitest shard in every workspace", () => {
   const { status, calls } = run(["ui", "--partition", "2/3"]);
   assert.equal(status, 0);
-  assert.deepEqual(calls, [
-    "npm run test --workspaces -- --shard 2/3 --passWithNoTests",
-  ]);
+  assert.deepEqual(calls, ["npm run test --workspaces -- --shard 2/3"]);
 });
 
 test("ui without a partition runs the whole frontend suite", () => {

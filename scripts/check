@@ -99,8 +99,8 @@ fi
 
 if runs slow ui && [[ -f package.json ]]; then
   if [[ -n "$partition" ]]; then
-    # A shard of a small workspace can be empty, which is not a failure.
-    npm run test --workspaces -- --shard "$shard/$shards" --passWithNoTests
+    # A shard of a small workspace can be empty; each test script passes --passWithNoTests.
+    npm run test --workspaces -- --shard "$shard/$shards"
   else
     npm test
   fi
