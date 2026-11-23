@@ -419,6 +419,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   imported and refreshed through one connection. When no local connection covers
   a ticket, it shows its last synced content and says the provider isn’t connected
   on this desktop. The ticket carries the provider’s display name and icon.
+  During a manually started refresh, **Cancel sync** is available in Settings → Sources.
 - An **externally owned** ticket receives its title, description, confirmed closures
   and reopenings from the tracker. Progress on open issues, Plan membership,
   relationships, tags, Activities, and Documents stay in ticketd.

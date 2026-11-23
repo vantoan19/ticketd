@@ -219,6 +219,11 @@ A response already sent can cross the cancel notification and ticketd discards
 it. If the process sends no terminal response within about two seconds,
 ticketd terminates the process tree. The next request starts a new process.
 
+To try cancellation with your linked extension, start **Sync now** in
+**Settings → Sources** and select **Cancel sync**. In an interactive terminal,
+`ticketd source CONNECTION refresh` reports progress on stderr and stops
+with exit status 130 when you press Ctrl+C.
+
 ## Report errors
 
 Use JSON-RPC error code `-32000` for tracker and configuration errors. Put

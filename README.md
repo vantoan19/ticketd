@@ -4,7 +4,7 @@ ticketd is a local ticket workspace for people and their coding agents. Create a
 ticket in the desktop app, ask an agent to post an update through the CLI, and
 read it on the same ticket. Both interfaces work on the same computer, even
 offline. Projects, Plans, linked Documents, and dependencies keep the context
-with the work. Connect GitHub Issues, Linear, or a ticket source extension to
+with the work. Connect GitHub Issues, Linear, or another ticket source extension to
 track issues from an external tracker. Sync your workspace across desktops
 through your own Google Drive.
 
