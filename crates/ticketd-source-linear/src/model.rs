@@ -83,7 +83,7 @@ pub(crate) struct Issue {
     created_at: String,
     updated_at: String,
     pub(crate) trashed: Option<bool>,
-    team: Id,
+    pub(crate) team: Id,
     pub(crate) state: State,
     creator: Option<PersonName>,
     assignee: Option<PersonName>,

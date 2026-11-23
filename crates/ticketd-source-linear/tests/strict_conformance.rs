@@ -16,8 +16,11 @@ use ticketd_core::source::{
 
 const ENDPOINT: &str = "LINEAR_GRAPHQL_TEST_ENDPOINT";
 const TEAM: &str = "10000000-0000-4000-8000-000000000001";
+const TEAM_TWO: &str = "10000000-0000-4000-8000-000000000002";
 const ISSUE: &str = "20000000-0000-4000-8000-000000000001";
+const ISSUE_TWO: &str = "20000000-0000-4000-8000-000000000002";
 const USER: &str = "30000000-0000-4000-8000-000000000001";
+const USER_TWO: &str = "30000000-0000-4000-8000-000000000002";
 const SITE: &str = "40000000-0000-4000-8000-000000000001";
 const KEY: &str = "lin_api_synthetic_ticketd";
 const TIME: &str = "2025-01-03T09:20:00.000Z";
@@ -56,8 +59,9 @@ fn linear_passes_strict_conformance_through_the_host() {
     server.join().unwrap();
     assert!(
         output.status.success(),
-        "{}",
-        String::from_utf8_lossy(&output.stdout)
+        "{}\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
     );
 }
 
@@ -84,10 +88,26 @@ fn verify_connector() {
     let registry = ExtensionRegistry::new(root.path().join("registry"));
     registry.link(&package).unwrap();
     let config: ConfigValues = serde_json::from_value(json!({
-        "team": [TEAM],
+        "team": [TEAM_TWO, TEAM],
         "assignee": ["me"],
     }))
     .unwrap();
+    let connector = registry
+        .engine()
+        .unwrap()
+        .for_connection("linear", "conformance", &config);
+    let assignees = connector
+        .options("linear", "assignee", "", &config)
+        .unwrap();
+    assert_eq!(
+        assignees
+            .iter()
+            .map(|option| option.value.as_str())
+            .collect::<Vec<_>>(),
+        ["me", USER, USER_TWO]
+    );
+    let labels = connector.options("linear", "labels", "", &config).unwrap();
+    assert_eq!(labels[0].label, "Across teams");
     let report = registry
         .conformance(
             "linear",
@@ -119,12 +139,12 @@ fn page(nodes: Vec<Value>, cursor: Option<&str>) -> Value {
     json!({"nodes": nodes, "pageInfo": {"hasNextPage": cursor.is_some(), "endCursor": cursor}})
 }
 
-fn issue() -> Value {
+fn issue(id: &str, team: &str, identifier: &str) -> Value {
     json!({
-        "id": ISSUE, "identifier": "TST-1", "url": "https://linear.app/fixture/issue/TST-1",
+        "id": id, "identifier": identifier, "url": "https://linear.app/fixture/issue/TST-1",
         "title": "Fixture issue", "description": "Synthetic description",
         "createdAt": TIME, "updatedAt": TIME, "trashed": false,
-        "team": {"id": TEAM}, "state": {"name": "Done label in open state", "type": "started"},
+        "team": {"id": team}, "state": {"name": "Done label in open state", "type": "started"},
         "creator": {"displayName": "Fixture User"}, "assignee": null, "labels": page(vec![], None),
     })
 }
@@ -158,29 +178,50 @@ fn serve(mut stream: TcpStream) -> bool {
     let variables = &request["variables"];
     let after = variables["after"].as_str();
     let fields = match request["operationName"].as_str().unwrap() {
-        "LinearConnection" => {
-            assert_eq!(variables["team"], TEAM);
-            json!({"viewer": {"id": USER, "displayName": "Fixture User"},
-                   "organization": {"id": SITE}, "team": {"id": TEAM}})
+        "LinearConnection" => json!({"viewer": {"id": USER, "displayName": "Fixture User"},
+                   "organization": {"id": SITE}}),
+        "LinearConfiguredTeams" => {
+            assert_eq!(variables["teams"], json!([TEAM, TEAM_TWO]));
+            json!({"teams": page(vec![json!({"id": TEAM}), json!({"id": TEAM_TWO})], None)})
         }
         "LinearMe" => json!({"viewer": {"id": USER}}),
         "LinearTeams" => {
-            json!({"teams": page(vec![json!({"id": TEAM, "key": "TST", "name": "Fixture Team"})], None)})
+            json!({"teams": page(vec![json!({"id": TEAM, "key": "TST", "name": "Fixture Team"}),
+                json!({"id": TEAM_TWO, "key": "SECOND", "name": "Second Team"})], None)})
+        }
+        "LinearAssignees" => {
+            let mut people = vec![json!({"id": USER, "displayName": "Fixture User"})];
+            if variables["team"] == TEAM_TWO {
+                people.push(json!({"id": USER_TWO, "displayName": "Second User"}));
+            } else {
+                assert_eq!(variables["team"], TEAM);
+            }
+            json!({"team": {"members": page(people, None)}})
+        }
+        "LinearLabels" => {
+            assert_eq!(variables["teams"], json!([TEAM, TEAM_TWO]));
+            json!({"issueLabels": page(vec![json!({"id": "60000000-0000-4000-8000-000000000001", "name": "Across teams"})], None)})
         }
         "LinearDiscover" => {
             assert_eq!(
                 variables["filter"],
-                json!({"team": {"id": {"eq": TEAM}}, "assignee": {"id": {"eq": USER}}})
+                json!({"team": {"id": {"in": [TEAM, TEAM_TWO]}}, "assignee": {"id": {"eq": USER}}})
             );
             json!({"issues": match after {
                 None => page(vec![], Some("issues")),
-                Some("issues") => page(vec![issue()], None),
+                Some("issues") if variables["first"] == 1 => page(vec![issue(ISSUE, TEAM, "TST-1")], Some("more-issues")),
+                Some("issues") => page(vec![issue(ISSUE, TEAM, "TST-1"), issue(ISSUE_TWO, TEAM_TWO, "SECOND-1")], None),
+                Some("more-issues") => page(vec![issue(ISSUE_TWO, TEAM_TWO, "SECOND-1")], None),
                 _ => unreachable!(),
             }})
         }
         "LinearFetch" => {
-            assert_eq!(variables["id"], ISSUE);
-            json!({"issue": issue()})
+            let issue = match variables["id"].as_str() {
+                Some(ISSUE) => issue(ISSUE, TEAM, "TST-1"),
+                Some(ISSUE_TWO) => issue(ISSUE_TWO, TEAM_TWO, "SECOND-1"),
+                _ => unreachable!(),
+            };
+            json!({"issue": issue})
         }
         "LinearComments" => {
             assert_eq!(variables["id"], ISSUE);

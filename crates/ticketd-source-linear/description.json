@@ -20,8 +20,8 @@
       },
       {
         "key": "team",
-        "label": "Team",
-        "help": "Sync issues from this team.",
+        "label": "Teams",
+        "help": "Sync issues from these Linear teams.",
         "required": true,
         "pattern": {
           "regex": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
@@ -33,7 +33,7 @@
           "depends_on": []
         },
         "min_items": 1,
-        "max_items": 1
+        "max_items": 25
       },
       {
         "key": "assignee",
@@ -101,12 +101,12 @@
     },
     "target": {
       "field": "team",
-      "label": "Team",
+      "label": "Teams",
       "example": "Engineering",
-      "choose": "Choose a team",
+      "choose": "Choose teams",
       "add": "Add a team"
     },
-    "discovery_note": "Sync issues from one Linear team, optionally filtered by assignee, labels, or project.",
+    "discovery_note": "Sync issues from selected Linear teams, optionally filtered by assignee, labels, or project.",
     "hosts": ["api.linear.app"]
   }
 }

@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use serde::Deserialize;
 use serde_json::{Value, json};
 use ticketd_source_sdk::{
@@ -68,22 +70,24 @@ impl Extension for Linear {
         context: &RequestContext<'_>,
         config: &ConfigValues,
     ) -> Result<ConnectionCheck, ExtensionError> {
-        let team = required_team(config)?;
+        let teams = required_teams(config)?;
         let api = self.api(context, config)?;
-        let connection: LinearConnection = api
-            .request("LinearConnection", json!({"team": team}), &[])
-            .map_err(|error| {
-                if error.code() == ErrorCode::NotFound {
-                    ExtensionError::configuration(vec![FieldIssue::for_field(
-                        "team",
-                        "choose an accessible Linear team",
-                    )])
-                } else {
-                    error
-                }
-            })?;
-        if connection.team.id != team {
-            return Err(protocol("Linear returned a different team"));
+        let connection: LinearConnection = api.request("LinearConnection", json!({}), &[])?;
+        let visible: HashSet<_> = api
+            .all::<Id>(
+                "LinearConfiguredTeams",
+                json!({"teams": teams}),
+                &["teams"],
+                None,
+            )?
+            .into_iter()
+            .map(|team| team.id)
+            .collect();
+        if teams.iter().any(|team| !visible.contains(team)) {
+            return Err(ExtensionError::configuration(vec![FieldIssue::for_field(
+                "team",
+                "choose teams this Linear API key can read",
+            )]));
         }
         let filters = Filters::read(config);
         let scope =
@@ -100,7 +104,7 @@ impl Extension for Linear {
                 site: connection.organization.id.to_string(),
             },
             derived: DerivedConfiguration {
-                partitions: vec![team.to_string()],
+                partitions: teams.iter().map(Uuid::to_string).collect(),
                 discovery_scope: scope,
                 ..DerivedConfiguration::default()
             },
@@ -121,33 +125,18 @@ impl Extension for Linear {
                 .map(|team| choice(team.id.to_string(), team.name, Some(team.key)))
                 .collect()
         } else {
-            let Some(team) = optional_team(config) else {
+            let teams = selected_teams(config);
+            if teams.is_empty() {
                 return Ok(Vec::new());
-            };
-            let variables = json!({"team": team});
+            }
             match field {
-                "assignee" => {
-                    let mut people = vec![choice(
-                        "me".into(),
-                        "Me".into(),
-                        Some("Connected Linear account".into()),
-                    )];
-                    people.extend(
-                        api.all::<Person>(
-                            "LinearAssignees",
-                            variables,
-                            &["team", "members"],
-                            None,
-                        )?
-                        .into_iter()
-                        .map(|person| choice(person.id.to_string(), person.display_name, None)),
-                    );
-                    people
-                }
-                "labels" => names(api.all("LinearLabels", variables, &["issueLabels"], None)?),
-                "project" => {
-                    names(api.all("LinearProjects", variables, &["team", "projects"], None)?)
-                }
+                "labels" => names(api.all(
+                    "LinearLabels",
+                    json!({"teams": teams}),
+                    &["issueLabels"],
+                    None,
+                )?),
+                "project" | "assignee" => team_choices(&api, &teams, field)?,
                 _ => {
                     return Err(ExtensionError::configuration(vec![FieldIssue::for_form(
                         "the Linear setting has no options",
@@ -174,16 +163,23 @@ impl Extension for Linear {
         context: &RequestContext<'_>,
         request: DiscoveryRequest<'_>,
     ) -> Result<DiscoveryPage, ExtensionError> {
-        let team = required_team(request.config)?;
+        let teams = required_teams(request.config)?;
         let api = self.api(context, request.config)?;
         let filters = Filters::read(request.config);
-        let filter = filters.graphql(&api, team)?;
+        let filter = filters.graphql(&api, &teams)?;
         let page: Page<Issue> = api.request(
             "LinearDiscover",
             json!({"filter": filter, "first": request.page_size.clamp(1, 250), "after": request.cursor}),
             &["issues"],
         )?;
         let next_cursor = page.next_cursor()?;
+        if page
+            .nodes
+            .iter()
+            .any(|issue| !teams.contains(&issue.team.id))
+        {
+            return Err(protocol("Linear returned an issue from an unselected team"));
+        }
         let issues = page
             .nodes
             .into_iter()
@@ -249,7 +245,6 @@ impl Extension for Linear {
 struct LinearConnection {
     viewer: Person,
     organization: Id,
-    team: Id,
 }
 
 #[derive(Default)]
@@ -271,8 +266,8 @@ impl<'a> Filters<'a> {
         }
     }
 
-    fn graphql(&self, api: &Graphql<'_>, team: Uuid) -> Result<Value, ExtensionError> {
-        let mut filter = json!({"team": {"id": {"eq": team}}});
+    fn graphql(&self, api: &Graphql<'_>, teams: &[Uuid]) -> Result<Value, ExtensionError> {
+        let mut filter = json!({"team": {"id": {"in": teams}}});
         if let Some(assignee) = self.assignee {
             let id = if assignee == "me" {
                 api.request::<Id>("LinearMe", json!({}), &["viewer"])?.id
@@ -324,12 +319,55 @@ fn parse_uuid(value: &str) -> Option<Uuid> {
     Uuid::parse_str(value).ok()
 }
 
-fn optional_team(config: &ConfigValues) -> Option<Uuid> {
-    values(config, "team").next().and_then(parse_uuid)
+fn selected_teams(config: &ConfigValues) -> Vec<Uuid> {
+    let mut teams: Vec<_> = values(config, "team").filter_map(parse_uuid).collect();
+    teams.sort_unstable();
+    teams.dedup();
+    teams
 }
 
-fn required_team(config: &ConfigValues) -> Result<Uuid, ExtensionError> {
-    optional_team(config).ok_or_else(|| invalid_uuid("team"))
+fn required_teams(config: &ConfigValues) -> Result<Vec<Uuid>, ExtensionError> {
+    let teams = selected_teams(config);
+    if teams.is_empty() {
+        return Err(invalid_uuid("team"));
+    }
+    Ok(teams)
+}
+
+fn team_choices(
+    api: &Graphql<'_>,
+    teams: &[Uuid],
+    field: &str,
+) -> Result<Vec<ChoiceOption>, ExtensionError> {
+    let assignees = field == "assignee";
+    let mut choices = Vec::new();
+    if assignees {
+        choices.push(choice(
+            "me".into(),
+            "Me".into(),
+            Some("Connected Linear account".into()),
+        ));
+    }
+    for team in teams {
+        let variables = json!({"team": team});
+        if assignees {
+            choices.extend(
+                api.all::<Person>("LinearAssignees", variables, &["team", "members"], None)?
+                    .into_iter()
+                    .map(|person| choice(person.id.to_string(), person.display_name, None)),
+            );
+        } else {
+            choices.extend(names(api.all(
+                "LinearProjects",
+                variables,
+                &["team", "projects"],
+                None,
+            )?));
+        }
+    }
+    let mut seen = HashSet::new();
+    choices.retain(|choice| seen.insert(choice.value.clone()));
+    Ok(choices)
 }
 
 fn invalid_uuid(field: &str) -> ExtensionError {

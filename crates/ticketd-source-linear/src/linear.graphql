@@ -1,4 +1,4 @@
-query LinearConnection($team: String!) {
+query LinearConnection {
   viewer {
     id
     displayName
@@ -8,8 +8,15 @@ query LinearConnection($team: String!) {
     name
     urlKey
   }
-  team(id: $team) {
-    id
+}
+query LinearConfiguredTeams($teams: [ID!]!, $first: Int!, $after: String) {
+  teams(first: $first, after: $after, filter: { id: { in: $teams } }) {
+    nodes {
+      id
+    }
+    pageInfo {
+      ...LinearPage
+    }
   }
 }
 
@@ -46,12 +53,12 @@ query LinearAssignees($team: String!, $first: Int!, $after: String) {
   }
 }
 
-query LinearLabels($team: ID!, $first: Int!, $after: String) {
+query LinearLabels($teams: [ID!]!, $first: Int!, $after: String) {
   issueLabels(
     first: $first
     after: $after
     filter: {
-      or: [{ team: { id: { eq: $team } } }, { team: { null: true } }]
+      or: [{ team: { id: { in: $teams } } }, { team: { null: true } }]
       isGroup: { eq: false }
     }
   ) {
