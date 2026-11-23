@@ -36,19 +36,23 @@ ticket, not a workaround for an ordinary edit rejection.
 
 ## Publication and uncertain outcomes
 
-When publication is requested, first inspect its exact payload and destination:
+Start by previewing the publication to inspect its exact payload and destination.
 
 ```sh
-ticketd source publish T-KQ1 --destination owner/repository --preview
+ticketd source publish T-KQ1 --preview
 ```
 
-A saved source publishes only to the repositories it lists: any other
-`--destination` is refused in the preview and the publish, before anything is sent.
+The preview defaults to the ticket's Project remote when the saved source lists
+that repository on the matching host. Without a match, it selects the sole listed
+repository if there is one. Use `--destination owner/repository` to choose
+explicitly. If the saved source lists repositories, it only publishes to those
+repositories.
 
-Use the returned fingerprint with `--expect FINGERPRINT` when executing the
-publication. It creates an external issue and transfers authority while preserving
-ticketd identity. A changed payload or destination invalidates the preview.
-Publication is not ongoing outbound synchronization.
+Keep the same destination arguments and pass the returned fingerprint with
+`--expect FINGERPRINT` when publishing. Using the Project remote as the default
+requires this fingerprint. A changed payload or destination invalidates the
+preview. Publication creates one external issue and transfers authority while
+preserving ticketd identity.
 
 If the outcome is unresolved, use `source resolve T-KQ1` to inspect the attempt and
 search for the possible issue. `--no-search` avoids network access. Then use the
