@@ -457,6 +457,9 @@ impl State {
 
     /// The `if-match` / `if-none-match` of a write against what the key holds now.
     fn refuse_condition(&self, request: &S3Request, key: &str) -> Option<S3Response> {
+        if self.ignores_conditions {
+            return None;
+        }
         let current = self.current(key).map(Version::etag);
         let conditions = !self.ignores_conditions;
         if conditions && header(request, "if-none-match") == Some("*") && current.is_some() {
