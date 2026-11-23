@@ -175,3 +175,5 @@ per-platform Claude Code packages are not bundled, the bridge always starts the
 executable path the host gives it, and the build fails if the output looks like
 it contains one. The SDK version is pinned exactly in the bridge's
 `package.json`.
+
+This line is a throwaway CI proof and is never merged.
