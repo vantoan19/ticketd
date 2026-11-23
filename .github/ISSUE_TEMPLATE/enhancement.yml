@@ -1,0 +1,22 @@
+name: Request an enhancement
+description: Propose a new capability and explain who would use it.
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. Give your request a short title and describe one outcome in everyday language.
+  - type: textarea
+    id: capability
+    attributes:
+      label: What would you like ticketd to let you do?
+      description: Give one example of who needs this and when.
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: How would you know it worked?
+      description: Describe what someone using ticketd would see or be able to do.
+    validations:
+      required: true

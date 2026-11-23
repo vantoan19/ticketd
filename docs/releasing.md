@@ -114,7 +114,7 @@ At public launch, configure and verify these settings:
   reports against the PR before merge.
 
 GitHub may reject fork-approval or protection configuration while this repository
-is private on its current plan. Record those pending checks in the launch issue
+is private on its current plan. Record those pending checks locally in ticketd
 and apply them when public visibility makes them available. Keep the visibility
 change distinct from signed-release publication.
 
@@ -159,8 +159,7 @@ Build continuously, publish deliberately. There are no nightlies or update chann
    `releases/latest/download/latest.json`. Drafts and prereleases stay outside
    this feed.
 6. If testing fails, delete the draft, fix `main` and build the same version again.
-   Nothing was public, so no version number is spent. Record why in the release's
-   tracking issue.
+   Nothing was public, so no version number is spent. Record why in the local ticketd release plan.
 7. A problem found after publishing is fixed forward with a patch release. Never
    replace the files of a published release; add a known-issue note to it instead.
 
@@ -235,6 +234,6 @@ Publish desktop and CLI from the same version. Most workspace commands can migra
 data when opening it; older binaries may refuse a newer format. Do not promise
 downgrade support without testing it against that release's migrations.
 
-Keep release evidence and follow-up work in GitHub Issues, and durable behavior
-documentation in this repository. Announce a support window only when maintainers
+Organize release tasks locally in ticketd. Summarize release evidence on the
+relevant PR and report distinct user-facing bugs in GitHub Issues. Announce a support window only when maintainers
 have committed to it. Update installation and security guidance when that policy changes.

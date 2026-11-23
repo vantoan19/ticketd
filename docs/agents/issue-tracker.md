@@ -1,24 +1,21 @@
-# Issue tracker: GitHub
+# Public issues and local implementation tasks
 
-Use GitHub Issues in `vantoan19/ticketd` for features, bugs, research, implementation plans, and progress. Use the `gh` CLI; keep durable product requirements in `docs/product.md`.
+Use `gh` for bugs, enhancements, ideas, and improvements in `vantoan19/ticketd`. The same four categories apply to CLI and API submissions. Write a short title and describe one outcome in plain language. Follow the [issue writing guide](../../CONTRIBUTING.md#write-an-issue-people-can-understand). Keep durable product requirements in `docs/product.md`.
 
 Before the first issue write in a session, verify the target with `gh repo view --json nameWithOwner`. Use `--repo vantoan19/ticketd` when outside this checkout or when the default target is ambiguous.
 
-- Create: `gh issue create --title "..." --body-file /path/to/body.md`.
-- Read: `gh issue view <number> --json number,title,body,labels,comments`.
-- List: `gh issue list --state open --json number,title,labels`.
+- Create with the matching [issue form](../../.github/ISSUE_TEMPLATE/). With `gh issue create --title "..." --body-file /path/to/body.md`, follow that form’s prompts. Apply the [intake labels](triage-labels.md#triage-an-issue) if you have permission.
+- Read: `gh issue view <number> --json number,title,body,labels,assignees,comments,blockedBy,closedByPullRequestsReferences`. If your `gh` rejects a field, run `gh issue view <number> --json number,title,body,labels,assignees,comments` for the issue details and discussion. Check the issue’s GitHub sidebar for linked PRs and blockers.
+- List: `gh issue list --state open --json number,title,labels,assignees`.
 - Update: `gh issue edit <number> --body-file /path/to/body.md`.
-- Report findings or progress: `gh issue comment <number> --body-file /path/to/comment.md`.
+- Report a decision or verification result: `gh issue comment <number> --body-file /path/to/comment.md`.
 - Apply/remove labels: `gh issue edit <number> --add-label "..." --remove-label "..."`.
 - Close: post the outcome as a comment, then `gh issue close <number>` with the appropriate completion reason.
 
-Use temporary files outside the repository for multiline command input. Publish work specs and task breakdowns as issues, not repository Markdown tickets.
+Use temporary files outside the repository for multiline command input. When a skill calls for a work breakdown, create the Plan, subtickets, dependencies, and research notes in the contributor’s local ticketd workspace. This applies to Wayfinder maps and child tasks too. Run `ticketd skills get` for the local CLI guide. Keep the public issue URL with the local work. Never create public issues or sub-issues for its implementation steps.
 
-Use native GitHub sub-issues and blocking dependencies where supported by the installed CLI/API. Check `gh issue create --help` and `gh issue edit --help` before selecting flags. If unavailable, record `Part of #<parent>` or `Blocked by: #<number>` in issue bodies and link children from the parent. Inspect blockers before selecting work; a canceled prerequisite is not evidence that the requirement was satisfied.
-
-When a skill says to publish to the tracker, create a GitHub issue here. When it says to fetch a ticket, read the issue and its comments. Wayfinder maps and child tickets also live in GitHub Issues.
-
-Use issues for product requests and implementation planning. Small fixes and
-documentation improvements may be submitted directly as PRs; see
-[contribution guidance](../../CONTRIBUTING.md). Substantial changes need scope
-discussion before implementation.
+Before picking up work, check the assignee, recent claims, blockers, and linked PRs.
+Use the [public claim and release rules](../../CONTRIBUTING.md#find-and-claim-an-issue).
+For triage and closure, use the [label definitions and outcomes](triage-labels.md).
+For direct PRs and changes that need maintainer agreement, follow the
+[contribution paths](../../CONTRIBUTING.md#choose-a-starting-point).
