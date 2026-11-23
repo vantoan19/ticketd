@@ -165,6 +165,7 @@ impl Extension for Linear {
     ) -> Result<DiscoveryPage, ExtensionError> {
         let teams = required_teams(request.config)?;
         let api = self.api(context, request.config)?;
+        context.progress(0, None)?;
         let filters = Filters::read(request.config);
         let filter = filters.graphql(&api, &teams)?;
         let page: Page<Issue> = api.request(

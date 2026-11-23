@@ -7,6 +7,7 @@ use std::{
     path::Path,
     process::Command,
     thread,
+    time::Duration,
 };
 
 use serde_json::{Value, json};
@@ -108,10 +109,18 @@ fn verify_connector() {
     );
     let labels = connector.options("linear", "labels", "", &config).unwrap();
     assert_eq!(labels[0].label, "Across teams");
+    assert_conformance(&registry, &config);
+
+    let mut bare_teams = config;
+    bare_teams.remove("assignee");
+    assert_conformance(&registry, &bare_teams);
+}
+
+fn assert_conformance(registry: &ExtensionRegistry, config: &ConfigValues) {
     let report = registry
         .conformance(
             "linear",
-            &config,
+            config,
             &ConformanceOptions {
                 strict: true,
                 publish: None,
@@ -122,6 +131,7 @@ fn verify_connector() {
     for check in [
         "version_refusal",
         "options",
+        "cancellation",
         "empty_continuation",
         "stable_identity",
         "conversation",
@@ -203,10 +213,16 @@ fn serve(mut stream: TcpStream) -> bool {
             json!({"issueLabels": page(vec![json!({"id": "60000000-0000-4000-8000-000000000001", "name": "Across teams"})], None)})
         }
         "LinearDiscover" => {
-            assert_eq!(
-                variables["filter"],
-                json!({"team": {"id": {"in": [TEAM, TEAM_TWO]}}, "assignee": {"id": {"eq": USER}}})
-            );
+            let mut filter = json!({"team": {"id": {"in": [TEAM, TEAM_TWO]}}});
+            if variables["filter"]["assignee"].is_null() {
+                if after.is_none() {
+                    // Keep fixture work in flight while the host cancels after progress.
+                    thread::sleep(Duration::from_millis(100));
+                }
+            } else {
+                filter["assignee"] = json!({"id": {"eq": USER}});
+            }
+            assert_eq!(variables["filter"], filter);
             json!({"issues": match after {
                 None => page(vec![], Some("issues")),
                 Some("issues") if variables["first"] == 1 => page(vec![issue(ISSUE, TEAM, "TST-1")], Some("more-issues")),
