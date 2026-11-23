@@ -1,0 +1,175 @@
+name: Release
+
+# Builds the packages of every green main commit (kept 14 days), and turns a commit whose version
+# has no published release yet, a merged version-bump PR, into a draft GitHub Release of that
+# exact build. A manual run drafts again after a draft was deleted, or makes a dry-run draft with
+# a build-time version.
+# scripts/release-plan.mjs decides; docs/releasing.md describes the whole release.
+on:
+  workflow_run:
+    workflows: [Quality]
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      sha:
+        description: Main commit to build and draft (default, the latest green main commit)
+        type: string
+        default: ""
+      version_override:
+        description: Build-time version for a dry run, such as 0.1.1-dryrun.1. Never committed.
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  plan:
+    name: Plan
+    # Quality also completes for pull requests, forks included. Only a successful push to this
+    # repository's main goes further, and only that commit is ever checked out with secrets.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.plan.outputs.sha }}
+      short: ${{ steps.plan.outputs.short }}
+      tag: ${{ steps.plan.outputs.tag }}
+      override: ${{ steps.plan.outputs.override }}
+      draft: ${{ steps.plan.outputs.draft }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.23.4"
+      - name: Plan the build and draft
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'auto' }}
+          SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.event.workflow_run.head_sha }}
+          VERSION_OVERRIDE: ${{ inputs.version_override }}
+          # The commit this run started from, which the attestation's provenance names.
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: node scripts/release-plan.mjs --mode "$MODE" --sha "$SHA" --version-override "$VERSION_OVERRIDE" --workflow-sha "$WORKFLOW_SHA"
+
+  build:
+    name: Build
+    needs: plan
+    uses: ./.github/workflows/distribution.yml
+    with:
+      sha: ${{ needs.plan.outputs.sha }}
+      version: ${{ needs.plan.outputs.override }}
+      retention-days: 14
+    secrets:
+      # The Desktop OAuth client is public and every distribution build embeds it.
+      TICKETD_GOOGLE_OAUTH_CLIENT_JSON: ${{ secrets.TICKETD_GOOGLE_OAUTH_CLIENT_JSON }}
+      # The updater signing key reaches only a build that will be drafted. Other per-commit
+      # builds get empty values, so Distribution warns and builds them without updater files.
+      TAURI_SIGNING_PRIVATE_KEY: ${{ needs.plan.outputs.draft == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+      TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ needs.plan.outputs.draft == 'true' && secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD || '' }}
+
+  draft:
+    name: Draft release
+    needs: [plan, build]
+    if: needs.plan.outputs.draft == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    # One writer per version, so two runs never both create its draft.
+    concurrency:
+      group: release-draft-${{ needs.plan.outputs.tag }}
+      cancel-in-progress: false
+    # The only job that writes: it creates the draft and its attestations. It reads no build
+    # secrets and runs only this repository's scripts on downloaded files.
+    permissions:
+      actions: read
+      contents: write
+      pull-requests: read
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      # The released documents, the manifest generator with its workspace format, and the
+      # commit's own version (to tell an override) come from the build commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+          path: build-source
+          persist-credentials: false
+          sparse-checkout-cone-mode: false
+          sparse-checkout: |
+            LICENSE
+            THIRD_PARTY_NOTICES.md
+            docs/install.md
+            scripts/generate-latest.mjs
+            crates/ticketd-core/src/format.rs
+            apps/desktop/src-tauri/tauri.conf.json
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: "22.23.4"
+      - name: Check the release again before writing
+        # A release may have been published or drafted while the packages built. This token can
+        # see drafts, so this check is the one that decides.
+        id: plan
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'auto' }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          VERSION_OVERRIDE: ${{ needs.plan.outputs.override }}
+          # The commit this run started from, which the attestation's provenance names.
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: node scripts/release-plan.mjs --mode "$MODE" --sha "$SHA" --version-override "$VERSION_OVERRIDE" --workflow-sha "$WORKFLOW_SHA"
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        if: steps.plan.outputs.draft == 'true'
+        with:
+          pattern: ticketd-*-${{ needs.plan.outputs.short }}
+          path: artifacts
+      - name: Assemble release files
+        if: steps.plan.outputs.draft == 'true'
+        env:
+          VERSION: ${{ steps.plan.outputs.version }}
+        run: node scripts/assemble-release.mjs --version "$VERSION" --artifacts artifacts --source build-source --out release-assets
+      - name: Write release notes
+        if: steps.plan.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          SHA: ${{ steps.plan.outputs.sha }}
+        run: node scripts/release-notes.mjs release --version "$VERSION" --sha "$SHA" --source build-source --out "$RUNNER_TEMP/notes.md"
+      - name: Attest build provenance
+        if: steps.plan.outputs.draft == 'true'
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: release-assets/*
+      - name: Create the draft release
+        if: steps.plan.outputs.draft == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ steps.plan.outputs.tag }}
+          VERSION: ${{ steps.plan.outputs.version }}
+          SHA: ${{ steps.plan.outputs.sha }}
+          PRERELEASE: ${{ steps.plan.outputs.prerelease }}
+        # Never deletes a release: an existing draft makes the check above decline instead.
+        run: |
+          flags=()
+          if [[ "$PRERELEASE" == true ]]; then flags+=(--prerelease); fi
+          url=$(gh release create "$TAG" release-assets/* --repo "$REPO" --draft --target "$SHA" \
+            --title "ticketd $VERSION (unsigned preview)" --notes-file "$RUNNER_TEMP/notes.md" "${flags[@]}")
+          echo "Draft release: $url" >> "$GITHUB_STEP_SUMMARY"

@@ -22,6 +22,7 @@ import {
   type InputEvidence,
   type CommandOption,
   type ModelOption,
+  type PermissionMode,
   type RejectionCode,
   type ToolOutcome,
 } from "./protocol";
@@ -43,7 +44,7 @@ export interface SdkQuery extends AsyncIterable<unknown> {
   close(): void;
   // Settings and context, from SDK 0.3.322's `Query`.
   setModel?(model?: string): Promise<void>;
-  setPermissionMode?(mode: "default" | "acceptEdits" | "plan"): Promise<void>;
+  setPermissionMode?(mode: PermissionMode): Promise<void>;
   applyFlagSettings?(settings: {
     effortLevel: "low" | "medium" | "high" | "xhigh" | "max";
   }): Promise<void>;
@@ -405,6 +406,10 @@ export function createBridge(deps: BridgeDeps) {
       ...(command.permission_mode && {
         permissionMode: command.permission_mode,
       }),
+      // Full access stays one of the person's choices for the whole session:
+      // Claude Code switches into it later only for a process started with this.
+      // It makes the mode available, never the mode in effect.
+      ...(!command.unattended && { allowDangerouslySkipPermissions: true }),
       // Last, so nothing above changes how an unattended session runs.
       ...(command.unattended && {
         permissionMode: "dontAsk" as const,
@@ -555,9 +560,16 @@ export function createBridge(deps: BridgeDeps) {
       }
       const requestId = `${current.generation}-${++requestCounter}`;
       const isQuestion = toolName === "AskUserQuestion";
+      // Full access is turned on only by the person's pick of it, never by
+      // remembering an answer: every session is started able to take it.
       const suggestions = context.suppressAlwaysAllowRule
         ? []
-        : (context.suggestions ?? []);
+        : (context.suggestions ?? []).filter(
+            (update) =>
+              !(
+                update.type === "setMode" && update.mode === "bypassPermissions"
+              ),
+          );
       current.requests.set(requestId, {
         isQuestion,
         input,

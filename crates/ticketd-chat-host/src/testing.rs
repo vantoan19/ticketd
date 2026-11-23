@@ -57,6 +57,7 @@ struct State {
     open_failures: VecDeque<Problem>,
     open_holds: VecDeque<oneshot::Receiver<()>>,
     respond_holds: VecDeque<oneshot::Receiver<()>>,
+    setting_replies: VecDeque<oneshot::Receiver<SettingOutcome>>,
     submit_replies: VecDeque<ScriptedReply>,
     interrupt_outcomes: VecDeque<InterruptOutcome>,
     close_outcome: CloseOutcome,
@@ -119,6 +120,7 @@ impl FakeAdapter {
                 open_failures: VecDeque::new(),
                 open_holds: VecDeque::new(),
                 respond_holds: VecDeque::new(),
+                setting_replies: VecDeque::new(),
                 submit_replies: VecDeque::new(),
                 interrupt_outcomes: VecDeque::new(),
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
@@ -208,6 +210,14 @@ impl FakeAdapter {
     pub fn hold_next_respond(&self) -> oneshot::Sender<()> {
         let (sender, receiver) = oneshot::channel();
         self.state().respond_holds.push_back(receiver);
+        sender
+    }
+
+    /// The next setting change is written, then waits for the outcome sent on the
+    /// returned sender. Dropping the sender leaves it unconfirmed.
+    pub fn hold_next_setting(&self) -> oneshot::Sender<SettingOutcome> {
+        let (sender, receiver) = oneshot::channel();
+        self.state().setting_replies.push_back(receiver);
         sender
     }
 
@@ -330,6 +340,44 @@ impl HarnessAdapter for FakeAdapter {
             .options
             .clone()
             .ok_or_else(|| "the fake lists no options".to_owned())
+    }
+
+    /// The fake records its permission as `{"permission": id}`; it offers `ask` and
+    /// `full`.
+    fn permission_before_session(
+        &self,
+        recorded: Option<&str>,
+        picked: Option<&str>,
+    ) -> Option<crate::Setting> {
+        let recorded = recorded
+            .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
+            .and_then(|value| value["permission"].as_str().map(str::to_owned));
+        let option = |id: &str, permission| crate::SettingOption {
+            id: id.to_owned(),
+            label: id.to_owned(),
+            description: None,
+            is_default: id == "ask",
+            permission: Some(permission),
+            allowed: true,
+        };
+        Some(crate::Setting {
+            current: Some(picked.map(str::to_owned).or(recorded)?),
+            options: vec![
+                option("ask", crate::PermissionKind::Ask),
+                option("full", crate::PermissionKind::FullAccess),
+            ],
+            unchangeable: None,
+            applies_from: crate::AppliesFrom::NextTurn,
+            answered_by: None,
+        })
+    }
+
+    fn record_permission(&self, recorded: Option<&str>, value: &str) -> Option<String> {
+        let mut recorded: serde_json::Value = serde_json::from_str(recorded?).ok()?;
+        recorded
+            .as_object_mut()?
+            .insert("permission".to_owned(), serde_json::json!(value));
+        Some(recorded.to_string())
     }
 
     /// Opening replaces any live runtime, whose stream then ends.
@@ -471,14 +519,20 @@ impl HarnessRuntime for FakeRuntime {
 
     /// The fake harness accepts every setting change that reaches it.
     async fn change_setting(&self, change: SettingChange) -> SettingOutcome {
-        let mut state = self.fake.state();
-        if state.live_for(self.generation, change.generation).is_err() {
-            return SettingOutcome::Refused {
-                reason: "the session has ended".to_owned(),
-            };
+        let reply = {
+            let mut state = self.fake.state();
+            if state.live_for(self.generation, change.generation).is_err() {
+                return SettingOutcome::Refused {
+                    reason: "the session has ended".to_owned(),
+                };
+            }
+            state.written.push(Written::Setting(change));
+            state.setting_replies.pop_front()
+        };
+        match reply {
+            Some(reply) => reply.await.unwrap_or(SettingOutcome::Unconfirmed),
+            None => SettingOutcome::Applied,
         }
-        state.written.push(Written::Setting(change));
-        SettingOutcome::Applied
     }
 
     /// Closing a runtime that is no longer live reports the scripted outcome too.

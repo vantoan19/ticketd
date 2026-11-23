@@ -13,6 +13,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import userEvent from "@testing-library/user-event";
 import {
   ChatClientContext,
+  type HarnessSetting,
   type Step,
   type TranscriptItem,
 } from "@/features/chats/client";
@@ -2343,15 +2344,59 @@ test("a Chat's picker changes model on its own harness; a refusal is one dock li
 
   openMenu("Permissions: Accept edits");
   expect(await screen.findByText(/^This Chat only\./)).toBeTruthy();
-  expect(
-    screen.queryByRole("menuitemradio", { name: /Full access/ }),
-  ).toBeNull();
   fireEvent.click(
     await screen.findByRole("menuitemradio", { name: /^Ask before edits/ }),
   );
   await waitFor(() =>
     expect(asked).toEqual(["model=sonnet", "permission=ask"]),
   );
+});
+
+test("Full access is one pick away in a Chat and shows on the trigger once in effect", async () => {
+  const permission = (current: string): HarnessSetting => ({
+    current,
+    options: [
+      { ...option("default", "Ask before edits", true), permission: "ask" },
+      {
+        ...option("bypassPermissions", "Full access"),
+        description: "Runs tools and commands without asking",
+        permission: "full_access",
+      },
+    ],
+    changeable: true,
+    applies_from: "next_request",
+  });
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      harness: { id: "claude-code", name: "Claude Code" },
+      settings: { permission: permission("default") },
+    }),
+  );
+  const asked: string[] = [];
+  client.changeSetting = async (_id, setting, value) => {
+    asked.push(`${setting}=${value}`);
+    return { value, state: "applied" };
+  };
+
+  openMenu("Permissions: Ask before edits");
+  const full = await screen.findByRole("menuitemradio", {
+    name: /^Full access/,
+  });
+  // What it means is said where it is chosen.
+  expect(full.textContent).toContain("Runs tools and commands without asking");
+  fireEvent.click(full);
+  await waitFor(() => expect(asked).toEqual(["permission=bypassPermissions"]));
+
+  act(() =>
+    client.patch("c1", {
+      settings: { permission: permission("bypassPermissions") },
+    }),
+  );
+  expect(
+    await screen.findByRole("button", { name: "Permissions: Full access" }),
+  ).toBeTruthy();
 });
 
 test("a refused change names its choice after the options go, and Stop clears it (#387 M16)", async () => {

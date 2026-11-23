@@ -44,8 +44,6 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: Build and check the site
-        env:
-          DOCS_PROJECT_PAGES: "1"
         run: |
           npm run build:docs
           node apps/docs/check-pages.mjs

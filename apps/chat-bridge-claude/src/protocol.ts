@@ -14,6 +14,18 @@ export const SDK_CLAUDE_CODE_VERSION = "2.1.322";
 const id = z.string().min(1).max(200);
 const generation = z.number().int().nonnegative();
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
+/**
+ * The modes a person's Chat can be in. `bypassPermissions` is Full access: Claude
+ * Code runs every tool without asking. It is only ever the person's own pick; an
+ * unattended session runs in "don't ask" whatever is sent.
+ */
+const permissionMode = z.enum([
+  "default",
+  "acceptEdits",
+  "plan",
+  "bypassPermissions",
+]);
+export type PermissionMode = z.infer<typeof permissionMode>;
 
 const decision = z.discriminatedUnion("kind", [
   z.strictObject({
@@ -45,11 +57,10 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     cwd: absolutePath,
     claude_executable: absolutePath,
     resume_session_id: z.string().min(1).optional(),
-    // New Chat's picks; without one Claude Code's own setting applies. The bridge
-    // can never be asked to skip permissions.
+    // New Chat's picks; without one Claude Code's own setting applies.
     model: z.string().min(1).optional(),
     effort: z.enum(["low", "medium", "high", "xhigh", "max"]).optional(),
-    permission_mode: z.enum(["default", "acceptEdits", "plan"]).optional(),
+    permission_mode: permissionMode.optional(),
     /**
      * Set for the Chat of an Automation run, where nobody can approve. The session
      * runs in the "don't ask" permission mode: a tool on `allowed_tools` runs and
@@ -99,12 +110,7 @@ export const commandSchema = z.discriminatedUnion("cmd", [
         kind: z.literal("effort"),
         value: z.enum(["low", "medium", "high", "xhigh", "max"]),
       }),
-      // bypassPermissions is not here: the bridge can never be asked to skip
-      // permissions.
-      z.strictObject({
-        kind: z.literal("permission"),
-        value: z.enum(["default", "acceptEdits", "plan"]),
-      }),
+      z.strictObject({ kind: z.literal("permission"), value: permissionMode }),
     ]),
   }),
   z.strictObject({ id, cmd: z.literal("close"), generation }),

@@ -179,8 +179,6 @@ jobs:
         run: npm run build
       - name: Build and check the GitHub Pages site
         if: matrix.shard == 1
-        env:
-          DOCS_PROJECT_PAGES: "1"
         run: |
           npm run build:docs
           node apps/docs/check-pages.mjs
@@ -202,8 +200,6 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/prepare
       - name: Build and check the GitHub Pages site
-        env:
-          DOCS_PROJECT_PAGES: "1"
         run: |
           npm run build:docs
           node apps/docs/check-pages.mjs

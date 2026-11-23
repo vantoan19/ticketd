@@ -3,29 +3,12 @@ import { NavLink } from "react-router";
 import { useTheme } from "next-themes";
 import { links, siteUrl } from "../links";
 import { useHydrated } from "./useHydrated";
+import icon from "../art/brand/ticketd-icon.svg";
 
 export function Wordmark() {
   return (
     <a className="wordmark" href={siteUrl("/")} aria-label="ticketd home">
-      <svg aria-hidden="true" viewBox="66 66 892 892" width="28" height="28">
-        <rect
-          x="100"
-          y="100"
-          width="824"
-          height="824"
-          rx="186"
-          fill="currentColor"
-        />
-        <rect
-          x="266"
-          y="356"
-          width="468"
-          height="312"
-          rx="156"
-          fill="var(--mark-track)"
-        />
-        <circle cx="578" cy="512" r="156" fill="var(--mark-disc)" />
-      </svg>
+      <img src={icon} alt="" width="28" height="28" />
       ticketd
     </a>
   );
@@ -91,6 +74,7 @@ export function SiteFooter() {
         <Wordmark />
         <nav aria-label="Footer">
           <SiteLinks />
+          <a href={siteUrl("/docs/reference/privacy")}>Privacy</a>
           <a href={links.license}>MIT license</a>
         </nav>
       </div>

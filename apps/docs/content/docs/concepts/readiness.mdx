@@ -7,10 +7,10 @@ A **blocking dependency** says that one ticket must be Done before another is
 considered Ready. Dependencies can cross projects.
 
 ```sh
-ticketd add-dependency T-LG12 T-LG13
+ticketd add-dependency T-RL12 T-RL13
 ```
 
-T-LG13 waits for T-LG12.
+T-RL13 waits for T-RL12.
 
 ## Ready and Blocked
 
@@ -53,7 +53,7 @@ ticketd list --availability blocked
 ## Seeing the dependencies
 
 ```sh
-ticketd graph T-LG12
+ticketd graph T-RL12
 ```
 
 In the desktop app, a Plan’s **Flow** view arranges its work into Now, Next and Later. Open the full graph to inspect relationships.
@@ -61,7 +61,7 @@ In the desktop app, a Plan’s **Flow** view arranges its work into Now, Next an
 ## Removing a dependency
 
 ```sh
-ticketd remove-dependency T-LG12 T-LG13
+ticketd remove-dependency T-RL12 T-RL13
 ```
 
 ## Links that do not block
@@ -73,8 +73,8 @@ Some relationships carry context without affecting readiness:
   another.
 
 ```sh
-ticketd add-relationship T-LG12 T-LG10 related
-ticketd add-relationship T-LG12 T-LG16 discovered
+ticketd add-relationship T-RL12 T-RL10 related
+ticketd add-relationship T-RL12 T-RL16 discovered
 ```
 
 For `discovered`, the first ticket is the work during which the second was found.

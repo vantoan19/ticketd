@@ -13,6 +13,8 @@ Copyright 2024 The Geist Project Authors.
 
 The fonts are licensed under the SIL Open Font License 1.1. The complete license
 is retained alongside the fonts in [OFL.txt](apps/desktop/src/assets/fonts/OFL.txt).
+The ticketd icon (`apps/desktop/src-tauri/app-icon.svg` and the website's
+`apps/docs/src/art/brand/`) draws its `td` letters from Geist outlines.
 Include that text when distributing the fonts.
 
 ## shadcn/ui

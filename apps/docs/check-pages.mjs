@@ -3,8 +3,8 @@ import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-// GitHub mounts the contents of the uploaded artifact at this URL.
-const base = "/ticketd/";
+// GitHub Pages serves the uploaded artifact at the root of ticketd.dev.
+const base = "/";
 const root = new URL("./build/client/", import.meta.url);
 const paths = await readdir(root, { recursive: true, withFileTypes: true });
 const files = new Set(
@@ -21,7 +21,7 @@ const read = (file) => readFile(new URL(file, root), "utf8");
 const checked = new Set();
 
 function checkUrl(url, from) {
-  assert.ok(url.startsWith(base), `${from} links outside the project: ${url}`);
+  assert.ok(url.startsWith(base), `${from} links outside the site: ${url}`);
   const target = decodeURIComponent(url.slice(base.length).split(/[?#]/)[0]);
   if (checked.has(target)) return;
   const index = path.posix.join(target, "index.html");
@@ -71,4 +71,4 @@ const missing = await read("404.html");
 assert.equal(missing, await read("404/index.html"));
 assert.doesNotMatch(missing, /<script\b[^>]*type="module"/);
 assert.ok(JSON.parse(await read("api/search")));
-console.log(`Checked ${checked.size} project URLs and the Pages entry points.`);
+console.log(`Checked ${checked.size} site URLs and the Pages entry points.`);

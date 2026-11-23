@@ -192,8 +192,9 @@ or a running Secret Service session on Linux. Desktop and CLI must run as the sa
 OS user to share authorization. An unavailable store produces recovery guidance;
 there is no file-based credential fallback. Restoring a backup on another machine
 restores reference metadata, not credentials or remote bytes; select files again
-with the appropriate account. External Testing refresh tokens may expire after
-seven days under Google's OAuth policy.
+with the appropriate account. A developer's own Google app registration that is
+still in External Testing gets refresh tokens that expire after seven days, so
+reconnect weekly with such a build.
 
 To keep the same workspace on two computers, follow [Sync two desktops with Google Drive](workspace-tasks.md#sync-two-desktops-with-google-drive).
 

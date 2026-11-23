@@ -27,7 +27,7 @@ A pull request took 32 to 39 minutes to reach `CI result`, and a docs-only one t
 
 The risk of a plan is a wrong "nothing to run", so every doubt resolves to everything: an unknown path costs minutes, a missed test costs a red `main`. The aggregate check is what makes skipping safe. It is the only required check, so it has to tell "the plan did not ask for this" from "this should have run and did not".
 
-The table errs toward the other lane for files that a lane reads without owning them. Rust reads at compile time or in a test: the three frontend files embedded by the desktop crate, the chat bridge the desktop build bundles, `skills/**`, and `docs/sync-file-format.md`, whose examples a Rust test parses. The frontend lane reads `apps/desktop/src-tauri/**` (a test parses `tauri.conf.json`, the docs site imports an icon, so that folder plans both lanes) and `GLOSSARY.md`, which the docs site includes.
+The table errs toward the other lane for files that a lane reads without owning them. Rust reads at compile time or in a test: the three frontend files embedded by the desktop crate, the chat bridge the desktop build bundles, `skills/**`, and `docs/sync-file-format.md`, whose examples a Rust test parses. The frontend lane reads `apps/desktop/src-tauri/**` (a test parses `tauri.conf.json`, the docs site imports an icon, so that folder plans both lanes) `GLOSSARY.md` and `PRIVACY.md`, which the docs site includes.
 
 ## Consequences
 
