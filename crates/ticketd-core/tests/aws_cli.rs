@@ -247,6 +247,52 @@ fn an_identity_that_fails_otherwise_is_a_failure() {
 }
 
 #[test]
+fn a_profile_with_an_endpoint_is_checked_through_its_credentials_not_sts() {
+    // STS is AWS's: a MinIO profile's keys fail there, though they work for the bucket.
+    let aws = StandIn::new()
+        .once(
+            IDENTITY,
+            fails(
+                254,
+                "An error occurred (InvalidClientTokenId) when calling GetCallerIdentity",
+            ),
+        )
+        .once("configure get region --profile work", ok("us-east-1\n"))
+        .once("configure get services --profile work", fails(1, ""))
+        .once(
+            "configure get endpoint_url --profile work",
+            ok("http://localhost:9000\n"),
+        )
+        .once(EXPORT, ok(&credentials_json("minioadmin", None)));
+    let identity = aws.cli().identity("work").unwrap();
+    assert!(
+        identity.contains("work") && identity.contains("localhost:9000"),
+        "{identity}"
+    );
+    assert!(!identity.contains("minioadmin"), "{identity}");
+}
+
+#[test]
+fn an_endpoint_profile_whose_credentials_cannot_be_exported_is_not_signed_in() {
+    let aws = StandIn::new()
+        .once(IDENTITY, fails(254, "InvalidClientTokenId"))
+        .once("configure get region --profile work", fails(1, ""))
+        .once("configure get services --profile work", fails(1, ""))
+        .once(
+            "configure get endpoint_url --profile work",
+            ok("http://localhost:9000\n"),
+        )
+        .once(
+            EXPORT,
+            fails(
+                253,
+                "Unable to retrieve credentials: Token has expired and refresh failed",
+            ),
+        );
+    assert!(aws.cli().identity("work").unwrap_err().needs_sign_in());
+}
+
+#[test]
 fn buckets_are_listed_by_name() {
     let aws = StandIn::new().once(BUCKETS, ok("[\n    \"alpha\",\n    \"beta\"\n]\n"));
     assert_eq!(
@@ -560,8 +606,24 @@ fn an_sso_profile_signs_in_with_aws_sso_login() {
 
 #[test]
 fn a_console_login_profile_signs_in_with_aws_login() {
-    let command = sign_in_for(&[("login_session", "arn:aws:iam::111111111111:user/me")]).unwrap();
+    let aws = profile_values(&[("login_session", "arn:aws:iam::111111111111:user/me")])
+        .once("--version", ok("aws-cli/2.32.0 Python/3.13.0\n"));
+    let command = aws.cli().sign_in_command("work").unwrap().unwrap();
     assert_eq!(command.args(), ["login", "--profile", "work"]);
+}
+
+#[test]
+fn a_console_login_profile_on_a_cli_without_aws_login_asks_for_an_update() {
+    // `aws login` arrived in 2.32; 2.19.5 passes the version check but cannot run it.
+    let aws = profile_values(&[("login_session", "arn:aws:iam::111111111111:user/me")]);
+    let error = aws.cli().sign_in_command("work").unwrap_err();
+    assert!(
+        matches!(error, AwsCliError::LoginNeedsNewerCli { .. }),
+        "{error:?}"
+    );
+    assert!(error.to_string().contains("2.32"), "{error}");
+    // An SSO profile still signs in on it.
+    assert!(sign_in_for(&[("sso_session", "corp")]).is_some());
 }
 
 #[test]
@@ -704,16 +766,42 @@ fn a_missing_profile_is_a_failure_not_an_empty_setting() {
 #[test]
 fn arguments_are_passed_as_given_never_through_a_shell() {
     let profile = "a b; echo pwned";
-    let aws = StandIn::new().once(
-        &format!("configure export-credentials --profile {profile}"),
-        ok(&credentials_json("AKIAEXAMPLE", None)),
-    );
+    // The stand-in counts its arguments: `$*` would join a profile split at its spaces into
+    // the same text as the whole name.
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("aws");
+    let json = credentials_json("AKIAEXAMPLE", None).replace('\'', "");
+    fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'aws-cli/2.19.5 Python/3.12.7'; exit 0; fi\n\
+             if [ \"$#\" -eq 4 ] && [ \"$4\" = '{profile}' ]; then printf '%s' '{json}'; exit 0; fi\n\
+             echo \"unexpected: $# arguments\" >&2; exit 99\n"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
     // The whole name arrives as one argument: a shell would have split it at the `;`.
-    aws.cli().credentials(profile).unwrap();
-    assert_eq!(
-        aws.calls(&format!("configure export-credentials --profile {profile}")),
-        1
-    );
+    AwsCli::locate_in(Some(&path), &[])
+        .unwrap()
+        .credentials(profile)
+        .unwrap();
+}
+
+#[test]
+fn a_program_that_prints_without_end_is_an_error_and_its_output_is_not_parsed() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("aws");
+    // 16 MiB of one long line, then a normal exit, as a runaway helper might.
+    fs::write(
+        &path,
+        "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'aws-cli/2.19.5 Python/3.12.7'; exit 0; fi\nhead -c 16777216 /dev/zero | tr '\\0' 'x'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    let cli = AwsCli::locate_in(Some(&path), &[]).unwrap();
+    let error = cli.profiles().unwrap_err();
+    assert!(matches!(error, AwsCliError::OutputTooLarge), "{error:?}");
 }
 
 #[test]

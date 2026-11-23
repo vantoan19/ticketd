@@ -95,6 +95,17 @@ fn a_bucket_that_ignores_if_none_match_is_refused() {
 }
 
 #[test]
+fn a_bucket_that_ignores_if_match_is_refused() {
+    // An update that names another ETag must be refused, or an edit made after sync read the
+    // file could overwrite another device's.
+    let bench = Bench::new();
+    bench.sim.ignore_if_match();
+    assert_eq!(bench.check(), Err(BucketCheckError::NoConditionalUpdates));
+    let message = BucketCheckError::NoConditionalUpdates.to_string();
+    assert!(message.contains("If-Match"), "{message}");
+}
+
+#[test]
 fn a_missing_bucket_is_named() {
     let bench = Bench::new();
     bench.sim.remove_bucket();
@@ -138,6 +149,35 @@ fn a_denied_action_is_named_wherever_the_bucket_denies_it() {
 }
 
 #[test]
+fn a_head_refusal_without_a_region_is_read_from_a_request_that_can_say_why() {
+    // A compatible service can refuse HeadBucket for a bucket policy and name no region.
+    // Without a body that looks like an ended session; the listing's answer says which it is.
+    let bench = Bench::new();
+    let mut head = Fault::new("HEAD", BUCKET, 403, "AccessDenied");
+    head.body.clear();
+    head.times = 2;
+    bench.sim.fault(head);
+    bench
+        .sim
+        .fault(Fault::denied("GET", "list-type=2", "s3:ListBucket"));
+    assert_eq!(bench.check(), Err(denied("s3:ListBucket")));
+
+    // A static key refused for its policy is not a wrong key either.
+    let bench = Bench {
+        sim: S3Sim::default(),
+        credentials: FakeCredentials::new(&["token-1", "token-2"]).without_sign_in(),
+    };
+    let mut head = Fault::new("HEAD", BUCKET, 403, "AccessDenied");
+    head.body.clear();
+    head.times = 2;
+    bench.sim.fault(head);
+    bench
+        .sim
+        .fault(Fault::denied("GET", "list-type=2", "s3:ListBucket"));
+    assert_eq!(bench.check(), Err(denied("s3:ListBucket")));
+}
+
+#[test]
 fn a_session_that_ended_on_head_bucket_renews_the_credentials_once_and_then_needs_sign_in() {
     // The answer to HeadBucket has no body, so the code that says "the session ended" is not
     // there: the status and the missing region header are all there is.
@@ -158,7 +198,8 @@ fn a_session_that_ended_on_head_bucket_renews_the_credentials_once_and_then_need
         bench.check(),
         Err(BucketCheckError::Storage(RemoteError::Unauthorized))
     );
-    assert_eq!(bench.credentials.forgets(), 1);
+    // Once for HeadBucket, and once for the listing that reads why it was refused.
+    assert_eq!(bench.credentials.forgets(), 2);
 
     // The same when the region is what the check is asking for.
     let probe = S3Target::new(BUCKET, "us-east-1", None).unwrap();
@@ -199,6 +240,17 @@ fn an_encryption_key_the_profile_cannot_use_is_its_own_failure() {
         );
         assert!(error.to_string().contains("kms:Decrypt"), "{error}");
     }
+}
+
+#[test]
+fn a_bucket_named_with_kms_is_not_an_encryption_key_problem() {
+    let bench = Bench::new();
+    let mut fault = Fault::denied("GET", PROBE, "s3:GetObject");
+    fault.body = fault
+        .body
+        .replace("arn:aws:s3:::", "arn:aws:s3:::team-kms-backups/");
+    bench.sim.fault(fault);
+    assert_eq!(bench.check(), Err(denied("s3:GetObject")));
 }
 
 #[test]

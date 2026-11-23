@@ -907,6 +907,31 @@ fn an_ended_sign_in_needs_sign_in_and_sends_nothing() {
     assert!(sim.requests().is_empty());
 }
 
+/// A credential helper that failed and printed a token on stderr, which the CLI repeats.
+struct Leaky;
+impl CredentialSource for Leaky {
+    fn credentials(&self) -> Result<Credentials, AwsCliError> {
+        Err(AwsCliError::Failed {
+            exit_code: Some(253),
+            message: "Error when retrieving credentials from custom-process: token=SECRET-TOKEN"
+                .into(),
+        })
+    }
+    fn forget(&self) {}
+}
+
+#[test]
+fn a_failed_credential_helper_does_not_put_its_output_in_the_error() {
+    // The error is saved with the Workspace as sync's recovery message.
+    let sim = S3Sim::default();
+    let remote = S3Remote::new(target(), "ticketd/", &Leaky, &sim).unwrap();
+    let Err(RemoteError::Other(message)) = remote.list("folder") else {
+        panic!("the failure should be an error with words");
+    };
+    assert!(!message.contains("SECRET-TOKEN"), "{message}");
+    assert!(message.contains("253"), "{message}");
+}
+
 #[test]
 fn a_missing_bucket_or_marker_is_a_missing_folder() {
     let bench = Bench::new();

@@ -36,6 +36,10 @@ pub enum BucketCheckError {
     )]
     NoConditionalWrites,
     #[error(
+        "this storage let an update through that named another file's version (If-Match); sync needs a bucket that refuses it, such as one on AWS S3, MinIO or Ceph"
+    )]
+    NoConditionalUpdates,
+    #[error(
         "the profile is not allowed to use {action} on this bucket; add it to the profile's policy for the bucket and prefix"
     )]
     PermissionDenied { action: String },
@@ -82,11 +86,12 @@ pub(super) fn run(client: &S3Client<'_>, prefix: &str) -> Result<(), BucketCheck
     }
     let head = client.send(&head_bucket())?;
     if !(200..300).contains(&head.status) {
-        return Err(head_failure(client.target(), &head));
+        return Err(head_failure(client, &head));
     }
     versioning_is_on(client)?;
     let probe = format!("{prefix}{PROBE}");
     refuses_a_second_create(client, &probe)?;
+    refuses_a_mismatched_update(client, &probe)?;
     read_back(client, &probe, None, GET_OBJECT)?;
     let version = newest_version(client, &probe)?;
     read_back(client, &probe, Some(&version), GET_OBJECT_VERSION)
@@ -103,10 +108,13 @@ fn head_bucket() -> S3Call<'static> {
 }
 
 /// A HEAD answer has no body, so only its status says what went wrong.
-fn head_failure(target: &S3Target, head: &S3Response) -> BucketCheckError {
-    // S3 names the bucket's region in every answer, including a refusal.
+fn head_failure(client: &S3Client<'_>, head: &S3Response) -> BucketCheckError {
+    let target = client.target();
+    // AWS names the bucket's region in every answer, including a refusal, so an answer
+    // without it may be an ended session. Another service may also leave it out when a policy
+    // refuses, so ask a request that has a body to say which.
     if ended_session_on_head("HEAD", head) {
-        return BucketCheckError::Storage(RemoteError::Unauthorized);
+        return why_head_was_refused(client);
     }
     let elsewhere = head
         .header("x-amz-bucket-region")
@@ -128,6 +136,20 @@ fn head_failure(target: &S3Target, head: &S3Response) -> BucketCheckError {
     }
 }
 
+/// Lists no keys, only to read the code of the refusal the bucket gives that HeadBucket cannot.
+fn why_head_was_refused(client: &S3Client<'_>) -> BucketCheckError {
+    let asked = client.send(&S3Call::get("", &[("list-type", "2"), ("max-keys", "0")]));
+    match asked {
+        Err(error) => BucketCheckError::Storage(error),
+        Ok(response) if (200..300).contains(&response.status) => {
+            BucketCheckError::Storage(RemoteError::Other(
+                "S3 refused HeadBucket for this profile, though it lists the bucket; check the bucket policy and the service's own settings".into(),
+            ))
+        }
+        Ok(response) => failure(client.target(), &response, LIST_BUCKET),
+    }
+}
+
 /// What a refusal means for the bucket, when `action` is what the step was doing.
 fn failure(target: &S3Target, response: &S3Response, action: &str) -> BucketCheckError {
     let general = refusal(response);
@@ -141,7 +163,8 @@ fn failure(target: &S3Target, response: &S3Response, action: &str) -> BucketChec
     }
     let error = error_of(response).unwrap_or_default();
     let message: String = error.message.chars().take(300).collect();
-    if error.code.starts_with("KMS.") || message.to_ascii_lowercase().contains("kms") {
+    // A bucket or key may have "kms" in its name; only a KMS code or a `kms:` action is the key's.
+    if error.code.starts_with("KMS.") || message.to_ascii_lowercase().contains("kms:") {
         return BucketCheckError::KmsKeyUnusable { detail: message };
     }
     if response.status == 403 && matches!(error.code.as_str(), "AccessDenied" | "AllAccessDisabled")
@@ -237,6 +260,32 @@ fn refuses_a_second_create(client: &S3Client<'_>, key: &str) -> Result<(), Bucke
     }
 }
 
+/// A bucket that honours `If-Match` refuses an update that names an ETag the file does not
+/// have. Sync's updates rely on it: an edit made after the version lookup must not overwrite
+/// another device's. An update that is wrongly let through writes the check's own bytes again.
+fn refuses_a_mismatched_update(client: &S3Client<'_>, key: &str) -> Result<(), BucketCheckError> {
+    let headers = [
+        ("content-type", "text/plain; charset=utf-8".to_owned()),
+        ("if-match", "\"ticketd-not-this-files-etag\"".to_owned()),
+        (
+            "x-amz-checksum-sha256",
+            STANDARD.encode(Sha256::digest(PROBE_BYTES)),
+        ),
+    ];
+    let response = client.send(&S3Call {
+        method: "PUT",
+        key,
+        query: &[],
+        headers: &headers,
+        body: PROBE_BYTES,
+    })?;
+    match response.status {
+        412 => Ok(()),
+        200 | 501 => Err(BucketCheckError::NoConditionalUpdates),
+        _ => Err(failure(client.target(), &response, PUT_OBJECT)),
+    }
+}
+
 /// Reads the file, as sync's downloads do, and compares it and its SHA-256 with what was stored.
 fn read_back(
     client: &S3Client<'_>,
@@ -311,6 +360,6 @@ pub fn discover_bucket_region(
     match (told, head.status) {
         (Some(region), _) => Ok(region.to_owned()),
         (None, 200..=299) => Ok(probe.region().to_owned()),
-        _ => Err(head_failure(probe, &head)),
+        _ => Err(head_failure(&client, &head)),
     }
 }

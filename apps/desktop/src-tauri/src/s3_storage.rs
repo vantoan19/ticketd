@@ -13,7 +13,7 @@ use std::{
 use ticketd_core::{
     s3::{
         AwsCli, AwsCliError, CredentialSource, Credentials, ProfileCredentials, S3Remote, S3Target,
-        S3TargetError, UreqS3Transport, discover_bucket_region,
+        S3TargetError, UreqS3Transport, cli_failure, discover_bucket_region,
     },
     sync::{
         S3Binding,
@@ -159,12 +159,7 @@ impl RemoteStorage for S3Storage {
 
 /// What a failure of the AWS CLI means to sync: a session to sign in to again, or a failure.
 fn cli_error(error: AwsCliError) -> RemoteError {
-    if error.needs_sign_in() {
-        RemoteError::Unauthorized
-    } else {
-        // The CLI's own words hold no credential.
-        RemoteError::Other(error.to_string())
-    }
+    cli_failure(&error)
 }
 
 /// One set of credentials of a profile, shared with the sign-in command that forgets it.
