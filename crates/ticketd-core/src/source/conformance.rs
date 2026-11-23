@@ -138,7 +138,7 @@ pub(super) fn run(
         );
     }
     let suspect = descriptor.schema.fields.iter().any(|field| {
-        !matches!(field.kind, FieldKind::Secret)
+        !matches!(field.kind, FieldKind::Secret | FieldKind::Link { .. })
             && [&field.key, &field.label].into_iter().any(|value| {
                 let spaced = value.to_ascii_lowercase().replace(['_', '-'], " ");
                 spaced.contains("api key")

@@ -400,6 +400,11 @@ A ticket source connects an external tracker. GitHub Issues is built in. GitHub
 and extensions use the same ticket authority and refresh workflows
 ([ADR 0006](adr/0006-external-ticket-authority.md)).
 
+- **Linear** ships with the desktop app. Connect your Linear teams with
+  a personal API key that can read them. Filter discovery by assignee, labels, or
+  project. ticketd syncs the issue's current state and its comments and
+  timeline.
+
 - Add and name source connections under Settings → Sources. Several accounts can
   connect to the same provider. Connections stay on this device and are excluded
   from Workspace sync, portable backups, and JSON exports.

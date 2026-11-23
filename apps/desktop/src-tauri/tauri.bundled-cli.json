@@ -5,7 +5,8 @@
   "bundle": {
     "externalBin": [
       "../../chat-bridge-claude/dist/ticketd-chat-bridge-claude",
-      "../../../crates/ticketd-cli/dist/ticketd"
+      "../../../crates/ticketd-cli/dist/ticketd",
+      "../../../crates/ticketd-source-linear/dist/ticketd-source-linear"
     ]
   }
 }

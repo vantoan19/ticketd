@@ -12,6 +12,7 @@ license.workspace = true
 workspace = true
 
 [dependencies]
+ticketd-source-sdk.workspace = true
 aho-corasick = "1"
 # `clock` reads the local time a schedule is evaluated in.
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }

@@ -163,6 +163,8 @@ enum LaunchMode {
     Installed {
         hash: String,
         executable: PathBuf,
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        bundled: bool,
     },
 }
 
@@ -425,10 +427,7 @@ impl ExtensionRegistry {
         record.launch.verify_trust()?;
         let probe = Host::default();
         let refusal = probe.probe(Arc::new(record.launch), &[0]).and_then(|hello| {
-            if hello.contract_version.is_none()
-                && hello.contract_versions.contains(&CONTRACT_VERSION)
-                && !hello.contract_versions.contains(&0)
-            {
+            if ticketd_source_sdk::conformance::refused_version(&hello, 0, CONTRACT_VERSION) {
                 Ok(())
             } else {
                 Err(SourceError::Protocol(format!(
@@ -492,6 +491,7 @@ impl ExtensionRegistry {
             mode: LaunchMode::Installed {
                 hash: folder_digest(&package).map_err(storage_error)?,
                 executable: executable.clone(),
+                bundled: false,
             },
         };
         let consent = ExtensionConsent {
@@ -510,6 +510,77 @@ impl ExtensionRegistry {
     /// usable if the new package cannot complete its handshake.
     pub fn add(&self, prepared: PreparedExtension) -> Result<RegisteredExtension, SourceError> {
         let _lock = registry_lock(&self.folder)?;
+        self.activate(prepared, None)
+    }
+
+    /// Install a sidecar supplied by the trusted application as an ordinary
+    /// hashed package. Its description is available without launching it.
+    pub fn install_bundled(
+        &self,
+        sidecar: &Path,
+        version: &str,
+        description: super::SourceDescription,
+    ) -> Result<(), SourceError> {
+        match sidecar.symlink_metadata() {
+            Ok(metadata) if metadata.is_file() => {}
+            Ok(_) => {
+                return Err(SourceError::Protocol(
+                    "the bundled source executable is not a regular file".into(),
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => return Err(storage_error(error)),
+        }
+        let executable = sidecar.file_name().ok_or_else(|| {
+            SourceError::Protocol("the bundled source executable has no name".into())
+        })?;
+        let _lock = registry_lock(&self.folder)?;
+        match self.read_record(&description.descriptor.provider) {
+            Ok(record) => {
+                let bundled = matches!(
+                    record.launch.mode,
+                    LaunchMode::Installed { bundled: true, .. }
+                );
+                if !bundled || record.launch.manifest.version == version {
+                    return Ok(());
+                }
+            }
+            Err(SourceError::UnknownProvider(_)) => {}
+            Err(error) => return Err(error),
+        }
+        let manifest = Manifest {
+            id: description.descriptor.provider.clone(),
+            version: version.into(),
+            executable: PathBuf::from(".").join(executable),
+            args: Vec::new(),
+            env: Vec::new(),
+            hosts: description.presentation.hosts.clone(),
+        };
+        let original = tempfile::tempdir().map_err(storage_error)?;
+        fs::copy(sidecar, original.path().join(executable)).map_err(storage_error)?;
+        let manifest = serde_json::to_vec(&manifest).map_err(|_| {
+            SourceError::Protocol("could not encode the bundled source manifest".into())
+        })?;
+        fs::write(original.path().join(MANIFEST), manifest).map_err(storage_error)?;
+        let mut prepared = self.prepare_add(original.path())?;
+        if let LaunchMode::Installed { bundled, .. } = &mut prepared.launch.mode {
+            *bundled = true;
+        }
+        let hello = Description {
+            contract_versions: vec![CONTRACT_VERSION],
+            contract_version: Some(CONTRACT_VERSION),
+            version: version.into(),
+            description: Some(description),
+        };
+        self.activate(prepared, Some(hello)).map(|_| ())
+    }
+
+    /// The caller holds the registry lock from approval through the record write.
+    fn activate(
+        &self,
+        prepared: PreparedExtension,
+        cached: Option<Description>,
+    ) -> Result<RegisteredExtension, SourceError> {
         let registry = self.folder.canonicalize().map_err(storage_error)?;
         let PreparedExtension {
             consent,
@@ -540,7 +611,10 @@ impl ExtensionRegistry {
         let had_previous = move_if_present(&destination, &previous)?;
         let install = fs::rename(&package, &destination)
             .map_err(storage_error)
-            .and_then(|()| self.probe_and_record(launch));
+            .and_then(|()| match cached {
+                Some(hello) => self.write_record(launch, hello),
+                None => self.probe_and_record(launch),
+            });
         if let Err(error) = install {
             if let Err(rollback) = restore_package(&destination, &previous, had_previous) {
                 let retained = transaction.keep();
@@ -603,11 +677,15 @@ impl ExtensionRegistry {
     }
 
     fn probe_and_record(&self, launch: Launch) -> Result<(), SourceError> {
-        let record_path = self.folder.join(format!("{}.json", launch.manifest.id));
         let probe = Host::default();
         let hello = probe.probe(Arc::new(launch.clone()), &[CONTRACT_VERSION])?;
         probe.shutdown();
+        self.write_record(launch, hello)
+    }
+
+    fn write_record(&self, launch: Launch, hello: Description) -> Result<(), SourceError> {
         launch.verify_trust()?;
+        let record_path = self.folder.join(format!("{}.json", launch.manifest.id));
         let mut validation = Engine::builtin();
         let record = Record { launch, hello };
         let bytes = serde_json::to_vec(&record).map_err(|error| {
@@ -917,4 +995,62 @@ fn folder_digest(folder: &Path) -> io::Result<String> {
     let mut digest = Sha256::new();
     visit(folder, &mut digest)?;
     Ok(format!("{:x}", digest.finalize()))
+}
+
+#[cfg(test)]
+mod bundled_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn lists_bundled_metadata_before_the_executable_runs() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = ExtensionRegistry::new(root.path().join("registry"));
+        let name = format!("fixture-source{}", std::env::consts::EXE_SUFFIX);
+        let sidecar = root.path().join(&name);
+        fs::write(&sidecar, "not an executable").unwrap();
+        let description = crate::source::SourceDescription {
+            descriptor: crate::source::ConnectorDescriptor {
+                provider: "fixture-source".into(),
+                name: "Fixture Source".into(),
+                contract_version: CONTRACT_VERSION,
+                capabilities: vec![Capability::Discover, Capability::Fetch],
+                schema: crate::source::ConfigSchema { fields: vec![] },
+            },
+            presentation: crate::source::SourcePresentation::default(),
+        };
+
+        registry
+            .install_bundled(&sidecar, "1.0.0", description.clone())
+            .unwrap();
+
+        let registrations = registry.list().unwrap();
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].id, "fixture-source");
+        assert!(!registrations[0].development);
+        assert_eq!(
+            registry
+                .engine()
+                .unwrap()
+                .descriptor("fixture-source")
+                .unwrap()
+                .name,
+            "Fixture Source"
+        );
+
+        let installed = registrations[0].path.join(name);
+        fs::write(&installed, "changed after installation").unwrap();
+        registry
+            .install_bundled(&sidecar, "1.0.0", description)
+            .unwrap();
+        assert!(
+            registry
+                .read_record("fixture-source")
+                .unwrap()
+                .launch
+                .verify_trust()
+                .is_err()
+        );
+    }
 }

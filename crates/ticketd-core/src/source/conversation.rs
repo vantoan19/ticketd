@@ -32,12 +32,12 @@ pub enum ConversationEntry {
     },
     Event {
         id: String,
-        /// `closed`, `reopened`, `assigned` or `unassigned`.
+        /// The neutral source timeline event name.
         event: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         state_category: Option<StateCategory>,
         actor: Option<String>,
-        /// Whom an assignment change concerns.
+        /// The assignee, destination workflow state, or related issue when known.
         subject: Option<String>,
         created_at: String,
     },
@@ -86,6 +86,11 @@ fn event_parts(kind: ExternalEventKind) -> (&'static str, Option<StateCategory>)
     match kind {
         ExternalEventKind::Closed(category) => ("closed", Some(category)),
         ExternalEventKind::Reopened => ("reopened", Some(StateCategory::Open)),
+        ExternalEventKind::StateChanged(category) => ("state_changed", Some(category)),
+        ExternalEventKind::MarkedDuplicate => ("marked_duplicate", None),
+        ExternalEventKind::UnmarkedDuplicate => ("unmarked_duplicate", None),
+        ExternalEventKind::DuplicateAdded => ("duplicate_added", None),
+        ExternalEventKind::DuplicateRemoved => ("duplicate_removed", None),
         ExternalEventKind::Assigned => ("assigned", None),
         ExternalEventKind::Unassigned => ("unassigned", None),
     }

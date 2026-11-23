@@ -2011,6 +2011,34 @@ impl StartupProgress {
     }
 }
 
+/// The app owns the metadata for the sidecars it distributes.
+fn install_bundled_sources(registry: &ExtensionRegistry) {
+    const SOURCES: &[(&str, &str)] = &[(
+        "ticketd-source-linear",
+        include_str!("../../../../crates/ticketd-source-linear/description.json"),
+    )];
+    let Ok(application) = std::env::current_exe() else {
+        tracing::warn!("could not locate bundled source extensions");
+        return;
+    };
+    for (name, metadata) in SOURCES {
+        let Ok(description) = serde_json::from_str(metadata) else {
+            tracing::warn!(name, "could not load bundled source description");
+            continue;
+        };
+        let sidecar = application.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        if let Err(error) =
+            registry.install_bundled(&sidecar, env!("CARGO_PKG_VERSION"), description)
+        {
+            tracing::warn!(
+                name,
+                error_kind = error.code(),
+                "could not install bundled source extension"
+            );
+        }
+    }
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     let started = std::time::Instant::now();
     let sync = std::sync::Arc::new(sync_scheduler::Scheduler::new(
@@ -2025,6 +2053,7 @@ pub fn run() -> Result<(), tauri::Error> {
     let sources = std::sync::Arc::new(ExtensionRegistry::device().map_err(|error| {
         tauri::Error::Setup((Box::new(error) as Box<dyn std::error::Error>).into())
     })?);
+    install_bundled_sources(&sources);
     let refresh_registry = sources.clone();
     let app = tauri::Builder::default()
         // Must be the first plugin. One process owns Chat execution: starting ticketd

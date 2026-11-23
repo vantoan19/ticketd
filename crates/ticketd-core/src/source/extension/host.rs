@@ -590,7 +590,7 @@ async fn serve(
 
 fn describe(versions: &[u32]) -> Call<'_> {
     Call::Describe {
-        contract_versions: versions,
+        contract_versions: versions.into(),
         pid: std::process::id(),
     }
 }

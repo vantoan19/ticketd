@@ -59,6 +59,33 @@ function describeEvent(entry: EventEntry): {
       }
     case "reopened":
       return { text: `${actor} reopened this`, icon: Circle };
+    case "state_changed":
+      return {
+        text: subject
+          ? `${actor} moved this to ${subject}`
+          : `${actor} changed the workflow state`,
+        icon: Circle,
+      };
+    case "marked_duplicate":
+      return {
+        text: `${actor} marked this as a duplicate${subject ? ` of ${subject}` : ""}`,
+        icon: statusIcons.Duplicate,
+      };
+    case "unmarked_duplicate":
+      return {
+        text: `${actor} removed this duplicate link${subject ? ` to ${subject}` : ""}`,
+        icon: statusIcons.Duplicate,
+      };
+    case "duplicate_added":
+      return {
+        text: `${actor} linked ${subject ?? "an issue"} as a duplicate of this`,
+        icon: statusIcons.Duplicate,
+      };
+    case "duplicate_removed":
+      return {
+        text: `${actor} removed ${subject ?? "an issue"} as a duplicate of this`,
+        icon: statusIcons.Duplicate,
+      };
     case "assigned":
       return {
         text:

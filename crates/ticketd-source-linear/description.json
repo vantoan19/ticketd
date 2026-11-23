@@ -1,0 +1,112 @@
+{
+  "provider": "linear",
+  "name": "Linear",
+  "contract_version": 2,
+  "capabilities": ["discover", "fetch", "comments"],
+  "schema": {
+    "fields": [
+      {
+        "key": "api_key",
+        "label": "Personal API key",
+        "help": "Use a key that can read the team you want to sync.",
+        "required": true,
+        "type": "secret"
+      },
+      {
+        "key": "create_key",
+        "label": "Create a Linear API key",
+        "type": "link",
+        "url": "https://linear.app/settings/account/security"
+      },
+      {
+        "key": "team",
+        "label": "Teams",
+        "help": "Sync issues from these Linear teams.",
+        "required": true,
+        "pattern": {
+          "regex": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "message": "must be a Linear UUID"
+        },
+        "type": "multi_select",
+        "options": {
+          "source": "dynamic",
+          "depends_on": []
+        },
+        "min_items": 1,
+        "max_items": 25
+      },
+      {
+        "key": "assignee",
+        "label": "Assignee",
+        "help": "Limit discovery to one assignee. Choose Me to use the connected account.",
+        "required": false,
+        "pattern": {
+          "regex": "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|me)$",
+          "message": "must be a Linear UUID or me"
+        },
+        "type": "multi_select",
+        "options": {
+          "source": "dynamic",
+          "depends_on": ["team"]
+        },
+        "min_items": 0,
+        "max_items": 1
+      },
+      {
+        "key": "labels",
+        "label": "Labels",
+        "help": "Only discover issues with every selected label.",
+        "required": false,
+        "pattern": {
+          "regex": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "message": "must be a Linear UUID"
+        },
+        "type": "multi_select",
+        "options": {
+          "source": "dynamic",
+          "depends_on": ["team"]
+        },
+        "min_items": 0,
+        "max_items": 10
+      },
+      {
+        "key": "project",
+        "label": "Project",
+        "help": "Only discover issues in the selected project.",
+        "required": false,
+        "pattern": {
+          "regex": "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$",
+          "message": "must be a Linear UUID"
+        },
+        "type": "multi_select",
+        "options": {
+          "source": "dynamic",
+          "depends_on": ["team"]
+        },
+        "min_items": 0,
+        "max_items": 1
+      }
+    ]
+  },
+  "presentation": {
+    "icon_svg": "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 24 24\"><path fill=\"currentColor\" d=\"M3 8.5a9.6 9.6 0 1 1 12.5 12.4L3 8.5Zm-1 3.2 10.3 10.2a10 10 0 0 1-2.8-.5L2.6 14.5a10 10 0 0 1-.6-2.8Zm2 5.9 2.6 2.6A10.2 10.2 0 0 1 4 17.6Z\"/></svg>",
+    "issue_name": {
+      "separator": "-",
+      "separator_in_number": true
+    },
+    "sign_in": {
+      "terminal_hint": "Set the API key with TICKETD_SOURCE_<CONNECTION>_API_KEY.",
+      "desktop_hint": "Enter a personal API key in Settings → Sources.",
+      "desktop_instruction": "Create a personal API key with read access to your Linear team."
+    },
+    "target": {
+      "field": "team",
+      "label": "Teams",
+      "example": "Engineering",
+      "choose": "Choose teams",
+      "add": "Add a team"
+    },
+    "discovery_note": "Sync issues from selected Linear teams, optionally filtered by assignee, labels, or project.",
+    "hosts": ["api.linear.app"]
+  }
+}
