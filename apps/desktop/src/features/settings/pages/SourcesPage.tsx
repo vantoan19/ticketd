@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -147,6 +148,9 @@ export function SourcesPage({
                     trailing={
                       !editing && (
                         <>
+                          {entry.development && (
+                            <Badge variant="experimental">Development</Badge>
+                          )}
                           <Button
                             size="sm"
                             variant="outline"
@@ -247,6 +251,7 @@ export function SourcesPage({
               >
                 <Plus aria-hidden="true" /> Add {entry.connector.name}{" "}
                 connection
+                {entry.development && <span>(development)</span>}
               </Button>
             ))}
           {removing && (

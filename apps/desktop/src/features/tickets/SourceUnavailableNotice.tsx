@@ -60,7 +60,7 @@ export function SourceUnavailableNotice({
             variant="outline"
             size="sm"
             disabled={retrying}
-            onClick={() => void retry()}
+            onClick={() => void retry(true)}
           >
             Retry now
           </Button>

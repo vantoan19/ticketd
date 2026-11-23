@@ -1,4 +1,4 @@
-use std::ffi::OsString;
+use std::{ffi::OsString, path::PathBuf};
 
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
@@ -11,6 +11,7 @@ mod output;
 mod skills;
 
 use output::{bare, ok};
+use ticketd_core::source::ExtensionRegistry;
 
 #[derive(Parser)]
 #[command(name = "ticketd", version, about = "Local ticket workspace")]
@@ -737,6 +738,24 @@ struct SourceSettings {
 
 #[derive(Subcommand)]
 enum SourceCommand {
+    /// Manage ticket source extensions on this device
+    Extension {
+        #[command(subcommand)]
+        command: ExtensionCommand,
+    },
+    /// Check a linked extension against the ticket source contract
+    Conformance {
+        /// The provider ID of a linked extension
+        extension: String,
+        /// Allow creating one issue in the named destination to check publication and recovery
+        #[arg(long, value_name = "DESTINATION")]
+        publish: Option<String>,
+        /// Require evidence for advertised capabilities when they can be exercised
+        #[arg(long)]
+        strict: bool,
+        #[command(flatten)]
+        settings: SourceSettings,
+    },
     /// List connections with their provider and settings schema
     List,
     /// Validate settings and add a connection for this provider
@@ -809,6 +828,15 @@ enum SourceCommand {
     /// Operate on a saved connection by its ID
     #[command(external_subcommand)]
     Connection(Vec<OsString>),
+}
+
+#[derive(Subcommand)]
+enum ExtensionCommand {
+    /// Link and run an extension from a local development folder
+    Link {
+        /// Folder containing ticketd-source.json
+        path: PathBuf,
+    },
 }
 
 #[derive(Parser)]
@@ -898,7 +926,8 @@ impl FindArgs {
     fn filter(self, query: String) -> Result<TicketFilter, Box<dyn std::error::Error>> {
         // A source that does not exist would silently list nothing: say so instead.
         if let Some(source) = self.source.as_deref().filter(|source| *source != "local") {
-            let known: Vec<String> = ticketd_core::source::Engine::builtin()
+            let known: Vec<String> = ExtensionRegistry::device()?
+                .engine()?
                 .connectors()
                 .into_iter()
                 .map(|connector| connector.provider)
@@ -1368,6 +1397,44 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
     let command = match args.command {
         CliCommand::Skills { command } => return skills::run(command, output),
         CliCommand::Workspace(command) => command,
+    };
+    let command = match command {
+        Command::Source {
+            command:
+                SourceCommand::Extension {
+                    command: ExtensionCommand::Link { path },
+                },
+        } => {
+            let registry = ExtensionRegistry::device()?;
+            writeln!(output, "{}", serde_json::to_string(&registry.link(&path)?)?)?;
+            return Ok(());
+        }
+        Command::Source {
+            command:
+                SourceCommand::Conformance {
+                    extension,
+                    publish,
+                    strict,
+                    settings,
+                },
+        } => {
+            let registry = ExtensionRegistry::device()?;
+            let config = source_settings(
+                &registry.engine()?,
+                &extension,
+                ticketd_core::source::ConfigValues::new(),
+                settings,
+            )?;
+            let options = ticketd_core::source::ConformanceOptions { publish, strict };
+            let report = registry.conformance(&extension, &config, &options)?;
+            writeln!(output, "{}", serde_json::to_string(&report)?)?;
+            return if report.passed {
+                Ok(())
+            } else {
+                Err("source conformance failed".into())
+            };
+        }
+        command => command,
     };
     let connection_command = match &command {
         Command::Source {
@@ -2144,7 +2211,8 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     agent,
                 },
         } => {
-            let engine = ticketd_core::source::Engine::builtin();
+            let registry = ExtensionRegistry::device()?;
+            let engine = registry.engine()?;
             let connection = match connection {
                 Some(id) => workspace.source_connection(&id)?,
                 None => workspace.source_connection(&workspace.default_publication_provider(&engine)?)?,
@@ -2202,7 +2270,8 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 },
         } => {
             use ticketd_core::source::{PublicationError, Resolution, ResolveOptions};
-            let engine = ticketd_core::source::Engine::builtin();
+            let registry = ExtensionRegistry::device()?;
+            let engine = registry.engine()?;
             let resolution = if not_created {
                 Some(Resolution::NotCreated)
             } else if attach || issue.is_some() {
@@ -2260,8 +2329,9 @@ fn source_command(
     workspace: &mut Workspace,
     command: SourceCommand,
 ) -> Result<String, Box<dyn std::error::Error>> {
-    use ticketd_core::source::{ConfigValues, Engine};
-    let engine = Engine::builtin();
+    use ticketd_core::source::ConfigValues;
+    let registry = ExtensionRegistry::device()?;
+    let engine = registry.engine()?;
     Ok(match command {
         SourceCommand::List => {
             let saved = workspace.saved_sources()?;
@@ -2273,11 +2343,13 @@ fn source_command(
                     .collect();
                 if connections.is_empty() {
                     sources.push(output::SourceListing {
+                        development: registry.is_development(&description.descriptor.provider),
                         connector: description,
                         saved: None,
                     });
                 } else {
                     sources.extend(connections.into_iter().map(|saved| output::SourceListing {
+                        development: registry.is_development(&description.descriptor.provider),
                         connector: description.clone(),
                         saved: Some(saved),
                     }));
@@ -2310,6 +2382,8 @@ fn source_command(
             serde_json::to_string(&workspace.take_ownership(&reference, agent.as_deref())?)?
         }
         SourceCommand::Connection(_)
+        | SourceCommand::Extension { .. }
+        | SourceCommand::Conformance { .. }
         | SourceCommand::Publish { .. }
         | SourceCommand::Resolve { .. } => {
             return Err(
@@ -2325,8 +2399,9 @@ fn run_source_connection(
     operation: SourceConnectionCommand,
     output: &mut impl Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use ticketd_core::source::{Engine, RefreshOptions};
-    let engine = Engine::builtin();
+    use ticketd_core::source::RefreshOptions;
+    let registry = ExtensionRegistry::device()?;
+    let engine = registry.engine()?;
     let saved = workspace.source_connection(connection)?;
     let text = match operation {
         SourceConnectionCommand::Show => serde_json::to_string(&saved)?,

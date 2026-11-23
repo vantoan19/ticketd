@@ -1,0 +1,1644 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Contract2",
+  "anyOf": [
+    {
+      "$ref": "#/$defs/Request"
+    },
+    {
+      "$ref": "#/$defs/Response"
+    }
+  ],
+  "$defs": {
+    "Capability": {
+      "description": "What a connector can do beyond describing and validating its configuration.",
+      "oneOf": [
+        {
+          "description": "List issues that match the discovery configuration.",
+          "type": "string",
+          "const": "discover"
+        },
+        {
+          "description": "Fetch one issue by identity, including its external state.",
+          "type": "string",
+          "const": "fetch"
+        },
+        {
+          "description": "Create an issue, locate it, and search for an uncertain creation (optional).",
+          "type": "string",
+          "const": "publish"
+        },
+        {
+          "description": "Read an issue's comments and timeline events (optional).",
+          "type": "string",
+          "const": "comments"
+        }
+      ]
+    },
+    "ChoiceOption": {
+      "type": "object",
+      "properties": {
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ]
+    },
+    "ConfigSchema": {
+      "type": "object",
+      "properties": {
+        "fields": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SchemaField"
+          }
+        }
+      },
+      "required": [
+        "fields"
+      ]
+    },
+    "ConnectionCheck": {
+      "description": "The verified connection and answers derived from its settings.",
+      "type": "object",
+      "properties": {
+        "connection": {
+          "$ref": "#/$defs/ConnectionInfo"
+        },
+        "derived": {
+          "$ref": "#/$defs/DerivedConfiguration"
+        }
+      },
+      "required": [
+        "connection",
+        "derived"
+      ]
+    },
+    "ConnectionInfo": {
+      "description": "The account the connector is acting as. Never contains a credential.",
+      "type": "object",
+      "properties": {
+        "account": {
+          "type": "string"
+        },
+        "site": {
+          "description": "Canonical site identity. Empty when the provider has only one site.",
+          "type": "string",
+          "default": ""
+        }
+      },
+      "required": [
+        "account"
+      ]
+    },
+    "ConnectionParams": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "connection_id": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "connection_id",
+        "config"
+      ]
+    },
+    "Conversation": {
+      "description": "An issue's whole conversation. Order is not significant; the engine sorts\nit chronologically.",
+      "type": "object",
+      "properties": {
+        "comments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalComment"
+          }
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalEvent"
+          }
+        }
+      },
+      "required": [
+        "comments",
+        "events"
+      ]
+    },
+    "DerivedConfiguration": {
+      "description": "Configuration answers that ticketd can keep for use without a connector call.",
+      "type": "object",
+      "properties": {
+        "discovery_scope": {
+          "description": "A stable key for filters that narrow what discovery reads within each part.\nAn empty key means discovery does not narrow the part.",
+          "type": "string"
+        },
+        "partitions": {
+          "description": "Parts read by discovery, named as in [`ExternalRef::partition`].",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "publication": {
+          "$ref": "#/$defs/DestinationRules"
+        }
+      },
+      "required": [
+        "partitions",
+        "discovery_scope",
+        "publication"
+      ]
+    },
+    "Description": {
+      "type": "object",
+      "properties": {
+        "contract_version": {
+          "description": "Null when the extension does not support any versions offered by the host.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint32",
+          "minimum": 0
+        },
+        "contract_versions": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "format": "uint32",
+            "minimum": 0
+          }
+        },
+        "description": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SourceDescription"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "version": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "contract_versions",
+        "version"
+      ]
+    },
+    "DestinationRules": {
+      "description": "Destination choices and the rules for checking a destination locally.",
+      "type": "object",
+      "properties": {
+        "case_insensitive": {
+          "description": "Whether destination matching ignores ASCII case.",
+          "type": "boolean"
+        },
+        "destinations": {
+          "description": "Accepted destinations in their canonical spelling. Empty when the\nconnector cannot enumerate them.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "validation": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DestinationValidation"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "destinations",
+        "case_insensitive"
+      ]
+    },
+    "DestinationValidation": {
+      "type": "object",
+      "properties": {
+        "format": {
+          "$ref": "#/$defs/ValueFormat"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "format",
+        "message"
+      ]
+    },
+    "DiscoveryPage": {
+      "type": "object",
+      "properties": {
+        "issues": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalIssue"
+          }
+        },
+        "next_cursor": {
+          "description": "`Some` while more results remain. A page may be empty and still have a\ncontinuation, so an empty page is never proof that discovery is done.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "skipped": {
+          "description": "Parts of the discovery rules the connector could not read (a repository\nthat is gone or inaccessible) and skipped, so the rest still ran.",
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/SkippedPartition"
+          }
+        }
+      },
+      "required": [
+        "issues",
+        "skipped"
+      ]
+    },
+    "ErrorClass": {
+      "description": "A broad cause that a caller can handle without knowing every failure code.",
+      "type": "string",
+      "enum": [
+        "config",
+        "auth",
+        "transient",
+        "system"
+      ]
+    },
+    "ExternalComment": {
+      "description": "A comment on an external issue, as its source reports it. Authors are the\nsource's own identities, never ticketd editing agents.",
+      "type": "object",
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "description": "Stable within the issue; repeated reads of one comment return one id.",
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "url": {
+          "description": "Where the comment can be viewed at the source.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "author",
+        "body",
+        "url",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "ExternalEvent": {
+      "description": "A timeline event such as a closure, reopening or assignment change.",
+      "type": "object",
+      "properties": {
+        "actor": {
+          "description": "Who acted, when the source says.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ExternalEventKind"
+        },
+        "subject": {
+          "description": "Whom an assignment change concerns.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "created_at"
+      ]
+    },
+    "ExternalEventKind": {
+      "description": "What happened in an external timeline event.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "category": {
+              "$ref": "#/$defs/StateCategory"
+            },
+            "event": {
+              "type": "string",
+              "const": "closed"
+            }
+          },
+          "required": [
+            "event",
+            "category"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "reopened"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "assigned"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "unassigned"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        }
+      ]
+    },
+    "ExternalIdentity": {
+      "description": "An external issue's immutable identity. Titles, numbers and repository\nnames can change; this cannot. Never match issues by display text.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "provider",
+        "id"
+      ]
+    },
+    "ExternalIssue": {
+      "description": "An issue as the provider reports it, in provider-neutral form.",
+      "type": "object",
+      "properties": {
+        "assignees": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "author": {
+          "description": "The source identity that opened the issue, when known.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "body": {
+          "type": "string"
+        },
+        "created_at": {
+          "description": "When the issue was opened at the source.",
+          "type": "string"
+        },
+        "display": {
+          "description": "Human-readable name such as `owner/name#12`. Display only.",
+          "type": "string"
+        },
+        "duplicate_of": {
+          "description": "For an issue closed as a duplicate: the canonical issue, when the provider\nnames an accessible one. Absent means the target is unknown.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ExternalRef"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "duplicate_of_url": {
+          "description": "Where the canonical issue can be opened, when the provider says.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "duplicate_withdrawn": {
+          "description": "The provider says the duplicate marking was withdrawn. Distinct from\n`duplicate_of` being `None`, which only means no target was supplied (a\nlookup failed or access changed) and keeps the last known one.",
+          "type": "boolean",
+          "default": false
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "reference": {
+          "$ref": "#/$defs/ExternalRef"
+        },
+        "state": {
+          "$ref": "#/$defs/ExternalState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "updated_at": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "reference",
+        "display",
+        "url",
+        "title",
+        "body",
+        "state",
+        "assignees",
+        "labels",
+        "created_at",
+        "updated_at"
+      ]
+    },
+    "ExternalRef": {
+      "description": "Enough to ask the connector for an issue again. `locator` is opaque to\nticketd and defined by the connector (for GitHub, `owner/name#number`).",
+      "type": "object",
+      "properties": {
+        "identity": {
+          "$ref": "#/$defs/ExternalIdentity"
+        },
+        "locator": {
+          "type": "string"
+        },
+        "partition": {
+          "description": "The part of discovery this issue belongs to, such as a repository.\nAn empty string denotes a source that is read as one whole.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "identity",
+        "locator",
+        "partition"
+      ]
+    },
+    "ExternalState": {
+      "type": "object",
+      "properties": {
+        "category": {
+          "$ref": "#/$defs/StateCategory"
+        },
+        "name": {
+          "description": "The tracker's own name for the state, used only for display. Older\nobservations may have no name.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "category"
+      ]
+    },
+    "Failure": {
+      "type": "object",
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/RpcError"
+        },
+        "id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "jsonrpc": {
+          "$ref": "#/$defs/JsonRpc"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "error"
+      ]
+    },
+    "FieldIssue": {
+      "type": "object",
+      "properties": {
+        "field": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "FieldPattern": {
+      "description": "A regular expression and instructions for correcting a mismatched value.",
+      "type": "object",
+      "properties": {
+        "message": {
+          "type": "string"
+        },
+        "regex": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "regex",
+        "message"
+      ]
+    },
+    "FieldPresentation": {
+      "type": "object",
+      "properties": {
+        "additional_placeholder": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "placeholder": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "IssueName": {
+      "description": "The last occurrence of the separator ends the place. The separator is\nincluded in the displayed number when it is part of the issue's name.",
+      "type": "object",
+      "properties": {
+        "place_separator": {
+          "description": "A place separator to surround with spaces in the human-readable label.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "separator": {
+          "type": "string",
+          "default": ""
+        },
+        "separator_in_number": {
+          "type": "boolean",
+          "default": false
+        }
+      }
+    },
+    "IssueParams": {
+      "type": "object",
+      "properties": {
+        "config": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "connection_id": {
+          "type": "string"
+        },
+        "reference": {
+          "$ref": "#/$defs/ExternalRef"
+        }
+      },
+      "required": [
+        "connection_id",
+        "config",
+        "reference"
+      ]
+    },
+    "JsonRpc": {
+      "type": "string",
+      "enum": [
+        "2.0"
+      ]
+    },
+    "OptionSource": {
+      "description": "Where a selector gets its options.",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "options": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ChoiceOption"
+              }
+            },
+            "source": {
+              "type": "string",
+              "const": "static"
+            }
+          },
+          "required": [
+            "source",
+            "options"
+          ]
+        },
+        {
+          "description": "Options come from the connector while the person types. `depends_on`\nnames fields whose current values the connector needs.",
+          "type": "object",
+          "properties": {
+            "depends_on": {
+              "type": "array",
+              "default": [],
+              "items": {
+                "type": "string"
+              }
+            },
+            "source": {
+              "type": "string",
+              "const": "dynamic"
+            }
+          },
+          "required": [
+            "source"
+          ]
+        }
+      ]
+    },
+    "PublicationCandidates": {
+      "description": "What a search found. `matches` holds every issue the connector saw whose\ntitle or non-empty description equals what the attempt sent. `recent` holds\nthe other issues the connected account created in the window: they are shown\nfor information and may be attached, but never block a \"not created\" verdict.\n`complete` is true only when the connector read the whole window: then an\nempty `matches` proves that nothing was created, while an incomplete read\nproves nothing.",
+      "type": "object",
+      "properties": {
+        "complete": {
+          "type": "boolean"
+        },
+        "matches": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ExternalIssue"
+          }
+        },
+        "recent": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/ExternalIssue"
+          }
+        }
+      },
+      "required": [
+        "matches",
+        "complete"
+      ]
+    },
+    "PublicationSearch": {
+      "description": "A search for issues an earlier, uncertain publish may have created.",
+      "type": "object",
+      "properties": {
+        "account": {
+          "description": "The account the source was connected as. Whatever that account created in\nthe window is a candidate, whatever its text now says: a teammate or an\nautomation may have edited the title and description since.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "request": {
+          "description": "Exactly what the earlier attempt sent.",
+          "$ref": "#/$defs/PublishRequest"
+        },
+        "since": {
+          "description": "RFC 3339 instant before which the attempt cannot have created anything.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request",
+        "since"
+      ]
+    },
+    "PublishRequest": {
+      "description": "A request to create an ordinary issue. Connectors that do not declare\n[`Capability::Publish`] keep the default implementation. It carries exactly\nwhat the person previewed: no ticketd metadata, labels or comments.",
+      "type": "object",
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "destination": {
+          "description": "Connector-defined destination, such as `owner/name`.",
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "body",
+        "destination"
+      ]
+    },
+    "PullRequestLink": {
+      "description": "How to recognize an evidence link with the path /owner/project/segment/number.",
+      "type": "object",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "segment": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "host",
+        "segment"
+      ]
+    },
+    "Request": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "jsonrpc": {
+          "$ref": "#/$defs/JsonRpc"
+        }
+      },
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "describe"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "contract_versions": {
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "format": "uint32",
+                    "minimum": 0
+                  }
+                },
+                "pid": {
+                  "type": "integer",
+                  "format": "uint32",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "contract_versions",
+                "pid"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "check_connection"
+            },
+            "params": {
+              "$ref": "#/$defs/ConnectionParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "validate"
+            },
+            "params": {
+              "$ref": "#/$defs/ConnectionParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "options"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "connection_id": {
+                  "type": "string"
+                },
+                "field": {
+                  "type": "string"
+                },
+                "query": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "connection_id",
+                "config",
+                "field",
+                "query"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "discover"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "connection_id": {
+                  "type": "string"
+                },
+                "cursor": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "page_size": {
+                  "type": "integer",
+                  "format": "uint",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "connection_id",
+                "config",
+                "page_size"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "fetch"
+            },
+            "params": {
+              "$ref": "#/$defs/IssueParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "conversation"
+            },
+            "params": {
+              "$ref": "#/$defs/IssueParams"
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "publish"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "connection_id": {
+                  "type": "string"
+                },
+                "request": {
+                  "$ref": "#/$defs/PublishRequest"
+                }
+              },
+              "required": [
+                "connection_id",
+                "config",
+                "request"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "locate"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "connection_id": {
+                  "type": "string"
+                },
+                "destination": {
+                  "type": "string"
+                },
+                "text": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "connection_id",
+                "config",
+                "destination",
+                "text"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "method": {
+              "type": "string",
+              "const": "find_published"
+            },
+            "params": {
+              "type": "object",
+              "properties": {
+                "config": {
+                  "type": "object",
+                  "additionalProperties": true
+                },
+                "connection_id": {
+                  "type": "string"
+                },
+                "search": {
+                  "$ref": "#/$defs/PublicationSearch"
+                }
+              },
+              "required": [
+                "connection_id",
+                "config",
+                "search"
+              ]
+            }
+          },
+          "required": [
+            "method",
+            "params"
+          ]
+        }
+      ],
+      "required": [
+        "jsonrpc",
+        "id"
+      ]
+    },
+    "Response": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Success"
+        },
+        {
+          "$ref": "#/$defs/Failure"
+        }
+      ]
+    },
+    "ResultValue": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/Description"
+        },
+        {
+          "$ref": "#/$defs/ConnectionCheck"
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FieldIssue"
+          }
+        },
+        {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ChoiceOption"
+          }
+        },
+        {
+          "$ref": "#/$defs/DiscoveryPage"
+        },
+        {
+          "$ref": "#/$defs/ExternalIssue"
+        },
+        {
+          "$ref": "#/$defs/Conversation"
+        },
+        {
+          "$ref": "#/$defs/PublicationCandidates"
+        }
+      ]
+    },
+    "RpcError": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "type": "integer",
+          "format": "int32"
+        },
+        "data": {
+          "description": "Domain errors use code -32000 and carry the source failure in data.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/WireFailure"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ]
+    },
+    "SchemaField": {
+      "type": "object",
+      "properties": {
+        "advanced": {
+          "type": "boolean"
+        },
+        "help": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "key": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "pattern": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FieldPattern"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "placeholder": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "required": {
+          "type": "boolean",
+          "default": false
+        },
+        "show_if": {
+          "description": "An input key that must have a value for this setting to apply.",
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "description": "One line of text. An empty value means the field is not set.",
+          "type": "object",
+          "properties": {
+            "format": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ValueFormat"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "type": "string",
+              "const": "text"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        },
+        {
+          "description": "An ordered set of values picked from options and, when allowed, typed.",
+          "type": "object",
+          "properties": {
+            "allow_custom": {
+              "description": "Whether a value that is not among the offered options is accepted.",
+              "type": "boolean",
+              "default": false
+            },
+            "format": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ValueFormat"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "max_items": {
+              "type": "integer",
+              "format": "uint",
+              "minimum": 0
+            },
+            "min_items": {
+              "type": "integer",
+              "format": "uint",
+              "default": 0,
+              "minimum": 0
+            },
+            "options": {
+              "$ref": "#/$defs/OptionSource"
+            },
+            "type": {
+              "type": "string",
+              "const": "multi_select"
+            }
+          },
+          "required": [
+            "type",
+            "options",
+            "max_items"
+          ]
+        },
+        {
+          "description": "An informational link. Its URL is metadata rather than a setting value.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "link"
+            },
+            "url": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "url"
+          ]
+        },
+        {
+          "description": "Reserved for settings backed by the operating system keychain.",
+          "type": "object",
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "secret"
+            }
+          },
+          "required": [
+            "type"
+          ]
+        }
+      ],
+      "required": [
+        "key",
+        "label"
+      ]
+    },
+    "SignInGuidance": {
+      "type": "object",
+      "properties": {
+        "desktop_hint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "desktop_instruction": {
+          "description": "The complete instruction for the connection screen.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "terminal_hint": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        }
+      }
+    },
+    "SkippedPartition": {
+      "description": "One part of the discovery rules that could not be read.",
+      "type": "object",
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/ErrorClass"
+        },
+        "code": {
+          "description": "The failure code of the part (`not_found` or `forbidden`).",
+          "type": "string"
+        },
+        "field": {
+          "description": "The setting that named the part, so a preview can point at it.",
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "message": {
+          "type": "string"
+        },
+        "partition": {
+          "description": "The part, as [`ExternalRef::partition`] names it.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "class",
+        "message",
+        "partition"
+      ]
+    },
+    "SourceDescription": {
+      "description": "The schema and presentation for a source registered with the engine.",
+      "type": "object",
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Capability"
+          }
+        },
+        "contract_version": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "name": {
+          "type": "string"
+        },
+        "presentation": {
+          "$ref": "#/$defs/SourcePresentation"
+        },
+        "provider": {
+          "description": "Stable provider id, such as `github`. It is part of every external identity.",
+          "type": "string"
+        },
+        "schema": {
+          "$ref": "#/$defs/ConfigSchema"
+        }
+      },
+      "required": [
+        "provider",
+        "name",
+        "contract_version",
+        "capabilities",
+        "schema",
+        "presentation"
+      ]
+    },
+    "SourcePresentation": {
+      "type": "object",
+      "properties": {
+        "discovery_note": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "fields": {
+          "type": "object",
+          "additionalProperties": {
+            "$ref": "#/$defs/FieldPresentation"
+          },
+          "default": {}
+        },
+        "hosts": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "type": "string"
+          }
+        },
+        "icon_svg": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "default": null
+        },
+        "issue_name": {
+          "$ref": "#/$defs/IssueName",
+          "default": {
+            "place_separator": null,
+            "separator": "",
+            "separator_in_number": false
+          }
+        },
+        "pull_request_link": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PullRequestLink"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "sign_in": {
+          "$ref": "#/$defs/SignInGuidance",
+          "default": {
+            "desktop_hint": null,
+            "desktop_instruction": null,
+            "terminal_hint": null
+          }
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TargetPresentation"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      }
+    },
+    "StateCategory": {
+      "description": "How a source state affects ticketd's workflow. Connectors derive the\ncategory from typed provider data and use Unknown for an unrecognized value.",
+      "type": "string",
+      "enum": [
+        "open",
+        "completed",
+        "not_planned",
+        "duplicate",
+        "unknown"
+      ]
+    },
+    "Success": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "jsonrpc": {
+          "$ref": "#/$defs/JsonRpc"
+        },
+        "result": {
+          "$ref": "#/$defs/ResultValue"
+        }
+      },
+      "additionalProperties": false,
+      "required": [
+        "jsonrpc",
+        "id",
+        "result"
+      ]
+    },
+    "TargetPresentation": {
+      "type": "object",
+      "properties": {
+        "add": {
+          "type": "string"
+        },
+        "choose": {
+          "type": "string"
+        },
+        "example": {
+          "type": "string"
+        },
+        "field": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "field",
+        "label",
+        "example",
+        "choose",
+        "add"
+      ]
+    },
+    "ValueFormat": {
+      "description": "Built-in syntax checks a field can ask for.",
+      "oneOf": [
+        {
+          "description": "`owner/name`, as in a repository path.",
+          "type": "string",
+          "const": "owner_name"
+        },
+        {
+          "description": "A short account handle: letters, digits and single hyphens.",
+          "type": "string",
+          "const": "handle"
+        },
+        {
+          "description": "A label or similar tag: no commas or line breaks, at most 50 characters.",
+          "type": "string",
+          "const": "label"
+        }
+      ]
+    },
+    "WireFailure": {
+      "type": "object",
+      "properties": {
+        "class": {
+          "$ref": "#/$defs/ErrorClass"
+        },
+        "code": {
+          "$ref": "#/$defs/WireFailureCode"
+        },
+        "detail": {
+          "description": "Reserved for diagnostics. The host does not expose extension-supplied detail.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fields": {
+          "type": "array",
+          "default": [],
+          "items": {
+            "$ref": "#/$defs/FieldIssue"
+          }
+        },
+        "message": {
+          "type": "string"
+        },
+        "retry_after_secs": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "class",
+        "code",
+        "message"
+      ]
+    },
+    "WireFailureCode": {
+      "type": "string",
+      "enum": [
+        "unauthenticated",
+        "forbidden",
+        "not_found",
+        "rate_limited",
+        "unavailable",
+        "not_sent",
+        "rejected",
+        "protocol",
+        "unsupported",
+        "invalid_configuration"
+      ]
+    }
+  }
+}

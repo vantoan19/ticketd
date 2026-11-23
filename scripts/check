@@ -39,6 +39,8 @@ if runs slow rust && [[ -f Cargo.toml ]]; then
     -D warnings -D unsafe_code \
     -D clippy::unwrap_used -D clippy::expect_used -D clippy::panic
   cargo test --workspace --locked
+  cargo run --quiet --locked -p ticketd-core --example source_contract_schema | \
+    diff -u docs/source-extensions/contract-2.schema.json -
 fi
 
 if runs slow ui && [[ -f package.json ]]; then npm test; fi

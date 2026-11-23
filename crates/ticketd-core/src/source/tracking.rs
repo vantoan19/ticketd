@@ -916,6 +916,20 @@ impl Workspace {
         self.refresh_selected(engine, options, None)
     }
 
+    /// The connection that would refresh the externally owned ticket on this device.
+    pub fn ticket_source_connection(&self, reference: &str) -> Result<Option<String>, Error> {
+        let tracked = tracked(&self.connection, Some(reference))?;
+        let Some(ticket) = tracked.first() else {
+            return Ok(None);
+        };
+        super::selected_connection(
+            &self.connection,
+            &ticket.ticket_id,
+            &ticket.provider,
+            &ticket.partition,
+        )
+    }
+
     /// Refreshes a single connection and the tickets routed to it.
     pub fn refresh_connection(
         &mut self,

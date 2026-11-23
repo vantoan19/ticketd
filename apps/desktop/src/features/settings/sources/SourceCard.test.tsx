@@ -884,13 +884,26 @@ test("the connector's readback follows draft changes and preserves emphasis", as
   );
 });
 
-test("the Sync section shows the refresh command with a copy button", () => {
-  render(<SourceCard entry={entry} />);
+test("the Sync section shows the saved connection's refresh command with a copy button", () => {
+  render(
+    <SourceCard
+      entry={{
+        ...entry,
+        saved: {
+          id: "github-2",
+          provider: "github",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
+      }}
+    />,
+  );
   const sync = screen.getByRole("region", { name: "Sync" });
   expect(sync.textContent).toContain(
     "Agents can sync without the desktop open",
   );
-  expect(sync.textContent).toContain("ticketd source refresh");
+  expect(sync.textContent).toContain("ticketd source github-2 refresh");
   expect(
     within(sync).getByRole("button", { name: "Copy sync command" }),
   ).toBeTruthy();

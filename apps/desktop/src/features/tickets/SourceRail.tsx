@@ -177,7 +177,7 @@ export function SourceRail({
             <FailureAlert
               size="compact"
               failure={sync.failure}
-              onRetry={() => void sync.run()}
+              onRetry={() => void sync.run(true)}
             />
           )}
         </div>

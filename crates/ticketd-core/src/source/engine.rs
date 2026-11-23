@@ -79,7 +79,7 @@ pub struct DiscoverySummary {
     pub skipped: Vec<SkippedPartition>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Engine {
     connectors: Vec<std::sync::Arc<dyn Connector>>,
 }
@@ -563,7 +563,7 @@ impl Engine {
             .map(AsRef::as_ref)
     }
 
-    fn connector(&self, provider: &str) -> Result<&dyn Connector, SourceError> {
+    pub(super) fn connector(&self, provider: &str) -> Result<&dyn Connector, SourceError> {
         self.find(provider)
             .ok_or_else(|| SourceError::UnknownProvider(provider.to_owned()))
     }

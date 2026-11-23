@@ -3,6 +3,20 @@ import { BridgeFailure } from "./bridge-failure";
 import { describeFailure, sentence } from "./describe-failure";
 
 describe("describeFailure", () => {
+  it("offers Retry when the source extension has crashed repeatedly", () => {
+    expect(
+      describeFailure(
+        { code: "extension_crash_limit", message: "runtime details" },
+        "sync this connection",
+      ),
+    ).toMatchObject({
+      code: "extension_crash_limit",
+      action: "retry",
+      sentence: "The source extension stopped after repeated crashes.",
+      details: "runtime details",
+    });
+  });
+
   it("says what did not happen in plain words and keeps the raw text for Details", () => {
     const failure = describeFailure(
       {

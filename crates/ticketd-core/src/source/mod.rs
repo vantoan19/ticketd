@@ -10,11 +10,11 @@
 //!   the engine first and write in one short transaction afterwards, so no
 //!   network I/O ever happens while the database is locked.
 
-#[cfg(test)]
 mod conformance;
 mod contract;
 mod conversation;
 mod engine;
+mod extension;
 mod freshness;
 mod github;
 mod presentation;
@@ -29,6 +29,9 @@ use std::borrow::Cow;
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+pub use conformance::{
+    ConformanceCheck, ConformanceOptions, ConformanceOutcome, ConformanceReport,
+};
 pub use contract::{
     CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector, ConnectorDescriptor,
     Conversation, DerivedConfiguration, DestinationRules, DestinationValidation, DiscoveryPage,
@@ -39,6 +42,7 @@ pub use contract::{
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
+pub use extension::{ExtensionRegistry, LinkedExtension, contract_schema};
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub use presentation::{
     FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourceDescription,

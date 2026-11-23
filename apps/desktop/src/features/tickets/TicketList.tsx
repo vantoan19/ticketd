@@ -1,3 +1,4 @@
+import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import { useNow } from "@/lib/use-now";
 import {
   memo,
@@ -555,7 +556,11 @@ export function SourcePill({ ticket }: { ticket: Ticket }) {
         <span className="sr-only">
           Owned by {source.provider_name}, {source.number}
         </span>
-        <Cloud aria-hidden="true" />
+        {source.provider_icon_svg ? (
+          <SourceIcon svg={source.provider_icon_svg} size={14} />
+        ) : (
+          <Cloud aria-hidden="true" />
+        )}
         <span aria-hidden="true">{source.number}</span>
       </Badge>
     </Tooltip>

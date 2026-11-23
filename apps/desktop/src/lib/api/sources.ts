@@ -134,6 +134,7 @@ const sourceEntrySchema = lazySchema(() =>
     connector: connectorSchema,
     saved: savedSourceSchema.nullable(),
     next_id: z.string().optional(),
+    development: z.boolean().optional(),
   }),
 );
 export type SourceEntry = z.infer<typeof sourceEntrySchema>;
@@ -312,12 +313,13 @@ export const sourcesClient = {
    * `ticket`. Saved content stays in place when the source cannot be reached; the
    * report names what failed.
    */
-  async refresh(ticket?: string, connection?: string) {
+  async refresh(ticket?: string, connection?: string, retry = false) {
     return refreshReportSchema.parse(
       await structured(
         invoke("refresh_sources", {
           ticket: ticket ?? null,
           ...(connection && { connection }),
+          ...(retry && { retry }),
         }),
       ),
     );
@@ -394,7 +396,7 @@ export const sourcesClient = {
       ),
     );
   },
-  /** The built-in sources and what is saved for each. */
+  /** The registered sources and what is saved for each. */
   async list() {
     return z
       .array(sourceEntrySchema)
