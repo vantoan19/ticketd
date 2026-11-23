@@ -31,8 +31,9 @@ jobs:
           rust: true
           desktop: true
           cache: native-smoke
-      - name: Install WebDriver dependencies
-        run: sudo apt-get install -y webkit2gtk-driver xvfb
+          # The WebDriver dependencies go through the same package cache; xauth is what xvfb-run
+          # needs, which a plain install pulls in as a recommendation.
+          extra-packages: webkit2gtk-driver xvfb xauth
       - run: npm run build
       - run: npm run desktop -- build --debug --bundles deb -- --locked
       - name: Check the CLI in the Debian package
