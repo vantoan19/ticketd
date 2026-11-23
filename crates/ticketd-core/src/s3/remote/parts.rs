@@ -89,6 +89,16 @@ enum Upload {
     Gone,
 }
 
+/// What an upload in progress holds, as far as this file's write can tell.
+enum Held {
+    /// Only parts of this file's plan; the ETag of each one it has.
+    Ours(Vec<Option<String>>),
+    /// A part that is not this file's.
+    Another,
+    /// No part yet, or no longer there.
+    Nothing,
+}
+
 /// What a 200 answer to a completion says. S3 can answer 200 and then fail while it assembles
 /// the file, and say so only in the body.
 fn completion(response: S3Response) -> Result<S3Response, RemoteError> {
@@ -175,20 +185,12 @@ impl S3Remote<'_> {
             let code = crate::s3::client::error_of(&response).map(|error| error.code);
             match response.status {
                 200 => {
-                    let version = response
-                        .header("x-amz-version-id")
-                        .filter(|version| valid_version(version))
-                        .ok_or_else(|| {
-                            RemoteError::Other(
-                                "S3 stored the file without a version; turn on Versioning for the bucket"
-                                    .into(),
-                            )
-                        })?;
+                    let version = self.committed_version(&response)?;
                     let (file_id, created) = lookup.identity();
                     return Ok(RemoteFile {
                         key: key.clone(),
                         name: file_name(key),
-                        version: version.to_owned(),
+                        version,
                         size,
                         file_id,
                         created,
@@ -235,18 +237,15 @@ impl S3Remote<'_> {
     ) -> Result<Upload, RemoteError> {
         let mut chosen: Option<(String, Vec<Option<String>>)> = None;
         for id in self.uploads_of(object)? {
-            let resumed = if chosen.is_none() {
-                self.resumable(object, &id, plan)?
-            } else {
-                None
-            };
-            match resumed {
-                Some(etags) => chosen = Some((id, etags)),
+            // One look at its parts decides, so a part another writer adds meanwhile cannot
+            // turn an upload seen empty into one that is aborted.
+            match self.classify(object, &id, plan)? {
+                Held::Ours(etags) if chosen.is_none() => chosen = Some((id, etags)),
                 // Another desktop may have begun it a moment ago and not sent a part yet;
                 // aborting it would fail that desktop's upload. It costs nothing while it
                 // holds no part, and the write that finds the file complete ends it.
-                None if self.holds_no_part(object, &id)? => {}
-                None => self.abort(object, &id),
+                Held::Nothing => {}
+                Held::Ours(_) | Held::Another => self.abort(object, &id),
             }
         }
         let (id, mut etags) = match chosen {
@@ -324,27 +323,15 @@ impl S3Remote<'_> {
         created_upload(&response.body).ok_or_else(unreadable)
     }
 
-    /// Whether upload `id` is still there and holds no part yet.
-    fn holds_no_part(&self, object: &str, id: &str) -> Result<bool, RemoteError> {
-        Ok(self
-            .parts_of(object, id)?
-            .is_some_and(|parts| parts.is_empty()))
-    }
-
-    /// The ETag of each part of `plan` that upload `id` already holds, if every part it holds
-    /// is this file's. An upload with no parts cannot be told from another file's (S3 does not
-    /// say what it was created with), so it is not resumed.
-    fn resumable(
-        &self,
-        object: &str,
-        id: &str,
-        plan: &Plan,
-    ) -> Result<Option<Vec<Option<String>>>, RemoteError> {
+    /// What upload `id` holds, read once. When every part it holds is this file's, the ETag
+    /// of each part of `plan` it already has. An upload with no parts cannot be told from
+    /// another file's (S3 does not say what it was created with), so it is not resumed.
+    fn classify(&self, object: &str, id: &str, plan: &Plan) -> Result<Held, RemoteError> {
         let Some(held) = self.parts_of(object, id)? else {
-            return Ok(None);
+            return Ok(Held::Nothing);
         };
         if held.is_empty() {
-            return Ok(None);
+            return Ok(Held::Nothing);
         }
         let mut etags = vec![None; plan.parts.len()];
         for part in held {
@@ -356,11 +343,11 @@ impl S3Remote<'_> {
                     planned.len == part.size && part.checksum.as_deref() == Some(&planned.checksum)
                 });
             let Some((index, _)) = ours else {
-                return Ok(None);
+                return Ok(Held::Another);
             };
             etags[index] = Some(part.etag);
         }
-        Ok(Some(etags))
+        Ok(Held::Ours(etags))
     }
 
     /// The ids of the uploads in progress for exactly `object`, oldest first.

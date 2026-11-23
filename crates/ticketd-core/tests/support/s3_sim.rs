@@ -211,6 +211,8 @@ struct State {
     versioning: Versioning,
     /// A bucket that ignores `If-None-Match` and `If-Match`, as some S3-compatible services do.
     ignores_conditions: bool,
+    /// A bucket that honors `If-None-Match` but ignores `If-Match`.
+    ignores_if_match: bool,
     /// Where the bucket lives, when it is not where the sim's target says.
     bucket_region: Option<String>,
     uploads: Vec<Upload>,
@@ -327,7 +329,13 @@ impl State {
         checksum: Option<String>,
     ) -> (String, String) {
         let modified = self.now();
-        let id = format!("v{}", self.counter);
+        // AWS version ids are opaque and can hold characters a URL must encode, such as +. A
+        // bucket whose Versioning was suspended writes the one `null` version.
+        let id = if self.versioning == Versioning::Suspended {
+            "null".to_owned()
+        } else {
+            format!("v{}+opaque", self.counter)
+        };
         let version = Version {
             id: id.clone(),
             bytes,
@@ -481,7 +489,8 @@ impl State {
         if conditions && header(request, "if-none-match") == Some("*") && current.is_some() {
             return Some(failure(412, "PreconditionFailed"));
         }
-        if let Some(wanted) = header(request, "if-match").filter(|_| conditions) {
+        let if_match = header(request, "if-match").filter(|_| !self.ignores_if_match);
+        if let Some(wanted) = if_match.filter(|_| conditions) {
             match current {
                 None => return Some(failure(404, "NoSuchKey")),
                 Some(etag) if etag != wanted => return Some(failure(412, "PreconditionFailed")),
@@ -922,6 +931,12 @@ impl S3Sim {
     /// The bucket stops refusing writes on `If-None-Match` and `If-Match`.
     pub fn ignore_conditional_writes(&self) {
         self.state().ignores_conditions = true;
+    }
+
+    /// The bucket still refuses a second create, but writes over an ETag that is not the
+    /// file's.
+    pub fn ignore_if_match(&self) {
+        self.state().ignores_if_match = true;
     }
 
     /// The bucket lives in `region`; a request signed for another region is answered with it.

@@ -13,7 +13,7 @@ use std::{
 use ticketd_core::{
     s3::{
         AwsCli, AwsCliError, CredentialSource, Credentials, ProfileCredentials, S3Remote, S3Target,
-        S3TargetError, UreqS3Transport, discover_bucket_region,
+        S3TargetError, UreqS3Transport, cli_failure, discover_bucket_region,
     },
     sync::{
         S3Binding,
@@ -159,12 +159,7 @@ impl RemoteStorage for S3Storage {
 
 /// What a failure of the AWS CLI means to sync: a session to sign in to again, or a failure.
 fn cli_error(error: AwsCliError) -> RemoteError {
-    if error.needs_sign_in() {
-        RemoteError::Unauthorized
-    } else {
-        // The CLI's own words hold no credential.
-        RemoteError::Other(error.to_string())
-    }
+    cli_failure(&error)
 }
 
 /// One set of credentials of a profile, shared with the sign-in command that forgets it.
@@ -215,6 +210,15 @@ fn build(binding: &S3Binding) -> Result<Built, RemoteError> {
 }
 
 static KEPT: Mutex<Option<Arc<S3Storage>>> = Mutex::new(None);
+
+/// Drops the kept storage and the credentials kept for every profile. The next call builds
+/// the storage from the profile as it is now: its endpoint, its region and its account. Setup
+/// choices (connect, upload, download, reconnect) call this, since a person who comes back to
+/// them may have changed the profile.
+pub fn reset() {
+    *KEPT.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    s3_commands::forget_all_credentials();
+}
 
 /// The storage of an S3 binding. One value is kept, so what it learned (the region, a
 /// folder's marker) lasts between runs; a changed binding gets a new one.
@@ -347,6 +351,19 @@ mod tests {
         assert_eq!(console_url(&other.target, &binding(), "f1"), None);
         let china = built(&fake, "cn-north-1", None);
         assert_eq!(console_url(&china.target, &binding(), "f1"), None);
+    }
+
+    #[test]
+    fn a_reset_gives_the_next_call_a_storage_built_afresh_from_the_profile() {
+        let binding = S3Binding {
+            bucket: "reset-test-bucket".into(),
+            ..binding()
+        };
+        let first = storage(&binding);
+        assert!(Arc::ptr_eq(&first, &storage(&binding)));
+        // The profile's endpoint or account may have changed since it was built.
+        reset();
+        assert!(!Arc::ptr_eq(&first, &storage(&binding)));
     }
 
     #[test]

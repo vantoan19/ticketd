@@ -132,18 +132,19 @@ impl<'a> S3Client<'a> {
             }
             let code = error_code(&response);
             let mismatch = code.as_deref() == Some("SignatureDoesNotMatch");
-            if credentials_expired(response.status, code.as_deref())
+            let by_code = credentials_expired(response.status, code.as_deref())
                 || response.status == 401
-                || mismatch
-                || ended_session_on_head(call.method, &response)
-            {
+                || mismatch;
+            let head_only = !by_code && ended_session_on_head(call.method, &response);
+            if by_code || head_only {
                 if !renewed {
                     renewed = true;
                     self.credentials.forget();
                     continue;
                 }
-                // A mismatch that persists is not an ended session; the caller words it.
-                if !mismatch && !self.credentials.can_sign_in() {
+                // A mismatch that persists is not an ended session; the caller words it. Nor is a
+                // HEAD refusal that names no region: it may be a policy, and the caller asks.
+                if !mismatch && !self.credentials.can_sign_in() && !head_only {
                     // Not an ended session, which signing in would mend: the key is wrong.
                     return Err(RemoteError::Other(
                         "S3 refused the access key of this AWS profile. Check the profile's keys with the AWS CLI".into(),
@@ -230,11 +231,20 @@ fn sign_request(
 }
 
 fn credentials_error(error: AwsCliError) -> RemoteError {
-    if error.needs_sign_in() {
-        RemoteError::Unauthorized
-    } else {
-        // The CLI's own words: they hold no credential.
-        RemoteError::Other(error.to_string())
+    cli_failure(&error)
+}
+
+/// What a failure of the AWS CLI means to sync: a session to sign in to again, or a failure.
+/// The failure's words never include what the program printed. A credential helper that fails
+/// can print its token on stderr, and sync saves this message with the Workspace.
+pub fn cli_failure(error: &AwsCliError) -> RemoteError {
+    match error {
+        _ if error.needs_sign_in() => RemoteError::Unauthorized,
+        AwsCliError::Failed { exit_code, .. } => RemoteError::Other(format!(
+            "The AWS CLI could not export this profile's credentials{}. Run the profile's `aws` command in a terminal to see why",
+            exit_code.map_or_else(String::new, |code| format!(" (exit code {code})"))
+        )),
+        other => RemoteError::Other(other.to_string()),
     }
 }
 
@@ -273,8 +283,9 @@ fn credentials_expired(status: u16, code: Option<&str>) -> bool {
 }
 
 /// A HEAD answer has no body, so an ended or revoked session shows only as a refusal that
-/// names no region. S3 names the bucket's region even in a refusal of a request that was
-/// signed well, so a refusal without it is the credentials'.
+/// names no region. AWS names the bucket's region even in a refusal of a request that was
+/// signed well, so a refusal without it may be the credentials'. It is a hint to renew them
+/// once, not proof: another service may leave the region out of a policy refusal.
 pub(crate) fn ended_session_on_head(method: &str, response: &S3Response) -> bool {
     method == "HEAD"
         && matches!(response.status, 400 | 401 | 403)

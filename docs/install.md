@@ -232,7 +232,9 @@ passes, the Upload, Download and Reconnect choices work as with Google Drive.
 
 An S3-compatible service works when it supports Versioning, conditional writes
 (`If-None-Match` and `If-Match`) and SHA-256 checksums. Its endpoint comes from the
-profile's `endpoint_url`. Reading an endpoint set in a service-specific `s3` section
+profile's `endpoint_url`, and must be `https` unless the service runs on this computer
+(`localhost`). Setup checks that the profile's credentials can be exported rather than asking
+AWS who it is, since AWS knows nothing of a MinIO account. Reading an endpoint set in a service-specific `s3` section
 of the profile needs AWS CLI 2.34.22 or later. AWS S3, MinIO and Ceph RGW 20.x are
 confirmed. Cloudflare R2 (no Versioning) and the Google Cloud Storage XML API (it
 ignores the conditional headers) do not work. The bucket check, not this list, decides
@@ -300,5 +302,9 @@ which keeps 30 days of versions on each desktop. For the prefix `ticketd/`:
 }
 ```
 
-Apply it with `aws s3api put-bucket-lifecycle-configuration --bucket my-bucket
---lifecycle-configuration file://rule.json`. ticketd never sets the rule itself.
+This command replaces the bucket's whole lifecycle configuration, including rules for
+other prefixes. If the bucket already has rules, read them first with `aws s3api
+get-bucket-lifecycle-configuration --bucket my-bucket`, add this rule to them, and apply
+the combined file (or add the rule in the S3 console instead). Then apply it with `aws
+s3api put-bucket-lifecycle-configuration --bucket my-bucket --lifecycle-configuration
+file://rule.json`. ticketd never sets the rule itself.

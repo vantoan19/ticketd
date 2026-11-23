@@ -108,6 +108,13 @@ export function RecordHistory({
     failure: FailureDescription;
     retry: () => void;
   } | null>(null);
+  // Each source starts without the failure of a read of the one before it. Adjusted while
+  // rendering, which React does before it shows anything.
+  const [errorOf, setErrorOf] = useState(remote);
+  if (errorOf !== remote) {
+    setErrorOf(remote);
+    setError(null);
+  }
   const [readAttempt, setReadAttempt] = useState(0);
   const reload = useCallback(() => {
     setError(null);

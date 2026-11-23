@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 
 use super::bucket_check::{self, BucketCheckError};
 use super::client::{S3Call, S3Client, refusal};
-use super::provider::{CredentialSource, S3Target, S3TargetError, S3Transport, encode};
+use super::provider::{CredentialSource, S3Response, S3Target, S3TargetError, S3Transport, encode};
 use super::xml::{Listed, prefixes_page, versions_page};
 use crate::sync::remote::{
     RemoteCapabilities, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
@@ -59,7 +59,13 @@ fn extension(kind: RemoteKind) -> &'static str {
     match kind {
         RemoteKind::Attachment => "",
         RemoteKind::Devices => ".json",
-        _ => ".md",
+        // Listed one by one, so a new kind needs a decision about its file format.
+        RemoteKind::Ticket
+        | RemoteKind::Document
+        | RemoteKind::Plan
+        | RemoteKind::Project
+        | RemoteKind::Automation
+        | RemoteKind::AutomationAgent => ".md",
     }
 }
 
@@ -67,7 +73,12 @@ fn content_type(kind: RemoteKind) -> &'static str {
     match kind {
         RemoteKind::Attachment => "application/octet-stream",
         RemoteKind::Devices => "application/json",
-        _ => "text/markdown",
+        RemoteKind::Ticket
+        | RemoteKind::Document
+        | RemoteKind::Plan
+        | RemoteKind::Project
+        | RemoteKind::Automation
+        | RemoteKind::AutomationAgent => "text/markdown",
     }
 }
 
@@ -105,13 +116,11 @@ fn hex(bytes: &[u8]) -> String {
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
-/// A VersionId is made of characters that are safe in a URL; anything else names no version.
+/// A VersionId is opaque to ticketd: AWS documents ids with `+` and other characters a URL
+/// must encode, and the client encodes it as a query value. Only an empty or oversized id, or
+/// one with a control character, names no version.
 fn valid_version(version: &str) -> bool {
-    !version.is_empty()
-        && version.len() <= 1024
-        && version
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'.' | b'_' | b'-'))
+    !version.is_empty() && version.len() <= 1024 && !version.chars().any(char::is_control)
 }
 
 /// What a file is now: the current version, with the ETag a conditional update names.
@@ -163,18 +172,24 @@ impl Lookup {
 /// refuse it. Whoever records a prefix checks it here, so no binding is made that cannot sync.
 pub fn checked_prefix(prefix: &str) -> Result<String, S3TargetError> {
     let safe = |b: u8| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.' | b'/');
-    if !prefix.bytes().all(safe)
-        || prefix.starts_with('/')
-        || prefix.contains("//")
-        || prefix.len() > 512
+    // A `.` or `..` segment is resolved by the URL, which would leave the bucket's path.
+    let dot_segment = prefix
+        .split('/')
+        .any(|segment| matches!(segment, "." | ".."));
+    if !prefix.bytes().all(safe) || prefix.starts_with('/') || prefix.contains("//") || dot_segment
     {
         return Err(S3TargetError::Prefix);
     }
-    Ok(if prefix.is_empty() || prefix.ends_with('/') {
+    let normalized = if prefix.is_empty() || prefix.ends_with('/') {
         prefix.to_owned()
     } else {
         format!("{prefix}/")
-    })
+    };
+    // The limit is on the value kept, so whatever passes is accepted again where it is used.
+    if normalized.len() > 512 {
+        return Err(S3TargetError::Prefix);
+    }
+    Ok(normalized)
 }
 
 /// What a ranged read learned about an object while reading it.
@@ -274,6 +289,25 @@ impl<'a> S3Remote<'a> {
         bucket_check::run(&self.client, &self.prefix)?;
         self.checked.store(true, Ordering::Release);
         Ok(())
+    }
+
+    /// The VersionId of a write S3 just committed. A write with none, or to the `null` version,
+    /// has no stable revision: Versioning is off or was suspended after the bucket passed its
+    /// check, so the check runs again at the next call. (Reading a `null` version made before
+    /// Versioning was turned on is still fine.)
+    fn committed_version(&self, response: &S3Response) -> Result<String, RemoteError> {
+        match response.header("x-amz-version-id") {
+            Some("null") => {
+                self.checked.store(false, Ordering::Release);
+                Err(RemoteError::Other(
+                    "S3 stored the file in the bucket's null version, which the next write replaces; Versioning is suspended, so turn it on again".into(),
+                ))
+            }
+            Some(version) if valid_version(version) => Ok(version.to_owned()),
+            _ => Err(RemoteError::Other(
+                "S3 stored the file without a version; turn on Versioning for the bucket".into(),
+            )),
+        }
     }
 
     /// The `s3://` address of a Workspace folder, for a person to open in another tool.
@@ -761,20 +795,12 @@ impl RemoteStorage for S3Remote<'_> {
             })?;
             match response.status {
                 200 => {
-                    let version = response
-                        .header("x-amz-version-id")
-                        .filter(|version| valid_version(version))
-                        .ok_or_else(|| {
-                            RemoteError::Other(
-                                "S3 stored the file without a version; turn on Versioning for the bucket"
-                                    .into(),
-                            )
-                        })?;
+                    let version = self.committed_version(&response)?;
                     let (file_id, created) = lookup.identity();
                     return Ok(RemoteFile {
                         key: key.clone(),
                         name: file_name(key),
-                        version: version.to_owned(),
+                        version,
                         size,
                         file_id,
                         created,

@@ -344,6 +344,21 @@ test("an S3 binding reads, names and restores the bucket's versions, and never s
   expect(document.body.textContent).not.toMatch(/drive/i);
 });
 
+test("a failure reading one storage is gone when the History reads another", async () => {
+  stored.local = [];
+  vi.mocked(syncReview.versions).mockImplementation(({ source }) =>
+    source === "drive"
+      ? Promise.reject(new Error("offline"))
+      : Promise.resolve(source === "s3" ? [versions[1]!] : []),
+  );
+  const { rerender } = render(connected(history, "google_drive"));
+  expect(await screen.findByRole("alert")).toBeTruthy();
+  // The status turned out to say S3: the first source's failure is not this one's.
+  rerender(connected(history, "s3"));
+  await screen.findByRole("button", { name: /S3 · Description/ });
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
 test("an S3 listing that finds no older versions says so in S3's name", async () => {
   render(connected(history, "s3"));
   fireEvent.click(

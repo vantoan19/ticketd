@@ -649,7 +649,8 @@ fn version_content(
             let Some(bound) = bound else {
                 return rejected("Sync is not connected");
             };
-            if version.is_empty() || version.len() > 256 {
+            // S3's VersionIds run to 1024 bytes; the storage says whether this one exists.
+            if version.is_empty() || version.len() > 1024 {
                 return missing();
             }
             let unloaded = |error: RemoteError| {
@@ -908,7 +909,11 @@ fn signed_in(workspace: &Workspace) -> Outcome<Arc<dyn RemoteStorage>> {
     match (status.provider, status.connection_id, status.s3) {
         (SyncProvider::GoogleDrive, Some(connection), _) => Ok(drive(&connection)),
         (SyncProvider::GoogleDrive, None, _) => rejected("Sign in to Google Drive first"),
-        (SyncProvider::S3, _, Some(s3)) => Ok(s3_storage::storage(&s3)),
+        (SyncProvider::S3, _, Some(s3)) => {
+            // A choice about the storage reads the profile as it is now.
+            s3_storage::reset();
+            Ok(s3_storage::storage(&s3))
+        }
         (SyncProvider::S3, _, None) => rejected("Connect S3 first"),
     }
 }
@@ -1064,7 +1069,7 @@ pub fn sync_recover(
     if status.recovery == Some(SyncRecovery::AuthorizationExpired) {
         match status.s3 {
             // The profile's own sign-in; what it signs in as stays what the binding says.
-            Some(s3) => crate::s3_commands::sign_in_for_recovery(&s3.profile)?,
+            Some(s3) => crate::s3_commands::sign_in_for_recovery(&s3)?,
             None => {
                 let (connection, account) = sign_in(&app)?;
                 open_workspace()?.sync_connect(&connection, &account)?;
@@ -1573,6 +1578,39 @@ mod tests {
             desks.here.show_ticket(&ticket.reference).unwrap().title,
             "One"
         );
+    }
+
+    #[test]
+    fn a_version_id_up_to_the_storages_own_limit_is_looked_up_not_refused_unseen() {
+        // S3's VersionIds can be 1024 bytes; the storage says whether one exists.
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("One").unwrap();
+        desks.sync_there();
+        desks.sync_here();
+        let calls = desks.remote.calls().len();
+        let refused = version_detail(
+            &desks.here,
+            Some(&desks.bound),
+            RecordKind::Ticket,
+            &ticket.id,
+            Source::Drive,
+            &"v".repeat(300),
+        )
+        .unwrap_err();
+        assert_eq!(refused.message, "This version is no longer available");
+        assert!(desks.remote.calls()[calls..].contains(&RemoteOp::Revisions));
+        // Past the limit, nothing is asked.
+        let calls = desks.remote.calls().len();
+        version_detail(
+            &desks.here,
+            Some(&desks.bound),
+            RecordKind::Ticket,
+            &ticket.id,
+            Source::Drive,
+            &"v".repeat(1025),
+        )
+        .unwrap_err();
+        assert!(!desks.remote.calls()[calls..].contains(&RemoteOp::Revisions));
     }
 
     #[test]

@@ -98,6 +98,9 @@ impl S3Target {
                 if !plain {
                     return Err(S3TargetError::Endpoint);
                 }
+                if url.scheme() == "http" && !is_loopback(&url) {
+                    return Err(S3TargetError::InsecureEndpoint);
+                }
                 Ok(url.origin().ascii_serialization())
             })
             .transpose()?;
@@ -196,6 +199,16 @@ impl S3Target {
     }
 }
 
+/// Whether the address is this computer's own: `localhost` or a loopback IP address.
+fn is_loopback(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(name)) => name.eq_ignore_ascii_case("localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+        None => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum S3TargetError {
     #[error(
@@ -206,6 +219,10 @@ pub enum S3TargetError {
     Region,
     #[error("the S3 endpoint must be a plain http or https address")]
     Endpoint,
+    #[error(
+        "the S3 endpoint must use https; plain http is accepted only for a service on this computer (localhost)"
+    )]
+    InsecureEndpoint,
     #[error("the key prefix may hold only letters, digits and - _ . /, and must not start with /")]
     Prefix,
 }

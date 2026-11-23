@@ -5,6 +5,7 @@
 
 use std::{
     collections::HashMap,
+    path::Path,
     sync::{Arc, Mutex, PoisonError},
 };
 
@@ -57,7 +58,12 @@ fn locate(located: Result<AwsCli, AwsCliError>) -> Outcome<Result<AwsCli, CliSta
 }
 
 fn cli() -> Outcome<AwsCli> {
-    match locate(AwsCli::locate(None))? {
+    cli_at(None)
+}
+
+/// The AWS CLI at `path` (the binding's own choice), or the usual locations.
+fn cli_at(path: Option<&Path>) -> Outcome<AwsCli> {
+    match locate(AwsCli::locate(path))? {
         Ok(cli) => Ok(cli),
         Err(CliState::Missing) => rejected("The AWS CLI was not found."),
         Err(CliState::TooOld { found }) => rejected(&format!(
@@ -134,6 +140,12 @@ pub fn credentials(cli: &AwsCli, profile: &str) -> Arc<ProfileCredentials> {
     )
 }
 
+/// Forgets the credentials kept for every profile, so the next request exports them again.
+/// What a profile signs in as, or where it reaches, may have changed since they were kept.
+pub fn forget_all_credentials() {
+    *CREDENTIALS.lock().unwrap_or_else(PoisonError::into_inner) = None;
+}
+
 /// Runs the profile's sign-in command, which waits for the person in their browser.
 #[tauri::command(async)]
 pub fn s3_sign_in(profile: String) -> Outcome<()> {
@@ -163,10 +175,11 @@ fn sign_in_with(cli: &AwsCli, profile: &str) -> Outcome<bool> {
 /// What recovering from an ended authorization does first: sign the profile in again when it
 /// has a command for that. A profile with static keys or a credential helper has none, and
 /// there is nothing to sign in to, so the recovery just tries again.
-pub fn sign_in_for_recovery(profile: &str) -> Outcome<()> {
-    check_profile(profile)?;
-    let cli = cli()?;
-    sign_in_with(&cli, profile).map(drop)
+pub fn sign_in_for_recovery(binding: &S3Binding) -> Outcome<()> {
+    check_profile(&binding.profile)?;
+    // The program sync itself uses, which may be outside the usual locations.
+    let cli = cli_at(binding.aws_cli_path.as_deref().map(Path::new))?;
+    sign_in_with(&cli, &binding.profile).map(drop)
 }
 
 /// The bucket names the profile may list; `None` when it may not, so the interface asks
@@ -243,6 +256,9 @@ pub fn sync_connect_s3(bucket: String, prefix: String, profile: String) -> Outco
         profile,
         aws_cli_path: None,
     };
+    // The profile may now sign in as another account or reach another endpoint, so what was
+    // kept for it is dropped and the storage is built afresh from it.
+    crate::s3_storage::reset();
     let status = open_workspace()?.sync_connect_s3(&binding, &identity)?;
     crate::wake::CHANGED.notify();
     Ok(status)
@@ -329,6 +345,58 @@ mod tests {
         assert!(sign_in_with(&cli, "work").unwrap());
         let ran = std::fs::read_to_string(directory.path().join("ran.log")).unwrap();
         assert_eq!(ran.trim(), "sso login --profile work");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_recovery_signs_in_through_the_aws_program_the_binding_names() {
+        use std::os::unix::fs::PermissionsExt;
+        // An `aws` outside the usual directories, which default discovery would not find.
+        let (directory, _) = stand_in(true);
+        let program = directory.path().join("aws");
+        let elsewhere = tempfile::tempdir().unwrap();
+        let moved = elsewhere.path().join("aws");
+        std::fs::copy(&program, &moved).unwrap();
+        std::fs::set_permissions(&moved, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let binding = S3Binding {
+            bucket: "team-bucket".into(),
+            prefix: "ticketd/".into(),
+            profile: "work".into(),
+            aws_cli_path: Some(moved.display().to_string()),
+        };
+        sign_in_for_recovery(&binding).unwrap();
+        let ran = std::fs::read_to_string(elsewhere.path().join("ran.log")).unwrap();
+        assert_eq!(ran.trim(), "sso login --profile work");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn kept_credentials_are_exported_again_after_they_are_all_forgotten() {
+        use std::os::unix::fs::PermissionsExt;
+        // Static keys never expire, so only forgetting makes the next request export again.
+        let directory = tempfile::tempdir().unwrap();
+        let program = directory.path().join("aws");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\ncase \"$1\" in\n--version) echo 'aws-cli/2.19.5 Python/3.12.7';;\n*) echo \"$@\" >> \"$(dirname \"$0\")/ran.log\"; echo '{\"AccessKeyId\":\"AKIAEXAMPLE\",\"SecretAccessKey\":\"secret\"}';;\nesac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let cli = AwsCli::locate(Some(&program)).unwrap();
+        let profile = "forgetting-test-profile";
+        let exports = || {
+            std::fs::read_to_string(directory.path().join("ran.log"))
+                .unwrap_or_default()
+                .lines()
+                .filter(|line| line.starts_with("configure export-credentials"))
+                .count()
+        };
+        credentials(&cli, profile).access().unwrap();
+        credentials(&cli, profile).access().unwrap();
+        assert_eq!(exports(), 1, "kept between requests");
+        forget_all_credentials();
+        credentials(&cli, profile).access().unwrap();
+        assert_eq!(exports(), 2);
     }
 
     #[test]

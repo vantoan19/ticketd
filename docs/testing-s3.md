@@ -21,10 +21,16 @@ and hashes in headers), run against a MinIO with Versioning on. They are opt-in:
 With Docker running:
 
 ```sh
-eval "$(scripts/minio-test-server start)"      # starts MinIO on 127.0.0.1:9000, prints the variables
-cargo test -p ticketd-core --locked --test remote_contract --test s3_live -- live_
+export TICKETD_S3_TEST_REQUIRED=1   # a missing server fails the run instead of skipping the tests
+# Starts MinIO on 127.0.0.1:9000; the tests run only if it started.
+variables="$(scripts/minio-test-server start)" && eval "$variables" &&
+  cargo test -p ticketd-core --locked --test remote_contract --test s3_live -- live_
 scripts/minio-test-server stop
 ```
+
+If the server does not start (an image that cannot be pulled, for example), the script prints no
+variables and exits with an error. Evaluating `"$(…)"` directly would hide that: an empty
+`eval` succeeds, and the tests would skip.
 
 The tests create the bucket (`ticketd-live-test`, or `TICKETD_S3_TEST_BUCKET`) and turn
 Versioning on, and keep each run's data under its own prefix. `TICKETD_S3_TEST_REQUIRED=1` turns

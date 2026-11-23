@@ -26,6 +26,11 @@ const COMMAND_TIMEOUT: Duration = Duration::from_secs(60);
 const SIGN_IN_TIMEOUT: Duration = Duration::from_secs(11 * 60);
 /// How much of the CLI's own message an error carries.
 const MESSAGE_LIMIT: usize = 2000;
+/// The most output of either stream a run keeps. A longer one is an error: the answers
+/// ticketd reads (credentials, names, settings) are far smaller.
+const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
+/// `aws login` arrived in this version of the CLI.
+const LOGIN_VERSION: (u64, u64) = (2, 32);
 
 /// Temporary or static AWS credentials. `Debug` shows no key, secret or token.
 #[derive(Clone, PartialEq, Eq)]
@@ -89,6 +94,14 @@ pub enum AwsCliError {
     Unreadable,
     #[error("The AWS CLI did not answer in time.")]
     TimedOut,
+    /// The program printed more than ticketd keeps, so what it said is not read.
+    #[error("The AWS CLI printed far more than expected, so ticketd stopped reading it.")]
+    OutputTooLarge,
+    /// The profile signs in with `aws login`, which this CLI does not have.
+    #[error(
+        "This profile signs in with `aws login`, which needs AWS CLI version 2.32 or later; this one is {found}. Update the AWS CLI."
+    )]
+    LoginNeedsNewerCli { found: String },
     #[error("Could not run the AWS CLI: {0}")]
     Io(#[source] io::Error),
 }
@@ -110,6 +123,7 @@ impl AwsCliError {
 pub struct AwsCli {
     program: PathBuf,
     timeout: Duration,
+    version: (u64, u64),
 }
 
 impl AwsCli {
@@ -130,11 +144,12 @@ impl AwsCli {
                 .find(|path| path.is_file())
                 .ok_or(AwsCliError::NotFound)?,
         };
-        let cli = Self {
+        let mut cli = Self {
             program,
             timeout: COMMAND_TIMEOUT,
+            version: (0, 0),
         };
-        cli.check_version()?;
+        cli.version = cli.check_version()?;
         Ok(cli)
     }
 
@@ -150,7 +165,7 @@ impl AwsCli {
         self
     }
 
-    fn check_version(&self) -> Result<(), AwsCliError> {
+    fn check_version(&self) -> Result<(u64, u64), AwsCliError> {
         let output = run(&self.program, &["--version"], self.timeout)?;
         // CLI v1 printed its version on stderr.
         let text = format!("{}\n{}", output.stdout, output.stderr);
@@ -164,7 +179,7 @@ impl AwsCli {
             .and_then(parse_version)
             .ok_or_else(found)?;
         if version >= MINIMUM_VERSION {
-            Ok(())
+            Ok(version)
         } else {
             Err(found())
         }
@@ -194,7 +209,31 @@ impl AwsCli {
 
     /// The ARN of the identity the profile signs in as (`aws sts get-caller-identity`),
     /// which is also how setup learns that the profile is signed in.
+    ///
+    /// STS is AWS's own service, so a profile with an S3 endpoint override (MinIO and the
+    /// like) has no identity there. When STS fails for such a profile, its credentials
+    /// exporting is the proof that it is signed in, and the identity is its name and endpoint.
     pub fn identity(&self, profile: &str) -> Result<String, AwsCliError> {
+        match self.caller_arn(profile) {
+            Err(error @ AwsCliError::Failed { .. }) => {
+                let endpoint = self
+                    .settings(profile)
+                    .ok()
+                    .and_then(|settings| settings.endpoint_url);
+                let Some(endpoint) = endpoint else {
+                    return Err(error);
+                };
+                self.credentials(profile)?;
+                let host = endpoint
+                    .split_once("://")
+                    .map_or(endpoint.as_str(), |(_, host)| host);
+                Ok(format!("{profile} on {}", host.trim_end_matches('/')))
+            }
+            other => other,
+        }
+    }
+
+    fn caller_arn(&self, profile: &str) -> Result<String, AwsCliError> {
         let stdout = self
             .checked(
                 &[
@@ -292,6 +331,11 @@ impl AwsCli {
         let words: &[&str] = if is_sso {
             &["sso", "login"]
         } else if self.config_value(&["login_session"], profile)?.is_some() {
+            if self.version < LOGIN_VERSION {
+                return Err(AwsCliError::LoginNeedsNewerCli {
+                    found: format!("{}.{}", self.version.0, self.version.1),
+                });
+            }
             &["login"]
         } else {
             return Ok(None);
@@ -586,21 +630,48 @@ fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Output, AwsCl
     };
     // A helper the program started may still hold the pipes; do not wait for it forever.
     let grace = Duration::from_secs(2);
+    let stdout = stdout.recv_timeout(grace).unwrap_or_default();
+    let stderr = stderr.recv_timeout(grace).unwrap_or_default();
+    if stdout.overflowed || stderr.overflowed {
+        return Err(AwsCliError::OutputTooLarge);
+    }
     Ok(Output {
         code: status.code(),
-        stdout: stdout.recv_timeout(grace).unwrap_or_default(),
-        stderr: stderr.recv_timeout(grace).unwrap_or_default(),
+        stdout: stdout.text,
+        stderr: stderr.text,
     })
 }
 
-fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<String> {
+/// What one stream held, and whether it held more than [`OUTPUT_LIMIT`].
+#[derive(Default)]
+struct Drained {
+    text: String,
+    overflowed: bool,
+}
+
+/// Reads a stream to its end on another thread, keeping at most [`OUTPUT_LIMIT`] bytes. What
+/// is past the limit is read and dropped, so the program is never held up by a full pipe and
+/// memory stays bounded until the timeout ends it.
+fn drain(pipe: Option<impl Read + Send + 'static>) -> mpsc::Receiver<Drained> {
     let (send, receive) = mpsc::channel();
     thread::spawn(move || {
         let mut bytes = Vec::new();
+        let mut overflowed = false;
         if let Some(mut pipe) = pipe {
-            let _ = pipe.read_to_end(&mut bytes);
+            let mut chunk = [0_u8; 16 * 1024];
+            while let Ok(read) = pipe.read(&mut chunk) {
+                if read == 0 {
+                    break;
+                }
+                let room = OUTPUT_LIMIT - bytes.len();
+                bytes.extend_from_slice(&chunk[..read.min(room)]);
+                overflowed |= read > room;
+            }
         }
-        let _ = send.send(String::from_utf8_lossy(&bytes).into_owned());
+        let _ = send.send(Drained {
+            text: String::from_utf8_lossy(&bytes).into_owned(),
+            overflowed,
+        });
     });
     receive
 }

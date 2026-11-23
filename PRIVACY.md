@@ -72,7 +72,7 @@ your AWS account allow, and by your storage provider. The bucket must keep objec
 versions, so earlier versions of a file stay in the bucket until your lifecycle rule
 (if any) expires them, and ticketd also leaves a small `.ticketd-bucket-check` file
 under the prefix. ticketd signs in through the AWS CLI on your computer: it runs the
-CLI to get short-lived credentials, keeps them in memory only, and stores no AWS
+CLI to get credentials, keeps them in memory only, and stores no AWS
 secret, not in the OS secure store, a backup or the Workspace. It sends the requests
 to your bucket's endpoint itself and to no one else. What the CLI contacts to sign you
 in (for example IAM Identity Center) is governed by AWS and your organization. ticketd
@@ -112,7 +112,7 @@ macOS Keychain, or Linux Secret Service. There is no file-based credential fallb
 The Google desktop app registration bundled by a publisher is separate from a user's
 access and refresh tokens. See [Google Drive setup](docs/install.md#google-drive-setup).
 
-S3 sync stores no AWS credential. It gets short-lived ones from the AWS CLI's profile
+S3 sync stores no AWS credential. It gets credentials from the AWS CLI's profile
 you chose and keeps them only in memory. Diagnostics exports replace the AWS identity
 (its ARN and account ID). See [S3 sync setup](docs/install.md#s3-sync-setup).
 

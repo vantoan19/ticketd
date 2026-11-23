@@ -12,7 +12,7 @@ pub use aws_cli::{
     SignInCommand,
 };
 pub use bucket_check::{BucketCheckError, discover_bucket_region};
-pub use client::{S3Call, S3Client, refusal};
+pub use client::{S3Call, S3Client, cli_failure, refusal};
 pub use provider::{
     CredentialSource, S3Request, S3Response, S3Target, S3TargetError, S3Transport,
     S3TransportError, UreqS3Transport,
