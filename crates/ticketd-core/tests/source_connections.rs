@@ -544,7 +544,7 @@ fn restoring_a_legacy_backup_preserves_the_devices_own_settings() {
     let backup = folder.path().join("legacy-backup.sqlite3");
     let current = folder.path().join("legacy-workspace.sqlite3");
     for (path, account) in [(&backup, "backup-account"), (&current, "device-account")] {
-        ticketd_core::create_workspace_at_format_version(path, FORMAT_VERSION - 1).unwrap();
+        ticketd_core::create_workspace_at_format_version(path, 88).unwrap();
         Connection::open(path)
             .unwrap()
             .execute(
