@@ -34,6 +34,13 @@ projects produce an error; an unmatched directory creates an unlinked ticket.
 Paths are interpreted by the native operating system; interoperability with WSL
 has not been validated.
 
+`ticketd project create NAME PATH` saves the checkout's detected Project remote,
+preferring a valid `upstream` over `origin`. Use `--remote host/owner/name` to
+choose it explicitly or `--no-remote` to skip detection. `project edit ID NAME
+PATH` accepts `--remote host/owner/name` or `--clear-remote`. `project show` and
+`project list` include the `remote` field. Registering a checkout with a different
+detected remote still succeeds and prints a warning to stderr.
+
 ## JSON output
 
 Most data commands print JSON on stdout. Direct commands usually return an

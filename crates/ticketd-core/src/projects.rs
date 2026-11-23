@@ -1,8 +1,11 @@
+use std::path::Path;
+
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Error, Workspace};
+use crate::project_remote::normalize_project_remote;
+use crate::{Error, Workspace, detect_project_remote};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Project {
@@ -10,6 +13,27 @@ pub struct Project {
     pub name: String,
     pub path: String,
     pub paths: Vec<String>,
+    #[serde(default)]
+    pub remote: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProjectRemoteChange<'a> {
+    Keep,
+    Set(&'a str),
+    Clear,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckoutRegistration {
+    pub project: Project,
+    pub warning: Option<CheckoutRemoteMismatch>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckoutRemoteMismatch {
+    pub project_remote: String,
+    pub checkout_remote: String,
 }
 
 pub(crate) fn migrate(tx: &Transaction<'_>) -> Result<(), Error> {
@@ -22,27 +46,55 @@ pub(crate) fn migrate_checkouts(tx: &Transaction<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+pub(crate) fn migrate_remote(tx: &Transaction<'_>) -> Result<(), Error> {
+    tx.execute_batch(
+        "ALTER TABLE projects ADD COLUMN remote TEXT COLLATE NOCASE;
+         CREATE UNIQUE INDEX projects_remote ON projects(remote) WHERE remote IS NOT NULL;",
+    )?;
+    Ok(())
+}
+
 impl Workspace {
     pub fn register_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
+        self.register_normalized_checkout(id, &normalize(path)?)
+    }
+
+    pub fn register_checkout_with_warning(
+        &mut self,
+        id: &str,
+        path: &str,
+    ) -> Result<CheckoutRegistration, Error> {
         let path = normalize(path)?;
-        let tx = self.connection.savepoint()?;
-        crate::write_scope::lock(&tx)?;
-        let project = find(&tx, id)?;
-        ensure_path_free(&tx, &path, id)?;
-        tx.execute(
-            "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
-            params![id, path],
-        )?;
-        // A Project that lost its last checkout has no primary path; the first one
-        // registered again becomes it.
-        if project.path.is_empty() {
+        let project = self.register_normalized_checkout(id, &path)?;
+        let warning = project.remote.as_ref().and_then(|project_remote| {
+            let checkout_remote = detect_project_remote(Path::new(&path)).suggested?;
+            (!project_remote.eq_ignore_ascii_case(&checkout_remote)).then(|| {
+                CheckoutRemoteMismatch {
+                    project_remote: project_remote.clone(),
+                    checkout_remote,
+                }
+            })
+        });
+        Ok(CheckoutRegistration { project, warning })
+    }
+
+    fn register_normalized_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
+        crate::write_scope::run(&self.connection, |tx| {
+            let project = find(tx, id)?;
+            ensure_path_free(tx, path, id)?;
             tx.execute(
-                "UPDATE projects SET path = ?1 WHERE id = ?2",
-                params![path, id],
+                "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
+                params![id, path],
             )?;
-        }
-        tx.commit()?;
-        self.show_project(id)
+            // The first checkout registered after the last was removed becomes primary.
+            if project.path.is_empty() {
+                tx.execute(
+                    "UPDATE projects SET path = ?1 WHERE id = ?2",
+                    params![path, id],
+                )?;
+            }
+            find(tx, id)
+        })
     }
 
     pub fn remove_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
@@ -98,7 +150,17 @@ impl Workspace {
     }
 
     pub fn create_project(&mut self, name: &str, path: &str) -> Result<Project, Error> {
+        self.create_project_with_remote(name, path, None)
+    }
+
+    pub fn create_project_with_remote(
+        &mut self,
+        name: &str,
+        path: &str,
+        remote: Option<&str>,
+    ) -> Result<Project, Error> {
         let (name, path) = validate(name, path)?;
+        let remote = remote.map(validate_remote).transpose()?;
         let normalized = normalize(path)?;
         let path = normalized.as_str();
         let project = Project {
@@ -106,12 +168,16 @@ impl Workspace {
             name: name.to_owned(),
             path: path.to_owned(),
             paths: vec![path.to_owned()],
+            remote,
         };
         crate::write_scope::run(&self.connection, |tx| {
             ensure_path_free(tx, path, &project.id)?;
+            if let Some(remote) = &project.remote {
+                ensure_remote_free(tx, remote, &project.id)?;
+            }
             tx.execute(
-                "INSERT INTO projects (id, name, path) VALUES (?1, ?2, ?3)",
-                params![project.id, project.name, project.path],
+                "INSERT INTO projects (id, name, path, remote) VALUES (?1, ?2, ?3, ?4)",
+                params![project.id, project.name, project.path, project.remote],
             )?;
             tx.execute(
                 "INSERT INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
@@ -122,6 +188,16 @@ impl Workspace {
     }
 
     pub fn edit_project(&mut self, id: &str, name: &str, path: &str) -> Result<Project, Error> {
+        self.edit_project_with_remote(id, name, path, ProjectRemoteChange::Keep)
+    }
+
+    pub fn edit_project_with_remote(
+        &mut self,
+        id: &str,
+        name: &str,
+        path: &str,
+        remote: ProjectRemoteChange<'_>,
+    ) -> Result<Project, Error> {
         let (name, path) = (name.trim(), path.trim());
         if name.is_empty() {
             return Err(Error::EmptyProject);
@@ -142,9 +218,18 @@ impl Workspace {
             if let Some(path) = &target {
                 ensure_path_free(tx, path, id)?;
             }
+            let remote = match remote {
+                ProjectRemoteChange::Keep => old.remote,
+                ProjectRemoteChange::Set(remote) => {
+                    let remote = validate_remote(remote)?;
+                    ensure_remote_free(tx, &remote, id)?;
+                    Some(remote)
+                }
+                ProjectRemoteChange::Clear => None,
+            };
             tx.execute(
-                "UPDATE projects SET name = ?1 WHERE id = ?2",
-                params![name, id],
+                "UPDATE projects SET name = ?1, remote = ?2 WHERE id = ?3",
+                params![name, remote, id],
             )?;
             if let Some(path) = target {
                 tx.execute(
@@ -187,7 +272,7 @@ impl Workspace {
         self.read(|_| {
             let mut statement = self
                 .connection
-                .prepare("SELECT id, name, path FROM projects ORDER BY name, id")?;
+                .prepare("SELECT id, name, path, remote FROM projects ORDER BY name, id")?;
             let rows = statement
                 .query_map([], row)?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -217,6 +302,26 @@ fn ensure_path_free(connection: &Connection, path: &str, project_id: &str) -> Re
     }
 }
 
+fn ensure_remote_free(
+    connection: &Connection,
+    remote: &str,
+    project_id: &str,
+) -> Result<(), Error> {
+    if let Some(project) = find_by_remote(connection, remote)?
+        && project.id != project_id
+    {
+        return Err(Error::ProjectRemoteTaken {
+            remote: remote.to_owned(),
+            project: project.name,
+        });
+    }
+    Ok(())
+}
+
+fn validate_remote(remote: &str) -> Result<String, Error> {
+    normalize_project_remote(remote).ok_or(Error::InvalidProjectRemote)
+}
+
 fn validate<'a>(name: &'a str, path: &'a str) -> Result<(&'a str, &'a str), Error> {
     let (name, path) = (name.trim(), path.trim());
     if name.is_empty() || path.is_empty() {
@@ -231,19 +336,37 @@ fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         name: row.get(1)?,
         path: row.get(2)?,
         paths: Vec::new(),
+        remote: row.get(3)?,
     })
 }
 
 pub(crate) fn find(connection: &Connection, id: &str) -> Result<Project, Error> {
     let mut project = connection
         .query_row(
-            "SELECT id, name, path FROM projects WHERE id = ?1",
+            "SELECT id, name, path, remote FROM projects WHERE id = ?1",
             [id],
             row,
         )
         .optional()?
         .ok_or_else(|| Error::ProjectNotFound(id.to_owned()))?;
     project.paths = paths(connection, id)?;
+    Ok(project)
+}
+
+pub(crate) fn find_by_remote(
+    connection: &Connection,
+    remote: &str,
+) -> Result<Option<Project>, Error> {
+    let mut project = connection
+        .query_row(
+            "SELECT id, name, path, remote FROM projects WHERE remote = ?1",
+            [remote],
+            row,
+        )
+        .optional()?;
+    if let Some(project) = &mut project {
+        project.paths = paths(connection, &project.id)?;
+    }
     Ok(project)
 }
 

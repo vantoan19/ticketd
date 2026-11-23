@@ -2,7 +2,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
     ActivityPatch, Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput,
-    EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
+    EvidenceKind, ProjectRemoteChange, Status, TicketFilter, TicketPatch, Workspace, WriteRequest,
+    WriteResult,
 };
 
 mod output;
@@ -962,14 +963,26 @@ enum ProjectCommand {
         name: String,
         /// The repository folder
         path: String,
+        /// Use this Project remote (host/owner/name)
+        #[arg(long, conflicts_with = "no_remote")]
+        remote: Option<String>,
+        /// Skip Git remote detection
+        #[arg(long)]
+        no_remote: bool,
     },
-    /// Change a project's name and path
+    /// Change a project's name, path, or Project remote
     Edit {
         id: String,
         /// The project's new name
         name: String,
         /// The repository folder
         path: String,
+        /// Set the Project remote (host/owner/name)
+        #[arg(long, conflicts_with = "clear_remote")]
+        remote: Option<String>,
+        /// Clear the Project remote
+        #[arg(long)]
+        clear_remote: bool,
     },
     /// Show a project
     Show { id: String },
@@ -1664,15 +1677,48 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             serde_json::to_string(&workspace.apply_batch(operations)?)?
         }
         Command::Project { command } => match command {
-            ProjectCommand::Create { name, path } => {
-                serde_json::to_string(&workspace.create_project(&name, &path)?)?
+            ProjectCommand::Create {
+                name,
+                path,
+                remote,
+                no_remote,
+            } => {
+                let remote = remote.or_else(|| {
+                    if no_remote {
+                        return None;
+                    }
+                    ticketd_core::detect_project_remote(std::path::Path::new(path.trim())).suggested
+                });
+                serde_json::to_string(&workspace.create_project_with_remote(
+                    &name,
+                    &path,
+                    remote.as_deref(),
+                )?)?
             }
-            ProjectCommand::Edit { id, name, path } => {
-                serde_json::to_string(&workspace.edit_project(&id, &name, &path)?)?
+            ProjectCommand::Edit {
+                id,
+                name,
+                path,
+                remote,
+                clear_remote,
+            } => {
+                let remote = match remote.as_deref() {
+                    Some(remote) => ProjectRemoteChange::Set(remote),
+                    None if clear_remote => ProjectRemoteChange::Clear,
+                    None => ProjectRemoteChange::Keep,
+                };
+                serde_json::to_string(&workspace.edit_project_with_remote(&id, &name, &path, remote)?)?
             }
             ProjectCommand::Show { id } => serde_json::to_string(&workspace.show_project(&id)?)?,
             ProjectCommand::Register { id, path } => {
-                serde_json::to_string(&workspace.register_checkout(&id, &path)?)?
+                let registration = workspace.register_checkout_with_warning(&id, &path)?;
+                if let Some(warning) = registration.warning {
+                    eprintln!(
+                        "warning: The checkout's detected remote {} differs from the Project remote {}.",
+                        warning.checkout_remote, warning.project_remote
+                    );
+                }
+                serde_json::to_string(&registration.project)?
             }
             ProjectCommand::Unregister { id, path } => {
                 serde_json::to_string(&workspace.remove_checkout(&id, &path)?)?

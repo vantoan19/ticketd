@@ -51,8 +51,9 @@ See [in-app updates](install.md#in-app-updates).
   prints its path and format versions.
 - A **Project** represents one repository, not a grouping of work. Its explicit
   identity survives repository moves and renames, and several local checkouts may
-  refer to it. Registered checkout paths locate projects without implying Git
-  integration. A ticket optionally links to one project ("No project" is valid).
+  refer to it. Registered checkout paths locate projects and can suggest a Project
+  remote from Git configuration. Git is optional. A ticket optionally links to
+  one project ("No project" is valid).
 - **Project context** is local to each UI or CLI interaction. An explicit selection
   takes precedence; the CLI otherwise infers the project from a registered checkout
   that contains the current directory. With neither, new tickets stay unlinked.

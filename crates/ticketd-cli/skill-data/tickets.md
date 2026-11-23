@@ -89,7 +89,12 @@ Use evidence IDs returned by `evidence list` for edit/delete operations.
 `project create NAME PATH` creates a project and registers its existing checkout.
 `project register PROJECT_ID PATH` associates another checkout with that same
 project; `unregister` removes a registration. Discover existing projects before
-creating one. Paths are native to the OS; WSL interoperability is not validated.
+creating one. `project create` saves a detected Project remote from `upstream` or `origin`,
+with `--remote host/owner/name` to override it or `--no-remote` to skip detection.
+`project edit ID NAME PATH` accepts `--remote host/owner/name` or
+`--clear-remote`. `project show` and `project list` include the `remote` field.
+Registering a checkout with a different detected remote still succeeds and
+prints a warning to stderr. Paths are native to the OS; WSL interoperability is not validated.
 
 `trash T-KQ1` hides a ticket while preserving its data and relationships.
 `trash-list` finds hidden tickets; `restore T-KQ1` returns one to ordinary visibility.
