@@ -518,7 +518,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
       screen.getByRole("navigation", { name: "Workspace views" }),
     ).getByRole("button", { name: "All tickets" }),
   );
-  expect(screen.getByRole("button", { name: "Filters" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Filters" })).toBeTruthy();
 });
 
 test("an idle workspace costs one token poll per tick and refetches only when the token moves", async () => {

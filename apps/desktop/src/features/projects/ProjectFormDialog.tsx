@@ -160,7 +160,7 @@ export function ProjectFormDialog({
       }
       onSubmit={() => void save()}
     >
-      <FieldGroup className="gap-4">
+      <FieldGroup>
         {!project && (
           <FolderPicker
             label="Repository folder"
