@@ -62,9 +62,9 @@ async function footer(status: SyncStatus) {
   await waitFor(() => expect(api.status).toHaveBeenCalled());
 }
 const line = () => screen.findByRole("button", { expanded: false });
-async function popover() {
+async function popover(name = "Google Drive sync") {
   fireEvent.click(await line());
-  return screen.findByRole("dialog", { name: "Google Drive sync" });
+  return screen.findByRole("dialog", { name });
 }
 const change = (title: string) => ({
   kind: "ticket" as const,
@@ -353,4 +353,50 @@ test("the same status sent again re-renders nothing", async () => {
     shellRendered.mock.calls.length,
     readerRendered.mock.calls.length,
   ]).toEqual(before);
+});
+
+test("an S3 binding names S3 on the line and in the popover, never Drive", async () => {
+  await footer(syncStatus({ provider: "s3" }));
+  expect((await line()).textContent).toBe("S3 synced1 min ago");
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("S3 synced");
+  expect(dialog.textContent).not.toMatch(/drive/i);
+  cleanup();
+
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "upload_pending",
+      pending_uploads: [change("A")],
+    }),
+  );
+  expect((await popover("S3 sync")).textContent).toContain("Uploading to S3");
+  cleanup();
+
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "saved_locally",
+      recovery: "rate_limited",
+      pending_uploads: [change("A")],
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "Saved on this computerS3 is busy · 1 change waiting",
+  );
+  cleanup();
+
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "authorization_expired",
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "AWS sign-in expiredSaved on this computer",
+  );
+  expect((await popover("S3 sync")).textContent).toContain(
+    "Sign in to AWS again",
+  );
 });
