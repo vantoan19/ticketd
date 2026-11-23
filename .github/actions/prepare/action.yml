@@ -11,6 +11,11 @@ inputs:
   desktop:
     description: Install the Linux system packages the Tauri desktop crate compiles against.
     default: "false"
+  extra-packages:
+    description: >-
+      Further Linux packages, separated by spaces, installed and cached together with the desktop
+      packages. Only used when desktop is true.
+    default: ""
   nextest:
     description: Install the pinned cargo-nextest, which scripts/check rust uses to run the tests in shards.
     default: "false"
@@ -104,13 +109,45 @@ runs:
       with:
         tool: cargo-nextest@0.9.151
 
-    # The hosted mirrors sometimes stall one connection for minutes. A short timeout with no
-    # retries makes apt move on to the next mirror in /etc/apt/apt-mirrors.txt (as uv does),
-    # and the man-db trigger, which can take minutes, is switched off. The settings stay in
-    # place for any later apt step in the job.
+    # The hosted mirrors sometimes stall for minutes, or trickle at 75 kB/s without ever stalling
+    # (70 MB took 15 min in run 45209713330), so a timeout alone cannot fix the download. Cache
+    # the .deb files instead. The key holds the package list and the runner image, so the files
+    # always fit the packages the image already has. On a hit dpkg installs the cached files:
+    # no mirror and no apt-get update (apt install ./x.deb would still fetch dependencies, even
+    # ones present as files). On a miss apt updates, downloads into the same folder and keeps the
+    # files for the save. After a hit the image's package lists are older than the installed
+    # packages, so a later apt-get install fails on versions that no longer fit; add such
+    # packages through extra-packages, which puts them in the same cache. The timeouts and the
+    # man-db switch-off stay for every apt command later in the job; only the -o options below
+    # point apt at the cache folder.
+    - name: Compute Linux desktop packages key
+      id: apt-key
+      if: inputs.desktop == 'true' && runner.os == 'Linux'
+      shell: bash
+      env:
+        EXTRA_PACKAGES: ${{ inputs.extra-packages }}
+      run: |
+        packages="libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev $EXTRA_PACKAGES"
+        echo "packages=$packages" >> "$GITHUB_OUTPUT"
+        echo "dir=$RUNNER_TEMP/desktop-debs" >> "$GITHUB_OUTPUT"
+        echo "key=apt-debs-v1-${ImageOS}-${ImageVersion}-$(printf '%s' "$packages" | sha256sum | cut -c1-16)" >> "$GITHUB_OUTPUT"
+        # apt runs as root but the cache action runs as the runner user, and apt downloads as _apt.
+        mkdir -p "$RUNNER_TEMP/desktop-debs/partial"
+        chmod -R a+rwx "$RUNNER_TEMP/desktop-debs"
+    - name: Restore Linux desktop packages
+      id: apt-cache
+      if: inputs.desktop == 'true' && runner.os == 'Linux' && inputs.cache != 'none'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.apt-key.outputs.dir }}/*.deb
+        key: ${{ steps.apt-key.outputs.key }}
     - name: Install Linux desktop packages
       if: inputs.desktop == 'true' && runner.os == 'Linux'
       shell: bash
+      env:
+        PACKAGES: ${{ steps.apt-key.outputs.packages }}
+        DEB_DIR: ${{ steps.apt-key.outputs.dir }}
+        CACHE_HIT: ${{ steps.apt-cache.outputs.cache-hit }}
       run: |
         printf '%s\n' \
           'Acquire::Retries "0";' \
@@ -118,6 +155,20 @@ runs:
           'Acquire::https::Timeout "10";' \
           | sudo tee /etc/apt/apt.conf.d/80-ci-timeouts > /dev/null
         sudo rm -f /var/lib/man-db/auto-update
+        if [[ "$CACHE_HIT" == 'true' ]]; then
+          # The cached files are the packages this image lacks, with their dependencies.
+          if sudo dpkg -i "$DEB_DIR"/*.deb; then exit 0; fi
+          sudo dpkg --configure -a || true
+          echo "::warning::Installing the cached Linux desktop packages failed; downloading them again."
+        fi
         sudo apt-get update
         sudo apt-get install -y --no-install-recommends \
-          libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+          -o Dir::Cache::Archives="$DEB_DIR" -o APT::Keep-Downloaded-Packages=true $PACKAGES
+    - name: Save Linux desktop packages
+      if: >-
+        inputs.desktop == 'true' && runner.os == 'Linux' && inputs.cache != 'none'
+        && steps.apt-cache.outputs.cache-hit != 'true' && github.ref == 'refs/heads/main'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.apt-key.outputs.dir }}/*.deb
+        key: ${{ steps.apt-key.outputs.key }}
