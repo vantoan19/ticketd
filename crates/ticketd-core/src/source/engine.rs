@@ -309,7 +309,7 @@ impl Engine {
         if !descriptor.capabilities.contains(&Capability::Discover) {
             return Err(SourceError::Unsupported("discovery"));
         }
-        let config = self.validate(provider, raw)?;
+        let config = connector.configuration_for_request(raw)?;
         let mut seen_identities = HashSet::new();
         let mut seen_cursors = HashSet::new();
         let mut cursor: Option<String> = None;
@@ -461,7 +461,7 @@ impl Engine {
         {
             return Err(SourceError::Unsupported("fetching"));
         }
-        let config = self.validate(provider, raw)?;
+        let config = connector.configuration_for_request(raw)?;
         let issue = with_guidance(connector, connector.fetch(&config, reference))?;
         if issue.reference.identity != reference.identity {
             return Err(SourceError::Protocol(
@@ -488,7 +488,7 @@ impl Engine {
     ) -> Result<ExternalIssue, SourceError> {
         let connector = self.connector(provider)?;
         let publication = publication(connector)?;
-        let config = self.validate(provider, raw)?;
+        let config = connector.configuration_for_request(raw)?;
         let issue = with_guidance(connector, publication.publish(&config, request))?;
         if issue.reference.identity.provider != provider {
             return Err(SourceError::Protocol(
@@ -514,7 +514,7 @@ impl Engine {
     ) -> Result<ExternalIssue, SourceError> {
         let connector = self.connector(provider)?;
         let publication = publication(connector)?;
-        let config = self.validate(provider, raw)?;
+        let config = connector.configuration_for_request(raw)?;
         let issue = with_guidance(connector, publication.locate(&config, destination, text))?;
         if issue.reference.identity.provider != provider {
             return Err(SourceError::Protocol(
@@ -533,7 +533,7 @@ impl Engine {
     ) -> Result<PublicationCandidates, SourceError> {
         let connector = self.connector(provider)?;
         let publication = publication(connector)?;
-        let config = self.validate(provider, raw)?;
+        let config = connector.configuration_for_request(raw)?;
         let found = with_guidance(connector, publication.find_published(&config, search))?;
         if found
             .matches
@@ -566,7 +566,7 @@ impl Engine {
         {
             return Ok(None);
         }
-        let config = self.validate(provider, raw)?;
+        let config = connector.configuration_for_request(raw)?;
         let mut conversation =
             with_guidance(connector, connector.conversation(&config, reference))?;
         let mut comments = HashSet::new();

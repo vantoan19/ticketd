@@ -23,11 +23,11 @@ use super::{
     redaction::Redactions,
     wire::{
         CancelMethod, CancelNotification, CancelParams, JsonRpc, ProgressNotification,
-        REQUEST_CANCELED, Response,
+        REQUEST_CANCELED, Response, RpcErrorExt,
     },
 };
 
-pub(super) const LINE_LIMIT: usize = 4 * 1024 * 1024;
+pub(super) use super::wire::LINE_LIMIT;
 const STDERR_LIMIT: usize = 16 * 1024;
 const EOF_GRACE: Duration = Duration::from_millis(150);
 #[cfg(unix)]

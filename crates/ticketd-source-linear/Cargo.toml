@@ -1,0 +1,24 @@
+[package]
+name = "ticketd-source-linear"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+license.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+httpdate = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+ticketd-source-sdk.workspace = true
+ureq = "3"
+url = "2"
+uuid = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"
+ticketd-core.workspace = true

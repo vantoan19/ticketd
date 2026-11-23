@@ -30,6 +30,24 @@ and `ticketd source example-tracker refresh` provide the corresponding CLI flow.
 The example also has a `Sign-in` board that accepts any nonblank synthetic API
 key. Try it to exercise the optional `secret` field.
 
+## Rust SDK
+
+Add the SDK from a reviewed commit of this repository.
+
+```toml
+ticketd-source-sdk = { git = "https://github.com/vantoan19/ticketd" }
+```
+
+Implement `ticketd_source_sdk::Extension` with your tracker's description and
+operations. Call `serve_stdio(env!("CARGO_PKG_VERSION"), extension)` from the
+entry point. The server negotiates Contract 2 and translates the operation
+results into JSON-RPC. Use the request context to report progress and check for
+cancellation between requests to your tracker. `serve` accepts supplied streams
+for protocol tests.
+
+Use `ticketd source extension link` to register the build and
+`ticketd source conformance <provider> --strict` to run it through the host.
+
 ## Manifest
 
 Put `ticketd-source.json` in the folder you add or link. Its `id` is the stable provider
@@ -99,6 +117,13 @@ discovery from `check_connection` and put the matching part on each issue
 reference. Use the tracker's typed state for ticketd's state category and keep its
 state name as display text. Return `unknown` when the tracker did not give a
 recognized state. Missing or inaccessible issues are errors.
+
+For conversation events, `state_changed` carries the destination category and
+uses the workflow state name as its subject. `marked_duplicate` and
+`unmarked_duplicate` describe this issue's link to an original.
+`duplicate_added` and `duplicate_removed` describe a link from another issue
+to this one. Use the related issue's display identifier as the subject.
+`closed` and `reopened` carry lifecycle evidence.
 
 A domain failure uses JSON-RPC error code `-32000` with `data` holding a stable
 `code`, a `class` and a person-readable `message`. Configuration failures can

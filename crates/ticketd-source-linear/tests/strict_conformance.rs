@@ -1,0 +1,204 @@
+#![cfg(debug_assertions)]
+#![allow(clippy::unwrap_used)]
+
+use std::{
+    io::{BufRead, BufReader, Read, Write},
+    net::{TcpListener, TcpStream},
+    path::Path,
+    process::Command,
+    thread,
+};
+
+use serde_json::{Value, json};
+use ticketd_core::source::{
+    ConfigValues, ConformanceOptions, ConformanceOutcome, ExtensionRegistry,
+};
+
+const ENDPOINT: &str = "LINEAR_GRAPHQL_TEST_ENDPOINT";
+const TEAM: &str = "10000000-0000-4000-8000-000000000001";
+const ISSUE: &str = "20000000-0000-4000-8000-000000000001";
+const USER: &str = "30000000-0000-4000-8000-000000000001";
+const SITE: &str = "40000000-0000-4000-8000-000000000001";
+const KEY: &str = "lin_api_synthetic_ticketd";
+const TIME: &str = "2025-01-03T09:20:00.000Z";
+
+#[test]
+fn linear_passes_strict_conformance_through_the_host() {
+    // Set an endpoint on the test process before starting the host. The
+    // extension must receive it through its ordinary manifest environment.
+    if let Ok(endpoint) = std::env::var("LINEAR_CONFORMANCE_CHILD") {
+        assert_eq!(std::env::var(ENDPOINT).unwrap(), endpoint);
+        return verify_connector();
+    }
+    let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+    let address = listener.local_addr().unwrap();
+    let server = thread::spawn(move || {
+        for stream in listener.incoming() {
+            let stream = stream.unwrap();
+            if !serve(stream) {
+                break;
+            }
+        }
+    });
+    let endpoint = format!("http://{address}/graphql");
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "linear_passes_strict_conformance_through_the_host",
+            "--nocapture",
+        ])
+        .env("LINEAR_CONFORMANCE_CHILD", &endpoint)
+        .env(ENDPOINT, &endpoint)
+        .env("TICKETD_SOURCE_CONFORMANCE_API_KEY", KEY)
+        .output()
+        .unwrap();
+    drop(TcpStream::connect(address).unwrap());
+    server.join().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stdout)
+    );
+}
+
+fn verify_connector() {
+    let root = tempfile::tempdir().unwrap();
+    let package = root.path().join("extension");
+    std::fs::create_dir(&package).unwrap();
+    let artifact = Path::new(env!("CARGO_BIN_EXE_ticketd-source-linear"));
+    let name = artifact.file_name().unwrap().to_str().unwrap();
+    std::fs::copy(artifact, package.join(name)).unwrap();
+    std::fs::write(
+        package.join("ticketd-source.json"),
+        json!({
+            "id": "linear",
+            "version": env!("CARGO_PKG_VERSION"),
+            "executable": format!("./{name}"),
+            "env": [ENDPOINT],
+            "hosts": ["api.linear.app"],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    let registry = ExtensionRegistry::new(root.path().join("registry"));
+    registry.link(&package).unwrap();
+    let config: ConfigValues = serde_json::from_value(json!({
+        "team": [TEAM],
+        "assignee": ["me"],
+    }))
+    .unwrap();
+    let report = registry
+        .conformance(
+            "linear",
+            &config,
+            &ConformanceOptions {
+                strict: true,
+                publish: None,
+            },
+        )
+        .unwrap();
+    assert!(report.passed, "{report:?}");
+    for check in [
+        "version_refusal",
+        "options",
+        "empty_continuation",
+        "stable_identity",
+        "conversation",
+    ] {
+        assert!(
+            report.checks.iter().any(
+                |item| item.name == check && matches!(item.outcome, ConformanceOutcome::Passed)
+            ),
+            "{report:?}"
+        );
+    }
+}
+
+fn page(nodes: Vec<Value>, cursor: Option<&str>) -> Value {
+    json!({"nodes": nodes, "pageInfo": {"hasNextPage": cursor.is_some(), "endCursor": cursor}})
+}
+
+fn issue() -> Value {
+    json!({
+        "id": ISSUE, "identifier": "TST-1", "url": "https://linear.app/fixture/issue/TST-1",
+        "title": "Fixture issue", "description": "Synthetic description",
+        "createdAt": TIME, "updatedAt": TIME, "trashed": false,
+        "team": {"id": TEAM}, "state": {"name": "Done label in open state", "type": "started"},
+        "creator": {"displayName": "Fixture User"}, "assignee": null, "labels": page(vec![], None),
+    })
+}
+
+fn serve(mut stream: TcpStream) -> bool {
+    let mut reader = BufReader::new(&mut stream);
+    let mut line = String::new();
+    if reader.read_line(&mut line).unwrap() == 0 {
+        return false;
+    }
+    assert_eq!(line.trim(), "POST /graphql HTTP/1.1");
+    let mut length = 0;
+    let mut authorized = false;
+    loop {
+        line.clear();
+        reader.read_line(&mut line).unwrap();
+        if line == "\r\n" {
+            break;
+        }
+        let (field, value) = line.split_once(':').unwrap();
+        if field.eq_ignore_ascii_case("Content-Length") {
+            length = value.trim().parse().unwrap();
+        } else if field.eq_ignore_ascii_case("Authorization") {
+            authorized = value.trim() == KEY;
+        }
+    }
+    assert!(authorized);
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).unwrap();
+    let request: Value = serde_json::from_slice(&body).unwrap();
+    let variables = &request["variables"];
+    let after = variables["after"].as_str();
+    let fields = match request["operationName"].as_str().unwrap() {
+        "LinearConnection" => {
+            assert_eq!(variables["team"], TEAM);
+            json!({"viewer": {"id": USER, "displayName": "Fixture User"},
+                   "organization": {"id": SITE}, "team": {"id": TEAM}})
+        }
+        "LinearMe" => json!({"viewer": {"id": USER}}),
+        "LinearTeams" => {
+            json!({"teams": page(vec![json!({"id": TEAM, "key": "TST", "name": "Fixture Team"})], None)})
+        }
+        "LinearDiscover" => {
+            assert_eq!(
+                variables["filter"],
+                json!({"team": {"id": {"eq": TEAM}}, "assignee": {"id": {"eq": USER}}})
+            );
+            json!({"issues": match after {
+                None => page(vec![], Some("issues")),
+                Some("issues") => page(vec![issue()], None),
+                _ => unreachable!(),
+            }})
+        }
+        "LinearFetch" => {
+            assert_eq!(variables["id"], ISSUE);
+            json!({"issue": issue()})
+        }
+        "LinearComments" => {
+            assert_eq!(variables["id"], ISSUE);
+            let row = |id| json!({"id": id, "body": "A comment", "createdAt": TIME, "updatedAt": TIME, "url": "https://linear.app/fixture/issue/TST-1"});
+            json!({"issue": {"comments": match after {
+                None => page(vec![row("50000000-0000-4000-8000-000000000001")], Some("more-comments")),
+                Some("more-comments") => page(vec![row("50000000-0000-4000-8000-000000000002")], None),
+                _ => unreachable!(),
+            }}})
+        }
+        "LinearHistory" => {
+            assert_eq!(variables["id"], ISSUE);
+            assert_eq!(after, None);
+            json!({"issue": {"history": page(vec![], None)}})
+        }
+        _ => unreachable!("{request:?}"),
+    };
+    let data = json!({"data": fields}).to_string();
+    write!(stream, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\nContent-Length: {}\r\n\r\n{data}", data.len()).unwrap();
+    true
+}

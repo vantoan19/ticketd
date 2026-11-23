@@ -2022,6 +2022,12 @@ pub fn run() -> Result<(), tauri::Error> {
     let sources = std::sync::Arc::new(ExtensionRegistry::device().map_err(|error| {
         tauri::Error::Setup((Box::new(error) as Box<dyn std::error::Error>).into())
     })?);
+    if let Err(error) = sources.install_bundled_sources() {
+        tracing::warn!(
+            error_kind = error.code(),
+            "could not install bundled source extensions"
+        );
+    }
     let app = tauri::Builder::default()
         // Must be the first plugin. One process owns Chat execution: starting ticketd
         // again shows the running app's window instead of starting a second host.

@@ -13,7 +13,7 @@ use uuid::Uuid;
 use super::{ConfigSchema, ConfigValues, FieldIssue, FieldKind, SchemaField, SourceError};
 use crate::Error;
 
-pub(super) const VALUE_LIMIT: usize = 64 * 1024;
+pub(super) use ticketd_source_sdk::{VALUE_LIMIT, env_part};
 const SERVICE: &str = "ticketd.source-secrets.v1";
 static SESSION: LazyLock<Mutex<HashMap<Uuid, String>>> = LazyLock::new(Mutex::default);
 
@@ -131,19 +131,6 @@ pub(super) fn discard(reference: Uuid) {
     }
 }
 
-pub(super) fn env_part(value: &str) -> String {
-    value
-        .chars()
-        .map(|c| {
-            if c.is_ascii_alphanumeric() {
-                c.to_ascii_uppercase()
-            } else {
-                '_'
-            }
-        })
-        .collect()
-}
-
 fn env_key(id: &str, field: &str) -> String {
     format!("TICKETD_SOURCE_{}_{}", env_part(id), env_part(field))
 }
@@ -216,7 +203,9 @@ fn resolve_field(
     if candidate.len() > VALUE_LIMIT {
         return Err(invalid(&field.key, "must be at most 64 KiB"));
     }
-    field.check_secret_pattern(&candidate)?;
+    field
+        .check_secret_pattern(&candidate)
+        .map_err(|issue| SourceError::InvalidConfiguration(vec![issue]))?;
     values.insert(field.key.clone(), Value::String(candidate));
     Ok(())
 }

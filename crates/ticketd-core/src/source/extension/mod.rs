@@ -10,7 +10,7 @@ mod wire;
 #[cfg(test)]
 mod tests;
 
-use std::sync::Arc;
+use std::{borrow::Cow, sync::Arc};
 
 use serde::de::DeserializeOwned;
 
@@ -59,14 +59,22 @@ impl ProcessConnector {
             &self.credentials,
             config,
         )?;
-        self.call(
-            id,
-            &resolved,
-            call(ConnectionParams {
-                connection_id: id,
-                config,
-            }),
-        )
+        let call = call(ConnectionParams {
+            connection_id: id.into(),
+            config: Cow::Borrowed(config),
+        });
+        // Options use drafts while the person is still filling in the form.
+        // Other operations see the normalized settings with the current secret.
+        let resolved = if matches!(call, Call::Options { .. }) {
+            resolved
+        } else {
+            self.description
+                .descriptor
+                .schema
+                .validate(&resolved)
+                .map_err(SourceError::InvalidConfiguration)?
+        };
+        self.call(id, &resolved, call)
     }
 
     fn connection_id(&self) -> Result<&str, SourceError> {
@@ -106,6 +114,10 @@ impl Connector for ProcessConnector {
 
     fn presentation(&self) -> SourcePresentation {
         self.description.presentation.clone()
+    }
+
+    fn configuration_for_request(&self, raw: &ConfigValues) -> Result<ConfigValues, SourceError> {
+        Ok(raw.clone())
     }
 
     fn for_connection(&self, id: &str, config: &ConfigValues) -> Option<Box<dyn Connector>> {
@@ -158,8 +170,8 @@ impl Connector for ProcessConnector {
             id,
             &config,
             Call::Validate(ConnectionParams {
-                connection_id: id,
-                config: &config,
+                connection_id: id.into(),
+                config: Cow::Borrowed(&config),
             }),
         )?;
         if !issues.is_empty() {
@@ -200,15 +212,15 @@ impl Connector for ProcessConnector {
     ) -> Result<Vec<ChoiceOption>, SourceError> {
         self.request(config, |connection| Call::Options {
             connection,
-            field,
-            query,
+            field: field.into(),
+            query: query.into(),
         })
     }
 
     fn discover(&self, request: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
         self.request(request.config, |connection| Call::Discover {
             connection,
-            cursor: request.cursor,
+            cursor: request.cursor.map(Cow::Borrowed),
             page_size: request.page_size,
         })
     }
@@ -221,7 +233,7 @@ impl Connector for ProcessConnector {
         self.request(config, |connection| {
             Call::Fetch(IssueParams {
                 connection,
-                reference,
+                reference: Cow::Borrowed(reference),
             })
         })
     }
@@ -234,7 +246,7 @@ impl Connector for ProcessConnector {
         self.request(config, |connection| {
             Call::Conversation(IssueParams {
                 connection,
-                reference,
+                reference: Cow::Borrowed(reference),
             })
         })
     }
@@ -256,7 +268,7 @@ impl Publication for ProcessConnector {
     ) -> Result<ExternalIssue, SourceError> {
         self.request(config, |connection| Call::Publish {
             connection,
-            request,
+            request: Cow::Borrowed(request),
         })
     }
 
@@ -268,8 +280,8 @@ impl Publication for ProcessConnector {
     ) -> Result<ExternalIssue, SourceError> {
         self.request(config, |connection| Call::Locate {
             connection,
-            destination,
-            text,
+            destination: destination.into(),
+            text: text.into(),
         })
     }
 
@@ -280,7 +292,7 @@ impl Publication for ProcessConnector {
     ) -> Result<PublicationCandidates, SourceError> {
         self.request(config, |connection| Call::FindPublished {
             connection,
-            search,
+            search: Cow::Borrowed(search),
         })
     }
 }

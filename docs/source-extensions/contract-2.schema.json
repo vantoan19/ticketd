@@ -398,7 +398,7 @@
           "$ref": "#/$defs/ExternalEventKind"
         },
         "subject": {
-          "description": "Whom an assignment change concerns.",
+          "description": "The assignee, destination workflow state, or related issue when known.",
           "type": [
             "string",
             "null"
@@ -436,6 +436,73 @@
             "event": {
               "type": "string",
               "const": "reopened"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        },
+        {
+          "description": "A workflow change that does not itself establish a closure or reopening.",
+          "type": "object",
+          "properties": {
+            "category": {
+              "$ref": "#/$defs/StateCategory"
+            },
+            "event": {
+              "type": "string",
+              "const": "state_changed"
+            }
+          },
+          "required": [
+            "event",
+            "category"
+          ]
+        },
+        {
+          "description": "This issue was marked as a duplicate of another issue.",
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "marked_duplicate"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "unmarked_duplicate"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        },
+        {
+          "description": "Another issue was marked as a duplicate of this issue.",
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "duplicate_added"
+            }
+          },
+          "required": [
+            "event"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "const": "duplicate_removed"
             }
           },
           "required": [
@@ -1426,7 +1493,7 @@
           ]
         },
         {
-          "description": "Reserved for settings backed by the operating system keychain.",
+          "description": "An opaque credential sent only in connection requests.",
           "type": "object",
           "properties": {
             "type": {
