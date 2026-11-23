@@ -19,8 +19,11 @@ distribution are outside this matrix.
   quarantine before the first launch.
 
   ```sh
-  xattr -dr com.apple.quarantine /Applications/ticketd.app
+  /usr/bin/xattr -dr com.apple.quarantine /Applications/ticketd.app
   ```
+
+  Use the full `/usr/bin/xattr` path: Python's `xattr` package (installed with pip,
+  pyenv or Homebrew's Python) can come first on PATH, and it rejects `-r`.
 
   Alternatively, try to open the app once, then choose **Open Anyway** in System
   Settings → Privacy & Security.
@@ -56,7 +59,7 @@ or `ticketd-cli-*-windows-x86_64.zip`). Extract the executable and move it to a
 directory on your PATH, such as `~/.local/bin` on macOS and Linux or
 `%LOCALAPPDATA%\Programs\ticketd-cli` on Windows. Add the directory to PATH if
 needed. On macOS, remove the quarantine attribute from the extracted executable
-with `xattr -d com.apple.quarantine ~/.local/bin/ticketd` (use its actual path).
+with `/usr/bin/xattr -d com.apple.quarantine ~/.local/bin/ticketd` (use its actual path).
 Update a standalone CLI by downloading the new archive and replacing the executable.
 
 Run `ticketd --version` and `ticketd --help` in the same environment as the
