@@ -29,13 +29,28 @@ export function sourceLocation(source: TicketSource): string {
   return `${source.place_label ?? source.place} ${source.number}`.trim();
 }
 
+/** An unavailable ticket without a working local route has no retry action. */
+export function connectionUnavailableText(source: TicketSource): string | null {
+  switch (source.unavailable?.code) {
+    case "connection_removed":
+      return "Connection removed";
+    case "not_configured":
+      return `${source.provider_name} isn't connected on this desktop`;
+    default:
+      return null;
+  }
+}
+
 /** The state line's words, and the tone of its dot, if it has one. */
 export function sourceState(source: TicketSource): {
   text: string;
   tone: "positive" | "attention" | null;
 } {
   if (source.unavailable)
-    return { text: "Source unavailable", tone: "attention" };
+    return {
+      text: connectionUnavailableText(source) ?? "Source unavailable",
+      tone: "attention",
+    };
   const { category, name } = source.state;
   const categoryLabel = {
     open: "Open",
@@ -82,11 +97,23 @@ export function freshness(source: TicketSource, now = Date.now()): string {
 export function unavailableNotice(
   source: TicketSource,
   now = Date.now(),
-): { title: string; detail: string; since: string } | null {
+): { title: string; detail: string; since: string; canRetry?: false } | null {
   const unavailable = source.unavailable;
   if (!unavailable || source.ownership !== "external") return null;
   const name = source.provider_name;
   const since = ago(unavailable.since, now) ?? unavailable.since;
+  const connectionTitle = connectionUnavailableText(source);
+  if (connectionTitle) {
+    return {
+      title: connectionTitle,
+      detail:
+        unavailable.code === "connection_removed"
+          ? "The last synced copy and your local work are still here. Sync resumes when a connection discovers this issue again."
+          : "You’re viewing the last synced copy. Add a covering connection in Settings → Sources to refresh this ticket.",
+      since: `Since ${since}`,
+      canRetry: false,
+    };
+  }
   // Worded by what failed, once: the provider's own text is not chained on.
   const cause =
     unavailable.code === "not_found"

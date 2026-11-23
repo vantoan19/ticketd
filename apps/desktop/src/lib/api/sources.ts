@@ -491,4 +491,7 @@ export const sourcesClient = {
       ),
     );
   },
+  async remove(connection: string) {
+    await structured(invoke("remove_source_connection", { connection }));
+  },
 };

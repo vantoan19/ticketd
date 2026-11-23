@@ -138,9 +138,13 @@ The ticket that lost the relationship lists it in `blocked_by_removed` or `paren
 
 The text after the header is the description. Activities and Implementation evidence follow as sections, oldest first.
 
-An externally sourced ticket uses `format: 2`. It carries `source_provider`, `source_external_id`, `source_locator`, `source_display`, `source_url`, `source_origin` (imported or published), `source_linked_at`, `source_authority` (external or local), `source_authority_changed_at` and `source_state_category` (open, completed, not_planned, duplicate or unknown). The observed state can also carry `source_state_name` (the tracker’s display label), `source_updated_at` and `source_partition` (the provider-defined part, such as a GitHub repository). The identity and observation travel between devices. Connection settings and IDs stay on each device.
+An externally sourced ticket uses `format: 2`. It carries `source_provider`, `source_external_id`, `source_locator`, `source_display`, `source_url`, `source_origin` (imported or published), `source_linked_at`, `source_authority` (external or local), `source_authority_changed_at` and `source_state_category` (open, completed, not_planned, duplicate or unknown). The observed state can also carry `source_state_name` (the tracker’s display label), `source_updated_at` and `source_partition` (the provider-defined part, such as a GitHub repository). The identity and observation travel between devices. Connection settings, IDs and removal state stay on each device.
 
-Format 1 and unmarked files use `source_state` (open or closed) and optional `source_closure_reason`. A reader converts a closed issue whose reason is absent or marked unknown to the unknown category. For GitHub it recovers the display label and repository from the stored state and locator. A writer still uses format 1 for local tickets and other record kinds. Older clients leave format 2 files untouched.
+A ticket with a cached provider presentation uses `format: 3` and includes the optional
+`source_provider_name` and `source_provider_icon_svg` fields. The desktop displays
+the mark as an image and uses the provider name when it has no covering local connection.
+
+Format 1 and unmarked files use `source_state` (open or closed) and optional `source_closure_reason`. A reader converts a closed issue whose reason is absent or marked unknown to the unknown category. For GitHub it recovers the display label and repository from the stored state and locator. A writer still uses format 1 for local tickets and other record kinds. Readers continue to accept formats 1 and 2. Older clients leave files with newer formats untouched.
 
 ### Activity section
 

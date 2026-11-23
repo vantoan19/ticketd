@@ -1010,3 +1010,58 @@ fn connection_help_and_edits_use_the_connection_first() {
         json!({"repositories":["o/r"], "assignee":"octo"})
     );
 }
+
+#[test]
+fn removing_a_connection_keeps_unresolved_publication_and_does_not_rebind_on_id_reuse() {
+    let cli = Cli::new();
+    let reference = unresolved_ticket(&cli);
+    let before = cli.run(&["show", &reference]);
+    let removed = cli.command(&["source", "github", "remove"], None);
+    assert!(
+        removed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&removed.stderr)
+    );
+    assert_eq!(
+        serde_json::from_slice::<Value>(&removed.stdout).unwrap(),
+        json!({"ok": true})
+    );
+    assert_eq!(cli.run(&["source", "list"])[0]["saved"], Value::Null);
+    assert_eq!(
+        cli.run(&["show", &reference])["publication"],
+        before["publication"]
+    );
+
+    let added = cli.command(
+        &[
+            "source",
+            "add",
+            "github",
+            "--set",
+            "repositories=o/r,o/flaky",
+        ],
+        Some(SECOND_TOKEN),
+    );
+    assert!(
+        added.status.success(),
+        "{}",
+        String::from_utf8_lossy(&added.stderr)
+    );
+    let review = cli.run(&["source", "resolve", &reference, "--no-search"]);
+    assert!(
+        review["actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|action| action["available"] == false)
+    );
+    let preview = cli.run(&[
+        "source",
+        "publish",
+        &reference,
+        "--preview",
+        "--destination",
+        "o/flaky",
+    ]);
+    assert_eq!(preview["eligibility"]["reason"], "attempt_open");
+}
