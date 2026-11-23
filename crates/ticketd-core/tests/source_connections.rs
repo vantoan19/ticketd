@@ -89,6 +89,7 @@ fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
     assert_portable_boundary(&path, folder.path());
 }
 
+#[allow(clippy::unwrap_used)] // A broken fixture should fail this test immediately.
 fn assert_portable_boundary(path: &Path, folder: &Path) {
     let backup = folder.join("portable.sqlite3");
     let mut workspace = Workspace::open(path).unwrap();
@@ -535,4 +536,46 @@ fn values(account: &str, repository: &str) -> ticketd_core::source::ConfigValues
     ]
     .into_iter()
     .collect()
+}
+
+#[test]
+fn restoring_a_legacy_backup_preserves_the_devices_own_settings() {
+    let folder = tempfile::tempdir().unwrap();
+    let backup = folder.path().join("legacy-backup.sqlite3");
+    let current = folder.path().join("legacy-workspace.sqlite3");
+    for (path, account) in [(&backup, "backup-account"), (&current, "device-account")] {
+        ticketd_core::create_workspace_at_format_version(path, FORMAT_VERSION - 1).unwrap();
+        Connection::open(path)
+            .unwrap()
+            .execute(
+                "INSERT INTO source_configurations (provider, configuration, account, contract_version)
+                 VALUES ('github', '{\"repositories\":[\"owner/repo\"]}', ?1, 1)",
+                [account],
+            )
+            .unwrap();
+    }
+
+    let empty = folder.path().join("new-workspace.sqlite3");
+    Workspace::restore(&empty, &backup).unwrap();
+    assert!(
+        Workspace::open(&empty)
+            .unwrap()
+            .saved_sources()
+            .unwrap()
+            .is_empty()
+    );
+
+    let safety = Workspace::restore(&current, &backup).unwrap();
+    let restored = Workspace::open(&current).unwrap();
+    assert_eq!(
+        restored.source_connection("github").unwrap().account,
+        "device-account"
+    );
+    let recovery = Connection::open(safety).unwrap();
+    let account: String = recovery
+        .query_row("SELECT account FROM source_configurations", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(account, "device-account");
 }
