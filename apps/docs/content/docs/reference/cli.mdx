@@ -3,7 +3,7 @@ title: CLI reference
 description: Find the command for tickets, relationships, Documents, Plans and workspace operations.
 ---
 
-Run `ticketd COMMAND --help` for a command's arguments and flags. Workspace commands print JSON on stdout. The help and skill guides also offer readable text. Errors go to stderr with a nonzero exit code.
+Most workspace commands print JSON on stdout. `ticketd document link TARGET` prints a Markdown link that you can paste into a Document. `ticketd skills get` prints the guide as text. Run `ticketd COMMAND --help` for a command's arguments and flags. On failure, check stderr and the nonzero exit code.
 
 ## Tickets
 

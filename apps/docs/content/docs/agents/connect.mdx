@@ -60,7 +60,7 @@ To get a notification when a ticket is ready for review, open **Automations → 
 
 ## What the agent can rely on
 
-- **Workspace commands return JSON.** The skill-reading commands and help also produce readable text.
+- **Most workspace commands return JSON.** Read the output of `ticketd document link TARGET` as a Markdown link. Help and `ticketd skills get` also print text.
 - **Check the exit status.** A nonzero status signals failure. Read stderr for
   the reason and keep any JSON report on stdout. For example, `inspect-backup`
   prints its inspection report when it finds damage that prevents a restore.
