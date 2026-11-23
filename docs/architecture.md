@@ -878,9 +878,12 @@ and a project membership history entry in the same transaction as the new ticket
 Refresh preserves existing project membership. It retains a previously observed
 repository while the issue's locator and URL stay the same. A changed location
 without a repository report clears the old observation. GitHub derives the web
-host from the API host, using `github.com` for `api.github.com` and the configured
-host for Enterprise. Enterprise issue identities include that host, so issues
+host from the API host. It maps `api.github.com` to `github.com` and
+`api.<tenant>.ghe.com` to `<tenant>.ghe.com`. GitHub Enterprise Server uses its
+configured host. Enterprise issue identities include the web host, so issues
 with the same numeric ID on different hosts stay separate after a source change.
+[GitHub Enterprise Cloud data residency](https://docs.github.com/en/enterprise-cloud@latest/admin/data-residency/about-github-enterprise-cloud-with-data-residency#api-access)
+
 Public GitHub keeps its numeric IDs. Format version 87 populates the repository
 when a legacy issue URL agrees with its locator. Format version 88 qualifies
 legacy IDs using stored host evidence. A legacy ID without host evidence remains

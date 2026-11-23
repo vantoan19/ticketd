@@ -369,7 +369,7 @@ pub(crate) fn migrate_issue_repository(connection: &Connection) -> Result<(), Er
 /// database ID. This covers local takeover provenance and saved duplicate targets.
 pub(crate) fn migrate_github_issue_hosts(connection: &Connection) -> Result<(), Error> {
     use super::github::{
-        PROVIDER, issue_id_host, repository_from_issue_url, scope_legacy_issue_id,
+        PROVIDER, issue_id_host, repository_from_issue_url, scope_legacy_issue_id, web_host_for_api,
     };
 
     let mut identities = connection.prepare(
@@ -387,15 +387,23 @@ pub(crate) fn migrate_github_issue_hosts(connection: &Connection) -> Result<(), 
         })?
         .collect::<Result<Vec<_>, _>>()?;
     for (ticket, id, repository, locator, url) in rows {
-        let repository = repository.or_else(|| repository_from_issue_url(&locator, &url));
-        let host = repository
+        let canonical_repository = match repository.as_deref() {
+            Some(remote) => remote.split_once('/').and_then(|(host, name)| {
+                let web_host = web_host_for_api(host);
+                (web_host != host).then(|| format!("{web_host}/{name}"))
+            }),
+            None => repository_from_issue_url(&locator, &url),
+        };
+        let host = canonical_repository
             .as_deref()
+            .or(repository.as_deref())
             .and_then(|remote| remote.split_once('/'))
             .map(|(host, _)| host);
-        if let Some(scoped) = scope_legacy_issue_id(&id, host).filter(|scoped| scoped != &id) {
+        let scoped = scope_legacy_issue_id(&id, host).filter(|scoped| scoped != &id);
+        if canonical_repository.is_some() || scoped.is_some() {
             connection.execute(
-                "UPDATE external_identities SET external_id = ?2 WHERE ticket_id = ?1",
-                params![ticket, scoped],
+                "UPDATE external_identities SET external_id = COALESCE(?2, external_id), repository = COALESCE(?3, repository) WHERE ticket_id = ?1",
+                params![ticket, scoped, canonical_repository],
             )?;
         }
     }

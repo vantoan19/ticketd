@@ -137,8 +137,12 @@ fn configured_repositories_use_the_github_web_host_without_network_access() {
     for (api, repository) in [
         ("https://api.github.com", "github.com/Owner/Name"),
         (
-            "https://Git.Example.test:8443/api/v3",
-            "git.example.test/Owner/Name",
+            "https://api.octocorp.ghe.com",
+            "octocorp.ghe.com/Owner/Name",
+        ),
+        (
+            "https://Api.Git.Example.test:8443/api/v3",
+            "api.git.example.test/Owner/Name",
         ),
     ] {
         let fixture = Arc::new(Fixture::default());
@@ -221,6 +225,72 @@ fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
             .urls()
             .contains(&format!("{API}/repos/o/one/issues/7"))
     );
+}
+
+#[test]
+fn data_residency_discovery_reuses_legacy_tickets_and_routes_by_their_web_host() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("legacy.db");
+    crate::create_workspace_at_format_version(&path, 87).unwrap();
+    let old = rusqlite::Connection::open(&path).unwrap();
+    for (id, repository) in [(7, Some("api.octocorp.ghe.com/o/one")), (8, None)] {
+        let key = format!("legacy-{id}");
+        let reference = format!("T-KQ{id}");
+        let locator = format!("o/one#{id}");
+        let url = format!("https://octocorp.ghe.com/o/one/issues/{id}");
+        old.execute("INSERT INTO tickets (id, reference, title, status) VALUES (?1, ?2, 'Legacy issue', 'Todo')", rusqlite::params![key, reference]).unwrap();
+        old.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, repository) VALUES (?1, 'github', ?2, ?3, ?3, ?4, 'imported', ?5)", rusqlite::params![key, id.to_string(), locator, url, repository]).unwrap();
+        old.execute(
+            "INSERT INTO external_ownership (ticket_id, authority) VALUES (?1, 'external')",
+            [&key],
+        )
+        .unwrap();
+        old.execute(
+            "INSERT INTO source_sync (ticket_id, external_state) VALUES (?1, 'open')",
+            [&key],
+        )
+        .unwrap();
+    }
+    drop(old);
+
+    let mut workspace = crate::Workspace::open(&path).unwrap();
+    let api = "https://api.octocorp.ghe.com";
+    let (fixture, engine) = setup_at(api, Some(TOKEN));
+    let mut issues = Vec::new();
+    for id in [7, 8] {
+        let mut item = issue(id, id, "o/one");
+        item["html_url"] = json!(format!("https://octocorp.ghe.com/o/one/issues/{id}"));
+        issues.push(item);
+        for suffix in ["comments", "events"] {
+            fixture.respond(
+                &format!("{api}/repos/o/one/issues/{id}/{suffix}?per_page=100"),
+                ok(json!([])),
+            );
+        }
+    }
+    let values = config(json!({"repositories": ["o/one"]}));
+    let listed = format!("{api}/repos/o/one/issues?state=open&per_page=100");
+    fixture.respond(&format!("{api}/user"), ok(json!({"login": "octo"})));
+    fixture.respond(&listed, ok(json!(issues)));
+    let saved = workspace.save_source(&engine, "github", &values).unwrap();
+    assert_eq!(saved.preview.already_here, 2);
+    let project = workspace
+        .create_project_with_remote(
+            "Tenant project",
+            folder.path().to_str().unwrap(),
+            Some("octocorp.ghe.com/o/one"),
+        )
+        .unwrap();
+    let preview = workspace
+        .preview_connect_source(&engine, "github", &project.id)
+        .unwrap();
+    assert_eq!(preview.tickets, ["T-KQ7", "T-KQ8"]);
+    fixture.respond(&listed, ok(json!(issues)));
+    let refresh = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert!(refresh.imported.is_empty());
+    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
 }
 
 #[test]

@@ -69,16 +69,9 @@ impl GithubConnector {
         credentials: Box<dyn CredentialSource>,
     ) -> Self {
         let api_url = api_url.into().trim_end_matches('/').to_owned();
-        let web_host = url::Url::parse(&api_url).ok().and_then(|api| {
-            api.host_str().map(|host| {
-                if host == "api.github.com" {
-                    "github.com"
-                } else {
-                    host
-                }
-                .to_owned()
-            })
-        });
+        let web_host = url::Url::parse(&api_url)
+            .ok()
+            .and_then(|api| api.host_str().map(|host| web_host_for_api(host).to_owned()));
         Self {
             api_url,
             web_host,
@@ -984,6 +977,20 @@ fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {
         .ok_or_else(|| SourceError::Protocol("the issue locator is not valid".into()))
 }
 
+/// GitHub.com and data residency have dedicated API hostnames. Enterprise
+/// Server can use any hostname, including one that starts with `api.`.
+pub(super) fn web_host_for_api(host: &str) -> &str {
+    if host == "api.github.com" {
+        return "github.com";
+    }
+    host.strip_prefix("api.")
+        .filter(|web| {
+            web.strip_suffix(".ghe.com")
+                .is_some_and(|tenant| !tenant.is_empty() && !tenant.contains('.'))
+        })
+        .unwrap_or(host)
+}
+
 fn issue_id(id: &str, host: &str) -> String {
     if host == "github.com" {
         id.to_owned()
@@ -1034,7 +1041,7 @@ pub(super) fn repository_from_issue_url(locator: &str, issue_url: &str) -> Optio
     }
     crate::project_remote::normalize_project_remote(&format!(
         "{}/{url_repository}",
-        url.host_str()?
+        web_host_for_api(url.host_str()?)
     ))
 }
 
