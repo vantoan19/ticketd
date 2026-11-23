@@ -25,11 +25,13 @@ ticketd source CONNECTION remove
 ticketd context T-KQ1 --conversation
 ```
 
-`source list` returns connection IDs, providers, and the providers' settings schemas.
-Put the connection ID before its operation. See `source CONNECTION --help`
-for `show`, `test`, `options`, `edit`, `rename`, `preview`, `status` and `refresh`. `source add` takes a provider ID. Use
-`source add --preview` to check a new connection before adding it. See each command's
-help for `--set` and `--config-file`.
+`source list` returns the provider description and settings schema in
+`connector`. Find the provider ID at `connector.provider` and the connection
+ID at `saved.id`. A row with `saved: null` describes a provider available for
+setup. `source add` takes a provider ID. Put the saved connection ID before
+operations such as `show`, `test`, `options`, `edit`, `rename`, `preview`,
+`status` and `refresh`. Use `source add --preview` to check settings before
+adding. See each command's help for accepted settings and flags.
 
 `source add` and `source CONNECTION edit` validate and store settings without importing.
 `source CONNECTION refresh` discovers matching issues and updates tickets routed to
@@ -48,6 +50,20 @@ external identity. Its tickets read Connection removed on this desktop until a
 covering connection discovers the issue again. Taking ownership makes a ticket
 local. That authority decision persists after rediscovery. Unresolved publications
 remain recorded and block a second create.
+
+## Register and test an extension
+
+Use `source extension list` to find registered extension IDs. `source extension
+add PATH` shows the exact command and asks for approval before running it
+with the user's OS permissions. `source extension link PATH` runs a trusted
+development folder in place. `source extension remove ID` removes the extension
+registration.
+
+`source conformance PROVIDER` checks a registered extension with settings
+provided through `--set` or `--config-file -`. Read the report and its skip
+reasons. Use `--strict` to require the observations described in help.
+When the task calls for a test write, `--publish DESTINATION` permits one
+creation and checks the recovery queries.
 
 ## Publication and uncertain outcomes
 

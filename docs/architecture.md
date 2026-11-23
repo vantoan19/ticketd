@@ -312,9 +312,8 @@ matches nothing: each desktop reacts only to changes made on it and to its ticke
 sources (provisional, ADR 0012).
 Conditions are tested against the ticket as it is when the event is matched, not as
 it was when the event was logged: its project, its tags, and its source, which is
-the provider that owns it now (`github`) or `local`, the same rule as the ticket
-list's source filter. Matching and the run state
-machine are functions with no SQL: the state machine takes the run's steps and how
+the current owning provider ID or `local`, the same rule as the ticket list's
+source filter. Matching and the run state machine are functions with no SQL: the state machine takes the run's steps and how
 the step it was on ended, and answers with the next step or how the run ends.
 The executor drives a run with one core call, `advance_automation_run`, which
 records how its step ended and answers with the next piece of work that needs a
@@ -812,17 +811,20 @@ The desktop must detect writes committed by CLI processes and refresh affected v
 
 ## Verification and future evolution
 
-The built-in GitHub Issues connector runs through a ticketd-owned engine and a
+GitHub Issues and extensions run through a ticketd-owned engine and a
 versioned connector interface. Connectors handle provider-specific configuration,
 discovery, ticket and comment retrieval, external identity, status interpretation,
 and optional publication. The core owns scheduling, identity preservation, local
 data, and persistence. ticketd renders provider-specific configuration and filter
 forms from schemas shared by the desktop and CLI.
 
-The built-in connector and linked development extensions run through the same
-engine. The decision and the released wire shapes are recorded in
-[ADR 0021](adr/0021-ticket-source-extensions-run-out-of-process.md) and the
-[Contract 2 JSON Schema](source-extensions/contract-2.schema.json).
+The engine uses the same connector interface for built-in GitHub and
+out-of-process extensions. The Rust SDK owns the shared protocol types and
+the extension-side stdio server. The wire contract is described in the
+schema, and the author guide covers installation, development and conformance.
+[ADR 0021](adr/0021-ticket-source-extensions-run-out-of-process.md) ·
+[Contract 2 JSON Schema](source-extensions/contract-2.schema.json) ·
+[Author guide](ticket-source-extensions.md)
 
 ### Source connector layers
 
@@ -843,21 +845,27 @@ The code lives in `ticketd_core::source`, from the inside out:
   condition names another input. The dependent value is omitted when that input
   or any input it depends on is empty. Advanced settings use the same validation
   rules. Links are display metadata, and the desktop only opens HTTPS addresses.
-  A schema declaring a secret is refused until keychain-backed settings ship.
-  Preview and Save run connector validation after normalization, before discovery.
+  Secret fields store references to keychain entries. Before an extension
+  operation, ticketd resolves active credentials and passes their values
+  in the request. Preview and Save run connector validation after normalization,
+  before discovery.
   Connector problems can point to an input or describe the whole form.
-- **Extension host** (`extension/`): caches linked descriptions in a registry
-  beside the default Workspace. Desktop keeps one process per connection, starts
-  it on demand, and closes it after five idle minutes or at quit. CLI commands
-  close their sessions before exit. Each request has a deadline, and a broken
-  connection can restart unless five crashes within three minutes latched it.
+- The **extension host** (`extension/`) registers installed and linked packages
+  and caches descriptions in the device registry beside the default Workspace.
+  The packaged desktop registers the bundled Linear executable at startup.
+  The CLI reads the same registry. Desktop keeps one process per connection,
+  starts it on demand, and closes it after five idle minutes or at quit.
+  CLI commands close their sessions before exit. Each request has a deadline.
+  Five crashes within three minutes stop automatic restarts for that connection.
   Retry clears that connection's latch. The host owns the process group on Unix or
   Job Object on Windows and escalates shutdown for the whole tree.
 - **Engine** (`engine.rs`): the only caller of connectors. It validates
   configuration, walks pages with a progress guard, de-duplicates by external
   identity, bounds previews, and holds no database handle.
-- **Connectors** (`github/`): provider translation over an `HttpTransport` seam
-  with deterministic fixtures in tests. GitHub uses the person's own credential
+- **Connectors** translate tracker data. The built-in GitHub connector uses an
+  `HttpTransport` seam with deterministic fixtures. Linear implements the
+  Rust SDK's `Extension` trait and uses the same process adapter as locally
+  installed or linked extensions. GitHub uses the person's own credential
   (environment token or `gh auth token`), which is never stored, exported,
   backed up, logged, or sent to any host other than the API.
 - **Workflows** (`source/tracking.rs`, `publication.rs`, `takeover.rs`,
@@ -934,7 +942,7 @@ refresh at once, with serial calls within a connection. Failure backoff and
 persisted rate-limit holds apply to each connection. CLI refresh and status
 take a connection ID and work without the desktop.
 
-Publication cannot be atomic across the external tracker and SQLite, so `Workspace::publish_ticket`
+Publication cannot be atomic across a tracker and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks
 eligibility and saves the attempt as `in_flight` with the exact title,
 description and destination. It binds the attempt to the original connection
