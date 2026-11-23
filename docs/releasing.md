@@ -13,8 +13,8 @@ The `linux-distribution` target limits the build to Linux, and `native-smoke` ru
 the Linux native desktop smoke test. The workflow uploads artifacts with
 seven-day retention. GitHub Release creation and OS code signing are separate steps.
 
-Distribution CI requires a platform-specific Google desktop app registration;
-see [publisher configuration](install.md#publisher-and-developer-configuration).
+Distribution CI embeds one Google desktop app registration across the supported platforms.
+See [Configure Google Drive for a build](#configure-google-drive-for-a-build).
 An independent local build can omit Google configuration and keep Drive disabled;
 see [development packaging](development.md#build-packages).
 
@@ -52,6 +52,42 @@ version, and each platform's download URL and signature. It warns and skips the
 manifest when no updater signatures are staged and fails if only some of the
 required files are signed. Attach the manifest, the updater files, and their
 `.sig` files to the draft together.
+
+## Configure Google Drive for a build
+
+The publisher enables Google Drive API and Google Picker API in its Google Cloud
+project, configures consent with only `https://www.googleapis.com/auth/drive.file`,
+and creates one **Desktop app** OAuth client, which serves every platform. For an
+External Testing app, add the test users. Store the downloaded installed-app JSON
+as the `TICKETD_GOOGLE_OAUTH_CLIENT_JSON` repository secret.
+
+Enable the APIs in the same project that owns the OAuth client; creating a
+client alone does not enable Drive API access. If sign-in and folder selection
+succeed but ticketd reports that Google Drive API is disabled, the publisher must
+[enable it in Google Cloud](https://developers.google.com/workspace/guides/enable-apis),
+allow the change to take effect, then retry. End users do not perform this setup.
+
+The distribution workflow embeds that registration in both desktop and
+CLI via the build-time `TICKETD_GOOGLE_OAUTH_CLIENT_JSON` variable. Missing or
+invalid registration fails distribution before installers are published. Local
+builds can supply that same variable during compilation. Keep the JSON outside
+Git and workspace/backup storage. Desktop clients are public clients; bundling
+their registration never bundles a user's authorization or refresh token.
+
+Developers can explicitly override a bundled registration by setting
+`TICKETD_GOOGLE_OAUTH_CLIENT_FILE` to an external Desktop OAuth JSON file in the
+process environment and restarting ticketd. A missing or invalid override reports
+an error rather than silently switching registrations. Unset it to use the
+bundled registration. The application pins Google's authorization/token/API
+endpoints rather than trusting endpoints in either JSON source.
+
+The native Picker integration requires validation with your configured desktop
+client and account before a complete Drive release is claimed. Fixture tests do
+not establish live OAuth/Picker, account policy or packaged secure-store behavior.
+Primary contracts: [native Picker](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker),
+[desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
+[per-file scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth),
+and [OAuth expiration](https://developers.google.com/identity/protocols/oauth2#expiration).
 
 ## Repository CI settings
 
@@ -175,8 +211,10 @@ Releases are **unsigned preview builds** until signing is set up; see
 [#534](https://github.com/vantoan19/ticketd/issues/534) for how comparable projects
 handle signing. Release notes and the install guide must say so and explain the
 platform warnings: on macOS, remove the quarantine attribute
-(`xattr -d com.apple.quarantine`) or use System Settings → Privacy & Security →
+(`/usr/bin/xattr -d com.apple.quarantine`) or use System Settings → Privacy & Security →
 Open Anyway; on Windows, SmartScreen's More info → Run anyway.
+
+For OS signing requirements, see the [Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/) and [Windows signing guide](https://v2.tauri.app/distribute/sign/windows/).
 
 A release contains the matching desktop and CLI, installation instructions, license
 notices, SHA-256 checksums, and the updater files described in the

@@ -137,9 +137,6 @@ The MSI install and relaunch path still needs a native Windows run.
 - Losing the updater key, or its password, means no installed copy can update in
   place again; people would have to reinstall by hand. The key is backed up outside
   GitHub.
-- v0.1.0 was built before the updater existed and cannot update itself; its users
-  download the next release once.
-- `docs/install.md` and `docs/releasing.md` change when this ships: in-app updates,
-  the bundled CLI, and Install command-line tool.
+- The [first public release, v0.1.0](https://github.com/vantoan19/ticketd/releases/tag/v0.1.0), shipped the updater and bundled CLI. Its first live upgrade requires a later release.
 - The bundled CLI's PATH link on macOS points into `/Applications/ticketd.app`, so
   moving the app breaks the link until the button is used again.

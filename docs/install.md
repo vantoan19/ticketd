@@ -19,8 +19,11 @@ distribution are outside this matrix.
   quarantine before the first launch.
 
   ```sh
-  xattr -dr com.apple.quarantine /Applications/ticketd.app
+  /usr/bin/xattr -dr com.apple.quarantine /Applications/ticketd.app
   ```
+
+  Use the full `/usr/bin/xattr` path: Python's `xattr` package (installed with pip,
+  pyenv or Homebrew's Python) can come first on PATH, and it rejects `-r`.
 
   Alternatively, try to open the app once, then choose **Open Anyway** in System
   Settings → Privacy & Security.
@@ -31,6 +34,8 @@ distribution are outside this matrix.
   unrecognized app, choose **More info**, then **Run anyway**. If Smart App
   Control is on, it blocks unsigned installers outright. Follow
   [development setup](development.md) to build from source.
+
+Open ticketd and [create your first ticket](first-ticket.md).
 
 ## Command-line tool
 
@@ -56,7 +61,7 @@ or `ticketd-cli-*-windows-x86_64.zip`). Extract the executable and move it to a
 directory on your PATH, such as `~/.local/bin` on macOS and Linux or
 `%LOCALAPPDATA%\Programs\ticketd-cli` on Windows. Add the directory to PATH if
 needed. On macOS, remove the quarantine attribute from the extracted executable
-with `xattr -d com.apple.quarantine ~/.local/bin/ticketd` (use its actual path).
+with `/usr/bin/xattr -d com.apple.quarantine ~/.local/bin/ticketd` (use its actual path).
 Update a standalone CLI by downloading the new archive and replacing the executable.
 
 Run `ticketd --version` and `ticketd --help` in the same environment as the
@@ -69,9 +74,8 @@ Registered project paths belong to the native OS environment; see
 
 ## In-app updates
 
-v0.1.0 predates in-app updates. If you installed it, download and install a newer
-desktop release from [GitHub Releases](https://github.com/vantoan19/ticketd/releases)
-once to get the updater and bundled CLI.
+The [first public release (v0.1.0)](https://github.com/vantoan19/ticketd/releases/tag/v0.1.0)
+includes the desktop updater and matching CLI.
 
 By default, the desktop checks for updates about ten seconds after launch and
 every 24 hours while it is open. It downloads and verifies a newer stable release
@@ -112,8 +116,7 @@ path and supported format without changing data. Most other workspace commands
 may create or migrate the database. Back up before upgrading; an older binary
 may refuse a newer workspace, and downgrade compatibility is not guaranteed.
 Close both desktop and CLI processes before replacing binaries or restoring a backup.
-See [workspace operations](../crates/ticketd-cli/skill-data/workspace.md) for backup
-and restore commands and [export documentation](export.md) for what they preserve.
+See [Back up and restore your workspace](workspace-tasks.md#back-up-and-restore-your-workspace).
 
 Uninstall the desktop through the OS or package manager. On macOS, remove the
 CLI link if you installed it. On Windows, remove the app folder's entry from your
@@ -174,21 +177,6 @@ When interacting with ticketd, use the ticketd skill or load `ticketd skills get
 Users and their other skills decide which work belongs in ticketd and how to
 organize it. Installing this skill does not change those choices.
 
-## Signing and distribution
-
-Releases are unsigned previews until signing is set up; see
-[release and distribution](releasing.md#publish-a-public-release). The manual
-Package workflow uploads unsigned artifacts for inspection and does not publish a
-release. macOS distribution outside the App Store requires a Developer ID
-Application certificate and Apple notarization credentials; unsigned downloads
-are blocked by Gatekeeper until the quarantine is removed as shown above. Windows code
-signing requires an appropriate certificate and signing configuration; unsigned
-installers can trigger SmartScreen or be blocked by Smart App Control. See the
-[Tauri macOS signing guide](https://v2.tauri.app/distribute/sign/macos/) and
-[Windows signing guide](https://v2.tauri.app/distribute/sign/windows/). Signing,
-notarization, and platform installation must be verified with real credentials
-and target systems before distribution.
-
 ## Google Drive setup
 
 Distribution builds include ticketd's Google app registration. In the attachment
@@ -207,38 +195,8 @@ restores reference metadata, not credentials or remote bytes; select files again
 with the appropriate account. External Testing refresh tokens may expire after
 seven days under Google's OAuth policy.
 
+To keep the same workspace on two computers, follow [Sync two desktops with Google Drive](workspace-tasks.md#sync-two-desktops-with-google-drive).
+
 ### Publisher and developer configuration
 
-The publisher enables Google Drive API and Google Picker API in its Google Cloud
-project, configures consent with only `https://www.googleapis.com/auth/drive.file`,
-and creates one **Desktop app** OAuth client, which serves every platform. For an
-External Testing app, add the test users. Store the downloaded installed-app JSON
-as the `TICKETD_GOOGLE_OAUTH_CLIENT_JSON` repository secret.
-
-Enable the APIs in the same project that owns the OAuth client; creating a
-client alone does not enable Drive API access. If sign-in and folder selection
-succeed but ticketd reports that Google Drive API is disabled, the publisher must
-[enable it in Google Cloud](https://developers.google.com/workspace/guides/enable-apis),
-allow the change to take effect, then retry. End users do not perform this setup.
-
-The distribution workflow embeds that registration in both desktop and
-CLI via the build-time `TICKETD_GOOGLE_OAUTH_CLIENT_JSON` variable. Missing or
-invalid registration fails distribution before installers are published. Local
-builds can supply that same variable during compilation. Keep the JSON outside
-Git and workspace/backup storage. Desktop clients are public clients; bundling
-their registration never bundles a user's authorization or refresh token.
-
-Developers can explicitly override a bundled registration by setting
-`TICKETD_GOOGLE_OAUTH_CLIENT_FILE` to an external Desktop OAuth JSON file in the
-process environment and restarting ticketd. A missing or invalid override reports
-an error rather than silently switching registrations. Unset it to use the
-bundled registration. The application pins Google's authorization/token/API
-endpoints rather than trusting endpoints in either JSON source.
-
-The native Picker integration requires validation with your configured desktop
-client and account before a complete Drive release is claimed. Fixture tests do
-not establish live OAuth/Picker, account policy or packaged secure-store behavior.
-Primary contracts: [native Picker](https://developers.google.com/workspace/drive/picker/guides/desktop-mobile-picker),
-[desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
-[per-file scopes](https://developers.google.com/workspace/drive/api/guides/api-specific-auth),
-and [OAuth expiration](https://developers.google.com/identity/protocols/oauth2#expiration).
+For source and distribution builds, see [Configure Google Drive for a build](releasing.md#configure-google-drive-for-a-build).

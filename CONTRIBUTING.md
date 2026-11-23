@@ -6,13 +6,15 @@ changes are welcome. You do not need an AI assistant or any private tools to con
 
 ## Where to start
 
-| Contribution                        | Start here                                            | Useful evidence                            |
-| ----------------------------------- | ----------------------------------------------------- | ------------------------------------------ |
-| Improve setup or explain a workflow | `README.md`, `docs/install.md`, `docs/development.md` | Commands you tried and the confusing step  |
-| Fix CLI behavior                    | `crates/ticketd-cli/`                                 | Reproduction command and expected output   |
-| Fix domain or storage behavior      | `crates/ticketd-core/`                                | A focused test with a temporary workspace  |
-| Improve desktop UI or accessibility | `apps/desktop/src/features/`                          | Before/after screenshots or keyboard steps |
-| Test a platform                     | `docs/install.md`                                     | OS, app version, and observed results      |
+| If you're changing…                   | Start here                                                                                                                                  | First focused check                                                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Setup or a walkthrough                | [Install](docs/install.md), [first ticket](docs/first-ticket.md), and [development setup](docs/development.md)                              | Follow the published steps in a fresh workspace. Record the platform, version, and observed result.                                                                      |
+| CLI commands or JSON output           | [CLI adapter](crates/ticketd-cli/src/) and [CLI integration tests](crates/ticketd-cli/tests/)                                               | For JSON output, run `cargo test -p ticketd-cli --test json_output`.                                                                                                     |
+| Agent operating guides                | [Bundled Markdown](crates/ticketd-cli/skill-data/) and [discovery skill](skills/ticketd/SKILL.md)                                           | Run `cargo test -p ticketd-cli --test skills_command` and try changed examples in a disposable workspace.                                                                |
+| Domain behavior or persistence        | [Shared Rust core](crates/ticketd-core/src/), [integration tests](crates/ticketd-core/tests/), and [architectural decisions](docs/adr/)     | Run the test for the affected behavior. For backup review, use `cargo test -p ticketd-core --test backup_review`.                                                        |
+| Desktop interactions or accessibility | [Feature components](apps/desktop/src/features/), [Tauri adapter](apps/desktop/src-tauri/src/), and [interface guidance](docs/agents/ui.md) | Run the adjacent component test. For posting updates, use `npm test -w @ticketd/desktop -- src/features/tickets/Activity.test.tsx`, then try the interaction in the app. |
+
+For the full component map, see [architecture and module responsibilities](docs/architecture.md#source-layout).
 
 Search [existing issues](https://github.com/vantoan19/ticketd/issues) before
 reporting a problem. Small fixes and documentation improvements can go straight

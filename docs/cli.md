@@ -4,6 +4,25 @@ For every command and option, use `ticketd --help` and command-specific `--help`
 The bundled `ticketd skills get` guide matches your executable version.
 See [installation](install.md) and [development setup](development.md) to get started.
 
+## Create a ticket and verify an update
+
+This example uses a POSIX shell and `jq` to read the JSON results. Start in an
+existing checkout you want to register. Run `ticketd workspace` and check the
+workspace path before creating data. If this checkout is already registered,
+set `project_id` to its `id` from `ticketd project list` and start at the
+second command.
+
+```sh
+project_id=$(ticketd project create demo . | jq -r '.id')
+ticket_ref=$(ticketd create "Review the welcome page" --project "$project_id" | jq -r '.reference')
+ticketd activity add "$ticket_ref" --brief "The draft is ready for review." --agent docs-agent
+ticketd context "$ticket_ref" --latest-update | jq -r '.latest_update.brief.text'
+```
+
+The last command prints `The draft is ready for review.` Open the same reference
+in the desktop app to see the update under **Activity**. Keep the returned
+project ID for filters and the ticket reference for commands that act on the ticket.
+
 ## Project context
 
 Checkout registrations use native filesystem paths. Register each existing checkout
@@ -15,16 +34,19 @@ projects produce an error; an unmatched directory creates an unlinked ticket.
 Paths are interpreted by the native operating system; interoperability with WSL
 has not been validated.
 
-### JSON output
+## JSON output
 
-Agents parse command output, so its shape is the same in every command:
+Most data commands print JSON on stdout. Direct commands usually return an
+object or array. `ticketd write` returns a `kind` and, for operations with a
+result, a `value`. Check the command's exit status before using its output.
+Runtime failures exit with status 1 and argument errors with status 2.
 
 - Status counts use the keys `todo`, `in_progress`, `in_review`, `done`,
   `canceled` and `duplicate` (`plan show` and `plan context` alike). Ticket
   `status` values keep their display spelling, such as `In progress`.
-- A write with no record to return prints `{"ok":true}`. This covers
+- A direct write with no record to return prints `{"ok":true}`. This covers
   `evidence delete`, `activity delete`, `document tag`, `document pin` and `export --file`.
-  A write that changes a record prints that record.
+  Direct ticket edits print the changed ticket.
 - Reminders print `{"reference":...,"due_at":...}` from `reminder show`, `set` and
   `snooze`, with `due_at` null when there is none; `reminder dismiss` prints
   `{"dismissed":true}` or `{"dismissed":false}`. `backup` prints `{"path":...}` and
@@ -35,7 +57,7 @@ Agents parse command output, so its shape is the same in every command:
   `{"ticket": ..., "latest_update": ...}` rows. The update, with its bounded brief, appears only
   beside the ticket; the ticket inside the row has no `latest_update` of its own.
 
-### Atomic batches
+## Atomic batches
 
 `ticketd batch plan.json` accepts a JSON array; use `ticketd batch -` to read
 standard input. Every create needs a `name` and a `title`; later operations refer
@@ -68,7 +90,7 @@ tickets were never saved; tickets that existed before keep their `T-` references
 100 operations, and 1,000 individual edits; execution checks a 10-second limit
 between operations.
 
-### Input limits
+## Input limits
 
 New writes (`create`, `change`, `batch`, `write`, and the desktop app) enforce
 these limits. Data saved earlier stays valid and is never rewritten.
@@ -83,7 +105,7 @@ these limits. Data saved earlier stays valid and is never rewritten.
   breaks collapse to single spaces and the title is cut at 1000 characters. The
   source keeps the original text.
 
-### Bounded ticket context
+## Bounded ticket context
 
 `ticketd context T-KQ1` returns JSON with the ticket, derived availability, and
 its tags. Add `--project`, `--plan`, `--relationships`, `--activities`, `--documents`, or
@@ -133,7 +155,45 @@ The JSON export includes `contextual_relationships` records. Backups retain
 these links and retry outcomes; personal preferences remain scoped to
 `local-person`, independently of editing-agent attribution.
 
-### Reporting progress
+## Recover from a conflicting edit
+
+Suppose you read the title `Review the welcome page` and want to append
+`before launch`. Someone renames it to `Review the French welcome page`
+before you save. A guarded edit preserves their change. Using the ticket
+reference from the walkthrough, first simulate the other edit on your practice
+ticket.
+
+```sh
+ticketd change "$ticket_ref" --title "Review the French welcome page"
+```
+
+Now submit the edit based on the earlier title. This command should fail and
+leave the other edit in place.
+
+```sh
+jq -n --arg ref "$ticket_ref" '{
+  operation: "change_ticket", reference: $ref,
+  patch: {expected_title: "Review the welcome page", title: "Review the welcome page before launch"}
+}' | ticketd write -
+```
+
+Read the full ticket again with `ticketd show "$ticket_ref"`. If the current
+title is `Review the French welcome page` and both edits still make sense,
+use that exact title as the new guard and keep the language in your edit.
+
+```sh
+jq -n --arg ref "$ticket_ref" '{
+  operation: "change_ticket", reference: $ref,
+  patch: {expected_title: "Review the French welcome page", title: "Review the French welcome page before launch"}
+}' | ticketd write -
+ticketd show "$ticket_ref" | jq -r '.title'
+```
+
+The final read should print `Review the French welcome page before launch`.
+If the intended edit is unclear, resolve it with the author before writing.
+For retry IDs and guarded body or Document edits, run `ticketd skills get writes`.
+
+## Reporting progress
 
 Post an authored Activity when beginning work, reaching a meaningful result,
 changing direction, requesting input, pausing, or handing off for review or
