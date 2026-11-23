@@ -35,47 +35,38 @@ test("a version-bump commit creates its draft", () => {
     tag: "v0.1.1",
     version: "0.1.1",
     prerelease: false,
-    replace: [],
     reason: `Creating the draft v0.1.1 from ${sha}.`,
   });
 });
 
-test("a later commit leaves a draft built from another commit alone", () => {
+test("an existing draft is never replaced, even for the same commit", () => {
+  for (const target of [sha, other]) {
+    const draft = {
+      id: 7,
+      tag_name: "v0.1.1",
+      draft: true,
+      target_commitish: target,
+    };
+    const plan = auto("0.1.1", [published, draft]);
+    assert.equal(plan.draft, false);
+    assert.match(plan.reason, /delete that draft on the Releases page/);
+    assert.throws(
+      () => manual("0.1.1", [published, draft]),
+      /delete that draft/,
+    );
+  }
+});
+
+test("a manual dry run marks a prerelease and ignores other versions' drafts", () => {
   const draft = {
-    id: 7,
+    id: 8,
     tag_name: "v0.1.1",
     draft: true,
     target_commitish: other,
   };
-  const plan = auto("0.1.1", [published, draft]);
-  assert.equal(plan.draft, false);
-  assert.match(plan.reason, /may be under test/);
-});
-
-test("rerunning the same commit replaces its own draft", () => {
-  const draft = {
-    id: 7,
-    tag_name: "v0.1.1",
-    draft: true,
-    target_commitish: sha,
-  };
-  assert.deepEqual(auto("0.1.1", [published, draft]).replace, [7]);
-});
-
-test("a manual run replaces any draft of the version and marks a prerelease", () => {
-  const drafts = [
-    {
-      id: 7,
-      tag_name: "v0.1.1-dryrun.1",
-      draft: true,
-      target_commitish: other,
-    },
-    { id: 8, tag_name: "v0.1.1", draft: true, target_commitish: other },
-  ];
-  const plan = manual("0.1.1-dryrun.1", [published, ...drafts]);
+  const plan = manual("0.1.1-dryrun.1", [published, draft]);
   assert.equal(plan.draft, true);
   assert.equal(plan.prerelease, true);
-  assert.deepEqual(plan.replace, [7]);
 });
 
 test("a manual run refuses a published, older or invalid version", () => {

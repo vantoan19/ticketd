@@ -2,7 +2,8 @@ name: Release
 
 # Builds the packages of every green main commit (kept 14 days), and turns a commit whose version
 # has no published release yet, a merged version-bump PR, into a draft GitHub Release of that
-# exact build. A manual run rebuilds a draft, or makes a dry-run draft with a build-time version.
+# exact build. A manual run drafts again after a draft was deleted, or makes a dry-run draft with
+# a build-time version.
 # scripts/release-plan.mjs decides; docs/releasing.md describes the whole release.
 on:
   workflow_run:
@@ -80,7 +81,7 @@ jobs:
     if: needs.plan.outputs.draft == 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    # One writer per version, so two commits never replace each other's draft at once.
+    # One writer per version, so two runs never both create its draft.
     concurrency:
       group: release-draft-${{ needs.plan.outputs.tag }}
       cancel-in-progress: false
@@ -148,7 +149,7 @@ jobs:
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: release-assets/*
-      - name: Create or replace the draft release
+      - name: Create the draft release
         if: steps.plan.outputs.draft == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -157,16 +158,8 @@ jobs:
           VERSION: ${{ steps.plan.outputs.version }}
           SHA: ${{ steps.plan.outputs.sha }}
           PRERELEASE: ${{ steps.plan.outputs.prerelease }}
-          REPLACE: ${{ steps.plan.outputs.replace }}
+        # Never deletes a release: an existing draft makes the check above decline instead.
         run: |
-          for id in $REPLACE; do
-            # Only ever delete a draft, even if one was published since the check above.
-            if [[ "$(gh api "repos/$REPO/releases/$id" --jq .draft)" != true ]]; then
-              echo "::error::Release $id is no longer a draft. Refusing to replace it."
-              exit 1
-            fi
-            gh api -X DELETE "repos/$REPO/releases/$id"
-          done
           flags=()
           if [[ "$PRERELEASE" == true ]]; then flags+=(--prerelease); fi
           url=$(gh release create "$TAG" release-assets/* --repo "$REPO" --draft --target "$SHA" \

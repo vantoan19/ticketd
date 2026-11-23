@@ -1,13 +1,14 @@
-// Decides whether the Release workflow drafts a release for a commit, and which existing drafts
-// that draft replaces. The workflow runs it before building and again just before it writes.
+// Decides whether the Release workflow drafts a release for a commit. The workflow runs it
+// before building and again just before it writes.
 //
 //   auto    a green main push (workflow_run). Every such commit is built; it is drafted only
-//           when its version has no published release yet. A missing draft is created and a
-//           draft of this same commit is replaced, but a draft built from another commit is
-//           left alone, because the maintainer may be testing it.
+//           when its version has no published release and no draft yet.
 //   manual  a workflow_dispatch rerun or dry run. Refuses a commit that is not a green main
-//           commit, and a version that is published or not newer than the latest release.
-//           Replaces any draft of that version.
+//           commit, a version that is published or not newer than the latest release, and a
+//           version that already has a draft.
+//
+// The workflow never deletes a release: the delete API cannot be limited to drafts, so a draft
+// published between a check and a delete would be lost. An existing draft is deleted by hand.
 import { appendFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { parseArgs } from "node:util";
@@ -48,13 +49,12 @@ export function planDraft({ mode, sha, version, releases, onMain, green }) {
       `${version} is not newer than the latest published release, v${latest}.`,
     );
   }
-  const drafts = releases.filter(
+  const existing = releases.find(
     (release) => release.draft && release.tag_name === tag,
   );
-  const other = drafts.find((release) => release.target_commitish !== sha);
-  if (mode === "auto" && other) {
+  if (existing) {
     return decline(
-      `The draft ${tag} was built from ${other.target_commitish}, and a later commit does not replace a draft that may be under test. Run the Release workflow by hand to rebuild it from ${sha}.`,
+      `The draft ${tag} already exists, built from ${existing.target_commitish}. To rebuild it, delete that draft on the Releases page, then run the Release workflow again.`,
     );
   }
   return {
@@ -62,10 +62,7 @@ export function planDraft({ mode, sha, version, releases, onMain, green }) {
     tag,
     version,
     prerelease: isPrerelease(version),
-    replace: drafts.map((release) => release.id),
-    reason: drafts.length
-      ? `Replacing the draft ${tag} with a build of ${sha}.`
-      : `Creating the draft ${tag} from ${sha}.`,
+    reason: `Creating the draft ${tag} from ${sha}.`,
   };
 }
 
@@ -151,7 +148,6 @@ function main() {
     override,
     draft: plan.draft,
     prerelease: plan.prerelease ?? false,
-    replace: (plan.replace ?? []).join(" "),
   };
   const lines = Object.entries(outputs).map(
     ([key, value]) => `${key}=${value}\n`,

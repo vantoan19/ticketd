@@ -14,9 +14,9 @@ Three workflows call it:
 
 - [Release](../.github/workflows/release.yml) runs when Quality succeeds on a push
   to `main`. It builds that commit and keeps the packages for 14 days. When the
-  commit's version has no published release yet, it also creates the draft release
-  (see the [release model](#release-model)). Run it by hand to rebuild a draft or
-  for a [dry run](#dry-run-a-release).
+  commit's version has no release yet, it also creates the draft release (see
+  the [release model](#release-model)). Run it by hand to draft again after
+  deleting a draft, or for a [dry run](#dry-run-a-release).
 - The manual [Package workflow](../.github/workflows/package.yml) builds the current
   `main` with seven-day retention. Its `linux-distribution` target builds only
   Linux, and `native-smoke` runs the Linux native desktop smoke test on any branch.
@@ -218,11 +218,12 @@ Build continuously, publish deliberately. There are no nightlies or update chann
 7. A problem found after publishing is fixed forward with a patch release. Never
    replace the files of a published release; add a known-issue note to it instead.
 
-The Release workflow never touches a published release. A run for a published
-version, or a version not newer than the latest release, drafts nothing. A manual
-run fails instead. A rerun for the same commit, or a manual run, replaces that
-version's draft. A later `main` commit leaves a draft built from another commit
-alone, because it may be under test.
+The Release workflow never deletes or changes a release. It drafts nothing for a
+version that is published, not newer than the latest release, or already has a
+draft; a manual run fails instead. To rebuild a draft, delete it on the Releases
+page, then run the Release workflow again. The workflow cannot delete drafts
+itself: GitHub's delete call cannot be limited to drafts, so a draft published
+between a check and the delete would be lost.
 
 Release whenever `main` has user-visible changes, aiming for small releases every one
 to two weeks. A public beta (`v0.3.0-beta.1`, published as a prerelease) is optional,
