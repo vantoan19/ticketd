@@ -1,4 +1,4 @@
-import { useRef, useState, type CSSProperties } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 import { useHydrated } from "../components/useHydrated";
 import { captures, regionOf } from "./captures";
 import { frameFor, markerIn, type Frame } from "./framing";
@@ -65,6 +65,10 @@ export function ProofScreen({
   const [failure, setFailure] = useState<"failed" | "retrying">();
   const [retry, setRetry] = useState({ index: -1, attempt: 0 });
   const retryButton = useRef<HTMLButtonElement>(null);
+  const currentSelection = useRef(selected);
+  useLayoutEffect(() => {
+    currentSelection.current = selected;
+  }, [selected]);
   const pending = shown !== selected;
   const busy = pending || failure === "retrying";
   const feature = stop.features[shown]!,
@@ -90,7 +94,7 @@ export function ProofScreen({
           {(pending ? [shown, selected] : [shown]).map((index) => {
             const item = stop.features[index]!;
             const settle = (failed: boolean) => {
-              if (index === selected) {
+              if (index === currentSelection.current) {
                 const button = retryButton.current;
                 if (!failed && button && button === document.activeElement) {
                   button

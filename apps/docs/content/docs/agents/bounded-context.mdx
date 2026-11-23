@@ -28,8 +28,10 @@ description, status, availability and tags. Everything else is opt-in.
 ticketd context T-LG12 --latest-update --evidence --documents
 ```
 
-A scope you did not select is absent from the result. A scope you selected that
-has nothing linked, such as a ticket with no Plan, is `null`.
+The result includes only the scopes you request. For a ticket without a Plan,
+`--plan` returns `"plan": null`. An empty list keeps its pagination fields.
+For example, `--activities` returns `"activities": {"items": [], "next_offset": null}`
+when the ticket has no updates.
 
 ## Limits
 
@@ -90,5 +92,6 @@ ticketd list --status "In review" --latest-update
 ticketd backlinks T-LG12
 ```
 
-`search` matches a literal substring in titles, descriptions and update briefs.
+`search` matches a literal substring. One or two characters search ticket
+titles. Three or more characters also search descriptions and update briefs.
 ASCII letters match without regard to case. Results exclude the trash.

@@ -103,17 +103,13 @@ export function ProofPhoto({
   const theme = useImageTheme();
   const image = useRef<HTMLImageElement>(null);
   useEffect(() => {
-    // A prerendered image can fail before React has attached its error
-    // handler. Recover the browser's settled result once the palette is known.
+    // A prerendered image can fail before hydration. Returning to an already
+    // loaded photo can also make it the pending selection without a new event.
     const current = image.current;
-    if (
-      theme &&
-      current?.currentSrc &&
-      current.complete &&
-      !current.naturalWidth
-    )
-      onError();
-  }, [theme, onError]);
+    if (!theme || !current?.currentSrc || !current.complete) return;
+    if (!current.naturalWidth) onError();
+    else if (pending) onLoad();
+  }, [theme, pending, onLoad, onError]);
   const sizes =
     "auto, (max-width: 759px) min(90vw, 590px), (max-width: 1440px) 52vw, 750px";
   // A host may cache a failed image response. Only an explicit retry needs
