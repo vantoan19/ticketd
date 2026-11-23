@@ -1,0 +1,13 @@
+# cargo-nextest settings. scripts/check rust uses the `ci` profile when CI is set; locally it
+# uses the default profile. The tests are IO-bound (they create temporary Workspaces and
+# processes), so the CI profile is tuned from measured runs; see docs/agents/quality.md.
+
+[profile.ci]
+# A flaky test must stay visible (#533), so a failure is never retried into a pass.
+retries = 0
+# Report every failing test, not only the first.
+fail-fast = false
+# A test that runs longer than 60 s is reported as slow, and is killed after 5 minutes.
+slow-timeout = { period = "60s", terminate-after = 5 }
+# Under target/nextest/ci/junit.xml; CI uploads it when a shard fails.
+junit.path = "junit.xml"
