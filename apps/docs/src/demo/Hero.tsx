@@ -71,14 +71,15 @@ export function Hero({ available }: { available: boolean }) {
     <section className="hero" aria-labelledby="hero-title">
       <div className="site-width hero-lead">
         <h1 id="hero-title">
-          A ticket workspace for
+          ticketd, a ticket workspace
           <br />
-          you and your AI agents.
+          for you and your AI agents.
         </h1>
         <div className="hero-intro">
           <p>
-            Plan a ticket, hand it to Claude Code or Codex, and review what
-            changed. A free, open-source desktop app and CLI.
+            Plan work as tickets on your computer, hand them to Claude Code or
+            Codex, and review what changed. A free, open-source desktop app and
+            CLI.
           </p>
           <CallsToAction available={available} />
           <span className="hero-platforms">macOS, Ubuntu and Windows</span>

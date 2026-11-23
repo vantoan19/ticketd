@@ -1,5 +1,5 @@
-export const featureRef = "T-LG12";
-export const dependentRef = "T-LG13";
+export const featureRef = "T-RL12";
+export const dependentRef = "T-RL13";
 
 export const stages = [
   {
@@ -29,39 +29,39 @@ export const stages = [
 ] as const;
 export type Stage = 0 | 1 | 2 | 3;
 export type Status = (typeof stages)[number]["status"];
-export const planName = "Login hardening";
+export const planName = "API rate limits";
 export const specTitle = planName + " spec";
 export const agentName = "coding-agent";
 export const report =
   "The limiter passes the boundary tests. Ready for review.";
 export const specification =
-  "Protect sign-in from repeated failures. Count attempts inside a sliding window, report the result, and show when a person can try again.";
+  "Protect the API from request bursts. Count requests inside a sliding window, report the result, and tell clients when they can try again.";
 
 export const featuredTicket = {
   reference: featureRef,
-  title: "Rate-limit failed logins",
+  title: "Rate-limit API requests",
   status: "Todo",
-  body: "Limit repeated attempts and let people retry after the window closes.",
+  body: "Limit request bursts and let clients retry after the window closes.",
 } as const;
 
 const seed = [
   {
-    reference: "T-LG9",
-    title: "Log failed sign-ins",
+    reference: "T-RL9",
+    title: "Log rejected requests",
     status: "In review",
-    body: "Record a failed sign-in without storing credentials.",
+    body: "Record a rejected request without storing its payload.",
   },
   {
-    reference: "T-LG10",
+    reference: "T-RL10",
     title: "Exercise the alert path",
     status: "Todo",
-    body: "Check that repeated failed sign-ins reach the person on call.",
+    body: "Check that repeated rejections reach the person on call.",
   },
   {
-    reference: "T-LG11",
+    reference: "T-RL11",
     title: "Add an audit event",
     status: "Done",
-    body: "Record the outcome of a login attempt.",
+    body: "Record the outcome of a limited request.",
   },
   featuredTicket,
   {
@@ -71,10 +71,10 @@ const seed = [
     body: "Use the limiter events to alert the person on call.",
   },
   {
-    reference: "T-LG14",
+    reference: "T-RL14",
     title: "Show the retry time",
     status: "In progress",
-    body: "Tell people when they can try signing in again.",
+    body: "Tell clients when they can send requests again.",
   },
 ] as const;
 
@@ -88,7 +88,7 @@ export function demoTickets(stage: Stage) {
     const factor =
       ticket.reference === dependentRef
         ? featureRef
-        : ticket.reference === "T-LG10"
+        : ticket.reference === "T-RL10"
           ? dependentRef
           : null;
     const prerequisite = tickets.find((t) => t.reference === factor);

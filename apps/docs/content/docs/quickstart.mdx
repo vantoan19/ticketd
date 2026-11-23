@@ -13,14 +13,14 @@ Open the desktop app beside a terminal with the [CLI on PATH](/docs/install). Bo
 Create a [Document](/docs/concepts/context) with the requirements, then make the Plan.
 
 ```sh
-ticketd document create --title "Login hardening spec" --body "Limit repeated failed sign-ins and show when another attempt is allowed."
-ticketd plan create "Login hardening"
+ticketd document create --title "API rate limits spec" --body "Limit request bursts and show when clients can retry."
+ticketd plan create "API rate limits"
 ```
 
 Use the `id` from each result in place of `DOCUMENT_ID` and `PLAN_ID`.
 
 ```sh
-ticketd plan purpose PLAN_ID "Make repeated sign-in attempts safe."
+ticketd plan purpose PLAN_ID "Keep the API responsive under request bursts."
 ticketd plan spec PLAN_ID DOCUMENT_ID
 ```
 
@@ -30,14 +30,14 @@ ticketd plan spec PLAN_ID DOCUMENT_ID
 ## Create work a person can review
 
 ```sh
-ticketd create "Rate-limit failed logins" --plan PLAN_ID
+ticketd create "Rate-limit API requests" --plan PLAN_ID
 ticketd create "Alert on repeated failures" --plan PLAN_ID
 ```
 
-Use the `reference` from each result in the remaining commands. In the site’s demonstration they are `T-LG12` and `T-LG13`. Your device issues its own references.
+Use the `reference` from each result in the remaining commands. In the site’s demonstration they are `T-RL12` and `T-RL13`. Your device issues its own references.
 
 ```sh
-ticketd add-dependency T-LG12 T-LG13
+ticketd add-dependency T-RL12 T-RL13
 ticketd list --availability ready --plan PLAN_ID
 ```
 
@@ -51,16 +51,16 @@ The first ticket blocks the second. In the Plan’s **Flow** view, the limiter c
 In the desktop app, follow the limiter ticket to see its updates in your Inbox. An agent can read context, take the work into progress and post evidence through the CLI.
 
 ```sh
-ticketd context T-LG12 --plan --relationships
-ticketd change T-LG12 --status "In progress" --agent coding-agent
-ticketd evidence add T-LG12 --kind branch --name "Limiter branch" --value auth/login-limiter --agent coding-agent
+ticketd context T-RL12 --plan --relationships
+ticketd change T-RL12 --status "In progress" --agent coding-agent
+ticketd evidence add T-RL12 --kind branch --name "Limiter branch" --value api/rate-limiter --agent coding-agent
 ```
 
 When the work is ready, the agent reports the result and asks for review.
 
 ```sh
-ticketd activity add T-LG12 --brief "The limiter passes the boundary tests. Ready for review." --agent coding-agent
-ticketd change T-LG12 --status "In review" --agent coding-agent
+ticketd activity add T-RL12 --brief "The limiter passes the boundary tests. Ready for review." --agent coding-agent
+ticketd change T-RL12 --status "In review" --agent coding-agent
 ```
 
 </Step>
@@ -71,7 +71,7 @@ ticketd change T-LG12 --status "In review" --agent coding-agent
 Open **Inbox → Needs you**. Read the update, open the ticket and check the evidence. When you accept the work, move the ticket to **Done** in the desktop app or use the CLI.
 
 ```sh
-ticketd change T-LG12 --status Done
+ticketd change T-RL12 --status Done
 ticketd list --availability ready --plan PLAN_ID
 ```
 
