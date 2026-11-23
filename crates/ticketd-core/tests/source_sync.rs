@@ -708,7 +708,7 @@ fn imported_tickets_survive_reopening_export_backup_and_restore() {
     let exported = f.workspace.export().unwrap();
     assert_eq!(exported["external_identities"][0]["external_id"], "1");
     assert_eq!(exported["external_ownership"][0]["authority"], "external");
-    assert_eq!(exported["source_sync"][0]["external_state"], "open");
+    assert_eq!(exported["source_sync"][0]["state_category"], "open");
     assert_eq!(exported["source_sync"][0]["external_author"], "alice");
     assert_eq!(
         exported["source_sync"][0]["external_created_at"],
@@ -1020,7 +1020,7 @@ fn comments_and_events_are_persisted_chronologically_and_repeated_refresh_adds_n
     assert_eq!(
         labels(&entries),
         vec![
-            "event e1 reopened",
+            "event e1 reopened Some(Open)",
             "comment c1",
             "comment c2",
             "event e2 closed Some(Completed)"

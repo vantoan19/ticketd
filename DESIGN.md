@@ -140,11 +140,11 @@ Ready and Blocked are availability indicators, not extra statuses. Canceled and 
 
 Each dot color keeps one meaning across every view:
 
-| Dot    | Value     | Meaning                                                                                                                      |
-| ------ | --------- | ---------------------------------------------------------------------------------------------------------------------------- |
-| Green  | `#45A557` | Ready, and other positive states such as an external source that is open and synced                                          |
+| Dot    | Value     | Meaning                                                                                                                     |
+| ------ | --------- | --------------------------------------------------------------------------------------------------------------------------- |
+| Green  | `#45A557` | Ready, and other positive states such as an external source that is open and synced                                         |
 | Orange | `#FF990A` | Blocked, and other states that need attention: Source unavailable, an unrecognized tracker state, an unresolved publication |
-| Blue   | `#0062D1` | Unread                                                                                                                       |
+| Blue   | `#0062D1` | Unread                                                                                                                      |
 
 Transient and settled states, such as Refreshing GitHub… or Closed on GitHub, use words without a dot.
 
