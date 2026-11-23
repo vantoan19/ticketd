@@ -1,0 +1,15 @@
+{
+  "title": "ticketd",
+  "pages": [
+    "---Get started---",
+    "index",
+    "install",
+    "quickstart",
+    "---Concepts---",
+    "...concepts",
+    "---Working with agents---",
+    "...agents",
+    "---Reference---",
+    "...reference"
+  ]
+}

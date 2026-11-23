@@ -1,0 +1,49 @@
+{
+  "name": "@ticketd/docs",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "react-router dev",
+    "build": "react-router typegen && tsc --noEmit && react-router build",
+    "preview": "vite preview --config preview.ts",
+    "typecheck": "react-router typegen && tsc --noEmit",
+    "lint": "eslint . --max-warnings 0",
+    "test": "vitest run",
+    "capture": "node capture/screens.mjs"
+  },
+  "dependencies": {
+    "@react-router/node": "^8.5.1",
+    "fumadocs-core": "^16.18.4",
+    "fumadocs-mdx": "^15.5.3",
+    "fumadocs-ui": "npm:@fumadocs/base-ui@^16.18.4",
+    "isbot": "^5.2.3",
+    "lucide-react": "^1.77.0",
+    "next-themes": "^0.4.6",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "react-markdown": "^10.1.0",
+    "react-router": "^8.5.1",
+    "remark-gfm": "^4.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@react-router/dev": "^8.5.1",
+    "@tailwindcss/vite": "^4.3.5",
+    "@testing-library/react": "^16.3.3",
+    "@types/mdast": "^4.0.4",
+    "@types/mdx": "^2.0.14",
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.1.8",
+    "@types/react-dom": "^19.1.6",
+    "@vitejs/plugin-react": "6.1.2",
+    "jsdom": "^29.1.1",
+    "playwright": "^1.65.1",
+    "postcss": "^8.5.33",
+    "sharp": "^0.35.5",
+    "tailwindcss": "^4.3.5",
+    "typescript": "~6.0.3",
+    "vite": "^8.0.16",
+    "vitest": "^5.0.5"
+  }
+}

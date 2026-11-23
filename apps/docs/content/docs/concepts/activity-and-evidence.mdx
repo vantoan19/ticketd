@@ -1,0 +1,89 @@
+---
+title: Activity and evidence
+description: Updates explain what happened, history records what changed, and evidence points at the work itself.
+---
+
+## Activity
+
+An **Activity** is attached to exactly one ticket. There are two kinds:
+
+- An **authored Activity** is an update someone wrote. It has a short brief that
+  reads on its own, and it can link to one supporting Document for the details.
+  Authored activities can be edited and deleted. The desktop app calls them
+  _updates_.
+- An **automatic event** records a structured change, such as a status change.
+  Events cannot be edited or deleted individually.
+
+```sh
+ticketd activity add T-LG12 --agent coding-agent \
+  --brief "The limiter passes the boundary tests. Ready for review."
+ticketd activity list T-LG12
+```
+
+Posting an update does not change the ticket's status or its readiness.
+
+### Details
+
+Keep the brief short and put the long form in the details. The details are saved
+as a new Document linked to the update:
+
+```sh
+ticketd activity add T-LG12 --agent coding-agent \
+  --brief "Investigated the lockout reports." \
+  --details-file findings.md
+```
+
+## Editing agent
+
+When a write names an agent with `--agent`, ticketd records it as the **editing
+agent** and shows it beside the change.
+
+<Callout title="Editing agent">
+  The name records attribution supplied by the writer. A person or an agent can
+  leave it empty.
+</Callout>
+
+## Ticket history
+
+Ticket history is the automatic record of changes to a ticket's status,
+relationships, project or Plan, and trash state.
+
+```sh
+ticketd history T-LG12
+```
+
+## Evidence
+
+**Implementation evidence** is named material that locates the work or records
+that it was verified.
+
+| Kind           | Use it for                         |
+| -------------- | ---------------------------------- |
+| `branch`       | The branch the work is on.         |
+| `worktree`     | The worktree path.                 |
+| `commit`       | A commit.                          |
+| `pull-request` | A pull request URL.                |
+| `verification` | The result of a check or test run. |
+
+```sh
+ticketd evidence add T-LG12 --kind branch \
+  --name "Limiter branch" --value auth/login-limiter --agent coding-agent
+ticketd evidence add T-LG12 --kind verification \
+  --name "Limiter tests" --value "passed on CI" --agent coding-agent
+ticketd evidence list T-LG12
+```
+
+## Following tickets
+
+Follow a ticket in the desktop app to receive its status changes and authored updates in your Inbox. **Needs you** brings review requests to the top. Opening an entry reveals its ticket.
+
+```sh
+ticketd inbox
+```
+
+A reminder brings a ticket back to your attention at a time you choose,
+whatever its status. The time must be RFC 3339 with an offset:
+
+```sh
+ticketd reminder set T-LG12 2026-12-01T09:00:00+00:00
+```

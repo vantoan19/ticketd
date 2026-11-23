@@ -14,3 +14,8 @@ node_modules/
 /workspace.sqlite3
 /workspace.sqlite3-wal
 /workspace.sqlite3-shm
+
+# Generated website output
+apps/docs/.react-router/
+apps/docs/.source/
+apps/docs/build/

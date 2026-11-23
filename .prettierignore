@@ -5,3 +5,9 @@ target/
 **/gen/
 # Written by ESLint (--suppress-rule, --prune-suppressions).
 apps/desktop/eslint-suppressions.json
+
+# Generated website output
+apps/docs/.react-router/
+apps/docs/.source/
+apps/docs/build/
+.local/
