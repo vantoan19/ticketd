@@ -11,7 +11,7 @@ Document can be linked from many tickets, Plans and other Documents without bein
 copied.
 
 ```sh
-ticketd document create --title "Login hardening spec" --body-file spec.md
+ticketd document create --title "API rate limits spec" --body-file spec.md
 ticketd document show DOCUMENT_ID
 ticketd document search "rate limit"
 ```
@@ -22,8 +22,8 @@ A ticket's Documents are the ones its description mentions, plus the ones attach
 explicitly:
 
 ```sh
-ticketd document link-ticket DOCUMENT_ID T-LG12
-ticketd document unlink-ticket DOCUMENT_ID T-LG12
+ticketd document link-ticket DOCUMENT_ID T-RL12
+ticketd document unlink-ticket DOCUMENT_ID T-RL12
 ```
 
 Detaching removes only the explicit attachment. It never edits the description.
@@ -37,7 +37,7 @@ ticketd document link DOCUMENT_ID
 ### Creating a ticket from a Document
 
 ```sh
-ticketd document create-ticket DOCUMENT_ID "Rate-limit failed login attempts"
+ticketd document create-ticket DOCUMENT_ID "Rate-limit API requests"
 ```
 
 The new ticket's description links back to the Document.
@@ -49,8 +49,8 @@ span several projects. Each ticket belongs to at most one Plan, and belonging to
 one is optional.
 
 ```sh
-ticketd plan create "Login hardening"
-ticketd plan add PLAN_ID T-LG12
+ticketd plan create "API rate limits"
+ticketd plan add PLAN_ID T-RL12
 ticketd plan show PLAN_ID
 ```
 

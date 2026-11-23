@@ -647,9 +647,13 @@
 .foundations a {
   text-decoration: none;
 }
-.foundations a:hover {
+.foundations a:hover,
+.foundations dd a {
   text-decoration: underline;
   text-underline-offset: 3px;
+}
+.foundations dd a {
+  color: var(--base-ink);
 }
 .foundations dt span {
   font-size: 13px;
