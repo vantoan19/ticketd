@@ -390,7 +390,8 @@ fn routing_from_settings_requires_a_checkout_and_a_still_saved_repository() {
         .create_source_repository_project(&f.engine, "fake", "other/repo", "Current", path)
         .unwrap();
     assert_eq!(created.remote.as_deref(), Some("example.test/other/repo"));
-    assert_eq!(created.paths, [path]);
+    let canonical = std::fs::canonicalize(path).unwrap();
+    assert_eq!(created.paths, [canonical.to_str().unwrap()]);
 }
 
 #[test]
