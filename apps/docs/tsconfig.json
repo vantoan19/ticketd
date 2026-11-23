@@ -1,0 +1,35 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "skipLibCheck": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "exactOptionalPropertyTypes": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "types": ["vite/client", "node"],
+    "rootDirs": [".", "./.react-router/types"],
+    "paths": {
+      "@/*": ["./src/*", "../desktop/src/*"],
+      "@desktop/*": ["../desktop/src/*"]
+    },
+    "allowImportingTsExtensions": true
+  },
+  "include": [
+    "src",
+    "preview.ts",
+    "source.config.ts",
+    "vite.config.ts",
+    "vitest.config.ts",
+    "react-router.config.ts",
+    ".react-router/types/**/*",
+    "capture/**/*.tsx",
+    "capture/**/*.ts",
+    "../desktop/src/vite-env.d.ts"
+  ]
+}

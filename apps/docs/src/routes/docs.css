@@ -1,0 +1,371 @@
+@import "tailwindcss" source(none);
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+@source "../**/*.{ts,tsx}";
+@source "../../content/docs/**/*.mdx";
+
+:root,
+.dark {
+  --color-fd-background: var(--paper);
+  --color-fd-foreground: var(--ink);
+  --color-fd-muted: var(--paper-recess);
+  --color-fd-muted-foreground: var(--ink-soft);
+  --color-fd-popover: var(--paper-raised);
+  --color-fd-popover-foreground: var(--ink);
+  --color-fd-card: var(--paper-raised);
+  --color-fd-card-foreground: var(--ink);
+  --color-fd-border: var(--line);
+  --color-fd-primary: var(--blue);
+  --color-fd-primary-foreground: var(--on-blue);
+  --color-fd-secondary: var(--paper-recess);
+  --color-fd-secondary-foreground: var(--ink);
+  --color-fd-accent: var(--blue-tint);
+  --color-fd-accent-foreground: var(--ink);
+  --color-fd-ring: var(--blue);
+}
+/* Move and fade the documentation controls. Interpolating the sidebar grid or
+   the section menu height reflows the article on every animation frame. */
+#nd-docs-layout,
+#nd-docs-layout :where(*),
+#nd-sidebar-mobile :where(*),
+#fd-search-dialog-content,
+#fd-search-dialog-content :where(*) {
+  transition-property: opacity, transform, translate, rotate, scale;
+}
+#nd-docs-layout {
+  --fd-layout-width: 90rem;
+  --fd-docs-height: 100dvh;
+}
+/* The shared masthead already skips both navigation areas to the article. */
+#nd-docs-layout > a[href="#nd-page"] {
+  display: none;
+}
+.doc-directory-dialog {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+}
+.doc-directory-dialog::backdrop {
+  background: transparent;
+}
+.doc-directory-dialog[data-magnified] {
+  --drawer-share: 0.9;
+}
+.doc-directory-dialog #nd-sidebar-mobile {
+  --drawer-width: min(
+    380px,
+    var(--viewport-width, 100vw) * var(--drawer-share, 0.85)
+  );
+  inset: var(--viewport-top, 0px) auto auto
+    calc(
+      var(--viewport-center, 50vw) + var(--viewport-width, 100vw) / 2 -
+        var(--drawer-width)
+    );
+  width: var(--drawer-width);
+  height: var(--viewport-height, 100%);
+}
+.doc-subnav {
+  display: contents;
+}
+/* Keep the query and the close button visible when a phone rotates or a
+   keyboard reduces the available height. Only the results need to scroll. */
+#fd-search-dialog-content {
+  --viewport-height: 100dvh;
+  --search-gap: 0.75rem;
+  --search-top: max(var(--search-gap), env(safe-area-inset-top));
+  left: var(--viewport-center, 50%);
+  width: calc(var(--viewport-width, 100%) - 1rem);
+  top: calc(var(--viewport-top, 0px) + var(--search-top));
+  max-height: calc(
+    var(--viewport-height) - var(--search-top) -
+      max(var(--search-gap), env(safe-area-inset-bottom))
+  );
+  display: flex;
+  flex-direction: column;
+}
+.search-dismiss > svg {
+  display: none;
+}
+@media (pointer: coarse) {
+  .search-dismiss > span[aria-hidden] {
+    display: none;
+  }
+  .search-dismiss > svg {
+    display: block;
+  }
+  .search-dismiss {
+    min-width: 2.25rem;
+    min-height: 2.25rem;
+  }
+}
+#fd-search-dialog-content > :first-child {
+  flex: none;
+}
+#fd-search-dialog-content[data-short-viewport] {
+  --search-gap: 0.25rem;
+}
+#fd-search-dialog-content[data-short-viewport] > :first-child {
+  padding-block: 0.25rem;
+}
+#fd-search-dialog-content > [data-empty] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: auto;
+  transition: none;
+}
+#fd-search-list {
+  min-height: 0;
+  overscroll-behavior: contain;
+}
+.search-retry {
+  align-self: flex-start;
+  min-height: 36px;
+  margin: 0 12px 8px;
+  color: var(--blue);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+/* The section title already identifies the position in the article. */
+[data-toc-popover-trigger] svg[role="progressbar"] {
+  display: none;
+}
+[data-toc-popover-trigger] .opacity-0 {
+  visibility: hidden;
+}
+@media (min-width: 48rem) {
+  #fd-search-dialog-content {
+    --search-top: max(
+      var(--search-gap),
+      (var(--viewport-height) - 32rem) / 2,
+      env(safe-area-inset-top)
+    );
+  }
+  .doc-subnav {
+    display: none;
+  }
+}
+#nd-sidebar {
+  background: var(--paper);
+}
+#nd-sidebar [data-active="true"] {
+  color: var(--blue);
+  font-weight: 500;
+}
+.doc-heading {
+  font: 500 clamp(36px, 3.6vw, 56px)/1.06 var(--font-sans);
+  letter-spacing: -0.057em;
+  text-wrap: balance;
+  scroll-margin-top: 18px;
+}
+.doc-dek {
+  font-size: clamp(16px, 1.45vw, 20px);
+  line-height: 1.5;
+  color: var(--ink-soft);
+  max-width: 58ch;
+  margin: 12px 0 18px;
+}
+.doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 25px;
+}
+.doc-actions > a {
+  color: var(--blue);
+  min-height: 30px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 12px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.doc-copy-article {
+  min-inline-size: 8rem;
+  gap: 0.5rem;
+}
+.doc-copy-article svg,
+.doc-copy-heading,
+.doc-copy-code {
+  color: var(--ink-soft);
+}
+.doc-prose {
+  color: var(--ink);
+  font-size: 16px;
+  line-height: 1.68;
+  overflow-wrap: break-word;
+}
+.doc-anchor {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  scroll-margin: 7rem;
+}
+.doc-copy-heading {
+  flex: none;
+  opacity: 0;
+}
+.doc-anchor:hover .doc-copy-heading,
+.doc-copy-heading:focus-visible {
+  opacity: 1;
+}
+.doc-prose h2,
+.doc-prose h3 {
+  letter-spacing: -0.042em;
+  font-weight: 550;
+  text-wrap: balance;
+}
+.doc-prose h2 {
+  margin-top: 1.8em;
+}
+.doc-prose p,
+.doc-prose li,
+.doc-prose td {
+  color: var(--ink-soft);
+}
+.doc-prose b,
+.doc-prose strong {
+  color: var(--ink);
+}
+.doc-prose a {
+  color: var(--blue);
+  text-underline-offset: 3px;
+}
+.doc-prose :is(h2, h3, h4) > a {
+  color: inherit;
+  text-decoration: none;
+}
+.doc-prose :is(h2, h3, h4) > a:is(:hover, :focus-visible) {
+  color: var(--blue);
+  text-decoration: underline;
+}
+.doc-prose figure.shiki {
+  border-radius: 6px;
+}
+.doc-prose pre {
+  font-family: var(--mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+.doc-prose :not(pre) > code {
+  font-family: var(--mono);
+  font-size: 0.86em;
+  overflow-wrap: anywhere;
+}
+@media (width < 48rem) {
+  /* Search, the article directory and the section menu share one sticky row. */
+  #nd-docs-layout:has([data-toc-popover]) {
+    --fd-header-height: 2.875rem;
+    --fd-toc-popover-height: 0px;
+    --doc-tools: 6rem;
+  }
+  #nd-docs-layout:has([data-toc-popover]) #nd-subnav {
+    padding-inline: 8px;
+    background: var(--paper);
+  }
+  #nd-docs-layout:has([data-toc-popover]) #nd-subnav > :is(a, div) {
+    display: none;
+  }
+  #nd-subnav button {
+    min-width: 40px;
+    min-height: 42px;
+  }
+  #nd-docs-layout [data-toc-popover] {
+    grid-area: header;
+    top: var(--fd-docs-row-1);
+    height: var(--fd-header-height);
+    z-index: 31;
+    pointer-events: none;
+  }
+  #nd-docs-layout [data-toc-popover] > header {
+    border: 0;
+    background: transparent;
+    backdrop-filter: none;
+    box-shadow: none;
+  }
+  #nd-docs-layout [data-toc-popover-trigger] {
+    width: calc(100% - var(--doc-tools));
+    height: var(--fd-header-height);
+    margin-inline-start: var(--doc-tools);
+    padding-inline: 12px;
+    pointer-events: auto;
+  }
+  [data-toc-popover-trigger]::before {
+    content: "";
+    position: absolute;
+    width: 1px;
+    height: 19px;
+    margin-inline-start: -12px;
+    background: var(--line);
+  }
+  [data-toc-popover-content] {
+    pointer-events: auto;
+    background: var(--paper-raised);
+    border-bottom: 1px solid var(--keyline);
+  }
+  .doc-prose .shiki pre {
+    width: 100%;
+    white-space: pre-wrap;
+  }
+  .doc-prose .shiki .line {
+    overflow-wrap: anywhere;
+  }
+  .doc-prose .shiki .line:first-child {
+    padding-right: 38px;
+  }
+  .doc-prose {
+    font-size: 15px;
+  }
+  .doc-dek {
+    margin-bottom: 14px;
+  }
+  .doc-actions {
+    gap: 12px;
+  }
+}
+/* The static article directory occupies the copy control's place until
+   the documentation tools hydrate. */
+.static-doc-nav {
+  max-width: 100%;
+  font-size: 12px;
+}
+.static-doc-nav summary {
+  display: list-item;
+  min-height: 30px;
+  line-height: 30px;
+  padding-inline: 9px;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+.static-doc-nav[open] {
+  flex-basis: 100%;
+}
+.static-doc-nav ul {
+  margin-block: 8px;
+}
+.static-doc-nav li a {
+  display: block;
+  color: var(--blue);
+  padding: 4px 9px;
+  text-decoration: underline;
+}
+:root:not([data-interactive]) #nd-docs-layout button {
+  visibility: hidden;
+}
+@media (width < 48rem) {
+  :root:not([data-interactive]) #nd-docs-layout #nd-subnav > a {
+    display: inline-flex;
+  }
+}

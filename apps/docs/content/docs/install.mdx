@@ -1,0 +1,58 @@
+---
+title: Install and update
+description: Set up the desktop app and its bundled CLI on macOS, Ubuntu or Windows.
+---
+
+The [Download page](/download) shows which packages are publicly available for your platform. You can also [build ticketd from source](https://github.com/vantoan19/ticketd/blob/main/docs/development.md). The desktop and CLI share one workspace when both run as the same operating-system user.
+
+## Desktop packages
+
+The distribution targets are macOS 26 on Apple Silicon, Ubuntu 24.04 x86-64 and Windows 11 x86-64. Use the signing information and checksums supplied with a published release.
+
+### macOS
+
+Open the DMG and drag ticketd into Applications. For an unsigned preview, verify the download against the release’s `SHA256SUMS`. If macOS blocks the app the first time you open it, choose **Open Anyway** in **System Settings → Privacy & Security**.
+
+You can also clear the verified app’s quarantine attribute in Terminal. Use the full path to select the macOS utility even if Python has installed another command named `xattr`.
+
+```sh
+/usr/bin/xattr -dr com.apple.quarantine /Applications/ticketd.app
+```
+
+Open **Settings → Command line → Install command-line tool** in ticketd. Approving the administrator prompt links the bundled CLI in `/usr/local/bin`. The per-user option uses `~/.local/bin`. Add that directory to your PATH if needed. Run the same action again if you move the app.
+
+### Ubuntu
+
+Install the package with `sudo apt install ./ticketd_*.deb`. The package manager installs the desktop dependencies and puts the CLI in `/usr/bin`. If you set `XDG_DATA_HOME`, use the same value for the app and the agent.
+
+### Windows
+
+Run the MSI installer. In **Settings → Command line**, choose **Install command-line tool** to add the app’s folder to your user PATH. Reopen terminals and agent harnesses after changing PATH. Use the native Windows toolchain for source builds.
+
+For an unsigned preview, verify the installer against the release’s `SHA256SUMS`. SmartScreen offers **More info → Run anyway**. If Smart App Control blocks unsigned installers, follow the [source build instructions](https://github.com/vantoan19/ticketd/blob/main/docs/development.md). WSL interoperability has not been validated.
+
+## Check which workspace your agent sees
+
+Run these in the terminal your agent uses:
+
+```sh
+ticketd --version
+ticketd --help
+ticketd workspace
+```
+
+The last command prints the workspace path and format versions without creating or migrating a database. If another CLI takes precedence on PATH, **Settings → Command line** shows its path and version. You can also give the agent the absolute path to the intended executable.
+
+## Standalone CLI
+
+For a machine without the desktop, use the matching standalone CLI archive when a release provides one. Extract the executable to a directory on PATH. Update a standalone copy by replacing it with the new executable.
+
+## Updates
+
+In a build with an updater key, the desktop checks for stable releases after launch and daily while open. It downloads and verifies an update before offering **Restart to update**. **Settings → About** lets you check on demand, turn off scheduled checks, or return to a ready update. The bundled CLI updates with the desktop.
+
+On macOS and Windows, a verified update can install on quit. On Ubuntu, restart from the update prompt and approve the package installation. Updates that raise the workspace format require an explicit restart and a backup before migration. Read the prompt before interrupting active Chats or Automation runs.
+
+## Removing ticketd
+
+Uninstall the desktop app through your operating system. Remove any standalone CLI you copied separately. The workspace lives in your user application-data directory and is retained. Save and [inspect a backup](/docs/reference/backup-and-export) before replacing binaries or restoring data.

@@ -1,0 +1,45 @@
+---
+title: Backup and export
+description: Back up the workspace with its retained local files, inspect a backup, or share Markdown and JSON.
+---
+
+Find the workspace for the current OS user with `ticketd workspace`. It prints the default path and supported format without opening the database.
+
+## Back up and inspect
+
+Choose a new path in an existing directory. A backup contains the database and retained local attachment bytes. It also preserves request replay outcomes. Drive references keep their metadata. Credentials and remote file bytes stay outside the backup.
+
+```sh
+ticketd backup workspace-backup.sqlite3
+ticketd inspect-backup workspace-backup.sqlite3
+```
+
+Inspection checks integrity and retained-file checksums without restoring anything. A missing or damaged retained file blocks restoration.
+
+## Restore
+
+Close the desktop app and other ticketd operations first. Restore saves a safety copy before replacing the active workspace. Use `--target` to restore into a separate database.
+
+```sh
+ticketd restore-workspace workspace-backup.sqlite3
+```
+
+The desktop also offers backup inspection and restore in Settings. Older binaries may be unable to open a newer workspace format. Back up before upgrading.
+
+## Share a ticket or Document
+
+Choose an existing output directory. ticketd creates a new `ticketd-export-*` folder inside it. The export includes Markdown, portable references, available local files and a manifest that names omissions.
+
+```sh
+ticketd export-markdown --ticket T-LG12 --output .
+```
+
+Read the JSON result and the manifest for partial exports. Access to a Drive viewer link depends on the recipient’s permissions. In the desktop, choose **Export Markdown with files** from a ticket or Document.
+
+## Export workspace records
+
+```sh
+ticketd export --file workspace.json
+```
+
+The JSON snapshot includes records in the trash and describes machine-specific checkout paths. The file option publishes completed output to a new path. Use backups for restoration and JSON for inspection or transfer. See the [export format](https://github.com/vantoan19/ticketd/blob/main/docs/export.md) for details.

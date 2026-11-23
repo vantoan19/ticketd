@@ -106,6 +106,12 @@ jobs:
       - run: npm install --global npm@10.9.2
       - run: npm ci
       - run: ./scripts/check ui
+      - name: Build and check the GitHub Pages site
+        env:
+          DOCS_PROJECT_PAGES: "1"
+        run: |
+          npm run build:docs
+          node apps/docs/check-pages.mjs
 
   s3:
     # The S3 adapter against a real S3-compatible server, a pinned MinIO with Versioning on.
@@ -170,6 +176,13 @@ jobs:
       - run: npm install --global npm@10.9.2
       - run: npm ci
       - run: npm run build
+      - name: Check nested Pages URLs on Windows
+        if: runner.os == 'Windows'
+        env:
+          DOCS_PROJECT_PAGES: "1"
+        run: |
+          npm run build:docs
+          node apps/docs/check-pages.mjs
       # Report every failing test binary, not only the first, so one run shows them all.
       - name: Test Rust workspace
         run: cargo test --workspace --locked --no-fail-fast

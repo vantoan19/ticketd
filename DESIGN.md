@@ -4,7 +4,14 @@
 
 This document defines the target visual and interaction design for ticketd's desktop application and the design system it is built from (section 11). It is a specification for design work and review; the current interface is not evidence that these rules have been implemented. Dimensions are logical CSS pixels at 100% zoom. Minimum heights must grow for wrapped text and accessibility settings.
 
-Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product description](docs/product.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. It does not add accounts, collaboration, or a board. The experimental native Chat screens ([product description](docs/product.md#native-chats)) are off by default and follow this guide’s tokens and components; their layout is specified in section 15. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Track implementation and deviations in GitHub Issues, not in this document.
+Use [GLOSSARY.md](GLOSSARY.md) for domain language, [the product description](docs/product.md) for behavior, and [the architecture](docs/architecture.md) for technical boundaries. This guide defines how those behaviors are presented. The experimental native Chat screens ([product description](docs/product.md#native-chats)) are off by default and follow this guide’s tokens and components; their layout is specified in section 15. For tickets owned by an external source, starting with GitHub Issues ([#98](https://github.com/vantoan19/ticketd/issues/98)), it defines how ownership, freshness, and source content are presented; that issue defines the synchronization behavior. Report design bugs and proposed improvements in GitHub Issues. Organize implementation steps locally in ticketd.
+
+### Find the section for a change
+
+- For a shared control, start with the [design system and shared components](#11-design-system-and-shared-components), then check [feedback, motion, and accessibility](#12-feedback-motion-and-accessibility).
+- For a ticket workflow, follow [first run](#16-first-run), [navigation and ticket list](#6-navigation-and-ticket-list), [ticket detail](#7-ticket-detail), and [Documents and activity](#8-documents-and-activity).
+- For workspace features, see [Projects, Plans, graph, and settings](#10-projects-plans-graph-and-settings) or [Native Chat](#15-native-chat).
+- Before submitting a visible change, use the [review criteria](#14-review-criteria).
 
 ### Reference and adaptation
 

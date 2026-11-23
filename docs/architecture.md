@@ -2,7 +2,7 @@
 
 ticketd is a local desktop application and an independently usable CLI. Both call the same Rust core library, with a separate instance in each process, and share one local workspace database.
 
-The direct-access process model is the selected direction, conditional on validating concurrency, migrations, and UI refresh in a technical spike. Exact workflow interface signatures remain to be designed.
+The desktop keeps a Workspace session open and refreshes its views when the shared change token advances. Each CLI invocation opens its own connection through the core. See [Workspace sessions](adr/0016-one-warm-workspace-session-per-process-wal-inside-it.md) and [desktop refresh](adr/0013-desktop-reads-from-one-change-token.md).
 
 ## Runtime
 
@@ -32,18 +32,23 @@ The core is a shared library, not a shared running process. A background daemon,
 
 ## Source layout
 
-The Cargo workspace contains `crates/ticketd-core`, `crates/ticketd-cli`, `crates/ticketd-chat-host`, `crates/ticketd-automation-runner`, `crates/ticketd-diagnostics`, and `apps/desktop/src-tauri`. The React application lives in `apps/desktop/src`; npm manages it as a workspace. Domain rules, operations, queries, and persistence remain internal to the core crate and are introduced as their implementations are needed.
+The desktop and CLI meet at the Rust core. Start with the component that owns
+the change, then follow its boundary into the next layer. For focused test
+commands, see the [contributor guide](../CONTRIBUTING.md#where-to-start).
 
 ## Module responsibilities
 
-| Module        | Responsibility                                                                                                                                                |
-| ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Desktop UI    | Lists, ticket details, Plans, graph presentation, Markdown editing, unsaved drafts, and save feedback                                                         |
-| Tauri adapter | Translate desktop requests and results across the desktop bridge                                                                                              |
-| CLI adapter   | Parse arguments and input, resolve invocation context, call the core, format JSON or human-readable output, and report any error on stderr with exit status 1 |
-| Rust core     | Workflow operations and queries; domain validation, atomic persistence, history, retry handling, and bounded context assembly                                 |
+| Component                                                                                  | What it owns                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [Desktop UI](../apps/desktop/src/)                                                         | React views, editor drafts, and feedback when a save succeeds or fails.                                                                                              |
+| [Tauri adapter](../apps/desktop/src-tauri/src/)                                            | Translates desktop requests and results across the native bridge.                                                                                                    |
+| [CLI adapter](../crates/ticketd-cli/src/)                                                  | Parses arguments and input, resolves invocation context, calls the core, and formats results.                                                                        |
+| [Rust core](../crates/ticketd-core/src/)                                                   | Domain rules, workflows, bounded queries, and atomic SQLite persistence.                                                                                             |
+| [Chat host](../crates/ticketd-chat-host/) and [Claude bridge](../apps/chat-bridge-claude/) | The host supervises harness sessions. The bridge connects the host to the Claude Agent SDK. See [Native Chat runtime and storage](#native-chat-runtime-and-storage). |
+| [Automation runner](../crates/ticketd-automation-runner/)                                  | Executes Automations triggered by Workspace events. See [Automation runs](#automation-runs).                                                                         |
+| [Diagnostics](../crates/ticketd-diagnostics/)                                              | Configures logging for the CLI and desktop. See [Logging](#logging).                                                                                                 |
 
-Every CLI error exits with status 1; the CLI does not tell failures apart by kind. The core classifies a failure as a `FailureKind` (`failure.rs`) so an interface can choose its words and next step, and only the desktop uses it.
+Runtime failures exit with status 1. Argument validation errors exit with status 2. The core classifies a failure as a `FailureKind` (`failure.rs`) so an interface can choose its words and next step, and only the desktop uses it.
 
 The core has one public workflow interface. Its implementation is organized internally into domain rules, write operations, read queries, and SQLite persistence. Callers do not coordinate transactions or access storage directly. Keep domain calculations independent of SQL and Tauri without exposing a general-purpose storage framework.
 

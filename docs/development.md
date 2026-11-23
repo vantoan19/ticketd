@@ -126,7 +126,7 @@ Core local workflows and ordinary tests do not require GitHub or Google credenti
 Do not set `TICKETD_GOOGLE_OAUTH_CLIENT_JSON` for a basic source build; Drive stays
 disabled without a registration. Local attachments remain available.
 
-For integration work, see [Google configuration](install.md#publisher-and-developer-configuration),
+For integration work, see [Google configuration](releasing.md#configure-google-drive-for-a-build),
 [Drive verification](testing-google-drive.md), and the opt-in
 [live runner](../tests/live/README.md). Live verification contacts real services
 and can create remote files. Use a dedicated test account and destination. The S3

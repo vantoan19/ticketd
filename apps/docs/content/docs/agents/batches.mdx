@@ -1,0 +1,58 @@
+---
+title: Atomic batches
+description: Create and wire several tickets in one request that either applies completely or not at all.
+---
+
+`ticketd batch` applies a JSON array of operations as one unit. If any operation
+fails, the whole request is rolled back.
+
+```sh
+ticketd batch plan.json
+ticketd batch -          # read the array from stdin
+```
+
+## Naming tickets for later operations
+
+A `create` can name its ticket. Later operations refer to it as `$name`:
+
+```json title="plan.json"
+[
+  { "operation": "create", "name": "parent", "title": "Ship the feature" },
+  { "operation": "create", "name": "child", "title": "Implement it" },
+  {
+    "operation": "change",
+    "ticket": "$child",
+    "change": {
+      "parent": "$parent",
+      "add_blockers": ["$parent"],
+      "add_tags": ["feature"],
+      "activities": ["Plan agreed"]
+    }
+  }
+]
+```
+
+## What a change can set
+
+| Field                             | Effect                                |
+| --------------------------------- | ------------------------------------- |
+| `title`, `body`, `status`         | Replace the value.                    |
+| `parent`, `project_id`, `plan_id` | Set the link. Use `null` to clear it. |
+| `add_blockers`, `remove_blockers` | Change blocking dependencies.         |
+| `add_tags`, `remove_tags`         | Change tags.                          |
+| `activities`                      | Post updates.                         |
+| `editing_agent`                   | Attribute the change.                 |
+
+Omit a field to leave it unchanged.
+
+## Results and failures
+
+The result is a JSON array of ticket snapshots, in operation order. A failure
+names the zero-based index of the operation that failed.
+
+## Limits
+
+- 1 MiB per request
+- 100 operations
+- 1,000 individual edits
+- A 10-second limit, checked between operations
