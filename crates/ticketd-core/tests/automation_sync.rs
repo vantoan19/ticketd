@@ -673,7 +673,18 @@ fn a_file_that_would_make_a_broken_agent_or_automation_is_rejected_and_changes_n
         }
     }
     assert_eq!(files(&workspace), before);
-    // The check is also made on a record built in code, as a review's choice is.
+    // The checks also apply to records built in code, such as review choices.
+    let mut record = workspace
+        .export_sync_record(SyncKind::AutomationAgent, &agent)
+        .unwrap();
+    record
+        .fields
+        .insert("harness".into(), SyncValue::Text("unknown-harness".into()));
+    assert!(matches!(
+        workspace.apply_sync_record(&record),
+        Err(Error::SyncFile(message)) if message.contains("field 'harness'")
+    ));
+
     let mut record = workspace
         .export_sync_record(SyncKind::Automation, &automation)
         .unwrap();

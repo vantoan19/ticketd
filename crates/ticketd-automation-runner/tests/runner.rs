@@ -70,22 +70,22 @@ impl Fixture {
     /// The same, with the agent on `harness`.
     #[allow(clippy::unwrap_used)] // Setup that fails fails the test.
     fn on(harness: AgentHarness) -> Self {
-        let fake = match harness {
-            AgentHarness::Codex => FakeAdapter::codex(),
-            AgentHarness::ClaudeCode => {
-                fn unknown<B>() -> Capability<B> {
-                    Capability::Unknown {
-                        reason: "fake".into(),
-                    }
+        let fake = if harness == AgentHarness::Codex {
+            FakeAdapter::codex()
+        } else {
+            assert_eq!(harness, AgentHarness::ClaudeCode);
+            fn unknown<B>() -> Capability<B> {
+                Capability::Unknown {
+                    reason: "fake".into(),
                 }
-                FakeAdapter::new(
-                    Harness::ClaudeCode,
-                    Capabilities {
-                        steering: unknown(),
-                        native_resume: unknown(),
-                    },
-                )
             }
+            FakeAdapter::new(
+                Harness::ClaudeCode,
+                Capabilities {
+                    steering: unknown(),
+                    native_resume: unknown(),
+                },
+            )
         };
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
@@ -1532,7 +1532,7 @@ async fn a_run_taken_over_before_its_first_turn_opens_a_fresh_session_when_codex
 async fn a_run_taken_over_while_starting_keeps_its_instructions_set_aside() {
     for harness in [AgentHarness::Codex, AgentHarness::ClaudeCode] {
         for how in ["reply", "stop then message"] {
-            let f = Fixture::on(harness);
+            let f = Fixture::on(harness.clone());
             let open = f.fake.hold_next_open();
             f.tag("Fix login");
             f.tick().await;

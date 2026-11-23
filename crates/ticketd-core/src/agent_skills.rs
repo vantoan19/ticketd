@@ -18,48 +18,19 @@ const SKILL_NAME: &str = "ticketd";
 /// The version recorded in the marker, so a newer copy is never downgraded.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// A harness that loads skills from a per-user folder.
-pub struct Agent {
-    /// Stable identifier used by `--harness` and the desktop bridge.
-    pub id: &'static str,
-    pub name: &'static str,
-    /// Variable that relocates the harness's home folder, when it has one.
-    home_env: Option<&'static str>,
-    /// The harness's home folder relative to the user's home.
-    home: &'static str,
-    /// The skills folder relative to the user's home, when it lies outside the harness home.
-    skills: Option<&'static [&'static str]>,
-}
-
-/// Supported harnesses. Adding one is one row.
-pub const AGENTS: &[Agent] = &[
-    Agent {
-        id: "claude-code",
-        name: "Claude Code",
-        home_env: Some("CLAUDE_CONFIG_DIR"),
-        home: ".claude",
-        skills: None,
-    },
-    Agent {
-        id: "codex",
-        name: "Codex",
-        home_env: Some("CODEX_HOME"),
-        home: ".codex",
-        // Codex reads per-user skills from ~/.agents/skills, not its own home.
-        skills: Some(&[".agents", "skills"]),
-    },
-];
+pub use crate::harnesses::{HARNESS_DESCRIPTORS as AGENTS, HarnessDescriptor as Agent};
+use crate::harnesses::{SkillLocation, descriptor};
 
 impl Agent {
-    pub fn find(id: &str) -> Option<&'static Agent> {
-        AGENTS.iter().find(|agent| agent.id == id)
+    pub fn find(id: &str) -> Option<&'static Self> {
+        descriptor(id)
     }
 
     fn home(&self, user_home: &Path, env: impl Fn(&str) -> Option<OsString>) -> PathBuf {
-        self.home_env
+        self.config_home_env
             .and_then(env)
             .filter(|value| !value.is_empty())
-            .map_or_else(|| user_home.join(self.home), PathBuf::from)
+            .map_or_else(|| user_home.join(self.config_home), PathBuf::from)
     }
 
     /// The folder that holds this harness's copy of the ticketd skill. `env`
@@ -70,13 +41,12 @@ impl Agent {
         user_home: &Path,
         env: impl Fn(&str) -> Option<OsString>,
     ) -> PathBuf {
-        match self.skills {
-            Some(skills) => skills
-                .iter()
-                .fold(user_home.to_path_buf(), |path, part| path.join(part)),
-            None => self.home(user_home, env).join("skills"),
-        }
-        .join(SKILL_NAME)
+        let (mut base, skills) = match self.skills {
+            SkillLocation::ConfigHome(skills) => (self.home(user_home, env), skills),
+            SkillLocation::UserHome(skills) => (user_home.to_path_buf(), skills),
+        };
+        base.extend(Path::new(skills).components());
+        base.join(SKILL_NAME)
     }
 
     /// Whether the harness has run for this user: its home folder holds
