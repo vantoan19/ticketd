@@ -431,7 +431,7 @@ fn an_unavailable_linux_keyring_reports_session_only_and_does_not_persist_a_key(
     );
     assert_eq!(saved["config"], serde_json::json!({"board": "Sign-in"}));
     assert!(!String::from_utf8_lossy(&updated.stdout).contains(secret));
-    assert!(!String::from_utf8_lossy(&std::fs::read(workspace).unwrap()).contains(secret));
+    assert!(!String::from_utf8_lossy(&std::fs::read(&workspace).unwrap()).contains(secret));
     let expired = command().args(refresh).output().unwrap();
     assert!(!expired.status.success());
     assert!(String::from_utf8_lossy(&expired.stdout).contains("unauthenticated"));

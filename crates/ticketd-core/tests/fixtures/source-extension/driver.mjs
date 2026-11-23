@@ -101,21 +101,34 @@ async function dispatch({ id, method, params }, signal) {
   if (
     process.env.TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY ||
     process.env.TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY_COMMAND ||
-    (typeof credential === "string" && Object.values(process.env).includes(credential))
+    (typeof credential === "string" &&
+      Object.values(process.env).includes(credential))
   ) {
-    return problem("protocol", "credential reached the process environment", "system");
+    return problem(
+      "protocol",
+      "credential reached the process environment",
+      "system",
+    );
   }
   if (typeof credential === "string") {
     const middle = Math.floor(credential.length / 2);
     process.stderr.write(`fragment ${credential.slice(0, middle)}`);
     await pause(10);
-    process.stderr.write(`${credential.slice(middle)}\nencoded ${Buffer.from(credential).toString("base64")}\n`);
+    process.stderr.write(
+      `${credential.slice(middle)}\nencoded ${Buffer.from(credential).toString("base64")}\n`,
+    );
     if (mode === "secret_stdout") {
-      process.stdout.write(`not RPC: ${credential} ${encodeURIComponent(credential)}\n`);
+      process.stdout.write(
+        `not RPC: ${credential} ${encodeURIComponent(credential)}\n`,
+      );
       return null;
     }
     if (mode === "secret_error") {
-      return problem("unauthenticated", `tracker refused ${credential}`, "auth");
+      return problem(
+        "unauthenticated",
+        `tracker refused ${credential}`,
+        "auth",
+      );
     }
     if (mode === "secret_result") {
       return { result: { unexpected: credential } };

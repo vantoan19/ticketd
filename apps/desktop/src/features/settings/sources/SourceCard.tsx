@@ -396,7 +396,6 @@ export function SourceCard({
     !visible.some((field) => field.key === targetField?.field) ||
     ((Array.isArray(target) || typeof target === "string") &&
       target.length > 0);
-  const secretDeclared = visible.some((field) => field.type === "secret");
   const canPreview = !working && hasTarget;
   const canSave =
     preview !== null &&
@@ -668,7 +667,11 @@ export function SourceCard({
   const signedIn = account?.status === "signed_in" ? account.account : null;
   const credentialRecovery =
     saved?.id &&
-    secretDeclared &&
+    activeFields(
+      fields,
+      draftFromConfig(fields, saved.config),
+      storedSecrets,
+    ).some((field) => field.type === "secret") &&
     (account?.status === "signed_out" ||
       SIGNED_OUT.includes(health?.error?.code ?? ""));
   const accountLabel = credentialRecovery ? (

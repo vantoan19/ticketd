@@ -132,7 +132,10 @@ async function dispatch(
       "Choose Demo, Sandbox or Sign-in.",
     );
   if (board === "Sign-in" && typeof config.api_key !== "string")
-    throw new TrackerError("unauthenticated", "The Sign-in board needs an API key.");
+    throw new TrackerError(
+      "unauthenticated",
+      "The Sign-in board needs an API key.",
+    );
 
   if (method === "check_connection") {
     return {
