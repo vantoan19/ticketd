@@ -84,7 +84,7 @@ const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   url: "https://github.com/acme/api/issues/98",
   origin: "imported",
   ownership: "external",
-  state: { state: "open" },
+  state: { category: "open", name: "Open" },
   closure_unrecognized: false,
   last_refreshed_at: minutesAgo(30),
   last_attempt_at: minutesAgo(2),

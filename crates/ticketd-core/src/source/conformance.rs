@@ -9,9 +9,9 @@ use std::{collections::BTreeMap, ops::ControlFlow};
 use serde_json::json;
 
 use super::{
-    Capability, ClosureReason, ConfigValues, Connector, Conversation, DiscoveryRequest, Engine,
-    ErrorClass, ExternalComment, ExternalIssue, ExternalRef, ExternalState, PublicationSearch,
-    PublishRequest,
+    Capability, ConfigValues, Connector, Conversation, DiscoveryRequest, Engine, ErrorClass,
+    ExternalComment, ExternalIssue, ExternalRef, ExternalState, PublicationSearch, PublishRequest,
+    StateCategory,
 };
 
 use crate as ticketd_core;
@@ -54,9 +54,12 @@ impl<T> Fixture<T> {
 }
 
 pub(in crate::source) struct ClosureProbes {
+    pub open: ExternalRef,
     pub completed: ExternalRef,
     pub no_reason: ExternalRef,
     pub unknown_reason: ExternalRef,
+    pub missing: ExternalRef,
+    pub unreadable: ExternalRef,
 }
 
 pub(in crate::source) struct CommentProbe {
@@ -212,21 +215,24 @@ pub(in crate::source) fn invalid_configuration_is_a_configuration_error<D: Drive
     assert!(!error.issues().is_empty(), "{error}");
 }
 
-pub(in crate::source) fn unknown_closure_is_never_completed<D: Driver>() {
+pub(in crate::source) fn closure_requires_positive_tracker_state<D: Driver>() {
     let Fixture {
         connector,
         config,
         data,
     } = D::closures();
-    for (reference, reason) in [
-        (data.completed, ClosureReason::Completed),
-        (data.no_reason, ClosureReason::Unknown),
-        (data.unknown_reason, ClosureReason::Unknown),
+    for (reference, category) in [
+        (data.open, StateCategory::Open),
+        (data.completed, StateCategory::Completed),
+        (data.no_reason, StateCategory::Unknown),
+        (data.unknown_reason, StateCategory::Unknown),
     ] {
         let issue = connector.fetch(&config, &reference).unwrap();
-        assert_eq!(
-            issue.state,
-            ExternalState::Closed { reason },
+        assert_eq!(issue.state.category, category, "{}", reference.locator);
+    }
+    for reference in [data.missing, data.unreadable] {
+        assert!(
+            connector.fetch(&config, &reference).is_err(),
             "{}",
             reference.locator
         );
@@ -363,7 +369,7 @@ macro_rules! contract_tests {
                 issue_ids_are_stable_across_runs_and_fetch,
                 invalid_configuration_is_a_configuration_error,
                 discovered_refs_name_the_parts_returned_by_check,
-                unknown_closure_is_never_completed,
+                closure_requires_positive_tracker_state,
                 comment_ids_survive_repeated_reads_and_edits,
                 failed_publication_classifies_creation_honestly,
                 uncertain_search_distinguishes_matches_recent_and_incomplete,
@@ -403,18 +409,22 @@ impl Driver for FakeDriver {
 
     fn closures() -> Fixture<ClosureProbes> {
         let fake = FakeSource::default();
-        let add = |id, reason| {
-            let mut issue = issue(id, "Closed issue");
-            issue.state = ExternalState::Closed { reason };
+        let add = |id, category, name| {
+            let mut issue = issue(id, "Issue state probe");
+            issue.state = ExternalState::named(category, name);
             let reference = issue.reference.clone();
             fake.0.lock().unwrap().issues.insert(id, issue);
             reference
         };
         let data = ClosureProbes {
-            completed: add(1, ClosureReason::Completed),
-            no_reason: add(2, ClosureReason::Unknown),
-            unknown_reason: add(3, ClosureReason::Unknown),
+            open: add(1, StateCategory::Open, "Done"),
+            completed: add(2, StateCategory::Completed, "Released"),
+            no_reason: add(3, StateCategory::Unknown, "Closed"),
+            unknown_reason: add(4, StateCategory::Unknown, "Completed"),
+            missing: issue(5, "Missing").reference,
+            unreadable: issue(6, "Unreadable").reference,
         };
+        fake.0.lock().unwrap().broken.push(6);
         fake_fixture(fake, data)
     }
 

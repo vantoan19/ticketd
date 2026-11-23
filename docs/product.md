@@ -405,18 +405,21 @@ and run through a shared extension interface.
 - A synchronized ticket is **externally owned**: its title, description, and status
   are read-only and flow one way, from the tracker into ticketd. Plan membership,
   relationships, tags, Activities, and Documents stay local and are never overwritten.
-  GitHub issue state maps to status: an open issue starts as Todo, a completed
-  closure is Done, not-planned is Canceled, and duplicate is Duplicate. While the
-  issue stays open, people and agents manage Todo, In progress, and In review
-  locally without writing to GitHub. A reopened issue returns to Todo.
+  A source reports a typed state category and its own name for the state. Every
+  non-terminal state is open and imports as Todo. A completed issue is Done, a
+  not-planned issue is Canceled, and a duplicate is Duplicate. An unknown state
+  gets flagged and keeps the ticket's status. While the issue stays open, people
+  and agents manage Todo, In progress, and In review in ticketd. A reopened
+  issue returns to Todo. The detail shows the tracker's state name alongside
+  ticketd's status, for example “GitHub: Closed (not planned)”.
 - A **locally owned** ticket in Todo, In progress, or In review can be published once
   as a normal issue. Preview shows exactly what would be sent; ownership transfers
   only after ticketd confirms the issue exists, and an uncertain result is resolved
   before any retry so no second issue is created. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
-- If a source ticket becomes unavailable, ticketd keeps its content and local work and
-  warns; **Take ownership** makes it local and stops synchronization.
+- If an issue disappears or becomes unavailable, ticketd keeps its status, content,
+  and local work and shows a warning; **Take ownership** makes it local and stops synchronization.
 - Use `ticketd source add PROVIDER` to add a connection and `ticketd source list`
   to find its ID. When several connections can publish, pass
   `ticketd source publish T-XYZ --connection CONNECTION --preview`.
@@ -480,7 +483,9 @@ collect OAuth tokens, proxy model requests, or change billing.
   owned by any. It keeps the harness it was created with and needs an execution folder
   (an existing one or a persistent managed one). Ticket detail lists a ticket's Chats.
   Before sending, the person picks the harness and, from what it reports, its model,
-  effort, and permission mode; full access is never offered.
+  effort, and permission mode. Full access, where the harness edits and runs
+  commands without asking, is one of those modes for Claude Code and Codex; it is
+  never given to an Automation's agent.
 - **Conversation.** The UI streams responses, tool activity, native approval requests,
   and questions. Observed activity is Idle, Working, Waiting for you, Interrupted, or
   Failed; a finished turn is not evidence that the task succeeded. Sending during a

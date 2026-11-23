@@ -306,6 +306,60 @@ pub enum WriteResult {
     Deleted,
 }
 
+/// Request IDs still replay the original snapshot, including the state seen at
+/// that write. Convert just the serialized state of affected Ticket results.
+pub(crate) fn migrate_source_state_outcomes(
+    connection: &rusqlite::Connection,
+) -> Result<(), Error> {
+    use serde_json::Value;
+
+    fn migrate_ticket(ticket: &mut Value) -> Result<(), Error> {
+        if let Some(source) = ticket.get_mut("source")
+            && let Some(state) = source["state"]["state"].as_str()
+        {
+            let observed = crate::source::legacy_state(
+                source["provider"].as_str().unwrap_or_default(),
+                state,
+                source["state"]["reason"].as_str(),
+            );
+            source["state"] = serde_json::to_value(observed)?;
+        }
+        Ok(())
+    }
+
+    let ids: Vec<String> = connection
+        .prepare(
+            "SELECT id FROM request_outcomes WHERE CASE WHEN json_valid(outcome) THEN
+                 CASE json_extract(outcome, '$.kind')
+                     WHEN 'ticket' THEN json_type(outcome, '$.value.source.state.state') = 'text'
+                     WHEN 'tickets' THEN EXISTS (
+                         SELECT 1 FROM json_each(outcome, '$.value')
+                         WHERE CASE WHEN type = 'object' THEN json_type(value, '$.source.state.state') = 'text' ELSE 0 END
+                     )
+                     ELSE 0
+                 END ELSE 0 END",
+        )?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    let mut read = connection.prepare("SELECT outcome FROM request_outcomes WHERE id = ?1")?;
+    let mut write = connection.prepare("UPDATE request_outcomes SET outcome = ?2 WHERE id = ?1")?;
+    for id in ids {
+        let saved: String = read.query_row([&id], |row| row.get(0))?;
+        let mut outcome: Value = serde_json::from_str(&saved)?;
+        match outcome.get_mut("value") {
+            Some(Value::Array(tickets)) => {
+                for ticket in tickets {
+                    migrate_ticket(ticket)?;
+                }
+            }
+            Some(ticket) => migrate_ticket(ticket)?,
+            None => {}
+        }
+        write.execute(rusqlite::params![id, serde_json::to_string(&outcome)?])?;
+    }
+    Ok(())
+}
+
 impl Workspace {
     /// Execute a write, optionally retaining its result forever for retry. Different IDs
     /// do not protect against concurrent edits to the same fields.

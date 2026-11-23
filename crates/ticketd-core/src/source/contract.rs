@@ -116,11 +116,22 @@ pub struct ExternalRef {
     pub partition: String,
 }
 
-impl ClosureReason {
-    /// The name stored and shown for the reason (the same words GitHub's
-    /// `state_reason` uses).
+/// How a source state affects ticketd's workflow. Connectors derive the
+/// category from typed provider data and use Unknown for an unrecognized value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StateCategory {
+    Open,
+    Completed,
+    NotPlanned,
+    Duplicate,
+    Unknown,
+}
+
+impl StateCategory {
     pub(crate) fn as_str(self) -> &'static str {
         match self {
+            Self::Open => "open",
             Self::Completed => "completed",
             Self::NotPlanned => "not_planned",
             Self::Duplicate => "duplicate",
@@ -128,10 +139,19 @@ impl ClosureReason {
         }
     }
 
-    /// The reason named by `name`; anything else, and no reason at all, is
-    /// [`Self::Unknown`], never assumed to be completion.
-    pub(crate) fn parse(name: Option<&str>) -> Self {
-        match name {
+    pub(crate) fn parse(value: &str) -> Self {
+        match value {
+            "open" => Self::Open,
+            "completed" => Self::Completed,
+            "not_planned" => Self::NotPlanned,
+            "duplicate" => Self::Duplicate,
+            _ => Self::Unknown,
+        }
+    }
+
+    /// A closed issue with a missing or unknown closure reason stays unknown.
+    pub(crate) fn from_closure(reason: Option<&str>) -> Self {
+        match reason {
             Some("completed") => Self::Completed,
             Some("not_planned") => Self::NotPlanned,
             Some("duplicate") => Self::Duplicate,
@@ -140,22 +160,21 @@ impl ClosureReason {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ClosureReason {
-    Completed,
-    NotPlanned,
-    Duplicate,
-    /// The provider closed the issue without a reason ticketd recognizes.
-    /// It must be flagged, never treated as completion.
-    Unknown,
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ExternalState {
+    pub category: StateCategory,
+    /// The tracker's own name for the state, used only for display. Older
+    /// observations may have no name.
+    pub name: Option<String>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "state", rename_all = "snake_case")]
-pub enum ExternalState {
-    Open,
-    Closed { reason: ClosureReason },
+impl ExternalState {
+    pub fn named(category: StateCategory, name: impl Into<String>) -> Self {
+        Self {
+            category,
+            name: Some(name.into()),
+        }
+    }
 }
 
 /// An issue as the provider reports it, in provider-neutral form.
@@ -208,9 +227,9 @@ pub struct ExternalComment {
 
 /// What happened in an external timeline event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "event", content = "reason", rename_all = "snake_case")]
+#[serde(tag = "event", content = "category", rename_all = "snake_case")]
 pub enum ExternalEventKind {
-    Closed(ClosureReason),
+    Closed(StateCategory),
     Reopened,
     Assigned,
     Unassigned,

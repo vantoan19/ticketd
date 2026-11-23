@@ -24,7 +24,7 @@ fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
              VALUES ('source-ticket', 'github', '123', 'work/fixtures#1', 'work/fixtures#1',
                      'https://github.com/work/fixtures/issues/1', 'imported', 'work/fixtures');
          INSERT INTO external_ownership (ticket_id, authority) VALUES ('source-ticket', 'external');
-         INSERT INTO source_sync (ticket_id, external_state, last_error_code, last_error_message)
+         INSERT INTO source_sync (ticket_id, state_category, last_error_code, last_error_message)
              VALUES ('source-ticket', 'open', 'unauthenticated', 'The earlier refresh failed');
          INSERT INTO source_status (provider, last_attempt_at, error_code, error_message, last_checked_tickets)
              VALUES ('github', '2026-01-02T00:00:00Z', 'unauthenticated', 'The earlier refresh failed', 1);

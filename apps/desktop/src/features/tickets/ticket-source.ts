@@ -34,24 +34,30 @@ export function sourceState(source: TicketSource): {
   text: string;
   tone: "positive" | "attention" | null;
 } {
-  const name = source.provider_name;
   if (source.unavailable)
     return { text: "Source unavailable", tone: "attention" };
-  if (source.state.state === "open")
-    return { text: `Open on ${name}`, tone: "positive" };
-  switch (source.state.reason) {
-    case "completed":
-      return { text: `Closed on ${name} as completed`, tone: null };
-    case "not_planned":
-      return { text: `Closed on ${name} as not planned`, tone: null };
-    case "duplicate":
-      return { text: `Closed on ${name} as a duplicate`, tone: null };
-    case "unknown":
-      return {
-        text: `Closed on ${name}; the reason is not recognized`,
-        tone: "attention",
-      };
-  }
+  const { category, name } = source.state;
+  const categoryLabel = {
+    open: "Open",
+    completed: "Completed",
+    not_planned: "Not planned",
+    duplicate: "Duplicate",
+    unknown: "Unrecognized state",
+  }[category];
+  const label = name?.trim() || categoryLabel;
+  const qualifier =
+    category !== "open" && label.toLowerCase() !== categoryLabel.toLowerCase()
+      ? ` (${categoryLabel.toLowerCase()})`
+      : "";
+  return {
+    text: `${source.provider_name}: ${label}${qualifier}`,
+    tone:
+      category === "open"
+        ? "positive"
+        : category === "unknown"
+          ? "attention"
+          : null,
+  };
 }
 
 /** "just now", "4 min ago", "2 h ago", "3 d ago"; null when the time cannot be read. */

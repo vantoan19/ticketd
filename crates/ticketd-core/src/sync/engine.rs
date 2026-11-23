@@ -21,7 +21,9 @@ use super::{
 };
 use crate::{
     Error, SyncKind, SyncPart, SyncRecord, SyncValue, Workspace,
-    sync_files::{MAX_FILE_BYTES, find_record, from_newer_version, resolve_ticket_references},
+    sync_files::{
+        MAX_FILE_BYTES, find_record, from_newer_version, resolve_ticket_references, write_source,
+    },
 };
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
@@ -491,14 +493,166 @@ fn note_removals(connection: &Connection, record: &SyncRecord, read: bool) -> Re
 /// The fields a refresh from the tracker writes. They describe one refresh and
 /// go together; who holds authority over the ticket is a decision made on a
 /// desktop and is merged like any other field.
-const REFRESHED: [&str; 6] = [
-    "source_state",
-    "source_closure_reason",
+const REFRESHED: [&str; 7] = [
+    "source_state_category",
+    "source_state_name",
+    "source_partition",
     "source_updated_at",
     "source_locator",
     "source_display",
     "source_url",
 ];
+
+fn refresh_fields(record: &SyncRecord) -> BTreeMap<String, SyncValue> {
+    record
+        .fields
+        .iter()
+        .filter(|(name, _)| REFRESHED.contains(&name.as_str()))
+        .map(|(name, value)| (name.clone(), value.clone()))
+        .collect()
+}
+
+fn later_refresh(
+    ours: BTreeMap<String, SyncValue>,
+    theirs: BTreeMap<String, SyncValue>,
+) -> BTreeMap<String, SyncValue> {
+    let time = |group: &BTreeMap<String, SyncValue>| match group.get("source_updated_at") {
+        Some(SyncValue::Text(time)) => chrono::DateTime::parse_from_rfc3339(time).ok(),
+        _ => None,
+    };
+    // Equal times fall back to the values, so both devices pick the same side.
+    if (time(&theirs), &theirs) > (time(&ours), &ours) {
+        theirs
+    } else {
+        ours
+    }
+}
+
+/// Old conflicts stored individual field values. If they have a last-synced
+/// copy of the same issue, settle its observation together with the local one.
+/// Leave provenance, status and any unrelated conflicts alone.
+pub(crate) fn migrate_source_state_conflicts(connection: &Connection) -> Result<(), Error> {
+    const OBSERVATION: &str =
+        "kind = 'ticket' AND field IN ('source_state', 'source_closure_reason',
+        'source_updated_at', 'source_locator', 'source_display', 'source_url')";
+    let affected: Vec<String> = connection
+        .prepare(&format!(
+            "SELECT DISTINCT id FROM sync_conflicts WHERE {OBSERVATION}"
+        ))?
+        .query_map([], |row| row.get(0))?
+        .collect::<Result<_, _>>()?;
+    for id in affected {
+        let kind = SyncKind::Ticket;
+        let local = find_record(connection, kind, &id)?;
+        let remote = stored(connection, kind, &id)?.base;
+        if let (Some(local), Some(remote)) = (&local, &remote)
+            && ["source_provider", "source_external_id"]
+                .into_iter()
+                .all(|name| {
+                    local
+                        .fields
+                        .get(name)
+                        .is_some_and(|value| remote.fields.get(name) == Some(value))
+                })
+        {
+            let mut local = local.clone();
+            let ours = refresh_fields(&local);
+            let theirs = refresh_fields(remote);
+            let later = later_refresh(ours.clone(), theirs.clone());
+            if later != ours {
+                local
+                    .fields
+                    .retain(|name, _| !REFRESHED.contains(&name.as_str()));
+                local.fields.extend(later);
+                write_source(connection, &local)?;
+            } else if later != theirs {
+                mark_dirty(connection, RecordKind::Ticket, &id)?;
+            }
+            connection.execute(
+                &format!("DELETE FROM sync_conflicts WHERE {OBSERVATION} AND id = ?1"),
+                [&id],
+            )?;
+        } else {
+            translate_legacy_state_conflicts(connection, &id, local.as_ref())?;
+        }
+    }
+    Ok(())
+}
+
+fn translate_legacy_state_conflicts(
+    connection: &Connection,
+    id: &str,
+    local: Option<&SyncRecord>,
+) -> Result<(), Error> {
+    const OLD_FIELDS: &str =
+        "kind = 'ticket' AND id = ?1 AND field IN ('source_state', 'source_closure_reason')";
+    struct Values {
+        base: Option<SyncValue>,
+        remote: Option<SyncValue>,
+    }
+    fn text(value: Option<&SyncValue>) -> Option<&str> {
+        match value {
+            Some(SyncValue::Text(text)) => Some(text),
+            _ => None,
+        }
+    }
+    let read = |field: &str| -> Result<Option<Values>, Error> {
+        connection.query_row(
+            "SELECT base, remote FROM sync_conflicts WHERE kind = 'ticket' AND id = ?1 AND field = ?2",
+            params![id, field],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        ).optional()?.map(|(base, remote)| {
+            Ok(Values { base: from_json(base)?, remote: from_json(remote)? })
+        }).transpose()
+    };
+    let state = read("source_state")?;
+    let reason = read("source_closure_reason")?;
+    if state.is_none() && reason.is_none() {
+        return Ok(());
+    }
+    let provider =
+        text(local.and_then(|record| record.fields.get("source_provider"))).unwrap_or_default();
+    let convert = |value: fn(&Values) -> Option<&SyncValue>| {
+        // If the old review only contained the reason, each side describes a
+        // closure. A missing reason by itself supplies no terminal category.
+        let state = state
+            .as_ref()
+            .map_or(Some("closed"), |states| text(value(states)));
+        let reason = reason.as_ref().and_then(|reasons| text(value(reasons)));
+        state.map(|state| crate::source::legacy_state(provider, state, reason))
+    };
+    let base = convert(|values| values.base.as_ref());
+    let remote = convert(|values| values.remote.as_ref());
+    let category = |state: Option<&crate::source::ExternalState>| {
+        state.map(|state| SyncValue::Text(state.category.as_str().to_owned()))
+    };
+    let label = |state: Option<crate::source::ExternalState>| {
+        state.and_then(|state| state.name).map(SyncValue::Text)
+    };
+    for (field, base, remote) in [
+        (
+            "source_state_category",
+            category(base.as_ref()),
+            category(remote.as_ref()),
+        ),
+        ("source_state_name", label(base), label(remote)),
+    ] {
+        if field == "source_state_name" && base == remote {
+            continue;
+        }
+        connection.execute(
+            &format!("INSERT INTO sync_conflicts (kind, id, field, base, remote, remote_device, detected_at, read, remote_changed_at)
+                SELECT kind, id, ?2, ?3, ?4, remote_device, detected_at, MIN(read) OVER (), remote_changed_at
+                FROM sync_conflicts WHERE {OLD_FIELDS} ORDER BY detected_at DESC, field LIMIT 1"),
+            params![id, field, base.as_ref().map(json).transpose()?, remote.as_ref().map(json).transpose()?],
+        )?;
+    }
+    connection.execute(
+        &format!("DELETE FROM sync_conflicts WHERE {OLD_FIELDS}"),
+        [id],
+    )?;
+    Ok(())
+}
 
 /// When both sides refreshed, the later `source_updated_at` wins for the
 /// refreshed fields as a whole: mixing two refreshes field by field, or asking
@@ -509,31 +663,12 @@ fn settle_source(
     remote: &SyncRecord,
     merged: &mut super::merge::Merged,
 ) {
-    let group = |record: &SyncRecord| -> BTreeMap<String, SyncValue> {
-        let source = record.fields.iter();
-        source
-            .filter(|(name, _)| REFRESHED.contains(&name.as_str()))
-            .map(|(name, value)| (name.clone(), value.clone()))
-            .collect()
-    };
-    let (ours, theirs) = (group(local), group(remote));
-    let before = base.map(group).unwrap_or_default();
+    let (ours, theirs) = (refresh_fields(local), refresh_fields(remote));
+    let before = base.map(refresh_fields).unwrap_or_default();
     if ours == theirs || ours == before || theirs == before {
         return;
     }
-    // Equal times fall back to the values, so both devices pick the same side.
-    let age = |group: &BTreeMap<String, SyncValue>| {
-        let time = match group.get("source_updated_at") {
-            Some(SyncValue::Text(time)) => chrono::DateTime::parse_from_rfc3339(time).ok(),
-            _ => None,
-        };
-        (time, group.clone())
-    };
-    let later = if age(&theirs) > age(&ours) {
-        theirs
-    } else {
-        ours
-    };
+    let later = later_refresh(ours, theirs);
     let refreshed = |name: &str| REFRESHED.contains(&name);
     merged.fields.retain(|name, _| !refreshed(name));
     merged.fields.extend(later);

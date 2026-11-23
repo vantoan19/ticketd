@@ -424,7 +424,7 @@ fn a_malformed_file_is_rejected_with_the_reason_and_changes_nothing() {
             good.replace("trashed: false", "parent: \"T-KQ1\""),
             "'parent'",
         ),
-        (good.replace("format: 1", "format: 2"), "newer ticketd"),
+        (good.replace("format: 1", "format: 3"), "newer ticketd"),
         (good.replace("format: 1", "format: one"), "'format'"),
         (
             good.replace("trashed: false", "source_provider: \"github\""),
@@ -497,12 +497,38 @@ fn external_source_provenance_travels_with_the_ticket() {
     assert_eq!(source.locator, "acme/site#42");
     assert_eq!(source.ownership, ticketd_core::source::Ownership::External);
     assert_eq!(
-        workspace
+        source.state.category,
+        ticketd_core::source::StateCategory::Completed
+    );
+    assert_eq!(source.state.name.as_deref(), Some("Closed"));
+    let markdown = workspace
+        .export_sync_record(SyncKind::Ticket, &ticket.id)
+        .unwrap()
+        .to_markdown();
+    assert!(markdown.contains("format: 2\n"));
+    assert!(markdown.contains("source_state_category: \"completed\"\n"));
+    assert!(markdown.contains("source_state_name: \"Closed\"\n"));
+    assert!(markdown.contains("source_partition: \"acme/site\"\n"));
+    let parsed = SyncRecord::parse(&markdown).unwrap();
+    assert_eq!(parsed, record);
+    let mut other = Workspace::open(directory.path().join("b.sqlite3")).unwrap();
+    other.apply_sync_record(&parsed).unwrap();
+    assert_eq!(
+        other.show_ticket("T-ZZ7").unwrap().source.unwrap().state,
+        source.state
+    );
+    assert_eq!(
+        other
             .export_sync_record(SyncKind::Ticket, &ticket.id)
             .unwrap()
             .to_markdown(),
-        text
+        markdown
     );
+    assert_eq!(
+        SyncRecord::parse(&text.replace("format: 1\n", "")).unwrap(),
+        record
+    );
+    assert!(SyncRecord::parse(&markdown.replace("format: 2", "format: 1")).is_err());
     // Another device taking the ticket over arrives as a changed field.
     let taken = SyncRecord::parse(&text.replace(
         "source_authority: \"external\"",

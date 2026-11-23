@@ -30,12 +30,12 @@ use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 pub use contract::{
-    CONTRACT_VERSION, Capability, ClosureReason, ConnectionCheck, ConnectionInfo, Connector,
-    ConnectorDescriptor, Conversation, DerivedConfiguration, DestinationRules,
-    DestinationValidation, DiscoveryPage, DiscoveryRequest, ErrorClass, ExternalComment,
-    ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-    Publication, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
-    SourceError, Surface,
+    CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector, ConnectorDescriptor,
+    Conversation, DerivedConfiguration, DestinationRules, DestinationValidation, DiscoveryPage,
+    DiscoveryRequest, ErrorClass, ExternalComment, ExternalEvent, ExternalEventKind,
+    ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, Publication,
+    PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
+    StateCategory, Surface,
 };
 pub use conversation::ConversationEntry;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
@@ -233,10 +233,55 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
     Ok(())
 }
 
+/// Format version 88: preserve the last typed observation and source label
+/// independently of the local ticket's status and workflow history.
+pub(crate) fn migrate_state_categories(connection: &rusqlite::Connection) -> Result<(), Error> {
+    connection.execute_batch(
+        "ALTER TABLE source_sync ADD COLUMN state_category TEXT NOT NULL DEFAULT 'unknown'
+             CHECK (state_category IN ('open', 'completed', 'not_planned', 'duplicate', 'unknown'));
+         ALTER TABLE source_sync ADD COLUMN state_name TEXT;
+         UPDATE source_sync SET state_category = CASE
+             WHEN external_state = 'open' THEN 'open'
+             WHEN closure_reason IN ('completed', 'not_planned', 'duplicate') THEN closure_reason
+             ELSE 'unknown' END,
+             state_name = CASE (SELECT provider FROM external_identities i WHERE i.ticket_id = source_sync.ticket_id)
+                 WHEN 'github' THEN CASE external_state WHEN 'open' THEN 'Open' ELSE 'Closed' END
+             END;
+         ALTER TABLE source_sync DROP COLUMN closure_reason;
+         ALTER TABLE source_sync DROP COLUMN external_state;",
+    )?;
+    let legacy: Vec<(String, String)> = connection
+        .prepare("SELECT ticket_id, locator FROM external_identities WHERE provider = 'github' AND partition IS NULL")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (id, locator) in legacy {
+        if let Some(partition) = github::legacy_reference_partition("github", &locator) {
+            connection.execute(
+                "UPDATE external_identities SET partition = ?2 WHERE ticket_id = ?1",
+                rusqlite::params![id, partition],
+            )?;
+        }
+    }
+    conversation::migrate_state_categories(connection)
+}
+
 /// Older Workspace sync files carry the locator but no part. GitHub was the
 /// only source that could create them and its locator names the repository.
-pub(crate) fn legacy_reference_partition(provider: &str, locator: &str) -> String {
-    github::legacy_reference_partition(provider, locator).unwrap_or_default()
+pub(crate) fn legacy_reference_partition(provider: &str, locator: &str) -> Option<String> {
+    github::legacy_reference_partition(provider, locator)
+}
+
+/// Convert the state tuple saved before typed categories and display names.
+pub(crate) fn legacy_state(provider: &str, state: &str, reason: Option<&str>) -> ExternalState {
+    let category = if state == "open" {
+        StateCategory::Open
+    } else {
+        StateCategory::from_closure(reason)
+    };
+    ExternalState {
+        category,
+        name: github::legacy_state_name(provider, state).map(str::to_owned),
+    }
 }
 
 /// Describes a provider from the device-local cache, or its built-in

@@ -17,6 +17,7 @@ use super::{
         ConnectorDescriptor, Conversation, DerivedConfiguration, DiscoveryRequest,
         ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, Publication,
         PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
+        StateCategory,
     },
     github::GithubConnector,
     schema::{ChoiceOption, ConfigValues, FieldKind, OptionSource},
@@ -460,7 +461,7 @@ impl Engine {
                 "the created issue named a different provider".into(),
             ));
         }
-        if issue.state != ExternalState::Open {
+        if issue.state.category != StateCategory::Open {
             return Err(SourceError::Protocol(
                 "the created issue was not reported open".into(),
             ));

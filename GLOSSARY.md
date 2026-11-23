@@ -64,6 +64,9 @@ A named, device-local configuration for an account and site at a ticket source, 
 **Conformance suite**:
 The shared checks that verify whether a connector follows the ticket source contract.
 
+**Source state category**:
+ticketd's interpretation of a typed tracker state: open, completed, not planned, duplicate, or unknown. The source's state name is display text. Only completed, not planned, and duplicate imply a terminal ticket status.
+
 **External ticket identity**:
 The identity of a ticket's corresponding record in an external tracker, retained as provenance even when ticketd takes ownership. Its presence alone does not imply external ownership or active synchronization.
 

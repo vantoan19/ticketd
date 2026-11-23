@@ -70,7 +70,7 @@ function external(overrides: Partial<TicketSource> = {}): TicketSource {
     url: "https://github.com/sample/repo/issues/98",
     origin: "imported",
     ownership: "external",
-    state: { state: "open" },
+    state: { category: "open", name: "Open" },
     closure_unrecognized: false,
     last_refreshed_at: null,
     last_attempt_at: null,
@@ -825,7 +825,7 @@ test("card menus honor core status choices, source closure exceptions and retain
     {
       ...ticket(2),
       source: external({
-        state: { state: "closed", reason: "unknown" },
+        state: { category: "unknown", name: "Closed" },
         closure_unrecognized: true,
         status_choices: ["Todo", "Done", "Canceled"],
       }),
@@ -866,7 +866,7 @@ test("ownership changes during a card save reconcile the saved state and permitt
       ...ticket(1, "Done"),
       source: external({
         status_locked: true,
-        state: { state: "closed", reason: "completed" },
+        state: { category: "completed", name: "Closed" },
         status_choices: [],
       }),
     };
@@ -1516,7 +1516,7 @@ test("cards retain source, project, Plan and core readiness context; project and
       url: "https://github.com/sample/repo/issues/98",
       origin: "imported" as const,
       ownership: "external" as const,
-      state: { state: "open" as const },
+      state: { category: "open" as const, name: "Open" },
       closure_unrecognized: false,
       last_refreshed_at: null,
       last_attempt_at: null,

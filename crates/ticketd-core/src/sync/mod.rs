@@ -13,11 +13,12 @@ mod setup;
 
 pub use crate::sync_files::MAX_FILE_BYTES;
 pub use attachments::{AttachmentAvailability, AttachmentAvailabilityState, AttachmentDownloads};
+pub(crate) use capture::migrate_source_observation_capture;
 pub use capture::{DirtyRecord, RecordKind};
-pub(crate) use engine::removed_by_sync;
 pub use engine::{
     SyncChoice, SyncConflict, SyncConflictField, SyncNotice, SyncNoticeKind, SyncResolution,
 };
+pub(crate) use engine::{migrate_source_state_conflicts, removed_by_sync};
 pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, SetupOptions,
     SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem, SyncRecovery,

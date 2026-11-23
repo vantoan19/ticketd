@@ -216,36 +216,11 @@ fn a_page_of_only_pull_requests_does_not_end_discovery() {
 fn closure_reasons_map_to_neutral_states() {
     let (fixture, engine) = setup(Some(TOKEN));
     for (reason, expected) in [
-        (
-            json!("completed"),
-            ExternalState::Closed {
-                reason: ClosureReason::Completed,
-            },
-        ),
-        (
-            json!("not_planned"),
-            ExternalState::Closed {
-                reason: ClosureReason::NotPlanned,
-            },
-        ),
-        (
-            json!("duplicate"),
-            ExternalState::Closed {
-                reason: ClosureReason::Duplicate,
-            },
-        ),
-        (
-            json!(null),
-            ExternalState::Closed {
-                reason: ClosureReason::Unknown,
-            },
-        ),
-        (
-            json!("something_new"),
-            ExternalState::Closed {
-                reason: ClosureReason::Unknown,
-            },
-        ),
+        (json!("completed"), StateCategory::Completed),
+        (json!("not_planned"), StateCategory::NotPlanned),
+        (json!("duplicate"), StateCategory::Duplicate),
+        (json!(null), StateCategory::Unknown),
+        (json!("something_new"), StateCategory::Unknown),
     ] {
         let mut closed = issue(7, 7, "o/one");
         closed["state"] = json!("closed");
@@ -266,7 +241,13 @@ fn closure_reasons_map_to_neutral_states() {
                 &reference,
             )
             .unwrap();
-        assert_eq!(fetched.state, expected);
+        assert_eq!(
+            serde_json::to_value(&fetched.state).unwrap(),
+            json!({
+                "category": expected.as_str(),
+                "name": "Closed",
+            }),
+        );
     }
 }
 
@@ -916,9 +897,7 @@ fn an_unreadable_pull_request_or_failed_lookup_is_an_unknown_target_not_a_failed
         );
         assert_eq!(
             fetched.state,
-            ExternalState::Closed {
-                reason: ClosureReason::Duplicate
-            }
+            ExternalState::named(StateCategory::Duplicate, "Closed")
         );
     }
 }
@@ -991,7 +970,10 @@ fn publishing_posts_only_the_title_and_description_and_returns_the_created_issue
 
     assert_eq!(created.reference.identity.id, "77");
     assert_eq!(created.reference.locator, "o/r#12");
-    assert_eq!(created.state, ExternalState::Open);
+    assert_eq!(
+        created.state,
+        ExternalState::named(StateCategory::Open, "Open")
+    );
     let requests = fixture.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, Method::Post);
@@ -1133,10 +1115,10 @@ fn comments_and_events_follow_every_page_and_translate_to_neutral_entries() {
         [
             ExternalEventKind::Assigned,
             ExternalEventKind::Unassigned,
-            ExternalEventKind::Closed(ClosureReason::Duplicate),
+            ExternalEventKind::Closed(StateCategory::Duplicate),
             ExternalEventKind::Reopened,
-            ExternalEventKind::Closed(ClosureReason::NotPlanned),
-            ExternalEventKind::Closed(ClosureReason::Unknown),
+            ExternalEventKind::Closed(StateCategory::NotPlanned),
+            ExternalEventKind::Closed(StateCategory::Unknown),
         ],
         "unrelated events such as labels are left out"
     );

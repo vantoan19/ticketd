@@ -1176,9 +1176,9 @@ fn the_same_field_changed_on_two_devices_converges_in_every_order() {
 fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
     // A higher format number, with or without what else this version does not know.
     for (from, to) in [
-        ("format: 1\n", "format: 2\n"),
-        ("format: 1\n", "format: 2\nmood: \"happy\"\n"),
-        ("format: 1\n", "format: 2\n---\n<!-- ticketd:mood -->\n"),
+        ("format: 1\n", "format: 3\n"),
+        ("format: 1\n", "format: 3\nmood: \"happy\"\n"),
+        ("format: 1\n", "format: 3\n---\n<!-- ticketd:mood -->\n"),
     ] {
         let mut devices = devices();
         let reference = devices.shared_ticket("Login");
@@ -1507,6 +1507,69 @@ fn sourced(state: &str, updated: &str) -> String {
     )
 }
 
+#[test]
+fn a_format_one_cached_base_merges_a_format_two_observation_with_local_progress() {
+    let mut devices = devices();
+    let id = "3f2c9a1e-0000-4000-8000-000000000001";
+    let legacy = sourced("open", "2026-01-03T00:00:00Z");
+    let key = RemoteKey::new(RemoteKind::Ticket, id);
+    devices
+        .remote
+        .write(
+            &devices.folder,
+            &key,
+            "Imported.md",
+            None,
+            &mut Cursor::new(&legacy),
+        )
+        .unwrap();
+    devices.sync(0);
+    devices.sync(1);
+    let path = devices.desks.directory.path().join(NAMES[1]);
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .execute(
+            "UPDATE sync_files SET content = ?2 WHERE kind = 'ticket' AND id = ?1",
+            rusqlite::params![id, legacy],
+        )
+        .unwrap();
+    devices.workspaces[1]
+        .change_ticket(
+            "T-ZZ7",
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    let incoming = ticketd_core::SyncRecord::parse(&sourced("open", "2026-01-04T00:00:00Z"))
+        .unwrap()
+        .to_markdown()
+        .replace(
+            "source_state_name: \"Open\"",
+            "source_state_name: \"Reviewing\"",
+        );
+    devices.hand_edit(RemoteKind::Ticket, id, &incoming);
+
+    assert_eq!(devices.sync(1).conflicts, 0);
+    devices.sync(0);
+
+    for index in [0, 1] {
+        let ticket = devices.workspaces[index].show_ticket("T-ZZ7").unwrap();
+        assert_eq!(ticket.status, ticketd_core::Status::InProgress);
+        assert_eq!(
+            ticket.source.unwrap().state.name.as_deref(),
+            Some("Reviewing")
+        );
+        assert!(
+            devices.workspaces[index]
+                .sync_conflicts()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
 /// F38: what two desktops each refreshed from the tracker is not a decision for
 /// a person: the later refresh wins for the source fields as a whole.
 #[test]
@@ -1534,8 +1597,15 @@ fn source_fields_refreshed_on_two_devices_take_the_later_refresh_without_review(
                 field("source_updated_at"),
                 Some(SyncValue::Text("2026-01-05T00:00:00Z".into()))
             );
-            assert_eq!(field("source_state"), Some(SyncValue::Text("open".into())));
-            assert_eq!(field("source_closure_reason"), None, "{order:?}");
+            assert_eq!(
+                field("source_state_category"),
+                Some(SyncValue::Text("open".into()))
+            );
+            assert_eq!(
+                field("source_state_name"),
+                Some(SyncValue::Text("Open".into())),
+                "{order:?}"
+            );
         }
     }
 }
@@ -1582,7 +1652,11 @@ fn a_takeover_on_one_device_survives_a_later_refresh_on_another() {
                 field("source_authority_changed_at"),
                 text("2026-01-04T00:00:00.000Z")
             );
-            assert_eq!(field("source_state"), text("closed"), "{order:?}");
+            assert_eq!(
+                field("source_state_category"),
+                text("completed"),
+                "{order:?}"
+            );
             assert_eq!(field("source_updated_at"), text("2026-01-05T00:00:00Z"));
         }
     }

@@ -1,6 +1,7 @@
 import { beaconIcon, beaconSource, githubSource } from "@/test/source-fixtures";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { Ticket } from "@/lib/api/client";
+import type { SourceHealth } from "@/lib/api/sources";
 import {
   reportWorkspaceFailure,
   clearWorkspaceFailure,
@@ -2218,7 +2219,7 @@ test("the source filter narrows list and counts together without a header Refres
       url: "https://github.com/acme/api/issues/98",
       origin: "imported",
       ownership: "external",
-      state: { state: "open" },
+      state: { category: "open", name: "Open" },
       closure_unrecognized: false,
       last_refreshed_at: null,
       last_attempt_at: null,
@@ -2279,7 +2280,7 @@ test("the source filter narrows list and counts together without a header Refres
 });
 
 test("the sidebar footer follows persisted source health and keeps the list", async () => {
-  let health: unknown = {
+  let health: SourceHealth = {
     refreshing: false,
     sources: [
       {
@@ -2298,6 +2299,17 @@ test("the sidebar footer follows persisted source health and keeps the list", as
   await renderBulk({
     find_tickets: () => [bulkTicket(1)],
     count_tickets: counted({ todo: 1 }),
+    list_sources: [
+      {
+        ...githubSource,
+        saved: {
+          provider: "github",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
+      },
+    ],
     source_health: () => health,
   });
   const footer = screen.getByRole("group", { name: "Ticket sources" });
@@ -2305,7 +2317,7 @@ test("the sidebar footer follows persisted source health and keeps the list", as
   // The failure never empties the list.
   expect(screen.getByText("First")).toBeTruthy();
   // A refresh started elsewhere (startup or periodic) shows up on the next poll.
-  health = { ...(health as object), refreshing: true };
+  health = { ...health, refreshing: true };
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2100);
   });
@@ -13037,7 +13049,7 @@ const reviewSource = {
   url: "https://github.com/acme/api/issues/98",
   origin: "imported",
   ownership: "external",
-  state: { state: "open" },
+  state: { category: "open", name: "Open" },
   closure_unrecognized: false,
   last_refreshed_at: null,
   last_attempt_at: null,

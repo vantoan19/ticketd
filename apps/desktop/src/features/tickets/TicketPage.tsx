@@ -160,9 +160,8 @@ export function TicketPage({
   const source = externalSource(ticket);
   const state = source ? sourceState(source) : null;
   const original =
-    source?.state.state === "closed" &&
+    source?.state.category === "duplicate" &&
     !source.unavailable &&
-    source.state.reason === "duplicate" &&
     source.duplicate_target?.kind === "external"
       ? source.duplicate_target
       : null;
@@ -176,21 +175,7 @@ export function TicketPage({
           <>
             <span className="ticket-source-state">
               {state.tone && <StatusDot tone={state.tone} size={10} />}
-              <span>
-                {state.text}
-                {original && (
-                  <>
-                    {" "}
-                    of{" "}
-                    <Tooltip content={original.display} side="bottom">
-                      <span className="source-number" tabIndex={0}>
-                        {originalLabel}
-                      </span>
-                    </Tooltip>
-                    {original.last_known && " (last known)"}
-                  </>
-                )}
-              </span>
+              <span>{state.text}</span>
             </span>
             {source.unavailable ? (
               <span>
@@ -201,7 +186,20 @@ export function TicketPage({
               </span>
             ) : (
               <>
-                {source.state.state === "open" && <span>{source.number}</span>}
+                {source.state.category === "open" && (
+                  <span>{source.number}</span>
+                )}
+                {original && (
+                  <span>
+                    Duplicate of{" "}
+                    <Tooltip content={original.display} side="bottom">
+                      <span className="source-number" tabIndex={0}>
+                        {originalLabel}
+                      </span>
+                    </Tooltip>
+                    {original.last_known && " (last known)"}
+                  </span>
+                )}
                 {source.closed_at && (
                   <Tooltip
                     content={formatDateTime(source.closed_at)}

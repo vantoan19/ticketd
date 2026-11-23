@@ -14,7 +14,7 @@ use super::ticketd_core::source::{
     DestinationRules, DestinationValidation, DiscoveryPage, DiscoveryRequest, ErrorClass,
     ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, FieldIssue, FieldKind,
     OptionSource, Publication, PublicationCandidates, PublicationSearch, PublishRequest,
-    SchemaField, SkippedPartition, SourceError, SourcePresentation, ValueFormat,
+    SchemaField, SkippedPartition, SourceError, SourcePresentation, StateCategory, ValueFormat,
 };
 
 pub type Hook = Arc<dyn Fn() + Send + Sync>;
@@ -472,7 +472,7 @@ fn issue_page(remote: &Remote, request: DiscoveryRequest<'_>, start: usize) -> D
     let issues: Vec<_> = matching
         .iter()
         .filter_map(|id| remote.issues.get(id))
-        .filter(|issue| issue.state == ExternalState::Open)
+        .filter(|issue| issue.state.category == StateCategory::Open)
         .filter(|issue| {
             labels
                 .iter()
@@ -535,7 +535,7 @@ pub fn issue_in(repository: &str, id: u64, title: &str) -> ExternalIssue {
         url: format!("https://example.test/{repository}/issues/{id}"),
         title: title.into(),
         body: format!("Body of {title}"),
-        state: ExternalState::Open,
+        state: ExternalState::named(StateCategory::Open, "Open"),
         assignees: Vec::new(),
         labels: Vec::new(),
         created_at: "2026-01-01T00:00:00Z".into(),
