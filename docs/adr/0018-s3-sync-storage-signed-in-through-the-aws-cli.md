@@ -60,7 +60,7 @@ ticketd cannot limit itself to its prefix the way `drive.file` does; the person'
 
 - **Bucket:** `s3:ListBucket` (also for HeadBucket), `s3:ListBucketVersions` and `s3:GetBucketVersioning`. Optionally `s3:ListAllMyBuckets`, which lets setup offer a list of buckets.
 - **Objects:** `s3:GetObject`, `s3:GetObjectVersion` and `s3:PutObject`. `If-Match` also needs `s3:GetObject`.
-- **Multipart uploads:** `s3:AbortMultipartUpload`, `s3:ListMultipartUploadParts` and `s3:ListBucketMultipartUploads`. The bucket check does not try these, so a policy that lacks them first fails when an Attachment over 16 MiB uploads.
+- **Multipart uploads:** `s3:AbortMultipartUpload`, `s3:ListMultipartUploadParts` and `s3:ListBucketMultipartUploads`. The bucket check tries `s3:ListBucketMultipartUploads`, but not the other two, so a policy that lacks them first fails when an Attachment over 16 MiB uploads.
 - **A bucket encrypted with a KMS key:** also `kms:GenerateDataKey` and `kms:Decrypt` on that key.
 
 ## Why
