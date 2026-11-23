@@ -290,6 +290,7 @@ impl Connector for Fake {
                 created_at: now_rfc3339(),
                 updated_at: now_rfc3339(),
                 author: None,
+                repository: None,
                 duplicate_of: None,
                 duplicate_of_url: None,
                 duplicate_withdrawn: false,

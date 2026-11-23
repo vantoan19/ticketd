@@ -188,6 +188,14 @@ fn discovery_pages_through_every_repository_and_skips_pull_requests() {
 
     let displays: Vec<_> = issues.iter().map(|i| i.display.as_str()).collect();
     assert_eq!(displays, ["o/one#1", "o/one#3", "o/two#1"]);
+    assert_eq!(
+        issues[0].repository.as_deref(),
+        Some("api.example.test/o/one")
+    );
+    assert_eq!(
+        issues[2].repository.as_deref(),
+        Some("api.example.test/o/two")
+    );
     assert_eq!(issues[0].reference.identity.id, "1");
     assert_eq!(issues[0].assignees, ["octo"]);
     assert_eq!(issues[0].labels, ["bug", "plain"]);
@@ -287,6 +295,34 @@ fn closure_reasons_map_to_neutral_states() {
             .unwrap();
         assert_eq!(fetched.state, expected);
     }
+}
+
+#[test]
+fn fetch_reports_the_repository_a_transferred_issue_is_now_in() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/repos/o/one/issues/7"),
+        ok(issue(77, 12, "moved/away")),
+    );
+    let reference = ExternalRef {
+        identity: ExternalIdentity {
+            provider: "github".into(),
+            id: "77".into(),
+        },
+        locator: "o/one#7".into(),
+    };
+
+    let issue = engine
+        .fetch(
+            "github",
+            &config(json!({"repositories": ["o/one"]})),
+            &reference,
+        )
+        .unwrap();
+    assert_eq!(
+        issue.repository.as_deref(),
+        Some("api.example.test/moved/away")
+    );
 }
 
 #[test]

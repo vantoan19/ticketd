@@ -1634,14 +1634,28 @@ impl Apply<'_> {
             .iter()
             .map(|name| text(&self.record.fields, name))
             .collect();
-        if values[0].is_none() {
+        let Some(provider) = values[0] else {
             c.execute("DELETE FROM source_sync WHERE ticket_id = ?1", [id])?;
             c.execute("DELETE FROM external_ownership WHERE ticket_id = ?1", [id])?;
             c.execute("DELETE FROM external_identities WHERE ticket_id = ?1", [id])?;
             return Ok(());
-        }
-        c.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin, linked_at = excluded.linked_at",
-            params![id, values[0], values[1], values[2], values[3], values[4], values[5], values[6]])?;
+        };
+        let repository = values[2].zip(values[4]).and_then(|(locator, url)| {
+            crate::source::repository_from_saved_issue(provider, locator, url)
+        });
+        // Keep a repository confirmed by the connector while the location is unchanged.
+        // A synced move must invalidate that observation and use the new locator and URL.
+        c.execute(
+            "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, repository) \
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
+             ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, \
+                locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin, \
+                linked_at = excluded.linked_at, repository = CASE \
+                    WHEN external_identities.provider = excluded.provider AND external_identities.external_id = excluded.external_id \
+                         AND external_identities.locator = excluded.locator AND external_identities.url = excluded.url \
+                    THEN COALESCE(external_identities.repository, excluded.repository) ELSE excluded.repository END",
+            params![id, provider, values[1], values[2], values[3], values[4], values[5], values[6], repository],
+        )?;
         c.execute("INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3) ON CONFLICT(ticket_id) DO UPDATE SET authority = excluded.authority, changed_at = excluded.changed_at",
             params![id, values[7], values[8]])?;
         c.execute("INSERT INTO source_sync (ticket_id, external_state, closure_reason, external_updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(ticket_id) DO UPDATE SET external_state = excluded.external_state, closure_reason = excluded.closure_reason, external_updated_at = excluded.external_updated_at",

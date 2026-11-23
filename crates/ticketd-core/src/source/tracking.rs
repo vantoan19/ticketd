@@ -5,7 +5,7 @@
 //! `ticket_id`, so later work extends one without touching the others:
 //!
 //! - `external_identities` is **provenance**: which external issue a ticket is
-//!   (or was). It is written once when a ticket is linked and is never deleted,
+//!   (or was), with its last observed location. The stable identity is retained
 //!   so discovery can always match an issue to its ticket, even after the
 //!   ticket stops being externally owned.
 //! - `external_ownership` is **authority**: who may change the ticket's
@@ -324,6 +324,44 @@ pub(crate) fn migrate_issue_opening(connection: &Connection) -> Result<(), Error
                 .execute_batch(&format!("ALTER TABLE source_sync ADD COLUMN {column} TEXT"))?;
         }
     }
+    Ok(())
+}
+
+/// Format version 87: repository identity for import routing and offline backfill.
+/// Legacy GitHub rows can supply it immediately when their saved location is consistent.
+pub(crate) fn migrate_issue_repository(connection: &Connection) -> Result<(), Error> {
+    let present: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('external_identities') WHERE name = 'repository')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        connection.execute_batch(
+            "ALTER TABLE external_identities ADD COLUMN repository TEXT COLLATE NOCASE",
+        )?;
+    }
+    let mut pending = connection.prepare(
+        "SELECT ticket_id, locator, url FROM external_identities WHERE provider = ?1 AND repository IS NULL",
+    )?;
+    let rows = pending
+        .query_map([super::github::PROVIDER], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut update = connection
+        .prepare("UPDATE external_identities SET repository = ?2 WHERE ticket_id = ?1")?;
+    for (id, locator, url) in rows {
+        if let Some(repository) = super::github::repository_from_issue_url(&locator, &url) {
+            update.execute(params![id, repository])?;
+        }
+    }
+    connection.execute_batch(
+        "CREATE INDEX IF NOT EXISTS external_identities_repository ON external_identities(provider, repository) WHERE repository IS NOT NULL",
+    )?;
     Ok(())
 }
 
@@ -1373,6 +1411,7 @@ struct Existing {
     locator: String,
     display: String,
     url: String,
+    repository: Option<String>,
     /// `external_state:closure_reason` as last observed.
     state: String,
     /// The source's own update time of the issue last applied.
@@ -1392,7 +1431,7 @@ fn apply_issue(
         .query_row(
             "SELECT t.id, t.reference, t.title, t.body, t.status, o.authority, i.locator, i.display, i.url, \
                     COALESCE(s.external_state || ':' || COALESCE(s.closure_reason, ''), ''), \
-                    COALESCE(s.external_updated_at, '') \
+                    COALESCE(s.external_updated_at, ''), i.repository \
              FROM external_identities i \
              JOIN tickets t ON t.id = i.ticket_id \
              LEFT JOIN external_ownership o ON o.ticket_id = i.ticket_id \
@@ -1419,6 +1458,7 @@ fn apply_issue(
                     url: row.get(8)?,
                     state: row.get(9)?,
                     updated_at: row.get(10)?,
+                    repository: row.get(11)?,
                 })
             },
         )
@@ -1439,9 +1479,14 @@ fn apply_issue(
             let status = status_for(None, issue.state, Status::Todo);
             let id = Uuid::new_v4().to_string();
             let reference = crate::device::issue_reference(connection)?;
+            let project = match issue.repository.as_deref() {
+                Some(repository) => crate::projects::find_by_remote(connection, repository)?,
+                None => None,
+            };
+            let project_id = project.as_ref().map(|project| project.id.as_str());
             connection.execute(
-                "INSERT INTO tickets (id, reference, title, status, body) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![id, reference, title, status.to_string(), issue.body],
+                "INSERT INTO tickets (id, reference, title, status, body, project_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, reference, title, status.to_string(), issue.body, project_id],
             )?;
             crate::document_links::index_external_body(connection, &id, &issue.body)?;
             link(connection, &id, issue, Origin::Imported, now)?;
@@ -1453,6 +1498,16 @@ fn apply_issue(
                 &issue.display,
                 Some(&issue.reference.identity.provider),
             )?;
+            if let Some(project_id) = project_id {
+                history::record(
+                    connection,
+                    &id,
+                    "project",
+                    "",
+                    project_id,
+                    Some(&identity.provider),
+                )?;
+            }
             if status == Status::Duplicate {
                 set_duplicate_target(connection, &id, issue)?;
             }
@@ -1473,6 +1528,7 @@ fn apply_issue(
             locator,
             display,
             url,
+            repository,
             state: old_state,
             updated_at,
             ..
@@ -1523,10 +1579,14 @@ fn apply_issue(
             if observed != old_state {
                 changed = true;
             }
-            if locator != issue.reference.locator || display != issue.display || url != issue.url {
+            if locator != issue.reference.locator
+                || display != issue.display
+                || url != issue.url
+                || repository != issue.repository
+            {
                 connection.execute(
-                    "UPDATE external_identities SET locator = ?2, display = ?3, url = ?4 WHERE ticket_id = ?1",
-                    params![id, issue.reference.locator, issue.display, issue.url],
+                    "UPDATE external_identities SET locator = ?2, display = ?3, url = ?4, repository = ?5 WHERE ticket_id = ?1",
+                    params![id, issue.reference.locator, issue.display, issue.url, issue.repository],
                 )?;
                 changed = true;
             }
@@ -1725,8 +1785,8 @@ pub(crate) fn link(
     let identity = &issue.reference.identity;
     let (state, reason) = state_parts(issue.state);
     connection.execute(
-        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, repository) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
         params![
             ticket_id,
             identity.provider,
@@ -1738,7 +1798,8 @@ pub(crate) fn link(
                 Origin::Imported => "imported",
                 Origin::Published => "published",
             },
-            now
+            now,
+            issue.repository,
         ],
     )?;
     connection.execute(
