@@ -61,6 +61,7 @@ export function TicketWorkspaceView({
   inboxTarget,
   onCreate,
   inbox,
+  projectNotice,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
@@ -72,6 +73,7 @@ export function TicketWorkspaceView({
    * entries in the detail pane beside it, a triage split (S6).
    */
   inbox?: ReactNode;
+  projectNotice?: ReactNode;
 }) {
   const { selected, setSelected, clearMention } = workspace;
   const inboxMode = Boolean(inbox);
@@ -375,6 +377,7 @@ export function TicketWorkspaceView({
                 bulk={bulk}
                 listRef={listRef}
                 planState={planState}
+                projectNotice={projectNotice}
                 {...(scopedPlan && { filtersMenu })}
                 onCreate={onCreate}
                 onOpen={(reference) => {

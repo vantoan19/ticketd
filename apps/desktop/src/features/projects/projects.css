@@ -155,11 +155,6 @@
 }
 
 /* New project and Register checkout: the folder reads as a field. */
-.project-form {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
 .folder-picker {
   display: flex;
   align-items: center;

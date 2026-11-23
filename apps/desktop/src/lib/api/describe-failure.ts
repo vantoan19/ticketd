@@ -150,6 +150,7 @@ function nextStep(code: FailureCode): FailureDescription["action"] {
       return "choose_another";
     case "forbidden":
     case "drive_unconfigured":
+    case "project_source_host_mismatch":
     case "workspace_unreadable":
     case "publication_different_content":
     case "publication_candidates":

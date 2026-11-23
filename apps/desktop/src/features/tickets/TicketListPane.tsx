@@ -73,6 +73,7 @@ function TicketListBody({
   onOpen,
   onCreate,
   filtersMenu: sharedFiltersMenu,
+  projectNotice,
 }: {
   workspace: TicketWorkspace;
   bulk: BulkEdit;
@@ -82,6 +83,7 @@ function TicketListBody({
   onCreate: (trigger: HTMLButtonElement, status?: string) => void;
   /** The Plan header's Filters menu, which the chip row shares. */
   filtersMenu?: FiltersMenuState;
+  projectNotice?: ReactNode;
 }) {
   const { ticketRows } = usePreferences();
   const {
@@ -400,6 +402,7 @@ function TicketListBody({
           }
         />
       )}
+      {!trash && !scopedPlan && projectNotice}
       {!trash && <TicketFilters part="chips" {...filterProps} />}
       {
         <>

@@ -26,9 +26,9 @@ use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
     ContextGraphPage, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
     DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
-    MetadataSelection, Plan, PlanView, Project, SafetyBackup, SidebarCounts, Status, StatusCounts,
-    Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceGraph,
-    WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
+    MetadataSelection, Plan, PlanView, Project, ProjectRemoteChange, SafetyBackup, SidebarCounts,
+    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -134,6 +134,15 @@ impl From<ticketd_core::Error> for BridgeFailure {
             ),
             ticketd_core::Error::Publication(ref publication) => {
                 Self::coded(publication.code(), error.to_string())
+            }
+            ticketd_core::Error::InvalidProjectRemote => {
+                Self::coded("invalid_project_remote", error.to_string())
+            }
+            ticketd_core::Error::ProjectRemoteTaken { .. } => {
+                Self::coded("project_remote_taken", error.to_string())
+            }
+            ticketd_core::Error::ProjectSourceHostMismatch { .. } => {
+                Self::coded("project_source_host_mismatch", error.to_string())
             }
             other => Self::coded(other.kind().code(), other.to_string()),
         }
@@ -487,16 +496,82 @@ fn project_icon(id: String) -> Result<Option<folder_probe::Favicon>, BridgeFailu
         .find_map(|path| folder_probe::favicon(std::path::Path::new(path))))
 }
 #[tauri::command(async)]
-fn create_project(name: String, path: String) -> Result<Project, BridgeFailure> {
+fn detect_project_remote(path: String) -> ticketd_core::ProjectRemoteDetection {
+    ticketd_core::detect_project_remote(std::path::Path::new(&path))
+}
+
+#[tauri::command(async)]
+fn create_project(
+    name: String,
+    path: String,
+    remote: Option<String>,
+) -> Result<Project, BridgeFailure> {
     open_workspace()
-        .and_then(|mut w| w.create_project(&name, &path))
+        .and_then(|mut w| w.create_project_with_remote(&name, &path, remote.as_deref()))
         .map_err(BridgeFailure::from)
 }
+
 #[tauri::command(async)]
-fn edit_project(id: String, name: String, path: String) -> Result<Project, BridgeFailure> {
+fn edit_project(
+    id: String,
+    name: String,
+    path: String,
+    remote: Option<String>,
+    clear_remote: Option<bool>,
+) -> Result<Project, BridgeFailure> {
+    let remote = match (remote.as_deref(), clear_remote.unwrap_or(false)) {
+        (Some(_), true) => {
+            return Err(BridgeFailure::plain(
+                "Choose one change to the Project remote.",
+            ));
+        }
+        (Some(remote), false) => ProjectRemoteChange::Set(remote),
+        (None, true) => ProjectRemoteChange::Clear,
+        (None, false) => ProjectRemoteChange::Keep,
+    };
     open_workspace()
-        .and_then(|mut w| w.edit_project(&id, &name, &path))
+        .and_then(|mut w| w.edit_project_with_remote(&id, &name, &path, remote))
         .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
+fn preview_connect_source(
+    provider: String,
+    project_id: String,
+) -> Result<ticketd_core::source::ConnectSourcePreview, BridgeFailure> {
+    Ok(open_workspace()?.preview_connect_source(
+        &ticketd_core::source::Engine::builtin(),
+        &provider,
+        &project_id,
+    )?)
+}
+
+#[tauri::command(async)]
+fn connect_source_match_count(
+    provider: String,
+    project_id: String,
+    expected_fingerprint: String,
+) -> Result<Option<ticketd_core::source::ConnectSourceMatchCount>, BridgeFailure> {
+    Ok(open_workspace()?.connect_source_match_count(
+        &ticketd_core::source::Engine::builtin(),
+        &provider,
+        &project_id,
+        &expected_fingerprint,
+    )?)
+}
+
+#[tauri::command(async)]
+fn connect_source(
+    provider: String,
+    project_id: String,
+    expected_fingerprint: String,
+) -> Result<ticketd_core::source::ConnectSourceOutcome, BridgeFailure> {
+    Ok(open_workspace()?.connect_source(
+        &ticketd_core::source::Engine::builtin(),
+        &provider,
+        &project_id,
+        &expected_fingerprint,
+    )?)
 }
 
 #[tauri::command(async)]
@@ -1996,8 +2071,12 @@ pub fn run() -> Result<(), tauri::Error> {
             list_projects,
             register_checkout,
             remove_checkout,
+            detect_project_remote,
             create_project,
             edit_project,
+            preview_connect_source,
+            connect_source_match_count,
+            connect_source,
             show_ticket,
             search_tickets,
             find_tickets_with_updates,

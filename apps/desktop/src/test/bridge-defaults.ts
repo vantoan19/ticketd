@@ -115,6 +115,8 @@ export function bridgeDefault(
       return false;
     case "reminder":
     case "last_backup":
+    case "detect_project_remote":
+      return { suggested: null, candidates: [] };
     case "project_icon": // no favicon: the letter tile
       return null;
     case "workspace_info":
