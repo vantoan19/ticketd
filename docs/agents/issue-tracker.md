@@ -5,8 +5,8 @@ Use GitHub Issues in `vantoan19/ticketd` for features, bugs, research, implement
 Before the first issue write in a session, verify the target with `gh repo view --json nameWithOwner`. Use `--repo vantoan19/ticketd` when outside this checkout or when the default target is ambiguous.
 
 - Create: `gh issue create --title "..." --body-file /path/to/body.md`.
-- Read: `gh issue view <number> --json number,title,body,labels,comments`.
-- List: `gh issue list --state open --json number,title,labels`.
+- Read: `gh issue view <number> --json number,title,body,labels,assignees,comments,blockedBy,closedByPullRequestsReferences`.
+- List: `gh issue list --state open --json number,title,labels,assignees`.
 - Update: `gh issue edit <number> --body-file /path/to/body.md`.
 - Report findings or progress: `gh issue comment <number> --body-file /path/to/comment.md`.
 - Apply/remove labels: `gh issue edit <number> --add-label "..." --remove-label "..."`.
@@ -18,7 +18,8 @@ Use native GitHub sub-issues and blocking dependencies where supported by the in
 
 When a skill says to publish to the tracker, create a GitHub issue here. When it says to fetch a ticket, read the issue and its comments. Wayfinder maps and child tickets also live in GitHub Issues.
 
-Use issues for product requests and implementation planning. Small fixes and
-documentation improvements may be submitted directly as PRs; see
-[contribution guidance](../../CONTRIBUTING.md). Substantial changes need scope
-discussion before implementation.
+Before picking up work, check the assignee, recent claims, blockers, and linked PRs.
+Use the [public claim and release rules](../../CONTRIBUTING.md#find-and-claim-an-issue).
+For triage and closure, use the [label definitions and outcomes](triage-labels.md).
+For direct PRs and changes that need maintainer agreement, follow the
+[contribution paths](../../CONTRIBUTING.md#choose-a-starting-point).

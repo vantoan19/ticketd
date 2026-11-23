@@ -1,0 +1,21 @@
+name: Share an idea
+description: Describe an unmet need, even if you have no solution in mind.
+labels: [enhancement, needs-triage]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Search existing issues first. If someone has described the same need, add your example there.
+        [How proposals are triaged](https://github.com/vantoan19/ticketd/blob/main/docs/agents/triage-labels.md#triage-an-issue).
+  - type: textarea
+    id: need
+    attributes:
+      label: What are you trying to do, and when does the need arise?
+      description: Describe a concrete situation and who it affects.
+    validations:
+      required: true
+  - type: textarea
+    id: possibilities
+    attributes:
+      label: What have you tried or considered?
+      description: Workarounds, examples, and possible solutions are optional.

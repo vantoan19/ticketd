@@ -4,6 +4,35 @@ Help make local ticket management useful for people and their coding agents.
 Bug reports, documentation, accessibility feedback, platform testing, and code
 changes are welcome. You do not need an AI assistant or any private tools to contribute.
 
+- [I want to contribute](#i-want-to-contribute)
+- [I’m reviewing a contribution](#review-and-decisions)
+
+## I want to contribute
+
+### Choose a starting point
+
+Search [existing issues](https://github.com/vantoan19/ticketd/issues) first. If someone has already reported the same need, add your example there. Use the [issue chooser](https://github.com/vantoan19/ticketd/issues/new/choose) for new reports and proposals.
+
+| What brings you here?                                                                      | What to do                                                                                                                                                                    |
+| ------------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| An unmet need                                                                              | Choose **Share an idea**. Describe what you are trying to do and when the need arises. A solution is optional.                                                                |
+| Friction in an existing workflow                                                           | Choose **Suggest an improvement**. Describe today's steps, the difficulty, and the outcome you want.                                                                          |
+| Something fails                                                                            | Choose **Bug report**. Give the version, reproduction steps, and expected and observed behavior. Report vulnerabilities privately through the [security policy](SECURITY.md). |
+| A usage question                                                                           | Open an issue and ask your question. A maintainer can apply the `question` label.                                                                                             |
+| A small correction with a verifiable answer                                                | Open a PR directly. A broken install command or a fix that restores behavior specified in a test qualifies. Check for an existing claim or PR first.                          |
+| A change to product behavior, a public contract, dependencies, migrations, or architecture | Discuss it in an issue and get maintainer agreement on the outcome and constraints before implementing it.                                                                    |
+
+Maintainers triage ideas and improvements in the issue where they arrive. You can contribute examples, design alternatives, or a prototype when a maintainer invites exploration. If the investigation is substantial, give it a linked issue with a deliverable of its own. An invitation to explore leaves the implementation decision open. [Triage labels and outcomes](docs/agents/triage-labels.md)
+
+### Find and claim an issue
+
+Browse [ready, unassigned issues](https://github.com/vantoan19/ticketd/issues?q=is%3Aissue%20is%3Aopen%20label%3Aready%20no%3Aassignee). A maintainer marks an issue `ready` when it says what outcome is agreed, how someone can verify it, and which constraints apply. Contributors choose how to implement it within those constraints. For example, an issue about clipped dates should say whether the exact format is prescribed or whether any accessible format that fits will do.
+
+1. **Check the assignee, recent comments, and linked PRs.** An assignee is handling the issue. Coordinate with them before starting overlapping work.
+2. **Claim ready work publicly.** On an unassigned `ready` issue, the first clear “I’ll take this” counts immediately. You can begin even if GitHub won’t let you assign yourself. A maintainer assigns the claimant and replies to overlapping claims. The issue stays `ready` while assigned.
+3. **Link your PR as soon as you open it.** Post the draft PR link on the issue so the next contributor can see work in progress. On a `needs-decision` issue, say which investigation you are taking on so others know what is still open.
+4. **Update the issue if you pause or step away.** After two weeks without visible progress, a maintainer can check in. After another week without a reply, they can unassign the issue and link any useful branch, draft PR, or findings. Respect an agreed return date and exclude time spent waiting for maintainer feedback.
+
 ## Where to start
 
 | If you're changing…                   | Start here                                                                                                                                  | First focused check                                                                                                                                                      |
@@ -16,60 +45,46 @@ changes are welcome. You do not need an AI assistant or any private tools to con
 
 For the full component map, see [architecture and module responsibilities](docs/architecture.md#source-layout).
 
-Search [existing issues](https://github.com/vantoan19/ticketd/issues) before
-reporting a problem. Small fixes and documentation improvements can go straight
-to a pull request. Discuss substantial features, new dependencies, migrations,
-and architectural changes in an issue first so we can agree on the problem and scope.
-For usage questions, open an issue with the `question` label.
-
-Report vulnerabilities through [the security policy](SECURITY.md), not a public
-issue. Follow our [code of conduct](CODE_OF_CONDUCT.md) in project spaces.
-
 ## Set up and make a change
 
-1. Fork the repository and clone your fork. Create a descriptive branch such as
-   `fix/cli-error-message` or `docs/windows-setup`.
-2. Follow [development setup](docs/development.md), including a disposable workspace.
-3. Read the [engineering guidelines](docs/agents/quality.md). For domain changes,
-   consult [domain documentation](docs/agents/domain.md); for UI changes, consult
-   [interface guidance](docs/agents/ui.md).
-4. Solve one underlying problem per PR. Include the code, tests, and documentation
-   needed for that problem across the affected components.
-5. Run focused checks while working, then `npm run build` and `./scripts/check`
-   before handoff. Explain unavailable checks and their reason in the PR.
+1. Fork the repository, clone your fork, and create a descriptive branch such as `fix/cli-error-message`.
+2. Follow [development setup](docs/development.md), including a disposable workspace. Use synthetic data in examples, screenshots, and issue reports.
+3. Read the [engineering guidelines](docs/agents/quality.md). The [product description](docs/product.md) and [glossary](GLOSSARY.md) define current behavior and terms. The [architecture guide](docs/architecture.md) and [decision records](docs/adr/) explain module boundaries. For a desktop change, consult the [interface guidance](docs/agents/ui.md) and [design guide](DESIGN.md).
+4. Solve one underlying problem per PR. If it requires changing an established behavior or architectural decision, name that decision on the issue, explain the trade-off, and get maintainer agreement. Update the durable documentation alongside the implementation.
+5. Start with focused checks, then run `npm run build` and `./scripts/check` before handoff. Report unavailable checks and why.
 
-Keep credentials, personal workspaces, and private ticket content out of commits,
-screenshots, and issue reports. Use synthetic examples.
+AI-assisted contributions are welcome. The author owns the work, reviews and tests it, and respects third-party licenses. Keep credentials, personal workspaces, and private content out of commits and external tools. Contributions use the [MIT License](LICENSE). Retain applicable third-party notices and follow the [code of conduct](CODE_OF_CONDUCT.md).
 
 ## Submit a pull request
 
-Target `main` and use the PR template. Explain the problem, the resulting behavior,
-and what you actually verified. Link a related issue when one exists. Include
-before/after images for visible changes and a short recording when timing or
-interaction matters; attach these to the PR rather than committing review-only media.
+Target `main` and use the PR template. Describe the outcome, the risk, and the evidence that addresses it. Name the platforms you actually tested.
 
-For bug fixes, add a regression test when it can meaningfully reproduce the failure.
-For data changes, explain compatibility, migration, and recovery implications.
-Name the platforms tested; a Linux result alone does not establish Windows or macOS behavior.
+| Change                       | Evidence to include                                                                                                                                      |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Documentation or CLI example | Run the changed steps and report what you observed.                                                                                                      |
+| Bug fix                      | Show the failure before and success after. Add a regression test when it can catch the same failure again.                                               |
+| Visible desktop change       | Attach before/after images with synthetic data. Include a short recording when timing or keyboard interaction matters. Keep review-only media on the PR. |
+| Format, sync, or restore     | Demonstrate compatibility with existing data and exercise the relevant recovery path. Identify any remaining platform or failure case to verify.         |
 
-AI-assisted contributions are welcome. The author remains responsible for understanding,
-reviewing, and testing the submitted work and respecting third-party licenses.
-Remove credentials and private data before sharing context with an external tool.
+Use `Fixes #123` when merging fulfills the issue's acceptance criteria. For partial delivery, use `Refs #123` and record what remains on the issue. For example, if the agreed outcome includes verifying a Windows restore, keep the issue open until that result is recorded.
 
-Contributions to ticketd are provided under the [MIT License](LICENSE).
-Retain applicable third-party copyright and license notices when adapting code
-or assets.
+If a fork workflow says **Awaiting approval**, leave the PR open. A maintainer handles CI approval. Read the review, address blocking findings, and explain any disagreement on the PR. A concise follow-up there is welcome. There is no guaranteed review turnaround.
 
 ## Review and decisions
 
-Maintainers decide product direction and merge changes after review. Review may
-request a smaller scope, additional evidence, or a different approach. Agreeing
-on a problem does not guarantee acceptance of a particular implementation.
-There is no guaranteed review turnaround; a concise follow-up on the same PR is welcome.
+### Review the change
 
-CodeRabbit also comments on pull requests, using the settings in `.coderabbit.yaml`.
-Its comments are advice: answer or resolve them, but a maintainer's review decides
-what merges. Comment `@coderabbitai review` to ask it to review your latest push.
+1. **Check the agreed outcome.** For substantial work, follow the linked issue. Verify observable behavior, compatibility, and the constraints the contributor was given. Review against the product and architecture references above. For example, readiness belongs in the shared core so desktop and CLI agree. Where a test or lint check can enforce an agreed rule, protect it there.
+2. **Handle fork CI.** Check proposed workflow changes and scripts the workflows execute before approving a run. Approve it or explain the concern on the PR. A separate review decides whether to merge.
+3. **Distinguish blocking feedback from suggestions.** Mark a finding **Blocking** when it violates an acceptance criterion or documented rule, introduces a concrete risk, or lacks evidence needed to judge that risk. Cite the rule or describe the failure, and say what would resolve it. Use **Suggestion** for an optional improvement. A question can become blocking once the risk is clear.
+4. **Own new decisions.** Maintainers decide product and architectural direction. A contributor can challenge an existing rule on the issue. If a review introduces a new preference or changes scope, the maintainer explains and settles it there. Preserve the agreement in the relevant product or architecture document. CodeRabbit comments are advisory. A named maintainer resolves findings and owns acceptance. To request another bot pass, comment `@coderabbitai review` on the PR.
 
-Version bumps, tags, and releases are maintainer-managed. Leave them out of ordinary
-contributions. See [the release guide](docs/releasing.md) for distribution requirements.
+### Decide whether to merge
+
+The normal merge path for every change is a PR targeting `main`, with the branch up to date and a passing `CI result`. A maintainer reviews an outside PR. A maintainer may merge their own ordinary change after recording their self-review and verification on the PR.
+
+**Independent review is required** when a credible failure could irreversibly lose or corrupt workspace data, expose private content or credentials, or let an untrusted party publish a trusted release. Name the specific risk on the PR and obtain recorded approval from a qualified human reviewer independent of the author. The reviewing maintainer can provide that approval for an outside contributor. For a maintainer-authored change, find another reviewer. If nobody is available, hold the risky change or separate a safe portion. The maintainer applies this gate even when GitHub shows green checks and permits the merge.
+
+**Emergency bypass is limited to containing an active incident.** A maintainer takes the narrowest action that stops the harm, such as pausing distribution or reverting to known-good behavior. Record the incident, the checks performed, the gate bypassed, and who will verify recovery. Keep sensitive details in the private reporting channel. A remedy that meets the independent-review criteria still requires that approval. Deadlines and flaky tests follow the ordinary process.
+
+Version bumps, tags, and releases are maintainer-managed. See the [release guide](docs/releasing.md).
