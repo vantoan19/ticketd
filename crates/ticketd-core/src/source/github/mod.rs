@@ -1065,6 +1065,11 @@ fn site_of(url: &str) -> String {
 }
 
 pub(super) fn legacy_site(issue_urls: &[String]) -> String {
+    // Prior settings did not store the API host. An explicit API gateway can
+    // differ from the hostname in a tracker’s human-readable issue links.
+    if let Some(api) = configured_api_url().filter(|api| credential_may_travel(api)) {
+        return site_of(&api);
+    }
     let mut sites = issue_urls.iter().filter_map(|text| {
         let url = url::Url::parse(text).ok()?;
         (matches!(url.scheme(), "https" | "http") && url.has_host()).then(|| site_of(url.as_str()))
@@ -1074,9 +1079,7 @@ pub(super) fn legacy_site(issue_urls: &[String]) -> String {
     {
         return site;
     }
-    // The old configuration did not save the API endpoint. In the absence of
-    // a single observed site, use the endpoint the application is configured for.
-    configured_api_url().map_or_else(String::new, |api| site_of(&api))
+    String::new()
 }
 
 pub(super) fn legacy_derived_configuration(

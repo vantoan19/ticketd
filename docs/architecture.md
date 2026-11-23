@@ -886,6 +886,10 @@ core caches successful answers for offline routing and previews. GitHub can
 use the active GitHub CLI account, a named account already signed in with it,
 or a connection-specific token override such as `TICKETD_SOURCE_GITHUB_2_TOKEN`.
 Each request that can change authority checks the saved account and site first.
+When upgrading a pre-connection Workspace that used GitHub Enterprise, keep its
+`TICKETD_GITHUB_API_URL` configured for the first open. The old format recorded
+no API URL. The upgrade uses the configured endpoint first, then a distinct
+known issue host if there is one.
 
 External identity remains provider plus opaque ID. A device refreshes a ticket
 through its local discovery connection, or the first saved connection that

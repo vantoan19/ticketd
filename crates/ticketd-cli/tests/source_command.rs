@@ -18,8 +18,8 @@ fn migrates_the_site_of_a_legacy_enterprise_connection() {
     let workspace = directory.path().join("workspace.sqlite3");
     let registry = directory.path().join("extensions");
     ticketd_core::create_workspace_at_format_version(&workspace, 88).unwrap();
-    rusqlite::Connection::open(&workspace)
-        .unwrap()
+    let legacy = rusqlite::Connection::open(&workspace).unwrap();
+    legacy
         .execute(
             "INSERT INTO source_configurations
                (provider, configuration, account, contract_version, saved_at, revision)
@@ -27,6 +27,14 @@ fn migrates_the_site_of_a_legacy_enterprise_connection() {
             [json!({"repositories": ["work/fixtures"]}).to_string()],
         )
         .unwrap();
+    legacy.execute_batch(
+        "INSERT INTO tickets (id, reference, title, status) VALUES
+             ('imported', 'T-QZ1', 'Legacy ticket', 'Todo');
+         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, partition)
+             VALUES ('imported', 'github', '1', 'work/fixtures#1', 'work/fixtures#1',
+                     'https://issue-links.invalid/work/fixtures/issues/1', 'imported', 'work/fixtures');",
+    ).unwrap();
+    drop(legacy);
     // A local proxy sees the requested Enterprise host and never opens a
     // connection to it. The test can distinguish a site refusal from a call.
     let proxy = TcpListener::bind("127.0.0.1:0").unwrap();
