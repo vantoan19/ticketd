@@ -17,8 +17,7 @@ use tokio::{
 };
 
 use super::super::SourceError;
-use super::redaction::Redactions;
-use super::wire::Response;
+use super::{logs::ExtensionLog, redaction::Redactions, wire::Response};
 
 pub(super) const LINE_LIMIT: usize = 4 * 1024 * 1024;
 const STDERR_LIMIT: usize = 16 * 1024;
@@ -51,11 +50,14 @@ pub(super) struct Process {
     pub stdout: Lines,
     stderr: Arc<Mutex<VecDeque<u8>>>,
     drain: JoinHandle<()>,
-    redactions: Redactions,
 }
 
 impl Process {
-    pub(super) fn spawn(mut command: Command, redactions: Redactions) -> Result<Self, SourceError> {
+    pub(super) fn spawn(
+        mut command: Command,
+        redactions: Redactions,
+        log: Option<Arc<ExtensionLog>>,
+    ) -> Result<Self, SourceError> {
         let mut child = ManagedChild::spawn(
             command
                 .stdin(Stdio::piped())
@@ -71,13 +73,35 @@ impl Process {
         let mut reader = child.stderr().ok_or_else(missing_pipe)?;
         let stderr = Arc::new(Mutex::new(VecDeque::new()));
         let tail = stderr.clone();
-        let mut stream = redactions.stream();
+        let stderr_redactions = redactions.clone();
         let drain = tokio::spawn(async move {
+            let mut stream = stderr_redactions.stream();
             let mut buffer = [0; 4096];
-            while let Ok(length @ 1..) = reader.read(&mut buffer).await {
-                keep_stderr(&tail, &stream.push(&buffer[..length]));
+            let mut log = log;
+            loop {
+                let (bytes, finished) = match reader.read(&mut buffer).await {
+                    Ok(length @ 1..) => (stream.push(&buffer[..length]), false),
+                    _ => (stream.finish(), true),
+                };
+                {
+                    let mut tail = tail.lock().unwrap_or_else(|error| error.into_inner());
+                    tail.extend(bytes.iter().rev().take(STDERR_LIMIT).rev());
+                    let discard = tail.len().saturating_sub(STDERR_LIMIT);
+                    tail.drain(..discard);
+                }
+                if let Some(sink) = log.clone()
+                    && !bytes.is_empty()
+                    && !tokio::task::spawn_blocking(move || sink.append(&bytes))
+                        .await
+                        .is_ok_and(|result| result.is_ok())
+                {
+                    tracing::warn!("could not write source extension stderr");
+                    log = None;
+                }
+                if finished {
+                    break;
+                }
             }
-            keep_stderr(&tail, &stream.finish());
         });
         Ok(Self {
             child,
@@ -85,11 +109,10 @@ impl Process {
             stdout: Lines {
                 reader: BufReader::new(stdout),
                 frame: Vec::new(),
-                redactions: redactions.clone(),
+                redactions,
             },
             stderr,
             drain,
-            redactions,
         })
     }
 
@@ -126,23 +149,17 @@ impl Process {
         match serde_json::from_slice::<Response<Value>>(&result) {
             Ok(Response::Success(response)) if response.id == id => {
                 let _ = response.jsonrpc;
-                if self.redactions.contains_secret(&response.result) {
-                    return Err(Fault::Protocol(
-                        "source extension returned a credential in its result".into(),
-                    ));
+                if stdout.redactions.contains_secret(&response.result) {
+                    return Err(Fault::Protocol("source extension returned a credential in its result".into()));
                 }
                 Ok(Ok(response.result))
             }
             Ok(Response::Failure(response)) if response.id == id => {
                 let _ = response.jsonrpc;
-                Ok(Err(response.error.into_source_error(&self.redactions)))
+                Ok(Err(response.error.into_source_error(&stdout.redactions)))
             }
-            _ => Err(self.unexpected(&result)),
+            _ => Err(stdout.unexpected(&result)),
         }
-    }
-
-    pub(super) fn unexpected(&self, line: &[u8]) -> Fault {
-        unexpected(line, &self.redactions)
     }
 
     pub(super) async fn shutdown(mut self) {
@@ -156,8 +173,10 @@ impl Process {
             timeout(EOF_GRACE + REAP_LIMIT, drain_stdout),
             self.child.shutdown(),
         );
-        self.drain.abort();
-        let _ = self.drain.await;
+        if timeout(REAP_LIMIT, &mut self.drain).await.is_err() {
+            self.drain.abort();
+            let _ = self.drain.await;
+        }
         let captured = self
             .stderr
             .lock()
@@ -183,7 +202,7 @@ impl Lines {
                 return Err(if self.frame.is_empty() {
                     Fault::Crash
                 } else {
-                    unexpected(&self.frame, &self.redactions)
+                    self.unexpected(&self.frame)
                 });
             }
             let newline = bytes.iter().position(|byte| *byte == b'\n');
@@ -200,21 +219,18 @@ impl Lines {
             }
         }
     }
-}
 
-fn unexpected(line: &[u8], redactions: &Redactions) -> Fault {
-    let redacted = redactions.bytes(line);
-    let preview = String::from_utf8_lossy(&redacted[..redacted.len().min(240)]);
-    let suffix = if redacted.len() > 240 { "…" } else { "" };
-    Fault::Protocol(format!("unexpected stdout line {preview:?}{suffix}"))
-}
-
-fn keep_stderr(tail: &Mutex<VecDeque<u8>>, bytes: &[u8]) {
-    let mut tail = tail.lock().unwrap_or_else(|error| error.into_inner());
-    let bytes = &bytes[bytes.len().saturating_sub(STDERR_LIMIT)..];
-    let discard = (tail.len() + bytes.len()).saturating_sub(STDERR_LIMIT);
-    tail.drain(..discard);
-    tail.extend(bytes);
+    pub(super) fn unexpected(&self, line: &[u8]) -> Fault {
+        // Match the full line before taking a short preview, including a value
+        // that starts within the preview and ends after it.
+        let redacted = self.redactions.text(&String::from_utf8_lossy(line));
+        let limit = redacted.floor_char_boundary(240.min(redacted.len()));
+        let suffix = if limit < redacted.len() { "…" } else { "" };
+        Fault::Protocol(format!(
+            "unexpected stdout line {:?}{suffix}",
+            &redacted[..limit]
+        ))
+    }
 }
 
 pub(in crate::source) fn password_output(args: Vec<String>) -> Result<String, ()> {
@@ -333,11 +349,11 @@ impl ManagedChild {
     async fn shutdown(&mut self) {
         use rustix::process::Signal;
         sleep(EOF_GRACE).await;
-        if let Some(group) = self.group.take() {
-            if signal(group, Signal::TERM) {
-                sleep(TERMINATE_GRACE).await;
-                signal(group, Signal::KILL);
-            }
+        if let Some(group) = self.group.take()
+            && signal(group, Signal::TERM)
+        {
+            sleep(TERMINATE_GRACE).await;
+            signal(group, Signal::KILL);
         }
         let _ = timeout(REAP_LIMIT, self.child.wait()).await;
     }

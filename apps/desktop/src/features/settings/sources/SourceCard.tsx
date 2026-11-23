@@ -757,6 +757,12 @@ export function SourceCard({
                   : "Save discovery rules below to connect this workspace."
             }
           />
+          {!!presentation?.hosts?.length && (
+            <SettingsRow
+              title="Declared hosts"
+              description={presentation.hosts.join(", ")}
+            />
+          )}
           <SettingsRow
             leading={
               <SettingsRowTile>

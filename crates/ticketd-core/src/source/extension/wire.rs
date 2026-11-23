@@ -233,7 +233,7 @@ enum ResultValue {
 #[allow(dead_code)] // A schema-facing union of messages exchanged over stdio.
 enum Contract2 {
     Host(Request<'static>),
-    Extension(Response<ResultValue>),
+    Extension(Box<Response<ResultValue>>),
 }
 
 pub(super) fn schema() -> schemars::Schema {

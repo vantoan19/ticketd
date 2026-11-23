@@ -63,6 +63,7 @@ pub struct Remote {
     pub outage: Option<Failure>,
     pub connection_error: Option<String>,
     pub account_from_assignee: bool,
+    pub account_id: Option<String>,
     pub rate_limited_account: Option<String>,
     pub publish_destinations: Option<Vec<String>>,
     pub after_check: Option<Hook>,
@@ -168,13 +169,21 @@ impl Connector for FakeSource {
     }
 
     fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionCheck, SourceError> {
-        let (connection_error, choices, hook, account_from_assignee, rate_limited_account) = {
+        let (
+            connection_error,
+            choices,
+            hook,
+            account_from_assignee,
+            account_id,
+            rate_limited_account,
+        ) = {
             let mut remote = self.0.lock().unwrap();
             (
                 remote.connection_error.clone(),
                 remote.publish_destinations.clone(),
                 remote.after_check.take(),
                 remote.account_from_assignee,
+                remote.account_id.clone(),
                 remote.rate_limited_account.clone(),
             )
         };
@@ -202,6 +211,7 @@ impl Connector for FakeSource {
         Ok(ConnectionCheck {
             connection: ConnectionInfo {
                 account: account.into(),
+                account_id,
                 site: String::new(),
             },
             derived: DerivedConfiguration {

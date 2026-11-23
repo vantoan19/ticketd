@@ -4,6 +4,7 @@
 use std::{
     collections::{HashMap, VecDeque},
     io::{self, Write},
+    path::{Path, PathBuf},
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -24,6 +25,7 @@ use tokio::{
 
 use super::{
     CONTRACT_VERSION, Launch, SourceError,
+    logs::ExtensionLog,
     process::{EXIT_POLL, Fault, LINE_LIMIT, Process},
     redaction::Redactions,
     wire::{Call, Description, JsonRpc, Request},
@@ -55,6 +57,7 @@ pub(super) struct Host {
     state: Mutex<State>,
     next: AtomicU64,
     limits: Limits,
+    log_dir: Mutex<Option<PathBuf>>,
 }
 
 #[derive(Default)]
@@ -142,7 +145,16 @@ impl Host {
             limits,
             state: Mutex::default(),
             next: AtomicU64::new(0),
+            log_dir: Mutex::default(),
         }
+    }
+
+    pub(super) fn set_log_dir(&self, path: &Path) {
+        let mut log_dir = self
+            .log_dir
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        *log_dir = (!path.as_os_str().is_empty()).then(|| path.to_path_buf());
     }
 
     fn endpoint(
@@ -174,12 +186,21 @@ impl Host {
         let closing = runtime.closing.subscribe();
         let (sender, messages) = mpsc::channel(1);
         let redactions = Redactions::default();
+        let log = self
+            .log_dir
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .as_ref()
+            .zip(key.id.as_deref())
+            .and_then(|(dir, id)| ExtensionLog::new(dir, id))
+            .map(Arc::new);
         let task = runtime.handle.spawn(session(
             key.clone(),
             self.limits,
             closing,
             messages,
             redactions.clone(),
+            log,
         ));
         let endpoint = Arc::new(Endpoint {
             serial: Mutex::new(()),
@@ -335,6 +356,7 @@ async fn session(
     mut closing: watch::Receiver<()>,
     mut messages: mpsc::Receiver<Message>,
     redactions: Redactions,
+    log: Option<Arc<ExtensionLog>>,
 ) {
     let mut active: Option<(Arc<Launch>, Process)> = None;
     let mut idle_at = Instant::now() + limits.idle;
@@ -352,6 +374,15 @@ async fn session(
                     let _ = reply.send(());
                 }
                 Some(Message::Call { definition, request, reply }) => {
+                    if active.as_ref().is_some_and(|(launch, _)| launch != &definition.launch) {
+                        stop(&mut active).await;
+                    }
+                    if let Err(error) = verify_launch(&definition.launch).await {
+                        stop(&mut active).await;
+                        pending_stdout = None;
+                        let _ = reply.send(Err(error));
+                        continue;
+                    }
                     if crashes.len() >= CRASH_LIMIT {
                         let _ = reply.send(Err(SourceError::ExtensionCrashLimit));
                         continue;
@@ -360,10 +391,7 @@ async fn session(
                         let _ = reply.send(Err(fault.into()));
                         continue;
                     }
-                    if active.as_ref().is_some_and(|(launch, _)| launch != &definition.launch) {
-                        stop(&mut active).await;
-                    }
-                    let operation = serve(&mut active, &definition, key.id.is_some(), &request, limits, &redactions);
+                    let operation = serve(&mut active, &definition, key.id.is_some(), &request, limits, &redactions, log.clone());
                     let result = tokio::select! {
                         biased;
                         _ = closing.changed() => break,
@@ -404,12 +432,24 @@ async fn session(
     stop(&mut active).await;
 }
 
+async fn verify_launch(launch: &Arc<Launch>) -> Result<(), SourceError> {
+    if !launch.is_installed() {
+        return Ok(());
+    }
+    let launch = launch.clone();
+    tokio::task::spawn_blocking(move || launch.verify_trust())
+        .await
+        .map_err(|_| {
+            SourceError::NotSent("could not verify the installed source extension".into())
+        })?
+}
+
 async fn idle_stdout(active: &mut Option<(Arc<Launch>, Process)>) -> Fault {
     let Some((_, process)) = active.as_mut() else {
         return std::future::pending().await;
     };
     match process.stdout.read().await {
-        Ok(line) => process.unexpected(&line),
+        Ok(line) => process.stdout.unexpected(&line),
         Err(fault) => fault,
     }
 }
@@ -438,13 +478,13 @@ async fn serve(
     request: &EncodedRequest,
     limits: Limits,
     redactions: &Redactions,
+    log: Option<Arc<ExtensionLog>>,
 ) -> Result<Result<Value, SourceError>, Fault> {
     if active.is_none() {
-        let process = match definition
-            .launch
-            .command()
-            .and_then(|command| Process::spawn(command, redactions.clone()))
-        {
+        let process = match definition.launch.command().and_then(|command| {
+            definition.launch.redact_environment(&command, redactions);
+            Process::spawn(command, redactions.clone(), log)
+        }) {
             Ok(process) => process,
             Err(error) => return Ok(Err(error)),
         };

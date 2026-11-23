@@ -1,9 +1,18 @@
 # Ticket source extensions
 
 An extension is a local executable that connects ticketd to a tracker. It runs as
-your OS user. Link code you trust, including any dependencies and interpreter
-it launches. Linking points at the author's build folder on this device and
-marks the extension as Development.
+your OS user. Install code you trust, including the dependencies and interpreter
+it launches.
+
+`ticketd source extension add PATH` copies a local package after showing its exact
+program, arguments, version, ID, and declared hosts for approval. Add it again
+after changes to the installed copy. The package must contain regular files and
+directories. A PATH command resolves to an absolute path when you approve it.
+
+Use `ticketd source extension list` to see registrations and
+`ticketd source extension remove ID` to remove one. For authors, `link PATH`
+keeps the original build folder and marks the extension as Development in
+Settings.
 
 Use Node 22.23.4 to try the [TypeScript example](../../examples/ticket-source-example-ts/tracker.ts)
 from this repository. Make sure `node` is available on the PATH used to start
@@ -23,19 +32,20 @@ key. Try it to exercise the optional `secret` field.
 
 ## Manifest
 
-Put `ticketd-source.json` in the folder you link. Its `id` is the stable provider
+Put `ticketd-source.json` in the folder you add or link. Its `id` is the stable provider
 ID and uses lower-case letters, digits and hyphens. `version` is the extension
 version. `executable` is a PATH command or a path such as `./tracker` relative
 to the folder. Optional `args` is an array of command arguments. Optional
 `hosts` and `env` list the network hosts and extra environment variables the
 extension expects.
 
-The extension starts in the linked folder. It inherits a small set of operating
+The extension starts in its registered folder. It inherits a small set of operating
 system, locale, PATH, temporary-directory and proxy variables, plus named
 manifest variables. Variables beginning with `TICKETD_` are removed. Close
 the extension when stdin reaches EOF. Use stderr for diagnostics and keep
-stdout dedicated to JSON-RPC. Link the folder again after changing the manifest
-or the description it reports.
+stdout dedicated to JSON-RPC. Each connection's recent stderr is available in
+the local logs and Diagnostics export with known secrets redacted. Link a
+development folder again after changing the manifest or the description it reports.
 
 ## Contract 2
 

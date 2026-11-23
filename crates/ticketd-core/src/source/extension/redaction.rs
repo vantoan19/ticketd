@@ -23,6 +23,7 @@ impl Redactions {
     pub(super) fn register<'a>(&self, secrets: impl IntoIterator<Item = &'a str>) {
         let mut patterns = self.0.lock().unwrap_or_else(|error| error.into_inner());
         let before = patterns.values.len();
+        let lower_percent = regex::Regex::new("%[0-9A-F]{2}");
         for secret in secrets {
             if secret.is_empty() || patterns.values.contains(secret.as_bytes()) {
                 continue;
@@ -35,8 +36,7 @@ impl Redactions {
             let url: String = url::form_urlencoded::byte_serialize(secret.as_bytes()).collect();
             patterns.values.insert(url.as_bytes().to_vec());
             patterns.values.insert(url.replace('+', "%20").into_bytes());
-            let lower_percent = regex::Regex::new("%[0-9A-F]{2}");
-            if let Ok(lower_percent) = lower_percent {
+            if let Ok(lower_percent) = &lower_percent {
                 patterns.values.insert(
                     lower_percent
                         .replace_all(&url, |matched: &regex::Captures<'_>| {
