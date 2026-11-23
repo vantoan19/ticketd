@@ -1345,9 +1345,12 @@ fn a_listing_that_repeats_its_cursor_is_an_unreadable_response_not_an_endless_lo
         page
     };
     let listing = |request: &S3Request| {
-        request.method == "GET" && request.url.contains("versions") && !request.url.contains("versionId")
+        request.method == "GET"
+            && request.url.contains("versions")
+            && !request.url.contains("versionId")
     };
-    let folders = |request: &S3Request| request.method == "GET" && request.url.contains("list-type");
+    let folders =
+        |request: &S3Request| request.method == "GET" && request.url.contains("list-type");
     let uploads = |request: &S3Request| request.method == "GET" && request.url.contains("uploads");
     let cases: [(&str, fn(&S3Request) -> bool, &str); 4] = [
         (
