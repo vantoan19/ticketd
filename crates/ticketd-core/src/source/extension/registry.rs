@@ -513,28 +513,29 @@ impl ExtensionRegistry {
         self.activate(prepared, None)
     }
 
-    /// Install desktop app sidecars as ordinary hashed packages. The trusted
-    /// description lets Settings and the CLI list the connector before use.
-    pub fn install_bundled_sources(&self) -> Result<(), SourceError> {
-        let application = std::env::current_exe().map_err(storage_error)?;
-        let executable = format!("ticketd-source-linear{}", std::env::consts::EXE_SUFFIX);
-        self.install_bundled_linear(&application.with_file_name(&executable), &executable)
-    }
-
-    fn install_bundled_linear(&self, sidecar: &Path, executable: &str) -> Result<(), SourceError> {
+    /// Install a sidecar supplied by the trusted application as an ordinary
+    /// hashed package. Its description is available without launching it.
+    pub fn install_bundled(
+        &self,
+        sidecar: &Path,
+        version: &str,
+        description: super::SourceDescription,
+    ) -> Result<(), SourceError> {
         match sidecar.symlink_metadata() {
             Ok(metadata) if metadata.is_file() => {}
             Ok(_) => {
                 return Err(SourceError::Protocol(
-                    "the bundled Linear executable is not a regular file".into(),
+                    "the bundled source executable is not a regular file".into(),
                 ));
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
             Err(error) => return Err(storage_error(error)),
         }
+        let executable = sidecar.file_name().ok_or_else(|| {
+            SourceError::Protocol("the bundled source executable has no name".into())
+        })?;
         let _lock = registry_lock(&self.folder)?;
-        let version = env!("CARGO_PKG_VERSION").to_owned();
-        match self.read_record("linear") {
+        match self.read_record(&description.descriptor.provider) {
             Ok(record) => {
                 let bundled = matches!(
                     record.launch.mode,
@@ -547,13 +548,9 @@ impl ExtensionRegistry {
             Err(SourceError::UnknownProvider(_)) => {}
             Err(error) => return Err(error),
         }
-        let description: super::SourceDescription = serde_json::from_str(include_str!(
-            "../../../../ticketd-source-linear/description.json"
-        ))
-        .map_err(|_| SourceError::Protocol("the bundled Linear description is invalid".into()))?;
         let manifest = Manifest {
             id: description.descriptor.provider.clone(),
-            version: version.clone(),
+            version: version.into(),
             executable: PathBuf::from(".").join(executable),
             args: Vec::new(),
             env: Vec::new(),
@@ -562,7 +559,7 @@ impl ExtensionRegistry {
         let original = tempfile::tempdir().map_err(storage_error)?;
         fs::copy(sidecar, original.path().join(executable)).map_err(storage_error)?;
         let manifest = serde_json::to_vec(&manifest).map_err(|_| {
-            SourceError::Protocol("could not encode the bundled Linear manifest".into())
+            SourceError::Protocol("could not encode the bundled source manifest".into())
         })?;
         fs::write(original.path().join(MANIFEST), manifest).map_err(storage_error)?;
         let mut prepared = self.prepare_add(original.path())?;
@@ -572,7 +569,7 @@ impl ExtensionRegistry {
         let hello = Description {
             contract_versions: vec![CONTRACT_VERSION],
             contract_version: Some(CONTRACT_VERSION),
-            version,
+            version: version.into(),
             description: Some(description),
         };
         self.activate(prepared, Some(hello)).map(|_| ())
@@ -1006,37 +1003,49 @@ mod bundled_tests {
     use super::*;
 
     #[test]
-    fn linear_is_listed_from_bundled_metadata_before_the_executable_runs() {
+    fn lists_bundled_metadata_before_the_executable_runs() {
         let root = tempfile::tempdir().unwrap();
         let registry = ExtensionRegistry::new(root.path().join("registry"));
-        let name = format!("ticketd-source-linear{}", std::env::consts::EXE_SUFFIX);
+        let name = format!("fixture-source{}", std::env::consts::EXE_SUFFIX);
         let sidecar = root.path().join(&name);
         fs::write(&sidecar, "not an executable").unwrap();
+        let description = crate::source::SourceDescription {
+            descriptor: crate::source::ConnectorDescriptor {
+                provider: "fixture-source".into(),
+                name: "Fixture Source".into(),
+                contract_version: CONTRACT_VERSION,
+                capabilities: vec![Capability::Discover, Capability::Fetch],
+                schema: crate::source::ConfigSchema { fields: vec![] },
+            },
+            presentation: crate::source::SourcePresentation::default(),
+        };
 
-        registry.install_bundled_linear(&sidecar, &name).unwrap();
+        registry
+            .install_bundled(&sidecar, "1.0.0", description.clone())
+            .unwrap();
 
         let registrations = registry.list().unwrap();
         assert_eq!(registrations.len(), 1);
-        assert_eq!(registrations[0].id, "linear");
+        assert_eq!(registrations[0].id, "fixture-source");
         assert!(!registrations[0].development);
         assert_eq!(
             registry
                 .engine()
                 .unwrap()
-                .descriptor("linear")
+                .descriptor("fixture-source")
                 .unwrap()
                 .name,
-            "Linear"
+            "Fixture Source"
         );
 
         let installed = registrations[0].path.join(name);
         fs::write(&installed, "changed after installation").unwrap();
         registry
-            .install_bundled_linear(&sidecar, installed.file_name().unwrap().to_str().unwrap())
+            .install_bundled(&sidecar, "1.0.0", description)
             .unwrap();
         assert!(
             registry
-                .read_record("linear")
+                .read_record("fixture-source")
                 .unwrap()
                 .launch
                 .verify_trust()
