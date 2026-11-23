@@ -383,6 +383,10 @@ export function ConditionRows({
 }) {
   const { entries: sources } = useSources();
   const providers = sources.map(({ connector }) => connector.provider);
+  const sourceNote = OR.format([
+    ...sources.map(({ connector }) => connector.name),
+    "Local",
+  ]);
   const set = (index: number, condition: AutomationCondition) =>
     onChange(conditions.map((item, at) => (at === index ? condition : item)));
   return (
@@ -553,7 +557,13 @@ export function ConditionRows({
               >
                 <span className="flow-menu-item-text">
                   {label}
-                  <small>{taken ? "Already a condition" : note}</small>
+                  <small>
+                    {taken
+                      ? "Already a condition"
+                      : blank.kind === "source"
+                        ? sourceNote
+                        : note}
+                  </small>
                 </span>
               </DropdownMenuItem>
             );

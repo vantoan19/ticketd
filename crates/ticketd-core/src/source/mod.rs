@@ -131,7 +131,7 @@ pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(
 /// Format version 86: device-local presentation cached from registered sources.
 pub(crate) fn migrate_presentations(connection: &rusqlite::Connection) -> Result<(), Error> {
     connection.execute_batch(
-        "CREATE TABLE source_presentations (provider TEXT PRIMARY KEY, description TEXT NOT NULL);",
+        "CREATE TABLE IF NOT EXISTS source_presentations (provider TEXT PRIMARY KEY, description TEXT NOT NULL);",
     )?;
     Ok(())
 }

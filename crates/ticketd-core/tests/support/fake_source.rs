@@ -13,7 +13,7 @@ use super::ticketd_core::source::{
     Connector, ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest,
     ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, FieldIssue, FieldKind,
     OptionSource, PublicationCandidates, PublicationSearch, PublishRequest, SchemaField,
-    SkippedPartition, SourceError, ValueFormat,
+    SkippedPartition, SourceError, SourcePresentation, ValueFormat,
 };
 
 pub type Hook = Arc<dyn Fn() + Send + Sync>;
@@ -62,6 +62,8 @@ pub struct Remote {
     pub outage: Option<Failure>,
     pub connection_error: Option<String>,
     pub version: Option<u32>,
+    pub display_name: Option<String>,
+    pub presentation: SourcePresentation,
     pub repositories_optional: bool,
     pub discover_calls: usize,
     pub cursors_seen: Vec<Option<String>>,
@@ -109,7 +111,7 @@ impl Connector for FakeSource {
         let remote = self.0.lock().unwrap();
         ConnectorDescriptor {
             provider: "fake".into(),
-            name: "Fake".into(),
+            name: remote.display_name.clone().unwrap_or_else(|| "Fake".into()),
             contract_version: remote.version.unwrap_or(CONTRACT_VERSION),
             capabilities: vec![
                 Capability::Discover,
@@ -139,6 +141,10 @@ impl Connector for FakeSource {
                 ],
             },
         }
+    }
+
+    fn presentation(&self) -> SourcePresentation {
+        self.0.lock().unwrap().presentation.clone()
     }
 
     fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {

@@ -801,6 +801,11 @@ The code lives in `ticketd_core::source`, from the inside out:
   transaction, so no network I/O happens while the database is locked.
   `save_source` validates and previews before it saves.
 
+Each registered connector describes its name and icon, issue labels, sign-in
+instructions, settings fields and summary, required target, and network hosts.
+Clients render those descriptions using their own components. Saving a source
+caches its description locally so existing tickets can still name their source.
+
 Saved source configuration is workspace data (`source_configurations`), is
 included in export and backups, and is separate from any imported ticket.
 

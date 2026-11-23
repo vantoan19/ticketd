@@ -16,8 +16,8 @@ use ticketd_core::{
     source::{
         ClosureReason, Conversation, ConversationEntry, DuplicateTarget, Engine, ExternalComment,
         ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, FailureScope, Ownership, RefreshOptions, RefreshReport, SourceFilter,
-        SourceHealth, TargetProblem,
+        ExternalState, FailureScope, IssueName, Ownership, RefreshOptions, RefreshReport,
+        SourceFilter, SourceHealth, TargetProblem,
     },
 };
 
@@ -149,6 +149,41 @@ fn matching_issues_import_as_todo_with_stable_identity_across_pages_and_repeats(
     assert_eq!(second.unchanged, 5);
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 5);
     assert_eq!(f.ticket(1).reference, ticket.reference);
+}
+
+#[test]
+fn a_reopened_workspace_names_issues_using_the_configured_sources_description() {
+    let mut fixture = Fixture::new();
+    fixture.remote(|remote| {
+        remote.display_name = Some("Beacon Tracker".into());
+        remote.presentation.issue_name = IssueName {
+            separator: "#".into(),
+            ..IssueName::default()
+        };
+    });
+    let mut beacon = issue(42, "Beacon case");
+    beacon.reference.locator = "o/r#BEACON-42".into();
+    beacon.display = "BEACON-42".into();
+    fixture.publish(beacon, true);
+    let saved = fixture.workspace.saved_source("fake").unwrap().unwrap();
+    let saved = fixture
+        .workspace
+        .save_source(&fixture.engine, "fake", &saved.config)
+        .unwrap();
+    assert_eq!(saved.preview.issues[0].label, "BEACON-42");
+    let imported = fixture.refresh().imported;
+    assert_eq!(imported.len(), 1);
+
+    let reopened = Workspace::open(fixture.path()).unwrap();
+    let source = reopened.show_ticket(&imported[0]).unwrap().source.unwrap();
+    assert_eq!(source.provider, "fake");
+    assert_eq!(source.provider_name, "Beacon Tracker");
+    assert_eq!(source.place, "o/r");
+    assert_eq!(source.number, "BEACON-42");
+    let rows = reopened.find_ticket_rows(&TicketFilter::default()).unwrap();
+    let source = rows[0].source.as_ref().unwrap();
+    assert_eq!(source.provider_name, "Beacon Tracker");
+    assert_eq!(source.number, "BEACON-42");
 }
 
 #[test]

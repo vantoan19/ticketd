@@ -759,7 +759,6 @@ fn ineligible(reason: IneligibleReason, message: String) -> Eligibility {
 fn eligibility(
     connection: &Connection,
     ticket: &Subject,
-    provider_name: &str,
     now: Option<&str>,
 ) -> Result<Eligibility, Error> {
     let reference = &ticket.reference;
@@ -812,6 +811,7 @@ fn eligibility(
         ));
     }
     if let Some(attempt) = open_attempt(connection, &ticket.id, now)? {
+        let provider_name = super::provider_display_name(connection, &attempt.provider)?;
         let message = match attempt.state {
             AttemptState::InFlight => {
                 format!(
@@ -980,7 +980,7 @@ impl Workspace {
             .map(|t| t.destinations.clone())
             .unwrap_or_default();
         let destination = chosen_destination(destination, &destinations);
-        let mut eligibility = eligibility(&self.connection, &ticket, &descriptor.name, None)?;
+        let mut eligibility = eligibility(&self.connection, &ticket, None)?;
         if matches!(eligibility, Eligibility::Eligible)
             && let Err((reason, message)) =
                 require_target(engine, provider, &descriptor.name, target.as_ref())
@@ -1073,12 +1073,9 @@ impl Workspace {
                     message,
                 })
             };
-            if let Eligibility::Ineligible { reason, message } = eligibility(
-                transaction,
-                &ticket,
-                &descriptor.name,
-                options.now.as_deref(),
-            )? {
+            if let Eligibility::Ineligible { reason, message } =
+                eligibility(transaction, &ticket, options.now.as_deref())?
+            {
                 return Err(refuse(reason, message));
             }
             let target = match require_target(engine, provider, &descriptor.name, target.as_ref()) {
