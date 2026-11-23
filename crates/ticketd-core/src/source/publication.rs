@@ -667,7 +667,8 @@ fn attempt_from_row(row: &rusqlite::Row<'_>, now: &str) -> rusqlite::Result<Publ
                     id,
                 },
                 partition: partition
-                    .unwrap_or_else(|| super::legacy_reference_partition(&provider, &locator)),
+                    .or_else(|| super::legacy_reference_partition(&provider, &locator))
+                    .unwrap_or_default(),
                 locator,
                 display: display.unwrap_or_default(),
                 url: url.unwrap_or_default(),

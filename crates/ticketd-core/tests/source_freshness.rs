@@ -19,8 +19,8 @@ use serde_json::json;
 use ticketd_core::{
     self, Status, Workspace,
     source::{
-        Clock, ClosureReason, Engine, ExternalIssue, ExternalState, FailureScope,
-        RefreshCoordinator, RefreshOptions, RefreshPolicy, RefreshReport, Run, Skip, SourceHealth,
+        Clock, Engine, ExternalIssue, ExternalState, FailureScope, RefreshCoordinator,
+        RefreshOptions, RefreshPolicy, RefreshReport, Run, Skip, SourceHealth, StateCategory,
         TicketSource,
     },
 };
@@ -393,9 +393,7 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     f.publish(issue(1, T0));
     f.refresh_at(T0);
     let mut closed = issue(1, T2);
-    closed.state = ExternalState::Closed {
-        reason: ClosureReason::Completed,
-    };
+    closed.state = ExternalState::named(StateCategory::Completed, "Closed");
     f.publish(closed);
     f.refresh_at(T2);
     assert_eq!(
@@ -406,7 +404,7 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     // A slower overlapping run delivers what it saw before the closure.
     f.remote(|r| {
         let stale = r.issues.get_mut(&1).unwrap();
-        stale.state = ExternalState::Open;
+        stale.state = ExternalState::named(StateCategory::Open, "Open");
         stale.updated_at = T1.into();
         stale.title = "Stale title".into();
     });
@@ -457,9 +455,7 @@ fn one_unreadable_issue_neither_stops_the_others_nor_backs_off_the_source() {
         r.matching.clear();
         r.broken.push(1);
         let closed = r.issues.get_mut(&2).unwrap();
-        closed.state = ExternalState::Closed {
-            reason: ClosureReason::Completed,
-        };
+        closed.state = ExternalState::named(StateCategory::Completed, "Closed");
         closed.updated_at = T1.into();
     });
     let report = f.refresh_at(T1);

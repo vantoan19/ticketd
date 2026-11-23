@@ -16,12 +16,12 @@ use super::{
     FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourcePresentation, SummaryPart,
     TargetPresentation,
     contract::{
-        CONTRACT_VERSION, Capability, ClosureReason, ConnectionCheck, ConnectionInfo, Connector,
+        CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector,
         ConnectorDescriptor, Conversation, DerivedConfiguration, DestinationRules,
         DestinationValidation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
         ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
         Publication, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
-        SourceError,
+        SourceError, StateCategory,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, FieldPattern,
@@ -702,11 +702,7 @@ impl Connector for GithubConnector {
                 reference.locator
             ))
         })?;
-        if issue.state
-            == (ExternalState::Closed {
-                reason: ClosureReason::Duplicate,
-            })
-        {
+        if issue.state.category == StateCategory::Duplicate {
             let id = issue.reference.identity.id.parse().unwrap_or_default();
             match self.canonical_of(repository, number, id) {
                 Canonical::Named { reference, url } => {
@@ -981,6 +977,14 @@ fn could_be_published(issue: &ExternalIssue, request: &PublishRequest) -> bool {
         || (!plain(&request.body).is_empty() && plain(&issue.body) == plain(&request.body))
 }
 
+pub(super) fn legacy_state_name(provider: &str, state: &str) -> Option<&'static str> {
+    match (provider, state) {
+        (PROVIDER, "open") => Some("Open"),
+        (PROVIDER, "closed") => Some("Closed"),
+        _ => None,
+    }
+}
+
 pub(super) fn legacy_reference_partition(provider: &str, locator: &str) -> Option<String> {
     (provider == PROVIDER).then(|| {
         locator
@@ -1091,7 +1095,7 @@ fn translate_comment(item: &Value) -> Result<ExternalComment, SourceError> {
 /// rest are not part of the conversation.
 fn translate_event(item: &Value) -> Result<Option<ExternalEvent>, SourceError> {
     let kind = match item.get("event").and_then(Value::as_str) {
-        Some("closed") => ExternalEventKind::Closed(ClosureReason::parse(
+        Some("closed") => ExternalEventKind::Closed(StateCategory::from_closure(
             item.get("state_reason").and_then(Value::as_str),
         )),
         Some("reopened") => ExternalEventKind::Reopened,
@@ -1298,10 +1302,10 @@ fn translate_issue(
     let text = |key: &str| item.get(key).and_then(Value::as_str);
     let title = text("title").ok_or_else(|| missing("title"))?;
     let state = match text("state") {
-        Some("open") => ExternalState::Open,
-        Some("closed") => ExternalState::Closed {
-            reason: ClosureReason::parse(text("state_reason")),
-        },
+        Some("open") => ExternalState::named(StateCategory::Open, "Open"),
+        Some("closed") => {
+            ExternalState::named(StateCategory::from_closure(text("state_reason")), "Closed")
+        }
         _ => return Err(missing("recognized state")),
     };
     let repository = text("repository_url")

@@ -13,8 +13,8 @@ use serde_json::json;
 use ticketd_core::{
     self, Error, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
     source::{
-        ClosureReason, DuplicateTarget, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, Origin, Ownership, RefreshOptions, SourceFilter, TicketSource,
+        DuplicateTarget, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        Origin, Ownership, RefreshOptions, SourceFilter, StateCategory, TicketSource,
     },
 };
 
@@ -29,9 +29,7 @@ fn issue(id: u64, title: &str) -> ExternalIssue {
 
 fn duplicate(id: u64, title: &str, canonical: u64) -> ExternalIssue {
     let mut dup = issue(id, title);
-    dup.state = ExternalState::Closed {
-        reason: ClosureReason::Duplicate,
-    };
+    dup.state = ExternalState::named(StateCategory::Duplicate, "Closed");
     dup.duplicate_of = Some(ExternalRef {
         identity: ExternalIdentity {
             provider: "fake".into(),

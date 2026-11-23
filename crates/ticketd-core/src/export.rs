@@ -87,7 +87,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ("external_ownership", "ticket_id, authority, changed_at"),
     (
         "source_sync",
-        "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since, discovery_matches, external_author, external_created_at",
+        "ticket_id, state_category, state_name, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since, discovery_matches, external_author, external_created_at",
     ),
     (
         "external_duplicate_targets",
@@ -95,7 +95,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "source_conversation",
-        "ticket_id, kind, entry_id, position, actor, event, subject, body, url, created_at, edited_at",
+        "ticket_id, kind, entry_id, position, actor, event, state_category, subject, body, url, created_at, edited_at",
     ),
     (
         "source_status",

@@ -63,10 +63,24 @@ impl Driver for GitHubDriver {
             transport.respond(&format!("{API}/repos/o/r/issues/{number}"), ok(value));
             reference(number, id)
         };
+        let mut open = issue(1004, 4, "o/r");
+        open["state_reason"] = json!("completed");
+        transport.respond(&format!("{API}/repos/o/r/issues/4"), ok(open));
+        transport.respond(
+            &format!("{API}/repos/o/r/issues/5"),
+            status(404, json!({}), &[]),
+        );
+        transport.respond(
+            &format!("{API}/repos/o/r/issues/6"),
+            status(503, json!({}), &[]),
+        );
         let probes = ClosureProbes {
+            open: reference(4, 1004),
             completed: add(1, json!("completed")),
             no_reason: add(2, json!(null)),
             unknown_reason: add(3, json!("unmapped_reason")),
+            missing: reference(5, 1005),
+            unreadable: reference(6, 1006),
         };
         github_fixture(&transport, probes)
     }

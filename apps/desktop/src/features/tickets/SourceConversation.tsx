@@ -37,23 +37,26 @@ function describeEvent(entry: EventEntry): {
   const actor = entry.actor ?? "Someone";
   const subject = entry.subject;
   switch (entry.event) {
-    case "closed_completed":
-      return {
-        text: `${actor} closed this as completed`,
-        icon: statusIcons.Done,
-      };
-    case "closed_not_planned":
-      return {
-        text: `${actor} closed this as not planned`,
-        icon: statusIcons.Canceled,
-      };
-    case "closed_duplicate":
-      return {
-        text: `${actor} closed this as a duplicate${subject ? ` of ${subject}` : ""}`,
-        icon: statusIcons.Duplicate,
-      };
     case "closed":
-      return { text: `${actor} closed this`, icon: Circle };
+      switch (entry.state_category) {
+        case "completed":
+          return {
+            text: `${actor} closed this as completed`,
+            icon: statusIcons.Done,
+          };
+        case "not_planned":
+          return {
+            text: `${actor} closed this as not planned`,
+            icon: statusIcons.Canceled,
+          };
+        case "duplicate":
+          return {
+            text: `${actor} closed this as a duplicate${subject ? ` of ${subject}` : ""}`,
+            icon: statusIcons.Duplicate,
+          };
+        default:
+          return { text: `${actor} closed this`, icon: Circle };
+      }
     case "reopened":
       return { text: `${actor} reopened this`, icon: Circle };
     case "assigned":

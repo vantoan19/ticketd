@@ -9,14 +9,11 @@ import { ticketStatuses } from "@/lib/statuses";
 export type { PublicationAttempt } from "@/lib/api/publication";
 
 const statusSchema = lazySchema(() => z.enum(ticketStatuses));
+const stateCategorySchema = lazySchema(() =>
+  z.enum(["open", "completed", "not_planned", "duplicate", "unknown"]),
+);
 const externalStateSchema = lazySchema(() =>
-  z.discriminatedUnion("state", [
-    z.object({ state: z.literal("open") }),
-    z.object({
-      state: z.literal("closed"),
-      reason: z.enum(["completed", "not_planned", "duplicate", "unknown"]),
-    }),
-  ]),
+  z.object({ category: stateCategorySchema, name: z.string().nullish() }),
 );
 const duplicateTargetSchema = lazySchema(() =>
   z.discriminatedUnion("kind", [
@@ -66,7 +63,7 @@ const ticketSourceSchema = lazySchema(() =>
     author: z.string().nullish(),
     /** When the issue was opened at the source; unknown until a refresh reads it. */
     created_at: z.string().nullish(),
-    /** The source closed the issue with a reason ticketd does not recognize. */
+    /** The source reported a state category ticketd cannot map to a status. */
     closure_unrecognized: z.boolean(),
     last_refreshed_at: z.string().nullable(),
     last_attempt_at: z.string().nullable(),
@@ -499,6 +496,7 @@ const conversationEntrySchema = lazySchema(() =>
       type: z.literal("event"),
       id: z.string(),
       event: z.string(),
+      state_category: stateCategorySchema.optional(),
       actor: z.string().nullable(),
       subject: z.string().nullable(),
       created_at: z.string(),

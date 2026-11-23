@@ -452,6 +452,10 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     let shown = cli.run(&["show", "T-KQ1"]);
     assert_eq!(shown["title"], "Real issue");
     assert_eq!(shown["source"]["display"], "o/r#1");
+    assert_eq!(
+        shown["source"]["state"],
+        json!({"category": "open", "name": "Open"})
+    );
     assert_eq!(shown["source"]["ownership"], "external");
     assert_eq!(shown["source"]["content_locked"], true);
     // The source conversation is available to agents, apart from local notes.
@@ -465,7 +469,11 @@ fn refresh_imports_then_tracks_and_protects_external_tickets_without_the_desktop
     assert_eq!(first["body"]["text"], "Please take a look");
     assert_eq!(
         context["source_conversation"]["items"][1]["event"],
-        "closed_completed"
+        "closed"
+    );
+    assert_eq!(
+        context["source_conversation"]["items"][1]["state_category"],
+        "completed"
     );
     assert_eq!(context["activities"]["items"].as_array().unwrap().len(), 1);
     assert!(

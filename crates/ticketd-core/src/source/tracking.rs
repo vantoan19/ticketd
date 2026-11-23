@@ -32,8 +32,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use super::{
-    ClosureReason, Conversation, DerivedConfiguration, Engine, ExternalIdentity, ExternalIssue,
-    ExternalRef, ExternalState, SourceError,
+    Conversation, DerivedConfiguration, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
+    ExternalState, SourceError, StateCategory,
     contract::FailureCode,
     conversation,
     freshness::{self, ProviderRun, SourceUnavailable},
@@ -142,8 +142,7 @@ pub struct TicketSource {
     /// The latest source closure time, only when the matching conversation is fresh.
     #[serde(default)]
     pub closed_at: Option<String>,
-    /// The source closed the issue with a reason ticketd does not recognize, so
-    /// the closure was flagged and no outcome was guessed.
+    /// The observed state category is unknown and did not change the status.
     pub closure_unrecognized: bool,
     /// The last time a refresh confirmed this ticket against the source.
     pub last_refreshed_at: Option<String>,
@@ -344,64 +343,48 @@ fn opening(issue: &ExternalIssue) -> (Option<&str>, Option<&str>) {
     )
 }
 
-fn state_parts(state: ExternalState) -> (&'static str, Option<&'static str>) {
-    match state {
-        ExternalState::Open => ("open", None),
-        ExternalState::Closed { reason } => ("closed", Some(reason.as_str())),
-    }
-}
-
-fn state_from_parts(state: &str, reason: Option<&str>) -> ExternalState {
-    if state == "open" {
-        return ExternalState::Open;
-    }
-    ExternalState::Closed {
-        reason: ClosureReason::parse(reason),
-    }
-}
-
 /// The ownership of a ticket as write guards need it.
 pub(crate) enum Authority {
     Local,
     External {
         provider: String,
         open: bool,
-        /// Closed at the source for a reason ticketd does not recognize.
+        /// The reported state category is unknown.
         closure_unrecognized: bool,
     },
 }
 
 /// SQL that is true for the ticket whose id is `id_expr` and whose issue the
-/// source owns and closed with a reason ticketd does not recognize. Such a ticket
-/// keeps its status, is flagged, and awaits a local decision, so it is never
+/// source owns and reports with an unknown category. Such a ticket keeps
+/// its status, is flagged, and awaits a local decision, so it is never
 /// offered as Ready work.
 pub(crate) fn held_sql(id_expr: &str) -> String {
     format!(
         "EXISTS (SELECT 1 FROM external_ownership ho JOIN source_sync hs ON hs.ticket_id = ho.ticket_id \
          WHERE ho.ticket_id = {id_expr} AND ho.authority = 'external' \
-         AND hs.external_state = 'closed' AND hs.closure_reason = 'unknown')"
+         AND hs.state_category = 'unknown')"
     )
 }
 
 /// Whether a ticket is currently externally owned. Call inside the write
 /// transaction that depends on the answer.
 pub(crate) fn authority(connection: &Connection, id: &str) -> Result<Authority, Error> {
-    let row: Option<(String, String, Option<String>)> = connection
+    let row: Option<(String, String)> = connection
         .query_row(
-            "SELECT i.provider, s.external_state, s.closure_reason FROM external_ownership o \
+            "SELECT i.provider, s.state_category FROM external_ownership o \
              JOIN external_identities i ON i.ticket_id = o.ticket_id \
              JOIN source_sync s ON s.ticket_id = o.ticket_id \
              WHERE o.ticket_id = ?1 AND o.authority = 'external'",
             [id],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
     Ok(match row {
         None => Authority::Local,
-        Some((provider, state, reason)) => Authority::External {
+        Some((provider, category)) => Authority::External {
             provider,
-            open: state == "open",
-            closure_unrecognized: state == "closed" && reason.as_deref() == Some("unknown"),
+            open: category == "open",
+            closure_unrecognized: category == "unknown",
         },
     })
 }
@@ -431,8 +414,8 @@ pub(crate) fn guard_change(
             provider: super::provider_display_name(connection, &provider)?,
         });
     }
-    // Open: Todo, In progress and In review are local. Closed for an unrecognized
-    // reason: Done or Canceled is the person's own decision (the flag stays).
+    // Open: Todo, In progress and In review are local. For an unknown state,
+    // Done or Canceled is the person's own decision (the flag stays).
     let allowed =
         (open && status.is_local_progress()) || (closure_unrecognized && status.ends_work());
     if status != ticket.status && !allowed {
@@ -479,8 +462,8 @@ struct SourceRow {
     authority: String,
     discovery_matches: Option<bool>,
     ownership_changed_at: Option<String>,
-    state: String,
-    reason: Option<String>,
+    category: String,
+    name: Option<String>,
     refreshed: Option<String>,
     attempted: Option<String>,
     error_code: Option<String>,
@@ -496,7 +479,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     let row: Option<SourceRow> = connection
         .prepare_cached(
             "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, o.authority, \
-                    s.external_state, s.closure_reason, s.last_refreshed_at, \
+                    s.state_category, s.state_name, s.last_refreshed_at, \
                     s.last_attempt_at, s.last_error_code, s.last_error_message, s.failing_since, \
                     s.conversation_error_code, s.conversation_error_message, s.discovery_matches, o.changed_at, \
                     s.external_author, s.external_created_at \
@@ -516,8 +499,8 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
                     url: row.get(4)?,
                     origin: row.get(5)?,
                     authority: row.get(6)?,
-                    state: row.get(7)?,
-                    reason: row.get(8)?,
+                    category: row.get(7)?,
+                    name: row.get(8)?,
                     refreshed: row.get(9)?,
                     attempted: row.get(10)?,
                     error_code: row.get(11)?,
@@ -537,7 +520,10 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         ticket.source = None;
         return Ok(());
     };
-    let state = state_from_parts(&row.state, row.reason.as_deref());
+    let state = ExternalState {
+        category: StateCategory::parse(&row.category),
+        name: row.name,
+    };
     let ownership = if row.authority == "external" {
         Ownership::External
     } else {
@@ -545,18 +531,18 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
     };
     let external = ownership == Ownership::External;
     let status_choices: Vec<Status> = if external {
-        match state {
-            ExternalState::Open => ALL_STATUSES
+        match state.category {
+            StateCategory::Open => ALL_STATUSES
                 .into_iter()
                 .filter(|status| status.is_local_progress())
                 .collect(),
-            ExternalState::Closed {
-                reason: ClosureReason::Unknown,
-            } => ALL_STATUSES
+            StateCategory::Unknown => ALL_STATUSES
                 .into_iter()
                 .filter(|status| status.ends_work())
                 .collect(),
-            ExternalState::Closed { .. } => Vec::new(),
+            StateCategory::Completed | StateCategory::NotPlanned | StateCategory::Duplicate => {
+                Vec::new()
+            }
         }
     } else {
         Vec::new()
@@ -609,12 +595,7 @@ pub(crate) fn populate(connection: &Connection, ticket: &mut Ticket) -> Result<(
         ownership,
         discovery_matches: row.discovery_matches,
         ownership_changed_at: row.ownership_changed_at,
-        closure_unrecognized: matches!(
-            state,
-            ExternalState::Closed {
-                reason: ClosureReason::Unknown
-            }
-        ),
+        closure_unrecognized: state.category == StateCategory::Unknown,
         status_locked: external && status_choices.is_empty(),
         status_choices,
         state,
@@ -750,31 +731,27 @@ fn ticket_for_identity(
         .optional()?)
 }
 
-/// The status an observed external state implies, given the state last observed
-/// and the ticket's current status. An observation that does not decide the status
-/// (open stays open, an unrecognized closure) returns `current` unchanged.
+/// Apply status transitions from the typed category. Display names can change
+/// without a transition, and unknown observations preserve established status.
 pub(crate) fn status_for(
-    previous: Option<ExternalState>,
-    observed: ExternalState,
+    previous: Option<StateCategory>,
+    observed: StateCategory,
     current: Status,
 ) -> Status {
-    let mapped = |reason: ClosureReason| match reason {
-        ClosureReason::Completed => Some(Status::Done),
-        ClosureReason::NotPlanned => Some(Status::Canceled),
-        ClosureReason::Duplicate => Some(Status::Duplicate),
-        ClosureReason::Unknown => None,
-    };
-    match (previous, observed) {
-        // A new import starts open issues at Todo; an unrecognized closure is
-        // flagged and gets the neutral starting status, never Done.
-        (None, ExternalState::Open) => Status::Todo,
-        (None, ExternalState::Closed { reason }) => mapped(reason).unwrap_or(Status::Todo),
-        // Open stays open: local progress is preserved.
-        (Some(ExternalState::Open), ExternalState::Open) => current,
-        // Reopened.
-        (Some(ExternalState::Closed { .. }), ExternalState::Open) => Status::Todo,
-        (Some(before), ExternalState::Closed { .. }) if before == observed => current,
-        (Some(_), ExternalState::Closed { reason }) => mapped(reason).unwrap_or(current),
+    if previous == Some(observed) {
+        return current;
+    }
+    match observed {
+        StateCategory::Open
+            if previous == Some(StateCategory::Unknown) && current.is_local_progress() =>
+        {
+            current
+        }
+        StateCategory::Open => Status::Todo,
+        StateCategory::Completed => Status::Done,
+        StateCategory::NotPlanned => Status::Canceled,
+        StateCategory::Duplicate => Status::Duplicate,
+        StateCategory::Unknown => current,
     }
 }
 
@@ -1136,15 +1113,15 @@ impl Workspace {
                         .ok()
                         .and_then(|events| events.into_iter().max_by(|a, b| a.1.cmp(&b.1)))
                         .map(|(index, _)| index);
-                    if let ExternalState::Closed { reason } = issue.state
+                    if issue.state.category != StateCategory::Open
                         && let Some(index) = latest
                         && let Some(event) = read.events.get_mut(index)
                         && matches!(event.kind, super::ExternalEventKind::Closed(_))
                     {
-                        if event.kind == super::ExternalEventKind::Closed(ClosureReason::Unknown) {
-                            event.kind = super::ExternalEventKind::Closed(reason);
+                        if event.kind == super::ExternalEventKind::Closed(StateCategory::Unknown) {
+                            event.kind = super::ExternalEventKind::Closed(issue.state.category);
                         }
-                        if event.kind == super::ExternalEventKind::Closed(ClosureReason::Duplicate)
+                        if event.kind == super::ExternalEventKind::Closed(StateCategory::Duplicate)
                             && event.subject.is_none()
                         {
                             event.subject = issue
@@ -1200,7 +1177,8 @@ impl Workspace {
                     ticket_id: row.get(0)?,
                     reference: row.get(1)?,
                     partition: stored_partition
-                        .unwrap_or_else(|| super::legacy_reference_partition(&provider, &locator)),
+                        .or_else(|| super::legacy_reference_partition(&provider, &locator))
+                        .unwrap_or_default(),
                     provider,
                     external_id: row.get(3)?,
                     locator,
@@ -1434,8 +1412,8 @@ struct Existing {
     partition: Option<String>,
     display: String,
     url: String,
-    /// `external_state:closure_reason` as last observed.
-    state: String,
+    state_category: Option<String>,
+    state_name: Option<String>,
     /// The source's own update time of the issue last applied.
     updated_at: String,
 }
@@ -1452,7 +1430,7 @@ fn apply_issue(
     let existing: Option<Existing> = connection
         .query_row(
             "SELECT t.id, t.reference, t.title, t.body, t.status, o.authority, i.locator, i.display, i.url, \
-                    COALESCE(s.external_state || ':' || COALESCE(s.closure_reason, ''), ''), \
+                    s.state_category, s.state_name, \
                     COALESCE(s.external_updated_at, ''), i.partition \
              FROM external_identities i \
              JOIN tickets t ON t.id = i.ticket_id \
@@ -1478,9 +1456,10 @@ fn apply_issue(
                     locator: row.get(6)?,
                     display: row.get(7)?,
                     url: row.get(8)?,
-                    state: row.get(9)?,
-                    updated_at: row.get(10)?,
-                    partition: row.get(11)?,
+                    state_category: row.get(9)?,
+                    state_name: row.get(10)?,
+                    updated_at: row.get(11)?,
+                    partition: row.get(12)?,
                 })
             },
         )
@@ -1492,13 +1471,13 @@ fn apply_issue(
         "" => issue.display.as_str(),
         title => title,
     };
-    let (state, reason) = state_parts(issue.state);
+    let category = issue.state.category;
     match existing {
         None => {
             if super::publication::awaited_by_open_attempt(connection, issue)? {
                 return Ok(());
             }
-            let status = status_for(None, issue.state, Status::Todo);
+            let status = status_for(None, category, Status::Todo);
             let id = Uuid::new_v4().to_string();
             let reference = crate::device::issue_reference(connection)?;
             connection.execute(
@@ -1536,7 +1515,8 @@ fn apply_issue(
             partition,
             display,
             url,
-            state: old_state,
+            state_category,
+            state_name,
             updated_at,
             ..
         }) => {
@@ -1546,10 +1526,8 @@ fn apply_issue(
             if !updated_at.is_empty() && issue.updated_at.as_str() < updated_at.as_str() {
                 return Ok(());
             }
-            let previous = old_state
-                .split_once(':')
-                .map(|(s, r)| state_from_parts(s, (!r.is_empty()).then_some(r)));
-            let next = status_for(previous, issue.state, status);
+            let previous = state_category.as_deref().map(StateCategory::parse);
+            let next = status_for(previous, category, status);
             let mut changed = false;
             if old_title != title || old_body != issue.body {
                 connection.execute(
@@ -1582,10 +1560,7 @@ fn apply_issue(
             if next == Status::Duplicate && set_duplicate_target(connection, &id, issue)? {
                 changed = true;
             }
-            let observed = format!("{state}:{}", reason.unwrap_or(""));
-            if observed != old_state {
-                changed = true;
-            }
+            changed |= previous != Some(category) || state_name != issue.state.name;
             let identity_changed =
                 locator != issue.reference.locator || display != issue.display || url != issue.url;
             if identity_changed || partition.as_deref() != Some(&issue.reference.partition) {
@@ -1599,11 +1574,11 @@ fn apply_issue(
             // ticket; it also fills tickets tracked before it was stored.
             let (author, created_at) = opening(issue);
             connection.execute(
-                "UPDATE source_sync SET external_state = ?2, closure_reason = ?3, external_updated_at = ?4, \
+                "UPDATE source_sync SET state_category = ?2, state_name = ?3, external_updated_at = ?4, \
                  last_refreshed_at = ?5, last_attempt_at = ?5, last_error_code = NULL, last_error_message = NULL, failing_since = NULL, \
                  external_author = COALESCE(?6, external_author), external_created_at = COALESCE(?7, external_created_at) \
                  WHERE ticket_id = ?1",
-                params![id, state, reason, issue.updated_at, now, author, created_at],
+                params![id, category.as_str(), issue.state.name, issue.updated_at, now, author, created_at],
             )?;
             if let Some(read) = read {
                 changed |= conversation::store(connection, &id, read, &issue.updated_at)?;
@@ -1755,7 +1730,7 @@ pub(crate) fn map_closure(
             Box::new(error),
         ))
     })?;
-    let next = status_for(Some(ExternalState::Open), issue.state, current);
+    let next = status_for(Some(StateCategory::Open), issue.state.category, current);
     if next == current {
         return Ok(());
     }
@@ -1788,7 +1763,7 @@ pub(crate) fn link(
     now: &str,
 ) -> Result<(), Error> {
     let identity = &issue.reference.identity;
-    let (state, reason) = state_parts(issue.state);
+    let category = issue.state.category;
     connection.execute(
         "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
@@ -1813,9 +1788,9 @@ pub(crate) fn link(
     )?;
     let (author, created_at) = opening(issue);
     connection.execute(
-        "INSERT INTO source_sync (ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, external_author, external_created_at) \
+        "INSERT INTO source_sync (ticket_id, state_category, state_name, external_updated_at, last_refreshed_at, last_attempt_at, external_author, external_created_at) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7)",
-        params![ticket_id, state, reason, issue.updated_at, now, author, created_at],
+        params![ticket_id, category.as_str(), issue.state.name, issue.updated_at, now, author, created_at],
     )?;
     Ok(())
 }

@@ -1042,3 +1042,11 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column source_configurations.derived_checked_at
 + column source_configurations.derived_configuration
 + column source_configurations.revision
+
+## 88
++ column source_conversation.state_category
++ column source_sync.state_category
++ column source_sync.state_name
++ trigger sync_capture_source_observation
+- column source_sync.closure_reason
+- column source_sync.external_state

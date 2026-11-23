@@ -10,7 +10,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
-import type { Ticket, TicketSource } from "@/lib/api/client";
+import { client, type Ticket, type TicketSource } from "@/lib/api/client";
 import { SourceFilter } from "./SourceFilter";
 import { SourceDescription } from "./ReadOnlySource";
 import { TicketDetails } from "./TicketDetails";
@@ -52,7 +52,7 @@ const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   url: "https://github.com/acme/api/issues/98",
   origin: "imported",
   ownership: "external",
-  state: { state: "open" },
+  state: { category: "open", name: "Open" },
   closure_unrecognized: false,
   last_refreshed_at: "2026-02-01T00:00:00Z",
   last_attempt_at: "2026-02-01T00:00:00Z",
@@ -137,7 +137,7 @@ test("an open external ticket offers only local progress and says progress stays
   ).toEqual(["Done", "Canceled", "Duplicate"]);
   expect(screen.getByText("Set by GitHub when the issue closes")).toBeTruthy();
   expect(
-    screen.getByText(/Your progress, kept in ticketd. GitHub still shows Open/),
+    screen.getByText(/Your progress, kept in ticketd. GitHub controls when the issue closes/),
   ).toBeTruthy();
 });
 
@@ -168,7 +168,7 @@ test("a closed external ticket locks status and explains why", () => {
     ticket({
       status: "Done",
       source: source({
-        state: { state: "closed", reason: "completed" },
+        state: { category: "completed", name: "Closed" },
         status_locked: true,
       }),
     }),
@@ -188,7 +188,7 @@ test("an unrecognized closure is flagged instead of guessed", async () => {
   properties(
     ticket({
       source: source({
-        state: { state: "closed", reason: "unknown" },
+        state: { category: "unknown", name: "Closed" },
         status_locked: false,
         status_choices: ["Done", "Canceled"],
         closure_unrecognized: true,
@@ -197,7 +197,7 @@ test("an unrecognized closure is flagged instead of guessed", async () => {
   );
   expect(
     screen.getByText(
-      /reason ticketd does not recognize, so its status was not/,
+      /GitHub reported an unrecognized state/,
     ),
   ).toBeTruthy();
   expect(screen.queryByText("Agent: github")).toBeNull();
@@ -218,7 +218,7 @@ test("an unrecognized closure is flagged instead of guessed", async () => {
 test("a closed duplicate names the source's canonical issue or says it is unknown", () => {
   bridge.invoke.mockResolvedValue([]);
   const closed = {
-    state: { state: "closed", reason: "duplicate" },
+    state: { category: "duplicate", name: "Closed" },
     status_locked: true,
   } as const;
   properties(
@@ -249,7 +249,7 @@ test("a closed duplicate names the source's canonical issue or says it is unknow
 test("a resolved canonical issue opens its local ticket, and a loop is not followed", () => {
   bridge.invoke.mockResolvedValue([]);
   const closed = {
-    state: { state: "closed", reason: "duplicate" },
+    state: { category: "duplicate", name: "Closed" },
     status_locked: true,
   } as const;
   const external = {
@@ -314,7 +314,7 @@ test("the Source section shows the owner, the state, freshness and refreshes one
   expect(
     within(section).getByRole("link", { name: "acme/api#98" }),
   ).toBeTruthy();
-  expect(within(section).queryByText("Open on GitHub")).toBeNull();
+  expect(within(section).queryByText("GitHub: Open")).toBeNull();
   expect(within(section).getByText(/^Synced|Synced/)).toBeTruthy();
   expect(
     within(section).getByText(
@@ -395,8 +395,7 @@ test("an externally owned description is a read-only source card without editing
   expect(screen.queryByRole("textbox", { name: /title/i })).toBeNull();
   expect(screen.queryByRole("button", { name: "Edit description" })).toBeNull();
   expect(
-    screen.getByText("Open on GitHub").closest(".ticket-state-line")
-      ?.textContent,
+    screen.getByText("GitHub: Open").closest(".ticket-state-line")?.textContent,
   ).toContain("#98");
   // The document's source state line replaces the old duplicate rail link.
   expect(
@@ -422,7 +421,7 @@ test("an open state line names who opened the issue and when", () => {
       })}
     />,
   );
-  const line = screen.getByText("Open on GitHub").closest(".ticket-state-line");
+  const line = screen.getByText("GitHub: Open").closest(".ticket-state-line");
   expect(line?.textContent).toContain("#98");
   expect(within(line as HTMLElement).getByText("alice")).toBeTruthy();
   expect(
@@ -435,7 +434,7 @@ test("an open state line names who opened the issue and when", () => {
 test("a ticket imported before the author was stored shows neither until a refresh", () => {
   bridge.invoke.mockResolvedValue([]);
   render(<DetailsFixture value={ticket()} />);
-  const line = screen.getByText("Open on GitHub").closest(".ticket-state-line");
+  const line = screen.getByText("GitHub: Open").closest(".ticket-state-line");
   expect(line?.textContent).not.toContain("opened");
 });
 
@@ -466,13 +465,13 @@ test("an unavailable source still names who opened the issue and when", () => {
   ).toBe(openedAt);
 });
 
-test("a closed state line uses the core's closure time and names its canonical issue", () => {
+test("a closed state line uses the core's closure time and names its canonical issue", async () => {
   bridge.invoke.mockResolvedValue([]);
   const closedAt = new Date(Date.now() - 210 * 60_000).toISOString();
   const value = ticket({
     status: "Duplicate",
     source: source({
-      state: { state: "closed", reason: "duplicate" },
+      state: { category: "duplicate", name: "Closed" },
       status_locked: true,
       closed_at: closedAt,
       duplicate_number: "#99",
@@ -484,9 +483,12 @@ test("a closed state line uses the core's closure time and names its canonical i
       },
     }),
   });
-  const { container, rerender } = render(<DetailsFixture value={value} />);
+  bridge.invoke.mockResolvedValueOnce(value);
+  const shown = await client.showTicket(value.reference);
+  const { container, rerender } = render(<DetailsFixture value={shown} />);
   const line = container.querySelector(".ticket-state-line")!;
-  expect(line.textContent).toContain("Closed on GitHub as a duplicate of #99");
+  expect(line.textContent).toContain("GitHub: Closed (duplicate)");
+  expect(line.textContent).toContain("Duplicate of #99");
   const time = line.querySelector("time")!;
   expect(time.dateTime).toBe(closedAt);
   expect(time.textContent).toBe("3 h ago");
@@ -495,7 +497,7 @@ test("a closed state line uses the core's closure time and names its canonical i
       value={ticket({
         status: "Done",
         source: source({
-          state: { state: "closed", reason: "completed" },
+          state: { category: "completed", name: "Closed" },
           status_locked: true,
           closed_at: null,
         }),
@@ -591,11 +593,19 @@ test("the source filter offers All, GitHub and Local with counts and reports the
 
 test("source wording: location, state and freshness", () => {
   expect(sourceLocation(source())).toBe("acme / api #98");
-  expect(sourceState(source()).text).toBe("Open on GitHub");
+  expect(sourceState(source()).text).toBe("GitHub: Open");
   expect(
-    sourceState(source({ state: { state: "closed", reason: "not_planned" } }))
+    sourceState(source({ state: { category: "not_planned", name: "Closed" } }))
       .text,
-  ).toBe("Closed on GitHub as not planned");
+  ).toBe("GitHub: Closed (not planned)");
+  expect(
+    sourceState(
+      source({
+        provider_name: "Tracker",
+        state: { category: "open", name: "In development" },
+      }),
+    ),
+  ).toEqual({ text: "Tracker: In development", tone: "positive" });
   const now = new Date("2026-02-01T00:04:30Z").getTime();
   expect(freshness(source(), now)).toBe("Synced 4 min ago");
   expect(freshness(source({ last_refreshed_at: null }), now)).toBe(

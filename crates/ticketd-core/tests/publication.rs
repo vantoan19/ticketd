@@ -1579,9 +1579,8 @@ fn attach_rechecks_eligibility_and_brings_a_closed_issues_closure() {
 
     // Back in progress, and a teammate has meanwhile closed the issue as completed.
     set_status(&mut f, &ticket.reference, Status::InProgress);
-    f.fake.0.lock().unwrap().issues.get_mut(&101).unwrap().state = ExternalState::Closed {
-        reason: ticketd_core::source::ClosureReason::Completed,
-    };
+    f.fake.0.lock().unwrap().issues.get_mut(&101).unwrap().state =
+        ExternalState::named(ticketd_core::source::StateCategory::Completed, "Closed");
     let done = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
     assert_eq!(done.ticket.status, Status::Done);
     assert!(done.ticket.source.unwrap().status_locked);

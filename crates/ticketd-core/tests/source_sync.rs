@@ -14,10 +14,10 @@ use ticketd_core::{
     self, ContextOptions, Error, Status, Ticket, TicketChange, TicketFilter, TicketPatch,
     Workspace,
     source::{
-        ClosureReason, Conversation, ConversationEntry, DuplicateTarget, Engine, ExternalComment,
-        ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, FailureScope, IssueName, Ownership, RefreshOptions, RefreshReport,
-        SourceFilter, SourceHealth, TargetProblem,
+        Conversation, ConversationEntry, DuplicateTarget, Engine, ExternalComment, ExternalEvent,
+        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        FailureScope, IssueName, Ownership, RefreshOptions, RefreshReport, SourceFilter,
+        SourceHealth, StateCategory, TargetProblem,
     },
 };
 
@@ -95,8 +95,8 @@ impl Fixture {
     }
 }
 
-fn closed(reason: ClosureReason) -> ExternalState {
-    ExternalState::Closed { reason }
+fn closed(reason: StateCategory) -> ExternalState {
+    ExternalState::named(reason, "Closed")
 }
 
 fn progress(status: Status) -> TicketPatch {
@@ -280,7 +280,39 @@ fn refresh_follows_external_edits_and_preserves_local_progress_and_organization(
     // remote issue is still open.
     assert_eq!(
         f.fake.0.lock().unwrap().issues[&1].state,
-        ExternalState::Open
+        ExternalState::named(StateCategory::Open, "Open")
+    );
+}
+
+#[test]
+fn a_source_state_rename_keeps_local_progress_and_is_captured_for_sync() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Tracked work"), true);
+    f.refresh();
+    let reference = &f.ticket(1).reference;
+    f.workspace
+        .change_ticket(reference, progress(Status::InProgress))
+        .unwrap();
+    for record in f.workspace.dirty_records().unwrap() {
+        assert!(f.workspace.clear_dirty(&record).unwrap());
+    }
+
+    // Only the label changes. Its spelling resembles a terminal category.
+    f.set_state(1, ExternalState::named(StateCategory::Open, "Completed"));
+    f.refresh();
+
+    let ticket = f.ticket(1);
+    assert_eq!(ticket.status, Status::InProgress);
+    assert_eq!(
+        ticket.source.unwrap().state.name.as_deref(),
+        Some("Completed")
+    );
+    assert!(
+        f.workspace
+            .dirty_records()
+            .unwrap()
+            .iter()
+            .any(|record| record.id == ticket.id)
     );
 }
 
@@ -294,10 +326,10 @@ fn closure_reasons_map_to_statuses_and_unknown_ones_are_flagged_not_guessed() {
     f.workspace
         .change_ticket("T-KQ4", progress(Status::InReview))
         .unwrap();
-    f.set_state(1, closed(ClosureReason::Completed));
-    f.set_state(2, closed(ClosureReason::NotPlanned));
-    f.set_state(3, closed(ClosureReason::Duplicate));
-    f.set_state(4, closed(ClosureReason::Unknown));
+    f.set_state(1, closed(StateCategory::Completed));
+    f.set_state(2, closed(StateCategory::NotPlanned));
+    f.set_state(3, closed(StateCategory::Duplicate));
+    f.set_state(4, closed(StateCategory::Unknown));
     f.refresh();
 
     assert_eq!(f.ticket(1).status, Status::Done);
@@ -339,7 +371,7 @@ fn an_imported_duplicate_keeps_the_supplied_external_target_or_an_explicit_unkno
     f.publish(issue(2, "Dup without target"), true);
     f.refresh();
     let mut named = issue(1, "Dup with target");
-    named.state = closed(ClosureReason::Duplicate);
+    named.state = closed(StateCategory::Duplicate);
     named.duplicate_of = Some(ExternalRef {
         identity: ExternalIdentity {
             provider: "fake".into(),
@@ -349,7 +381,7 @@ fn an_imported_duplicate_keeps_the_supplied_external_target_or_an_explicit_unkno
         partition: "o/r".into(),
     });
     f.publish(named, true);
-    f.set_state(2, closed(ClosureReason::Duplicate));
+    f.set_state(2, closed(StateCategory::Duplicate));
     f.refresh();
 
     let with_target = f.ticket(1);
@@ -379,14 +411,14 @@ fn reopening_returns_to_todo_clears_duplicate_and_later_open_refreshes_keep_prog
     f.publish(issue(1, "Flaky"), true);
     f.publish(issue(2, "Dup"), true);
     f.refresh();
-    f.set_state(1, closed(ClosureReason::Completed));
-    f.set_state(2, closed(ClosureReason::Duplicate));
+    f.set_state(1, closed(StateCategory::Completed));
+    f.set_state(2, closed(StateCategory::Duplicate));
     f.refresh();
     assert_eq!(f.ticket(1).status, Status::Done);
     assert_eq!(f.ticket(2).status, Status::Duplicate);
 
-    f.set_state(1, ExternalState::Open);
-    f.set_state(2, ExternalState::Open);
+    f.set_state(1, ExternalState::named(StateCategory::Open, "Open"));
+    f.set_state(2, ExternalState::named(StateCategory::Open, "Open"));
     f.refresh();
     assert_eq!(f.ticket(1).status, Status::Todo);
     let reopened = f.ticket(2);
@@ -414,7 +446,7 @@ fn the_core_refuses_external_content_edits_and_closed_status_changes_but_allows_
     f.publish(issue(1, "Owned"), true);
     f.publish(issue(2, "Closed"), true);
     f.refresh();
-    f.set_state(2, closed(ClosureReason::Completed));
+    f.set_state(2, closed(StateCategory::Completed));
     f.refresh();
 
     assert!(matches!(
@@ -495,7 +527,7 @@ fn replayable_status_changes_validate_current_source_authority() {
     assert!(
         matches!(&original, WriteResult::Ticket(ticket) if ticket.status == Status::InProgress)
     );
-    f.set_state(1, closed(ClosureReason::Completed));
+    f.set_state(1, closed(StateCategory::Completed));
     f.refresh();
     let current = f.ticket(1);
     let history = f.workspace.ticket_history("T-KQ1").unwrap();
@@ -522,7 +554,7 @@ fn tracked_issues_refresh_after_leaving_the_discovery_rules_and_closure_is_obser
     // The issue stops matching the rules and then closes.
     f.remote(|r| r.matching.clear());
     let mut next = issue(1, "Reassigned, now elsewhere");
-    next.state = closed(ClosureReason::Completed);
+    next.state = closed(StateCategory::Completed);
     f.publish(next, false);
     let report = f.refresh();
     assert!(report.imported.is_empty());
@@ -531,7 +563,7 @@ fn tracked_issues_refresh_after_leaving_the_discovery_rules_and_closure_is_obser
     assert_eq!(ticket.title, "Reassigned, now elsewhere");
     assert_eq!(ticket.status, Status::Done);
     // Identity is retained: matching again later does not create a second ticket.
-    f.set_state(1, ExternalState::Open);
+    f.set_state(1, ExternalState::named(StateCategory::Open, "Open"));
     f.remote(|r| r.matching.push(1));
     f.refresh();
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 1);
@@ -733,7 +765,7 @@ fn concurrent_refreshes_create_one_ticket_per_issue() {
 
 fn duplicate_of(id: u64, title: &str, canonical: Option<u64>) -> ExternalIssue {
     let mut dup = issue(id, title);
-    dup.state = closed(ClosureReason::Duplicate);
+    dup.state = closed(StateCategory::Duplicate);
     dup.duplicate_of = canonical.map(|canonical| ExternalRef {
         identity: ExternalIdentity {
             provider: "fake".into(),
@@ -941,7 +973,14 @@ fn labels(entries: &[ConversationEntry]) -> Vec<String> {
         .iter()
         .map(|entry| match entry {
             ConversationEntry::Comment { id, .. } => format!("comment {id}"),
-            ConversationEntry::Event { id, event, .. } => format!("event {id} {event}"),
+            ConversationEntry::Event {
+                id,
+                event,
+                state_category,
+                ..
+            } => {
+                format!("event {id} {event} {state_category:?}")
+            }
         })
         .collect()
 }
@@ -962,7 +1001,7 @@ fn comments_and_events_are_persisted_chronologically_and_repeated_refresh_adds_n
             events: vec![
                 event(
                     "e2",
-                    ExternalEventKind::Closed(ClosureReason::Completed),
+                    ExternalEventKind::Closed(StateCategory::Completed),
                     "bob",
                     "2026-01-03T00:00:00Z",
                 ),
@@ -984,7 +1023,7 @@ fn comments_and_events_are_persisted_chronologically_and_repeated_refresh_adds_n
             "event e1 reopened",
             "comment c1",
             "comment c2",
-            "event e2 closed_completed"
+            "event e2 closed Some(Completed)"
         ]
     );
     let ConversationEntry::Comment {
@@ -1290,7 +1329,7 @@ fn a_closed_issue_with_an_unrecognized_reason_is_never_ready_and_allows_a_local_
     f.publish(issue(1, "Closed for a reason nobody recognizes"), true);
     f.refresh();
     assert_eq!(f.ticket(1).availability.as_deref(), Some("Ready"));
-    f.set_state(1, closed(ClosureReason::Unknown));
+    f.set_state(1, closed(StateCategory::Unknown));
     f.refresh();
 
     // Flagged and held: it keeps its status but is not offered as work to pick up.
@@ -1584,9 +1623,7 @@ fn an_in_flight_refresh_does_not_apply_discovery_from_a_replaced_configuration()
 fn only_the_latest_closure_borrows_the_current_issues_reason() {
     let mut f = Fixture::new();
     let mut closed = issue(1, "Closed with a reason");
-    closed.state = ExternalState::Closed {
-        reason: ClosureReason::Completed,
-    };
+    closed.state = ExternalState::named(StateCategory::Completed, "Closed");
     f.publish(closed, true);
     f.remote(|remote| {
         remote.conversations.insert(
@@ -1596,7 +1633,7 @@ fn only_the_latest_closure_borrows_the_current_issues_reason() {
                 events: vec![
                     event(
                         "old",
-                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        ExternalEventKind::Closed(StateCategory::Unknown),
                         "octo",
                         "2026-01-01T00:00:00Z",
                     ),
@@ -1608,7 +1645,7 @@ fn only_the_latest_closure_borrows_the_current_issues_reason() {
                     ),
                     event(
                         "latest",
-                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        ExternalEventKind::Closed(StateCategory::Unknown),
                         "octo",
                         "2026-01-03T00:00:00Z",
                     ),
@@ -1617,20 +1654,20 @@ fn only_the_latest_closure_borrows_the_current_issues_reason() {
         );
     });
     // Closed issues are not discovered, so first import it open, then observe closure.
-    f.remote(|remote| remote.issues.get_mut(&1).unwrap().state = ExternalState::Open);
+    f.remote(|remote| {
+        remote.issues.get_mut(&1).unwrap().state = ExternalState::named(StateCategory::Open, "Open")
+    });
     f.refresh();
     f.remote(|remote| {
         let issue = remote.issues.get_mut(&1).unwrap();
-        issue.state = ExternalState::Closed {
-            reason: ClosureReason::Completed,
-        };
+        issue.state = ExternalState::named(StateCategory::Completed, "Closed");
         issue.updated_at = "2026-02-02T00:00:00Z".into();
     });
     f.refresh_at("2026-02-03T00:00:00Z");
     let events = f.workspace.source_conversation("T-KQ1").unwrap();
     assert!(matches!(&events[0], ConversationEntry::Event {event, ..} if event == "closed"));
     assert!(
-        matches!(&events[2], ConversationEntry::Event {event, ..} if event == "closed_completed")
+        matches!(&events[2], ConversationEntry::Event {event, state_category: Some(StateCategory::Completed), ..} if event == "closed")
     );
     assert_eq!(
         f.ticket(1).source.unwrap().closed_at.as_deref(),
@@ -1650,7 +1687,7 @@ fn closed_at_uses_only_fresh_latest_closures_and_never_an_observed_time() {
     assert_eq!(source.closed_at, None);
     f.remote(|remote| {
         let issue = remote.issues.get_mut(&1).unwrap();
-        issue.state = closed(ClosureReason::Completed);
+        issue.state = closed(StateCategory::Completed);
         issue.updated_at = "2026-02-02T00:00:00Z".into();
         remote.conversations.insert(
             1,
@@ -1659,7 +1696,7 @@ fn closed_at_uses_only_fresh_latest_closures_and_never_an_observed_time() {
                 events: vec![
                     event(
                         "old",
-                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        ExternalEventKind::Closed(StateCategory::Unknown),
                         "octo",
                         "2026-01-01T00:00:00Z",
                     ),
@@ -1671,7 +1708,7 @@ fn closed_at_uses_only_fresh_latest_closures_and_never_an_observed_time() {
                     ),
                     event(
                         "latest",
-                        ExternalEventKind::Closed(ClosureReason::Completed),
+                        ExternalEventKind::Closed(StateCategory::Completed),
                         "octo",
                         "2026-01-03T00:00:00Z",
                     ),
@@ -1712,7 +1749,7 @@ fn closed_at_uses_only_fresh_latest_closures_and_never_an_observed_time() {
     );
     f.remote(|remote| {
         let issue = remote.issues.get_mut(&1).unwrap();
-        issue.state = ExternalState::Open;
+        issue.state = ExternalState::named(StateCategory::Open, "Open");
         issue.updated_at = "2026-02-07T00:00:00Z".into();
     });
     f.refresh_at("2026-02-08T00:00:00Z");
@@ -1723,11 +1760,11 @@ fn closed_at_uses_only_fresh_latest_closures_and_never_an_observed_time() {
     );
     f.remote(|remote| {
         let issue = remote.issues.get_mut(&1).unwrap();
-        issue.state = closed(ClosureReason::Completed);
+        issue.state = closed(StateCategory::Completed);
         issue.updated_at = "2026-02-09T00:00:00Z".into();
         remote.conversations.get_mut(&1).unwrap().events.push(event(
             "invalid",
-            ExternalEventKind::Closed(ClosureReason::Completed),
+            ExternalEventKind::Closed(StateCategory::Completed),
             "octo",
             "not-a-time",
         ));
@@ -1756,7 +1793,7 @@ fn legacy_latest_closure_is_enriched_only_while_the_conversation_is_fresh() {
                 events: vec![
                     event(
                         "old",
-                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        ExternalEventKind::Closed(StateCategory::Unknown),
                         "octo",
                         "2026-01-01T00:00:00Z",
                     ),
@@ -1768,7 +1805,7 @@ fn legacy_latest_closure_is_enriched_only_while_the_conversation_is_fresh() {
                     ),
                     event(
                         "latest",
-                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        ExternalEventKind::Closed(StateCategory::Unknown),
                         "octo",
                         "2026-01-03T00:00:00Z",
                     ),
@@ -1780,31 +1817,31 @@ fn legacy_latest_closure_is_enriched_only_while_the_conversation_is_fresh() {
     // Simulate a row saved by an older version without reason or subject.
     let db = rusqlite::Connection::open(f.path()).unwrap();
     db.execute(
-        "UPDATE source_conversation SET event = 'closed', subject = NULL WHERE entry_id = 'latest'",
+        "UPDATE source_conversation SET state_category = 'unknown', subject = NULL WHERE entry_id = 'latest'",
         [],
     )
     .unwrap();
     let entries = f.conversation(1);
     assert!(matches!(&entries[0], ConversationEntry::Event { event, .. } if event == "closed"));
     assert!(
-        matches!(&entries[2], ConversationEntry::Event { event, subject, .. } if event == "closed_duplicate" && subject.as_deref() == Some("o/r#9"))
+        matches!(&entries[2], ConversationEntry::Event { event, state_category: Some(StateCategory::Duplicate), subject, .. } if event == "closed" && subject.as_deref() == Some("o/r#9"))
     );
     // Reading is an overlay, not a mutation of stored historical source data.
     let stored: (String, Option<String>) = db
         .query_row(
-            "SELECT event, subject FROM source_conversation WHERE entry_id = 'latest'",
+            "SELECT state_category, subject FROM source_conversation WHERE entry_id = 'latest'",
             [],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .unwrap();
-    assert_eq!(stored, ("closed".into(), None));
-    db.execute("UPDATE source_conversation SET event = 'closed_duplicate', subject = 'o/r#7' WHERE entry_id = 'latest'", []).unwrap();
+    assert_eq!(stored, ("unknown".into(), None));
+    db.execute("UPDATE source_conversation SET state_category = 'duplicate', subject = 'o/r#7' WHERE entry_id = 'latest'", []).unwrap();
     let explicit = f.conversation(1);
     assert!(
         matches!(&explicit[2], ConversationEntry::Event { subject, .. } if subject.as_deref() == Some("o/r#7"))
     );
     db.execute(
-        "UPDATE source_conversation SET event = 'closed', subject = NULL WHERE entry_id = 'latest'",
+        "UPDATE source_conversation SET state_category = 'unknown', subject = NULL WHERE entry_id = 'latest'",
         [],
     )
     .unwrap();
@@ -1827,7 +1864,7 @@ fn lifecycle_events_compare_instants_not_timestamp_text() {
     f.refresh();
     f.remote(|remote| {
         let issue = remote.issues.get_mut(&1).unwrap();
-        issue.state = closed(ClosureReason::Completed);
+        issue.state = closed(StateCategory::Completed);
         issue.updated_at = "2026-02-02T00:00:00Z".into();
         remote.conversations.insert(
             1,
@@ -1836,7 +1873,7 @@ fn lifecycle_events_compare_instants_not_timestamp_text() {
                 events: vec![
                     event(
                         "close",
-                        ExternalEventKind::Closed(ClosureReason::Unknown),
+                        ExternalEventKind::Closed(StateCategory::Unknown),
                         "octo",
                         "2026-01-01T23:00:00-02:00",
                     ),
@@ -1855,7 +1892,7 @@ fn lifecycle_events_compare_instants_not_timestamp_text() {
         f.ticket(1).source.unwrap().closed_at.as_deref(),
         Some("2026-01-01T23:00:00-02:00")
     );
-    assert!(f.conversation(1).iter().any(|entry| matches!(entry, ConversationEntry::Event { id, event, .. } if id == "close" && event == "closed_completed")));
+    assert!(f.conversation(1).iter().any(|entry| matches!(entry, ConversationEntry::Event { id, event, state_category: Some(StateCategory::Completed), .. } if id == "close" && event == "closed")));
 }
 
 #[test]
@@ -1868,7 +1905,7 @@ fn the_first_import_logs_no_workspace_events_and_later_inbound_changes_log_as_sy
     assert_eq!(f.workspace.workspace_events_after(0, 100).unwrap(), []);
 
     f.publish(issue(1, "Retitled"), true);
-    f.set_state(1, closed(ClosureReason::Completed));
+    f.set_state(1, closed(StateCategory::Completed));
     f.publish(issue(2, "Arrived later"), true);
     f.refresh_at("2026-02-02T00:00:00Z");
 
@@ -2175,6 +2212,236 @@ fn a_format_81_workspace_gains_the_repositories_read_and_loses_the_configuration
 }
 
 #[test]
+fn format_87_source_states_conversation_and_retry_results_upgrade_together() {
+    use rusqlite::params;
+    use ticketd_core::{WriteRequest, WriteResult};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 87).unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let at = "2026-02-03T00:00:00Z";
+    let inputs = [
+        (
+            "github",
+            "open",
+            None,
+            Status::InReview,
+            StateCategory::Open,
+            Some("Open"),
+        ),
+        (
+            "github",
+            "closed",
+            Some("completed"),
+            Status::Done,
+            StateCategory::Completed,
+            Some("Closed"),
+        ),
+        (
+            "github",
+            "closed",
+            Some("not_planned"),
+            Status::Canceled,
+            StateCategory::NotPlanned,
+            Some("Closed"),
+        ),
+        (
+            "github",
+            "closed",
+            Some("duplicate"),
+            Status::Duplicate,
+            StateCategory::Duplicate,
+            Some("Closed"),
+        ),
+        (
+            "github",
+            "closed",
+            Some("unknown"),
+            Status::InProgress,
+            StateCategory::Unknown,
+            Some("Closed"),
+        ),
+        (
+            "github",
+            "closed",
+            None,
+            Status::Todo,
+            StateCategory::Unknown,
+            Some("Closed"),
+        ),
+        (
+            "another-tracker",
+            "open",
+            None,
+            Status::InProgress,
+            StateCategory::Open,
+            None,
+        ),
+    ];
+    for (index, (provider, state, reason, status, _, _)) in inputs.iter().enumerate() {
+        let reference = format!("T-KQ{}", index + 10);
+        let id = uuid::Uuid::new_v4().to_string();
+        let locator = format!("Org/Kit#{}", index + 10);
+        db.execute("INSERT INTO tickets (id, reference, title, status) VALUES (?1, ?2, 'Tracked issue', ?3)",
+            params![id, reference, status.to_string()]).unwrap();
+        db.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin)
+            VALUES (?1, ?2, ?3, ?4, ?4, 'https://example.test/issue', 'imported')",
+            params![id, provider, reference, locator]).unwrap();
+        let authority = if index == 6 { "local" } else { "external" };
+        db.execute(
+            "INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3)",
+            params![id, authority, at],
+        )
+        .unwrap();
+        db.execute("INSERT INTO source_sync (ticket_id, external_state, closure_reason, external_updated_at,
+            last_refreshed_at, last_attempt_at, conversation_updated_at, external_author, external_created_at)
+            VALUES (?1, ?2, ?3, ?4, ?4, ?4, ?4, 'octo', ?4)",
+            params![id, state, reason, at]).unwrap();
+        if index == 1 {
+            for (position, event) in [
+                "closed_duplicate",
+                "reopened",
+                "closed_not_planned",
+                "closed",
+                "closed_completed",
+            ]
+            .iter()
+            .enumerate()
+            {
+                db.execute("INSERT INTO source_conversation (ticket_id, kind, entry_id, position, actor, event, created_at)
+                    VALUES (?1, 'event', ?2, ?3, 'octo', ?4, ?5)",
+                    params![id, format!("event-{position}"), position, event, at]).unwrap();
+            }
+        }
+    }
+    let unresolved: String = db
+        .query_row(
+            "SELECT id FROM tickets WHERE reference = 'T-KQ10'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    for (field, base, remote) in [
+        ("source_state", Some("open"), "closed"),
+        ("source_closure_reason", None, "not_planned"),
+        ("title", Some("First title"), "Other title"),
+    ] {
+        let encode = |value: &str| {
+            serde_json::to_string(&ticketd_core::SyncValue::Text(value.into())).unwrap()
+        };
+        db.execute("INSERT INTO sync_conflicts (kind, id, field, base, remote, remote_device, detected_at, remote_changed_at)
+            VALUES ('ticket', ?1, ?2, ?3, ?4, 'Other desktop', ?5, ?5)",
+            params![unresolved, field, base.map(encode), encode(remote), at]).unwrap();
+    }
+    let mut f = Fixture::new();
+    f.publish(issue(1, "Old snapshot"), true);
+    f.refresh();
+    let mut snapshot = serde_json::to_value(f.ticket(1)).unwrap();
+    snapshot["source"]["provider"] = json!("github");
+    snapshot["source"]["state"] = json!({"state": "closed", "reason": "not_planned"});
+    let request = || WriteRequest::CreateTicket {
+        title: "Recorded request".into(),
+        project_id: None,
+    };
+    for (request_id, kind, value) in [
+        ("single", "ticket", snapshot.clone()),
+        ("batch", "tickets", json!([snapshot])),
+    ] {
+        db.execute(
+            "INSERT INTO request_outcomes (id, request, outcome) VALUES (?1, ?2, ?3)",
+            params![
+                request_id,
+                serde_json::to_string(&request()).unwrap(),
+                json!({"kind": kind, "value": value}).to_string()
+            ],
+        )
+        .unwrap();
+    }
+    drop(db);
+
+    let mut workspace = Workspace::open(&path).unwrap();
+    for (index, (_, _, _, status, category, name)) in inputs.into_iter().enumerate() {
+        let ticket = workspace
+            .show_ticket(&format!("T-KQ{}", index + 10))
+            .unwrap();
+        assert_eq!(ticket.status, status);
+        let source = ticket.source.unwrap();
+        assert_eq!(source.state.category, category);
+        assert_eq!(source.state.name.as_deref(), name);
+        assert_eq!(
+            source.ownership,
+            if index == 6 {
+                Ownership::Local
+            } else {
+                Ownership::External
+            }
+        );
+        assert_eq!(source.ownership_changed_at.as_deref(), Some(at));
+        assert_eq!(source.last_refreshed_at.as_deref(), Some(at));
+        assert_eq!(source.author.as_deref(), Some("octo"));
+    }
+    let review = workspace
+        .sync_conflict(ticketd_core::SyncKind::Ticket, &unresolved)
+        .unwrap();
+    assert!(!review.read);
+    let reviewed = review
+        .fields
+        .iter()
+        .map(|field| (field.field.as_str(), &field.remote))
+        .collect::<std::collections::BTreeMap<_, _>>();
+    let remote = |value: &str| Some(ticketd_core::SyncValue::Text(value.into()));
+    assert_eq!(reviewed.len(), 3);
+    assert_eq!(*reviewed["source_state_category"], remote("not_planned"));
+    assert_eq!(*reviewed["source_state_name"], remote("Closed"));
+    assert_eq!(*reviewed["title"], remote("Other title"));
+    assert!(
+        review
+            .fields
+            .iter()
+            .all(|field| field.remote_changed_at.as_deref() == Some(at))
+    );
+    let events = workspace.source_conversation("T-KQ11").unwrap();
+    for (position, (event, category)) in [
+        ("closed", StateCategory::Duplicate),
+        ("reopened", StateCategory::Open),
+        ("closed", StateCategory::NotPlanned),
+        ("closed", StateCategory::Unknown),
+        ("closed", StateCategory::Completed),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        assert!(
+            matches!(&events[position], ConversationEntry::Event { id, event: kind, state_category: Some(observed), actor, .. }
+            if id == &format!("event-{position}") && kind == event && *observed == category && actor.as_deref() == Some("octo"))
+        );
+    }
+    assert_eq!(
+        workspace
+            .show_ticket("T-KQ11")
+            .unwrap()
+            .source
+            .unwrap()
+            .closed_at
+            .as_deref(),
+        Some(at)
+    );
+    let WriteResult::Ticket(single) = workspace.write(Some("single"), request()).unwrap() else {
+        unreachable!()
+    };
+    let WriteResult::Tickets(batch) = workspace.write(Some("batch"), request()).unwrap() else {
+        unreachable!()
+    };
+    assert_eq!(single.title, "Old snapshot");
+    assert_eq!(
+        single.source.as_ref().unwrap().state,
+        ExternalState::named(StateCategory::NotPlanned, "Closed")
+    );
+    assert_eq!(batch, vec![single]);
+}
+
+#[test]
 fn a_change_a_refresh_brings_in_starts_an_automation_narrowed_to_that_source() {
     use ticketd_core::{
         AutomationAgentSettings, AutomationDefinition, Condition, Step, StepAction, Trigger,
@@ -2218,7 +2485,7 @@ fn a_change_a_refresh_brings_in_starts_an_automation_narrowed_to_that_source() {
     let [from_fake, from_local] = ["fake", "local"].map(&mut done_from);
 
     // The tracker closes its issue; a person closes the local ticket.
-    f.set_state(1, closed(ClosureReason::Completed));
+    f.set_state(1, closed(StateCategory::Completed));
     f.refresh_at("2026-02-02T00:00:00Z");
     let done = TicketPatch {
         status: Some(Status::Done),
@@ -2368,7 +2635,7 @@ fn ready_and_blocked_agree_on_every_read() {
             f.workspace.set_trashed(&subject, true, None).unwrap();
         }
         if case.held {
-            f.set_state(1, closed(ClosureReason::Unknown));
+            f.set_state(1, closed(StateCategory::Unknown));
             f.refresh();
         }
 

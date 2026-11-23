@@ -12,7 +12,7 @@ use saphyr::{LoadableYamlNode, Scalar, Yaml};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{Error, Status, Workspace, document_links, inbox::LOCAL_PERSON};
+use crate::{Error, Status, Workspace, document_links, inbox::LOCAL_PERSON, source};
 
 /// The record kinds that each have their own sync file, in an order that applies a
 /// relationship's target before its owner where the kinds allow it.
@@ -77,7 +77,7 @@ const MAX_HEADER_INDENT: usize = 64;
 
 /// The format of sync files this version writes. A file that says a higher
 /// number is left alone until this desktop runs a ticketd that reads it.
-pub(crate) const FILE_FORMAT: i64 = 1;
+pub(crate) const FILE_FORMAT: i64 = 2;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -214,6 +214,8 @@ const TICKET: &[Field] = &[
         false,
     ),
     ("source_authority_changed_at", Type::Time, false),
+];
+const SOURCE_STATE_V1: &[Field] = &[
     ("source_state", Type::Choice(&["open", "closed"]), false),
     (
         "source_closure_reason",
@@ -221,6 +223,16 @@ const TICKET: &[Field] = &[
         false,
     ),
     ("source_updated_at", Type::Text, false),
+];
+const SOURCE_STATE_V2: &[Field] = &[
+    (
+        "source_state_category",
+        Type::Choice(&["open", "completed", "not_planned", "duplicate", "unknown"]),
+        false,
+    ),
+    ("source_state_name", Type::Text, false),
+    ("source_updated_at", Type::Text, false),
+    ("source_partition", Type::Text, false),
 ];
 /// External-source provenance is stored and carried as a whole.
 const SOURCE_REQUIRED: &[&str] = &[
@@ -233,7 +245,6 @@ const SOURCE_REQUIRED: &[&str] = &[
     "source_linked_at",
     "source_authority",
     "source_authority_changed_at",
-    "source_state",
 ];
 const DOCUMENT: &[Field] = &[
     ("title", Type::Text, false),
@@ -314,8 +325,8 @@ impl Block {
 }
 
 /// The header fields of a block, and whether Markdown text follows its header.
-fn shape(block: Block) -> (&'static [Field], bool) {
-    match block {
+fn shape(block: Block, format: i64) -> (impl Iterator<Item = &'static Field> + Clone, bool) {
+    let (fields, has_body) = match block {
         Block::Record(SyncKind::Ticket) => (TICKET, true),
         Block::Record(SyncKind::Document) => (DOCUMENT, true),
         Block::Record(SyncKind::Plan) => (PLAN, true),
@@ -324,7 +335,13 @@ fn shape(block: Block) -> (&'static [Field], bool) {
         Block::Record(SyncKind::Automation) => (AUTOMATION, true),
         Block::Part(SyncPartKind::Activity) => (ACTIVITY, true),
         Block::Part(SyncPartKind::Evidence) => (EVIDENCE, false),
-    }
+    };
+    let state_fields = match block {
+        Block::Record(SyncKind::Ticket) if format == 1 => SOURCE_STATE_V1,
+        Block::Record(SyncKind::Ticket) => SOURCE_STATE_V2,
+        _ => &[],
+    };
+    (fields.iter().chain(state_fields), has_body)
 }
 
 /// A set-valued field stored as rows of `table`: `owner` is the record whose file
@@ -570,8 +587,8 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
     }
 }
 
-fn validate(block: Block, id: &str, fields: &Fields) -> Result<(), Error> {
-    let (schema, has_body) = shape(block);
+fn validate(block: Block, format: i64, id: &str, fields: &Fields) -> Result<(), Error> {
+    let (mut schema, has_body) = shape(block, format);
     let block = block.name();
     if !is_guid(id) {
         return Err(bad(format!(
@@ -584,17 +601,14 @@ fn validate(block: Block, id: &str, fields: &Fields) -> Result<(), Error> {
             Type::Text
         } else {
             schema
-                .iter()
+                .clone()
                 .find(|field| field.0 == name)
                 .ok_or_else(|| bad(format!("unknown field '{name}' in a {block}")))?
                 .1
         };
         check(name, kind, value)?;
     }
-    match schema
-        .iter()
-        .find(|field| field.2 && !fields.contains_key(field.0))
-    {
+    match schema.find(|field| field.2 && !fields.contains_key(field.0)) {
         Some(field) => Err(bad(format!(
             "a {block} is missing its required field '{}'",
             field.0
@@ -629,14 +643,19 @@ fn quote(text: &str) -> String {
 type Labels = BTreeMap<String, String>;
 
 fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels: &Labels) {
-    let (schema, has_body) = shape(block);
+    let format = if fields.contains_key("source_provider") {
+        FILE_FORMAT
+    } else {
+        1
+    };
+    let (schema, has_body) = shape(block, format);
     let quote = |text: &str| match labels.get(text) {
         Some(label) => format!("{} # {label}", quote(text)),
         None => quote(text),
     };
     out.push_str("---\n");
     if let Block::Record(kind) = block {
-        out.push_str(&format!("kind: {}\nformat: {FILE_FORMAT}\n", kind.name()));
+        out.push_str(&format!("kind: {}\nformat: {format}\n", kind.name()));
     }
     out.push_str(&format!("id: {}\n", quote(id)));
     for (name, kind, _) in schema {
@@ -750,10 +769,11 @@ fn read_block(block: &str) -> Result<(Vec<(String, Raw)>, String), Error> {
 /// Give a block's header entries the types its fields have.
 fn typed(
     block: Block,
+    format: i64,
     entries: Vec<(String, Raw)>,
     body: String,
 ) -> Result<(String, Fields), Error> {
-    let (schema, has_body) = shape(block);
+    let (schema, has_body) = shape(block, format);
     let block = block.name();
     let mut id = None;
     let mut fields = Fields::new();
@@ -765,7 +785,7 @@ fn typed(
             continue;
         }
         let kind = schema
-            .iter()
+            .clone()
             .find(|field| field.0 == name)
             .ok_or_else(|| bad(format!("unknown field '{name}' in a {block}")))?
             .1;
@@ -1010,7 +1030,7 @@ impl SyncRecord {
             let (mut entries, body) = read_block(&block)?;
             match (part, &mut record) {
                 (Some(kind), Some(SyncRecord { parts, .. })) => {
-                    let (id, fields) = typed(Block::Part(kind), entries, body)?;
+                    let (id, fields) = typed(Block::Part(kind), FILE_FORMAT, entries, body)?;
                     parts.push(SyncPart { kind, id, fields });
                 }
                 _ => {
@@ -1027,18 +1047,24 @@ impl SyncRecord {
                     .ok_or_else(|| {
                         bad("field 'kind' must be one of project, document, plan, ticket, automation_agent, automation")
                     })?;
-                    match take("format") {
+                    let format = match take("format") {
                         // Files from before the marker are format 1.
-                        None | Some(Raw::Null) => {}
-                        Some(Raw::Integer(format)) if (1..=FILE_FORMAT).contains(&format) => {}
+                        None | Some(Raw::Null) => 1,
+                        Some(Raw::Integer(format)) if (1..=FILE_FORMAT).contains(&format) => format,
                         Some(Raw::Integer(format)) if format > FILE_FORMAT => {
                             return Err(bad(format!(
                                 "the file is in format {format}, which a newer ticketd wrote; update ticketd on this desktop to read it"
                             )));
                         }
                         Some(_) => return Err(bad("field 'format' must be a whole number")),
+                    };
+                    let block = Block::Record(kind);
+                    let (id, mut fields) = typed(block, format, entries, body)?;
+                    if format == 1 && kind == SyncKind::Ticket && has_source(&fields) {
+                        validate(block, format, &id, &fields)?;
+                        validate_source(&fields, "source_state")?;
+                        normalize_legacy_source(&mut fields);
                     }
-                    let (id, fields) = typed(Block::Record(kind), entries, body)?;
                     record = Some(SyncRecord {
                         kind,
                         id,
@@ -1056,13 +1082,18 @@ impl SyncRecord {
 
     /// Check a record built or merged in code the way a parsed file is checked.
     pub fn validate(&self) -> Result<(), Error> {
-        validate(Block::Record(self.kind), &self.id, &self.fields)?;
+        validate(
+            Block::Record(self.kind),
+            FILE_FORMAT,
+            &self.id,
+            &self.fields,
+        )?;
         let mut seen = BTreeSet::new();
         for part in &self.parts {
             if self.kind != SyncKind::Ticket {
                 return Err(bad("only a ticket has Activity and evidence sections"));
             }
-            validate(Block::Part(part.kind), &part.id, &part.fields)?;
+            validate(Block::Part(part.kind), FILE_FORMAT, &part.id, &part.fields)?;
             if !seen.insert(&part.id) {
                 return Err(bad(format!("section id '{}' is used twice", part.id)));
             }
@@ -1098,16 +1129,51 @@ impl SyncRecord {
                 "field 'related' lists only tickets whose id sorts after this one; the other ticket's file carries the rest",
             ));
         }
-        let sourced = self.fields.keys().any(|name| name.starts_with("source_"));
-        match SOURCE_REQUIRED
+        validate_source(&self.fields, "source_state_category")
+    }
+}
+
+fn has_source(fields: &Fields) -> bool {
+    fields.keys().any(|name| name.starts_with("source_"))
+}
+
+fn validate_source(fields: &Fields, category: &str) -> Result<(), Error> {
+    if has_source(fields)
+        && let Some(name) = SOURCE_REQUIRED
             .iter()
-            .find(|name| sourced && !self.fields.contains_key(**name))
-        {
-            Some(name) => Err(bad(format!(
-                "the source_ fields go together; '{name}' is missing"
-            ))),
-            None => Ok(()),
-        }
+            .copied()
+            .chain([category])
+            .find(|name| !fields.contains_key(*name))
+    {
+        return Err(bad(format!(
+            "the source_ fields go together; '{name}' is missing"
+        )));
+    }
+    Ok(())
+}
+
+fn normalize_legacy_source(fields: &mut Fields) {
+    let provider = text(fields, "source_provider").unwrap_or_default();
+    let state = source::legacy_state(
+        provider,
+        text(fields, "source_state").unwrap_or_default(),
+        text(fields, "source_closure_reason"),
+    );
+    let partition = source::legacy_reference_partition(
+        provider,
+        text(fields, "source_locator").unwrap_or_default(),
+    );
+    fields.remove("source_state");
+    fields.remove("source_closure_reason");
+    fields.insert(
+        "source_state_category".into(),
+        SyncValue::Text(state.category.as_str().into()),
+    );
+    if let Some(name) = state.name {
+        fields.insert("source_state_name".into(), SyncValue::Text(name));
+    }
+    if let Some(partition) = partition {
+        fields.insert("source_partition".into(), SyncValue::Text(partition));
     }
 }
 
@@ -1132,7 +1198,7 @@ fn rows(c: &Connection, sql: &str, id: &str, names: &[&str]) -> Result<Vec<Field
     Ok(found)
 }
 
-const SOURCE_SQL: &str = "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, i.linked_at, o.authority, o.changed_at, s.external_state, s.closure_reason, s.external_updated_at FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1";
+const SOURCE_SQL: &str = "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, i.linked_at, o.authority, o.changed_at, s.state_category, s.state_name, s.external_updated_at, i.partition FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1";
 const SOURCE_NAMES: &[&str] = &[
     "source_provider",
     "source_external_id",
@@ -1143,10 +1209,45 @@ const SOURCE_NAMES: &[&str] = &[
     "source_linked_at",
     "source_authority",
     "source_authority_changed_at",
-    "source_state",
-    "source_closure_reason",
+    "source_state_category",
+    "source_state_name",
     "source_updated_at",
+    "source_partition",
 ];
+
+/// Provenance, authority and the external state last seen. When and how this
+/// device last refreshed from the source stays its own.
+pub(crate) fn write_source(c: &Connection, record: &SyncRecord) -> Result<(), Error> {
+    let id = &record.id;
+    let field = |name| text(&record.fields, name);
+    let Some(provider) = field("source_provider") else {
+        c.execute("DELETE FROM source_sync WHERE ticket_id = ?1", [id])?;
+        c.execute("DELETE FROM external_ownership WHERE ticket_id = ?1", [id])?;
+        c.execute("DELETE FROM external_identities WHERE ticket_id = ?1", [id])?;
+        return Ok(());
+    };
+    c.execute(
+        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+         ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id,
+         locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin,
+         linked_at = excluded.linked_at, partition = excluded.partition",
+        params![id, provider, field("source_external_id"), field("source_locator"), field("source_display"),
+            field("source_url"), field("source_origin"), field("source_linked_at"), field("source_partition")],
+    )?;
+    c.execute(
+        "INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(ticket_id) DO UPDATE SET authority = excluded.authority, changed_at = excluded.changed_at",
+        params![id, field("source_authority"), field("source_authority_changed_at")],
+    )?;
+    c.execute(
+        "INSERT INTO source_sync (ticket_id, state_category, state_name, external_updated_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(ticket_id) DO UPDATE SET state_category = excluded.state_category,
+         state_name = excluded.state_name, external_updated_at = excluded.external_updated_at",
+        params![id, field("source_state_category"), field("source_state_name"), field("source_updated_at").unwrap_or("")],
+    )?;
+    Ok(())
+}
 
 fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRecord>, Error> {
     let follows = format!(
@@ -1230,7 +1331,7 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
             None => {}
         }
     }
-    for (name, _, _) in shape(Block::Record(kind)).0 {
+    for (name, _, _) in shape(Block::Record(kind), FILE_FORMAT).0 {
         if let Some(relation) = relation(kind, name) {
             let members = relation.members(c, id)?;
             if !members.is_empty() {
@@ -1591,7 +1692,7 @@ impl Apply<'_> {
                     )?;
                 }
             },
-            (SyncKind::Ticket, _) if field.starts_with("source_") => self.write_source()?,
+            (SyncKind::Ticket, _) if field.starts_with("source_") => write_source(c, self.record)?,
             _ => {}
         }
         if field == "body" && matches!(record.kind, SyncKind::Ticket | SyncKind::Document) {
@@ -1623,33 +1724,6 @@ impl Apply<'_> {
                 params![self.record.id, blocker, time],
             )?;
         }
-        Ok(())
-    }
-
-    /// Provenance, authority and the external state last seen. When and how this
-    /// device last refreshed from the source stays its own.
-    fn write_source(&self) -> Result<(), Error> {
-        let (c, id) = (self.c, &self.record.id);
-        let values: Vec<Option<&str>> = SOURCE_NAMES
-            .iter()
-            .map(|name| text(&self.record.fields, name))
-            .collect();
-        if values[0].is_none() {
-            c.execute("DELETE FROM source_sync WHERE ticket_id = ?1", [id])?;
-            c.execute("DELETE FROM external_ownership WHERE ticket_id = ?1", [id])?;
-            c.execute("DELETE FROM external_identities WHERE ticket_id = ?1", [id])?;
-            return Ok(());
-        }
-        c.execute("INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8) ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin, linked_at = excluded.linked_at, \
-         partition = CASE WHEN external_identities.provider = excluded.provider \
-                       AND external_identities.external_id = excluded.external_id \
-                       AND external_identities.locator = excluded.locator \
-                     THEN external_identities.partition ELSE NULL END",
-            params![id, values[0], values[1], values[2], values[3], values[4], values[5], values[6]])?;
-        c.execute("INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3) ON CONFLICT(ticket_id) DO UPDATE SET authority = excluded.authority, changed_at = excluded.changed_at",
-            params![id, values[7], values[8]])?;
-        c.execute("INSERT INTO source_sync (ticket_id, external_state, closure_reason, external_updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(ticket_id) DO UPDATE SET external_state = excluded.external_state, closure_reason = excluded.closure_reason, external_updated_at = excluded.external_updated_at",
-            params![id, values[9], values[10], values[11].unwrap_or("")])?;
         Ok(())
     }
 
@@ -1709,8 +1783,8 @@ impl Apply<'_> {
                 (created, true)
             }
         };
-        let (schema, _) = shape(Block::Record(record.kind));
-        for name in schema.iter().map(|field| field.0).chain(["body"]) {
+        let (schema, _) = shape(Block::Record(record.kind), FILE_FORMAT);
+        for name in schema.map(|field| field.0).chain(["body"]) {
             if present(&current.fields, name) != present(&record.fields, name) {
                 self.write(name)?;
             }
@@ -1924,25 +1998,28 @@ automation: name trashed
         match SyncPartKind::Activity {
             SyncPartKind::Activity | SyncPartKind::Evidence => {}
         }
-        let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
-        let blocks = SyncKind::ALL
-            .into_iter()
-            .map(|kind| (kind.name().to_owned(), Block::Record(kind)))
-            .chain(parts.into_iter().map(|kind| {
-                (
-                    format!("<!-- ticketd:{} -->", kind.name()),
-                    Block::Part(kind),
-                )
-            }));
-        let mut written = String::new();
-        for (label, block) in blocks {
-            let names: Vec<_> = shape(block).0.iter().map(|field| field.0).collect();
-            written.push_str(&format!("{label}: {}\n", names.join(" ")));
-        }
-        assert_eq!(
-            (FILE_FORMAT, written.as_str()),
-            (1, FORMAT_1),
-            "The header fields or section markers of sync files changed. A ticketd that does not know a field rejects the whole file, and only a higher `format` tells it the file is from a newer ticketd: raise FILE_FORMAT in the same change, then pin the new list here under the new number."
+        let format_2 = FORMAT_1.replace(
+            "source_state source_closure_reason source_updated_at",
+            "source_state_category source_state_name source_updated_at source_partition",
         );
+        assert_eq!(FILE_FORMAT, 2);
+        for (format, expected) in [(1, FORMAT_1), (2, format_2.as_str())] {
+            let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
+            let blocks = SyncKind::ALL
+                .into_iter()
+                .map(|kind| (kind.name().to_owned(), Block::Record(kind)))
+                .chain(parts.into_iter().map(|kind| {
+                    (
+                        format!("<!-- ticketd:{} -->", kind.name()),
+                        Block::Part(kind),
+                    )
+                }));
+            let mut written = String::new();
+            for (label, block) in blocks {
+                let names: Vec<_> = shape(block, format).0.map(|field| field.0).collect();
+                written.push_str(&format!("{label}: {}\n", names.join(" ")));
+            }
+            assert_eq!(written, expected, "sync file format {format}");
+        }
     }
 }
