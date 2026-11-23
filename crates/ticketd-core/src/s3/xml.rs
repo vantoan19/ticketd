@@ -88,6 +88,25 @@ pub(crate) fn error_body(xml: &[u8]) -> Option<ErrorBody> {
     seen.then_some(error)
 }
 
+/// GetBucketVersioning: `Some("Enabled")` or `Some("Suspended")`, or `None` for a bucket that
+/// never had Versioning. The outer `None` is an answer that is not a versioning configuration.
+pub(crate) fn versioning_status(xml: &[u8]) -> Option<Option<String>> {
+    let items = items(xml)?;
+    items
+        .iter()
+        .any(|item| matches!(item, Item::Open(name) if name == "VersioningConfiguration"))
+        .then(|| {
+            items.into_iter().find_map(|item| match item {
+                Item::Text(parent, name, text)
+                    if parent == "VersioningConfiguration" && name == "Status" =>
+                {
+                    Some(text)
+                }
+                _ => None,
+            })
+        })
+}
+
 /// One entry of ListObjectVersions, in the order S3 listed it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Listed {
@@ -267,6 +286,26 @@ mod tests {
     fn a_truncated_page_without_markers_is_unreadable() {
         let body = b"<ListVersionsResult><IsTruncated>true</IsTruncated></ListVersionsResult>";
         assert!(versions_page(body).is_none());
+    }
+
+    #[test]
+    fn versioning_is_enabled_suspended_or_never_set() {
+        let body = |status: &str| {
+            format!(
+                "<VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{status}</VersioningConfiguration>"
+            )
+        };
+        assert_eq!(
+            versioning_status(body("<Status>Enabled</Status>").as_bytes()),
+            Some(Some("Enabled".into()))
+        );
+        assert_eq!(
+            versioning_status(body("<Status>Suspended</Status>").as_bytes()),
+            Some(Some("Suspended".into()))
+        );
+        assert_eq!(versioning_status(body("").as_bytes()), Some(None));
+        assert_eq!(versioning_status(b"<VersioningConfiguration/>"), Some(None));
+        assert_eq!(versioning_status(b"<Error><Code>x</Code></Error>"), None);
     }
 
     #[test]

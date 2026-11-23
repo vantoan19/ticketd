@@ -8,12 +8,14 @@
 //! Sync never deletes: a delete marker only appears when a person deletes in the bucket.
 use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, SeekFrom, Write};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use base64::{Engine, engine::general_purpose::STANDARD};
 use sha2::{Digest, Sha256};
 
+use super::bucket_check::{self, BucketCheckError};
 use super::client::{S3Call, S3Client, refusal};
 use super::provider::{CredentialSource, S3Target, S3TargetError, S3Transport, encode};
 use super::xml::{Listed, prefixes_page, versions_page};
@@ -169,6 +171,8 @@ pub struct S3Remote<'a> {
     /// Folders whose marker was seen, so a write does not look for it every time. `list`
     /// looks afresh, so a folder removed from the bucket is noticed.
     known: Mutex<HashSet<String>>,
+    /// Set once the bucket passed [`S3Remote::check_bucket`].
+    checked: AtomicBool,
 }
 
 impl<'a> S3Remote<'a> {
@@ -197,6 +201,7 @@ impl<'a> S3Remote<'a> {
             client: S3Client::new(target, credentials, transport),
             prefix,
             known: Mutex::new(HashSet::new()),
+            checked: AtomicBool::new(false),
         })
     }
 
@@ -213,6 +218,19 @@ impl<'a> S3Remote<'a> {
     /// The prefix the Workspace folders are under, with its trailing `/` (or empty).
     pub fn prefix(&self) -> &str {
         &self.prefix
+    }
+
+    /// Whether the bucket can sync a Workspace safely: Versioning on, conditional creates
+    /// refused, and the profile allowed to read, write and list what sync uses. Writes one
+    /// small object under the prefix and leaves it. After it passes once, this `S3Remote`
+    /// does not check again.
+    pub fn check_bucket(&self) -> Result<(), BucketCheckError> {
+        if self.checked.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        bucket_check::run(&self.client, &self.prefix)?;
+        self.checked.store(true, Ordering::Release);
+        Ok(())
     }
 
     /// The `s3://` address of a Workspace folder, for a person to open in another tool.
@@ -453,6 +471,10 @@ impl RemoteStorage for S3Remote<'_> {
             conditional_writes: true,
             keeps_revisions: true,
         }
+    }
+
+    fn check_usable(&self) -> Result<(), RemoteError> {
+        Ok(self.check_bucket()?)
     }
 
     fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError> {

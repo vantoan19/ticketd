@@ -367,6 +367,9 @@ mod tests {
         fn capabilities(&self) -> RemoteCapabilities {
             self.inner.capabilities()
         }
+        fn check_usable(&self) -> Result<(), RemoteError> {
+            self.inner.check_usable()
+        }
         fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError> {
             self.inner.folders()
         }
