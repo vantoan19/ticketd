@@ -2,7 +2,6 @@ import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { fumadocsMdx } from "fumadocs-mdx/vite";
-import { siteBase } from "./site-base.ts";
 
 import { workshopArt } from "./src/art/plugin.tsx";
 import { proofImages } from "./capture/proof-images.ts";
@@ -12,7 +11,6 @@ import {
 } from "./src/art/desktop-tokens.ts";
 
 export default defineConfig({
-  base: siteBase,
   plugins: [
     workshopArt(),
     proofImages(),

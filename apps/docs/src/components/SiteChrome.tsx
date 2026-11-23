@@ -91,6 +91,7 @@ export function SiteFooter() {
         <Wordmark />
         <nav aria-label="Footer">
           <SiteLinks />
+          <a href={siteUrl("/docs/reference/privacy")}>Privacy</a>
           <a href={links.license}>MIT license</a>
         </nav>
       </div>

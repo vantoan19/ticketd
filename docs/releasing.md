@@ -78,9 +78,27 @@ A hand-assembled draft has no build attestations.
 
 The publisher enables Google Drive API and Google Picker API in its Google Cloud
 project, configures consent with only `https://www.googleapis.com/auth/drive.file`,
-and creates one **Desktop app** OAuth client, which serves every platform. For an
-External Testing app, add the test users. Store the downloaded installed-app JSON
-as the `TICKETD_GOOGLE_OAUTH_CLIENT_JSON` repository secret.
+and creates one **Desktop app** OAuth client, which serves every platform. Store
+the downloaded installed-app JSON as the `TICKETD_GOOGLE_OAUTH_CLIENT_JSON`
+repository secret.
+
+Distribution builds use an app that is **In production**. In Testing, only listed
+test users can sign in and their refresh tokens expire after seven days.
+`drive.file` is a non-sensitive scope, so publishing needs brand verification but
+no scope review or security assessment. Brand verification needs:
+
+- App name `ticketd`, a 120×120 logo, and a support email that is fine to show
+  publicly on the consent screen.
+- Homepage `https://ticketd.dev/` and privacy policy
+  `https://ticketd.dev/docs/reference/privacy`. The privacy page is built from
+  [PRIVACY.md](../PRIVACY.md) and carries the Google API Services User Data
+  Policy statement.
+- Authorized domain `ticketd.dev`, verified in Google Search Console by an owner
+  of the Cloud project.
+
+After Google approves the brand, publish the branding within seven days or
+verification must run again. Accounts that signed in during Testing must
+reconnect once. Keep a separate Testing project for development clients.
 
 Enable the APIs in the same project that owns the OAuth client; creating a
 client alone does not enable Drive API access. If sign-in and folder selection
