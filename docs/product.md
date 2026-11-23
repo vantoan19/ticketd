@@ -389,13 +389,15 @@ system's secure store.
 
 ### Ticket sources
 
-Link a local development extension with `ticketd source extension link PATH`.
-It appears alongside built-in providers in Settings → Sources. The
+Install an extension from a local folder with `ticketd source extension add PATH`.
+Review the program and declared hosts before approving. The installed copy
+appears alongside built-in providers in Settings → Sources. Authors can
+link their build folder with `ticketd source extension link PATH`. The
 [extension guide](source-extensions/README.md) includes a TypeScript example,
 the published contract and the conformance command.
 
 A ticket source connects an external tracker. GitHub Issues is built in. GitHub
-and linked extensions use the same ticket authority and refresh workflows
+and extensions use the same ticket authority and refresh workflows
 ([ADR 0006](adr/0006-external-ticket-authority.md)).
 
 - Add and name source connections under Settings → Sources. Several accounts can

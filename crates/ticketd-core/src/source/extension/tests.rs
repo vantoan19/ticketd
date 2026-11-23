@@ -225,3 +225,42 @@ fn an_exited_leader_is_unavailable_and_its_descendant_is_stopped() {
     stream.read_to_string(&mut text).unwrap();
     assert_eq!(text, "ready");
 }
+
+#[test]
+fn an_installed_folder_is_checked_even_with_a_warm_process() {
+    let scratch = tempfile::tempdir().unwrap();
+    let registry_folder = scratch.path().join("extensions");
+    let registry = ExtensionRegistry::new(registry_folder.clone());
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension");
+    let installed = registry
+        .add(registry.prepare_add(&fixture).unwrap())
+        .unwrap();
+
+    let config = configuration("valid");
+    let engine = registry
+        .engine()
+        .unwrap()
+        .for_connection("scripted", "scripted", &config);
+    assert!(engine.check_connection("scripted", &config).is_ok());
+    std::fs::write(installed.path.join("extra-file"), "changed").unwrap();
+    let error = engine.check_connection("scripted", &config).unwrap_err();
+    assert!(error.to_string().contains("add it again"), "{error}");
+}
+
+#[cfg(unix)]
+#[test]
+fn an_install_refuses_a_symlink_to_an_executable_outside_the_package() {
+    let scratch = tempfile::tempdir().unwrap();
+    let installation = ExtensionRegistry::new(scratch.path().join("extensions"));
+    let package = scratch.path().join("package");
+    std::fs::create_dir(&package).unwrap();
+    std::os::unix::fs::symlink("/bin/sh", package.join("tracker")).unwrap();
+    std::fs::write(
+        package.join("ticketd-source.json"),
+        r#"{ "id": "scripted", "version": "0.0.1", "executable": "./tracker" }"#,
+    )
+    .unwrap();
+
+    let error = installation.prepare_add(&package).err().unwrap();
+    assert!(error.to_string().contains("symlinks"), "{error}");
+}
