@@ -7,8 +7,9 @@ use std::io::Cursor;
 use ticketd_core::{
     Error, TicketPatch, Workspace,
     sync::{
-        AttachmentAvailabilityState, AttachmentDownload, RecordKind, SyncConnection, SyncDirection,
-        SyncNoticeKind, SyncRecovery, SyncRecoveryAction, SyncState, SyncStatus,
+        AttachmentAvailabilityState, AttachmentDownload, RecordKind, S3Binding, SyncConnection,
+        SyncDirection, SyncNoticeKind, SyncProvider, SyncRecovery, SyncRecoveryAction, SyncState,
+        SyncStatus,
         remote::{FakeRemote, RemoteError, RemoteKey, RemoteKind, RemoteOp, RemoteStorage},
     },
 };
@@ -2066,4 +2067,192 @@ fn a_format_64_workspace_gains_the_remembered_folder() {
         .unwrap();
     let options = desk.sync_setup_options(&desks.remote).unwrap();
     assert_eq!(options.reconnect.unwrap().name, "ticketd Home");
+}
+
+fn s3(bucket: &str, prefix: &str, profile: &str) -> S3Binding {
+    S3Binding {
+        bucket: bucket.into(),
+        prefix: prefix.into(),
+        profile: profile.into(),
+        aws_cli_path: Some("/opt/homebrew/bin/aws".into()),
+    }
+}
+
+const IDENTITY: &str = "arn:aws:sts::123456789012:assumed-role/Admin/mina";
+
+/// Format 86 records which storage the binding uses; every earlier binding is
+/// a Google Drive one.
+#[test]
+fn a_format_85_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and_keeps_syncing() {
+    let desks = desks();
+    let (desk, _, _) = desks.uploaded("a");
+    let folder = desk.sync_status().unwrap().folder.unwrap();
+    drop(desk);
+    let path = desks.directory.path().join("a");
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    let mut columns = String::new();
+    for column in [
+        "provider",
+        "s3_bucket",
+        "s3_prefix",
+        "aws_profile",
+        "aws_cli_path",
+        "last_provider",
+        "last_bucket",
+        "last_prefix",
+    ] {
+        columns += &format!("ALTER TABLE sync_state DROP COLUMN {column};");
+    }
+    fixture
+        .execute_batch(&format!("{columns} PRAGMA user_version = 85;"))
+        .unwrap();
+    drop(fixture);
+
+    let mut desk = Workspace::open(&path).unwrap();
+    let binding = desk.sync_binding().unwrap().unwrap();
+    assert_eq!(binding.provider, SyncProvider::GoogleDrive);
+    assert_eq!(binding.s3, None);
+    assert_eq!(binding.folder_id, folder.id);
+    let status = desk.sync_status().unwrap();
+    assert_eq!(status.provider, SyncProvider::GoogleDrive);
+    assert_eq!(status.s3, None);
+
+    let added = desk.create_ticket("After the upgrade").unwrap().reference;
+    let status = desk.sync_now(&desks.remote).unwrap();
+    assert_eq!((status.recovery, status.state), (None, SyncState::Uploaded));
+    let mut other = desks.joined("b", AttachmentDownload::Automatic);
+    other.sync_now(&desks.remote).unwrap();
+    assert_eq!(
+        other.show_ticket(&added).unwrap().title,
+        "After the upgrade"
+    );
+}
+
+#[test]
+fn a_binding_to_s3_reports_its_provider_and_location_in_status_and_binding() {
+    let desks = desks();
+    let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();
+    let bucket = s3("notes-bucket", "ticketd/", "work");
+    let choosing = desk.sync_connect_s3(&bucket, IDENTITY).unwrap();
+    assert_eq!(choosing.connection, SyncConnection::Choosing);
+    assert_eq!(choosing.provider, SyncProvider::S3);
+    assert_eq!(choosing.s3, Some(bucket.clone()));
+    assert_eq!(choosing.account.as_deref(), Some(IDENTITY));
+    assert_eq!(desk.sync_binding().unwrap(), None);
+
+    desk.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    let binding = desk.sync_binding().unwrap().unwrap();
+    assert_eq!(binding.provider, SyncProvider::S3);
+    assert_eq!(binding.s3, Some(bucket.clone()));
+    assert_eq!(binding.connection_id, None);
+    let status = desk.sync_now(&desks.remote).unwrap();
+    assert_eq!(
+        (status.provider, status.s3),
+        (SyncProvider::S3, Some(bucket))
+    );
+
+    // Signing out forgets the location; Google Drive is what is offered again.
+    let status = desk.sync_disconnect().unwrap();
+    assert_eq!(
+        (status.provider, status.s3),
+        (SyncProvider::GoogleDrive, None)
+    );
+}
+
+#[test]
+fn a_bound_workspace_is_not_connected_to_another_storage_or_bucket() {
+    let desks = desks();
+    let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();
+    desk.sync_connect_s3(&s3("one", "ticketd/", "work"), IDENTITY)
+        .unwrap();
+    desk.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+
+    for other in [s3("two", "ticketd/", "work"), s3("one", "other/", "work")] {
+        assert!(matches!(
+            desk.sync_connect_s3(&other, IDENTITY),
+            Err(Error::Sync(_))
+        ));
+    }
+    assert!(matches!(
+        desk.sync_connect("connection-1", "person@example.com"),
+        Err(Error::Sync(_))
+    ));
+    // Another profile reaching the same bucket is this desktop's own choice.
+    let status = desk
+        .sync_connect_s3(&s3("one", "ticketd/", "personal"), IDENTITY)
+        .unwrap();
+    assert_eq!(status.s3.unwrap().profile, "personal");
+}
+
+#[test]
+fn reconnect_is_offered_for_the_same_bucket_prefix_and_folder_of_an_s3_binding() {
+    let desks = desks();
+    let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();
+    desk.sync_connect_s3(&s3("one", "ticketd/", "work"), IDENTITY)
+        .unwrap();
+    desk.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    desk.sync_now(&desks.remote).unwrap();
+    let folder = desks.folder();
+    let offered = |desk: &Workspace| desk.sync_setup_options(&desks.remote).unwrap().reconnect;
+
+    desk.sync_disconnect().unwrap();
+    for other in [s3("two", "ticketd/", "work"), s3("one", "other/", "work")] {
+        desk.sync_connect_s3(&other, IDENTITY).unwrap();
+        assert_eq!(offered(&desk), None);
+        assert!(matches!(
+            desk.sync_reconnect(&desks.remote),
+            Err(Error::Sync(_))
+        ));
+    }
+    // Another provider offers nothing, whatever its account.
+    desk.sync_connect("connection-1", "person@example.com")
+        .unwrap();
+    assert_eq!(offered(&desk), None);
+
+    // The same bucket and prefix, through another profile and another identity.
+    desk.sync_connect_s3(
+        &s3("one", "ticketd/", "personal"),
+        "arn:aws:iam::123456789012:user/mina",
+    )
+    .unwrap();
+    assert_eq!(offered(&desk).unwrap().id, folder);
+    let status = desk.sync_reconnect(&desks.remote).unwrap();
+    assert_eq!(status.connection, SyncConnection::Connected);
+    assert_eq!(status.folder.unwrap().id, folder);
+    assert_eq!(status.provider, SyncProvider::S3);
+    let status = desk.sync_now(&desks.remote).unwrap();
+    assert_eq!(status.recovery, None);
+
+    // The folder is gone from the bucket.
+    desk.sync_disconnect().unwrap();
+    desk.sync_connect_s3(&s3("one", "ticketd/", "work"), IDENTITY)
+        .unwrap();
+    desks.remote.remove_folder(&folder);
+    assert_eq!(offered(&desk), None);
+}
+
+#[test]
+fn downloading_a_workspace_keeps_this_desktops_s3_binding() {
+    let desks = desks();
+    let (uploaded, _, _) = desks.uploaded("a");
+    drop(uploaded);
+    let mut desk = Workspace::open(desks.directory.path().join("b")).unwrap();
+    let bucket = s3("one", "ticketd/", "work");
+    desk.sync_connect_s3(&bucket, IDENTITY).unwrap();
+    let (mut desk, _) = desk
+        .sync_download_workspace(&desks.remote, &desks.folder())
+        .unwrap();
+    let binding = desk.sync_binding().unwrap().unwrap();
+    assert_eq!(
+        (binding.provider, binding.s3),
+        (SyncProvider::S3, Some(bucket))
+    );
+    assert_eq!(
+        desk.sync_status().unwrap().account.as_deref(),
+        Some(IDENTITY)
+    );
+    assert_eq!(desk.sync_now(&desks.remote).unwrap().recovery, None);
 }

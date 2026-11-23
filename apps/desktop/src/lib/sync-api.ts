@@ -74,8 +74,19 @@ const statusSchema = z.object({
    * `connected`: this Workspace syncs with `folder`.
    */
   connection: z.enum(["not_connected", "choosing", "connected"]),
-  /** The signed-in Google account's email address. */
+  /** The signed-in Google account's email address (an AWS identity for S3). */
   account: z.string().nullable(),
+  /** The storage this Workspace syncs with. The desktop offers only Google Drive for now. */
+  provider: z.enum(["google_drive", "s3"]),
+  /** For S3: the bucket and prefix of the Workspace folders and this desktop's AWS CLI profile. */
+  s3: z
+    .object({
+      bucket: z.string(),
+      prefix: z.string(),
+      profile: z.string(),
+      aws_cli_path: z.string().nullable(),
+    })
+    .nullable(),
   /** The Workspace's Drive folder, once connected. */
   folder: z.object({ name: z.string() }).nullable(),
   state: z.enum(syncStates),

@@ -19,9 +19,9 @@ pub use engine::{
     SyncChoice, SyncConflict, SyncConflictField, SyncNotice, SyncNoticeKind, SyncResolution,
 };
 pub use setup::{
-    AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, SetupOptions,
-    SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem, SyncRecovery,
-    SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
+    AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, S3Binding,
+    SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem,
+    SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
 };
 
 pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
@@ -39,6 +39,11 @@ pub(crate) fn migrate_unchanged_tickets(
     connection: &rusqlite::Connection,
 ) -> Result<(), crate::Error> {
     capture::migrate_unchanged_tickets(connection)
+}
+
+/// Format version 86: see `setup::migrate_provider`.
+pub(crate) fn migrate_provider(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_provider(connection)
 }
 
 /// The sync destination and Attachment transfer state (format version 59).

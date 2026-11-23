@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
-use ticketd_core::sync::SyncConnection;
+use ticketd_core::sync::{SyncConnection, SyncProvider};
 use ticketd_diagnostics::{
     ErrorGroup, Export, Facts, HarnessVersion, KnownValues, LogLevel, WorkspaceHealth,
 };
@@ -113,7 +113,8 @@ async fn gather(bridge: &State<'_, ChatBridge>) -> Facts {
     let harnesses = harness_versions(bridge);
     let workspace = tauri::async_runtime::spawn_blocking(workspace_facts);
     let harnesses = harnesses.await;
-    let (health, sync_enabled, account, path) = workspace.await.unwrap_or_default();
+    let (health, sync_enabled, (drive_email, aws_identity), path) =
+        workspace.await.unwrap_or_default();
     Facts {
         app_version: env!("CARGO_PKG_VERSION").to_string(),
         commit: option_env!("TICKETD_COMMIT")
@@ -131,7 +132,8 @@ async fn gather(bridge: &State<'_, ChatBridge>) -> Facts {
         sync_enabled,
         harnesses,
         workspace: health,
-        known: KnownValues::from_environment(path.as_deref(), account.as_deref()),
+        known: KnownValues::from_environment(path.as_deref(), drive_email.as_deref())
+            .with_aws_identity(aws_identity.as_deref()),
     }
 }
 
@@ -151,14 +153,17 @@ async fn harness_versions(bridge: &State<'_, ChatBridge>) -> Vec<HarnessVersion>
         .unwrap_or_default()
 }
 
-/// The Workspace's health, whether sync is connected, the Drive account and the file's path.
-fn workspace_facts() -> (WorkspaceHealth, bool, Option<String>, Option<PathBuf>) {
+/// The Workspace's health, whether sync is connected, the Drive email and the AWS identity
+/// (one of them, by provider) and the file's path.
+type Accounts = (Option<String>, Option<String>);
+
+fn workspace_facts() -> (WorkspaceHealth, bool, Accounts, Option<PathBuf>) {
     let Ok(file) = ticketd_core::default_workspace_file() else {
         let health = WorkspaceHealth {
             quick_check: "the Workspace location is not known".to_string(),
             ..WorkspaceHealth::default()
         };
-        return (health, false, None, None);
+        return (health, false, (None, None), None);
     };
     let health = ticketd_core::workspace_health(&file.path);
     let status = crate::open_workspace()
@@ -167,7 +172,13 @@ fn workspace_facts() -> (WorkspaceHealth, bool, Option<String>, Option<PathBuf>)
     let sync_enabled = status
         .as_ref()
         .is_some_and(|status| status.connection != SyncConnection::NotConnected);
-    let account = status.and_then(|status| status.account);
+    // The Drive email or the AWS identity, whichever the binding signs in with.
+    let accounts = status
+        .and_then(|status| status.account.map(|account| (status.provider, account)))
+        .map_or((None, None), |(provider, account)| match provider {
+            SyncProvider::GoogleDrive => (Some(account), None),
+            SyncProvider::S3 => (None, Some(account)),
+        });
     (
         WorkspaceHealth {
             format_version: health.format_version.and_then(|v| u32::try_from(v).ok()),
@@ -177,7 +188,7 @@ fn workspace_facts() -> (WorkspaceHealth, bool, Option<String>, Option<PathBuf>)
             row_counts: health.row_counts,
         },
         sync_enabled,
-        account,
+        accounts,
         Some(file.path),
     )
 }
