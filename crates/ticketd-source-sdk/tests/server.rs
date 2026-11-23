@@ -41,6 +41,7 @@ impl Extension for Tracker {
                 account: "Fixture User".into(),
                 account_id: Some("fixture-user".into()),
                 site: "fixture-site".into(),
+                tracker_time: None,
             },
             derived: Default::default(),
         })

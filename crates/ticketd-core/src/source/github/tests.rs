@@ -1228,6 +1228,7 @@ fn search_for_title(engine: &Engine) -> Result<PublicationCandidates, SourceErro
         "github",
         &config(json!({"repositories": ["o/r"]})),
         &PublicationSearch {
+            tracker_since: None,
             account: None,
             request: publish_request(),
             since: "2026-03-01T00:00:00Z".into(),
@@ -1292,6 +1293,7 @@ fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_matc
             "github",
             &config(json!({"repositories": ["o/r"]})),
             &PublicationSearch {
+                tracker_since: None,
                 account: Some("octo".into()),
                 request: publish_request(),
                 since: "2026-03-01T00:00:00Z".into(),

@@ -554,6 +554,7 @@ impl Connector for GithubConnector {
                 account: account.to_owned(),
                 account_id: Some(account.to_ascii_lowercase()),
                 site: self.site(),
+                tracker_time: None,
             },
             derived: Self::derived_configuration(config),
         })

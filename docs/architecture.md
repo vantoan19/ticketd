@@ -958,8 +958,12 @@ published ticket returns it without calling the connector. The attempt remains
 readable on a restored device without the original binding. An unavailable
 connection cannot establish that the original create failed. Recovery uses the
 connection’s stable account identity to surface other issues the account created
-in the search window. Linear uses team UUIDs throughout publication and retains
-human-readable team labels in its connection’s derived configuration for preview.
+in the search window. Linear uses the tracker’s HTTP Date from the authenticated
+connection check. Core saves that time before the mutation and uses it to bound
+discovery and recovery across restarts. When the date is missing, Linear can still
+search a bounded set of issues for candidates and cannot confirm absence.
+Linear uses team UUIDs throughout publication and retains human-readable team
+labels in its connection’s derived configuration for preview.
 
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only

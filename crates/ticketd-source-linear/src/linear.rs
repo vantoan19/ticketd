@@ -75,6 +75,9 @@ impl Extension for Linear {
         let teams = required_teams(config)?;
         let api = self.api(context, config)?;
         let connection: LinearConnection = api.request("LinearConnection", json!({}), &[])?;
+        let tracker_time = api
+            .response_time()
+            .map(|time| chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339());
         let destination_labels: BTreeMap<_, _> = api
             .all::<Team>(
                 "LinearConfiguredTeams",
@@ -109,6 +112,7 @@ impl Extension for Linear {
                 account: connection.viewer.display_name,
                 account_id: Some(connection.viewer.id.to_string()),
                 site: connection.organization.id.to_string(),
+                tracker_time,
             },
             derived: DerivedConfiguration {
                 partitions: destinations.clone(),

@@ -510,6 +510,7 @@ pub(in crate::source) fn publication_search() -> PublicationSearch {
             body: "The ticket description as sent.".into(),
             destination: "o/r".into(),
         },
+        tracker_since: None,
         account: Some("octo".into()),
         since: SEARCH_SINCE.into(),
     }

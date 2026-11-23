@@ -150,6 +150,13 @@
           "description": "Canonical site identity. Empty when the provider has only one site.",
           "type": "string",
           "default": ""
+        },
+        "tracker_time": {
+          "description": "RFC 3339 time reported by the tracker during this authenticated check, when available.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
@@ -951,8 +958,15 @@
           "$ref": "#/$defs/PublishRequest"
         },
         "since": {
-          "description": "RFC 3339 instant before which the attempt cannot have created anything.",
+          "description": "The lower bound based on the device clock, in RFC 3339.",
           "type": "string"
+        },
+        "tracker_since": {
+          "description": "The lower bound based on the tracker clock immediately before the mutation, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [

@@ -201,7 +201,8 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
          CREATE INDEX source_connection_tickets_by_connection ON source_connection_tickets(connection_id);
          CREATE TABLE publication_connections (
              attempt_id TEXT PRIMARY KEY REFERENCES publication_attempts(id) ON DELETE CASCADE,
-             connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE
+             connection_id TEXT NOT NULL REFERENCES source_connections(id) ON DELETE CASCADE,
+             tracker_started_at TEXT
          );",
     )?;
     let mut old = connection.prepare(
@@ -249,7 +250,7 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
             params![provider, id],
         )?;
         connection.execute(
-            "INSERT INTO publication_connections
+            "INSERT INTO publication_connections (attempt_id, connection_id)
              SELECT a.id, ?2 FROM publication_attempts a
              JOIN source_configurations c ON c.provider = a.provider
              WHERE a.provider = ?1 AND a.status IN ('in_flight', 'unresolved')
@@ -1383,17 +1384,18 @@ pub(crate) fn retain_connections(
         }
     }
     let mut bindings = current.prepare(
-        "SELECT p.attempt_id, p.connection_id, a.provider, a.destination, a.started_at, a.title, a.body
+        "SELECT p.attempt_id, p.connection_id, a.provider, a.destination, a.started_at, a.title, a.body,
+                p.tracker_started_at
          FROM publication_connections p JOIN publication_attempts a ON p.attempt_id = a.id",
     )?;
     let mut rows = bindings.query([])?;
     while let Some(row) = rows.next()? {
-        let values = (0..7)
+        let values = (0..8)
             .map(|index| row.get::<_, rusqlite::types::Value>(index))
             .collect::<Result<Vec<_>, _>>()?;
         restored.execute(
-            "INSERT INTO publication_connections
-             SELECT id, ?2 FROM publication_attempts WHERE id = ?1 AND provider = ?3 AND destination = ?4 AND started_at = ?5 AND title = ?6 AND body = ?7",
+            "INSERT INTO publication_connections (attempt_id, connection_id, tracker_started_at)
+             SELECT id, ?2, ?8 FROM publication_attempts WHERE id = ?1 AND provider = ?3 AND destination = ?4 AND started_at = ?5 AND title = ?6 AND body = ?7",
             rusqlite::params_from_iter(values),
         )?;
     }

@@ -412,6 +412,7 @@ fn check_publication(
     let search = PublicationSearch {
         request,
         since,
+        tracker_since: connection.connection.tracker_time.clone(),
         account: Some(connection.connection.account_key().to_owned()),
     };
     let found = engine.find_published(provider, config, &search)?;

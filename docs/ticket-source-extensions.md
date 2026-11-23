@@ -279,7 +279,12 @@ A timeout, lost response or ambiguous tracker answer leaves publication
 unresolved. Report an appropriate `unavailable` or `protocol` error, so
 ticketd can check for a created issue before allowing another write.
 In `find_published`, report the search as complete only if you finished
-reading the relevant issues in that destination.
+reading the relevant issues in that destination and can trust the lower bound.
+A connection check can report the tracker’s current RFC 3339 `tracker_time`
+when the tracker provides it. ticketd keeps that time for the mutation and sends
+the derived `tracker_since` during recovery. A device-clock `since` alone can miss
+a committed issue if the device is ahead. With no reliable lower bound, use a
+bounded search for candidates and leave the result incomplete.
 
 ## Describe forms and presentation
 

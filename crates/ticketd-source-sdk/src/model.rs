@@ -43,6 +43,9 @@ pub struct ConnectionInfo {
     /// Canonical site identity. Empty when the provider has only one site.
     #[serde(default)]
     pub site: String,
+    /// RFC 3339 time reported by the tracker during this authenticated check, when available.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracker_time: Option<String>,
 }
 
 impl ConnectionInfo {
@@ -314,8 +317,11 @@ pub struct PublishRequest {
 pub struct PublicationSearch {
     /// Exactly what the earlier attempt sent.
     pub request: PublishRequest,
-    /// RFC 3339 instant before which the attempt cannot have created anything.
+    /// The lower bound based on the device clock, in RFC 3339.
     pub since: String,
+    /// The lower bound based on the tracker clock immediately before the mutation, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tracker_since: Option<String>,
     /// The account ID, or its label when the source has no separate ID. Whatever it created in
     /// the window is a candidate, whatever its text now says: a teammate or an
     /// automation may have edited the title and description since.

@@ -562,8 +562,9 @@ pub(crate) fn awaited_by_open_attempt(
     issue: &ExternalIssue,
 ) -> Result<bool, Error> {
     let mut statement = connection.prepare(
-        "SELECT title, body, started_at FROM publication_attempts \
-         WHERE provider = ?1 AND status IN ('in_flight', 'unresolved')",
+        "SELECT a.title, a.body, COALESCE(c.tracker_started_at, a.started_at)
+         FROM publication_attempts a LEFT JOIN publication_connections c ON c.attempt_id = a.id
+         WHERE a.provider = ?1 AND a.status IN ('in_flight', 'unresolved')",
     )?;
     let attempts = statement
         .query_map([&issue.reference.identity.provider], |row| {
@@ -1166,10 +1167,16 @@ impl Workspace {
         // The remote write. Nothing is held open: another process may read or
         // write the workspace meanwhile and sees the attempt in flight.
         let (result, sent) = match started.source.check(engine) {
-            Ok((scoped, _)) => (
-                scoped.publish(provider, &started.source.saved.config, &started.request),
-                true,
-            ),
+            Ok((scoped, checked)) => match self.record_tracker_time(
+                &started.attempt_id,
+                checked.connection.tracker_time.as_deref(),
+            ) {
+                Ok(()) => (
+                    scoped.publish(provider, &started.source.saved.config, &started.request),
+                    true,
+                ),
+                Err(error) => (Err(error), false),
+            },
             Err(error) => (Err(error), false),
         };
         match result {
@@ -1327,6 +1334,29 @@ impl Workspace {
             )?;
             Ok(Linked::Done(Box::new(attempt)))
         })
+    }
+
+    /// Save the tracker clock before sending so a lost reply remains recoverable across restarts.
+    fn record_tracker_time(&mut self, id: &str, time: Option<&str>) -> Result<(), SourceError> {
+        let Some(time) = time.filter(|time| parse_time(time).is_some()) else {
+            return Ok(());
+        };
+        let saved = crate::write_scope::run(&self.connection, |transaction| {
+            Ok(transaction.execute(
+                "UPDATE publication_connections SET tracker_started_at = ?2
+                 WHERE attempt_id = ?1 AND EXISTS (
+                     SELECT 1 FROM publication_attempts WHERE id = ?1 AND status = 'in_flight'
+                 )",
+                params![id, time],
+            )? == 1)
+        });
+        if matches!(saved, Ok(true)) {
+            Ok(())
+        } else {
+            Err(SourceError::NotSent(
+                "could not save the tracker's time for publication recovery".into(),
+            ))
+        }
     }
 
     /// Moves an attempt that is still open to `failed` or `unresolved`, keeping
@@ -1497,13 +1527,12 @@ impl Workspace {
         let source = publication_connection(&self.connection, &attempt)?;
         if search && !running && attempt.issue.is_none() {
             let search_result = match source.as_ref() {
-                Some(source) => verified_publication_engine(engine, source).and_then(|engine| {
-                    engine.find_published(
-                        &attempt.provider,
-                        &source.saved.config,
-                        &search_for(&attempt, &source.account_key),
-                    )
-                }),
+                Some(source) => {
+                    let search = search_for(&self.connection, &attempt, &source.account_key)?;
+                    verified_publication_engine(engine, source).and_then(|engine| {
+                        engine.find_published(&attempt.provider, &source.saved.config, &search)
+                    })
+                }
                 None => Err(publication_connection_missing()),
             };
             match search_result {
@@ -1818,7 +1847,9 @@ impl Workspace {
                 known.display, issue.display
             )));
         }
-        if attempt.issue.is_none() && predates(&issue.created_at, &attempt.started_at) {
+        let started_at = tracker_started_at(&self.connection, &attempt.id)?
+            .unwrap_or_else(|| attempt.started_at.clone());
+        if attempt.issue.is_none() && predates(&issue.created_at, &started_at) {
             return Err(mismatch(format!(
                 "{} was created before this publication began, so it cannot be its result",
                 issue.display
@@ -1958,12 +1989,9 @@ impl Workspace {
                 source,
             })
         };
+        let search = search_for(&self.connection, attempt, &source.account_key)?;
         let found = engine
-            .find_published(
-                &attempt.provider,
-                &source.saved.config,
-                &search_for(attempt, &source.account_key),
-            )
+            .find_published(&attempt.provider, &source.saved.config, &search)
             .map_err(unverified)?;
         if !found.matches.is_empty() {
             return Err(publication(PublicationError::Candidates {
@@ -2040,8 +2068,23 @@ fn without_retry_advice(message: &str) -> String {
 /// Failure code of an attempt a person confirmed was never created.
 const RULED_OUT: &str = "ruled_out";
 
-fn search_for(attempt: &PublicationAttempt, account: &str) -> PublicationSearch {
-    PublicationSearch {
+fn tracker_started_at(connection: &Connection, id: &str) -> Result<Option<String>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT tracker_started_at FROM publication_connections WHERE attempt_id = ?1",
+            [id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten())
+}
+
+fn search_for(
+    connection: &Connection,
+    attempt: &PublicationAttempt,
+    account: &str,
+) -> Result<PublicationSearch, Error> {
+    Ok(PublicationSearch {
         account: Some(account.to_owned()),
         request: PublishRequest {
             title: attempt.title.clone(),
@@ -2049,7 +2092,10 @@ fn search_for(attempt: &PublicationAttempt, account: &str) -> PublicationSearch 
             destination: attempt.destination.clone(),
         },
         since: search_start(&attempt.started_at),
-    }
+        tracker_since: tracker_started_at(connection, &attempt.id)?
+            .as_deref()
+            .map(search_start),
+    })
 }
 
 fn publication_connection(
