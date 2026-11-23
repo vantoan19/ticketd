@@ -129,6 +129,34 @@ fn discover_all(engine: &Engine, values: &ConfigValues) -> Result<Vec<ExternalIs
 }
 
 #[test]
+fn configured_repositories_use_the_github_web_host_without_network_access() {
+    for (api, repository) in [
+        ("https://api.github.com", "github.com/Owner/Name"),
+        (
+            "https://Git.Example.test:8443/api/v3",
+            "git.example.test/Owner/Name",
+        ),
+    ] {
+        let fixture = Arc::new(Fixture::default());
+        let connector = GithubConnector::new(
+            api,
+            Box::new(Shared(fixture.clone())),
+            Box::new(Token(None)),
+        );
+        let mut engine = Engine::new();
+        engine.register(Box::new(connector)).unwrap();
+        assert_eq!(
+            engine
+                .repository_for_destination("github", "Owner/Name")
+                .unwrap()
+                .as_deref(),
+            Some(repository)
+        );
+        assert!(fixture.urls().is_empty());
+    }
+}
+
+#[test]
 fn discovery_pages_through_every_repository_and_skips_pull_requests() {
     let (fixture, engine) = setup(Some(TOKEN));
     let first = format!("{API}/repos/o/one/issues?state=open&per_page=100");
