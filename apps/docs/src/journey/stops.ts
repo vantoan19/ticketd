@@ -43,7 +43,7 @@ export const stops: readonly Stop[] = [
       },
       {
         name: "A shared spec",
-        description: "The Plan keeps the login requirements close.",
+        description: "The Plan keeps the rate-limit requirements close.",
         region: "spec",
         station: [48, 8, 44],
         screen: "plan",
@@ -66,7 +66,7 @@ export const stops: readonly Stop[] = [
       {
         name: "Read the context",
         description: "The agent reads the ticket before it starts.",
-        command: "ticketd context T-LG12 --plan --documents --relationships",
+        command: "ticketd context T-RL12 --plan --documents --relationships",
         region: "purpose",
         station: [21, 18, 36],
         screen: "context",
@@ -75,7 +75,7 @@ export const stops: readonly Stop[] = [
         name: "Start work",
         description: "The ticket moves to In progress under the agent’s name.",
         command:
-          'ticketd change T-LG12 --status "In progress" --agent coding-agent',
+          'ticketd change T-RL12 --status "In progress" --agent coding-agent',
         region: "working",
         station: [87, 28, 27],
         screen: "board",
@@ -84,7 +84,7 @@ export const stops: readonly Stop[] = [
         name: "Post the update",
         description: "The agent leaves an update with the test result.",
         command:
-          'ticketd activity add T-LG12 --agent coding-agent --brief "The limiter passes the boundary tests. Ready for review."',
+          'ticketd activity add T-RL12 --agent coding-agent --brief "The limiter passes the boundary tests. Ready for review."',
         region: "update",
         station: [22, 18, 36],
         screen: "ticket",
@@ -94,7 +94,7 @@ export const stops: readonly Stop[] = [
         description:
           "The review request reaches the person following the ticket.",
         command:
-          'ticketd change T-LG12 --status "In review" --agent coding-agent',
+          'ticketd change T-RL12 --status "In review" --agent coding-agent',
         region: "review",
         station: [135, 15, 43],
         screen: "inbox",

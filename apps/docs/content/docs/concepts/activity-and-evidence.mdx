@@ -15,9 +15,9 @@ An **Activity** is attached to exactly one ticket. There are two kinds:
   Events cannot be edited or deleted individually.
 
 ```sh
-ticketd activity add T-LG12 --agent coding-agent \
+ticketd activity add T-RL12 --agent coding-agent \
   --brief "The limiter passes the boundary tests. Ready for review."
-ticketd activity list T-LG12
+ticketd activity list T-RL12
 ```
 
 Posting an update does not change the ticket's status or its readiness.
@@ -28,7 +28,7 @@ Keep the brief short and put the long form in the details. The details are saved
 as a new Document linked to the update:
 
 ```sh
-ticketd activity add T-LG12 --agent coding-agent \
+ticketd activity add T-RL12 --agent coding-agent \
   --brief "Investigated the lockout reports." \
   --details-file findings.md
 ```
@@ -49,7 +49,7 @@ Ticket history is the automatic record of changes to a ticket's status,
 relationships, project or Plan, and trash state.
 
 ```sh
-ticketd history T-LG12
+ticketd history T-RL12
 ```
 
 ## Evidence
@@ -66,11 +66,11 @@ that it was verified.
 | `verification` | The result of a check or test run. |
 
 ```sh
-ticketd evidence add T-LG12 --kind branch \
-  --name "Limiter branch" --value auth/login-limiter --agent coding-agent
-ticketd evidence add T-LG12 --kind verification \
+ticketd evidence add T-RL12 --kind branch \
+  --name "Limiter branch" --value api/rate-limiter --agent coding-agent
+ticketd evidence add T-RL12 --kind verification \
   --name "Limiter tests" --value "passed on CI" --agent coding-agent
-ticketd evidence list T-LG12
+ticketd evidence list T-RL12
 ```
 
 ## Following tickets
@@ -85,5 +85,5 @@ A reminder brings a ticket back to your attention at a time you choose,
 whatever its status. The time must be RFC 3339 with an offset:
 
 ```sh
-ticketd reminder set T-LG12 2026-12-01T09:00:00+00:00
+ticketd reminder set T-RL12 2026-12-01T09:00:00+00:00
 ```

@@ -94,7 +94,7 @@ const definitions: Pick<
         id: "scan",
         kind: "run_agent",
         agent_id: "reviewer",
-        execution_folder: "/workspace/login-hardening",
+        execution_folder: "/workspace/api-rate-limits",
       },
       {
         id: "notify",
