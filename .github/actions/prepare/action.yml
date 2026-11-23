@@ -21,9 +21,11 @@ inputs:
 runs:
   using: composite
   steps:
-    # The hosted D: drive is faster than C: for small-file IO; the checkout and target/ are
-    # already there, but TEMP (where tests create their Workspaces) and CARGO_HOME are not. A
-    # ReFS Dev Drive is no faster on standard runners and changes directory-delete events.
+    # The tests create their temporary Workspaces in TEMP, which defaults to C:. On D: the Windows
+    # test run took about 880 s (2 runs) instead of about 1,520 s (3 runs on C:); see #563. The checkout
+    # and target/ are already on D:. A ReFS Dev Drive is no faster on standard runners and changes
+    # directory-delete events. Windows Defender exclusions and the rust-lld linker were measured
+    # too and made no difference beyond run-to-run noise, so they are not used.
     - name: "Move Windows temp and Cargo home to D:"
       if: runner.os == 'Windows'
       shell: pwsh
@@ -34,7 +36,6 @@ runs:
           "TMP=D:\tmp"
           "TEMP=D:\tmp"
           "CARGO_HOME=D:\.cargo"
-          "RUSTUP_HOME=D:\.rustup"
         ) | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
         "D:\.cargo\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
