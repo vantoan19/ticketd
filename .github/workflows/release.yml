@@ -60,7 +60,9 @@ jobs:
           MODE: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'auto' }}
           SHA: ${{ github.event_name == 'workflow_dispatch' && inputs.sha || github.event.workflow_run.head_sha }}
           VERSION_OVERRIDE: ${{ inputs.version_override }}
-        run: node scripts/release-plan.mjs --mode "$MODE" --sha "$SHA" --version-override "$VERSION_OVERRIDE"
+          # The commit this run started from, which the attestation's provenance names.
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: node scripts/release-plan.mjs --mode "$MODE" --sha "$SHA" --version-override "$VERSION_OVERRIDE" --workflow-sha "$WORKFLOW_SHA"
 
   build:
     name: Build
@@ -126,7 +128,9 @@ jobs:
           MODE: ${{ github.event_name == 'workflow_dispatch' && 'manual' || 'auto' }}
           SHA: ${{ needs.plan.outputs.sha }}
           VERSION_OVERRIDE: ${{ needs.plan.outputs.override }}
-        run: node scripts/release-plan.mjs --mode "$MODE" --sha "$SHA" --version-override "$VERSION_OVERRIDE"
+          # The commit this run started from, which the attestation's provenance names.
+          WORKFLOW_SHA: ${{ github.sha }}
+        run: node scripts/release-plan.mjs --mode "$MODE" --sha "$SHA" --version-override "$VERSION_OVERRIDE" --workflow-sha "$WORKFLOW_SHA"
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         if: steps.plan.outputs.draft == 'true'
         with:

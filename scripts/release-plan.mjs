@@ -7,6 +7,10 @@
 //           commit, a version that is published or not newer than the latest release, and a
 //           version that already has a draft.
 //
+// Either way, only the commit the run started from (`github.sha`) is drafted. The build
+// provenance attestation names that commit, so a draft of any other commit would attest the
+// wrong source. Another commit is still built, without a draft.
+//
 // The workflow never deletes a release: the delete API cannot be limited to drafts, so a draft
 // published between a check and a delete would be lost. An existing draft is deleted by hand.
 import { spawnSync } from "node:child_process";
@@ -44,6 +48,7 @@ export function planDraft({
   version,
   releases,
   tagCommit = null,
+  workflowSha,
   onMain,
   green,
 }) {
@@ -51,9 +56,10 @@ export function planDraft({
     throw new Error(`Unknown mode ${mode}`);
   parseVersion(version);
   const tag = `v${version}`;
-  const decline = (reason) => {
+  // `warn` marks a skip the maintainer should notice, unlike an ordinary published version.
+  const decline = (reason, warn = true) => {
     if (mode === "manual") throw new Error(reason);
-    return { draft: false, tag, version, reason };
+    return { draft: false, tag, version, reason, warn };
   };
 
   if (mode === "manual") {
@@ -66,12 +72,14 @@ export function planDraft({
   if (releases.some((release) => !release.draft && release.tag_name === tag)) {
     return decline(
       `${tag} is already published, and a published release is never replaced. Release a new version instead.`,
+      false,
     );
   }
   const latest = latestPublished(releases);
   if (latest !== null && compareVersions(version, latest) <= 0) {
     return decline(
       `${version} is not newer than the latest published release, v${latest}.`,
+      false,
     );
   }
   // GitHub ignores a draft's target when its tag already exists, so the files built from `sha`
@@ -88,6 +96,15 @@ export function planDraft({
     return decline(
       `The draft ${tag} already exists, built from ${existing.target_commitish}. To rebuild it, delete that draft on the Releases page, then run the Release workflow again.`,
     );
+  }
+  if (sha !== workflowSha) {
+    return {
+      draft: false,
+      tag,
+      version,
+      warn: true,
+      reason: `main moved on to ${workflowSha} before this run started, and the build attestation names that commit, so ${sha} is built without a draft. The next green main commit drafts ${tag}, or rerun the Release workflow once main's head has passed Quality.`,
+    };
   }
   return {
     draft: true,
@@ -147,8 +164,12 @@ function main() {
       mode: { type: "string" },
       sha: { type: "string", default: "" },
       "version-override": { type: "string", default: "" },
+      "workflow-sha": { type: "string", default: "" },
     },
   });
+  const workflowSha = values["workflow-sha"].trim();
+  if (!/^[0-9a-f]{40}$/.test(workflowSha))
+    throw new Error("Pass the run's github.sha as --workflow-sha.");
   const repository = process.env.GITHUB_REPOSITORY;
   if (!repository) throw new Error("GITHUB_REPOSITORY is not set");
   const { mode } = values;
@@ -184,6 +205,7 @@ function main() {
     version,
     releases: listReleases(repository),
     tagCommit: resolveTag(`v${version}`, readApi(repository)),
+    workflowSha,
     onMain,
     green,
   });
@@ -202,7 +224,7 @@ function main() {
   if (process.env.GITHUB_OUTPUT)
     appendFileSync(process.env.GITHUB_OUTPUT, lines.join(""));
   else process.stdout.write(lines.join(""));
-  console.error(plan.reason);
+  console.error(plan.warn ? `::warning::${plan.reason}` : plan.reason);
   if (process.env.GITHUB_STEP_SUMMARY)
     appendFileSync(process.env.GITHUB_STEP_SUMMARY, `${plan.reason}\n`);
 }

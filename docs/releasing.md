@@ -218,6 +218,12 @@ Build continuously, publish deliberately. There are no nightlies or update chann
 7. A problem found after publishing is fixed forward with a patch release. Never
    replace the files of a published release; add a known-issue note to it instead.
 
+A run drafts only the commit it started from, the head of `main` at that moment,
+because the build attestation names that commit. If `main` moved on before the
+run started, the run builds its commit without a draft, and the next green `main`
+commit drafts the version instead. It also refuses a version whose tag already
+exists at another commit.
+
 The Release workflow never deletes or changes a release. It drafts nothing for a
 version that is published, not newer than the latest release, or already has a
 draft; a manual run fails instead. To rebuild a draft, delete it on the Releases
@@ -241,8 +247,8 @@ A dry run builds a draft with a test version from a `main` commit without changi
 committed, so the packages, `latest.json` and the draft all carry the test version.
 
 1. Run the Release workflow on `main` with `version_override` set to a prerelease
-   such as `0.1.1-dryrun.1`. Leave `sha` empty to build the latest green `main`
-   commit.
+   such as `0.1.1-dryrun.1`. Leave `sha` empty, and run it once Quality has
+   passed on the head of `main`: only the commit the run starts from is drafted.
 2. Download the draft's files and check them:
    - `gh release download v0.1.1-dryrun.1 --dir dryrun`, then
      `shasum -a 256 -c SHA256SUMS` in that directory;

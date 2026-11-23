@@ -11,13 +11,21 @@ const published = {
   target_commitish: "main",
 };
 const auto = (version, releases, checks = {}) =>
-  planDraft({ mode: "auto", sha, version, releases, ...checks });
+  planDraft({
+    mode: "auto",
+    sha,
+    version,
+    releases,
+    workflowSha: sha,
+    ...checks,
+  });
 const manual = (version, releases, checks = {}) =>
   planDraft({
     mode: "manual",
     sha,
     version,
     releases,
+    workflowSha: sha,
     onMain: true,
     green: true,
     ...checks,
@@ -37,6 +45,24 @@ test("a version-bump commit creates its draft", () => {
     prerelease: false,
     reason: `Creating the draft v0.1.1 from ${sha}.`,
   });
+});
+
+test("a commit other than the run's own is built without a draft", () => {
+  // The attestation's provenance names github.sha, the commit the run started from.
+  for (const plan of [
+    auto("0.1.1", [published], { workflowSha: other }),
+    manual("0.1.1-dryrun.1", [published], { workflowSha: other }),
+  ]) {
+    assert.equal(plan.draft, false);
+    assert.equal(plan.warn, true);
+    assert.match(plan.reason, /main moved on to b{40}/);
+  }
+  // A refusal still refuses, and a published version stays an ordinary skip.
+  assert.throws(
+    () => manual("0.1.0", [published], { workflowSha: other }),
+    /already published/,
+  );
+  assert.equal(auto("0.1.0", [published], { workflowSha: other }).warn, false);
 });
 
 test("an existing draft is never replaced, even for the same commit", () => {
