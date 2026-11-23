@@ -606,6 +606,10 @@ impl RemoteStorage for Hooked<'_> {
         self.remote.capabilities()
     }
 
+    fn check_usable(&self) -> Result<(), RemoteError> {
+        self.remote.check_usable()
+    }
+
     fn folders(&self) -> Result<Vec<ticketd_core::sync::remote::RemoteFolder>, RemoteError> {
         self.remote.folders()
     }

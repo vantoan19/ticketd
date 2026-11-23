@@ -157,6 +157,14 @@ pub trait RemoteStorage: Send + Sync {
     /// What this storage guarantees. It does not change for the life of the value.
     fn capabilities(&self) -> RemoteCapabilities;
 
+    /// Whether the storage can safely hold a synced Workspace, asked before the first
+    /// upload, download or reconnect. A storage with nothing to check keeps this default. The
+    /// error says what to fix. A storage may write a small object of its own to find out,
+    /// but never a Workspace file.
+    fn check_usable(&self) -> Result<(), RemoteError> {
+        Ok(())
+    }
+
     /// Workspace folders this app created in the account.
     fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError>;
 

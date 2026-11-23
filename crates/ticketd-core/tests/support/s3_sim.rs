@@ -80,6 +80,8 @@ struct Version {
     content_type: Option<String>,
     modified: String,
     delete_marker: bool,
+    /// The SHA-256 the writer sent, base64, as S3 keeps it for a read that asks.
+    checksum: Option<String>,
 }
 
 impl Version {
@@ -150,6 +152,18 @@ pub struct Fault {
 }
 
 impl Fault {
+    /// S3's refusal of an action the credentials do not allow, worded as AWS words it.
+    pub fn denied(method: &'static str, url_contains: &'static str, action: &str) -> Self {
+        let mut fault = Self::new(method, url_contains, 403, "AccessDenied");
+        fault.body = error_xml(
+            "AccessDenied",
+            &format!(
+                "User: arn:aws:sts::123456789012:assumed-role/sync/me is not authorized to perform: {action} on resource: arn:aws:s3:::{BUCKET}"
+            ),
+        );
+        fault
+    }
+
     pub fn new(method: &'static str, url_contains: &'static str, status: u16, code: &str) -> Self {
         Self {
             method,
@@ -182,7 +196,21 @@ struct State {
     requests: Vec<(String, String)>,
     /// Writes by another device that land just before the next matching PutObject.
     interleaved: Vec<(String, Vec<u8>)>,
+    versioning: Versioning,
+    /// A bucket that ignores `If-None-Match` and `If-Match`, as some S3-compatible services do.
+    ignores_conditions: bool,
+    /// Where the bucket lives, when it is not where the sim's target says.
+    bucket_region: Option<String>,
     uploads: Vec<Upload>,
+}
+
+/// What GetBucketVersioning answers.
+#[derive(Clone, Copy, Default, PartialEq, Eq)]
+pub enum Versioning {
+    #[default]
+    Enabled,
+    Suspended,
+    NeverSet,
 }
 
 pub struct S3Sim {
@@ -230,6 +258,10 @@ fn escape(text: &str) -> String {
         .replace('<', "&lt;")
         .replace('>', "&gt;")
         .replace('"', "&quot;")
+}
+
+fn authorization(request: &S3Request) -> &str {
+    header(request, "authorization").expect("a signed request")
 }
 
 fn metadata_of(request: &S3Request) -> Vec<(String, String)> {
@@ -280,6 +312,7 @@ impl State {
         metadata: Vec<(String, String)>,
         disposition: Option<String>,
         content_type: Option<String>,
+        checksum: Option<String>,
     ) -> (String, String) {
         let modified = self.now();
         let id = format!("v{}", self.counter);
@@ -291,6 +324,7 @@ impl State {
             content_type,
             modified,
             delete_marker: false,
+            checksum,
         };
         let etag = version.etag();
         self.objects
@@ -305,7 +339,21 @@ impl State {
             return refused;
         }
         if self.missing_bucket {
-            return failure(404, "NoSuchBucket");
+            let mut refused = failure(404, "NoSuchBucket");
+            if request.method == "HEAD" {
+                refused.body.clear();
+            }
+            return refused;
+        }
+        if let Some(region) = self.bucket_region.as_deref()
+            && !authorization(request).contains(&format!("/{region}/s3/aws4_request"))
+        {
+            // S3 answers a request signed for another region with the bucket's own.
+            return answer(
+                301,
+                vec![("x-amz-bucket-region".into(), region.to_owned())],
+                vec![],
+            );
         }
         let url = url::Url::parse(&request.url).unwrap();
         let query = Query(url.query_pairs().into_owned().collect());
@@ -315,6 +363,17 @@ impl State {
             .unwrap()
             .into_owned();
         match (request.method, key.is_empty()) {
+            ("HEAD", true) => answer(
+                200,
+                vec![(
+                    "x-amz-bucket-region".into(),
+                    self.bucket_region
+                        .clone()
+                        .unwrap_or_else(|| target.region().to_owned()),
+                )],
+                vec![],
+            ),
+            ("GET", true) if query.get("versioning").is_some() => self.versioning_answer(),
             ("GET", true) if query.get("uploads").is_some() => self.list_uploads(&query),
             ("GET", false) if query.get("uploadId").is_some() => self.list_parts(&key, &query),
             ("POST", false) if query.get("uploads").is_some() => self.create_upload(request, &key),
@@ -333,6 +392,21 @@ impl State {
             ("PUT", false) => self.put(request, &key),
             (method, _) => panic!("unexpected S3 request: {method} {}", url.path()),
         }
+    }
+
+    fn versioning_answer(&self) -> S3Response {
+        let status = match self.versioning {
+            Versioning::Enabled => "<Status>Enabled</Status>",
+            Versioning::Suspended => "<Status>Suspended</Status>",
+            Versioning::NeverSet => "",
+        };
+        answer(
+            200,
+            vec![],
+            format!(
+                "<?xml version=\"1.0\" encoding=\"UTF-8\"?><VersioningConfiguration xmlns=\"http://s3.amazonaws.com/doc/2006-03-01/\">{status}</VersioningConfiguration>"
+            ),
+        )
     }
 
     fn authenticate(&self, request: &S3Request, target: &S3Target) -> Option<S3Response> {
@@ -377,12 +451,15 @@ impl State {
             .position(|(contains, _)| key.contains(contains.as_str()))
         {
             let (_, bytes) = self.interleaved.remove(index);
-            self.store(key, bytes, vec![], None, None);
+            self.store(key, bytes, vec![], None, None, None);
         }
     }
 
     /// The `if-match` / `if-none-match` of a write against what the key holds now.
     fn refuse_condition(&self, request: &S3Request, key: &str) -> Option<S3Response> {
+        if self.ignores_conditions {
+            return None;
+        }
         let current = self.current(key).map(Version::etag);
         if header(request, "if-none-match") == Some("*") && current.is_some() {
             return Some(failure(412, "PreconditionFailed"));
@@ -414,6 +491,7 @@ impl State {
             metadata,
             header(request, "content-disposition").map(str::to_owned),
             header(request, "content-type").map(str::to_owned),
+            header(request, "x-amz-checksum-sha256").map(str::to_owned),
         );
         answer(
             200,
@@ -447,6 +525,11 @@ impl State {
             ("x-amz-version-id".to_owned(), version.id.clone()),
         ];
         headers.extend(version.metadata.iter().cloned());
+        if let (Some(checksum), Some("ENABLED")) =
+            (&version.checksum, header(request, "x-amz-checksum-mode"))
+        {
+            headers.push(("x-amz-checksum-sha256".into(), checksum.clone()));
+        }
         let len = version.bytes.len();
         let Some(range) = header(request, "range") else {
             return answer(200, headers, version.bytes.clone());
@@ -738,7 +821,7 @@ impl State {
             return refused;
         }
         self.uploads.retain(|u| !(u.key == key && u.id == id));
-        let (version, etag) = self.store(key, bytes, metadata, disposition, content_type);
+        let (version, etag) = self.store(key, bytes, metadata, disposition, content_type, None);
         answer(
             200,
             vec![("x-amz-version-id".into(), version)],
@@ -814,6 +897,21 @@ impl S3Sim {
         self.state().token = token.to_owned();
     }
 
+    /// What GetBucketVersioning answers, and so whether the bucket keeps versions.
+    pub fn versioning(&self, versioning: Versioning) {
+        self.state().versioning = versioning;
+    }
+
+    /// The bucket stops refusing writes on `If-None-Match` and `If-Match`.
+    pub fn ignore_conditional_writes(&self) {
+        self.state().ignores_conditions = true;
+    }
+
+    /// The bucket lives in `region`; a request signed for another region is answered with it.
+    pub fn in_region(&self, region: &str) {
+        self.state().bucket_region = Some(region.to_owned());
+    }
+
     pub fn remove_bucket(&self) {
         self.state().missing_bucket = true;
     }
@@ -825,7 +923,7 @@ impl S3Sim {
     /// An object uploaded by hand (`aws s3 cp`): no ticketd metadata, no readable name.
     pub fn put_foreign(&self, key: &str, bytes: &[u8]) -> String {
         self.state()
-            .store(key, bytes.to_vec(), vec![], None, None)
+            .store(key, bytes.to_vec(), vec![], None, None, None)
             .0
     }
 
@@ -846,6 +944,7 @@ impl S3Sim {
                 content_type: None,
                 modified,
                 delete_marker: true,
+                checksum: None,
             });
         id
     }
