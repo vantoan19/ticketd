@@ -357,19 +357,14 @@ fn the_previous_format_and_its_backups_gain_the_event_log_without_losing_records
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     let backup = dir.path().join("old-backup.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let ticket = workspace.create_ticket("Kept").unwrap();
-    drop(workspace);
+    let id = "173d42c6-58d1-4ae5-b5f4-41cd88561270";
+    let reference = "T-KQ1";
+    ticketd_core::create_workspace_at_format_version(&path, 72).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute_batch(
-        "DROP TRIGGER workspace_event_ticket_created;
-         DROP TRIGGER workspace_event_ticket_updated;
-         DROP TRIGGER workspace_event_ticket_status_changed;
-         DROP TRIGGER workspace_event_ticket_tag_added;
-         DROP TRIGGER workspace_event_ticket_tag_removed;
-         DROP TRIGGER workspace_event_activity_created;
-         DROP TABLE workspace_events;
-         PRAGMA user_version = 72;",
+    db.execute(
+        "INSERT INTO tickets (id, reference, title, status, body)
+         VALUES (?1, ?2, 'Kept', 'In progress', 'Details from before the event log')",
+        [id, reference],
     )
     .unwrap();
     db.execute("VACUUM INTO ?1", [backup.to_string_lossy()])
@@ -378,16 +373,21 @@ fn the_previous_format_and_its_backups_gain_the_event_log_without_losing_records
 
     // Tickets that existed before the log are not announced as created.
     let mut workspace = Workspace::open(&path).unwrap();
-    assert_eq!(workspace.show_ticket(&ticket.reference).unwrap(), ticket);
+    let ticket = workspace.show_ticket(reference).unwrap();
+    assert_eq!(ticket.id, id);
+    assert_eq!(ticket.title, "Kept");
+    assert_eq!(ticket.status, Status::InProgress);
+    assert_eq!(ticket.body, "Details from before the event log");
     assert_eq!(events_after(&workspace, 0), []);
-    workspace.add_tag(&ticket.reference, "ready").unwrap();
+    workspace.add_tag(reference, "ready").unwrap();
     assert_eq!(events_after(&workspace, 0).len(), 1);
     drop(workspace);
 
     // A backup taken before the log existed still restores and then migrates on open.
     Workspace::restore(&path, &backup).unwrap();
     let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.show_ticket(reference).unwrap(), ticket);
     assert_eq!(events_after(&workspace, 0), []);
-    workspace.add_tag(&ticket.reference, "ready").unwrap();
+    workspace.add_tag(reference, "ready").unwrap();
     assert_eq!(events_after(&workspace, 0).len(), 1);
 }
