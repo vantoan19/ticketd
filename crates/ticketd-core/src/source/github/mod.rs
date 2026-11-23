@@ -561,6 +561,7 @@ impl Connector for GithubConnector {
         Ok(ConnectionCheck {
             connection: ConnectionInfo {
                 account: account.to_owned(),
+                account_id: Some(account.to_ascii_lowercase()),
                 site: self.site(),
             },
             derived: Self::derived_configuration(config),

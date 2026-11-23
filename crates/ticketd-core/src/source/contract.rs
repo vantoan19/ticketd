@@ -44,10 +44,20 @@ pub struct ConnectorDescriptor {
 /// The account the connector is acting as. Never contains a credential.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ConnectionInfo {
+    /// The label shown for the signed-in account.
     pub account: String,
+    /// Stable account identity on this site when the display label is not an identity.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
     /// Canonical site identity. Empty when the provider has only one site.
     #[serde(default)]
     pub site: String,
+}
+
+impl ConnectionInfo {
+    pub(crate) fn account_key(&self) -> &str {
+        self.account_id.as_deref().unwrap_or(&self.account)
+    }
 }
 
 /// The verified connection and answers derived from its settings.

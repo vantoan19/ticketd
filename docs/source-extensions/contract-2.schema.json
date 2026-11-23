@@ -91,7 +91,15 @@
       "type": "object",
       "properties": {
         "account": {
+          "description": "The label shown for the signed-in account.",
           "type": "string"
+        },
+        "account_id": {
+          "description": "Stable account identity on this site when the display label is not an identity.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "site": {
           "description": "Canonical site identity. Empty when the provider has only one site.",
