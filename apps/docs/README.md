@@ -20,16 +20,15 @@ npm run preview --workspace @ticketd/docs -- --host 127.0.0.1 --port 5482
 
 ## GitHub Pages
 
-The public site uses the repository’s free [GitHub Pages address](https://vantoan19.github.io/ticketd/). To reproduce the hosted layout, build and preview with the same repository prefix.
+The public site is served by GitHub Pages at <https://ticketd.dev/>, the repository's custom domain. The domain is registered at Cloudflare, whose DNS points it at GitHub Pages with DNS-only records, and it is verified for the maintainer's GitHub account and in Google Search Console (Google's OAuth brand verification needs the latter). The repository's Pages settings hold the custom domain, so the artifact needs no `CNAME` file. To reproduce the hosted layout:
 
 ```sh
-export DOCS_PROJECT_PAGES=1
 npm run build:docs
 node apps/docs/check-pages.mjs
 npm run preview --workspace @ticketd/docs -- --host 127.0.0.1 --port 5483
 ```
 
-Open <http://127.0.0.1:5483/ticketd/>. The upload directory is `apps/docs/build/client`. It contains the page indexes, router data, search index, Markdown resources and a native `404.html`. Unset `DOCS_PROJECT_PAGES` to build at the domain root.
+Open <http://127.0.0.1:5483/>. The upload directory is `apps/docs/build/client`. It contains the page indexes, router data, search index, Markdown resources and a native `404.html`.
 
 The Quality workflow checks the Pages layout on Linux and Windows. When Quality passes on `main`, the Website workflow requests a fresh build of that commit. Publishing, editing or withdrawing a GitHub Release also requests a refresh, as does the nightly Quality run. A maintainer can run Website manually on `main`.
 
@@ -68,7 +67,7 @@ After every window and theme succeeds, the script replaces the WebPs in `screens
 
 ## Documentation and releases
 
-The Fumadocs pages and navigation live in `content/docs`. The glossary includes the canonical repository glossary. All resource paths are relative to the site’s base URL. Search loads its local engine and `api/search` when a reader types a query. Agents can read `llms.txt`, `llms-full.txt` or `llms.mdx/docs/<page>/content.md`. The introduction’s Markdown is at `llms.mdx/docs/content.md`. On GitHub Pages the Markdown index is `/ticketd/llms.txt`. Each article also links to its Markdown representation in the HTML head.
+The Fumadocs pages and navigation live in `content/docs`. The glossary includes the canonical repository glossary. All resource paths are relative to the site’s base URL. Search loads its local engine and `api/search` when a reader types a query. Agents can read `llms.txt`, `llms-full.txt` or `llms.mdx/docs/<page>/content.md`. The introduction’s Markdown is at `llms.mdx/docs/content.md`. The Markdown index is `/llms.txt`. Each article also links to its Markdown representation in the HTML head.
 
 At build time the site reads the repository’s public, unauthenticated GitHub Releases feed. Published release notes supply Changelog. Download buttons point to uploaded assets on those releases. With an empty feed the primary action opens the source repository. A feed error displays an availability message.
 
