@@ -1172,6 +1172,102 @@ const youSaid: TranscriptItem = {
   delivery: "delivered",
   turn_id: "t1",
 };
+
+test("Antigravity's native quota diagnostic is shown once with both failure statuses", async () => {
+  const diagnostic =
+    "\n⚠ agent executor error: generating and executing: Error 429, Message: Synthetic fixture quota exhausted for this test., Status: RESOURCE_EXHAUSTED, Details: []\n";
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Native quota failure",
+        harness: { id: "antigravity", name: "Antigravity" },
+        activity: "failed",
+        problem: {
+          kind: "usage_limit",
+          past: true,
+          message: diagnostic,
+          resets_at: null,
+        },
+      },
+      [
+        { ...youSaid, text: "QA566_QUOTA_FINAL_STATUS" },
+        turnTiming("failed", "2026-11-10T10:00:01Z"),
+        inTurn(reply("r1", diagnostic)),
+        inTurn({
+          id: "t1",
+          at: "2026-11-10T10:00:01Z",
+          kind: "marker",
+          reason: "failed",
+          message: diagnostic,
+        }),
+      ],
+    ),
+  );
+
+  const notice = screen.getByRole("alert");
+  const pane = notice.closest(".chat-body");
+  expect(pane?.textContent?.split(diagnostic.trim())).toHaveLength(2);
+  expect(conversation().getByText(diagnostic.trim())).toBeTruthy();
+  expect(
+    conversation().getByText(
+      "This turn failed. What it finished before that is kept.",
+    ),
+  ).toBeTruthy();
+  expect(notice.textContent).toContain("Antigravity reached your usage limit");
+  expect(notice.textContent).toContain("It didn't say when it resets.");
+
+  act(() => client.patch("c1", { activity: "idle", problem: null }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(pane?.textContent?.split(diagnostic.trim())).toHaveLength(2);
+});
+
+test.each([
+  { id: "antigravity", name: "Antigravity" },
+  { id: "codex", name: "Codex" },
+])(
+  "$name keeps distinct assistant text, turn failure detail and usage-limit detail",
+  async (harness) => {
+    await open(
+      one(
+        {
+          id: "c1",
+          title: "Quota failure with partial work",
+          harness,
+          activity: "failed",
+          problem: {
+            kind: "usage_limit",
+            past: true,
+            message: "The account's usage limit was reached",
+          },
+        },
+        [
+          youSaid,
+          turnTiming("failed", "2026-11-10T10:00:01Z"),
+          inTurn(reply("r1", "I finished the draft.")),
+          inTurn({
+            id: "t1",
+            at: "2026-11-10T10:00:01Z",
+            kind: "marker",
+            reason: "failed",
+            message: "The harness could not run the final check",
+          }),
+        ],
+      ),
+    );
+
+    expect(conversation().getByText("I finished the draft.")).toBeTruthy();
+    expect(
+      conversation().getByText(
+        /This turn failed\. The harness could not run the final check/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "The account's usage limit was reached.",
+    );
+  },
+);
+
 const failedRun: Step = {
   kind: "run",
   target: "npm run test:all",

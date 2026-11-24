@@ -229,6 +229,46 @@ test("keeps ordinary command text when a Session ID shares its spelling", (t) =>
   );
 });
 
+test("scrubs known Session IDs after whitespace-delimited labels", (t) => {
+  const { output, scrub } = capture(t);
+  const result = scrub([
+    [
+      2,
+      line({
+        text: 'Resuming session native123, Thread\tnative123, chat "native123", session ID native123.',
+        explicit: "session id: native123",
+        prose:
+          "The session started. Use native123 or the supersession native123.",
+        command: "id -u",
+      }),
+    ],
+    [
+      1,
+      line({
+        id: "id",
+        method: "thread/resume",
+        params: { sessionId: "native123", thread_id: "id" },
+      }),
+    ],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const [notice, request] = readFileSync(output, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map(JSON.parse);
+  assert.deepEqual(notice.server, {
+    text: 'Resuming session fixture-session-1, Thread\tfixture-session-1, chat "fixture-session-1", session ID fixture-session-1.',
+    explicit: "session id: fixture-session-1",
+    prose: "The session started. Use native123 or the supersession native123.",
+    command: "id -u",
+  });
+  assert.deepEqual(request.client, {
+    id: "id",
+    method: "thread/resume",
+    params: { sessionId: "fixture-session-1", thread_id: "fixture-session-2" },
+  });
+});
+
 test("replaces a known account alias in a protocol label", (t) => {
   const { output, scrub } = capture(t);
   const alias = "syntheticAccountAlias";

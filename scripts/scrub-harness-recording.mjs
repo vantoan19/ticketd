@@ -102,8 +102,10 @@ function readChunk(bytes, stream, frames) {
 const sessionFields =
   /^(?:(?:parent|resume|forkedfrom|source|native)?(?:session|thread)(?:id|ids|uuid)|chatid)$/;
 const ambiguousSessionId = /^[\p{L}\p{M}\p{N}]+$/u;
+// In "session id: VALUE", keep "id" as part of the label even if it is a
+// Session ID elsewhere in the recording.
 const sessionReferencePrefix =
-  /(?<![\p{L}\p{M}\p{N}_-])(?:(?:[Ss]ession|[Tt]hread|[Cc]hat)(?:[ _-]?[Ii][Dd])?[ \t]*[:=][ \t]*|--(?:session|thread|chat)(?:-id)?(?:=|[ \t]+))["'\x60]?/u;
+  /(?<![\p{L}\p{M}\p{N}_-])(?:(?:[Ss]ession|[Tt]hread|[Cc]hat)(?:[ _-]?[Ii][Dd])?(?:[ \t]*[:=][ \t]*|[ \t]+(?![Ii][Dd][ \t]*[:=]))|--(?:session|thread|chat)(?:-id)?(?:=|[ \t]+))["'\x60]?/u;
 const accountFields =
   /^(?:accounts?|account(?:id|name|info|number)|organizations?|organization(?:id|name|uuid)|org(?:id|name|uuid)|email(?:address)?|user(?:id|name)|(?:access|refresh|auth|oauth|api)token|apikey|authorization|password|secret|credentials)$/;
 const unixHome =
