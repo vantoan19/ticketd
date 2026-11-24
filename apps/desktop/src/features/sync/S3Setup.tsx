@@ -76,7 +76,7 @@ export function S3Setup() {
   // A bucket typed in, though the profile lists some: it may use more than it owns.
   const [typing, setTyping] = useState(false);
   const [prefix, setPrefix] = useState(DEFAULT_PREFIX);
-  const { busy, failure, run } = useCommand({ readable: true });
+  const { busy, failure, run, clear } = useCommand({ readable: true });
   // A check that started before another one must not put its answer back.
   const generation = useRef(0);
 
@@ -233,7 +233,10 @@ export function S3Setup() {
               signedIn={signedIn}
               value={bucket}
               typing={typing}
-              onChange={setBucket}
+              onChange={(value) => {
+                setBucket(value);
+                clear();
+              }}
               onOther={() => {
                 setBucket("");
                 setTyping(true);
@@ -257,7 +260,10 @@ export function S3Setup() {
               disabled={!signedIn}
               spellCheck={false}
               autoComplete="off"
-              onChange={(event) => setPrefix(event.target.value)}
+              onChange={(event) => {
+                setPrefix(event.target.value);
+                clear();
+              }}
             />
           }
         />
@@ -404,11 +410,16 @@ function BucketField({
         <SelectTrigger id="s3-bucket" className="w-60" title={value}>
           <SelectValue placeholder="Choose a bucket" />
         </SelectTrigger>
-        {/* A long name does not widen the list past the window; it is cut, whole on hover. */}
-        <SelectContent className="max-w-80">
+        {/* The list is as wide as its field and starts at its edge; a long name is cut, whole on hover. */}
+        <SelectContent className="w-(--radix-select-trigger-width) max-w-(--radix-select-trigger-width)">
           <SelectGroup>
             {buckets.map((name) => (
-              <SelectItem key={name} value={name} title={name}>
+              <SelectItem
+                key={name}
+                value={name}
+                title={name}
+                className="*:[span]:last:min-w-0"
+              >
                 <span className="min-w-0 truncate">{name}</span>
               </SelectItem>
             ))}
