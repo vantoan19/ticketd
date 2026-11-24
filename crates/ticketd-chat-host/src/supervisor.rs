@@ -159,7 +159,6 @@ struct Runtime {
 struct Opening {
     generation: RuntimeGeneration,
     origin: ChatSessionOrigin,
-    permission_restart: bool,
     preamble: Option<String>,
     reply: Option<Reply<()>>,
 }
@@ -278,6 +277,9 @@ pub(crate) struct Supervisor {
     /// made while no session ran. Kept until one opens.
     start_settings: StartSettings,
     reopen_for_permission: Option<String>,
+    /// A permission restart may only resume native history, unless the person
+    /// explicitly chooses a fresh session. The restriction survives failed opens.
+    permission_restart_pending: bool,
     /// What the Chat's sessions last reported in effect, as recorded with the Chat
     /// (`Chat::effective_settings`): what a session opened for it again starts with.
     recorded_settings: Option<String>,
@@ -364,6 +366,7 @@ impl Supervisor {
             refreshing: None,
             start_settings: StartSettings::default(),
             reopen_for_permission: None,
+            permission_restart_pending: false,
             recorded_settings: chat.effective_settings.clone(),
         };
         tokio::spawn(supervisor.run().instrument(span));
@@ -525,7 +528,7 @@ impl Supervisor {
         });
         if let Some(value) = unanswered {
             // Kept for the next session whether or not it could be saved.
-            let _saved = self.record_permission(&value);
+            let _ = self.record_permission(&value);
             self.start_settings.permission = Some(value);
         }
     }
@@ -564,17 +567,7 @@ impl Supervisor {
                 let _ = reply.send(self.request_stop());
             }
             Command::ResumeQueue(reply) => {
-                let chat = self.chat_id.clone();
-                let result = self.write(|core| core.set_chat_queue_paused(&chat, false));
-                if result.is_ok() {
-                    // The person asked for the queue to run: it opens a session when
-                    // none is live.
-                    self.queue_started = true;
-                    if matches!(self.problem, Some(ChatProblem::DispatchRefused { .. })) {
-                        self.problem = None;
-                    }
-                }
-                let _ = reply.send(result.map(|_| ()).map_err(HostError::from));
+                let _ = reply.send(self.resume_queue());
             }
             Command::SendQueuedNow { message_id, reply } => {
                 let _ = reply.send(self.send_queued_now(message_id));
@@ -668,7 +661,7 @@ impl Supervisor {
         }
         match setting {
             // Taken only once saved: the shown mode must be the one the Chat reopens in.
-            SettingKey::Permission if !self.record_permission(&value) => {
+            SettingKey::Permission if self.record_permission(&value).is_err() => {
                 return refused("the change could not be saved");
             }
             SettingKey::Permission => self.start_settings.permission = Some(value),
@@ -681,21 +674,16 @@ impl Supervisor {
     /// Saves `value` with the Chat as the permission its next session opens with, as
     /// soon as the change is accepted, so a restart before the next message cannot bring
     /// back a mode the person left. The record views read changes only once it is saved.
-    /// `false` when saving failed; a Chat with no record yet has nothing to save.
-    fn record_permission(&mut self, value: &str) -> bool {
+    fn record_permission(&mut self, value: &str) -> Result<(), Error> {
         let Some(updated) = self.adapter.as_ref().and_then(|adapter| {
             adapter.record_permission(self.recorded_settings.as_deref(), value)
         }) else {
-            return true;
+            return Ok(());
         };
         let chat = self.chat_id.clone();
-        let saved = self
-            .write(|core| core.set_chat_effective_settings(&chat, &updated))
-            .is_ok();
-        if saved {
-            self.recorded_settings = Some(updated);
-        }
-        saved
+        self.write(|core| core.set_chat_effective_settings(&chat, &updated))?;
+        self.recorded_settings = Some(updated);
+        Ok(())
     }
 
     /// The settings shown while no session runs or opens: the permission its next
@@ -817,21 +805,8 @@ impl Supervisor {
         text: &str,
         mode: SendMode,
     ) -> Result<ChatMessage, HostError> {
+        self.recover_storage()?;
         let chat = self.chat_id.clone();
-        if self.storage_failed.is_some() {
-            // Accept work again only once storage can record what was lost meanwhile.
-            let ending = TurnEnding::StoppedByTicketd(StopReason::StorageFailed);
-            self.core(|core| {
-                core.mark_chat_contact_lost(
-                    Some(&chat),
-                    &ending.detail().unwrap_or_default(),
-                    &ending.key(),
-                )
-            })
-            .map_err(|error| HostError::StorageFailed(error.to_string()))?;
-            self.storage_failed = None;
-            self.problem = None;
-        }
         let message = self.write(|core| core.save_chat_input(command_id, &chat, text))?;
         let immediate = self.active.is_none() || self.steering().is_some();
         if mode == SendMode::Auto
@@ -848,6 +823,39 @@ impl Supervisor {
             }
         }
         Ok(message)
+    }
+
+    /// Accept work again only once storage can record what was lost meanwhile.
+    fn recover_storage(&mut self) -> Result<(), HostError> {
+        if self.storage_failed.is_none() {
+            return Ok(());
+        }
+        let ending = TurnEnding::StoppedByTicketd(StopReason::StorageFailed);
+        self.core(|core| {
+            core.mark_chat_contact_lost(
+                Some(&self.chat_id),
+                &ending.detail().unwrap_or_default(),
+                &ending.key(),
+            )
+        })
+        .map_err(|error| HostError::StorageFailed(error.to_string()))?;
+        self.storage_failed = None;
+        self.problem = None;
+        Ok(())
+    }
+
+    fn resume_queue(&mut self) -> Result<(), HostError> {
+        if self.permission_restart_pending {
+            self.recover_storage()?;
+        }
+        let chat = self.chat_id.clone();
+        self.write(|core| core.set_chat_queue_paused(&chat, false))?;
+        // The person asked for the queue to run: it opens a session when none is live.
+        self.queue_started = true;
+        if matches!(self.problem, Some(ChatProblem::DispatchRefused { .. })) {
+            self.problem = None;
+        }
+        Ok(())
     }
 
     /// Sends one queued input now: it steers the turn in progress or starts one. Only
@@ -1052,6 +1060,12 @@ impl Supervisor {
             ))));
             return;
         }
+        if self.permission_restart_pending
+            && let Err(error) = self.recover_storage()
+        {
+            let _ = reply.send(Err(error));
+            return;
+        }
         if self.runtime.is_some() {
             self.stop_runtime(StopReason::ExplicitResume).await;
         }
@@ -1073,14 +1087,6 @@ impl Supervisor {
     }
 
     async fn reopen_for_permission(&mut self, value: String) {
-        let Ok(chat) = self.core(|core| core.chat(&self.chat_id)) else {
-            self.hold_queue();
-            return;
-        };
-        let (session @ SessionStart::Resume(_), origin, _) = native_session(&chat) else {
-            self.hold_queue();
-            return;
-        };
         // Carry over later picks made while the harness was answering the change.
         if let Some(runtime) = &self.runtime {
             for change in &runtime.setting_changes {
@@ -1094,16 +1100,13 @@ impl Supervisor {
                 }
             }
         }
-        let selected = self.start_settings.permission.clone().unwrap_or(value);
-        self.start_settings.permission = Some(selected.clone());
-        // Store the person's selection so a later recovery never uses a mode they left.
-        if !self.record_permission(&selected) {
-            self.hold_queue();
-            return;
-        }
+        self.start_settings.permission.get_or_insert(value);
+        self.permission_restart_pending = true;
         let direct = std::mem::take(&mut self.direct);
         let from_queue = std::mem::take(&mut self.direct_from_queue);
         let resend = self.resend.take();
+        // End ownership before checking storage. A paused queue can still be
+        // sent to directly.
         if self
             .stop_runtime(StopReason::ExplicitResume)
             .await
@@ -1112,13 +1115,43 @@ impl Supervisor {
             self.hold_queue();
             return;
         }
+        let chat = match self.core(|core| core.chat(&self.chat_id)) {
+            Ok(chat) if !chat.trashed => chat,
+            result => {
+                self.hold_queue();
+                if let Err(error) = result
+                    && !is_refusal(&error)
+                {
+                    self.storage_failed = Some(error.to_string());
+                }
+                return;
+            }
+        };
         self.direct = direct;
         self.direct_from_queue = from_queue;
         self.resend = resend;
-        self.open(&chat, session, origin, None, None);
-        if let Some(opening) = &mut self.opening {
-            opening.permission_restart = true;
+        let (session, origin, preamble) = native_session(&chat);
+        self.open(&chat, session, origin, preamble, None);
+    }
+
+    fn prepare_permission_restart(&mut self, origin: ChatSessionOrigin) -> Result<(), HostError> {
+        if let Some(detail) = &self.storage_failed {
+            return Err(HostError::StorageFailed(detail.clone()));
         }
+        // Save the requested mode before the open, including when only a later
+        // recovery can open the session.
+        if let Some(value) = self.start_settings.permission.clone() {
+            self.record_permission(&value)?;
+        }
+        if origin == ChatSessionOrigin::New {
+            return Err(HostError::Harness(Problem {
+                kind: crate::ProblemKind::NativeHistoryUnavailable,
+                message: "The native session is unavailable for the permission restart".to_owned(),
+                detail: None,
+                resets_at: None,
+            }));
+        }
+        Ok(())
     }
 
     // ------------------------------------------------------------------
@@ -1133,6 +1166,22 @@ impl Supervisor {
         preamble: Option<String>,
         reply: Option<Reply<()>>,
     ) {
+        if self.permission_restart_pending
+            && let Err(error) = self.prepare_permission_restart(origin)
+        {
+            if let HostError::Harness(problem) = &error {
+                self.pause(ChatProblem::OpenFailed {
+                    problem: problem.clone(),
+                    native_resume: origin != ChatSessionOrigin::FreshSession,
+                });
+            } else {
+                self.hold_queue();
+            }
+            if let Some(reply) = reply {
+                let _ = reply.send(Err(error));
+            }
+            return;
+        }
         let Some(adapter) = self.adapter.clone() else {
             self.pause(ChatProblem::OpenFailed {
                 problem: Problem {
@@ -1177,7 +1226,6 @@ impl Supervisor {
         self.opening = Some(Opening {
             generation,
             origin,
-            permission_restart: false,
             preamble,
             reply,
         });
@@ -1649,7 +1697,7 @@ impl Supervisor {
                     } else if outcome == SettingOutcome::Applied {
                         // The harness already runs it: unsaved, this process still opens
                         // the next session with it.
-                        if !self.record_permission(&value) {
+                        if self.record_permission(&value).is_err() {
                             self.start_settings.permission = Some(value);
                         }
                     } else {
@@ -1677,6 +1725,7 @@ impl Supervisor {
         let result = match result {
             Ok(opened) => {
                 self.start_settings = StartSettings::default();
+                self.permission_restart_pending = false;
                 self.runtime = Some(Runtime {
                     generation,
                     run: Uuid::new_v4().to_string(),
@@ -1711,9 +1760,10 @@ impl Supervisor {
                 Ok(())
             }
             Err(problem) => {
-                if problem.kind == crate::ProblemKind::NativeHistoryUnavailable
+                let can_open_fresh = problem.kind == crate::ProblemKind::NativeHistoryUnavailable
                     && opening.origin == ChatSessionOrigin::NativeResume
-                    && !opening.permission_restart
+                    && !self.permission_restart_pending;
+                if can_open_fresh
                     && self.native_history_only()
                     && let Ok(chat) = self.core(|core| core.chat(&self.chat_id))
                 {
@@ -1733,8 +1783,7 @@ impl Supervisor {
                 // the first turn runs, so a Chat whose session never completed a turn (a run
                 // taken over early) has nothing to resume: open a fresh session, with
                 // the same reply, rather than a dead Chat (#387 6A1).
-                if problem.kind == crate::ProblemKind::NativeHistoryUnavailable
-                    && opening.origin == ChatSessionOrigin::NativeResume
+                if can_open_fresh
                     && self.unattended.is_none()
                     && self
                         .core(|core| core.chat_ran_an_automation_agent(&self.chat_id))
