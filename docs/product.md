@@ -519,8 +519,10 @@ collect OAuth tokens, proxy model requests, or change billing.
   Chats use Antigravity settings by default. Permission choices come from
   the harness, with a native Full access flag that takes effect after a
   restart and resume. Antigravity is available for Chats a person drives.
-  A Chat resumes through Antigravity's native history. If it is unavailable,
-  the Chat starts a fresh session with no history carried over.
+  A Chat resumes through Antigravity's native history. If that history is
+  unavailable during ordinary resume, ticketd shows a notice and starts an
+  empty session. If a permission change required the restart, the queue
+  stays paused and the person can explicitly choose **Start fresh**.
   See [ADR 0024](adr/0024-antigravity-uses-acp-for-person-driven-chats.md).
 - **Conversation.** The UI streams responses, tool activity, native approval requests,
   and questions. Observed activity is Idle, Working, Waiting for you, Interrupted, or

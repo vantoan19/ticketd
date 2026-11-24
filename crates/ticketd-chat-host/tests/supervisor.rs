@@ -1955,6 +1955,138 @@ async fn storage_recovery_after_chat_off_and_on_keeps_the_lost_turns_receipt() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn storage_recovery_keeps_the_observed_turn_ending_and_its_receipt() {
+    use ticketd_core::{ChatAgentChange, Status, TicketPatch};
+
+    let failure = Problem {
+        kind: ProblemKind::QuotaExhausted,
+        message: "Usage limit reached".into(),
+        detail: None,
+        resets_at: Some(1_800_000_000),
+    };
+    for (outcome, state, ending) in [
+        (
+            TurnOutcome::Completed,
+            ChatTurnState::Completed,
+            TurnEnding::Completed,
+        ),
+        (
+            TurnOutcome::Failed(failure.clone()),
+            ChatTurnState::Failed,
+            TurnEnding::failed(&failure),
+        ),
+    ] {
+        let f = Fixture::new(FakeAdapter::codex());
+        let ticket = f.core().create_ticket("Reset email").unwrap();
+        f.send("Update the ticket").await;
+        f.emit(text_delta("Final response")).await;
+        let turn_id = f.turns()[0].id.clone();
+
+        let mut writer = f.core();
+        writer.act_for_chat(&f.chat.id).unwrap();
+        writer
+            .change_ticket(
+                &ticket.reference,
+                TicketPatch {
+                    status: Some(Status::InProgress),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        writer
+            .add_activity(&ticket.reference, "Before the end", Some("codex"))
+            .unwrap();
+
+        let db = rusqlite::Connection::open(&f.path).unwrap();
+        db.execute_batch(
+            "CREATE TRIGGER reject_observed_end BEFORE UPDATE OF ended_at ON chat_turns
+             WHEN OLD.ended_at IS NULL AND NEW.ending IN ('completed', 'failed') BEGIN
+                 SELECT RAISE(ABORT, 'temporary failure recording observed end');
+             END;",
+        )
+        .unwrap();
+        f.emit(turn_ended(turn_1(), outcome)).await;
+        assert!(matches!(
+            f.live().await.problem,
+            Some(ChatProblem::StorageFailed { .. })
+        ));
+        assert_eq!(f.turns()[0].state, ChatTurnState::Active);
+        assert!(matches!(
+            f.host
+                .send(&f.chat.id, None, "Refused during failure", SendMode::Queue)
+                .await,
+            Err(HostError::StorageFailed(_))
+        ));
+        assert_eq!(f.host.turn_off().await, Vec::new());
+        f.host.turn_on();
+        assert_eq!(f.turns()[0].state, ChatTurnState::Active);
+        assert!(
+            f.core()
+                .chat_latest_tool_input(&f.chat.id, AGENT_CHANGES_RECORD_NAME)
+                .unwrap()
+                .is_none()
+        );
+
+        writer
+            .change_ticket(
+                &ticket.reference,
+                TicketPatch {
+                    status: Some(Status::Done),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        writer
+            .add_activity(&ticket.reference, "After the end", Some("codex"))
+            .unwrap();
+        db.execute_batch("DROP TRIGGER reject_observed_end")
+            .unwrap();
+        f.queue("Queued after recovery").await;
+        f.queue("Queued after another send").await;
+
+        assert_eq!(f.turns()[0].state, state);
+        assert_eq!(f.first_ending(), Some(ending));
+        assert_eq!(
+            f.core().chat(&f.chat.id).unwrap().queue_paused,
+            state == ChatTurnState::Failed
+        );
+        assert_eq!(f.live().await.problem, None);
+        assert!(f.items().iter().any(|item| matches!(
+            item,
+            ChatItem::Message(message) if message.turn_id.as_deref() == Some(&turn_id)
+                && message.text == "Final response" && message.complete
+        )));
+        let receipts: Vec<_> = f
+            .items()
+            .into_iter()
+            .filter_map(|item| match item {
+                ChatItem::Tool(tool) if tool.name == AGENT_CHANGES_RECORD_NAME => Some(tool),
+                _ => None,
+            })
+            .collect();
+        let [receipt] = receipts.as_slice() else {
+            panic!("expected one Turn receipt, got {receipts:?}");
+        };
+        assert_eq!(receipt.turn_id, turn_id);
+        assert_eq!(
+            serde_json::from_str::<Vec<ChatAgentChange>>(&receipt.input).unwrap(),
+            [
+                ChatAgentChange::Status {
+                    reference: ticket.reference.clone(),
+                    title: ticket.title,
+                    from: "Todo".into(),
+                    to: "In progress".into(),
+                },
+                ChatAgentChange::Update {
+                    reference: ticket.reference,
+                    excerpt: "Before the end".into(),
+                },
+            ]
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_chat_write_before_the_first_turn_event_is_kept_in_its_transcript() {
     let f = Fixture::new(FakeAdapter::claude());
     let ticket = f.core().create_ticket("Reset email").unwrap();
@@ -1983,6 +2115,7 @@ async fn a_chat_write_before_the_first_turn_event_is_kept_in_its_transcript() {
     .await;
 
     let turn = &f.turns()[0];
+    assert_eq!(turn.ended_at.as_deref(), Some(turn.started_at.as_str()));
     let changes = f.items().into_iter().find_map(|item| match item {
         ChatItem::Tool(tool)
             if tool.name == AGENT_CHANGES_RECORD_NAME && tool.turn_id == turn.id =>
@@ -3255,6 +3388,148 @@ async fn an_unconfirmed_permission_restart_rechecks_the_old_runtime_before_recov
     assert_eq!(submits[1].text, "next");
     assert_eq!(submits[1].generation, opens[1].generation);
     assert_eq!(f.queued(), ["also queued"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_restore_keeps_only_the_unconfirmed_permission_cleanup() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let backup = f._dir.path().join("backup.sqlite3");
+    f.core()
+        .save_chat_input(None, &f.chat.id, "from the backup")
+        .unwrap();
+    f.core().set_chat_queue_paused(&f.chat.id, true).unwrap();
+    f.core().backup(&backup).unwrap();
+
+    f.send("old Turn").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("old-session"),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    let reason = "the exit could not be observed".to_owned();
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: reason.clone(),
+    });
+    let close = f.fake.hold_next_close();
+    let original = f.fake.opens()[0].generation;
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+    assert!(f.fake.written().contains(&Written::Close(original)));
+    let (unconfirmed, ()) = tokio::join!(f.host.begin_restore(), async {
+        assert!(matches!(f.host.serving(), Err(HostError::Restoring)));
+        close.send(()).unwrap();
+    });
+    let warning = UnconfirmedCleanup {
+        chat_id: f.chat.id.clone(),
+        reason,
+    };
+    assert_eq!(unconfirmed, [warning.clone()]);
+    assert!(f.host.live().is_empty());
+
+    // A failed replacement also releases the restore gate.
+    f.host.finish_restore();
+    assert!(matches!(
+        f.host.resume(&f.chat.id, ResumeMode::Native).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert_eq!(f.host.begin_restore().await, [warning]);
+    Workspace::restore(&f.path, &backup).unwrap();
+    f.host.finish_restore();
+
+    let view = f.host.attach(&f.chat.id).await.unwrap().0;
+    assert!(matches!(
+        view.live.problem,
+        Some(ChatProblem::CleanupUnconfirmed { .. })
+    ));
+    assert_eq!(view.snapshot.chat.effective_settings, None);
+    assert!(f.turns().is_empty());
+    assert!(f.send("sent after restore").await.queued);
+    assert_eq!(f.queued(), ["from the backup", "sent after restore"]);
+    assert!(matches!(
+        f.host.resume_queue(&f.chat.id).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(f.submits().len(), 1);
+
+    f.fake
+        .set_close_outcome(CloseOutcome::Confirmed { exit_code: Some(0) });
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].session, SessionStart::New);
+    assert_eq!(opens[1].settings.permission, None);
+    assert_eq!(f.submits()[1].text, "from the backup");
+    assert_eq!(f.queued(), ["sent after restore"]);
+    assert!(!f.items().iter().any(|item| matches!(
+        item,
+        ChatItem::Message(message) if message.text == "old Turn"
+    )));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_permission_restart_does_not_open_when_chat_turns_off_during_close() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let session = NativeSessionId::new("native-session");
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: session.clone(),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    f.queue("queued before turning off").await;
+    let next = f.queue("send this first").await;
+    f.host.send_queued_now(&f.chat.id, &next.id).await.unwrap();
+    let close = f.fake.hold_next_close();
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+    assert!(
+        f.fake
+            .written()
+            .contains(&Written::Close(f.fake.opens()[0].generation))
+    );
+
+    let (unconfirmed, ()) = tokio::join!(f.host.turn_off(), async {
+        assert!(matches!(f.host.serving(), Err(HostError::TurnedOff)));
+        close.send(()).unwrap();
+    });
+    assert!(unconfirmed.is_empty());
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.queued(), ["queued before turning off", "send this first"]);
+    let chat = f.core().chat(&f.chat.id).unwrap();
+    assert!(chat.queue_paused);
+    assert_eq!(
+        chat.effective_settings.as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+
+    f.host.turn_on();
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].session, SessionStart::Resume(session));
+    assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
+    assert_eq!(f.submits()[1].text, "send this first");
+    assert_eq!(f.queued(), ["queued before turning off"]);
 }
 
 #[tokio::test(start_paused = true)]
