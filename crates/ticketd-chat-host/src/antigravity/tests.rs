@@ -10,7 +10,7 @@ use crate::{
     RespondOutcome, SessionStart, SettingChange, SettingKey, SettingOutcome, TurnOutcome,
 };
 
-use super::{runtime, settings};
+use super::{ANTIGRAVITY, runtime, settings};
 
 const PROMPT: &str = include_str!("../../tests/fixtures/antigravity/prompt.jsonl");
 const QUESTION: &str = include_str!("../../tests/fixtures/antigravity/question.jsonl");
@@ -962,17 +962,25 @@ async fn recorded_resume_error_reports_missing_history_for_the_requested_session
 
 #[tokio::test]
 async fn signed_out_reports_login_required_without_attempting_authentication() {
-    let (mut peer, io) = pipes();
-    let opening = tokio::spawn(runtime::open(
-        io,
-        request(SessionStart::New),
-        settings::OWN.to_owned(),
-    ));
-    startup(&mut peer, SIGNED_OUT).await;
-    assert_eq!(
-        opening.await.unwrap().unwrap_err().kind,
-        ProblemKind::LoginRequired
-    );
+    let detail = "Authentication required: the credentials for this profile expired";
+    for (fixture, expected_message) in [
+        (SIGNED_OUT.to_owned(), ANTIGRAVITY.sign_in_guidance),
+        (
+            SIGNED_OUT.replace("Authentication required", detail),
+            detail,
+        ),
+    ] {
+        let (mut peer, io) = pipes();
+        let opening = tokio::spawn(runtime::open(
+            io,
+            request(SessionStart::New),
+            settings::OWN.to_owned(),
+        ));
+        startup(&mut peer, &fixture).await;
+        let problem = opening.await.unwrap().unwrap_err();
+        assert_eq!(problem.kind, ProblemKind::LoginRequired);
+        assert_eq!(problem.message, expected_message);
+    }
 }
 
 use std::sync::Arc;

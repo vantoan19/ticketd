@@ -487,8 +487,14 @@ fn prompt_outcome(reply: &Reply) -> TurnOutcome {
 
 fn rpc_problem(error: &json_rpc::RpcError, fallback: ProblemKind) -> Problem {
     let lower = error.message.to_ascii_lowercase();
-    if error.code == -32000 && lower.contains("authentication required") {
-        return problem(ProblemKind::LoginRequired, ANTIGRAVITY.sign_in_guidance);
+    let authentication_required = "authentication required";
+    if error.code == -32000 && lower.contains(authentication_required) {
+        let message = if lower.trim().trim_end_matches('.') == authentication_required {
+            ANTIGRAVITY.sign_in_guidance
+        } else {
+            &error.message
+        };
+        return problem(ProblemKind::LoginRequired, message);
     }
     let kind = if ["quota", "rate limit", "resource_exhausted"]
         .iter()
