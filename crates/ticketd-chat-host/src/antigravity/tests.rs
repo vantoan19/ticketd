@@ -122,6 +122,130 @@ async fn recorded_acp_turn_uses_a_plain_prompt_and_finishes_on_its_reply() {
 }
 
 #[tokio::test]
+async fn large_tool_updates_keep_bounded_output_and_file_changes_until_completion() {
+    use ticketd_core::{CHAT_TOOL_OUTPUT_LIMIT, ChatToolState, harnesses::ANTIGRAVITY};
+
+    use crate::{
+        FileChange, FileChangeKind, FileTargets, LineCounts, StepAction, ToolEvidence, ToolStatus,
+        read_tool_steps,
+    };
+
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("large-edit")).await,
+        DispatchOutcome::Written
+    );
+    let outgoing = peer.written().await;
+    let update = |update| {
+        json!({
+            "jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": "session-1", "update": update}
+        })
+    };
+
+    for (tool, path) in [("edit-1", "/workspace/one"), ("edit-2", "/workspace/two")] {
+        let line = format!("{}:fixture tail\n", "é".repeat(CHAT_TOOL_OUTPUT_LIMIT / 2));
+        send(
+            &mut peer,
+            &update(json!({
+                "sessionUpdate": "tool_call",
+                "toolCallId": tool,
+                "title": "Write file",
+                "kind": "edit",
+                "status": "in_progress",
+                "rawInput": {"TargetFile": path, "ReplacementContent": &line},
+                "rawOutput": {"output": &line, "unneeded": &line},
+                "content": [{"type": "diff", "path": path, "newText": format!("{line}second line\n")}]
+            })),
+        )
+        .await;
+    }
+    for tool in ["edit-1", "edit-2"] {
+        send(
+            &mut peer,
+            &update(json!({
+                "sessionUpdate": "tool_call_update", "toolCallId": tool, "status": "completed"
+            })),
+        )
+        .await;
+    }
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": outgoing["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+
+    let mut completed = Vec::new();
+    let mut files = Vec::new();
+    let mut tool_updates = 0;
+    loop {
+        match opened.events.recv().await.unwrap().kind {
+            EventKind::ToolUpdated {
+                item,
+                title,
+                output,
+                detail,
+                status,
+                ..
+            } => {
+                tool_updates += 1;
+                let output = output.unwrap();
+                assert!(output.len() <= CHAT_TOOL_OUTPUT_LIMIT + 4);
+                assert!(output.ends_with(":fixture tail\n"));
+                if status == ToolStatus::Succeeded {
+                    let detail = detail.unwrap();
+                    let steps = read_tool_steps(
+                        ANTIGRAVITY.key.as_str(),
+                        ToolEvidence {
+                            name: &title,
+                            input: detail.payload(),
+                            state: ChatToolState::Completed,
+                            output: Some(&output),
+                            working_directory: "/workspace",
+                        },
+                    );
+                    let path = if item.0 == "edit-1" {
+                        "/workspace/one"
+                    } else {
+                        "/workspace/two"
+                    };
+                    assert_eq!(
+                        steps[0].action,
+                        StepAction::Create {
+                            targets: FileTargets::Paths(vec![path.to_owned()]),
+                            counts: LineCounts {
+                                added: Some(2),
+                                removed: None
+                            }
+                        }
+                    );
+                    completed.push(item.0);
+                }
+            }
+            EventKind::FilesChanged { files: current, .. } => files = current,
+            EventKind::TurnEnded {
+                outcome: TurnOutcome::Completed,
+                ..
+            } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(tool_updates, 4);
+    assert_eq!(completed, ["edit-1", "edit-2"]);
+    assert_eq!(
+        files,
+        ["/workspace/one", "/workspace/two"].map(|path| FileChange {
+            path: path.to_owned(),
+            kind: FileChangeKind::Added,
+            added_lines: Some(2),
+            removed_lines: Some(0),
+            confirmed: true,
+        })
+    );
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
 async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
     let (mut peer, mut opened) = open(
         RESUME,
@@ -187,6 +311,75 @@ async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
 }
 
 #[tokio::test]
+async fn large_approval_input_keeps_the_exact_command() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("tool")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+
+    let command = "printf '%s' 'fixture command'";
+    let path = format!("/workspace/{}", "a".repeat(3500));
+    send(
+        &mut peer,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "permission-1",
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "session-1",
+                "toolCall": {
+                    "toolCallId": "tool-1",
+                    "title": "Print a marker",
+                    "kind": "execute",
+                    "rawInput": {
+                        "CommandLine": command,
+                        "AbsolutePath": path,
+                        "TargetFile": path,
+                        "SourcePath": path,
+                        "DestinationPath": path,
+                        "WorkingDirectory": path
+                    }
+                },
+                "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]
+            }
+        }),
+    )
+    .await;
+
+    let events = drain(&mut opened.events).await;
+    let [
+        ..,
+        EventKind::ToolUpdated {
+            title,
+            detail: Some(detail),
+            ..
+        },
+        EventKind::InteractionRequested(_),
+    ] = events.as_slice()
+    else {
+        panic!("expected tool evidence followed by approval");
+    };
+    assert!(detail.payload().len() <= crate::MAX_PROVIDER_DETAIL_BYTES);
+    let steps = crate::read_tool_steps(
+        ticketd_core::harnesses::ANTIGRAVITY.key.as_str(),
+        crate::ToolEvidence {
+            name: title,
+            input: detail.payload(),
+            output: None,
+            state: ticketd_core::ChatToolState::Running,
+            working_directory: "/workspace",
+        },
+    );
+    assert_eq!(
+        steps[0].command.as_ref().map(|shell| shell.exact.as_str()),
+        Some(command)
+    );
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
 async fn forwards_the_native_warning_and_choice_for_allow_always() {
     let (mut peer, mut opened) = open(
         RESUME,
@@ -200,6 +393,25 @@ async fn forwards_the_native_warning_and_choice_for_allow_always() {
     );
     assert_eq!(peer.written().await["method"], "session/prompt");
     let warning = "Allowing this command always adds an Antigravity permission rule.";
+    let command = "echo 'fixture command'";
+    send(
+        &mut peer,
+        &json!({
+            "jsonrpc": "2.0",
+            "method": "session/update",
+            "params": {
+                "sessionId": "session-1",
+                "update": {
+                    "sessionUpdate": "tool_call",
+                    "toolCallId": "tool-1",
+                    "title": "Print fixture",
+                    "kind": "execute",
+                    "rawInput": {"CommandLine": command, "Cwd": "/workspace/fixtures"}
+                }
+            }
+        }),
+    )
+    .await;
     send(
         &mut peer,
         &json!({
@@ -229,22 +441,43 @@ async fn forwards_the_native_warning_and_choice_for_allow_always() {
         }),
     )
     .await;
-    let approval = drain(&mut opened.events)
-        .await
-        .into_iter()
-        .find_map(|kind| match kind {
-            EventKind::InteractionRequested(request) => Some(request),
-            _ => None,
-        })
-        .unwrap();
+    let events = drain(&mut opened.events).await;
+    let [
+        ..,
+        EventKind::ToolUpdated {
+            title,
+            detail: Some(detail),
+            ..
+        },
+        EventKind::InteractionRequested(approval),
+    ] = events.as_slice()
+    else {
+        panic!("expected tool evidence followed by approval");
+    };
+    let steps = crate::read_tool_steps(
+        ticketd_core::harnesses::ANTIGRAVITY.key.as_str(),
+        crate::ToolEvidence {
+            name: title,
+            input: detail.payload(),
+            output: None,
+            state: ticketd_core::ChatToolState::Running,
+            working_directory: "/workspace",
+        },
+    );
+    let shell = steps[0].command.as_ref().unwrap();
+    assert_eq!(shell.exact, command);
+    assert_eq!(
+        shell.working_directory.as_deref(),
+        Some("/workspace/fixtures")
+    );
     let InteractionKind::NativeApproval {
         options, reason, ..
-    } = approval.kind
+    } = &approval.kind
     else {
         panic!("expected provider approval");
     };
     assert_eq!(
-        reason.unwrap().lines().collect::<Vec<_>>(),
+        reason.as_deref().unwrap().lines().collect::<Vec<_>>(),
         [
             "Permission needed to run this command",
             "Review the command before approving",
