@@ -372,6 +372,16 @@ impl Engine {
         self.connector(provider)?.check_destination(destination)
     }
 
+    /// Whether both spellings name the same destination under the provider's rules.
+    pub(super) fn same_destination(
+        &self,
+        provider: &str,
+        first: &str,
+        second: &str,
+    ) -> Result<bool, SourceError> {
+        Ok(self.connector(provider)?.same_destination(first, second))
+    }
+
     /// Whether `destination` is one of `allowed` (the saved destinations) for
     /// `provider`. An empty `allowed` list places no restriction.
     pub fn destination_allowed(

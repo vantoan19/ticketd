@@ -1891,6 +1891,93 @@ fn a_lost_response_is_not_imported_by_discovery_and_attach_finishes_it() {
 }
 
 #[test]
+fn discovery_holds_matching_issues_only_in_the_open_publication_repository_and_host() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    save_repositories(&mut f, &["o/r", "o/other"]);
+    let mut different_repository = unrelated_issue(&f, 102, "Escalate", "Body");
+    different_repository.repository = Some("example.test/o/other".into());
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        // Repository matching follows the provider's case-insensitive comparison.
+        remote.issues.get_mut(&101).unwrap().repository = Some("example.test/O/R".into());
+        remote.issues.insert(102, different_repository);
+    }
+
+    let refresh = f
+        .workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(refresh.imported.len(), 1);
+    assert_eq!(f.ticket(&refresh.imported[0]).source.unwrap().id, "102");
+
+    let other_host = Fake(Fake::new().0, "other.example.test");
+    let mut same_repository_on_other_host = unrelated_issue(&f, 103, "Escalate", "Body");
+    same_repository_on_other_host.repository = Some("other.example.test/o/r".into());
+    other_host
+        .0
+        .lock()
+        .unwrap()
+        .issues
+        .insert(103, same_repository_on_other_host);
+    let mut other_engine = Engine::new();
+    other_engine.register(Box::new(other_host)).unwrap();
+    let refresh = f
+        .workspace
+        .refresh_sources(&other_engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(refresh.imported.len(), 1);
+    assert_eq!(f.ticket(&refresh.imported[0]).source.unwrap().id, "103");
+    f.still_unresolved(&ticket.reference);
+}
+
+#[test]
+fn discovery_holds_matches_in_a_legacy_publications_repository_until_the_host_is_confirmed() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    save_repositories(&mut f, &["o/r", "o/other"]);
+    // An unresolved attempt migrated from format 88 can have no saved host.
+    rusqlite::Connection::open(f.path())
+        .unwrap()
+        .execute(
+            "UPDATE publication_attempts SET destination_host = NULL WHERE ticket_id = ?1",
+            [&ticket.id],
+        )
+        .unwrap();
+
+    let other_host = Fake(Fake::new().0, "other.example.test");
+    let mut same_repository = unrelated_issue(&f, 102, "Escalate", "Body");
+    same_repository.repository = Some("other.example.test/o/r".into());
+    let mut different_repository = unrelated_issue(&f, 103, "Escalate", "Body");
+    different_repository.repository = Some("other.example.test/o/other".into());
+    other_host
+        .0
+        .lock()
+        .unwrap()
+        .issues
+        .extend([(102, same_repository), (103, different_repository)]);
+    let mut other_engine = Engine::new();
+    other_engine.register(Box::new(other_host)).unwrap();
+    let refresh = f
+        .workspace
+        .refresh_sources(&other_engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(refresh.imported.len(), 1);
+    assert_eq!(f.ticket(&refresh.imported[0]).source.unwrap().id, "103");
+
+    f.workspace
+        .confirm_publication_host(&f.engine, &ticket.reference, "example.test")
+        .unwrap();
+    let refresh = f
+        .workspace
+        .refresh_sources(&other_engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(refresh.imported.len(), 1);
+    assert_eq!(f.ticket(&refresh.imported[0]).source.unwrap().id, "102");
+    f.still_unresolved(&ticket.reference);
+}
+
+#[test]
 fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
     let mut f = Fixture::new();
     let ticket = f.lost_response("Escalate");

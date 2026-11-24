@@ -1346,7 +1346,7 @@ impl Workspace {
                 });
             }
         }
-        self.apply_refresh(gathered, &started, &tracked)
+        self.apply_refresh(engine, gathered, &started, &tracked)
     }
 
     /// Reads the conversation of each issue gathered since `first_issue` whose
@@ -1484,6 +1484,7 @@ impl Workspace {
 
     fn apply_refresh(
         &mut self,
+        engine: &Engine,
         mut gathered: Gathered,
         now: &str,
         tracked: &[Tracked],
@@ -1599,6 +1600,7 @@ impl Workspace {
                 )?;
                 apply_issue(
                     transaction,
+                    engine,
                     issue,
                     gathered.conversations.get(&key),
                     now,
@@ -1751,6 +1753,7 @@ struct Existing {
 /// Applies one observed issue inside the refresh write transaction.
 fn apply_issue(
     connection: &Connection,
+    engine: &Engine,
     issue: &ExternalIssue,
     read: Option<&Conversation>,
     now: &str,
@@ -1803,7 +1806,7 @@ fn apply_issue(
     let (state, reason) = state_parts(issue.state);
     match existing {
         None => {
-            if super::publication::awaited_by_open_attempt(connection, issue)? {
+            if super::publication::awaited_by_open_attempt(connection, engine, issue)? {
                 return Ok(());
             }
             let status = status_for(None, issue.state, Status::Todo);

@@ -966,6 +966,10 @@ the attempt's repository, issue locator and saved issue host. When the original
 host is unknown, it must be explicitly confirmed against the configured connector
 before recovery can proceed.
 
+GitHub discovery holds a matching issue for an open attempt only within its
+recorded repository and host. An attempt with an unknown host can still hold a
+match in the same owner and repository name until the original host is confirmed.
+
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only
 while a ticket reads _Source unavailable_. It flips `external_ownership` to

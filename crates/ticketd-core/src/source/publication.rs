@@ -608,26 +608,62 @@ fn published(issue: &ExternalIssue) -> PublishedIssue {
 /// attached or ruled out, the next refresh imports the issue if it is still new.
 pub(crate) fn awaited_by_open_attempt(
     connection: &Connection,
+    engine: &Engine,
     issue: &ExternalIssue,
 ) -> Result<bool, Error> {
+    let provider = &issue.reference.identity.provider;
+    let issue_repository = issue
+        .repository
+        .as_deref()
+        .and_then(|remote| remote.split_once('/'));
+    // GitHub supplies canonical repository provenance. Other connectors can omit it.
+    let requires_repository = provider == super::github::PROVIDER;
+    if requires_repository && issue_repository.is_none() {
+        return Ok(false);
+    }
     let mut statement = connection.prepare(
-        "SELECT title, body, started_at FROM publication_attempts \
+        "SELECT title, body, started_at, destination, destination_host FROM publication_attempts \
          WHERE provider = ?1 AND status IN ('in_flight', 'unresolved')",
     )?;
-    let attempts = statement
-        .query_map([&issue.reference.identity.provider], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-            ))
-        })?
-        .collect::<Result<Vec<_>, _>>()?;
-    Ok(attempts.iter().any(|(title, body, started_at)| {
-        !predates(&issue.created_at, started_at)
-            && (plain(&issue.title) == plain(title)
-                || (!plain(body).is_empty() && plain(&issue.body) == plain(body)))
-    }))
+    let attempts = statement.query_map([provider], |row| {
+        Ok((
+            row.get::<_, String>(0)?,
+            row.get::<_, String>(1)?,
+            row.get::<_, String>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, Option<String>>(4)?,
+        ))
+    })?;
+    for attempt in attempts {
+        let (title, body, started_at, destination, destination_host) = attempt?;
+        if let Some((issue_host, issue_repository)) = issue_repository {
+            // An unverified legacy attempt still protects its repository until its host is confirmed.
+            if destination_host
+                .as_deref()
+                .is_some_and(|host| host != issue_host)
+            {
+                continue;
+            }
+            let remote = engine.repository_for_destination(provider, &destination)?;
+            let same_repository = match remote.as_deref().and_then(|remote| remote.split_once('/'))
+            {
+                Some((_, repository)) => {
+                    engine.same_destination(provider, repository, issue_repository)?
+                }
+                None => !requires_repository,
+            };
+            if !same_repository {
+                continue;
+            }
+        }
+        if !predates(&issue.created_at, &started_at)
+            && (plain(&issue.title) == plain(&title)
+                || (!plain(&body).is_empty() && plain(&issue.body) == plain(&body)))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Step 26: publication attempts.
