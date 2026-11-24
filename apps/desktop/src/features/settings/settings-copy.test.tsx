@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { ChatClientContext } from "@/features/chats/client";
+import { createMockChatClient } from "@/features/chats/mock-client";
 import { ChatFeatureContext } from "@/features/chats/use-chats";
 import { SyncStatusProvider } from "@/features/sync/SyncStatusProvider";
 import { syncSettings, syncStatus } from "@/features/sync/sync-fixtures";
@@ -154,6 +156,37 @@ const CHAT_ON = {
   chatRequest: null,
   requestChat: () => {},
 };
+
+test("Chat settings show harness names only in the catalog", async () => {
+  const client = createMockChatClient({
+    harnesses: [{ id: "antigravity", name: "Antigravity", status: "ready" }],
+  });
+  const page = (enabled: boolean) => (
+    <ChatClientContext value={client}>
+      <ChatFeatureContext value={{ ...CHAT_ON, enabled }}>
+        <TestReads>
+          <SyncStatusProvider>
+            <SettingsView
+              selected="chat"
+              onSelect={() => {}}
+              onRestore={async () => {}}
+              onOpenInbox={() => {}}
+            />
+          </SyncStatusProvider>
+        </TestReads>
+      </ChatFeatureContext>
+    </ChatClientContext>
+  );
+  const harnessNames = /Claude Code|Codex|Antigravity/i;
+  const { rerender } = render(page(false));
+  expect(screen.queryByText(harnessNames)).toBeNull();
+
+  rerender(page(true));
+  const catalog = await screen.findByRole("list", { name: "Harnesses" });
+  expect(screen.getAllByText(harnessNames)).toEqual([
+    within(catalog).getByText("Antigravity"),
+  ]);
+});
 
 test("every search entry's title and description are on the page it opens", async () => {
   const drifted: string[] = [];

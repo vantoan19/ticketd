@@ -10,8 +10,8 @@ use crate::wire::{capitalized, text};
 
 use crate::{
     AppliesFrom, ContextCategory, ContextUsage, EventKind, FileChange, FileChangeKind,
-    HarnessOptions, HarnessSettings, ModelChoice, NativeItemId, NativeTurnId, PermissionKind, Plan,
-    PlanStep, PlanStepStatus, Setting, SettingOption,
+    HarnessOptions, HarnessSettings, ModelChoice, NativeItemId, NativeTurnId, Plan, PlanStep,
+    PlanStepStatus, Setting, SettingOption,
 };
 
 /// Tools whose calls are the plan, shown as the plan and never as steps.
@@ -34,23 +34,6 @@ pub(super) const DEFAULT_PERMISSION_MODE: &str = "default";
 /// Why a run's agent's settings cannot be changed in its Chat.
 const AUTOMATION_RUNNING: &str =
     "An Automation is running this Chat. Reply or stop it to take it over first.";
-
-/// Permission modes ticketd offers for a person's Chat. `bypassPermissions` is Full
-/// access: Claude Code runs every tool without asking, which the bridge makes
-/// possible in every person's session (never in an Automation's).
-const PERMISSION_MODES: &[(&str, &str, PermissionKind)] = &[
-    ("default", "Ask before edits", PermissionKind::Ask),
-    ("acceptEdits", "Accept edits", PermissionKind::AcceptEdits),
-    ("plan", "Plan only", PermissionKind::ReadOnly),
-    (
-        "bypassPermissions",
-        "Full access",
-        PermissionKind::FullAccess,
-    ),
-];
-
-/// What the menu says under Full access, the one mode that needs saying.
-const FULL_ACCESS_NOTE: &str = "Runs tools and commands without asking";
 
 #[derive(Debug)]
 struct Thinking {
@@ -603,20 +586,17 @@ pub(super) fn permission_setting(mode: String) -> Setting {
 
 /// Whether ticketd offers `mode`, and so may open a session in it.
 pub(super) fn offered_permission(mode: &str) -> bool {
-    PERMISSION_MODES.iter().any(|(id, ..)| *id == mode)
+    ticketd_core::harnesses::CLAUDE_CODE
+        .permissions
+        .iter()
+        .any(|choice| choice.id == mode)
 }
 
 fn permission_options() -> Vec<SettingOption> {
-    PERMISSION_MODES
+    ticketd_core::harnesses::CLAUDE_CODE
+        .permissions
         .iter()
-        .map(|(id, label, kind)| SettingOption {
-            id: (*id).to_owned(),
-            label: (*label).to_owned(),
-            description: (*kind == PermissionKind::FullAccess).then(|| FULL_ACCESS_NOTE.to_owned()),
-            is_default: *id == DEFAULT_PERMISSION_MODE,
-            permission: Some(*kind),
-            allowed: true,
-        })
+        .map(|choice| SettingOption::from_permission(choice, true))
         .collect()
 }
 
@@ -659,6 +639,7 @@ fn model_name(id: &str) -> Option<String> {
 /// pick, the session keeps whatever Claude Code's own settings choose.
 pub(super) fn listed_options(models: &[Value]) -> HarnessOptions {
     HarnessOptions {
+        model_list_error: None,
         models: models
             .iter()
             .filter_map(|entry| {

@@ -2,11 +2,16 @@
 //! Workspaces against one fake storage account, through the shared-core interface.
 #![allow(clippy::unwrap_used)] // Setup and sync runs that fail must fail the test.
 
+use std::io::Cursor;
+
 use ticketd_core::{
-    AgentHarness, Automation, AutomationAgentSettings, AutomationDefinition, AutomationRunStatus,
-    Error, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind, SyncRecord, SyncValue,
-    Trigger, Workspace,
-    sync::{AttachmentDownload, RecordKind, SyncChoice, SyncResolution, remote::RemoteKind},
+    AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
+    AutomationRunStatus, Error, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind,
+    SyncRecord, SyncValue, Trigger, Workspace,
+    sync::{
+        AttachmentDownload, RecordKind, SyncChoice, SyncResolution,
+        remote::{RemoteKey, RemoteKind, RemoteStorage},
+    },
 };
 
 #[path = "support/sync_desks.rs"]
@@ -340,6 +345,90 @@ fn two_desktops_each_removing_a_command_never_add_up_to_any_command() {
 }
 
 #[test]
+fn concurrent_harness_and_command_policy_edits_keep_both_choices_available() {
+    for (first, inactive_grant, authorized_grant) in [
+        (1, true, false),
+        (1, false, false),
+        (0, false, false),
+        (0, true, false),
+        (1, true, true),
+    ] {
+        let mut devices = devices();
+        let (_, agent) = devices.shared_automation();
+        let initial = devices.workspaces[0].automation_agent(&agent).unwrap();
+        let mut switched = initial.settings.clone();
+        switched.harness = AgentHarness::Codex;
+        // The editor keeps this choice when the commands switch is turned off.
+        switched.tools.any_command = inactive_grant;
+        devices.workspaces[0]
+            .update_automation_agent(&agent, switched.clone())
+            .unwrap();
+        let mut listed = initial.settings;
+        listed.tools.run_commands = true;
+        listed.tools.any_command = authorized_grant;
+        listed.tools.allowed_commands = vec!["fixture-command".into()];
+        devices.workspaces[1]
+            .update_automation_agent(&agent, listed.clone())
+            .unwrap();
+
+        let first_local = [&switched, &listed][first];
+        let second = 1 - first;
+        let second_local = [&switched, &listed][second];
+        devices.sync(first);
+        devices.sync(second);
+
+        let workspace = &mut devices.workspaces[second];
+        assert_eq!(
+            workspace.automation_agent(&agent).unwrap().settings,
+            *second_local
+        );
+        let conflict = workspace
+            .sync_conflict(SyncKind::AutomationAgent, &agent)
+            .unwrap();
+        if first == 1 && inactive_grant {
+            let run_only = SyncResolution {
+                field: "run_commands".into(),
+                choice: SyncChoice::Remote,
+                detected_at: conflict
+                    .fields
+                    .iter()
+                    .find(|field| field.field == "run_commands")
+                    .map_or_else(
+                        || conflict.detected_at.clone(),
+                        |field| field.detected_at.clone(),
+                    ),
+            };
+            assert!(matches!(
+                workspace.resolve_sync_conflict(SyncKind::AutomationAgent, &agent, &[run_only]),
+                Err(Error::SyncReviewChanged)
+            ));
+            assert_eq!(
+                workspace.automation_agent(&agent).unwrap().settings,
+                *second_local
+            );
+        }
+        assert_eq!(conflict.fields.len(), 1);
+        assert_eq!(conflict.fields[0].field, "command_policy");
+        let remote: Vec<_> = conflict
+            .fields
+            .into_iter()
+            .map(|field| SyncResolution {
+                field: field.field,
+                choice: SyncChoice::Remote,
+                detected_at: field.detected_at,
+            })
+            .collect();
+        workspace
+            .resolve_sync_conflict(SyncKind::AutomationAgent, &agent, &remote)
+            .unwrap();
+        assert_eq!(
+            workspace.automation_agent(&agent).unwrap().settings,
+            *first_local
+        );
+    }
+}
+
+#[test]
 fn a_schedule_changed_on_another_desktop_counts_again_from_when_it_arrives() {
     use ticketd_core::Schedule;
 
@@ -607,7 +696,7 @@ fn an_agent_file_edited_by_hand_in_ordinary_yaml_is_accepted() {
     let directory = tempfile::tempdir().unwrap();
     let (mut workspace, _, agent) = workspace_with_files(&directory);
     let edited = format!(
-        "---\nkind: automation_agent\nid: {agent}\nname: Triage\nharness: codex\nmodel: gpt-5\nturn_limit: \"12\"\ntime_limit_minutes: 5\nrun_commands: true\nallowed_commands: [npm test]\n---\nLabel it.\n"
+        "---\nkind: automation_agent\nid: {agent}\nname: Triage\nharness: codex\nmodel: gpt-5\nturn_limit: \"12\"\ntime_limit_minutes: 5\nrun_commands: true\nany_command: true\nallowed_commands: [npm test]\n---\nLabel it.\n"
     );
 
     workspace
@@ -619,9 +708,101 @@ fn an_agent_file_edited_by_hand_in_ordinary_yaml_is_accepted() {
     assert_eq!(settings.model.as_deref(), Some("gpt-5"));
     assert_eq!((settings.turn_limit, settings.time_limit_minutes), (12, 5));
     assert_eq!(settings.tools.allowed_commands, ["npm test"]);
+    assert!(settings.tools.any_command);
     // A true-or-false field that is left out is false.
     assert!(!settings.tools.read_files && settings.tools.run_commands);
     assert_eq!(settings.instructions, "Label it.");
+}
+
+#[test]
+fn a_synced_harness_change_cannot_implicitly_widen_a_command_list() {
+    let directory = tempfile::tempdir().unwrap();
+    let (mut workspace, _, agent) = workspace_with_files(&directory);
+    let content = format!(
+        "---\nkind: automation_agent\nid: {agent}\nname: Triage\nharness: claude-code\nturn_limit: 12\ntime_limit_minutes: 5\nrun_commands: true\nallowed_commands: [npm test]\n---\nLabel it.\n"
+    );
+    workspace
+        .apply_sync_record(&SyncRecord::parse(&content).unwrap())
+        .unwrap();
+    let before = workspace.automation_agent(&agent).unwrap();
+    let widened = SyncRecord::parse(&content.replace("claude-code", "codex")).unwrap();
+    assert!(matches!(
+        workspace.apply_sync_record(&widened),
+        Err(Error::SyncFile(reason)) if reason.contains("explicit grant")
+    ));
+    assert_eq!(workspace.automation_agent(&agent).unwrap(), before);
+}
+
+#[test]
+fn sync_skips_an_agent_file_without_the_required_command_grant() {
+    let mut devices = devices();
+    let (_, agent) = devices.shared_automation();
+    let before = devices.workspaces[1].automation_agent(&agent).unwrap();
+    let invalid_agent = "b3f0c4e5-5df4-4a0d-a82a-42788e1911fb";
+    let file = AGENT_FILE
+        .replace("AGENT", invalid_agent)
+        .replace("claude-code", "codex")
+        .replace("any_command: false\n", "");
+    devices
+        .remote
+        .write(
+            &devices.folder,
+            &RemoteKey::new(RemoteKind::AutomationAgent, invalid_agent),
+            "Missing grant.md",
+            None,
+            &mut Cursor::new(file.as_bytes()),
+        )
+        .unwrap();
+
+    assert_eq!(devices.sync(1).skipped, 1);
+    let workspace = &devices.workspaces[1];
+    assert_eq!(workspace.automation_agents().unwrap(), [before]);
+}
+
+#[test]
+fn a_final_snapshot_syncs_an_explicitly_enabled_wider_command_policy() {
+    let mut devices = devices();
+    let listed = devices.workspaces[0]
+        .create_automation_agent(AutomationAgentSettings {
+            name: "Triage".into(),
+            harness: AgentHarness::ClaudeCode,
+            tools: AutomationAgentTools {
+                run_commands: true,
+                allowed_commands: vec!["npm test".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+    devices.settle();
+    assert_eq!(
+        devices.workspaces[1].automation_agent(&listed.id).unwrap(),
+        listed
+    );
+
+    // The editor saves the harness change with commands off, then saves the
+    // person's decision to enable any command. Only the latter is uploaded.
+    let mut settings = listed.settings.clone();
+    settings.harness = AgentHarness::Codex;
+    settings.tools.run_commands = false;
+    let source = &mut devices.workspaces[0];
+    let switched = source
+        .update_automation_agent(&listed.id, settings)
+        .unwrap();
+    let mut settings = switched.settings;
+    settings.tools.run_commands = true;
+    settings.tools.any_command = true;
+    let enabled = source
+        .update_automation_agent(&listed.id, settings)
+        .unwrap();
+
+    assert_eq!(devices.sync(0).uploaded, 1);
+    let received = devices.sync(1);
+    assert_eq!((received.skipped, received.conflicts), (0, 0));
+    assert_eq!(
+        devices.workspaces[1].automation_agent(&listed.id).unwrap(),
+        enabled
+    );
 }
 
 #[test]
@@ -673,7 +854,18 @@ fn a_file_that_would_make_a_broken_agent_or_automation_is_rejected_and_changes_n
         }
     }
     assert_eq!(files(&workspace), before);
-    // The check is also made on a record built in code, as a review's choice is.
+    // The checks also apply to records built in code, such as review choices.
+    let mut record = workspace
+        .export_sync_record(SyncKind::AutomationAgent, &agent)
+        .unwrap();
+    record
+        .fields
+        .insert("harness".into(), SyncValue::Text("unknown-harness".into()));
+    assert!(matches!(
+        workspace.apply_sync_record(&record),
+        Err(Error::SyncFile(message)) if message.contains("field 'harness'")
+    ));
+
     let mut record = workspace
         .export_sync_record(SyncKind::Automation, &automation)
         .unwrap();

@@ -1,5 +1,6 @@
 //! Shared ticket workflows for the desktop and CLI.
 pub mod agent_skills;
+pub mod harnesses;
 pub use search::{MetadataSelection, TicketMetadata, TicketMetadataPage, TicketWithUpdate};
 mod backlinks;
 pub use backlinks::Backlink;
@@ -152,14 +153,14 @@ pub use automations::{
 };
 pub use chat_suggestions::{ChatSuggestion, SuggestedTicket};
 pub use chats::{
-    CHAT_AGENT_CHANGES_LIMIT, CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_ID_VARIABLE,
-    CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX, CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatAgentChange,
-    ChatCatchUp, ChatChange, ChatDelivery, ChatDeliveryDecision, ChatHistoryPage,
-    ChatInputStanding, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatItem,
-    ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter, ChatMessage, ChatNotice,
-    ChatObservation, ChatRecord, ChatRole, ChatSession, ChatSessionOrigin, ChatSnapshot,
-    ChatSubmissionAttempt, ChatSubmissionIntent, ChatSummary, ChatTool, ChatToolState, ChatTurn,
-    ChatTurnState, FolderChat, NewChat,
+    AGENT_CHANGES_RECORD_NAME, CHAT_AGENT_CHANGES_LIMIT, CHAT_CHANGE_TAIL,
+    CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_ID_VARIABLE, CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX,
+    CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatAgentChange, ChatCatchUp, ChatChange, ChatDelivery,
+    ChatDeliveryDecision, ChatHistoryPage, ChatInputStanding, ChatInteraction, ChatInteractionKind,
+    ChatInteractionState, ChatItem, ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter,
+    ChatMessage, ChatNotice, ChatObservation, ChatRecord, ChatRole, ChatSession, ChatSessionOrigin,
+    ChatSnapshot, ChatSubmissionAttempt, ChatSubmissionIntent, ChatSummary, ChatTool,
+    ChatToolState, ChatTurn, ChatTurnReceipt, ChatTurnState, FolderChat, NewChat,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};

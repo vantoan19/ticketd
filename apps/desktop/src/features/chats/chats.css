@@ -917,11 +917,20 @@
 .chat-request-buttons {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
   margin-top: 12px;
 }
-.chat-request-buttons > .ui-button {
-  padding-inline: 10px;
+.chat-approval-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.chat-approval-warning {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
 }
 /* A request taller than the dock scrolls under its buttons, which stay in
    view. The row keeps 4px of room for the buttons' focus ring (CH-27). */

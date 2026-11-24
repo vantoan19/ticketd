@@ -1,3 +1,4 @@
+import { useHarnessCatalog } from "@/features/chats/harness-catalog";
 import { useSources } from "@/features/settings/sources/use-sources";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
@@ -62,11 +63,6 @@ const when = (timestamp: string) =>
  * (#387 3B4): Claude Code resumes as a new Chat does, Codex with the person's
  * own approval policy and sandbox (`supervisor.rs`, D11 and D3).
  */
-const TAKEN_OVER_ASKS: Record<string, string> = {
-  "claude-code": " and Claude Code asks before edits",
-  codex: " and Codex uses your own approval settings",
-};
-
 /** The harness of the agent whose step ran in `chat`. */
 function chatHarness(
   run: AutomationRunDetail,
@@ -241,6 +237,7 @@ export function RunView({
   /** How the reads this view makes by itself went. */
   onRead: ReportRead;
 }) {
+  const catalog = useHarnessCatalog();
   const { entries: sources } = useSources();
   const headingId = useId();
   const [run, setRun] = useState<AutomationRunDetail | null>(null);
@@ -305,6 +302,20 @@ export function RunView({
     };
   }, [chats, chat, chatEnded]);
 
+  const harness =
+    run && chat
+      ? catalog.find((item) => item.id === chatHarness(run, chat, agents))
+      : undefined;
+  const defaultPermission = harness?.permissions.find(
+    (choice) => choice.is_default,
+  )?.semantics;
+  const takeover =
+    defaultPermission === "ask"
+      ? ` and ${harness?.name} asks before edits`
+      : defaultPermission === "own_settings"
+        ? ` and ${harness?.name} uses your own approval settings`
+        : "";
+
   if (chat)
     return (
       <ChatDetail
@@ -320,7 +331,7 @@ export function RunView({
           run?.steps.some((step) => step.chat_id === chat && step.chat_owned)
             ? emptyChat === chat
               ? "The agent never started, so this Chat is empty."
-              : `A run of ${automationName}. Reply to take it over; it moves to your Chats${TAKEN_OVER_ASKS[chatHarness(run, chat, agents) ?? ""] ?? ""}.`
+              : `A run of ${automationName}. Reply to take it over; it moves to your Chats${takeover}.`
             : run?.status === "taken_over" && (
                 <TakenOverLine
                   automationName={automationName}

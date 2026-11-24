@@ -1,5 +1,5 @@
 //! One conformance suite for every harness adapter: the fake, the Claude bridge
-//! transport and the Codex adapter run the same properties against the adapter
+//! transport, Codex and Antigravity run the same properties against the adapter
 //! contract, each through its own scripted provider.
 //!
 //! A [`Provider`] is the provider's side of one open runtime: it knows how its
@@ -80,6 +80,18 @@ pub(crate) trait Provider: Send {
 
     /// What a lost process reports: its exit code, and the end of its diagnostics.
     fn loss(&self) -> (Option<i32>, &'static str);
+
+    fn loss_dispatch(&self) -> DispatchOutcome {
+        DispatchOutcome::UnknownAfterLoss
+    }
+
+    fn approval_answer(
+        &self,
+        request: &NativeRequestId,
+        generation: RuntimeGeneration,
+    ) -> InteractionResponse {
+        allow(request, generation)
+    }
 
     fn runtime(&self) -> Arc<dyn HarnessRuntime>;
 
@@ -181,7 +193,7 @@ async fn losing_the_process_after_the_write_leaves_the_submission_unknown(p: &mu
 
     let outcome = p.submit_and_lose_process("s1").await;
 
-    assert_eq!(outcome, DispatchOutcome::UnknownAfterLoss);
+    assert_eq!(outcome, p.loss_dispatch());
     let lost = drain(p.events()).await;
     let (expected_code, expected_tail) = p.loss();
     let [
@@ -239,9 +251,12 @@ async fn each_request_accepts_one_answer_from_its_own_generation(p: &mut dyn Pro
     let runtime = p.runtime();
     let request = p.request_approval().await;
 
-    let stale = runtime.respond(allow(&request, RuntimeGeneration(6))).await;
-    let first = p.respond(allow(&request, GENERATION)).await;
-    let repeated = p.respond(allow(&request, GENERATION)).await;
+    let stale = runtime
+        .respond(p.approval_answer(&request, RuntimeGeneration(6)))
+        .await;
+    let answer = p.approval_answer(&request, GENERATION);
+    let first = p.respond(answer.clone()).await;
+    let repeated = p.respond(answer).await;
 
     assert_eq!(
         stale,
@@ -464,3 +479,4 @@ conformance!(
 );
 conformance!(claude, crate::claude::tests::provider());
 conformance!(codex, crate::codex::tests::provider());
+conformance!(antigravity, crate::antigravity::tests::provider());

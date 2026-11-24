@@ -5295,10 +5295,17 @@ test.each([
     const publisherMark = (element: Element) =>
       element.querySelector(".harness-mark svg")?.getAttribute("viewBox") ??
       null;
-    render(<App />);
+    const { ChatClientContext } = await import("@/features/chats/client");
+    const { createMockChatClient } =
+      await import("@/features/chats/mock-client");
+    render(
+      <ChatClientContext value={createMockChatClient()}>
+        <App />
+      </ChatClientContext>,
+    );
     const row = await screen.findByRole("button", { name: /First/ });
     expect(within(row).getByLabelText("Ready for review")).toBeTruthy();
-    expect(publisherMark(row)).toBe(viewBox);
+    await waitFor(() => expect(publisherMark(row)).toBe(viewBox));
     fireEvent.click(row);
     const update = await screen.findByRole("article", {
       name: `Update by ${agent}`,

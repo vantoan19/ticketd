@@ -1536,6 +1536,183 @@ fn overlapping_chats_of_one_harness_are_credited_only_with_their_own_changes() {
     assert_eq!(excerpts(&second, "turn-b"), ["B-note"]);
 }
 
+#[test]
+fn adjacent_turns_credit_only_their_own_tagged_writes_at_the_same_millisecond() {
+    use ticketd_core::{AGENT_CHANGES_RECORD_NAME, ChatAgentChange, Status, TicketPatch};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let (mut host, chat) = workspace_with_chat(&dir);
+    let ticket = host.create_ticket("Reset email").unwrap();
+    let mut writer = Workspace::open(&path).unwrap();
+    writer.act_for_chat(&chat.id).unwrap();
+
+    start_turn(&mut host, &chat, "go", "first");
+    writer
+        .change_ticket(
+            &ticket.reference,
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    end_turn(&mut host, &chat, "first");
+    let input = host.save_chat_input(None, &chat.id, "next").unwrap();
+    writer
+        .add_activity(&ticket.reference, "From the gap", None)
+        .unwrap();
+    host.record_chat_queue_submission(
+        &chat.id,
+        &input.id,
+        "attempt-second",
+        ChatSubmissionIntent::NewTurn,
+    )
+    .unwrap();
+    writer
+        .add_activity(&ticket.reference, "Before the start was observed", None)
+        .unwrap();
+    host.record_chat_observations(
+        &chat.id,
+        vec![
+            ChatObservation::TurnStarted {
+                turn_id: "second".into(),
+                native_turn_id: None,
+            },
+            ChatObservation::SubmissionProcessing {
+                attempt_id: "attempt-second".into(),
+                turn_id: "second".into(),
+            },
+        ],
+    )
+    .unwrap();
+    host.mark_chat_contact_lost(Some(&chat.id), "lost", "unknown")
+        .unwrap();
+    writer
+        .add_activity(&ticket.reference, "After contact was lost", None)
+        .unwrap();
+    end_turn(&mut host, &chat, "second");
+
+    // Force an exact tie without relying on how fast these separate commits run.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "UPDATE ticket_history SET timestamp = '2026-01-01T00:00:00.000Z';
+             UPDATE activities SET reported_at = '2026-01-01T00:00:00.000Z';
+             UPDATE chat_submission_attempts SET recorded_at = '2026-01-01T00:00:00.000Z';
+             UPDATE chat_turns SET started_at = '2026-01-01T00:00:00.000Z',
+                                   ended_at = '2026-01-01T00:00:00.000Z';",
+        )
+        .unwrap();
+    drop(writer);
+    drop(host);
+
+    let mut reopened = Workspace::open(&path).unwrap();
+    let expected = [
+        (
+            "first",
+            vec![ChatAgentChange::Status {
+                reference: ticket.reference.clone(),
+                title: ticket.title,
+                from: "Todo".into(),
+                to: "In progress".into(),
+            }],
+        ),
+        (
+            "second",
+            vec![ChatAgentChange::Update {
+                reference: ticket.reference,
+                excerpt: "Before the start was observed".into(),
+            }],
+        ),
+    ];
+    for (turn, changes) in &expected {
+        assert_eq!(
+            &reopened.chat_turn_agent_changes(&chat.id, turn).unwrap(),
+            changes
+        );
+        reopened
+            .record_chat_observations(
+                &chat.id,
+                vec![ChatObservation::CaptureAgentChanges {
+                    turn_id: (*turn).into(),
+                }],
+            )
+            .unwrap();
+    }
+    let before_trim = reopened.chat_change_sequence().unwrap();
+    reopened
+        .record_chat_observations(
+            &chat.id,
+            (0..CHAT_CHANGE_TAIL)
+                .map(|i| ChatObservation::Notice {
+                    notice_id: format!("notice-{i}"),
+                    text: "line".into(),
+                    from_harness: true,
+                })
+                .collect(),
+        )
+        .unwrap();
+    assert_eq!(
+        reopened
+            .chat_changes(&chat.id, before_trim - 1, 10)
+            .unwrap(),
+        ChatCatchUp::Resync
+    );
+    let saved = reopened
+        .chat_history(&chat.id, before_trim + 1, 20)
+        .unwrap();
+    let backup = dir.path().join("copy.sqlite3");
+    reopened.backup(&backup).unwrap();
+    let check = reopened.inspect_backup(&backup).unwrap().check;
+    assert!(
+        matches!(
+            check,
+            ticketd_core::BackupCheck::Valid { format_version, .. }
+                if i64::from(format_version) == ticketd_core::FORMAT_VERSION
+        ),
+        "receipt was written to an incompatible backup: {check:?}"
+    );
+    let restored = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored, &backup).unwrap();
+    let restored = Workspace::open(&restored).unwrap();
+    let portable = restored.export().unwrap();
+    assert!(portable.get("chat_record_writes").is_none());
+    for (turn, changes) in expected {
+        assert_eq!(
+            restored.chat_turn_agent_changes(&chat.id, turn).unwrap(),
+            changes
+        );
+        let input = saved
+            .items
+            .iter()
+            .find_map(|item| match item {
+                ChatItem::Tool(tool)
+                    if tool.turn_id == turn && tool.name == AGENT_CHANGES_RECORD_NAME =>
+                {
+                    Some(&tool.input)
+                }
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(
+            serde_json::from_str::<Vec<ChatAgentChange>>(input).unwrap(),
+            changes
+        );
+        assert!(
+            portable["chat_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| {
+                    tool["turn_id"] == turn
+                        && tool["name"] == AGENT_CHANGES_RECORD_NAME
+                        && tool["input"] == *input
+                })
+        );
+    }
+}
+
 #[allow(clippy::unwrap_used)]
 fn end_turn(workspace: &mut Workspace, chat: &Chat, turn: &str) {
     workspace
@@ -1687,6 +1864,62 @@ fn a_format_82_workspace_gains_the_turn_ending_column_and_keeps_its_turns() {
     let turn = last_turn(&workspace, &chat);
     assert_eq!(turn.state, ChatTurnState::Completed);
     assert_eq!(turn.ending, None);
+}
+
+#[test]
+fn a_format_85_workspace_keeps_legacy_attribution_and_its_first_turn_end() {
+    use ticketd_core::ChatAgentChange;
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    old_chat_workspace(&path, 85, "unknown");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute_batch(
+        "INSERT INTO tickets (id, title, status, reference) VALUES ('ticket', 'Kept', 'Todo', 'T-KQ1');
+         UPDATE chat_turns SET position = 3, started_at = '2026-01-01T00:00:00.002Z',
+                               ended_at = '2026-01-01T00:00:00.003Z' WHERE id = 'turn-1';
+         INSERT INTO chat_changes (chat_id, kind, subject_id)
+         VALUES ('chat-1', 'message', 'input'), ('chat-1', 'message', 'input'),
+                ('chat-1', 'turn', 'turn-1'), ('chat-1', 'turn', 'turn-1');
+         INSERT INTO chat_messages (id, chat_id, position, role, text, complete)
+         VALUES ('input', 'chat-1', 1, 'user', 'go', 1);
+         INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, turn_id, recorded_at)
+         VALUES ('attempt', 'chat-1', 'input', 'new_turn', 'acknowledged', 'turn-1', '2026-01-01T00:00:00.000Z');
+         INSERT INTO activities (id, ticket_id, brief, reported_at)
+         VALUES ('activity', 'ticket', 'Before the observed start', '2026-01-01T00:00:00.001Z');
+         INSERT INTO chat_record_writes (chat_id, activity_id) VALUES ('chat-1', 'activity');",
+    )
+    .unwrap();
+    drop(db);
+
+    let mut workspace = Workspace::open(&path).unwrap();
+    let chat = workspace.chat("chat-1").unwrap();
+    workspace.act_for_chat(&chat.id).unwrap();
+    let after_old_end = workspace
+        .add_activity("T-KQ1", "After the old Turn ended", None)
+        .unwrap();
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let version: i64 = db
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, ticketd_core::FORMAT_VERSION);
+    // The first end predates the newer attribution rows, even if the timestamps tie.
+    db.execute(
+        "UPDATE activities SET reported_at = '2026-01-01T00:00:00.003Z' WHERE id = ?1",
+        [&after_old_end.id],
+    )
+    .unwrap();
+    end_turn(&mut workspace, &chat, "turn-1");
+
+    assert_eq!(
+        workspace
+            .chat_turn_agent_changes(&chat.id, "turn-1")
+            .unwrap(),
+        [ChatAgentChange::Update {
+            reference: "T-KQ1".into(),
+            excerpt: "Before the observed start".into(),
+        }]
+    );
 }
 
 #[test]

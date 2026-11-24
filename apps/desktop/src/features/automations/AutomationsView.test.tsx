@@ -81,6 +81,8 @@ beforeEach(() => {
       return created;
     };
     switch (command) {
+      case "list_projects":
+        return [];
       case "automation_list":
         return automations;
       case "automation_run_list_all":
@@ -480,20 +482,47 @@ test("cancelling or dismissing the agent delete dialog returns focus to Agent ac
   expect(stored).toHaveLength(1);
 });
 
-test("with Codex chosen, the switches are live, say briefly what Codex does with them, and the turn limit is hidden; Claude Code brings the command list back", async () => {
-  await open(undefined, [
+test("switching from a command list to Codex turns commands off until the person explicitly enables any command", async () => {
+  const catalog = await createMockChatClient().harnessCatalog();
+  catalog.push({
+    id: "fixture-harness",
+    name: "Fixture Harness",
+    mark_id: "fixture-mark",
+    editing_agent_aliases: [],
+    unattended: null,
+    permissions: [],
+  });
+  await open(createMockChatClient({ catalog }), [
     {
       id: "a1",
       ...DEFAULTS,
       name: "Triage",
-      harness: "codex",
-      tools: { ...DEFAULTS.tools, read_files: false },
+      tools: {
+        ...DEFAULTS.tools,
+        read_files: false,
+        run_commands: true,
+        allowed_commands: ["npm test"],
+      },
     } as unknown as AutomationAgent,
   ]);
   fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
   const form = await screen.findByRole("region", { name: "Triage" });
   const control = (role: "switch" | "spinbutton", name: string) =>
     within(form).getByRole(role, { name }) as HTMLButtonElement;
+  expect(
+    within(form).queryByRole("radio", { name: /Fixture Harness/ }),
+  ).toBeNull();
+
+  expect(
+    within(form).getByRole("textbox", { name: "Allowed commands" }),
+  ).toHaveProperty("value", "npm test");
+  fireEvent.click(within(form).getByRole("radio", { name: /Codex/ }));
+  await waitFor(() =>
+    expect(stored[0]).toMatchObject({
+      harness: "codex",
+      tools: { run_commands: false, any_command: false },
+    }),
+  );
 
   // Every switch is the agent's own, and none is locked.
   for (const [name, on] of [
@@ -510,7 +539,13 @@ test("with Codex chosen, the switches are live, say briefly what Codex does with
   expect(within(form).getByText("Any command")).toBeTruthy();
   // Turning Run commands on offers no list: Codex has none.
   fireEvent.click(control("switch", "Run commands"));
-  await waitFor(() => expect(stored[0]?.tools.run_commands).toBe(true));
+  await waitFor(() =>
+    expect(stored[0]?.tools).toMatchObject({
+      run_commands: true,
+      any_command: true,
+      allowed_commands: ["npm test"],
+    }),
+  );
   expect(
     within(form).queryByRole("textbox", { name: "Allowed commands" }),
   ).toBeNull();
@@ -531,11 +566,108 @@ test("with Codex chosen, the switches are live, say briefly what Codex does with
     "true",
   );
   expect(
-    within(form).getByRole("textbox", { name: "Allowed commands" }),
-  ).toBeTruthy();
+    within(form).getByRole("radio", { name: "Any command" }).ariaChecked,
+  ).toBe("true");
   expect(within(form).queryByText(/Codex can read any file/)).toBeNull();
   expect(control("spinbutton", "Turns").disabled).toBe(false);
   await waitFor(() => expect(stored[0]?.harness).toBe("claude-code"));
+
+  fireEvent.click(within(form).getByRole("radio", { name: "Only these" }));
+  expect(
+    within(form).getByRole("textbox", { name: "Allowed commands" }),
+  ).toHaveProperty("value", "npm test");
+
+  fireEvent.click(within(form).getByRole("radio", { name: /Codex/ }));
+  await waitFor(() => expect(stored[0]?.harness).toBe("codex"));
+  expect(control("switch", "Run commands").getAttribute("aria-checked")).toBe(
+    "false",
+  );
+});
+
+test("the open agent editor can retry a failed harness catalog load and choose a harness", async () => {
+  const client = createMockChatClient();
+  const catalog = await client.harnessCatalog();
+  let fail = () => {};
+  const firstLoad = new Promise<typeof catalog>((_, reject) => {
+    fail = () => reject(new Error("test catalog request failed"));
+  });
+  let finishRetry = () => {};
+  const secondLoad = new Promise<typeof catalog>((resolve) => {
+    finishRetry = () => resolve(catalog);
+  });
+  client.harnessCatalog = vi
+    .fn(client.harnessCatalog)
+    .mockReturnValueOnce(firstLoad)
+    .mockReturnValueOnce(secondLoad);
+
+  await open(client, [
+    {
+      ...DEFAULTS,
+      id: "a1",
+      name: "Triage",
+      tools: { ...DEFAULTS.tools, allowed_commands: [] },
+      used_by: [],
+    },
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const form = within(await screen.findByRole("region", { name: "Triage" }));
+  expect(form.queryByRole("radio", { name: /Codex/ })).toBeNull();
+
+  await act(async () => fail());
+  const failure = form.getByRole("alert");
+  expect(failure.textContent).toContain("Couldn't load harness choices");
+  expect(client.harnessCatalog).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+  expect(form.getByRole("status").textContent).toContain(
+    "Loading harness choices…",
+  );
+  await act(async () => finishRetry());
+
+  expect(form.queryByRole("alert")).toBeNull();
+  expect(form.getByRole("radio", { name: /Claude Code/ })).toBeTruthy();
+  fireEvent.click(form.getByRole("radio", { name: /Codex/ }));
+  await waitFor(() => expect(stored[0]?.harness).toBe("codex"));
+  expect(client.harnessCatalog).toHaveBeenCalledTimes(2);
+});
+
+test("an existing agent can turn commands off while its capability loads and explicitly enable them once it is known", async () => {
+  const client = createMockChatClient();
+  const catalog = await client.harnessCatalog();
+  let answer = () => {};
+  const pending = new Promise<void>((resolve) => (answer = resolve));
+  client.harnessCatalog = async () => {
+    await pending;
+    return catalog;
+  };
+  await open(client, [
+    {
+      ...DEFAULTS,
+      id: "a1",
+      name: "Triage",
+      harness: "codex",
+      tools: { ...DEFAULTS.tools, run_commands: true, allowed_commands: [] },
+      used_by: [],
+    },
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const form = await screen.findByRole("region", { name: "Triage" });
+  const commands = within(form).getByRole("switch", { name: "Run commands" });
+  expect(commands).toHaveProperty("disabled", false);
+
+  fireEvent.click(commands);
+  await waitFor(() => expect(stored[0]?.tools.run_commands).toBe(false));
+  expect(commands).toHaveProperty("disabled", true);
+
+  await act(async () => answer());
+  expect(commands).toHaveProperty("disabled", false);
+  fireEvent.click(commands);
+  await waitFor(() =>
+    expect(stored[0]?.tools).toMatchObject({
+      run_commands: true,
+      any_command: true,
+    }),
+  );
 });
 
 test("the Runs view lists every run under Now, Needs you and Earlier, naming its Automation, and opens the one chosen", async () => {

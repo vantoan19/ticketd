@@ -199,7 +199,7 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     ),
     (
         "chat_record_writes",
-        "bookkeeping that makes a repeated Chat write harmless",
+        "bookkeeping for crediting CLI writes to Chat Turns",
     ),
     ("device", "this installation's device code and counter"),
     ("document_fts", "a search index derived from Documents"),

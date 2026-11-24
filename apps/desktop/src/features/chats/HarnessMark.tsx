@@ -1,12 +1,18 @@
 import { SquareTerminal } from "lucide-react";
 import { cn } from "cn";
+import { useHarnessCatalog } from "./harness-catalog";
 
 /**
  * The publishers' own marks, copied verbatim and drawn in `currentColor`
- * (THIRD_PARTY_NOTICES.md). Keyed by the host's harness id.
+ * (THIRD_PARTY_NOTICES.md). Keyed by mark id.
  */
 const MARKS: Record<string, { viewBox: string; d: string; evenOdd: boolean }> =
   {
+    antigravity: {
+      viewBox: "0 0 180 180",
+      evenOdd: false,
+      d: "M144.248 149.062C151.748 154.688 162.998 150.938 152.685 140.625C121.748 110.625 128.31 28.125 89.8727 28.125C51.4352 28.125 57.9977 110.625 27.0602 140.625C15.8102 151.875 27.9977 154.688 35.4977 149.062C64.5602 129.375 62.6852 94.6875 89.8727 94.6875C117.06 94.6875 115.185 129.375 144.248 149.062Z",
+    },
     "claude-code": {
       viewBox: "0 0 256 257",
       evenOdd: false,
@@ -27,6 +33,7 @@ const MARKS: Record<string, { viewBox: string; d: string; evenOdd: boolean }> =
  */
 export function HarnessMark({
   harness,
+  markId,
   name,
   dim = false,
   decorative = false,
@@ -34,12 +41,15 @@ export function HarnessMark({
 }: {
   /** The host's harness id. */
   harness: string | null | undefined;
+  markId?: string | undefined;
   name: string;
   dim?: boolean;
   decorative?: boolean;
   className?: string;
 }) {
-  const mark = harness ? MARKS[harness] : undefined;
+  const catalog = useHarnessCatalog();
+  const id = markId ?? catalog.find((item) => item.id === harness)?.mark_id;
+  const mark = id && Object.hasOwn(MARKS, id) ? MARKS[id] : undefined;
   const label = decorative
     ? ({ "aria-hidden": true } as const)
     : ({ role: "img", "aria-label": name } as const);

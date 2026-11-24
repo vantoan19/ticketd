@@ -4,35 +4,14 @@ use rusqlite::{Connection, OptionalExtension, Row, params};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::harnesses::{
+    CommandControl, HARNESS_DESCRIPTORS, HarnessDescriptor, InvalidHarnessKey, UnattendedSupport,
+    find_descriptor,
+};
 use crate::{Error, Workspace, automations::AUTOMATION_NAME_LIMIT};
 
-/// The harness an Automation agent runs on, named as the Chat host names it.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum AgentHarness {
-    #[default]
-    ClaudeCode,
-    Codex,
-}
-
-impl AgentHarness {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::ClaudeCode => "claude-code",
-            Self::Codex => "codex",
-        }
-    }
-
-    fn parse(key: &str) -> Result<Self, Error> {
-        match key {
-            "claude-code" => Ok(Self::ClaudeCode),
-            "codex" => Ok(Self::Codex),
-            other => Err(Error::InvalidAutomationAgent(format!(
-                "unknown harness '{other}'"
-            ))),
-        }
-    }
-}
+/// The harness key used by an Automation agent.
+pub use crate::harnesses::HarnessKey as AgentHarness;
 
 /// What an Automation agent may do. Anything not allowed here is denied; the
 /// ticketd command line is always allowed and so is not a setting.
@@ -137,7 +116,25 @@ pub const MAX_TURN_LIMIT: u32 = 500;
 /// The largest time limit, in minutes, an agent may have.
 pub const MAX_TIME_LIMIT_MINUTES: u32 = 240;
 
-fn validated(mut settings: AutomationAgentSettings) -> Result<AutomationAgentSettings, Error> {
+fn validated(
+    mut settings: AutomationAgentSettings,
+    harnesses: &[&HarnessDescriptor],
+) -> Result<AutomationAgentSettings, Error> {
+    let key = settings.harness.as_str();
+    let descriptor = find_descriptor(harnesses, key)
+        .ok_or_else(|| Error::InvalidAutomationAgent(format!("unknown harness '{key}'")))?;
+    if let UnattendedSupport::Unsupported { reason } = descriptor.unattended {
+        return Err(Error::InvalidAutomationAgent(format!(
+            "{} does not support Automations. {reason}",
+            descriptor.name
+        )));
+    }
+    validate_command_policy(
+        descriptor,
+        settings.tools.run_commands,
+        settings.tools.any_command,
+    )
+    .map_err(Error::InvalidAutomationAgent)?;
     if !(1..=MAX_TURN_LIMIT).contains(&settings.turn_limit) {
         return Err(Error::InvalidAutomationAgent(format!(
             "the turn limit must be a whole number from 1 to {MAX_TURN_LIMIT}"
@@ -166,6 +163,24 @@ fn validated(mut settings: AutomationAgentSettings) -> Result<AutomationAgentSet
         .filter(|command| !command.is_empty())
         .collect();
     Ok(settings)
+}
+
+pub(crate) fn validate_command_policy(
+    descriptor: &HarnessDescriptor,
+    runs_commands: bool,
+    allows_any: bool,
+) -> Result<(), String> {
+    if runs_commands
+        && !allows_any
+        && let UnattendedSupport::Supported(reach) = descriptor.unattended
+        && reach.commands == CommandControl::OffOrAny
+    {
+        return Err(format!(
+            "{} requires an explicit grant to run any command. Turn commands off or allow any command.",
+            descriptor.name
+        ));
+    }
+    Ok(())
 }
 
 fn read(row: &Row<'_>) -> rusqlite::Result<(AutomationAgent, String, String)> {
@@ -198,7 +213,9 @@ fn read(row: &Row<'_>) -> rusqlite::Result<(AutomationAgent, String, String)> {
 fn decode(
     (mut agent, harness, commands): (AutomationAgent, String, String),
 ) -> Result<AutomationAgent, Error> {
-    agent.settings.harness = AgentHarness::parse(&harness)?;
+    agent.settings.harness = harness
+        .try_into()
+        .map_err(|error: InvalidHarnessKey| Error::InvalidAutomationAgent(error.to_string()))?;
     agent.settings.tools.allowed_commands = serde_json::from_str(&commands)
         .map_err(|error| Error::InvalidAutomationAgent(error.to_string()))?;
     Ok(agent)
@@ -239,7 +256,7 @@ impl Workspace {
     ) -> Result<AutomationAgent, Error> {
         let agent = AutomationAgent {
             id: Uuid::new_v4().to_string(),
-            settings: validated(settings)?,
+            settings: validated(settings, HARNESS_DESCRIPTORS)?,
         };
         let s = &agent.settings;
         self.connection.execute(
@@ -269,7 +286,7 @@ impl Workspace {
         id: &str,
         settings: AutomationAgentSettings,
     ) -> Result<AutomationAgent, Error> {
-        let s = validated(settings)?;
+        let s = validated(settings, HARNESS_DESCRIPTORS)?;
         let changed = self.connection.execute(
             "UPDATE automation_agents SET name = ?2, harness = ?3, model = ?4, instructions = ?5, read_files = ?6, edit_files = ?7, run_commands = ?8, allowed_commands = ?9, use_web = ?10, turn_limit = ?11, time_limit_minutes = ?12, any_command = ?13 WHERE id = ?1 AND trashed = 0",
             params![
@@ -337,5 +354,46 @@ impl Workspace {
             .query_map([], read)?
             .collect::<Result<Vec<_>, _>>()?;
         rows.into_iter().map(decode).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::harnesses::CLAUDE_CODE;
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn automation_validation_accepts_another_unattended_harness() {
+        let harness = "sample-agent".parse().unwrap();
+        let descriptor = HarnessDescriptor {
+            key: harness,
+            name: "Sample agent",
+            ..CLAUDE_CODE.clone()
+        };
+        let mut saved = serde_json::to_value(AutomationAgentSettings::default()).unwrap();
+        saved["harness"] = serde_json::json!("sample-agent");
+        let settings: AutomationAgentSettings = serde_json::from_value(saved).unwrap();
+
+        let accepted = validated(settings.clone(), &[&CLAUDE_CODE, &descriptor]).unwrap();
+        assert_eq!(
+            serde_json::to_value(accepted).unwrap()["harness"],
+            "sample-agent"
+        );
+        assert!(matches!(
+            validated(settings.clone(), &[&CLAUDE_CODE]),
+            Err(Error::InvalidAutomationAgent(message)) if message.contains("sample-agent")
+        ));
+
+        let interactive = HarnessDescriptor {
+            unattended: UnattendedSupport::Unsupported {
+                reason: "Interactive Chats only.",
+            },
+            ..descriptor
+        };
+        assert!(matches!(
+            validated(settings, &[&CLAUDE_CODE, &interactive]),
+            Err(Error::InvalidAutomationAgent(message)) if message.contains("Interactive Chats only.")
+        ));
     }
 }

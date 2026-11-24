@@ -4,7 +4,7 @@ import { preserveNewerFocus } from "@/components/ui/use-focus-return";
 import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
 import { onTicketUpdate } from "./activity-composer-request";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { editingHarness } from "@/features/chats/editing-harness";
+import { useEditingHarness } from "@/features/chats/editing-harness";
 import { Pager } from "@/components/ui/pager";
 import { SectionHeader } from "@/components/ui/section-header";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -220,6 +220,7 @@ function RecoveredActivity({
   latestNoteId,
   foldEmpty = false,
 }: ActivityProps) {
+  const editingHarness = useEditingHarness();
   const recovery = useDraftRecovery();
   const targetId = target?.id;
   const targetKey = target?.key;

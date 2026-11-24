@@ -17,7 +17,7 @@ import {
   Plus,
 } from "lucide-react";
 import { HarnessMark } from "@/features/chats/HarnessMark";
-import { editingHarness } from "@/features/chats/editing-harness";
+import { useEditingHarness } from "@/features/chats/editing-harness";
 import { useInboxAttention } from "./use-inbox-attention";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { Card } from "@/components/ui/card";
@@ -53,6 +53,7 @@ import { SourcePill } from "./TicketList";
 import {
   readiness,
   readinessLabel,
+  readyForReview,
   rowContextItem,
   type RowContextKind,
 } from "./ticket-row";
@@ -776,6 +777,7 @@ const BoardCard = memo(function BoardCard({
   const chat =
     chats?.find((item) => item.status.rank === "approval") ??
     chats?.find((item) => item.status.rank === "working");
+  const editingHarness = useEditingHarness();
   const harness =
     chat?.harness_id ?? editingHarness(ticket.progress_summary?.editing_agent);
   const agentState =
@@ -783,7 +785,7 @@ const BoardCard = memo(function BoardCard({
       ? "Approval needed"
       : chat?.status.rank === "working"
         ? `${chat.harness_name} is working`
-        : ticket.status === "In review" && harness
+        : readyForReview(ticket)
           ? "Ready for review"
           : "";
   const source = externalSource(ticket);

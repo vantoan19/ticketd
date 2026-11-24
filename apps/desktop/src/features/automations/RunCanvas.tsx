@@ -1,3 +1,4 @@
+import { useHarnessCatalog } from "@/features/chats/harness-catalog";
 import { useEffect, useMemo, useState } from "react";
 import {
   Background,
@@ -172,13 +173,15 @@ export function RunCanvas({
   selected: string | null;
   onSelect: (id: string) => void;
 }) {
+  const catalog = useHarnessCatalog();
   const { nodes, edges, ran } = useMemo(() => {
     const { trigger, steps } = run.definition;
     const states = stepStates(run);
     const cards = new Map([
       [TRIGGER_ID, triggerCard(trigger, only)],
       ...everyStep(steps).map(
-        (step) => [step.id, stepCard(step, agents)] as const,
+        (step) =>
+          [step.id, stepCard(step, agents, undefined, catalog)] as const,
       ),
     ]);
     const layout = layoutFlow(flowSteps(steps), RUN_CARD_HEIGHT);
@@ -232,7 +235,7 @@ export function RunCanvas({
       .map((node) => node.id)
       .filter((id) => id === TRIGGER_ID || reached(id));
     return { nodes, edges, ran };
-  }, [run, agents, only, selected, onSelect]);
+  }, [run, agents, only, selected, onSelect, catalog]);
   return (
     <div className="flow-canvas">
       <ReactFlowProvider>

@@ -9,8 +9,8 @@ use std::time::Duration;
 use ticketd_automation_runner::Runner;
 use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
-    ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, Harness, HarnessAdapter,
-    HostError, InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
+    ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, HarnessAdapter, HostError,
+    InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
     NativeTurnId, Problem, ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey,
     SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
 };
@@ -49,12 +49,12 @@ fn opener(path: &Path) -> WorkspaceOpener {
     Arc::new(move || WorkspaceSession::for_file(&path)?.workspace())
 }
 
-fn tools() -> AutomationAgentTools {
+fn tools(harness: &AgentHarness) -> AutomationAgentTools {
     AutomationAgentTools {
         read_files: true,
         edit_files: false,
         run_commands: true,
-        any_command: false,
+        any_command: *harness == AgentHarness::Codex,
         allowed_commands: vec!["npm test".into()],
         use_web: false,
     }
@@ -70,22 +70,21 @@ impl Fixture {
     /// The same, with the agent on `harness`.
     #[allow(clippy::unwrap_used)] // Setup that fails fails the test.
     fn on(harness: AgentHarness) -> Self {
-        let fake = match harness {
-            AgentHarness::Codex => FakeAdapter::codex(),
-            AgentHarness::ClaudeCode => {
-                fn unknown<B>() -> Capability<B> {
-                    Capability::Unknown {
-                        reason: "fake".into(),
-                    }
+        let fake = if harness == AgentHarness::Codex {
+            FakeAdapter::codex()
+        } else {
+            assert_eq!(harness, AgentHarness::ClaudeCode);
+            fn unknown<B>() -> Capability<B> {
+                Capability::Unknown {
+                    reason: "fake".into(),
                 }
-                FakeAdapter::new(
-                    Harness::ClaudeCode,
-                    Capabilities {
-                        steering: unknown(),
-                        native_resume: unknown(),
-                    },
-                )
             }
+            FakeAdapter::new(
+                &ticketd_core::harnesses::CLAUDE_CODE,
+                Capabilities {
+                    steering: unknown(),
+                },
+            )
         };
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
@@ -95,10 +94,10 @@ impl Fixture {
         let agent = workspace
             .create_automation_agent(AutomationAgentSettings {
                 name: "Triage".into(),
+                tools: tools(&harness),
                 harness,
                 model: Some("gpt-test".into()),
                 instructions: INSTRUCTIONS.into(),
-                tools: tools(),
                 turn_limit: 12,
                 time_limit_minutes: 5,
             })
@@ -290,7 +289,7 @@ async fn tagging_a_ticket_runs_the_agent_as_a_chat_owned_by_the_run() {
     let unattended = opens[0].unattended.clone().unwrap();
     assert_eq!(unattended.run_id, run.id);
     assert_eq!(unattended.model.as_deref(), Some("gpt-test"));
-    assert_eq!(unattended.tools, tools());
+    assert_eq!(unattended.tools, tools(&AgentHarness::Codex));
     assert_eq!(unattended.turn_limit, 12);
     // L1: the harness gets the ticketd CLI to put on the agent's PATH.
     assert_eq!(opens[0].ticketd_cli, ticketd_chat_host::cli::executable());
@@ -1384,7 +1383,18 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
                     f.runner.stop_run(&run.id).await.unwrap();
                 }
                 _ => {
+                    // A person's input saved while the agent is starting survives even
+                    // in the same Chat. Only the run's first Prompt belongs to it.
+                    let person = f
+                        .core()
+                        .save_chat_input(None, &chat, "Kept for later")
+                        .unwrap();
                     f.host.turn_off().await;
+                    assert_eq!(
+                        f.core().chat_queue(&chat).unwrap().as_slice(),
+                        std::slice::from_ref(&person)
+                    );
+                    f.core().withdraw_chat_input(&chat, &person.id).unwrap();
                 }
             }
         };
@@ -1409,6 +1419,19 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
         } else {
             assert!(queued.is_empty(), "{how}: {queued:?}");
             assert!(submitted.is_empty(), "{how}: {submitted:?}");
+        }
+        if how == "chat turned off" {
+            assert_eq!(
+                f.needs_attention(),
+                "Chat was turned off while this run was going."
+            );
+            f.host.turn_on();
+            f.reply(&chat, "Hello").await;
+            let submitted: Vec<_> = written(&f)
+                .into_iter()
+                .filter(|w| w.starts_with("submit"))
+                .collect();
+            assert_eq!(submitted, ["submit: Hello"]);
         }
     }
 }
@@ -1532,7 +1555,7 @@ async fn a_run_taken_over_before_its_first_turn_opens_a_fresh_session_when_codex
 async fn a_run_taken_over_while_starting_keeps_its_instructions_set_aside() {
     for harness in [AgentHarness::Codex, AgentHarness::ClaudeCode] {
         for how in ["reply", "stop then message"] {
-            let f = Fixture::on(harness);
+            let f = Fixture::on(harness.clone());
             let open = f.fake.hold_next_open();
             f.tag("Fix login");
             f.tick().await;

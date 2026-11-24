@@ -7,9 +7,9 @@ use std::time::Duration;
 use serde_json::json;
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    ApprovalDecision, DeliveryEvidence, EventKind, InteractionRequest, NativeItemId,
-    NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind,
-    ProviderDetail, ToolStatus, TurnOutcome,
+    ApprovalDecision, Capabilities, Capability, DeliveryEvidence, EventKind, HarnessSettings,
+    InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
+    Problem, ProblemKind, ProviderDetail, SettingOutcome, ToolStatus, TurnOutcome,
 };
 use ticketd_core::{ChatDelivery, ChatSubmissionIntent};
 
@@ -24,6 +24,65 @@ struct Fixture {
     chats: Arc<Chats>,
 }
 
+#[tokio::test]
+async fn probes_a_third_registered_adapter_and_exposes_its_declared_reach() {
+    use std::sync::LazyLock;
+    use ticketd_core::harnesses::{CLAUDE_CODE, HarnessDescriptor, UnattendedSupport};
+
+    static THIRD: LazyLock<HarnessDescriptor> = LazyLock::new(|| HarnessDescriptor {
+        key: "fixture-harness".parse().unwrap(),
+        name: "Fixture Harness",
+        mark_id: "fixture-mark",
+        unattended: UnattendedSupport::Unsupported {
+            reason: "This fixture is for a person’s Chat.",
+        },
+        ..CLAUDE_CODE.clone()
+    });
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    drop(Workspace::open(&path).unwrap());
+    let third = FakeAdapter::new(
+        &THIRD,
+        ticketd_chat_host::Capabilities {
+            steering: ticketd_chat_host::Capability::Unknown {
+                reason: String::new(),
+            },
+        },
+    );
+    let chats = Chats::new(
+        Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
+        vec![
+            Arc::new(FakeAdapter::claude()),
+            Arc::new(FakeAdapter::codex()),
+            Arc::new(third),
+        ],
+        Vec::new(),
+        None,
+    );
+    let catalog = serde_json::to_value(chats.harness_catalog()).unwrap();
+    let descriptor = catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == "fixture-harness")
+        .expect("registered fixture descriptor");
+    assert_eq!(descriptor["unattended"], serde_json::Value::Null);
+    chats.set_enabled(true).await;
+    let statuses = chats.harnesses().await.unwrap();
+    for id in ["claude-code", "codex", "fixture-harness"] {
+        assert!(
+            statuses
+                .iter()
+                .any(|status| status.id == id && status.usable)
+        );
+    }
+    assert!(
+        statuses
+            .iter()
+            .any(|status| status.id == "fixture-harness" && status.mark_id == "fixture-mark")
+    );
+}
+
 /// Lets every task run until all of them wait. The clock is paused.
 async fn settle() {
     tokio::time::sleep(Duration::from_millis(1)).await;
@@ -31,11 +90,14 @@ async fn settle() {
 
 impl Fixture {
     async fn new() -> Self {
+        Self::with_adapter(FakeAdapter::codex()).await
+    }
+
+    async fn with_adapter(fake: FakeAdapter) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
         // The desktop creates its workspace before its session opens it.
         drop(Workspace::open(&path).unwrap());
-        let fake = FakeAdapter::codex();
         let chats = Chats::new(
             Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
             vec![Arc::new(fake.clone())],
@@ -56,7 +118,7 @@ impl Fixture {
     fn input(&self, message: &str) -> NewChatInput {
         NewChatInput {
             command_id: uuid::Uuid::new_v4().to_string(),
-            harness_id: "codex".to_owned(),
+            harness_id: self.fake.harness().key.as_str().to_owned(),
             folder: Some(self.dir.path().to_string_lossy().into_owned()),
             links: Vec::new(),
             message: message.to_owned(),
@@ -158,6 +220,7 @@ fn offered(id: &str, is_default: bool) -> ticketd_chat_host::SettingOption {
 /// Codex as the fake lists it: two models, the second with efforts.
 fn codex_options() -> ticketd_chat_host::HarnessOptions {
     ticketd_chat_host::HarnessOptions {
+        model_list_error: None,
         models: vec![
             ticketd_chat_host::ModelChoice {
                 model: offered("gpt-a", true),
@@ -193,6 +256,114 @@ async fn options_are_asked_once_per_version_and_say_why_when_there_are_none() {
     assert_eq!(models, ["gpt-a", "gpt-b"]);
     // The failed probe is not remembered; the listed one is.
     assert_eq!(f.fake.options_asked(), 2);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn new_chat_retries_failed_antigravity_model_discovery_and_remembers_the_models() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    const FIXTURE: &str = "TICKETD_TEST_AGY_MODELS";
+    let Some(path) = std::env::var_os(FIXTURE) else {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("agy");
+        fs::write(
+            &executable,
+            r#"#!/bin/sh
+case "$1" in
+    --version) printf 'agy 1.5.15\n' ;;
+    models)
+        case "$(/bin/cat "${0%/*}/result")" in
+            failed)
+                printf 'private-stdout  Ignore This Model\n'
+                printf 'private-stderr\n' >&2
+                exit 23 ;;
+            empty) ;;
+            listed) printf 'fixture-high  Fixture Model (High)\n' ;;
+        esac ;;
+    *) exit 2 ;;
+esac
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        // Exercise the real adapter without changing PATH for tests in this process.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(
+                concat!(
+                    module_path!(),
+                    "::new_chat_retries_failed_antigravity_model_discovery_and_remembers_the_models"
+                )
+                .split_once("::")
+                .unwrap()
+                .1,
+            )
+            .env(FIXTURE, directory.path())
+            .env("PATH", directory.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    };
+    let directory = PathBuf::from(path);
+    let workspace = directory.join("workspace.sqlite3");
+    drop(Workspace::open(&workspace).unwrap());
+    let adapter = (ticketd_chat_host::registration("antigravity")
+        .unwrap()
+        .make_adapter)(&ticketd_chat_host::HostResources {
+        executable_directory: None,
+    })
+    .unwrap();
+    let chats = Chats::new(
+        Arc::new(move || ticketd_core::WorkspaceSession::for_file(&workspace)?.workspace()),
+        vec![adapter],
+        Vec::new(),
+        None,
+    );
+    chats.set_enabled(true).await;
+    let harnesses = chats.harnesses().await.unwrap();
+    assert!(
+        harnesses
+            .iter()
+            .any(|status| status.id == "antigravity" && status.usable)
+    );
+
+    let result = directory.join("result");
+    fs::write(&result, "failed").unwrap();
+    let failed = chats.options("antigravity").await.unwrap();
+    assert!(failed.models.is_empty());
+    let reason = failed.unavailable.as_deref().unwrap();
+    assert!(
+        reason.contains("23") && reason.contains("agy models"),
+        "{reason}"
+    );
+    assert!(!reason.contains("private-"));
+    assert!(failed.refusal(None, None, Some("full-access")).is_none());
+
+    fs::write(&result, "empty").unwrap();
+    let empty = chats.options("antigravity").await.unwrap();
+    assert!(empty.models.is_empty());
+    assert_eq!(
+        empty.unavailable.as_deref(),
+        Some("Antigravity listed no models")
+    );
+
+    fs::write(&result, "listed").unwrap();
+    let listed = chats.options("antigravity").await.unwrap();
+    assert_eq!(listed.unavailable, None);
+    assert_eq!(listed.models[0].model.id, "fixture");
+    assert_eq!(listed.models[0].efforts[0].id, "high");
+
+    fs::write(&result, "failed").unwrap();
+    assert_eq!(chats.options("antigravity").await.unwrap(), listed);
 }
 
 #[tokio::test(start_paused = true)]
@@ -824,21 +995,19 @@ async fn an_uncertain_submission_waits_for_the_person_and_is_resent_only_when_th
 
 #[test]
 fn missing_harness_guidance_includes_install_help_and_its_own_sign_in_command() {
-    for (id, name, command, help) in [
+    for (descriptor, command, help) in [
         (
-            "codex",
-            "Codex",
+            &ticketd_core::harnesses::CODEX,
             "codex login",
             "https://developers.openai.com/codex/cli",
         ),
         (
-            "claude-code",
-            "Claude Code",
+            &ticketd_core::harnesses::CLAUDE_CODE,
             "claude /login",
             "https://code.claude.com/docs/en/setup",
         ),
     ] {
-        let status = harness_status(id, name, Inspection::NotInstalled);
+        let status = harness_status(descriptor, Inspection::NotInstalled);
         assert_eq!(status.status, HarnessState::NotInstalled);
         assert_eq!(status.command.as_deref(), Some(command));
         assert_eq!(status.help_url.as_deref(), Some(help));
@@ -887,6 +1056,102 @@ async fn a_fresh_session_starts_with_the_history_the_person_selected_and_replays
     assert!(sent.ends_with("\n\ncontinue"));
     let too_many = HistorySelection::LastMessages { count: 0 };
     assert!(f.chats.resume(&id, too_many).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_only_permission_restart_offers_fresh_recovery_and_refuses_history_selection() {
+    let f = Fixture::with_adapter(FakeAdapter::new(
+        &ticketd_core::harnesses::ANTIGRAVITY,
+        Capabilities {
+            steering: Capability::Unsupported {
+                reason: String::new(),
+            },
+        },
+    ))
+    .await;
+    let id = f.chat().await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    let recorded = r#"{"permission":"ask"}"#;
+    f.emit(EventKind::Notice {
+        turn: None,
+        kind: NoticeKind::EffectiveSettings,
+        message: String::new(),
+        detail: Some(ProviderDetail::new("settings", recorded)),
+    })
+    .await;
+    f.emit(EventKind::SettingsState(HarnessSettings {
+        permission: f.fake.permission_before_session(Some(recorded), None),
+        ..HarnessSettings::default()
+    }))
+    .await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    let answer = f.fake.hold_next_setting();
+    f.fake
+        .fail_next_open(failure(ProblemKind::NativeHistoryUnavailable));
+    f.chats
+        .change_setting(&id, SettingKey::Permission, "full")
+        .await
+        .unwrap();
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+
+    let (opened, _) = f.open(&id).await;
+    let chat = opened.snapshot.chat;
+    let problem = serde_json::to_value(chat.problem.unwrap()).unwrap();
+    assert_eq!(problem["kind"], "history_lost");
+    assert_eq!(problem["history_recovery"], "start_fresh");
+    assert!(!chat.has_composer);
+    assert!(chat.queue_paused);
+    // Reject the unsupported choice before looking up even an invalid message id.
+    let error = f
+        .chats
+        .resume(
+            &id,
+            HistorySelection::Picked {
+                ids: vec!["absent".to_owned()],
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "This harness can only resume its own history"
+    );
+    assert_eq!(f.fake.opens().len(), 1);
+
+    let selection = serde_json::from_value(json!({ "kind": "none" })).unwrap();
+    f.chats.resume(&id, selection).await.unwrap();
+    let opens = f.fake.opens();
+    assert_eq!(opens[1].session, ticketd_chat_host::SessionStart::New);
+    assert_eq!(opens[1].settings.permission.as_deref(), Some("full"));
+    assert_eq!(f.submitted(), ["first"]);
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-2"),
+    })
+    .await;
+
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.chat.has_composer);
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Session {
+            history: "none",
+            count: 0,
+            ..
+        }
+    )));
+    f.chats.resume_queue(&id).await.unwrap();
+    f.chats.send(&id, "continue", SendMode::Auto).await.unwrap();
+    settle().await;
+    assert_eq!(f.submitted(), ["first", "continue"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1169,12 +1434,9 @@ async fn api_key_and_unknown_sign_in_are_their_own_statuses_with_an_explanation(
                 steering: ticketd_chat_host::Capability::Unknown {
                     reason: String::new(),
                 },
-                native_resume: ticketd_chat_host::Capability::Unknown {
-                    reason: String::new(),
-                },
             },
         };
-        harness_status("claude-code", "Claude Code", inspection)
+        harness_status(&ticketd_core::harnesses::CLAUDE_CODE, inspection)
     };
 
     let ready = status(LoginState::SignedIn);
@@ -1553,6 +1815,48 @@ fn turn_number(turn: &str) -> usize {
 }
 
 #[tokio::test(start_paused = true)]
+async fn antigravity_sign_in_problem_supplies_the_command_and_only_additional_detail() {
+    let antigravity = &ticketd_core::harnesses::ANTIGRAVITY;
+    let f = Fixture::with_adapter(FakeAdapter::new(
+        antigravity,
+        Capabilities {
+            steering: Capability::Unsupported {
+                reason: "Antigravity queues messages".to_owned(),
+            },
+        },
+    ))
+    .await;
+    for (message, expected_detail) in [
+        (antigravity.sign_in_guidance, None),
+        (
+            "The credentials for this profile expired",
+            Some("The credentials for this profile expired"),
+        ),
+    ] {
+        f.fake.fail_next_open(Problem {
+            message: message.to_owned(),
+            ..failure(ProblemKind::LoginRequired)
+        });
+        let id = f
+            .chats
+            .create(f.input("First message"))
+            .await
+            .unwrap()
+            .chat_id;
+        settle().await;
+        let (opened, _) = f.open(&id).await;
+        let chat = opened.snapshot.chat;
+        let problem = chat.problem.unwrap();
+        assert_eq!(problem.kind, ChatProblemKind::NotSignedIn);
+        assert_eq!(problem.title, "Antigravity isn't signed in");
+        assert_eq!(problem.command.as_deref(), Some("agy"));
+        assert_eq!(problem.message.as_deref(), expected_detail);
+        assert!(chat.queue_paused);
+        assert_eq!(chat.queue[0].text, "First message");
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn checking_again_after_a_past_sign_in_failure_reports_what_the_probe_finds() {
     let f = Fixture::new().await;
     let id = f.chat().await;
@@ -1574,9 +1878,6 @@ async fn checking_again_after_a_past_sign_in_failure_reports_what_the_probe_find
         login,
         capabilities: ticketd_chat_host::Capabilities {
             steering: ticketd_chat_host::Capability::Unknown {
-                reason: String::new(),
-            },
-            native_resume: ticketd_chat_host::Capability::Unknown {
                 reason: String::new(),
             },
         },
@@ -2138,8 +2439,7 @@ async fn a_folder_that_comes_back_clears_the_missing_folder_state() {
 #[test]
 fn an_incompatible_harness_says_what_was_found_and_needed_once() {
     let status = harness_status(
-        "codex",
-        "Codex",
+        &ticketd_core::harnesses::CODEX,
         Inspection::Incompatible {
             executable: PathBuf::from("/opt/bin/codex"),
             version: Some("codex-cli 0.150.0".to_owned()),

@@ -627,7 +627,7 @@ file bytes.
 ### Native Chats
 
 Native Chat is experimental and off by default (Settings > Chat). A Chat hosts the
-person's own installed Claude Code or Codex harness with its own sign-in. ticketd
+person's own installed Claude Code, Codex or Antigravity harness with its own sign-in. ticketd
 detects the installation and guides the person to the harness's login; it does not
 collect OAuth tokens, proxy model requests, or change billing.
 
@@ -637,8 +637,16 @@ collect OAuth tokens, proxy model requests, or change billing.
   (an existing one or a persistent managed one). Ticket detail lists a ticket's Chats.
   Before sending, the person picks the harness and, from what it reports, its model,
   effort, and permission mode. Full access, where the harness edits and runs
-  commands without asking, is one of those modes for Claude Code and Codex; it is
-  never given to an Automation's agent.
+  commands without asking, is a choice for a person's Chat.
+- **Antigravity.** The person's installed `agy` serves the Chat over ACP. New
+  Chats use Antigravity settings by default. Permission choices come from
+  the harness, with a native Full access flag that takes effect after a
+  restart and resume. Antigravity is available for Chats a person drives.
+  A Chat resumes through Antigravity's native history. If that history is
+  unavailable during ordinary resume, ticketd shows a notice and starts an
+  empty session. If a permission change required the restart, the queue
+  stays paused and the person can explicitly choose **Start fresh**.
+  See [ADR 0025](adr/0025-antigravity-uses-acp-for-person-driven-chats.md).
 - **Conversation.** The UI streams responses, tool activity, native approval requests,
   and questions. Observed activity is Idle, Working, Waiting for you, Interrupted, or
   Failed; a finished turn is not evidence that the task succeeded. Sending during a

@@ -12,6 +12,7 @@ use saphyr::{LoadableYamlNode, Scalar, Yaml};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+use crate::harnesses::{HARNESS_DESCRIPTORS, UnattendedSupport, descriptor};
 use crate::{Error, Status, Workspace, document_links, inbox::LOCAL_PERSON, source};
 
 /// The record kinds that each have their own sync file, in an order that applies a
@@ -172,6 +173,7 @@ enum Type {
     Status,
     Reference,
     Choice(&'static [&'static str]),
+    AutomationHarness,
 }
 
 /// Name, type, and whether the field is required.
@@ -272,7 +274,7 @@ const PROJECT: &[Field] = &[("name", Type::Name, true)];
 /// The text after the header is the agent's instructions.
 const AUTOMATION_AGENT: &[Field] = &[
     ("name", Type::Text, false),
-    ("harness", Type::Choice(&["claude-code", "codex"]), true),
+    ("harness", Type::AutomationHarness, true),
     ("model", Type::Text, false),
     ("turn_limit", Type::Count, true),
     ("time_limit_minutes", Type::Count, true),
@@ -561,6 +563,14 @@ fn expected(kind: Type) -> String {
         Type::Status => "one of Todo, In progress, In review, Done, Canceled, Duplicate".into(),
         Type::Reference => "a Ticket reference such as T-KQ43".into(),
         Type::Choice(options) => format!("one of {}", options.join(", ")),
+        Type::AutomationHarness => {
+            let options: Vec<_> = HARNESS_DESCRIPTORS
+                .iter()
+                .filter(|descriptor| matches!(descriptor.unattended, UnattendedSupport::Supported(_)))
+                .map(|descriptor| descriptor.key.as_str())
+                .collect();
+            format!("one of {}", options.join(", "))
+        },
     }
 }
 
@@ -597,6 +607,11 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
         (Type::Status, SyncValue::Text(text)) => text.parse::<Status>().is_ok(),
         (Type::Reference, SyncValue::Text(text)) => document_links::is_ticket_reference(text),
         (Type::Choice(options), SyncValue::Text(text)) => options.contains(&text.as_str()),
+        (Type::AutomationHarness, SyncValue::Text(text)) => {
+            descriptor(text).is_some_and(|descriptor| {
+                matches!(descriptor.unattended, UnattendedSupport::Supported(_))
+            })
+        }
     };
     if valid {
         Ok(())
@@ -1118,6 +1133,23 @@ impl SyncRecord {
         record.parts.sort_by(|a, b| a.order().cmp(&b.order()));
         record.validate()?;
         Ok((record, legacy_github_id))
+    }
+
+    /// Enforce current command policy before accepting or applying a snapshot.
+    /// Parsing also reads historical merge bases, which must keep their original values.
+    pub(crate) fn validate_agent_command_policy(&self) -> Result<(), Error> {
+        if self.kind == SyncKind::AutomationAgent
+            && let Some(harness) = text(&self.fields, "harness").and_then(descriptor)
+        {
+            let on = |field| matches!(self.fields.get(field), Some(SyncValue::Flag(true)));
+            crate::automation_agents::validate_command_policy(
+                harness,
+                on("run_commands"),
+                on("any_command"),
+            )
+            .map_err(bad)?;
+        }
+        Ok(())
     }
 
     /// Check a record built or merged in code the way a parsed file is checked.
@@ -2110,6 +2142,7 @@ impl Workspace {
     /// external ownership, dependency loops) do not apply: the record is taken as it is.
     pub fn apply_sync_record(&mut self, record: &SyncRecord) -> Result<Vec<MissingTarget>, Error> {
         record.validate()?;
+        record.validate_agent_command_policy()?;
         crate::write_scope::run(&self.connection, |transaction| {
             let mut apply = Apply {
                 c: transaction,

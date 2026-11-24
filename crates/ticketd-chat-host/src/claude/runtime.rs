@@ -201,7 +201,7 @@ impl Connection {
             connection
                 .stderr
                 .clone()
-                .spawn_drain(stderr, crate::Harness::ClaudeCode);
+                .spawn_drain(stderr, &ticketd_core::harnesses::CLAUDE_CODE);
         }
         let (sender, events) = mpsc::channel(EVENT_BUFFER);
         tokio::spawn(Arc::clone(&connection).read(io.stdout, sender));
@@ -779,6 +779,7 @@ pub(super) fn recorded_settings(recorded: Option<&str>) -> StartSettings {
         permission: reopen("permission_mode")
             .filter(|mode| super::report::offered_permission(mode))
             .map(str::to_owned),
+        ..StartSettings::default()
     }
 }
 

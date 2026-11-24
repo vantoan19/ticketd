@@ -9,9 +9,11 @@ use ticketd_chat_host::attention::{self, Facts, Status};
 use ticketd_chat_host::conditions::ChatProblemKind;
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
-    ChatProblem, InteractionKind, ProblemKind, StopState, TurnEnding,
+    ChatProblem, FileTargets, InteractionKind, OmittedFiles, ProblemKind, ReadAction, RunAction,
+    SearchScope, StepAction, StepOutcomeOverride, StopState, ToolEvidence, ToolStep, TurnEnding,
+    WebAction, read_tool_steps,
 };
-use ticketd_chat_host::{FileChangeKind, diffstat};
+use ticketd_core::harnesses::{ResumePolicy, descriptor};
 use ticketd_core::{
     Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
     ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
@@ -21,35 +23,15 @@ use ticketd_core::{
 use crate::chat_reports::{self, ContextView, FileView, PlanStepView, Report, SettingsView};
 use crate::chat_ticketd::{self, Call};
 use crate::folder_probe::Branch;
-use ticketd_chat_host::step_kind::{self, Kind, Variant};
-
-pub const HARNESSES: [(&str, &str); 2] = [("claude-code", "Claude Code"), ("codex", "Codex")];
+use ticketd_chat_host::step_kind;
 
 pub fn harness_name(id: &str) -> &str {
-    HARNESSES
-        .iter()
-        .find(|(key, _)| *key == id)
-        .map_or(id, |(_, name)| name)
-}
-
-/// The harness's own sign-in, as a command the person runs in a terminal.
-pub fn login_command(harness: &str) -> Option<&'static str> {
-    match harness {
-        // ponytail: `claude /login` starts Claude Code at its sign-in; confirm against
-        // a live installation in #264.
-        "claude-code" => Some("claude /login"),
-        "codex" => Some("codex login"),
-        _ => None,
-    }
+    ticketd_core::harnesses::descriptor(id).map_or(id, |descriptor| descriptor.name)
 }
 
 /// Where the harness's publisher explains installing and updating it.
 pub fn help_url(harness: &str) -> Option<&'static str> {
-    match harness {
-        "claude-code" => Some("https://code.claude.com/docs/en/setup"),
-        "codex" => Some("https://developers.openai.com/codex/cli"),
-        _ => None,
-    }
+    ticketd_core::harnesses::descriptor(harness).map(|descriptor| descriptor.help_url)
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
@@ -60,6 +42,8 @@ pub struct Problem {
     /// Observed now, it keeps the Chat from taking a new message.
     pub blocks_send: bool,
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_recovery: Option<HistoryRecovery>,
     pub command: Option<String>,
     pub help_url: Option<String>,
     pub path: Option<String>,
@@ -70,6 +54,21 @@ pub struct Problem {
     /// The problem is why the last turn stopped, not a condition observed now: it is
     /// told, and it does not stop the next message.
     pub past: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryRecovery {
+    StartFresh,
+    SelectHistory,
+}
+
+fn history_recovery(harness: &str) -> Option<HistoryRecovery> {
+    let policy = descriptor(harness)?.resume;
+    Some(match policy {
+        ResumePolicy::NativeOnly => HistoryRecovery::StartFresh,
+        ResumePolicy::NativeOrReplay => HistoryRecovery::SelectHistory,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -161,6 +160,8 @@ pub struct Step {
     /// ticketd did.
     pub target: String,
     pub targets: Vec<StepTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omitted_files: Option<OmittedFilesView>,
     /// The command without its shell wrappers, for a command step.
     pub command: Option<String>,
     pub exit_code: Option<i64>,
@@ -195,6 +196,12 @@ pub struct Step {
     pub awaiting: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OmittedFilesView {
+    /// Older compact patches can reveal missing paths without their count.
+    pub count: Option<u32>,
+}
+
 /// Where a step's whole output is read when its row opens (`chat_step_output`).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FullOutput {
@@ -226,6 +233,8 @@ fn output_tail(output: &str) -> &str {
 pub struct RequestOption {
     pub id: String,
     pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -762,6 +771,7 @@ fn approval_option(decision: ApprovalDecision) -> RequestOption {
     RequestOption {
         id: id.to_owned(),
         label: label.to_owned(),
+        warning: None,
     }
 }
 
@@ -790,7 +800,11 @@ fn approval_outcome(interaction: &ChatInteraction) -> Option<String> {
         match interaction.response.as_deref()? {
             "allow" => "You allowed this once",
             "allow for session" => "You allowed this for this session",
-            _ => "You declined this",
+            "deny" => "You declined this",
+            choice if let Some(label) = choice.strip_prefix("choice:") => {
+                return Some(format!("You chose {label}"));
+            }
+            _ => "You answered this",
         }
         .to_owned(),
     )
@@ -798,8 +812,26 @@ fn approval_outcome(interaction: &ChatInteraction) -> Option<String> {
 
 /// What an approval asks to do, from the step it was asked for: the title's verb, and
 /// what follows it inline (the command, or the files).
-fn asked_to(step: Option<&Step>) -> Option<(&'static str, &'static str, String)> {
-    let step = step?;
+fn asked_to(steps: &[Step]) -> Option<(&'static str, &'static str, String)> {
+    if let [step] = steps {
+        return asked_to_step(step);
+    }
+    let subjects = steps
+        .iter()
+        .filter_map(asked_to_step)
+        .map(|(_, asked, subject)| {
+            let action = asked.strip_prefix("asked to ").unwrap_or("");
+            [action, subject.as_str()]
+                .into_iter()
+                .filter(|part| !part.is_empty())
+                .collect::<Vec<_>>()
+                .join(" ")
+        })
+        .collect::<Vec<_>>();
+    (!subjects.is_empty()).then(|| ("wants to", "asked to", subjects.join(", ")))
+}
+
+fn asked_to_step(step: &Step) -> Option<(&'static str, &'static str, String)> {
     if step.ticketd.is_some() {
         // The view says the sentences after "wants to"; the subject keeps the command.
         return Some(("wants to", "asked to", step.target.clone()));
@@ -812,16 +844,52 @@ fn asked_to(step: Option<&Step>) -> Option<(&'static str, &'static str, String)>
         ));
     }
     let targets = || {
-        step.targets
+        let included = step
+            .targets
             .iter()
             .map(|target| target.text.as_str())
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", ");
+        match &step.omitted_files {
+            Some(omitted) => {
+                let summary = match omitted.count {
+                    Some(count) => {
+                        let files = step.targets.len() as u64 + u64::from(count);
+                        let file_word = if files == 1 { "file" } else { "files" };
+                        let paths = if count == 1 { "path" } else { "paths" };
+                        format!("{files} {file_word} ({count} {paths} omitted)")
+                    }
+                    None => "files (partial list)".to_owned(),
+                };
+                if included.is_empty() {
+                    summary
+                } else {
+                    format!("{summary} including {included}")
+                }
+            }
+            None => included,
+        }
     };
     match step.kind {
+        "read" if step.variant == Some("list") => {
+            Some(("wants to list", "asked to list", targets()))
+        }
+        "read" => Some(("wants to read", "asked to read", targets())),
+        "search" => Some(("wants to search for", "asked to search for", targets())),
         "run" => Some(("wants to run", "asked to run", step.target.clone())),
+        "create" if step.omitted_files.is_some() => {
+            Some(("wants to create", "asked to create", targets()))
+        }
         "edit" | "create" => Some(("wants to edit", "asked to edit", targets())),
         "delete" => Some(("wants to delete", "asked to delete", targets())),
+        "web" if step.variant == Some("fetch") => {
+            Some(("wants to open", "asked to open", targets()))
+        }
+        "web" => Some((
+            "wants to search the web for",
+            "asked to search the web for",
+            targets(),
+        )),
         _ => None,
     }
 }
@@ -829,12 +897,7 @@ fn asked_to(step: Option<&Step>) -> Option<(&'static str, &'static str, String)>
 /// A stored request as the dock or a receipt shows it. `step` is the step an approval
 /// was asked for, when the harness named it: its title then says what it would do,
 /// worded so the subject follows inline ("Claude Code wants to run `npm install`").
-fn request(
-    interaction: &ChatInteraction,
-    live: &ChatLive,
-    harness: &str,
-    step: Option<&Step>,
-) -> Item {
+fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps: &[Step]) -> Item {
     let asked = live
         .interactions
         .iter()
@@ -849,8 +912,9 @@ fn request(
     };
     let pending = state == "pending";
     let prompt = Some(interaction.prompt.clone()).filter(|prompt| !prompt.is_empty());
-    let plan = step.is_some_and(|step| step.variant == Some("plan"));
-    let (title, subject) = match (approval, asked_to(step.filter(|_| approval))) {
+    let step = steps.first();
+    let plan = steps.len() == 1 && step.is_some_and(|step| step.variant == Some("plan"));
+    let (title, subject) = match (approval, asked_to(steps)) {
         // Its plan's path is the harness's own; the title says what it is.
         (true, Some((wants, asked, _))) if plan => (
             format!("{harness} {}", if pending { wants } else { asked }),
@@ -881,6 +945,17 @@ fn request(
             decisions.iter().copied().map(approval_option).collect(),
             false,
         ),
+        Some(InteractionKind::NativeApproval { options, .. }) => (
+            options
+                .iter()
+                .map(|option| RequestOption {
+                    id: option.id.clone(),
+                    label: option.label.clone(),
+                    warning: option.warning.clone(),
+                })
+                .collect(),
+            false,
+        ),
         Some(InteractionKind::Question { questions }) => match questions.as_slice() {
             [question] if !question.options.is_empty() => (
                 question
@@ -889,6 +964,7 @@ fn request(
                     .map(|option| RequestOption {
                         id: option.clone(),
                         label: option.clone(),
+                        warning: None,
                     })
                     .collect(),
                 false,
@@ -986,13 +1062,141 @@ fn page(url: &str) -> String {
     rest.trim_end_matches('/').to_owned()
 }
 
-/// Claude Code's own wording of a search that found nothing.
-const NOTHING_FOUND: [&str; 2] = ["No files found", "No matches found"];
-/// Claude Code's Write result when the file did not exist before (SDK 0.3.322).
-const WRITE_CREATED: &str = "File created successfully at:";
+fn word_tool_step(action: ToolStep, base: &Step, folder: &str, home: Option<&str>) -> Step {
+    let mut step = base.clone();
+    step.omitted_files = action.omitted_files.map(|omitted| OmittedFilesView {
+        count: match omitted {
+            OmittedFiles::Count(count) => Some(count.get()),
+            OmittedFiles::Unknown => None,
+        },
+    });
+    let path = |text: &str| shown_path(text, folder, home);
+    let paths = |paths: Vec<String>| paths.into_iter().map(|file| target(&path(&file))).collect();
+    let create = matches!(action.action, StepAction::Create { .. });
+    step.targets = match action.action {
+        StepAction::Read(ReadAction::Files(files)) => {
+            step.kind = "read";
+            files
+                .into_iter()
+                .map(|file| StepTarget {
+                    text: path(&file.path),
+                    lines: file.lines.map(|(first, last)| [first, last]),
+                    scope: None,
+                })
+                .collect()
+        }
+        StepAction::Read(ReadAction::List(files)) => {
+            step.kind = "read";
+            step.variant = Some("list");
+            paths(files)
+        }
+        StepAction::Search {
+            targets,
+            no_matches,
+        } => {
+            step.kind = "search";
+            step.no_matches = no_matches;
+            targets
+                .into_iter()
+                .map(|search| StepTarget {
+                    text: search.query,
+                    lines: None,
+                    scope: search.scope.map(|scope| match scope {
+                        SearchScope::Path(scope) => path(&scope),
+                        SearchScope::Pattern(scope) => scope,
+                    }),
+                })
+                .collect()
+        }
+        StepAction::Edit { targets, counts } | StepAction::Create { targets, counts } => {
+            step.kind = if create { "create" } else { "edit" };
+            step.added_lines = counts.added;
+            step.removed_lines = counts.removed;
+            match targets {
+                FileTargets::Paths(files) => paths(files),
+                FileTargets::Plan { .. } => {
+                    step.variant = Some("plan");
+                    Vec::new()
+                }
+            }
+        }
+        StepAction::Delete {
+            paths: files,
+            counts,
+        } => {
+            step.kind = "delete";
+            step.added_lines = counts.added;
+            step.removed_lines = counts.removed;
+            paths(files)
+        }
+        StepAction::Run(run) => {
+            step.kind = "run";
+            match run {
+                RunAction::Command => Vec::new(),
+                RunAction::CommandUnavailable {
+                    working_directory,
+                    exit_code,
+                } => {
+                    step.folder = working_directory
+                        .map(|folder| path(&folder))
+                        .filter(|folder| folder != ".");
+                    step.exit_code = exit_code;
+                    Vec::new()
+                }
+                RunAction::Script { interpreters } => {
+                    step.variant = Some("script");
+                    interpreters.iter().map(|program| target(program)).collect()
+                }
+            }
+        }
+        StepAction::Web(web) => {
+            step.kind = "web";
+            match web {
+                WebAction::Search { query } => vec![target(&query)],
+                WebAction::Fetch { url } => {
+                    step.variant = Some("fetch");
+                    vec![target(&page(&url))]
+                }
+            }
+        }
+        StepAction::Other { name } => {
+            let targets = vec![target(&name)];
+            step.target = name;
+            targets
+        }
+    };
+    if let Some(command) = action.command {
+        step.target = match &command.ticketd_calls {
+            Some(calls) => calls
+                .iter()
+                .map(|args| step_kind::ticketd_command(args))
+                .collect::<Vec<_>>()
+                .join("; "),
+            None => step_kind::shown_command(&command.display),
+        };
+        step.ticketd = command
+            .ticketd_calls
+            .as_deref()
+            .and_then(chat_ticketd::sentences);
+        step.command = Some(command.display);
+        step.folder = command
+            .working_directory
+            .map(|folder| path(&folder))
+            .filter(|folder| folder != ".");
+        step.exit_code = command.exit_code;
+        step.duration_ms = command.duration_ms;
+        step.timed_out = command.timed_out;
+    }
+    if let Some(outcome) = action.outcome {
+        step.state = match outcome {
+            StepOutcomeOverride::Completed => "done",
+            StepOutcomeOverride::Declined => "declined",
+        };
+    }
+    step
+}
 
-/// The step rows for one tool call: one, except for a Codex file change, which has
-/// one row per kind of change.
+/// Word each action the harness reader found in the tool evidence.
 fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec<Step> {
     let cut = tool
         .output_truncated
@@ -1002,6 +1206,7 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         variant: None,
         target: tool.name.clone(),
         targets: vec![target(&tool.name)],
+        omitted_files: None,
         command: None,
         exit_code: None,
         folder: None,
@@ -1036,273 +1241,30 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
             ..base
         }];
     }
-    let input = serde_json::from_str::<serde_json::Value>(&tool.input).ok();
-    let value = |name: &str| input.as_ref().and_then(|input| input.get(name));
-    let field = |name: &str| value(name).and_then(serde_json::Value::as_str);
-    let number = |name: &str| value(name).and_then(serde_json::Value::as_i64);
     let active = chat.active_turn.as_ref().map(|turn| &turn.id) == Some(&tool.turn_id);
     let state = match tool.state {
         ChatToolState::Running if active => "running",
         ChatToolState::Running => "not_finished",
         ChatToolState::Completed => "done",
-        // Codex declines were stored as failures before they were kept apart.
-        ChatToolState::Failed if field("status") == Some("declined") => "declined",
         ChatToolState::Failed => "failed",
         ChatToolState::Declined => "declined",
         ChatToolState::Unknown => "unknown",
     };
     let base = Step { state, ..base };
     let folder = chat.execution_folder.as_str();
-    let path = |text: &str| target(&shown_path(text, folder, home));
-    let kind = |kind: &'static str, targets: Vec<StepTarget>| Step {
-        kind,
-        targets,
-        ..base.clone()
-    };
-    let command = |command: &str, cwd: Option<&str>| {
-        let shell = step_kind::shell(command);
-        let paths = !matches!(shell.kind, Kind::Run | Kind::Search);
-        let targets = shell
-            .targets
-            .into_iter()
-            .map(|found| StepTarget {
-                text: if paths {
-                    shown_path(&found.text, folder, home)
-                } else {
-                    found.text
-                },
-                lines: found.lines.map(|(from, to)| [from, to]),
-                scope: found.scope.map(|scope| shown_path(&scope, folder, home)),
-            })
-            .collect();
-        // Where the command ran: Codex's working folder, then a leading `cd`.
-        let ran_in = match (cwd, shell.folder) {
-            (_, Some(cd)) if cd.starts_with(['/', '~']) => Some(cd),
-            (Some(cwd), Some(cd)) => Some(format!("{}/{cd}", cwd.trim_end_matches('/'))),
-            (cwd, cd) => cd.or(cwd.map(str::to_owned)),
-        }
-        .map(|ran_in| shown_path(&ran_in, folder, home))
-        .filter(|ran_in| ran_in != ".");
-        let exit_code = number("exitCode");
-        let search = shell.kind == Kind::Search;
-        // grep and rg exit 1 when they find nothing: the search worked.
-        let state = if search && state == "failed" && exit_code == Some(1) {
-            "done"
-        } else {
-            state
-        };
-        let empty = tool
-            .output
-            .as_deref()
-            .is_none_or(|output| output.trim().is_empty());
-        if let Some(calls) = step_kind::ticketd_calls(command) {
-            // Shown without ticketd's path or the variable naming it; what runs is kept.
-            let shown = calls
-                .iter()
-                .map(|args| step_kind::ticketd_command(args))
-                .collect::<Vec<_>>()
-                .join("; ");
-            return Step {
-                kind: "run",
-                target: shown,
-                command: Some(step_kind::unwrapped(command)),
-                ticketd: chat_ticketd::sentences(&calls),
-                exit_code,
-                folder: ran_in,
-                timed_out: state == "failed" && exit_code == Some(124),
-                duration_ms: number("durationMs"),
-                state,
-                ..base.clone()
-            };
-        }
-        Step {
-            kind: shell.kind.name(),
-            variant: shell.variant.map(Variant::name),
-            // A heading names ticketd without its path; what runs is kept exactly.
-            target: step_kind::shown_command(&shell.command),
-            targets,
-            command: Some(shell.command),
-            exit_code,
-            folder: ran_in,
-            // ponytail: Codex ends a command that ran out of time with exit code
-            // 124; confirm against a live timeout in #264.
-            timed_out: state == "failed" && exit_code == Some(124),
-            duration_ms: number("durationMs"),
-            no_matches: search && state == "done" && (empty || exit_code == Some(1)),
-            state,
-            ..base.clone()
-        }
-    };
-    let found_nothing = |step: Step| Step {
-        no_matches: step.state == "done"
-            && tool.output.as_deref().is_none_or(|output| {
-                let output = output.trim();
-                output.is_empty() || NOTHING_FOUND.iter().any(|said| output.starts_with(said))
-            }),
-        ..step
-    };
-    // Codex names a command step by its command and keeps its item as the input;
-    // Claude Code names its tool and passes the command or file in the input.
-    let step = match (field("type"), tool.name.as_str()) {
-        (Some("commandExecution"), _) => {
-            command(field("command").unwrap_or(&tool.name), field("cwd"))
-        }
-        (Some("fileChange"), _) => return file_changes(value("changes"), &base, &path),
-        (Some("webSearch"), _) => {
-            let url = value("action")
-                .filter(|action| action["type"] == "openPage")
-                .and_then(|action| action["url"].as_str());
-            match url {
-                Some(url) => Step {
-                    variant: Some(Variant::Fetch.name()),
-                    ..kind("web", vec![target(&page(url))])
-                },
-                None => kind("web", vec![target(field("query").unwrap_or_default())]),
-            }
-        }
-        (Some("imageView"), _) => kind("read", field("path").map(path).into_iter().collect()),
-        (Some(_), _) => base.clone(),
-        (None, name) if let Some(paths) = name.strip_prefix("Edit ") => {
-            kind("edit", paths.split(", ").map(path).collect())
-        }
-        (None, "Bash" | "PowerShell") => match field("command") {
-            Some(text) => command(text, None),
-            None => base.clone(),
+    read_tool_steps(
+        &chat.harness,
+        ToolEvidence {
+            name: &tool.name,
+            input: &tool.input,
+            output: tool.output.as_deref(),
+            state: tool.state,
+            working_directory: folder,
         },
-        (None, "Read") => {
-            let lines = match (number("offset"), number("limit")) {
-                (offset, Some(limit)) if limit > 0 => {
-                    let from = offset.unwrap_or(1).max(1);
-                    u32::try_from(from)
-                        .ok()
-                        .zip(u32::try_from(from + limit - 1).ok())
-                        .map(|(from, to)| [from, to])
-                }
-                _ => None,
-            };
-            let file = field("file_path").map(|file| StepTarget {
-                lines,
-                ..path(file)
-            });
-            kind("read", file.into_iter().collect())
-        }
-        (None, "LS") => Step {
-            variant: Some(Variant::List.name()),
-            ..kind("read", field("path").map(path).into_iter().collect())
-        },
-        (None, "Grep" | "Glob") => {
-            let scope = field("path").map(|scope| shown_path(scope, folder, home));
-            let scope = scope.or(field("glob").map(str::to_owned));
-            let pattern = field("pattern").map(|pattern| StepTarget {
-                scope,
-                ..target(pattern)
-            });
-            found_nothing(kind("search", pattern.into_iter().collect()))
-        }
-        (None, "Edit" | "MultiEdit" | "NotebookEdit" | "Write") => {
-            let file = field("file_path").or(field("notebook_path"));
-            // Created only when Claude Code's result says so.
-            let created = tool.name == "Write"
-                && state == "done"
-                && tool
-                    .output
-                    .as_deref()
-                    .is_some_and(|output| output.starts_with(WRITE_CREATED));
-            let lines = |key: &str| {
-                value("ticketd_lines")
-                    .and_then(|lines| lines[key].as_u64())
-                    .and_then(|count| u32::try_from(count).ok())
-            };
-            let plan = harness == "Claude Code" && file.is_some_and(|file| plan_file(file, folder));
-            Step {
-                added_lines: lines("added"),
-                removed_lines: lines("removed"),
-                // Claude Code's plan lives in its own profile: "Wrote its plan".
-                variant: plan.then_some("plan"),
-                ..kind(
-                    if created { "create" } else { "edit" },
-                    if plan {
-                        Vec::new()
-                    } else {
-                        file.map(path).into_iter().collect()
-                    },
-                )
-            }
-        }
-        (None, "WebSearch") => kind("web", vec![target(field("query").unwrap_or_default())]),
-        (None, "WebFetch") => Step {
-            variant: Some(Variant::Fetch.name()),
-            ..kind("web", vec![target(&page(field("url").unwrap_or_default()))])
-        },
-        (None, _) => base.clone(),
-    };
-    vec![step]
-}
-
-/// A plan Claude Code keeps in its own profile (`…/.claude/plans/name.md`), outside
-/// the Chat's folder: a step names it as "its plan", not by that path.
-fn plan_file(path: &str, folder: &str) -> bool {
-    let path = std::path::Path::new(path);
-    let outside = folder.is_empty() || !path.starts_with(folder);
-    let in_plans = path
-        .parent()
-        .and_then(|parent| parent.file_name())
-        .is_some_and(|name| name == "plans");
-    let claude = path.components().any(|part| {
-        part.as_os_str()
-            .to_string_lossy()
-            .to_ascii_lowercase()
-            .contains("claude")
-    });
-    outside && in_plans && claude && path.extension().is_some_and(|ext| ext == "md")
-}
-
-/// A Codex file change: one row per kind of change, in the order each kind first
-/// appears.
-fn file_changes(
-    changes: Option<&serde_json::Value>,
-    base: &Step,
-    path: &dyn Fn(&str) -> StepTarget,
-) -> Vec<Step> {
-    let mut rows: Vec<Step> = Vec::new();
-    let changes = changes.and_then(serde_json::Value::as_array);
-    for change in changes.into_iter().flatten() {
-        let Some(file) = change["path"].as_str() else {
-            continue;
-        };
-        let how = change["kind"]["type"].as_str().or(change["kind"].as_str());
-        let (kind, change_kind) = match how {
-            Some("add") => ("create", FileChangeKind::Added),
-            Some("delete") => ("delete", FileChangeKind::Deleted),
-            _ => ("edit", FileChangeKind::Modified),
-        };
-        // A change Codex sent no diff with leaves its row's count untold.
-        let counted = change["diff"]
-            .as_str()
-            .map(|diff| diffstat::counts(&change_kind, diff));
-        match rows.iter_mut().find(|row| row.kind == kind) {
-            Some(row) => {
-                row.targets.push(path(file));
-                let sum = |kept: Option<u32>, more: Option<u32>| kept.zip(more).map(|(a, b)| a + b);
-                row.added_lines = sum(row.added_lines, counted.map(|(added, _)| added));
-                row.removed_lines = sum(row.removed_lines, counted.map(|(_, removed)| removed));
-            }
-            None => rows.push(Step {
-                kind,
-                targets: vec![path(file)],
-                added_lines: counted.map(|(added, _)| added),
-                removed_lines: counted.map(|(_, removed)| removed),
-                ..base.clone()
-            }),
-        }
-    }
-    if rows.is_empty() {
-        rows.push(Step {
-            kind: "edit",
-            ..base.clone()
-        });
-    }
-    rows
+    )
+    .into_iter()
+    .map(|action| word_tool_step(action, &base, folder, home))
+    .collect()
 }
 
 /// One history record as a transcript item, or `None` when it has no row of its own.
@@ -1319,20 +1281,25 @@ pub fn item(
             if session.origin != ChatSessionOrigin::FreshSession {
                 return None;
             }
-            match fresh.filter(|fresh| session.position > fresh.after) {
-                Some(fresh) => Item::Session {
+            let history = fresh
+                .filter(|fresh| session.position > fresh.after)
+                .map(|fresh| (fresh.history, fresh.count))
+                .or_else(|| {
+                    (history_recovery(&chat.harness) == Some(HistoryRecovery::StartFresh))
+                        .then_some(("none", 0))
+                });
+            match history {
+                Some((history, count)) => Item::Session {
                     id: session.id.clone(),
                     at: session.started_at.clone(),
-                    history: fresh.history,
-                    count: fresh.count,
+                    history,
+                    count,
                 },
                 None => Item::Marker {
                     id: session.id.clone(),
                     at: session.started_at.clone(),
                     reason: "note",
-                    message: Some(format!(
-                        "Continued in a fresh {harness} session with history you selected."
-                    )),
+                    message: Some(format!("Continued in a fresh {harness} session.")),
                     turn_id: None,
                 },
             }
@@ -1423,16 +1390,13 @@ pub fn item(
             turn_id: Some(tool.turn_id.clone()),
         },
         ChatItem::Interaction(interaction) => {
-            let step = interaction
+            let rows = interaction
                 .tool_id
                 .as_deref()
                 .and_then(|id| tracker.tool(id))
-                .and_then(|tool| {
-                    steps(tool, harness, chat, home_folder().as_deref())
-                        .into_iter()
-                        .next()
-                });
-            request(interaction, live, harness, step.as_ref())
+                .map(|tool| steps(tool, harness, chat, home_folder().as_deref()))
+                .unwrap_or_default();
+            request(interaction, live, harness, &rows)
         }
         ChatItem::Notice(notice) => Item::Marker {
             id: notice.id.clone(),
@@ -1570,12 +1534,25 @@ fn harness_problem(harness: &str, kind: ProblemKind, message: Option<String>) ->
             | ProblemKind::IncompatibleVersion
             | ProblemKind::PermissionUnavailable
     );
-    let command = login_command(harness).filter(|_| kind == ProblemKind::LoginRequired);
+    let sign_in = if kind == ProblemKind::LoginRequired {
+        descriptor(harness)
+    } else {
+        None
+    };
+    // The notice already gives the sign-in instructions from the problem kind
+    // and command. Keep any message that adds something to those instructions.
+    let message =
+        message.filter(|text| sign_in.is_none_or(|descriptor| text != descriptor.sign_in_guidance));
     let help = help_url(harness).filter(|_| setup);
     Problem {
         kind: kind.into(),
         message,
-        command: command.map(str::to_owned),
+        history_recovery: if kind == ProblemKind::NativeHistoryUnavailable {
+            history_recovery(harness)
+        } else {
+            None
+        },
+        command: sign_in.map(|descriptor| descriptor.sign_in_command.to_owned()),
         help_url: help.map(str::to_owned),
         ..Problem::default()
     }
@@ -2003,6 +1980,19 @@ mod tests {
         rows.remove(0)
     }
 
+    fn claude_chat(active_turn: Option<&str>) -> Chat {
+        Chat {
+            harness: "claude-code".to_owned(),
+            ..chat(active_turn)
+        }
+    }
+
+    fn claude_step(tool: &ChatTool) -> Step {
+        let mut rows = steps(tool, "Claude Code", &claude_chat(None), Some("/Users/me"));
+        assert_eq!(rows.len(), 1, "one row");
+        rows.remove(0)
+    }
+
     fn codex_command(command: &str, status: &str, exit_code: i64) -> ChatTool {
         let input = json!({
             "type": "commandExecution",
@@ -2122,6 +2112,10 @@ mod tests {
         ]});
         let change = tool("Edit a", &input.to_string(), ChatToolState::Completed, None);
         let rows = steps(&change, "Codex", &chat(None), None);
+        assert_eq!(
+            super::asked_to(&rows).map(|(_, _, subject)| subject),
+            Some("edit src/a.ts, src/c.ts, edit src/b.ts, delete old.ts".to_owned())
+        );
         let rows: Vec<_> = rows.iter().map(|row| (row.kind, texts(row))).collect();
         assert_eq!(
             rows,
@@ -2130,6 +2124,59 @@ mod tests {
                 ("create", vec!["src/b.ts"]),
                 ("delete", vec!["old.ts"]),
             ]
+        );
+    }
+
+    #[test]
+    fn a_patch_approval_discloses_omitted_targets_including_unlisted_deletions() {
+        use ticketd_chat_host::{ApprovalDecision, InteractionKind, LiveInteraction};
+
+        let input = json!({"type": "fileChange", "changes": [
+            {"path": "/work/limiter/src/a.ts", "kind": {"type": "update"},
+             "ticketd_lines": {"added": 4, "removed": 1}},
+        ], "ticketd_omitted_files": {"update": 2, "delete": 1}});
+        let patch = ChatItem::Tool(tool(
+            "Edit /work/limiter/src/a.ts, /work/limiter/b.ts, /work/limiter/c.ts, /work/limiter/old.ts",
+            &input.to_string(),
+            ChatToolState::Running,
+            None,
+        ));
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 1,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Apply file changes".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Pending,
+            response: None,
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let mut live = ChatLive::idle();
+        live.interactions.push(LiveInteraction {
+            interaction_id: "ask".to_owned(),
+            kind: InteractionKind::approval(
+                None,
+                None,
+                "Apply file changes",
+                vec![ApprovalDecision::Deny],
+            ),
+        });
+        let tracker = Tracker::from_items(&[patch, approval.clone()]);
+        let Some(Item::Request { title, subject, .. }) =
+            super::item(&approval, &chat(Some("turn")), &live, None, &tracker)
+        else {
+            panic!("expected an approval card");
+        };
+        assert_eq!(title, "Codex wants to");
+        assert_eq!(
+            subject.as_deref(),
+            Some(
+                "edit 3 files (2 paths omitted) including src/a.ts, delete 1 file (1 path omitted)"
+            )
         );
     }
 
@@ -2152,14 +2199,14 @@ mod tests {
         assert_eq!(counts, [("edit", None, None), ("create", Some(2), Some(0))]);
 
         // Claude Code says it in the tool's result, which the adapter keeps.
-        let edit = one(&tool(
+        let edit = claude_step(&tool(
             "Edit",
             r#"{"file_path":"/work/limiter/src/a.ts","ticketd_lines":{"added":48,"removed":6}}"#,
             ChatToolState::Completed,
             None,
         ));
         assert_eq!((edit.added_lines, edit.removed_lines), (Some(48), Some(6)));
-        let untold = one(&tool(
+        let untold = claude_step(&tool(
             "Edit",
             r#"{"file_path":"/work/limiter/src/a.ts"}"#,
             ChatToolState::Completed,
@@ -2172,10 +2219,10 @@ mod tests {
     fn claude_code_tools_read_as_their_kind() {
         let done = ChatToolState::Completed;
         let row = |name: &str, input: &str, output: Option<&str>| {
-            let step = one(&tool(name, input, done, output));
+            let step = claude_step(&tool(name, input, done, output));
             (step.kind, step.variant, texts(&step).join(", "))
         };
-        let ran = one(&tool(
+        let ran = claude_step(&tool(
             "PowerShell",
             r#"{"command":"ticketd --version"}"#,
             done,
@@ -2189,7 +2236,7 @@ mod tests {
             row("Bash", r#"{"command":"rm -f /Users/me/notes.txt"}"#, None),
             ("delete", None, "~/notes.txt".to_owned())
         );
-        let read = one(&tool(
+        let read = claude_step(&tool(
             "Read",
             r#"{"file_path":"/work/limiter/src/a.ts","offset":40,"limit":51}"#,
             done,
@@ -2197,7 +2244,7 @@ mod tests {
         ));
         assert_eq!((read.kind, texts(&read)), ("read", vec!["src/a.ts"]));
         assert_eq!(read.targets[0].lines, Some([40, 90]));
-        let grep = one(&tool(
+        let grep = claude_step(&tool(
             "Grep",
             r#"{"pattern":"RateLimiter","path":"/work/limiter/src"}"#,
             done,
@@ -2249,7 +2296,7 @@ mod tests {
         let bin = "/Users/me/ticketd/target/debug/ticketd";
         let script = format!("T={bin}\n$T change T-MP4 --status \"In progress\"");
         let input = json!({ "command": script }).to_string();
-        let step = one(&tool("Bash", &input, ChatToolState::Completed, None));
+        let step = claude_step(&tool("Bash", &input, ChatToolState::Completed, None));
         assert_eq!(step.kind, "run");
         assert_eq!(
             step.target,
@@ -2261,7 +2308,7 @@ mod tests {
 
         // An unknown call says its words, without the path.
         let input = json!({ "command": format!("{bin} skills install --harness codex") });
-        let other = one(&tool(
+        let other = claude_step(&tool(
             "Bash",
             &input.to_string(),
             ChatToolState::Completed,
@@ -2275,7 +2322,7 @@ mod tests {
             "T={bin}; $T skills get chat | head -80; echo ----; $T show T-MP3 2>&1 || $T --help"
         );
         let input = json!({ "command": compound });
-        let calls = one(&tool(
+        let calls = claude_step(&tool(
             "Bash",
             &input.to_string(),
             ChatToolState::Completed,
@@ -2290,7 +2337,7 @@ mod tests {
 
         // Anything else stays the command, with ticketd's path left out of it.
         let input = json!({ "command": format!("{bin} export | sh") });
-        let raw = one(&tool(
+        let raw = claude_step(&tool(
             "Bash",
             &input.to_string(),
             ChatToolState::Completed,
@@ -2302,7 +2349,7 @@ mod tests {
             raw.command.as_deref(),
             Some(format!("{bin} export | sh").as_str())
         );
-        let (_, _, subject) = super::asked_to(Some(&raw)).expect("asked");
+        let (_, _, subject) = super::asked_to(&[raw]).expect("asked");
         assert_eq!(subject, "ticketd export | sh");
 
         let interaction = ChatInteraction {
@@ -2327,7 +2374,12 @@ mod tests {
             at,
             resolved_at,
             ..
-        } = request(&interaction, &ChatLive::idle(), "Claude Code", Some(&step))
+        } = request(
+            &interaction,
+            &ChatLive::idle(),
+            "Claude Code",
+            std::slice::from_ref(&step),
+        )
         else {
             panic!("a request");
         };
@@ -2339,16 +2391,14 @@ mod tests {
         assert_eq!(resolved_at.as_deref(), Some("2026-11-13T10:02:00Z"));
 
         let plan = json!({ "file_path": "/Users/me/.claude/plans/quiet-otter.md" });
-        let mut claude = chat(None);
-        claude.harness = "claude-code".to_owned();
-        let wrote = steps(
-            &tool("Write", &plan.to_string(), ChatToolState::Completed, None),
-            "Claude Code",
-            &claude,
-            Some("/Users/me"),
-        );
-        assert_eq!(wrote[0].variant, Some("plan"));
-        assert!(wrote[0].targets.is_empty());
+        let wrote = claude_step(&tool(
+            "Write",
+            &plan.to_string(),
+            ChatToolState::Completed,
+            None,
+        ));
+        assert_eq!(wrote.variant, Some("plan"));
+        assert!(wrote.targets.is_empty());
     }
 
     /// U4: the card shows what would run apart from why the harness asks.
@@ -2370,7 +2420,7 @@ mod tests {
         };
         let Item::Request {
             subject, reason, ..
-        } = request(&interaction, &ChatLive::idle(), "Codex", None)
+        } = request(&interaction, &ChatLive::idle(), "Codex", &[])
         else {
             panic!("an interaction is a request");
         };
@@ -2378,11 +2428,15 @@ mod tests {
         assert_eq!(reason.as_deref(), Some("Allow creating hello.txt?"));
 
         // Asked for a step, the title says what the step would do, subject inline.
-        let title =
-            |step: &Step| match request(&interaction, &ChatLive::idle(), "Codex", Some(step)) {
-                Item::Request { title, subject, .. } => (title, subject),
-                other => panic!("a request, got {other:?}"),
-            };
+        let title = |step: &Step| match request(
+            &interaction,
+            &ChatLive::idle(),
+            "Codex",
+            std::slice::from_ref(step),
+        ) {
+            Item::Request { title, subject, .. } => (title, subject),
+            other => panic!("a request, got {other:?}"),
+        };
         let run = one(&codex_command(
             "npm install @pagerduty/pdjs",
             "inProgress",
@@ -2395,12 +2449,7 @@ mod tests {
                 Some("npm install @pagerduty/pdjs".to_owned())
             )
         );
-        let edit = one(&tool(
-            "Edit",
-            r#"{"file_path":"/work/limiter/src/a.ts"}"#,
-            ChatToolState::Running,
-            None,
-        ));
+        let edit = one(&tool("Edit src/a.ts", "", ChatToolState::Running, None));
         assert_eq!(
             title(&edit),
             (
@@ -2408,6 +2457,315 @@ mod tests {
                 Some("src/a.ts".to_owned())
             )
         );
+        let read = one(&codex_command("cat src/a.ts", "inProgress", 0));
+        assert_eq!(
+            title(&read),
+            (
+                "Codex asked to read".to_owned(),
+                Some("src/a.ts".to_owned())
+            )
+        );
+    }
+
+    #[test]
+    fn a_saved_claude_edit_uses_the_same_path_in_history_and_approval() {
+        use super::{Tracker, item};
+        use ticketd_core::ChatItem;
+
+        let chat = claude_chat(None);
+        let record = ChatItem::Tool(tool(
+            "Edit",
+            r#"{"file_path":"/work/limiter/src/auth/config.ts"}"#,
+            ChatToolState::Completed,
+            Some("The file was updated successfully."),
+        ));
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Permission to change the configuration".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("allow".to_owned()),
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let tracker = Tracker::from_items(&[record.clone(), approval.clone()]);
+        let live = ChatLive::idle();
+        let Some(Item::Steps { steps, .. }) = item(&record, &chat, &live, None, &tracker) else {
+            panic!("a step");
+        };
+        assert_eq!(steps[0].kind, "edit");
+        assert_eq!(texts(&steps[0]), ["src/auth/config.ts"]);
+        assert_eq!(
+            steps[0].output.as_deref(),
+            Some("The file was updated successfully.")
+        );
+        let Some(Item::Request { title, subject, .. }) =
+            item(&approval, &chat, &live, None, &tracker)
+        else {
+            panic!("an approval");
+        };
+        assert_eq!(title, "Claude Code asked to edit");
+        assert_eq!(subject.as_deref(), Some("src/auth/config.ts"));
+    }
+
+    #[test]
+    fn a_saved_antigravity_edit_shows_its_file_in_history_and_approval() {
+        use super::{Tracker, item};
+
+        let chat = Chat {
+            harness: "antigravity".to_owned(),
+            ..chat(None)
+        };
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Permission to edit the file".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("allow".to_owned()),
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let live = ChatLive::idle();
+
+        for (location, input_path, expected) in [
+            (
+                Some("/work/limiter/src/location.rs"),
+                Some("/work/limiter/src/input.rs"),
+                "src/location.rs",
+            ),
+            (None, Some("/work/limiter/src/input.rs"), "src/input.rs"),
+            (None, None, "src/diff.rs"),
+        ] {
+            let mut evidence = json!({
+                "toolCallId": "t",
+                "title": "Edit file",
+                "kind": "edit",
+                "status": "completed",
+                "content": [{
+                    "type": "diff",
+                    "path": "/work/limiter/src/diff.rs",
+                    "oldText": "old\n",
+                    "newText": "new\n"
+                }]
+            });
+            if let Some(path) = location {
+                evidence["locations"] = json!([{ "path": path }]);
+            }
+            if let Some(path) = input_path {
+                evidence["rawInput"] = json!({ "TargetFile": path });
+            }
+            let record = ChatItem::Tool(tool(
+                "Edit file",
+                &evidence.to_string(),
+                ChatToolState::Completed,
+                None,
+            ));
+            let tracker = Tracker::from_items(&[record.clone(), approval.clone()]);
+            let Some(Item::Steps { steps, .. }) = item(&record, &chat, &live, None, &tracker)
+            else {
+                panic!("a step");
+            };
+            let Some(Item::Request { title, subject, .. }) =
+                item(&approval, &chat, &live, None, &tracker)
+            else {
+                panic!("an approval");
+            };
+            assert_eq!(steps[0].kind, "edit");
+            assert_eq!(title, "Antigravity asked to edit");
+            assert_eq!(
+                (texts(&steps[0]), subject.as_deref()),
+                (vec![expected], Some(expected))
+            );
+        }
+    }
+
+    #[test]
+    fn a_saved_antigravity_move_shows_both_paths_in_history_and_approval() {
+        use super::{Tracker, item};
+
+        let chat = Chat {
+            harness: "antigravity".to_owned(),
+            ..chat(None)
+        };
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Permission to move files".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("allow".to_owned()),
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let live = ChatLive::idle();
+        let source = "/work/limiter/src/old.rs";
+        let destination = "/work/limiter/src/new.rs";
+        let both = ["src/old.rs", "src/new.rs"];
+
+        for (raw_input, locations, expected) in [
+            (
+                json!({"SourcePath": source, "DestinationPath": destination}),
+                json!([{"path": source}]),
+                both.as_slice(),
+            ),
+            (
+                json!({"SourcePath": source}),
+                json!([{"path": destination}]),
+                both.as_slice(),
+            ),
+            (
+                json!({"DestinationPath": destination}),
+                json!([]),
+                &["src/new.rs"],
+            ),
+            (
+                serde_json::Value::Null,
+                json!([{"path": source}, {"path": destination}, {"path": source}]),
+                both.as_slice(),
+            ),
+            (
+                json!({"TargetFile": destination}),
+                json!([]),
+                &["src/new.rs"],
+            ),
+        ] {
+            let evidence = json!({
+                "toolCallId": "t", "title": "Move file", "kind": "move",
+                "status": "completed", "rawInput": raw_input, "locations": locations,
+            });
+            let record = ChatItem::Tool(tool(
+                "Move file",
+                &evidence.to_string(),
+                ChatToolState::Completed,
+                None,
+            ));
+            let tracker = Tracker::from_items(&[record.clone(), approval.clone()]);
+            let Some(Item::Steps { steps, .. }) = item(&record, &chat, &live, None, &tracker)
+            else {
+                panic!("a step");
+            };
+            let Some(Item::Request { title, subject, .. }) =
+                item(&approval, &chat, &live, None, &tracker)
+            else {
+                panic!("an approval");
+            };
+            assert_eq!(steps[0].kind, "edit");
+            assert_eq!(title, "Antigravity asked to edit");
+            assert_eq!(texts(&steps[0]), expected, "{evidence}");
+            assert_eq!(subject, Some(expected.join(", ")), "{evidence}");
+        }
+    }
+
+    #[test]
+    fn a_live_native_approval_serializes_each_choices_warning() {
+        use super::item;
+        use ticketd_chat_host::{ApprovalOption, InteractionKind, LiveInteraction};
+
+        let reason = "Review the command.";
+        let approval = ChatItem::Interaction(
+            serde_json::from_value(json!({
+                "id": "ask",
+                "position": 1,
+                "turn_id": "turn",
+                "kind": "approval",
+                "prompt": "Print a fixture",
+                "reason": reason,
+                "state": "pending"
+            }))
+            .unwrap(),
+        );
+        let chat = Chat {
+            harness: "antigravity".to_owned(),
+            ..chat(Some("turn"))
+        };
+        let mut live = ChatLive::idle();
+        live.interactions.push(LiveInteraction {
+            interaction_id: "ask".to_owned(),
+            kind: InteractionKind::NativeApproval {
+                description: "Print a fixture".to_owned(),
+                reason: Some(reason.to_owned()),
+                options: vec![
+                    ApprovalOption {
+                        id: "allow".to_owned(),
+                        label: "Allow once".to_owned(),
+                        warning: None,
+                    },
+                    ApprovalOption {
+                        id: "provider-option-7".to_owned(),
+                        label: "Allow always".to_owned(),
+                        warning: Some("Adds a persistent rule.".to_owned()),
+                    },
+                ],
+            },
+        });
+        let tracker = Tracker::from_items(std::slice::from_ref(&approval));
+        let view = item(&approval, &chat, &live, None, &tracker).unwrap();
+        let json = serde_json::to_value(view).unwrap();
+        assert_eq!(json["reason"], reason);
+        assert_eq!(
+            json["options"],
+            json!([
+                {"id": "allow", "label": "Allow once"},
+                {"id": "provider-option-7", "label": "Allow always", "warning": "Adds a persistent rule."},
+            ])
+        );
+    }
+
+    #[test]
+    fn a_saved_antigravity_create_retains_its_target_after_preview_compaction() {
+        use super::{Tracker, item};
+
+        let chat = Chat {
+            harness: "antigravity".to_owned(),
+            ..chat(None)
+        };
+        let record = ChatItem::Tool(tool(
+            "Write files",
+            r#"{"toolCallId":"t","title":"","kind":"edit","status":"completed","rawInput":{"TargetFile":"/work/limiter/src/generated.rs","_ticketdAllFilesAdded":true,"_ticketdAddedLines":64}}"#,
+            ChatToolState::Completed,
+            None,
+        ));
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Permission to write files".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("allow".to_owned()),
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let tracker = Tracker::from_items(&[record.clone(), approval.clone()]);
+        let live = ChatLive::idle();
+        let Some(Item::Steps { steps, .. }) = item(&record, &chat, &live, None, &tracker) else {
+            panic!("a step");
+        };
+        let Some(Item::Request { subject, .. }) = item(&approval, &chat, &live, None, &tracker)
+        else {
+            panic!("an approval");
+        };
+        assert_eq!(steps[0].kind, "create");
+        assert_eq!(steps[0].added_lines, Some(64));
+        assert_eq!(texts(&steps[0]), ["src/generated.rs"]);
+        assert_eq!(subject.as_deref(), Some("src/generated.rs"));
     }
 
     /// #367: a turn's records read by whether it still runs, and a stop that did not
@@ -2500,7 +2858,7 @@ mod tests {
         };
         let Item::Request {
             answer, turn_id, ..
-        } = request(&interaction, &ChatLive::idle(), "Codex", None)
+        } = request(&interaction, &ChatLive::idle(), "Codex", &[])
         else {
             panic!("an interaction is a request");
         };
@@ -2668,7 +3026,7 @@ mod tests {
     fn a_step_carries_its_output_s_last_lines_and_says_how_much_there_is() {
         let lines: Vec<String> = (1..=30).map(|n| format!("line {n}")).collect();
         let output = format!("{}\n", lines.join("\n"));
-        let long = one(&tool("Bash", "ls", ChatToolState::Completed, Some(&output)));
+        let long = claude_step(&tool("Bash", "ls", ChatToolState::Completed, Some(&output)));
         let tail = format!("{}\n", lines[10..].join("\n"));
         assert_eq!(long.output.as_deref(), Some(tail.as_str()));
         assert_eq!(
@@ -2680,10 +3038,10 @@ mod tests {
         );
         // One long line is cut too, on a character boundary.
         let wide = "é".repeat(5000);
-        let cut = one(&tool("Bash", "ls", ChatToolState::Completed, Some(&wide)));
+        let cut = claude_step(&tool("Bash", "ls", ChatToolState::Completed, Some(&wide)));
         assert!(cut.output.as_deref().is_some_and(|tail| tail.len() <= 4096));
         // Output that fits is all there, with nothing more to read.
-        let short = one(&tool("Bash", "ls", ChatToolState::Completed, Some("ok\n")));
+        let short = claude_step(&tool("Bash", "ls", ChatToolState::Completed, Some("ok\n")));
         assert_eq!(
             (short.output.as_deref(), short.full_output),
             (Some("ok\n"), None)
@@ -2699,7 +3057,7 @@ mod tests {
             None,
         );
         running.started_at = Some("2026-11-10T10:00:05Z".to_owned());
-        let step = &steps(&running, "Codex", &chat(Some("turn")), None)[0];
+        let step = &steps(&running, "Claude Code", &claude_chat(Some("turn")), None)[0];
         assert_eq!(
             (step.state, step.started_at.as_deref()),
             ("running", Some("2026-11-10T10:00:05Z"))

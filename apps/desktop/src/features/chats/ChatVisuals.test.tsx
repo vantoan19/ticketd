@@ -11,12 +11,14 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import {
   ChatClientContext,
+  transcriptItemSchema,
   type Suggestion,
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { drafts } from "@/features/chats/drafts";
+import { HarnessMark } from "@/features/chats/HarnessMark";
 import {
   chatState,
   createMockChatClient,
@@ -39,6 +41,29 @@ afterEach(() => {
   cleanup();
   drafts.clear();
   watching.clear();
+});
+
+test("a newly mounted harness mark can retry a failed catalog load", async () => {
+  const client = createMockChatClient();
+  client.harnessCatalog = vi
+    .fn(client.harnessCatalog)
+    .mockRejectedValueOnce(new Error("test catalog request failed"));
+  const view = (second = false) => (
+    <ChatClientContext value={client}>
+      <HarnessMark harness="codex" name="Codex" />
+      {second && <HarnessMark harness="claude-code" name="Claude Code" />}
+    </ChatClientContext>
+  );
+
+  const { rerender } = render(view());
+  await act(async () => {});
+  const mark = screen.getByRole("img", { name: "Codex" });
+  expect(mark.hasAttribute("data-dim")).toBe(true);
+  expect(client.harnessCatalog).toHaveBeenCalledTimes(1);
+
+  await act(async () => rerender(view(true)));
+  expect(mark.hasAttribute("data-dim")).toBe(false);
+  expect(client.harnessCatalog).toHaveBeenCalledTimes(2);
 });
 
 const at = "2026-11-10T10:00:00Z";
@@ -154,6 +179,73 @@ test("a file name opens the file; one that is gone becomes plain text and says s
   );
   expect(screen.queryByRole("button", { name: "Open old.ts" })).toBeNull();
   expect(screen.getByText("old.ts", { selector: "code *" })).toBeTruthy();
+});
+
+test("a bounded patch shows omitted paths and qualifies its line counts", async () => {
+  const patch = {
+    kind: "edit" as const,
+    target: "src/a.ts",
+    targets: [{ text: "src/a.ts" }],
+    output: "Applied the patch.",
+    omitted_files: { count: 2 },
+    added_lines: 4,
+    removed_lines: 1,
+  };
+  const items = steps(patch, {
+    kind: "create",
+    target: "src/exact.ts",
+    targets: [{ text: "src/exact.ts" }],
+    added_lines: 3,
+    removed_lines: 0,
+  }).map((item) => transcriptItemSchema.parse(item));
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items,
+    },
+  ]);
+  const row = button(
+    "Edited 3 files (2 paths omitted), at least 4 lines added and 1 line removed",
+  );
+  expect(row.textContent).toContain("At least +4 −1");
+  fireEvent.click(row);
+  expect(button("Open src/a.ts")).toBeTruthy();
+  expect(
+    screen.getByText("Applied the patch.", { selector: "pre" }),
+  ).toBeTruthy();
+  expect(screen.getByText("+3 −0")).toBeTruthy();
+});
+
+test("an opened bounded patch shows its full failure output with the named paths", async () => {
+  const retained = "Patch failed.";
+  const full = `No matching context in src/b.ts.\n${retained}`;
+  await show(
+    [
+      {
+        chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+        items: steps({
+          kind: "edit",
+          target: "src/a.ts",
+          targets: [{ text: "src/a.ts" }, { text: "src/b.ts" }],
+          omitted_files: { count: 1 },
+          state: "failed",
+          output: retained,
+          full_output: { tool_id: "patch", bytes: full.length },
+        }),
+      },
+    ],
+    { outputs: { patch: full } },
+  );
+  fireEvent.click(button("Edit 3 files (1 path omitted), Failed"));
+  expect(screen.getByText(retained, { selector: "pre" })).toBeTruthy();
+  expect(
+    await screen.findByText(full, {
+      selector: "pre",
+      normalizer: (text) => text,
+    }),
+  ).toBeTruthy();
+  expect(button("Open src/a.ts")).toBeTruthy();
+  expect(button("Open src/b.ts")).toBeTruthy();
 });
 
 test("a command's detail strips terminal colour and says its exit and folder", async () => {

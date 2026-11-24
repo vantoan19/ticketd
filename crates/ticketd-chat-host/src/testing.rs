@@ -61,6 +61,7 @@ struct State {
     submit_replies: VecDeque<ScriptedReply>,
     interrupt_outcomes: VecDeque<InterruptOutcome>,
     close_outcome: CloseOutcome,
+    close_holds: VecDeque<oneshot::Receiver<()>>,
     opens: Vec<OpenRequest>,
     written: Vec<Written>,
     respond_calls: usize,
@@ -124,6 +125,7 @@ impl FakeAdapter {
                 submit_replies: VecDeque::new(),
                 interrupt_outcomes: VecDeque::new(),
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
+                close_holds: VecDeque::new(),
                 opens: Vec::new(),
                 written: Vec::new(),
                 respond_calls: 0,
@@ -139,7 +141,7 @@ impl FakeAdapter {
     /// Steering supported without interrupting tools; native resume supported.
     pub fn codex() -> Self {
         Self::new(
-            Harness::Codex,
+            &ticketd_core::harnesses::CODEX,
             Capabilities {
                 steering: Capability::Supported {
                     behavior: SteeringBehavior {
@@ -147,7 +149,6 @@ impl FakeAdapter {
                     },
                     evidence: "fake".to_owned(),
                 },
-                native_resume: supported_resume(),
             },
         )
     }
@@ -157,12 +158,11 @@ impl FakeAdapter {
     /// [`crate::DeliveryEvidence::Processing`] that shows the input arrived.
     pub fn claude() -> Self {
         let fake = Self::new(
-            Harness::ClaudeCode,
+            &ticketd_core::harnesses::CLAUDE_CODE,
             Capabilities {
                 steering: Capability::Unknown {
                     reason: "fake harness that cannot steer".to_owned(),
                 },
-                native_resume: supported_resume(),
             },
         );
         fake.state().acknowledges_new_turn = false;
@@ -171,12 +171,11 @@ impl FakeAdapter {
 
     pub fn without_steering() -> Self {
         Self::new(
-            Harness::Codex,
+            &ticketd_core::harnesses::CODEX,
             Capabilities {
                 steering: Capability::Unsupported {
                     reason: "fake harness without steering".to_owned(),
                 },
-                native_resume: supported_resume(),
             },
         )
     }
@@ -239,6 +238,13 @@ impl FakeAdapter {
 
     pub fn set_close_outcome(&self, outcome: CloseOutcome) {
         self.state().close_outcome = outcome;
+    }
+
+    /// The next close is written, then waits for the returned sender before reporting its outcome.
+    pub fn hold_next_close(&self) -> oneshot::Sender<()> {
+        let (sender, receiver) = oneshot::channel();
+        self.state().close_holds.push_back(receiver);
+        sender
     }
 
     /// What `options` reports; without it the fake cannot tell.
@@ -313,13 +319,6 @@ impl FakeAdapter {
 
     fn state(&self) -> MutexGuard<'_, State> {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
-    }
-}
-
-fn supported_resume() -> Capability<()> {
-    Capability::Supported {
-        behavior: (),
-        evidence: "fake".to_owned(),
     }
 }
 
@@ -537,7 +536,7 @@ impl HarnessRuntime for FakeRuntime {
 
     /// Closing a runtime that is no longer live reports the scripted outcome too.
     async fn close(&self) -> CloseOutcome {
-        let outcome = {
+        let (outcome, hold) = {
             let mut state = self.fake.state();
             if state
                 .live
@@ -545,12 +544,15 @@ impl HarnessRuntime for FakeRuntime {
                 .is_some_and(|live| live.generation == self.generation)
             {
                 state.live = None;
-                state.written.push(Written::Close(self.generation));
             }
-            state.close_outcome.clone()
+            state.written.push(Written::Close(self.generation));
+            (state.close_outcome.clone(), state.close_holds.pop_front())
         };
         // As with a real process: its event stream has ended before `close` returns.
         tokio::task::yield_now().await;
+        if let Some(hold) = hold {
+            let _ = hold.await;
+        }
         outcome
     }
 }

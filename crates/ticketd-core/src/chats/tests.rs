@@ -1,0 +1,124 @@
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
+use super::*;
+
+#[test]
+fn capturing_a_short_turn_skips_unrelated_tickets_and_feed_rows() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "claude-code".into(),
+                execution_folder: "/work/app".into(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    // Seed unrelated status moves and Activities on both sides of the short Turn.
+    // Pin timestamps so a time-only query would visit all those rows.
+    let populate = |workspace: &Workspace, first: i64, last: i64| {
+        workspace
+            .connection
+            .execute(
+                "WITH RECURSIVE ticket_numbers(n) AS (
+                 VALUES (?1) UNION ALL SELECT n + 1 FROM ticket_numbers WHERE n < ?2
+             )
+             INSERT INTO tickets (id, reference, title, status)
+             SELECT 'ticket-' || n, 'T-KQ' || n, 'Outcome', 'Todo' FROM ticket_numbers",
+                params![first, last],
+            )
+            .unwrap();
+        workspace.connection.execute_batch(
+            "INSERT INTO ticket_history (ticket_id, kind, from_value, to_value, editing_agent, timestamp)
+             SELECT id, 'status', 'Todo', 'In progress', 'claude-code', '2026-01-01T00:00:00.000Z'
+             FROM tickets WHERE id NOT IN (SELECT ticket_id FROM ticket_history WHERE kind = 'status');
+             INSERT INTO activities (id, ticket_id, brief, editing_agent, reported_at)
+             SELECT 'activity-' || ticket_id, ticket_id, 'Drafted the copy', editing_agent, timestamp
+             FROM ticket_history WHERE kind = 'status' AND ticket_id NOT IN (SELECT ticket_id FROM activities);",
+        ).unwrap();
+    };
+    populate(&workspace, 1, 1_000);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnStarted {
+                turn_id: "turn".into(),
+                native_turn_id: None,
+            }],
+        )
+        .unwrap();
+    populate(&workspace, 2_001, 2_001);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnEnded {
+                turn_id: "turn".into(),
+                state: ChatTurnState::Completed,
+                detail: None,
+                problem: None,
+                problem_resets_at: None,
+                ending: None,
+            }],
+        )
+        .unwrap();
+    populate(&workspace, 1_001, 2_000);
+    workspace
+        .connection
+        .execute_batch(
+            "UPDATE chat_turns SET started_at = '2026-01-01T00:00:00.000Z',
+                               ended_at = '2026-01-01T00:00:00.000Z';",
+        )
+        .unwrap();
+
+    // Count SQLite work on the actual capture path without a wall-clock assertion.
+    let ticks = Arc::new(AtomicUsize::new(0));
+    let progress = Arc::clone(&ticks);
+    workspace.connection.progress_handler(
+        100,
+        Some(move || {
+            progress.fetch_add(1, Ordering::Relaxed);
+            false
+        }),
+    );
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::CaptureAgentChanges {
+                turn_id: "turn".into(),
+            }],
+        )
+        .unwrap();
+    workspace
+        .connection
+        .progress_handler(0, None::<fn() -> bool>);
+
+    let snapshot = workspace.chat_snapshot(&chat.id, 20).unwrap();
+    let receipt = snapshot.items.iter().find_map(|item| match item {
+        ChatItem::Tool(tool) if tool.name == AGENT_CHANGES_RECORD_NAME => Some(&tool.input),
+        _ => None,
+    });
+    assert_eq!(
+        serde_json::from_str::<Vec<ChatAgentChange>>(receipt.unwrap()).unwrap(),
+        [
+            ChatAgentChange::Status {
+                reference: "T-KQ2001".into(),
+                title: "Outcome".into(),
+                from: "Todo".into(),
+                to: "In progress".into(),
+            },
+            ChatAgentChange::Update {
+                reference: "T-KQ2001".into(),
+                excerpt: "Drafted the copy".into(),
+            },
+        ]
+    );
+    let steps = ticks.load(Ordering::Relaxed) * 100;
+    assert!(steps < 2_000, "used at least {steps} SQLite instructions");
+}

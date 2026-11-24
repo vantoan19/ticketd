@@ -2219,6 +2219,12 @@ pub fn run() -> Result<(), tauri::Error> {
             started,
         })
         .setup(move |app| {
+            #[cfg(all(debug_assertions, unix))]
+            ticketd_chat_host::prepare_harness_recording(|| {
+                open_workspace()?
+                    .workspace_info()
+                    .map(|info| info.path.into())
+            })?;
             // The boot module shows the window first (revealed), then loads the
             // application modules (booted). A broken module or stalled painting
             // IPC must never leave the process invisible or blank.
@@ -2528,6 +2534,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_set_muted,
             chat_commands::chat_list,
             chat_commands::chat_harnesses,
+            chat_commands::chat_harness_catalog,
             chat_commands::chat_harness_options,
             chat_commands::chat_folder_use,
             chat_commands::chat_create,

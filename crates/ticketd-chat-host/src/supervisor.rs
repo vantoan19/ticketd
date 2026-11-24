@@ -13,7 +13,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use ticketd_core::{
     Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
-    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, Workspace,
+    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnReceipt, ChatTurnState, Error,
+    Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
@@ -21,8 +22,8 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::host::{
-    AGENT_CHANGES_RECORD_NAME, Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive,
-    ChatProblem, ChatView, ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError,
+    Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, ChatView,
+    ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError, HostLifecycle,
     INTERRUPT_TIMEOUT, LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode,
     SNAPSHOT_ITEMS, SendMode, SettingChangeState, StopState, TEXT_CHECKPOINT_INTERVAL,
     TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal,
@@ -46,13 +47,14 @@ fn now_millis() -> i64 {
 }
 use crate::outcome::{settle, tool_state};
 use crate::subscription::{self, ChatUpdate, Publisher};
+use crate::unattended::{UnattendedChat, set_aside_first_message};
 use crate::{
     ApprovalDecision, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
     HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind, InteractionRequest,
     InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
     NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
     Problem, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
-    SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome, Unattended,
+    SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
 };
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
@@ -63,6 +65,10 @@ pub(crate) enum Command {
         command_id: Option<String>,
         text: String,
         mode: SendMode,
+        reply: Reply<ChatMessage>,
+    },
+    SendUnattended {
+        text: String,
         reply: Reply<ChatMessage>,
     },
     Stop(Reply<()>),
@@ -97,7 +103,8 @@ pub(crate) enum Command {
     Changed,
     /// The Chat's links were changed; the session is given the new context.
     LinksChanged,
-    /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
+    /// Stop the runtime and report unconfirmed cleanup. An unresolved permission
+    /// restart keeps its supervisor when Chat is switched off.
     Shutdown(StopReason, oneshot::Sender<Option<String>>),
 }
 
@@ -174,12 +181,26 @@ struct Dispatch {
 struct ActiveTurn {
     turn_id: String,
     native: NativeTurnId,
-    /// The workspace change token when the turn started; unchanged means nothing in
-    /// the workspace changed, so the agent changed no record.
-    token: Option<i64>,
     /// Open for as long as the Turn is, so every line about it is correlated and its close
     /// records how long it took.
     span: tracing::Span,
+}
+
+struct PendingRuntimeLoss {
+    ending: TurnEnding,
+    turn: Option<PendingTurn>,
+    pause_queue: bool,
+}
+
+enum PendingTurn {
+    Lost(ChatTurnReceipt),
+    Observed(ObservedTurnEnd),
+}
+
+struct ObservedTurnEnd {
+    receipt: ChatTurnReceipt,
+    preceding: Vec<ChatObservation>,
+    ending: TurnEnding,
 }
 
 struct LiveRequest {
@@ -216,7 +237,7 @@ pub(crate) struct Supervisor {
     adapter: Option<Arc<dyn HarnessAdapter>>,
     context: Option<ContextSource>,
     /// Set for the Chat of an Automation run: every session opens with these settings.
-    unattended: Option<Unattended>,
+    unattended: Option<Arc<UnattendedChat>>,
     board: Arc<Board>,
     commands: mpsc::Receiver<Command>,
     done: mpsc::UnboundedSender<Done>,
@@ -253,6 +274,7 @@ pub(crate) struct Supervisor {
     stop_when_turn_known: bool,
     problem: Option<ChatProblem>,
     storage_failed: Option<String>,
+    pending_runtime_loss: Option<PendingRuntimeLoss>,
     subscribers: Vec<Publisher>,
     cursor: i64,
     last_live: Option<ChatLive>,
@@ -276,6 +298,11 @@ pub(crate) struct Supervisor {
     /// The person's picks for the next session, new or resumed: New Chat's, or a change
     /// made while no session ran. Kept until one opens.
     start_settings: StartSettings,
+    reopen_for_permission: Option<String>,
+    /// A permission restart may only resume native history, unless the person
+    /// explicitly chooses a fresh session. The restriction survives failed opens.
+    permission_restart_pending: bool,
+    lifecycle: Arc<HostLifecycle>,
     /// What the Chat's sessions last reported in effect, as recorded with the Chat
     /// (`Chat::effective_settings`): what a session opened for it again starts with.
     recorded_settings: Option<String>,
@@ -295,6 +322,14 @@ async fn sleep_until_some(deadline: Option<Instant>) {
     }
 }
 
+pub(crate) async fn bounded_close(handle: &dyn HarnessRuntime) -> Option<String> {
+    match timeout(CLOSE_TIMEOUT, handle.close()).await {
+        Ok(CloseOutcome::Confirmed { .. }) => None,
+        Ok(CloseOutcome::Unconfirmed { reason }) => Some(reason),
+        Err(_) => Some("the harness did not confirm that it exited in time".to_owned()),
+    }
+}
+
 impl Supervisor {
     pub(crate) fn spawn(
         chat: &Chat,
@@ -302,7 +337,8 @@ impl Supervisor {
         adapter: Option<Arc<dyn HarnessAdapter>>,
         context: Option<ContextSource>,
         board: Arc<Board>,
-        unattended: Option<Unattended>,
+        unattended: Option<Arc<UnattendedChat>>,
+        lifecycle: Arc<HostLifecycle>,
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
@@ -313,7 +349,7 @@ impl Supervisor {
             chat_id = chat.id.as_str(),
             automation_run_id = unattended
                 .as_ref()
-                .map(|unattended| unattended.run_id.as_str()),
+                .map(|unattended| unattended.settings.run_id.as_str()),
         );
         let supervisor = Self {
             span: span.clone(),
@@ -348,6 +384,7 @@ impl Supervisor {
             stop_when_turn_known: false,
             problem: None,
             storage_failed: None,
+            pending_runtime_loss: None,
             subscribers: Vec::new(),
             cursor: 0,
             last_live: None,
@@ -361,6 +398,9 @@ impl Supervisor {
             unpublished: true,
             refreshing: None,
             start_settings: StartSettings::default(),
+            reopen_for_permission: None,
+            permission_restart_pending: false,
+            lifecycle,
             recorded_settings: chat.effective_settings.clone(),
         };
         tokio::spawn(supervisor.run().instrument(span));
@@ -382,13 +422,37 @@ impl Supervisor {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(why, reply)) => {
                         self.shutting_down = true;
+                        let keep_permission_recovery = self.permission_restart_pending
+                            && self.runtime.is_none()
+                            && self.opening.is_none();
                         let unconfirmed = self.stop_runtime(why).await;
+                        if why == StopReason::TurnedOff && self.unattended.is_some() {
+                            self.finish_unattended_shutdown(why);
+                        }
                         self.publish();
+                        if why == StopReason::TurnedOff
+                            && (keep_permission_recovery || self.pending_runtime_loss.is_some())
+                        {
+                            // Keep recovery state for when Chat is enabled again.
+                            self.subscribers.clear();
+                            self.queue_started = false;
+                            let _ = reply.send(unconfirmed);
+                            continue;
+                        }
                         self.board.report(&self.chat_id, self.number, None);
+                        self.commands.close();
                         let _ = reply.send(unconfirmed);
                         return;
                     }
                     Some(command) => {
+                        if self.shutting_down {
+                            if self.lifecycle.is_off() {
+                                // A command may have taken a sender before Chat was switched off.
+                                continue;
+                            }
+                            self.shutting_down = false;
+                            self.shut_down_for = None;
+                        }
                         let turn = self.turn_span();
                         self.on_command(command).instrument(turn).await;
                     }
@@ -399,19 +463,24 @@ impl Supervisor {
                         return;
                     }
                 },
-                Some(done) = self.finished.recv() => {
+                Some(done) = self.finished.recv(), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_done(done));
                 }
-                event = next_event(&mut self.runtime) => {
+                event = next_event(&mut self.runtime), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_event(event));
                 }
-                () = sleep_until_some(timer) => self.turn_span().in_scope(|| self.on_timer()),
+                () = sleep_until_some(timer), if !self.shutting_down => {
+                    self.turn_span().in_scope(|| self.on_timer());
+                }
             }
             if self.storage_failed.is_some() && (self.runtime.is_some() || self.opening.is_some()) {
                 // Controlled shutdown: nothing more can be recorded, so nothing more runs.
                 if let Some(reason) = self.stop_runtime(StopReason::StorageFailed).await {
                     self.notice(format!("Stopping the harness was not confirmed: {reason}"));
                 }
+            }
+            if let Some(value) = self.reopen_for_permission.take() {
+                self.reopen_for_permission(value).await;
             }
             // Before the queue can start another turn, so held changes apply to it.
             self.send_held_settings();
@@ -448,7 +517,15 @@ impl Supervisor {
     }
 
     /// Records observations after any streamed text that precedes them.
-    fn record(&mut self, mut observations: Vec<ChatObservation>) {
+    fn record(&mut self, observations: Vec<ChatObservation>) {
+        let batch = self.observation_batch(observations);
+        self.record_batch(batch, None);
+    }
+
+    fn observation_batch(
+        &mut self,
+        mut observations: Vec<ChatObservation>,
+    ) -> Vec<ChatObservation> {
         self.show_text();
         let mut batch = Vec::new();
         for buffer in &mut self.text {
@@ -465,23 +542,64 @@ impl Supervisor {
         batch.extend(self.pending_tools.drain(..).map(|(_, tool)| tool));
         batch.append(&mut observations);
         self.checkpoint_at = None;
+        batch
+    }
+
+    fn write_observations(
+        &mut self,
+        batch: Vec<ChatObservation>,
+        receipt: Option<&mut ChatTurnReceipt>,
+    ) -> Result<(), Error> {
+        let chat = self.chat_id.clone();
+        self.write(|core| match receipt {
+            Some(receipt) => core.record_chat_turn_observations(&chat, batch, receipt),
+            None => core.record_chat_observations(&chat, batch),
+        })
+        .map(|_| ())
+    }
+
+    fn record_batch(
+        &mut self,
+        batch: Vec<ChatObservation>,
+        mut receipt: Option<&mut ChatTurnReceipt>,
+    ) {
         if batch.is_empty() {
             return;
         }
-        let chat = self.chat_id.clone();
-        let together = batch.clone();
-        if let Err(Error::Chat(_)) =
-            self.write(|core| core.record_chat_observations(&chat, together))
+        if let Err(Error::Chat(_)) = self.write_observations(batch.clone(), receipt.as_deref_mut())
         {
             // One observation was refused; keep the others.
             for observation in batch {
                 if let Err(Error::Chat(reason)) =
-                    self.write(|core| core.record_chat_observations(&chat, vec![observation]))
+                    self.write_observations(vec![observation], receipt.as_deref_mut())
                 {
                     self.notice(format!("An observation was not recorded: {reason}"));
                 }
             }
         }
+    }
+
+    fn record_turn_end(&mut self, end: &mut ObservedTurnEnd) -> Result<(), Error> {
+        let record = |host: &mut Self, end: &mut ObservedTurnEnd| {
+            let mut batch = end.preceding.clone();
+            let turn_id = end.receipt.turn_id();
+            batch.push(end.ending.observation(turn_id.to_owned()));
+            batch.push(ChatObservation::CaptureAgentChanges {
+                turn_id: turn_id.to_owned(),
+            });
+            host.write_observations(batch, Some(&mut end.receipt))
+        };
+        let mut result = record(self, end);
+        if matches!(result, Err(Error::Chat(_))) && !end.preceding.is_empty() {
+            // Keep the valid observations when one was refused. The end and
+            // receipt are still written together, at the boundary already read.
+            self.record_batch(std::mem::take(&mut end.preceding), Some(&mut end.receipt));
+            result = record(self, end);
+        }
+        if let Err(Error::Chat(reason)) = &result {
+            self.notice(format!("An observation was not recorded: {reason}"));
+        }
+        result
     }
 
     fn pause(&mut self, problem: ChatProblem) {
@@ -519,7 +637,7 @@ impl Supervisor {
         });
         if let Some(value) = unanswered {
             // Kept for the next session whether or not it could be saved.
-            let _saved = self.record_permission(&value);
+            let _ = self.record_permission(&value);
             self.start_settings.permission = Some(value);
         }
     }
@@ -546,6 +664,18 @@ impl Supervisor {
             Command::Attach(reply) => {
                 let _ = reply.send(self.attach());
             }
+            Command::SendUnattended { text, reply } => {
+                let Some(unattended) = self.unattended.clone() else {
+                    let _ = reply.send(Err(HostError::Quitting));
+                    return;
+                };
+                let command_id = format!("{}:first", self.chat_id);
+                let result = self.send(Some(&command_id), &text, SendMode::Auto);
+                if let Ok(message) = &result {
+                    let _ = unattended.first_message.set(message.id.clone());
+                }
+                let _ = reply.send(result);
+            }
             Command::Send {
                 command_id,
                 text,
@@ -558,20 +688,10 @@ impl Supervisor {
                 let _ = reply.send(self.request_stop());
             }
             Command::ResumeQueue(reply) => {
-                let chat = self.chat_id.clone();
-                let result = self.write(|core| core.set_chat_queue_paused(&chat, false));
-                if result.is_ok() {
-                    // The person asked for the queue to run: it opens a session when
-                    // none is live.
-                    self.queue_started = true;
-                    if matches!(self.problem, Some(ChatProblem::DispatchRefused { .. })) {
-                        self.problem = None;
-                    }
-                }
-                let _ = reply.send(result.map(|_| ()).map_err(HostError::from));
+                let _ = reply.send(self.resume_queue().await);
             }
             Command::SendQueuedNow { message_id, reply } => {
-                let _ = reply.send(self.send_queued_now(message_id));
+                let _ = reply.send(self.send_queued_now(message_id).await);
             }
             Command::Respond {
                 interaction_id,
@@ -580,7 +700,7 @@ impl Supervisor {
             } => self.respond(interaction_id, answer, reply),
             Command::Resume { mode, reply } => self.resume(mode, reply).await,
             Command::Resend { message_id, reply } => {
-                let _ = reply.send(self.request_resend(message_id));
+                let _ = reply.send(self.request_resend(message_id).await);
             }
             Command::Trash(reply) => {
                 let chat = self.chat_id.clone();
@@ -609,7 +729,10 @@ impl Supervisor {
     /// Refuses a value the harness did not offer, holds a change while a turn runs and
     /// otherwise sends it now.
     fn change_setting(&mut self, setting: SettingKey, value: String) -> SettingChangeState {
-        let busy = self.active.is_some() || self.dispatching.is_some();
+        let busy = self.active.is_some()
+            || self.dispatching.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.setting_on_its_way();
         let Some(runtime) = &mut self.runtime else {
             return self.pick_for_next_session(setting, value);
         };
@@ -659,7 +782,7 @@ impl Supervisor {
         }
         match setting {
             // Taken only once saved: the shown mode must be the one the Chat reopens in.
-            SettingKey::Permission if !self.record_permission(&value) => {
+            SettingKey::Permission if self.record_permission(&value).is_err() => {
                 return refused("the change could not be saved");
             }
             SettingKey::Permission => self.start_settings.permission = Some(value),
@@ -672,21 +795,16 @@ impl Supervisor {
     /// Saves `value` with the Chat as the permission its next session opens with, as
     /// soon as the change is accepted, so a restart before the next message cannot bring
     /// back a mode the person left. The record views read changes only once it is saved.
-    /// `false` when saving failed; a Chat with no record yet has nothing to save.
-    fn record_permission(&mut self, value: &str) -> bool {
+    fn record_permission(&mut self, value: &str) -> Result<(), Error> {
         let Some(updated) = self.adapter.as_ref().and_then(|adapter| {
             adapter.record_permission(self.recorded_settings.as_deref(), value)
         }) else {
-            return true;
+            return Ok(());
         };
         let chat = self.chat_id.clone();
-        let saved = self
-            .write(|core| core.set_chat_effective_settings(&chat, &updated))
-            .is_ok();
-        if saved {
-            self.recorded_settings = Some(updated);
-        }
-        saved
+        self.write(|core| core.set_chat_effective_settings(&chat, &updated))?;
+        self.recorded_settings = Some(updated);
+        Ok(())
     }
 
     /// The settings shown while no session runs or opens: the permission its next
@@ -734,20 +852,22 @@ impl Supervisor {
 
     /// Sends the changes held during a turn once no turn runs or is starting.
     fn send_held_settings(&mut self) {
-        if self.active.is_some() || self.dispatching.is_some() {
+        if self.active.is_some()
+            || self.dispatching.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.setting_on_its_way()
+        {
             return;
         }
-        let Some(runtime) = &mut self.runtime else {
-            return;
-        };
-        let mut held = Vec::new();
-        for change in &mut runtime.setting_changes {
-            if change.state == SettingChangeState::Held {
-                change.state = SettingChangeState::Sent;
-                held.push((change.setting, change.value.clone()));
-            }
-        }
-        for (setting, value) in held {
+        let change = self.runtime.as_mut().and_then(|runtime| {
+            runtime
+                .setting_changes
+                .iter_mut()
+                .find(|change| change.state == SettingChangeState::Held)
+        });
+        if let Some(change) = change {
+            change.state = SettingChangeState::Sent;
+            let (setting, value) = (change.setting, change.value.clone());
             self.send_setting(setting, value);
         }
     }
@@ -806,24 +926,12 @@ impl Supervisor {
         text: &str,
         mode: SendMode,
     ) -> Result<ChatMessage, HostError> {
+        self.recover_storage()?;
         let chat = self.chat_id.clone();
-        if self.storage_failed.is_some() {
-            // Accept work again only once storage can record what was lost meanwhile.
-            let ending = TurnEnding::StoppedByTicketd(StopReason::StorageFailed);
-            self.core(|core| {
-                core.mark_chat_contact_lost(
-                    Some(&chat),
-                    &ending.detail().unwrap_or_default(),
-                    &ending.key(),
-                )
-            })
-            .map_err(|error| HostError::StorageFailed(error.to_string()))?;
-            self.storage_failed = None;
-            self.problem = None;
-        }
         let message = self.write(|core| core.save_chat_input(command_id, &chat, text))?;
         let immediate = self.active.is_none() || self.steering().is_some();
         if mode == SendMode::Auto
+            && !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
             && immediate
             && message.queued
             && !self.direct.contains(&message.id)
@@ -839,10 +947,47 @@ impl Supervisor {
         Ok(message)
     }
 
+    /// Accept work again only once storage can record what was lost meanwhile.
+    fn recover_storage(&mut self) -> Result<(), HostError> {
+        if self.storage_failed.is_none() {
+            return Ok(());
+        }
+        let settled = if self.pending_runtime_loss.is_some() {
+            self.settle_runtime_loss()
+        } else {
+            let ending = TurnEnding::StoppedByTicketd(StopReason::StorageFailed);
+            self.core(|core| {
+                core.mark_chat_contact_lost(
+                    Some(&self.chat_id),
+                    &ending.detail().unwrap_or_default(),
+                    &ending.key(),
+                )?;
+                Ok(())
+            })
+        };
+        settled.map_err(|error| HostError::StorageFailed(error.to_string()))?;
+        self.storage_failed = None;
+        self.problem = None;
+        Ok(())
+    }
+
+    async fn resume_queue(&mut self) -> Result<(), HostError> {
+        self.recover_storage()?;
+        self.confirm_permission_restart_cleanup().await?;
+        let chat = self.chat_id.clone();
+        self.write(|core| core.set_chat_queue_paused(&chat, false))?;
+        // The person asked for the queue to run: it opens a session when none is live.
+        self.queue_started = true;
+        if matches!(self.problem, Some(ChatProblem::DispatchRefused { .. })) {
+            self.problem = None;
+        }
+        Ok(())
+    }
+
     /// Sends one queued input now: it steers the turn in progress or starts one. Only
     /// that input goes; a paused queue stays paused. Refused while a turn runs that
     /// cannot be steered, since the input could only wait in the queue where it is.
-    fn send_queued_now(&mut self, message_id: String) -> Result<(), HostError> {
+    async fn send_queued_now(&mut self, message_id: String) -> Result<(), HostError> {
         if let Some(detail) = &self.storage_failed {
             return Err(HostError::StorageFailed(detail.clone()));
         }
@@ -854,6 +999,7 @@ impl Supervisor {
         if !queued.iter().any(|message| message.id == message_id) {
             return Err(Error::Chat("this input is not in the queue".to_owned()).into());
         }
+        self.confirm_permission_restart_cleanup().await?;
         if !self.direct.contains(&message_id) {
             self.direct_from_queue.insert(message_id.clone());
             self.direct.push_back(message_id);
@@ -898,7 +1044,7 @@ impl Supervisor {
     /// The person decided to send input again although its first delivery is uncertain.
     /// Only that input is dispatched, as a new submission: the queue is paused first, so
     /// nothing else follows it until the person resumes the queue.
-    fn request_resend(&mut self, message_id: String) -> Result<(), HostError> {
+    async fn request_resend(&mut self, message_id: String) -> Result<(), HostError> {
         if let Some(detail) = &self.storage_failed {
             return Err(HostError::StorageFailed(detail.clone()));
         }
@@ -914,6 +1060,7 @@ impl Supervisor {
         if self.core(|core| core.chat(&chat))?.trashed {
             return Err(Error::ChatTrashed(chat).into());
         }
+        self.confirm_permission_restart_cleanup().await?;
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.direct.clear();
         self.direct_from_queue.clear();
@@ -974,12 +1121,30 @@ impl Supervisor {
             let _ = reply.send(Err(HostError::InteractionExpired));
             return;
         };
+        // The harness still holds the native request if it refuses a mismatched answer.
+        if matches!(live.kind, InteractionKind::NativeApproval { .. })
+            && !matches!(answer, InteractionAnswer::NativeApproval(_))
+        {
+            let _ = reply.send(Err(HostError::InteractionExpired));
+            return;
+        }
         let response = match &answer {
             InteractionAnswer::Approval(ApprovalDecision::Allow) => "allow".to_owned(),
             InteractionAnswer::Approval(ApprovalDecision::AllowForSession) => {
                 "allow for session".to_owned()
             }
             InteractionAnswer::Approval(ApprovalDecision::Deny) => "deny".to_owned(),
+            InteractionAnswer::NativeApproval(id) => {
+                let InteractionKind::NativeApproval { options, .. } = &live.kind else {
+                    let _ = reply.send(Err(HostError::InteractionExpired));
+                    return;
+                };
+                let Some(option) = options.iter().find(|option| option.id == *id) else {
+                    let _ = reply.send(Err(HostError::InteractionExpired));
+                    return;
+                };
+                format!("choice:{}", option.label)
+            }
             InteractionAnswer::Answers(answers) => answers
                 .iter()
                 .map(|answer| answer.values.join(", "))
@@ -1009,22 +1174,37 @@ impl Supervisor {
             let _ = reply.send(Err(HostError::Busy));
             return;
         }
-        let chat_id = self.chat_id.clone();
-        let chat = match self.core(|core| core.chat(&chat_id)) {
-            // A trashed Chat runs nothing until it is restored.
-            Ok(chat) if chat.trashed => {
-                let _ = reply.send(Err(Error::ChatTrashed(chat_id).into()));
-                return;
-            }
+        if let Err(error) = self.chat_for_resume() {
+            let _ = reply.send(Err(error.into()));
+            return;
+        }
+        if self.native_history_only()
+            && matches!(&mode, ResumeMode::FreshSession { history } if !history.trim().is_empty())
+        {
+            let _ = reply.send(Err(HostError::Core(Error::Chat(
+                "This harness can only resume its own history".to_owned(),
+            ))));
+            return;
+        }
+        if let Err(error) = self.recover_storage() {
+            let _ = reply.send(Err(error));
+            return;
+        }
+        if let Err(error) = self.confirm_permission_restart_cleanup().await {
+            let _ = reply.send(Err(error));
+            return;
+        }
+        if self.runtime.is_some() {
+            self.stop_runtime(StopReason::ExplicitResume).await;
+        }
+        // Another Workspace connection can change or trash the Chat during cleanup.
+        let chat = match self.chat_for_resume() {
             Ok(chat) => chat,
             Err(error) => {
                 let _ = reply.send(Err(error.into()));
                 return;
             }
         };
-        if self.runtime.is_some() {
-            self.stop_runtime(StopReason::ExplicitResume).await;
-        }
         let (session, origin, preamble) = match mode {
             ResumeMode::FreshSession { history } => (
                 SessionStart::New,
@@ -1034,6 +1214,118 @@ impl Supervisor {
             ResumeMode::Native => native_session(&chat),
         };
         self.open(&chat, session, origin, preamble, Some(reply));
+    }
+
+    fn chat_for_resume(&self) -> Result<Chat, Error> {
+        let chat = self.core(|core| core.chat(&self.chat_id))?;
+        if chat.trashed {
+            return Err(Error::ChatTrashed(chat.id));
+        }
+        Ok(chat)
+    }
+
+    fn native_history_only(&self) -> bool {
+        self.adapter.as_ref().is_some_and(|adapter| {
+            adapter.harness().resume == ticketd_core::harnesses::ResumePolicy::NativeOnly
+        })
+    }
+
+    async fn reopen_for_permission(&mut self, value: String) {
+        if let Some(runtime) = &self.runtime {
+            // Resuming restores native history. The replacement must open with the
+            // settings the harness last confirmed, overlaid with any later picks.
+            if let Some(settings) = &runtime.settings {
+                self.start_settings.model = settings
+                    .model
+                    .as_ref()
+                    .and_then(|model| model.current.clone());
+                self.start_settings.effort = settings
+                    .effort
+                    .as_ref()
+                    .and_then(|effort| effort.current.clone());
+            }
+            let mut model_changed = false;
+            let mut effort_picked = false;
+            for change in &runtime.setting_changes {
+                if change.state == SettingChangeState::Held {
+                    let target = match change.setting {
+                        SettingKey::Model => {
+                            model_changed =
+                                self.start_settings.model.as_ref() != Some(&change.value);
+                            &mut self.start_settings.model
+                        }
+                        SettingKey::Effort => {
+                            effort_picked = true;
+                            &mut self.start_settings.effort
+                        }
+                        SettingKey::Permission => &mut self.start_settings.permission,
+                    };
+                    *target = Some(change.value.clone());
+                }
+            }
+            self.start_settings.retain_effort_if_supported = model_changed && !effort_picked;
+        }
+        self.start_settings.permission.get_or_insert(value);
+        self.permission_restart_pending = true;
+        let direct = std::mem::take(&mut self.direct);
+        let from_queue = std::mem::take(&mut self.direct_from_queue);
+        let resend = self.resend.take();
+        // End ownership before checking storage. A paused queue can still be
+        // sent to directly.
+        let unconfirmed = self.stop_runtime(StopReason::ExplicitResume).await;
+        // Chat Off or Restore may be waiting on the old process too.
+        if unconfirmed.is_some() || self.lifecycle.serving().is_err() {
+            self.hold_queue();
+            if let Some(value) = self.start_settings.permission.clone() {
+                let _ = self.record_permission(&value);
+            }
+            if unconfirmed.is_none() {
+                self.direct = direct;
+                self.direct_from_queue = from_queue;
+                self.resend = resend;
+            }
+            return;
+        }
+        let chat = match self.core(|core| core.chat(&self.chat_id)) {
+            Ok(chat) if !chat.trashed => chat,
+            result => {
+                self.hold_queue();
+                if let Err(error) = result
+                    && !is_refusal(&error)
+                {
+                    self.storage_failed = Some(error.to_string());
+                }
+                return;
+            }
+        };
+        self.direct = direct;
+        self.direct_from_queue = from_queue;
+        self.resend = resend;
+        let (session, origin, preamble) = native_session(&chat);
+        self.open(&chat, session, origin, preamble, None);
+    }
+
+    fn prepare_permission_restart(&mut self, origin: ChatSessionOrigin) -> Result<(), HostError> {
+        if self.lifecycle.has_retired_permission_runtime(&self.chat_id) {
+            return Err(HostError::PermissionRestartCleanupUnconfirmed);
+        }
+        if let Some(detail) = &self.storage_failed {
+            return Err(HostError::StorageFailed(detail.clone()));
+        }
+        // Save the requested mode before the open, including when only a later
+        // recovery can open the session.
+        if let Some(value) = self.start_settings.permission.clone() {
+            self.record_permission(&value)?;
+        }
+        if origin == ChatSessionOrigin::New {
+            return Err(HostError::Harness(Problem {
+                kind: crate::ProblemKind::NativeHistoryUnavailable,
+                message: "The native session is unavailable for the permission restart".to_owned(),
+                detail: None,
+                resets_at: None,
+            }));
+        }
+        Ok(())
     }
 
     // ------------------------------------------------------------------
@@ -1048,6 +1340,28 @@ impl Supervisor {
         preamble: Option<String>,
         reply: Option<Reply<()>>,
     ) {
+        if let Err(error) = self.lifecycle.serving() {
+            if let Some(reply) = reply {
+                let _ = reply.send(Err(error));
+            }
+            return;
+        }
+        if self.permission_restart_pending
+            && let Err(error) = self.prepare_permission_restart(origin)
+        {
+            if let HostError::Harness(problem) = &error {
+                self.pause(ChatProblem::OpenFailed {
+                    problem: problem.clone(),
+                    native_resume: origin != ChatSessionOrigin::FreshSession,
+                });
+            } else {
+                self.hold_queue();
+            }
+            if let Some(reply) = reply {
+                let _ = reply.send(Err(error));
+            }
+            return;
+        }
         let Some(adapter) = self.adapter.clone() else {
             self.pause(ChatProblem::OpenFailed {
                 problem: Problem {
@@ -1085,7 +1399,7 @@ impl Supervisor {
             settings: self.start_settings.clone(),
             session,
             recorded_settings: chat.effective_settings.clone(),
-            unattended: self.unattended.clone(),
+            unattended: self.unattended.as_ref().map(|run| run.settings.clone()),
             ticketd_cli: None,
             taken_over,
         };
@@ -1121,9 +1435,31 @@ impl Supervisor {
         );
     }
 
+    fn finish_unattended_shutdown(&mut self, why: StopReason) {
+        let Some(unattended) = self.unattended.take() else {
+            return;
+        };
+        // On can open a replacement as soon as Off returns. Set the run's input
+        // aside before handing the Chat back, and tell the waiter why it stopped.
+        if let Some(message_id) = unattended.first_message.get() {
+            let chat_id = self.chat_id.clone();
+            let _ = self.write(|workspace| {
+                set_aside_first_message(workspace, &chat_id, message_id, why);
+                Ok(())
+            });
+        }
+        unattended.turned_off.send_replace(true);
+    }
+
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
     /// Returns why cleanup could not be confirmed, if it could not.
     async fn stop_runtime(&mut self, why: StopReason) -> Option<String> {
+        if self.lifecycle.has_retired_permission_runtime(&self.chat_id) {
+            return self
+                .lifecycle
+                .close_retired_permission_runtime(&self.chat_id)
+                .await;
+        }
         // Kept while the runtime closes, so a turn the harness reports interrupted
         // meanwhile is recorded as ticketd's stop and not as the person's.
         let before = self.shut_down_for.replace(why);
@@ -1134,6 +1470,19 @@ impl Supervisor {
             self.shut_down_for = before;
         }
         unconfirmed
+    }
+
+    /// Checks the previous generation on an explicit retry before opening a replacement.
+    async fn confirm_permission_restart_cleanup(&self) -> Result<(), HostError> {
+        if self
+            .lifecycle
+            .close_retired_permission_runtime(&self.chat_id)
+            .await
+            .is_some()
+        {
+            return Err(HostError::PermissionRestartCleanupUnconfirmed);
+        }
+        self.lifecycle.serving()
     }
 
     async fn close_runtime(&mut self, why: StopReason) -> Option<String> {
@@ -1149,10 +1498,11 @@ impl Supervisor {
             if let Some(reply) = opening.reply {
                 let _ = reply.send(Err(HostError::Quitting));
             }
-            self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
+            self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
             return Some("the harness was still starting".to_owned());
         }
         let Some(runtime) = &self.runtime else {
+            let _ = self.settle_runtime_loss();
             return None;
         };
         let (handle, generation) = (runtime.handle.clone(), runtime.generation);
@@ -1178,25 +1528,30 @@ impl Supervisor {
                 }
             }
         }
-        let unconfirmed = if self.runtime.is_some() {
-            let closing = self
-                .drive(timeout(CLOSE_TIMEOUT, async move { handle.close().await }))
-                .await;
-            match closing {
-                Ok(CloseOutcome::Confirmed { .. }) => None,
-                Ok(CloseOutcome::Unconfirmed { reason }) => Some(reason),
-                Err(_) => Some("the harness did not confirm that it exited in time".to_owned()),
-            }
+        let permission_restart =
+            why == StopReason::ExplicitResume && self.permission_restart_pending;
+        // Losing the event stream does not prove that the previous process exited.
+        let unconfirmed = if permission_restart || self.runtime.is_some() {
+            self.drive(bounded_close(handle.as_ref())).await
         } else {
             None
         };
         self.keep_unanswered_permission();
         self.runtime = None;
-        self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
+        self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
-            self.problem = Some(ChatProblem::CleanupUnconfirmed {
-                reason: reason.clone(),
-            });
+            if permission_restart {
+                self.lifecycle
+                    .retire_permission_runtime(&self.chat_id, handle);
+                self.notice(
+                    "ticketd could not confirm that the previous harness exited during the permission restart. Tools it started may still be running."
+                        .to_owned(),
+                );
+            } else {
+                self.problem = Some(ChatProblem::CleanupUnconfirmed {
+                    reason: reason.clone(),
+                });
+            }
         }
         unconfirmed
     }
@@ -1214,19 +1569,15 @@ impl Supervisor {
     }
 
     /// Nothing more will be observed from the runtime: settle what it left open.
-    fn runtime_gone(&mut self, ending: &TurnEnding) {
-        let chat = self.chat_id.clone();
-        if let Some(changes) = self.agent_changes() {
-            let _ = self.write(|core| core.record_chat_observations(&chat, vec![changes]));
-        }
-        let _ = self.write(|core| {
-            core.mark_chat_contact_lost(
-                Some(&chat),
-                &ending.detail().unwrap_or_default(),
-                &ending.key(),
-            )
-        });
-        self.active = None;
+    fn runtime_gone(&mut self, ending: TurnEnding, pause_queue: bool) {
+        let active = self.active.take();
+        self.pending_runtime_loss
+            .get_or_insert_with(|| PendingRuntimeLoss {
+                ending,
+                turn: active.map(|turn| PendingTurn::Lost(ChatTurnReceipt::new(turn.turn_id))),
+                pause_queue,
+            });
+        let _ = self.settle_runtime_loss();
         self.unconfirmed_start = None;
         self.turn_evidence = None;
         self.unconfirmed_deadline = None;
@@ -1239,6 +1590,51 @@ impl Supervisor {
         self.stop = None;
         self.stop_deadline = None;
         self.stop_when_turn_known = false;
+    }
+
+    fn settle_runtime_loss(&mut self) -> Result<(), Error> {
+        let Some(mut loss) = self.pending_runtime_loss.take() else {
+            return Ok(());
+        };
+        // Settle a reported end before reconciling what the runtime left open.
+        // Otherwise contact loss would close this Turn with a different ending.
+        let observed = if let Some(PendingTurn::Observed(end)) = &mut loss.turn {
+            let result = self.record_turn_end(end);
+            if result.is_ok() {
+                loss.turn = None;
+            }
+            result
+        } else {
+            Ok(())
+        };
+        let chat = self.chat_id.clone();
+        let settled = self.write(|core| {
+            let settled = observed.and_then(|()| {
+                let receipt = match &mut loss.turn {
+                    Some(PendingTurn::Lost(receipt)) => Some(receipt),
+                    Some(PendingTurn::Observed(_)) | None => None,
+                };
+                core.mark_chat_runtime_lost(
+                    &chat,
+                    receipt,
+                    &loss.ending.detail().unwrap_or_default(),
+                    &loss.ending.key(),
+                )
+            });
+            // The queue can still be paused if only Turn settlement was refused by
+            // storage. Keep that pause on the retry if its own write failed too.
+            let paused = if loss.pause_queue {
+                core.set_chat_queue_paused(&chat, true)
+                    .map(|_| loss.pause_queue = false)
+            } else {
+                Ok(())
+            };
+            settled.and(paused)
+        });
+        if settled.as_ref().is_err_and(|error| !is_refusal(error)) {
+            self.pending_runtime_loss = Some(loss);
+        }
+        settled
     }
 
     fn on_loss(&mut self, detail: String) {
@@ -1258,9 +1654,9 @@ impl Supervisor {
             // `stop_runtime` settles what was open, with its own reason.
             return;
         }
-        self.runtime_gone(&TurnEnding::ContactLost(Some(detail.clone())));
+        self.runtime_gone(TurnEnding::ContactLost(Some(detail.clone())), !quiet);
         if !quiet {
-            self.pause(ChatProblem::RuntimeLost { detail });
+            self.problem = Some(ChatProblem::RuntimeLost { detail });
         }
     }
 
@@ -1279,6 +1675,8 @@ impl Supervisor {
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
         if self.shutting_down
+            || self.lifecycle.serving().is_err()
+            || self.lifecycle.has_retired_permission_runtime(&self.chat_id)
             || self.storage_failed.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
@@ -1558,10 +1956,12 @@ impl Supervisor {
                 };
                 change.state = SettingChangeState::Done(outcome.clone());
                 if setting == SettingKey::Permission {
-                    if outcome == SettingOutcome::Applied {
+                    if outcome == SettingOutcome::ReopenSession {
+                        self.reopen_for_permission = Some(value);
+                    } else if outcome == SettingOutcome::Applied {
                         // The harness already runs it: unsaved, this process still opens
                         // the next session with it.
-                        if !self.record_permission(&value) {
+                        if self.record_permission(&value).is_err() {
                             self.start_settings.permission = Some(value);
                         }
                     } else {
@@ -1589,6 +1989,7 @@ impl Supervisor {
         let result = match result {
             Ok(opened) => {
                 self.start_settings = StartSettings::default();
+                self.permission_restart_pending = false;
                 self.runtime = Some(Runtime {
                     generation,
                     run: Uuid::new_v4().to_string(),
@@ -1623,12 +2024,30 @@ impl Supervisor {
                 Ok(())
             }
             Err(problem) => {
+                let can_open_fresh = problem.kind == crate::ProblemKind::NativeHistoryUnavailable
+                    && opening.origin == ChatSessionOrigin::NativeResume
+                    && !self.permission_restart_pending;
+                if can_open_fresh
+                    && self.native_history_only()
+                    && let Ok(chat) = self.core(|core| core.chat(&self.chat_id))
+                {
+                    self.notice(
+                        "The harness could not resume its history. The Chat will continue in a new session.".to_owned(),
+                    );
+                    self.open(
+                        &chat,
+                        SessionStart::New,
+                        ChatSessionOrigin::New,
+                        None,
+                        opening.reply,
+                    );
+                    return;
+                }
                 // A take-over: Codex records a thread id when it starts one but keeps nothing until
                 // the first turn runs, so a Chat whose session never completed a turn (a run
                 // taken over early) has nothing to resume: open a fresh session, with
                 // the same reply, rather than a dead Chat (#387 6A1).
-                if problem.kind == crate::ProblemKind::NativeHistoryUnavailable
-                    && opening.origin == ChatSessionOrigin::NativeResume
+                if can_open_fresh
                     && self.unattended.is_none()
                     && self
                         .core(|core| core.chat_ran_an_automation_agent(&self.chat_id))
@@ -1764,6 +2183,10 @@ impl Supervisor {
         native: &NativeTurnId,
         observations: &mut Vec<ChatObservation>,
     ) -> Option<String> {
+        if self.pending_runtime_loss.is_some() {
+            // Storage recovery owns the last observed end while the runtime closes.
+            return None;
+        }
         let runtime = self.runtime.as_mut()?;
         let turn_id = format!("{}:{}", runtime.run, native.0);
         if runtime.turns.contains(&native.0) {
@@ -1787,11 +2210,9 @@ impl Supervisor {
                 output: None,
             });
         }
-        let token = self.core(|core| core.change_token()).ok();
         self.active = Some(ActiveTurn {
             turn_id: turn_id.clone(),
             native: native.clone(),
-            token,
             span: tracing::info_span!("chat_turn"),
         });
         self.unconfirmed_start = None;
@@ -2010,13 +2431,10 @@ impl Supervisor {
                         complete: true,
                     }
                 }));
-                if self.active.as_ref().is_some_and(|a| a.turn_id == turn_id) {
-                    observations.extend(self.agent_changes());
-                }
+                let is_active = self.active.as_ref().is_some_and(|a| a.turn_id == turn_id);
                 // A turn the person stopped is theirs to have stopped, even when the
                 // harness ends it as completed (Codex can, once interrupted).
-                let stopped = self.stop.is_some()
-                    && self.active.as_ref().is_some_and(|a| a.turn_id == turn_id);
+                let stopped = self.stop.is_some() && is_active;
                 let ending = match outcome {
                     TurnOutcome::Completed if stopped => TurnEnding::StoppedByPerson,
                     TurnOutcome::Completed => TurnEnding::Completed,
@@ -2025,22 +2443,42 @@ impl Supervisor {
                         .map_or(TurnEnding::StoppedByPerson, TurnEnding::StoppedByTicketd),
                     TurnOutcome::Failed(problem) => TurnEnding::failed(&problem),
                 };
-                observations.push(ending.observation(turn_id.clone()));
-                self.record(observations);
+                // Queued input does not follow a turn that did not complete. A
+                // take-over ends the agent's turn for the person, who is about to
+                // send (#387 M2): their Chat's queue is not paused for it.
+                let pause_queue = ending != TurnEnding::Completed
+                    && self.shut_down_for != Some(StopReason::TakenOver);
+                if is_active {
+                    let mut end = ObservedTurnEnd {
+                        receipt: ChatTurnReceipt::new(turn_id.clone()),
+                        preceding: self.observation_batch(observations),
+                        ending,
+                    };
+                    if self
+                        .record_turn_end(&mut end)
+                        .is_err_and(|error| !is_refusal(&error))
+                    {
+                        self.pending_runtime_loss = Some(PendingRuntimeLoss {
+                            ending: TurnEnding::StoppedByTicketd(StopReason::StorageFailed),
+                            turn: Some(PendingTurn::Observed(end)),
+                            pause_queue,
+                        });
+                    }
+                } else {
+                    observations.push(ending.observation(turn_id.clone()));
+                    self.record(observations);
+                }
                 self.text.retain(|buffer| buffer.turn_id != turn_id);
                 self.interactions.retain(|_, live| live.turn_id != turn_id);
-                if self.active.as_ref().is_some_and(|a| a.turn_id == turn_id) {
+                if is_active {
                     self.active = None;
                     self.stop = None;
                     self.stop_deadline = None;
-                    // Queued input does not follow a turn that did not complete. A
-                    // take-over ends the agent's turn for the person, who is about to
-                    // send (#387 M2): their Chat's queue is not paused for it.
-                    if ending != TurnEnding::Completed
-                        && self.shut_down_for != Some(StopReason::TakenOver)
-                    {
-                        let chat = self.chat_id.clone();
-                        let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
+                    if pause_queue {
+                        if self.pending_runtime_loss.is_none() {
+                            let chat = self.chat_id.clone();
+                            let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
+                        }
                         self.direct.clear();
                         self.direct_from_queue.clear();
                     }
@@ -2188,38 +2626,6 @@ impl Supervisor {
         self.record(observations);
     }
 
-    /// What the agent changed in ticketd during the active turn, as the record that keeps
-    /// it for the transcript; `None` when nothing in the workspace moved or none of it
-    /// was the agent's.
-    fn agent_changes(&mut self) -> Option<ChatObservation> {
-        let active = self.active.as_ref()?;
-        let (turn_id, started) = (active.turn_id.clone(), active.token);
-        let now = self.core(|core| core.change_token()).ok();
-        if now.is_some() && now == started {
-            return None;
-        }
-        let chat = self.chat_id.clone();
-        let changes = match self.core(|core| core.chat_turn_agent_changes(&chat, &turn_id)) {
-            Ok(changes) if changes.is_empty() => return None,
-            Ok(changes) => changes,
-            Err(error) => {
-                // The changes are in the workspace either way; only their row is missing.
-                self.notice(format!(
-                    "ticketd could not list what the agent changed in this turn: {error}"
-                ));
-                return None;
-            }
-        };
-        Some(ChatObservation::Tool {
-            tool_id: format!("{turn_id}:ticketd-changes"),
-            turn_id,
-            name: AGENT_CHANGES_RECORD_NAME.to_owned(),
-            input: serde_json::to_string(&changes).ok()?,
-            state: ChatToolState::Completed,
-            output: None,
-        })
-    }
-
     fn record_if_any(&mut self, observations: Vec<ChatObservation>) {
         if !observations.is_empty() {
             self.record(observations);
@@ -2246,6 +2652,11 @@ impl Supervisor {
         let interaction_id = format!("{run}:request:{}", request.request.0);
         let (kind, prompt, reason) = match &request.kind {
             InteractionKind::Approval {
+                description,
+                reason,
+                ..
+            }
+            | InteractionKind::NativeApproval {
                 description,
                 reason,
                 ..
@@ -2401,6 +2812,11 @@ impl Supervisor {
                 Some(detail) => Some(ChatProblem::StorageFailed {
                     detail: detail.clone(),
                 }),
+                None if self.lifecycle.has_retired_permission_runtime(&self.chat_id) => {
+                    Some(ChatProblem::CleanupUnconfirmed {
+                        reason: HostError::PermissionRestartCleanupUnconfirmed.to_string(),
+                    })
+                }
                 None => self.problem.clone(),
             },
             context: self.runtime.as_ref().and_then(|r| r.context.clone()),

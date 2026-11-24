@@ -297,7 +297,7 @@ pub fn serve(
                 }
             }
             Inbound::Request(request) => {
-                let Request { id, call, .. } = request;
+                let Request { id, call, .. } = *request;
                 if let Call::Describe {
                     contract_versions, ..
                 } = call
@@ -341,7 +341,7 @@ pub fn serve(
 #[derive(Deserialize)]
 #[serde(untagged)]
 enum Inbound {
-    Request(Request<'static>),
+    Request(Box<Request<'static>>),
     Cancel(CancelNotification),
     Other(OtherMethod),
 }

@@ -60,6 +60,7 @@ impl StopReason {
             | HostError::StorageFailed(_)
             | HostError::InteractionExpired
             | HostError::ContactLost
+            | HostError::PermissionRestartCleanupUnconfirmed
             | HostError::Harness(_)
             | HostError::HarnessUnavailable(_)
             | HostError::Busy

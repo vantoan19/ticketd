@@ -1,3 +1,4 @@
+import { useHarnessCatalogState } from "@/features/chats/harness-catalog";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Ellipsis, Maximize2, Minimize2, X } from "lucide-react";
 import {
@@ -15,6 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -35,15 +37,10 @@ import {
   SettingsList,
   SettingsListFooter,
 } from "@/features/settings/layout/SettingsList";
+import { describeFailure } from "@/lib/api/describe-failure";
 import "@/features/settings/layout/settings-layout.css";
 
-type Harness = AutomationAgentSettings["harness"];
 type Tools = AutomationAgentSettings["tools"];
-
-const HARNESSES: { id: Harness; name: string }[] = [
-  { id: "claude-code", name: "Claude Code" },
-  { id: "codex", name: "Codex" },
-];
 
 /**
  * One line of the agent editor: what it is, a note that gives way first, and
@@ -98,15 +95,6 @@ const TOOLS: {
     description: "Search and fetch pages",
   },
 ];
-
-/** What a switch means with Codex, which has no read tool and no list of commands. */
-const CODEX_DESCRIPTIONS: Partial<
-  Record<(typeof TOOLS)[number]["key"], string>
-> = {
-  read_files: "Needs Run commands",
-  edit_files: "Only in the step’s folder",
-  run_commands: "Any command",
-};
 
 /** The largest limits the core accepts (`automation_agents.rs`), offered as each field's range. */
 const MOST_TURNS = 500;
@@ -235,6 +223,8 @@ export function AgentForm({
    */
   const elsewhere = unsaved && saving === 0 && !own.includes(arrived);
   const statusOf = useHarnessStatus();
+  const catalogState = useHarnessCatalogState();
+  const catalog = catalogState.entries;
   const [deleting, setDeleting] = useState(false);
   /** Where the delete dialog returns focus: the menu item that opened it is gone. */
   const actions = useRef<HTMLButtonElement>(null);
@@ -265,16 +255,30 @@ export function AgentForm({
   };
   const changeTools = (patch: Partial<Tools>) =>
     change({ tools: { ...draft.tools, ...patch } });
-  const codex = draft.harness === "codex";
+  const harness = catalog.find((item) => item.id === draft.harness);
+  const reach = harness?.unattended;
+  const needsCommands = reach?.reads === "requires_commands";
+  const canListCommands = reach?.commands === "allowlist_or_any";
+  const commandsAreOffOrAny = reach?.commands === "off_or_any";
+  const toolDescriptions: Partial<
+    Record<(typeof TOOLS)[number]["key"], string>
+  > = {
+    ...(needsCommands && { read_files: "Needs Run commands" }),
+    ...(reach?.edits_in_step_folder_only && {
+      edit_files: "Only in the step’s folder",
+    }),
+    ...(commandsAreOffOrAny && { run_commands: "Any command" }),
+  };
   const title = draft.name.trim() || "New agent";
   /** An Automation with a step that runs this agent: it cannot be deleted. */
   const usedBy = agent.used_by[0];
-  const harnessName =
-    HARNESSES.find((item) => item.id === draft.harness)?.name ?? "Harness";
-  const standings = HARNESSES.map((harness) => ({
-    ...harness,
-    standing: harnessStanding(statusOf(harness.id)),
-  }));
+  const harnessName = harness?.name ?? draft.harness;
+  const standings = catalog
+    .filter((item) => item.unattended !== null)
+    .map((harness) => ({
+      ...harness,
+      standing: harnessStanding(statusOf(harness.id)),
+    }));
   const missing = standings.filter((harness) => !harness.standing.usable);
 
   return (
@@ -380,31 +384,67 @@ export function AgentForm({
             <span className="agent-label" id={`${fieldId}-harness`}>
               Harness
             </span>
-            <ChoiceTiles
-              aria-labelledby={`${fieldId}-harness`}
-              value={draft.harness}
-              // A model names one harness's model, so it does not carry over.
-              onValueChange={(harness) =>
-                harness !== draft.harness &&
-                change({ harness: harness as Harness, model: null })
-              }
-            >
-              {standings.map(({ id, name, standing }) => (
-                <ChoiceTile
-                  key={id}
-                  value={id}
-                  title={name}
-                  // The agent's own harness stays shown as chosen where it is missing.
-                  disabled={!standing.usable && id !== draft.harness}
-                  description={
-                    <span className="agent-standing">
-                      <StatusDot tone={standing.tone} />
-                      {standing.label}
-                    </span>
-                  }
-                />
-              ))}
-            </ChoiceTiles>
+            {(catalogState.status === "idle" ||
+              catalogState.status === "loading") && (
+              <p role="status" className="agent-hint">
+                Loading harness choices…
+              </p>
+            )}
+            {catalogState.status === "failed" && (
+              <FailureState
+                size="inline"
+                failure={{
+                  ...describeFailure(
+                    catalogState.error,
+                    "load harness choices",
+                  ),
+                  sentence: "The agent keeps its current harness.",
+                  action: "retry",
+                }}
+                onRetry={catalogState.retry}
+              />
+            )}
+            {catalogState.status === "ready" && (
+              <ChoiceTiles
+                aria-labelledby={`${fieldId}-harness`}
+                value={draft.harness}
+                // A model names one harness's model, so it does not carry over.
+                onValueChange={(harness) => {
+                  if (harness === draft.harness) return;
+                  const next = catalog.find(
+                    (item) => item.id === harness,
+                  )?.unattended;
+                  const wouldWiden =
+                    canListCommands &&
+                    draft.tools.run_commands &&
+                    !draft.tools.any_command &&
+                    next?.commands === "off_or_any";
+                  change({
+                    harness,
+                    model: null,
+                    ...(wouldWiden && {
+                      tools: { ...draft.tools, run_commands: false },
+                    }),
+                  });
+                }}
+              >
+                {standings.map(({ id, name, standing }) => (
+                  <ChoiceTile
+                    key={id}
+                    value={id}
+                    title={name}
+                    // The agent's own harness stays shown as chosen where it is missing.
+                    disabled={!standing.usable && id !== draft.harness}
+                    description={
+                      <span className="agent-standing">
+                        <StatusDot tone={standing.tone} />
+                        {standing.label}
+                      </span>
+                    }
+                  />
+                ))}
+              </ChoiceTiles>
+            )}
             {missing.map(({ id, name }) => (
               <p key={id} className="agent-hint">
                 {statusOf.reason(id) ??
@@ -447,19 +487,30 @@ export function AgentForm({
                   <ToolRow
                     key={key}
                     title={tool}
-                    description={
-                      (codex && CODEX_DESCRIPTIONS[key]) || description
-                    }
+                    description={toolDescriptions[key] ?? description}
                     control={
                       <Switch
                         aria-label={tool}
                         checked={draft.tools[key]}
-                        onCheckedChange={(on) => changeTools({ [key]: on })}
+                        disabled={
+                          key === "run_commands" &&
+                          !draft.tools.run_commands &&
+                          !reach
+                        }
+                        onCheckedChange={(on) =>
+                          changeTools({
+                            [key]: on,
+                            // Persist the grant for devices that only see this save.
+                            ...(key === "run_commands" &&
+                              on &&
+                              commandsAreOffOrAny && { any_command: true }),
+                          })
+                        }
                       />
                     }
                   >
                     {key === "run_commands" &&
-                      !codex &&
+                      canListCommands &&
                       draft.tools.run_commands && (
                         <>
                           {/* Chosen outright: an empty list never means "any". */}
@@ -504,19 +555,8 @@ export function AgentForm({
                 never asks.
               </SettingsListFooter>
             </SettingsList>
-            {codex ? (
-              <p className="agent-hint">
-                With Run commands on, Codex can read any file you can. Your
-                global AGENTS.md, personal skills and “always allow” rules still
-                apply.
-              </p>
-            ) : (
-              <p className="agent-hint">
-                Claude Code may still run shell commands that only read in the
-                step’s folder, such as listing it or printing a file there, with
-                “Read files” and “Run commands” off. ticketd cannot switch that
-                off.
-              </p>
+            {reach?.tool_note && (
+              <p className="agent-hint">{reach.tool_note}</p>
             )}
           </div>
           <div className="agent-field">
@@ -525,8 +565,7 @@ export function AgentForm({
               <small>A step that reaches one fails</small>
             </span>
             <SettingsList>
-              {/* Codex has no turn limit to set, so it is not shown. */}
-              {!codex && (
+              {reach?.native_turn_limit && (
                 <LimitRow
                   title="Turns"
                   description="How many turns one step may take"

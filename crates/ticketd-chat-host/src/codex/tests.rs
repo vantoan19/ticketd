@@ -18,10 +18,10 @@ use crate::conformance::{NewTurn, Provider};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
-    ApprovalDecision, Capability, CloseOutcome, DispatchOutcome, EventKind, EventStream,
-    HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome,
-    InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
-    OpenRequest, OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
+    ApprovalDecision, CloseOutcome, DispatchOutcome, EventKind, EventStream, HarnessAdapter,
+    HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome, InterruptRequest,
+    LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
+    OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
     RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
     TurnOutcome,
 };
@@ -34,6 +34,219 @@ macro_rules! fixture {
     ($name:literal) => {
         include_str!(concat!("../../tests/fixtures/codex/", $name, ".jsonl"))
     };
+}
+
+#[test]
+fn a_recorded_command_keeps_its_input_while_output_streams() {
+    let mut session = Session::default();
+    let mut inputs = std::collections::HashMap::new();
+    let mut streamed = 0;
+    for line in fixture!("recorded-steps").lines() {
+        let frame: Value = serde_json::from_str(line).expect("recorded frame");
+        let Some(method) = frame["server"]["method"].as_str() else {
+            continue;
+        };
+        let params = &frame["server"]["params"];
+        if !matches!(method, "item/started" | "item/commandExecution/outputDelta") {
+            continue;
+        }
+        for event in session.notification(method, params) {
+            let EventKind::ToolUpdated { item, detail, .. } = event else {
+                continue;
+            };
+            let input = detail.expect("running tool keeps its native input");
+            if method == "item/started" {
+                inputs.insert(item.0, input);
+            } else {
+                assert_eq!(&input, &inputs[&item.0]);
+                streamed += 1;
+            }
+        }
+    }
+    assert_eq!(streamed, 2);
+}
+
+#[test]
+fn recorded_steps_keep_actions_and_counts_after_mapping() {
+    use crate::{
+        FileTargets, LineCounts, StepAction, StepOutcomeOverride, ToolEvidence, read_tool_steps,
+    };
+    use ticketd_core::ChatToolState;
+
+    let mut session = Session::default();
+    let mut steps = Vec::new();
+    for line in fixture!("recorded-steps").lines() {
+        let frame: Value = serde_json::from_str(line).expect("recorded frame");
+        let Some(method @ ("item/started" | "item/completed")) = frame["server"]["method"].as_str()
+        else {
+            continue;
+        };
+        for event in session.notification(method, &frame["server"]["params"]) {
+            let EventKind::ToolUpdated {
+                detail: Some(detail),
+                title,
+                output,
+                status,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            let state = match status {
+                crate::ToolStatus::Running => continue,
+                crate::ToolStatus::Succeeded => ChatToolState::Completed,
+                crate::ToolStatus::Failed | crate::ToolStatus::Declined => ChatToolState::Failed,
+                other => panic!("unexpected recorded status {other:?}"),
+            };
+            let _: Value = serde_json::from_str(detail.payload()).expect("valid stored JSON");
+            steps.extend(read_tool_steps(
+                "codex",
+                ToolEvidence {
+                    name: &title,
+                    input: detail.payload(),
+                    output: output.as_deref(),
+                    state,
+                    working_directory: "/fixture/work",
+                },
+            ));
+        }
+    }
+    assert_eq!(steps.len(), 6);
+    assert!(matches!(steps[0].action, StepAction::Read(_)));
+    assert!(matches!(
+        steps[1].action,
+        StepAction::Search {
+            no_matches: true,
+            ..
+        }
+    ));
+    assert!(matches!(
+        steps[2].action,
+        StepAction::Edit {
+            counts: LineCounts {
+                added: Some(1),
+                removed: Some(1)
+            },
+            ..
+        }
+    ));
+    assert!(matches!(
+        &steps[3].action,
+        StepAction::Create {
+            targets: FileTargets::Paths(paths),
+            counts: LineCounts { added: Some(220), removed: Some(0) },
+        } if paths == &["/fixture/work/large.txt"]
+    ));
+    assert!(steps[4].command.is_some());
+    assert_eq!(steps[5].outcome, Some(StepOutcomeOverride::Declined));
+}
+
+#[test]
+fn a_bounded_patch_keeps_the_actions_for_files_it_could_not_keep() {
+    use crate::{
+        FileTargets, MAX_PROVIDER_DETAIL_BYTES, OmittedFiles, StepAction, ToolEvidence,
+        read_tool_steps,
+    };
+    use ticketd_core::ChatToolState;
+
+    let mut changes: Vec<Value> = (0..150)
+        .map(|index| {
+            json!({"path": format!("/work/{index}-{}.txt", "x".repeat(120)),
+                "kind": {"type": "add"}, "diff": "new line"})
+        })
+        .collect();
+    changes.push(json!({"path": "/work/old.txt", "kind": {"type": "delete"}, "diff": "old"}));
+    let events = Session::default().notification(
+        "item/started",
+        &json!({"turnId": "turn_1", "item": {
+            "type": "fileChange", "id": "patch", "status": "inProgress", "changes": changes,
+        }}),
+    );
+    let (title, detail) = events
+        .iter()
+        .find_map(|event| match event {
+            EventKind::ToolUpdated {
+                title,
+                detail: Some(detail),
+                ..
+            } => Some((title, detail)),
+            _ => None,
+        })
+        .expect("patch tool evidence");
+    assert!(detail.payload().len() <= MAX_PROVIDER_DETAIL_BYTES);
+
+    let steps = read_tool_steps(
+        "codex",
+        ToolEvidence {
+            name: title,
+            input: detail.payload(),
+            output: None,
+            state: ChatToolState::Running,
+            working_directory: "/work",
+        },
+    );
+    let [created, deleted] = steps.as_slice() else {
+        panic!("expected a create and a delete action");
+    };
+    let StepAction::Create {
+        targets: FileTargets::Paths(paths),
+        counts,
+    } = &created.action
+    else {
+        panic!("expected a create action");
+    };
+    let Some(OmittedFiles::Count(omitted)) = created.omitted_files else {
+        panic!("expected a count of unlisted creations");
+    };
+    assert_eq!(paths.len() + omitted.get() as usize, 150);
+    assert_eq!(counts.added, Some(paths.len() as u32));
+    assert!(matches!(&deleted.action, StepAction::Delete { paths, .. } if paths.is_empty()));
+    assert!(matches!(
+        deleted.omitted_files,
+        Some(OmittedFiles::Count(count)) if count.get() == 1
+    ));
+}
+
+#[test]
+fn a_legacy_patch_reports_omissions_only_when_the_saved_inventory_is_partial() {
+    use crate::{FileTargets, LineCounts, OmittedFiles, StepAction, ToolEvidence, read_tool_steps};
+    use ticketd_core::ChatToolState;
+
+    let input = r#"{"type":"fileChange","changes":[
+        {"path":"/work/a, b.txt","kind":{"type":"update"},"ticketd_lines":{"added":2,"removed":1}}
+    ]}"#;
+    for (name, expected) in [
+        ("Edit /work/a, b.txt", None),
+        (
+            "Edit /work/a, b.txt, /work/c.txt",
+            Some(OmittedFiles::Unknown),
+        ),
+    ] {
+        let steps = read_tool_steps(
+            "codex",
+            ToolEvidence {
+                name,
+                input,
+                output: None,
+                state: ChatToolState::Completed,
+                working_directory: "/work",
+            },
+        );
+        let [step] = steps.as_slice() else {
+            panic!("expected a single edit step");
+        };
+        assert_eq!(step.omitted_files, expected);
+        assert_eq!(
+            step.action,
+            StepAction::Edit {
+                targets: FileTargets::Paths(vec!["/work/a, b.txt".to_owned()]),
+                counts: LineCounts {
+                    added: Some(2),
+                    removed: Some(1)
+                },
+            }
+        );
+    }
 }
 
 fn options() -> Options {
@@ -205,11 +418,15 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Hello")).await;
 
     assert_eq!(outcome, DispatchOutcome::Written);
+    assert_eq!(
+        runtime.submit(start_turn("sub-1b", "Hello again")).await,
+        DispatchOutcome::NotSent(Refusal::StartUnconfirmed)
+    );
+    peer.assert_nothing_written().await;
     peer.play().await;
     assert_eq!(
         seen(&mut events).await,
         [
-            "turn-started turn_1",
             "evidence sub-1 Acknowledged { turn: NativeTurnId(\"turn_1\") }",
             "unknown reply to an unknown request",
         ]
@@ -223,6 +440,79 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     assert_eq!(
         seen(&mut events).await,
         ["turn-ended turn_1 Interrupted [\"sub-1\"]"]
+    );
+    peer.assert_nothing_written().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_late_start_rejection_allows_another_turn() {
+    let mut peer = provider().await;
+    assert_eq!(
+        peer.submit_unanswered("sub-1").await,
+        DispatchOutcome::Written
+    );
+
+    peer.refuse_late("sub-1").await;
+    assert_eq!(
+        seen(peer.events()).await,
+        ["evidence sub-1 Rejected { reason: \"server is shutting down (code -32600)\" }"]
+    );
+    peer.assert_nothing_else_written().await;
+    assert_eq!(
+        peer.start_turn("sub-2").await,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_correlated_turn_can_finish_before_its_start_reply() {
+    let (mut peer, runtime, mut events) = open().await;
+    peer.load(fixture!("late_start_after_completion"));
+    assert_eq!(
+        submit(&mut peer, &runtime, start_turn("sub-1", "First")).await,
+        DispatchOutcome::Written,
+    );
+
+    peer.play().await;
+    assert_eq!(seen(&mut events).await, ["turn-ended older Completed []"]);
+    assert_eq!(
+        runtime.submit(start_turn("sub-2", "Second")).await,
+        DispatchOutcome::NotSent(Refusal::StartUnconfirmed),
+    );
+    peer.assert_nothing_written().await;
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["evidence sub-1 Processing { turn: NativeTurnId(\"turn_1\") }"],
+    );
+    assert_eq!(
+        runtime.submit(start_turn("sub-2", "Second")).await,
+        turn_mismatch("turn_1"),
+    );
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["turn-ended turn_1 Completed [\"sub-1\"]"],
+    );
+    assert_eq!(
+        submit(&mut peer, &runtime, start_turn("sub-2", "Second")).await,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_2")
+        },
+    );
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["evidence sub-1 Acknowledged { turn: NativeTurnId(\"turn_1\") }"],
+    );
+    assert_eq!(
+        runtime.submit(start_turn("sub-3", "Third")).await,
+        turn_mismatch("turn_2"),
     );
     peer.assert_nothing_written().await;
 }
@@ -553,10 +843,6 @@ async fn resuming_reports_the_native_session_and_a_missing_one_as_unavailable_hi
         seen(&mut opened.events).await,
         ["session thr_1", SETTINGS, "notice EffectiveSettings"]
     );
-    assert!(matches!(
-        opened.capabilities.native_resume,
-        Capability::Supported { .. }
-    ));
 
     let (mut peer, missing) = open_with(fixture!("resume_missing"), resume("thr_gone")).await;
 
@@ -701,7 +987,7 @@ async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
         settings: StartSettings {
             model: Some("gpt-b".to_owned()),
             effort: Some("high".to_owned()),
-            permission: None,
+            ..StartSettings::default()
         },
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());
@@ -1093,6 +1379,18 @@ fn the_switches_become_codex_sandbox_shell_and_environment_settings() {
     }
 }
 
+#[test]
+fn a_command_policy_without_an_explicit_grant_leaves_the_codex_shell_disabled() {
+    let mut agent = unattended(false, false);
+    agent.tools.any_command = false;
+    agent.tools.allowed_commands = vec!["fixture-command".into()];
+
+    let overrides = super::switch_overrides(&agent.tools);
+    assert_eq!(overrides["features.shell_tool"], json!(false));
+    assert_eq!(overrides["features.view_image"], json!(false));
+    assert!(super::has_no_environment(&agent.tools));
+}
+
 /// The fixture checks that the thread and every turn are started with approvals off
 /// and the sandbox, here for an agent with "Edit files" off; a command Codex declines then fails the turn as a denied tool.
 #[tokio::test(start_paused = true)]
@@ -1144,7 +1442,8 @@ async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
 
 /// An unattended thread with the ticketd CLI opts into the experimental API, declares
 /// ticketd's own tool and tells the agent to use it. The tool refuses what could leave
-/// the run's Workspace or the step, and any other tool or thread.
+/// the run's Workspace or the step. Calls require the opened thread's ID and the
+/// ticketd tool name. The early call uses invalid arguments so it can never spawn a CLI.
 #[tokio::test(start_paused = true)]
 async fn an_unattended_thread_declares_ticketds_own_tool_and_answers_only_it() {
     let (mut peer, _opened) =
@@ -1166,9 +1465,111 @@ async fn an_agent_with_run_and_edit_off_gets_no_shell_and_no_environment() {
     .await;
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn excess_ticketd_calls_get_a_busy_result_while_rpc_stays_live() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    let directory = tempfile::tempdir().unwrap();
+    let working_directory = directory.path();
+    let cli = working_directory.join("fixture-cli");
+    fs::write(
+        &cli,
+        concat!(
+            "#!/bin/sh\n",
+            ": > \"started-$1\"\n",
+            "while [ ! -f release ]; do sleep 0.01; done\n",
+            "printf 'fixture output %s' \"$1\"\n",
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&cli, fs::Permissions::from_mode(0o700)).unwrap();
+    let (mut peer, opened) = open_with_ticketd_tool_at(
+        fixture!("unattended_ticket_tool"),
+        unattended(true, false),
+        working_directory,
+        cli,
+    )
+    .await;
+
+    let call = |id: u32| {
+        format!(
+            "{}\n",
+            json!({"id": format!("cli-{id}"), "method": "item/tool/call", "params": {
+                "threadId": "thr_1", "turnId": "turn_1", "callId": format!("call-{id}"),
+                "namespace": null, "tool": "ticketd", "arguments": {"arguments": [id.to_string()]},
+            }})
+        )
+    };
+    let (outcome, ()) = tokio::join!(opened.runtime.submit(start_turn("sub-1", "Go")), async {
+        let start = peer.written().await;
+        assert_eq!(start["method"], "turn/start");
+        for id in 1..=5 {
+            peer.send(&call(id)).await;
+        }
+        let busy = peer.written().await;
+        assert_eq!(busy["id"], "cli-5");
+        assert_eq!(busy["result"]["success"], false);
+        assert!(
+            busy["result"]["contentItems"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("busy")
+        );
+        peer.send(&format!(
+            "{}\n",
+            json!({"id": start["id"], "result": {"turn": {"id": "turn_1", "status": "inProgress"}}})
+        ))
+        .await;
+    });
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+
+    fs::write(working_directory.join("release"), "").unwrap();
+    let mut completed = Vec::new();
+    for _ in 1..=4 {
+        let reply = peer.written().await;
+        assert_eq!(reply["result"]["success"], true, "{reply}");
+        let id = reply["id"].as_str().unwrap();
+        let number = id.strip_prefix("cli-").unwrap();
+        assert_eq!(
+            reply["result"]["contentItems"][0]["text"],
+            format!("fixture output {number}")
+        );
+        completed.push(number.to_owned());
+    }
+    completed.sort();
+    assert_eq!(completed, ["1", "2", "3", "4"]);
+    assert!(!working_directory.join("started-5").exists());
+
+    peer.send(&call(6)).await;
+    let retry = peer.written().await;
+    assert_eq!(retry["id"], "cli-6");
+    assert_eq!(retry["result"]["success"], true, "{retry}");
+}
+
 /// Opens an unattended thread for `agent` with the ticketd CLI over a fixture that
 /// holds `$CONFIG`, `$SPEC` and `$INSTRUCTIONS` where ticketd fills in what it sends.
 async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Peer, OpenedRuntime) {
+    open_with_ticketd_tool_at(
+        fixture,
+        agent,
+        Path::new("/work/chat-1"),
+        PathBuf::from("/bin/ticketd"),
+    )
+    .await
+}
+
+async fn open_with_ticketd_tool_at(
+    fixture: &str,
+    agent: crate::Unattended,
+    working_directory: &Path,
+    cli: PathBuf,
+) -> (Peer, OpenedRuntime) {
     let mut config = super::personal_tools_off(None);
     let switches = super::switch_overrides(&agent.tools);
     config
@@ -1176,6 +1577,7 @@ async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Pee
         .unwrap()
         .extend(switches.as_object().unwrap().clone());
     let script = fixture
+        .replace("\"/work/chat-1\"", &json!(working_directory).to_string())
         .replace("$CONFIG", &config.to_string())
         .replace("$SPEC", &super::ticket_tool::spec().to_string())
         .replace(
@@ -1187,10 +1589,10 @@ async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Pee
     let request = OpenRequest {
         generation: GENERATION,
         chat_id: "chat-1".into(),
-        working_directory: PathBuf::from("/work/chat-1"),
+        working_directory: working_directory.to_owned(),
         session: SessionStart::New,
         unattended: Some(agent),
-        ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
+        ticketd_cli: Some(cli),
         taken_over: false,
         recorded_settings: None,
         settings: StartSettings::default(),

@@ -1,6 +1,9 @@
+use std::ffi::OsString;
 use std::io::Write;
-use std::path::PathBuf;
-use ticketd_core::agent_skills::{self, AGENTS, Agent, InstallError, InstallOutcome};
+use std::path::{Path, PathBuf};
+
+use ticketd_core::agent_skills::{self, InstallError, InstallOutcome};
+use ticketd_core::harnesses::{HARNESS_DESCRIPTORS, HarnessDescriptor, find_descriptor};
 
 #[derive(clap::Subcommand)]
 pub enum Command {
@@ -18,8 +21,12 @@ pub enum Command {
         /// Destination containing SKILL.md, e.g. .agents/skills/ticketd or .claude/skills/ticketd
         #[arg(group = "target")]
         directory: Option<PathBuf>,
-        /// Install into these harnesses' per-user skill folders: claude-code, codex
-        #[arg(long, value_delimiter = ',', group = "target")]
+        #[arg(
+            long,
+            value_delimiter = ',',
+            group = "target",
+            help = install_harness_help(HARNESS_DESCRIPTORS),
+        )]
         harness: Vec<String>,
         /// Replace an edited or foreign SKILL.md after reviewing it; it is saved as a backup first
         #[arg(long)]
@@ -71,6 +78,41 @@ const GUIDES: &[Guide] = &[
     },
 ];
 
+fn harness_choices(harnesses: &[&HarnessDescriptor]) -> String {
+    harnesses
+        .iter()
+        .map(|descriptor| descriptor.key.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn install_harness_help(harnesses: &[&HarnessDescriptor]) -> String {
+    format!(
+        "Install into these harnesses' per-user skill folders: {}",
+        harness_choices(harnesses)
+    )
+}
+
+fn skill_directories(
+    ids: &[String],
+    harnesses: &[&HarnessDescriptor],
+    home: &Path,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Result<Vec<PathBuf>, String> {
+    ids.iter()
+        .map(|id| {
+            find_descriptor(harnesses, id)
+                .map(|descriptor| descriptor.skill_directory(home, &env))
+                .ok_or_else(|| {
+                    format!(
+                        "unknown harness '{id}'; choose from {}",
+                        harness_choices(harnesses)
+                    )
+                })
+        })
+        .collect()
+}
+
 pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std::error::Error>> {
     match command {
         Command::List => {
@@ -111,23 +153,9 @@ pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std:
                 Some(directory) => vec![directory],
                 None => {
                     let home = agent_skills::user_home()?;
-                    harness
-                        .iter()
-                        .map(|id| {
-                            Agent::find(id)
-                                .map(|agent| {
-                                    agent.skill_directory(&home, |name| std::env::var_os(name))
-                                })
-                                .ok_or_else(|| {
-                                    let known: Vec<_> =
-                                        AGENTS.iter().map(|agent| agent.id).collect();
-                                    format!(
-                                        "unknown harness '{id}'; choose from {}",
-                                        known.join(", ")
-                                    )
-                                })
-                        })
-                        .collect::<Result<_, _>>()?
+                    skill_directories(&harness, HARNESS_DESCRIPTORS, &home, |name| {
+                        std::env::var_os(name)
+                    })?
                 }
             };
             // Install every target before reporting a failure, so one conflict
@@ -163,4 +191,38 @@ pub fn run(command: Command, output: &mut impl Write) -> Result<(), Box<dyn std:
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ticketd_core::harnesses::{CLAUDE_CODE, HarnessDescriptor, SkillLocation};
+
+    #[test]
+    #[allow(clippy::unwrap_used)]
+    fn install_offers_another_harness_and_uses_its_skill_folder() {
+        let descriptor = HarnessDescriptor {
+            key: "sample-agent".parse().unwrap(),
+            name: "Sample agent",
+            config_home: ".sample",
+            skills: SkillLocation::ConfigHome("support/skills"),
+            ..CLAUDE_CODE.clone()
+        };
+        let harnesses = [&CLAUDE_CODE, &descriptor];
+        assert!(install_harness_help(&harnesses).contains("claude-code, sample-agent"));
+
+        let home = tempfile::tempdir().unwrap();
+        let directories =
+            skill_directories(&["sample-agent".into()], &harnesses, home.path(), |_| None).unwrap();
+        let directory = home.path().join(".sample/support/skills/ticketd");
+        assert_eq!(directories.as_slice(), std::slice::from_ref(&directory));
+        assert_eq!(
+            agent_skills::install_skill(&directory, false).unwrap(),
+            InstallOutcome::Installed
+        );
+        assert!(!descriptor.detected(home.path(), |_| None));
+
+        std::fs::write(home.path().join(".sample/settings.toml"), "").unwrap();
+        assert!(descriptor.detected(home.path(), |_| None));
+    }
 }

@@ -53,6 +53,8 @@ export const problemSchema = z.object({
   blocks_send: z.boolean(),
   /** The host's plain explanation, for kinds whose wording depends on what was observed. */
   message: z.string().nullish(),
+  /** Recovery offered when the harness's native history is unavailable. */
+  history_recovery: z.enum(["start_fresh", "select_history"]).nullish(),
   /** A terminal command to copy, such as the harness's own sign-in. */
   command: z.string().nullish(),
   help_url: z.string().nullish(),
@@ -182,6 +184,7 @@ export type ChatOverview = z.infer<typeof chatOverviewSchema>;
 export const harnessStatusSchema = z.object({
   id: z.string(),
   name: z.string(),
+  mark_id: z.string().optional(),
   status: z.enum([
     "ready",
     "not_installed",
@@ -211,6 +214,39 @@ export const harnessStatusSchema = z.object({
   version: z.string().nullish(),
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
+
+export const harnessInfoSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  mark_id: z.string(),
+  editing_agent_aliases: z.array(z.string()),
+  unattended: z
+    .object({
+      commands: z.enum(["allowlist_or_any", "off_or_any"]),
+      reads: z.enum(["independent", "requires_commands"]),
+      edits_in_step_folder_only: z.boolean(),
+      tool_note: z.string().nullable(),
+      native_turn_limit: z.boolean(),
+    })
+    .nullable(),
+  permissions: z.array(
+    z.object({
+      id: z.string(),
+      label: z.string(),
+      description: z.string().nullable(),
+      semantics: z.enum([
+        "own_settings",
+        "ask",
+        "accept_edits",
+        "read_only",
+        "full_access",
+      ]),
+      availability: z.enum(["adapter", "native"]),
+      is_default: z.boolean(),
+    }),
+  ),
+});
+export type HarnessInfo = z.infer<typeof harnessInfoSchema>;
 
 const stepTargetSchema = z.object({
   /** A path relative to the Chat's folder, a pattern, a query or a page. */
@@ -267,6 +303,10 @@ const stepSchema = z.object({
   /** Readable text for a step without targets: the command, tool or note. */
   target: z.string(),
   targets: z.array(stepTargetSchema).optional(),
+  /** Omitted file paths, with a count when the stored evidence includes it. */
+  omitted_files: z
+    .object({ count: z.number().int().positive().nullable() })
+    .optional(),
   /** The command without its shell wrappers. */
   command: z.string().nullish(),
   exit_code: z.number().int().nullish(),
@@ -313,6 +353,7 @@ const requestOptionSchema = z.object({
   id: z.string(),
   label: z.string(),
   description: z.string().nullish(),
+  warning: z.string().nullish(),
 });
 
 /** `turn_id`: the turn that owns the item, when one does. */
@@ -445,7 +486,13 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
     kind: z.literal("session"),
-    history: z.enum(["last_response", "last_messages", "all", "picked"]),
+    history: z.enum([
+      "none",
+      "last_response",
+      "last_messages",
+      "all",
+      "picked",
+    ]),
     count: z.number().int().nonnegative(),
   }),
   /** One reasoning item. Times are milliseconds since the Unix epoch, as reported. */
@@ -729,6 +776,7 @@ export const suggestionSchema = z.discriminatedUnion("kind", [
 export type Suggestion = z.infer<typeof suggestionSchema>;
 export type RequestAnswer = { option_id: string } | { text: string };
 export type HistorySelection =
+  | { kind: "none" }
   | { kind: "last_response" }
   | { kind: "last_messages"; count: number }
   | { kind: "all" }
@@ -769,6 +817,8 @@ export interface ChatClient {
   listChats(scope: Retention): Promise<ChatSummary[]>;
   /** Probes installation and sign-in again on every call. */
   harnesses(): Promise<HarnessStatus[]>;
+  /** Compiled-in harness data, without probing installations or starting Chat. */
+  harnessCatalog(): Promise<HarnessInfo[]>;
   /** What a harness offers before a session; asked of the harness once per version. */
   harnessOptions(harnessId: string): Promise<HarnessOptions>;
   /** The native folder dialog; null when dismissed. */

@@ -11,6 +11,12 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { Profiler } from "react";
 import { App } from "@/app/App";
+import { ChatClientContext } from "@/features/chats/client";
+import {
+  createHostChatClient,
+  tauriBridge,
+} from "@/features/chats/host-client";
+import { createMockChatClient } from "@/features/chats/mock-client";
 import type { FindFilter, Ticket, TicketSource } from "@/lib/api/client";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { applyTokens, rootTokens } from "@/test/motion-tokens";
@@ -157,7 +163,10 @@ beforeEach(() => {
           throw new Error("Desktop search batches must remain bounded");
         return matching(args.filter)
           .slice(offset, offset + limit)
-          .map((ticket) => ({ ticket, latest_update: null }));
+          .map((ticket) => ({
+            ticket,
+            latest_update: ticket.progress_summary ?? null,
+          }));
       }
       if (command === "count_tickets" && args?.filter)
         return counts(matching(args.filter));
@@ -268,6 +277,90 @@ async function chooseStatus(reference: string, status: string) {
   fireEvent.click(screen.getByRole("menuitemradio", { name: status }));
   await settle();
 }
+
+test.each(["loading", "failed", "ready"] as const)(
+  "board cards retain the review wording with the harness catalog %s",
+  async (catalogState) => {
+    const updated = "2026-11-10T10:00:00Z";
+    saved = ["Codex", "Custom agent", null, "local-person"].map(
+      (editing_agent, index) => ({
+        ...ticket(index + 1, "In review"),
+        progress_summary: {
+          activity_id: String(index),
+          brief: { text: "Verified the fix", truncated: false },
+          reported_at: updated,
+          updated_at: updated,
+          editing_agent,
+          supporting_document_id: null,
+        },
+      }),
+    );
+    let resolveCatalog!: (value: unknown) => void;
+    let rejectCatalog!: (reason: Error) => void;
+    const catalog = new Promise((resolve, reject) => {
+      resolveCatalog = resolve;
+      rejectCatalog = reject;
+    });
+    const host = tauriBridge();
+    const client = createHostChatClient({
+      ...host,
+      invoke: (command, args) =>
+        command === "chat_harness_catalog"
+          ? catalog
+          : host.invoke(command, args),
+      listen: async () => () => {},
+    });
+    localStorage.setItem(
+      "ticketd.preferences",
+      JSON.stringify({ ticketLayout: "board" }),
+    );
+    render(
+      <ChatClientContext value={client}>
+        <App />
+      </ChatClientContext>,
+    );
+    await settle();
+    const codexCard = screen.getByRole("button", {
+      name: /T-KQ1 In review.*Ticket 1/,
+    });
+    if (catalogState === "failed")
+      rejectCatalog(new Error("Catalog unavailable"));
+    if (catalogState === "ready")
+      resolveCatalog(await createMockChatClient().harnessCatalog());
+    await settle();
+
+    expect(within(codexCard).getByText("Ready for review")).toBeTruthy();
+    const mark = within(codexCard).queryByRole("img", { name: "Codex" });
+    if (catalogState === "ready")
+      expect(mark?.hasAttribute("data-dim")).toBe(false);
+    else expect(mark).toBeNull();
+    const customCard = screen.getByRole("button", {
+      name: /T-KQ2 In review.*Ticket 2/,
+    });
+    expect(within(customCard).getByText("Ready for review")).toBeTruthy();
+    expect(within(customCard).queryByRole("img")).toBeNull();
+    for (const number of [3, 4]) {
+      const humanCard = screen.getByRole("button", {
+        name: new RegExp(`T-KQ${number} In review.*Ticket ${number}`),
+      });
+      expect(within(humanCard).queryByText("Ready for review")).toBeNull();
+      expect(within(humanCard).queryByRole("img")).toBeNull();
+    }
+
+    chooseLayout("List");
+    await settle(200);
+    const listRow = (number: number) =>
+      within(
+        screen.getByRole("button", {
+          name: new RegExp(`T-KQ${number}.*Ticket ${number}`),
+        }),
+      );
+    expect(listRow(1).getByText("Ready for review")).toBeTruthy();
+    expect(listRow(2).getByText("Ready for review")).toBeTruthy();
+    expect(listRow(3).queryByText("Ready for review")).toBeNull();
+    expect(listRow(4).queryByText("Ready for review")).toBeNull();
+  },
+);
 
 test("Display holds Layout and Rows; both persist and the header carries no toggles", async () => {
   render(<App />);

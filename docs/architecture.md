@@ -132,6 +132,58 @@ POSIX process groups. A wrapper process exiting does not prove all tools stopped
 Archive does not stop execution; trash does. Process pooling and a standalone
 always-running service are not selected for the initial design.
 
+### Harness registration and Step readers
+
+The plug-in design moves native tool decoding into Step readers in
+`ticketd-chat-host` ([ADR 0022](adr/0022-harnesses-plug-into-ticketds-chat-vocabulary.md)).
+The rollout introduces the readers first, followed by the core catalog, host
+registration list and descriptor-driven controls.
+
+In this design the core owns the data-only harness descriptors shared by the
+CLI and the Chat host. The host has one registration list that associates
+each descriptor with a lazy adapter factory and a Step reader. The desktop
+receives descriptors, capabilities, unattended reach and permission choices
+from the host. Descriptors declare what the harness can enforce when
+unattended and which permission choices it can offer. The host confirms
+actual availability through the adapter.
+
+The host's readers classify stored native tool evidence when the view is built.
+They use the shared shell classifier and return typed Step actions for both
+the transcript and approval cards. The desktop supplies the wording and
+shortens paths for display. Since the existing Chat records hold the tool
+evidence, saved Chats benefit from reader improvements without a format change.
+
+### Antigravity over ACP
+
+The Antigravity registration starts one `agy acp` process for a person's Chat
+([ADR 0025](adr/0025-antigravity-uses-acp-for-person-driven-chats.md)). Its
+dialogue uses the official ACP schema over the same JSON-RPC connection as
+Codex. The shared runtime tracks checked submissions, interruptions and
+live requests. ACP updates name a session, so the adapter accepts one
+Prompt at a time and ends its Turn on the Prompt reply. It applies partial
+tool updates by native tool ID and preserves native approval choice IDs until
+a person responds.
+
+During ordinary Chat resume, if Antigravity reports missing history for the
+requested Session or an unsupported resume method, the supervisor posts a
+notice and opens an empty Session without replaying the transcript. Other
+resume failures pause the queue and surface the harness error.
+
+The supervisor holds dispatch across a permission change that needs another
+process. It closes the old generation, opens with the person's chosen mode
+and resumes the same native Session. If the restart fails, the queue pauses.
+When the native Session is unavailable during this restart, the person can
+choose **Start fresh** explicitly. Antigravity recovery uses native Sessions
+without transcript replay.
+If exit is unconfirmed, the old generation can only be used for cleanup. Its
+requests expire, new messages stay queued, and the next explicit recovery
+checks for exit before opening a replacement. Turning Chat off or restoring a
+Workspace in the same desktop process preserves that exit check for the same
+Chat. On restore, the next supervisor takes its settings and queue from the
+current Workspace. Tools the previous generation started may still be running
+after its own exit is confirmed.
+The descriptor excludes unattended use.
+
 ### Persistence and delivery observations
 
 Chat storage uses structured records in the existing SQLite workspace for Chats
@@ -223,17 +275,21 @@ each record, the command that returns it, and the bundled `chat` guide; it holds
 record content and the host writes nothing into harness settings, skills or hooks.
 When links change, the next new turn of a live session carries the context again,
 and a resumed native session gets it when it differs from what it was last given.
-Agents change records only by running the CLI. When the workspace change token moved
-during a turn, the host lists the status moves and Activities written for that
-Chat in that turn's time and keeps them with the turn for the transcript. The host
+Agents change records only by running the CLI. At the end of a Turn, the core keeps
+the status moves and Activities attributed to it with the transcript. The host
 starts each harness process with the Chat's ID in `TICKETD_CHAT_ID` (only the ID);
 the CLI the harness runs inherits it and records which Chat each status move and
-Activity was written for (`chat_record_writes`). A write with no Chat ID (an older
-CLI, or a harness that strips the variable) counts for the Chat only when it
-carries the Chat's harness as agent name and no other Chat of that harness had a
-turn running at that moment; otherwise it is shown for no Chat rather than the
-wrong one. Save as Document is the ordinary Document-creation workflow applied to a
-stored response.
+Activity was written for (`chat_record_writes`). Tagged writes count from the
+earliest submission correlated to the Turn, or its observed start if that comes
+first, until its first recorded end. Each boundary keeps the latest ticket history
+and Activity numbers in the existing attribution table. Those numbers define the
+receipt's search ranges and resolve timestamp ties without a Workspace format
+change. A Turn whose boundaries were recorded by earlier code uses timestamps
+where a boundary number is unavailable. A write with no Chat ID counts only
+within the observed Turn, with the matching agent name, and while no other Chat
+of that harness had an observed Turn running. The host captures the receipt in
+the same transaction as the Turn end, including when contact is lost. Save as
+Document is the ordinary Document-creation workflow applied to a stored response.
 
 A harness process started for an Automation run also gets the run's ID in
 `TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket
@@ -427,12 +483,12 @@ the person's MCP servers, plugins and apps turned off. The same overrides also s
 their hooks, notify program, project `AGENTS.md`, memories, sub-agents, computer and browser
 use, and Codex's bundled skills (the agent editor does not list these). The switches map as follows. "Edit
 files" off is a `readOnly` sandbox; on, a `workspaceWrite` sandbox whose only writable place
-is the step's folder. "Run commands" off sets `features.shell_tool=false` (and turns the image
-viewer off), which also ends the agent's reading, because Codex has no read tool and reads
-through its shell; with it on the agent runs any command inside the sandbox, as Codex has no
-list of allowed commands. With both off, the thread starts with `environments: []`, so
+is the step's folder. Codex can run any command inside the sandbox when both
+`run_commands` and `any_command` are enabled. Without that grant, ticketd disables
+the shell and image viewer. This also ends the agent's reading because Codex
+reads through its shell. With commands and edits disabled, the thread starts with `environments: []`, so
 `apply_patch` goes too. "Read files" is not a Codex setting, and no read limit is applied: it
-can read any file the person can when Run commands is on. The agent reaches its tickets through
+can read any file the person can when its shell is enabled. The agent reaches its tickets through
 ticketd's own tool: the thread declares one dynamic tool, `ticketd`, over the experimental app-server API,
 and ticketd answers its `item/tool/call` requests by running the bundled CLI in its own process
 with the arguments as an array, the step's folder as working directory and the run's identity, so
@@ -508,12 +564,14 @@ already translated into the view model (`chat_view.rs`); a view that falls behin
 or cannot be served receives one `resync` entry and reads a new snapshot. Each
 update's changes arrive as one array, and an item already sent unchanged is not
 sent again. Steps carry the last lines of their output; an opened row reads the
-whole of it with `chat_step_output`. The view
-model only shapes what the host and core decided: attention and notification
-rules, step classification and what blocks Send live in `ticketd-chat-host`
-(`attention`, `step_kind`, `conditions`), and record queries such as New Chat's
-suggestions and a folder's Project live in the core. List
-rows and counts follow the `chat-overview` event, which comes from the host and
+whole of it with `chat_step_output`. Attention and notification rules and what
+blocks Send live in `ticketd-chat-host` (`attention`, `conditions`). Record
+queries such as New Chat's suggestions and a folder's Project live in the core.
+The [plug-in design](#harness-registration-and-step-readers) puts Step
+classification in the host's readers, beside the shared shell classifier
+(`step_kind`).
+
+List rows and counts follow the `chat-overview` event, which comes from the host and
 not from the workspace poll. Each wake rebuilds only the rows of Chats written
 since the last one or whose live state moved. The Experimental switch is a per-computer
 preference kept by the interface; the backend starts with Chat off and is told

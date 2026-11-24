@@ -12,6 +12,7 @@ import {
   type ChatStatus,
   type ChatSummary,
   type FolderFile,
+  type HarnessInfo,
   type HarnessOptions,
   type HarnessStatus,
   type SettingOption,
@@ -454,6 +455,7 @@ export function createMockChatClient(
     enabled?: boolean;
     chats?: MockChat[];
     harnesses?: HarnessInput[];
+    catalog?: HarnessInfo[];
     /** What each harness lists before a session; HARNESS_OPTIONS when left out. */
     options?: HarnessOptions[];
     records?: LinkedRecord[];
@@ -742,6 +744,36 @@ export function createMockChatClient(
         .map(summary)
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     harnesses: async () => harnesses,
+    harnessCatalog: async () =>
+      seed.catalog ??
+      harnesses.map(({ id, name, mark_id }) => ({
+        id,
+        name,
+        mark_id: mark_id ?? id,
+        editing_agent_aliases:
+          id === "claude-code" ? ["claude", id, "claude code"] : [id],
+        unattended: {
+          commands: id === "codex" ? "off_or_any" : "allowlist_or_any",
+          reads: id === "codex" ? "requires_commands" : "independent",
+          edits_in_step_folder_only: id === "codex",
+          tool_note:
+            id === "codex"
+              ? "With Run commands on, Codex can read any file you can. Your global AGENTS.md, personal skills and “always allow” rules still apply."
+              : "Claude Code may still run shell commands that only read in the step’s folder, such as listing it or printing a file there, with “Read files” and “Run commands” off. ticketd cannot switch that off.",
+          native_turn_limit: id !== "codex",
+        },
+        permissions: (
+          HARNESS_OPTIONS.find((entry) => entry.harness_id === id)?.permission
+            ?.options ?? []
+        ).map((choice) => ({
+          id: choice.id,
+          label: choice.label,
+          description: choice.description ?? null,
+          semantics: choice.permission ?? "own_settings",
+          availability: "adapter",
+          is_default: choice.is_default,
+        })),
+      })),
     async harnessOptions(harnessId) {
       return harnessOptionsSchema.parse(
         client.options.get(harnessId) ?? {
@@ -974,13 +1006,15 @@ export function createMockChatClient(
         kind: "session",
         history: history.kind,
         count:
-          history.kind === "picked"
-            ? history.ids.length
-            : history.kind === "last_messages"
-              ? Math.min(history.count, messages.length)
-              : history.kind === "all"
-                ? messages.length
-                : 1,
+          history.kind === "none"
+            ? 0
+            : history.kind === "picked"
+              ? history.ids.length
+              : history.kind === "last_messages"
+                ? Math.min(history.count, messages.length)
+                : history.kind === "all"
+                  ? messages.length
+                  : 1,
       });
       patch(id, { activity: "idle", problem: null });
     },

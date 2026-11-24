@@ -397,6 +397,67 @@ test("an approval is answered from the dock and leaves no receipt row of its own
   expect(document.activeElement).toBe(composer("Steer Codex"));
 });
 
+test("Antigravity approval warnings stay with their choices when an answer needs retry", async () => {
+  const reason = "Review the command before approving.";
+  const allowWarning = "Adds a rule to always allow this command.";
+  const denyWarning = "Adds a rule to always deny this command.";
+  const options = [
+    { id: "once", label: "Allow once" },
+    { id: "provider-option-7", label: "Allow always", warning: allowWarning },
+    { id: "provider-option-9", label: "Deny always", warning: denyWarning },
+  ];
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Fixture Chat",
+        activity: "waiting",
+        harness: { id: "antigravity", name: "Antigravity" },
+      },
+      [{ ...approval, title: "Antigravity wants to run", reason, options }],
+    ),
+  );
+  const request = screen.getByRole("group", {
+    name: /^Antigravity wants to run/,
+    description: reason,
+  });
+  const answer = vi
+    .spyOn(client, "answer")
+    .mockRejectedValueOnce(new Error("Disconnected"));
+  const choices = within(request);
+  const seeWarnings = () => {
+    expect(choices.getByText(allowWarning)).toBeTruthy();
+    expect(choices.getByText(denyWarning)).toBeTruthy();
+    expect(
+      choices.getByRole("button", { name: "Allow once", description: /^$/ }),
+    ).toBeTruthy();
+    expect(
+      choices.getByRole("button", {
+        name: "Deny always",
+        description: denyWarning,
+      }),
+    ).toBeTruthy();
+    return choices.getByRole("button", {
+      name: "Allow always",
+      description: allowWarning,
+    });
+  };
+
+  expect(answer).not.toHaveBeenCalled();
+  fireEvent.click(seeWarnings());
+  expect(await choices.findByText("Pick again to retry.")).toBeTruthy();
+  fireEvent.click(seeWarnings());
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("group", { name: /^Antigravity wants to run/ }),
+    ).toBeNull(),
+  );
+  expect(answer.mock.calls).toEqual([
+    ["c1", "req-1", { option_id: "provider-option-7" }],
+    ["c1", "req-1", { option_id: "provider-option-7" }],
+  ]);
+});
+
 test("an expired request cannot be answered", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [{ ...approval, state: "expired" }]),
@@ -654,48 +715,164 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(button("Folder emails").textContent).toBe("emails");
 });
 
-test("lost native history resumes the same Chat in a fresh session with chosen history", async () => {
+const nativeHistoryLost = {
+  id: "c1",
+  title: "Limiter",
+  harness: { id: "antigravity", name: "Antigravity" },
+  activity: "failed",
+  problem: { kind: "history_lost", history_recovery: "start_fresh" },
+} as const;
+
+test("starting a native-only Chat fresh focuses its composer when it opens without importing past messages", async () => {
+  const user = userEvent.setup();
   const client = await open(
-    one(
-      {
-        id: "c1",
-        title: "Limiter",
-        activity: "failed",
-        problem: { kind: "history_lost" },
-      },
-      [
-        {
-          id: "u1",
-          at,
-          kind: "user",
-          text: "Add a limiter",
-          delivery: "delivered",
-        },
-        reply("r1", "Added the limiter."),
-      ],
+    one(nativeHistoryLost, [reply("r1", "Added the limiter.")]),
+  );
+  const notice = screen.getByRole("alert");
+  expect(notice.textContent).toContain("without importing earlier messages");
+  expect(screen.queryByLabelText("Message Antigravity")).toBeNull();
+  noButton("Resume in a fresh session…");
+  const publishFreshSession = client.resume.bind(client);
+  let confirmResume!: () => void;
+  const pendingResume = new Promise<void>((resolve) => {
+    confirmResume = resolve;
+  });
+  const resume = vi.spyOn(client, "resume").mockReturnValueOnce(pendingResume);
+  const start = within(notice).getByRole("button", { name: "Start fresh" });
+  act(() => start.focus());
+  await user.keyboard("{Enter}");
+  expect(resume).toHaveBeenCalledWith("c1", { kind: "none" });
+
+  await act(async () => confirmResume());
+  expect(document.activeElement).toBe(start);
+  expect(screen.queryByLabelText("Message Antigravity")).toBeNull();
+
+  await act(() => publishFreshSession("c1", { kind: "none" }));
+  const message = await screen.findByLabelText("Message Antigravity");
+  expect(document.activeElement).toBe(message);
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(conversation().getByText("Added the limiter.")).toBeTruthy();
+  expect(
+    screen.getByText("Fresh session · no earlier messages imported"),
+  ).toBeTruthy();
+  expect(
+    (await client.openChat("c1")).items.some((item) => item.kind === "user"),
+  ).toBe(false);
+});
+
+test("a fresh session preserves focus moved elsewhere while recovery is pending", async () => {
+  const user = userEvent.setup();
+  const client = await open(
+    one({
+      ...nativeHistoryLost,
+      activity: "idle",
+      problem: null,
+      queue_paused: true,
+      queue: [{ id: "q1", text: "Add a regression test." }],
+    }),
+  );
+  fireEvent.click(button("Edit in the message box"));
+  await waitFor(() =>
+    expect(composer("Message Antigravity")).toHaveProperty(
+      "value",
+      "Add a regression test.",
     ),
   );
-  expect(screen.queryByLabelText("Message Codex")).toBeNull();
-  fireEvent.click(button("Resume in a fresh session…"));
-  const dialog = await screen.findByRole("dialog", {
-    name: "Resume in a fresh session",
+  act(() =>
+    client.patch("c1", {
+      activity: nativeHistoryLost.activity,
+      problem: nativeHistoryLost.problem,
+    }),
+  );
+
+  const publishFreshSession = client.resume.bind(client);
+  let confirmResume!: () => void;
+  const pendingResume = new Promise<void>((resolve) => {
+    confirmResume = resolve;
   });
-  const choices = within(dialog).getByRole("radiogroup", {
-    name: "History to give the new session",
-  });
-  expect(
-    within(choices).getByRole("radio", { name: /The last response/ }),
-  ).toHaveProperty("checked", true);
-  expect(within(choices).getByText("2 messages")).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
-  expect(
-    await screen.findByText("Fresh session · started with the last response"),
-  ).toBeTruthy();
-  expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
-  // Nothing was sent on the person's behalf.
-  const { items } = await client.openChat("c1");
-  expect(items.filter((item) => item.kind === "user")).toHaveLength(1);
+  vi.spyOn(client, "resume").mockReturnValueOnce(pendingResume);
+  act(() => button("Start fresh").focus());
+  await user.keyboard("{Enter}");
+  const other = button("Expand Chat");
+  act(() => other.focus());
+
+  await act(() => publishFreshSession("c1", { kind: "none" }));
+  expect(composer("Message Antigravity")).toHaveProperty(
+    "value",
+    "Add a regression test.",
+  );
+  expect(document.activeElement).toBe(other);
+  await act(async () => confirmResume());
+  expect(document.activeElement).toBe(other);
 });
+
+test("a failed fresh session keeps the recovery action focused and shows the failure", async () => {
+  const user = userEvent.setup();
+  const client = await open(one(nativeHistoryLost));
+  vi.spyOn(client, "resume").mockRejectedValueOnce(
+    new Error("Session refused"),
+  );
+  const start = button("Start fresh");
+  act(() => start.focus());
+  await user.keyboard("{Enter}");
+
+  const failure = await screen.findByText("Couldn't start a fresh session.");
+  expect(failure.closest('[role="alert"]')).toBeTruthy();
+  expect(document.activeElement).toBe(start);
+  expect(screen.queryByLabelText("Message Antigravity")).toBeNull();
+});
+
+test.each([
+  { id: "codex", name: "Codex" },
+  { id: "claude-code", name: "Claude Code" },
+])(
+  "$name resumes the same Chat in a fresh session with chosen history",
+  async (harness) => {
+    const client = await open(
+      one(
+        {
+          id: "c1",
+          title: "Limiter",
+          harness,
+          activity: "failed",
+          problem: { kind: "history_lost", history_recovery: "select_history" },
+        },
+        [
+          {
+            id: "u1",
+            at,
+            kind: "user",
+            text: "Add a limiter",
+            delivery: "delivered",
+          },
+          reply("r1", "Added the limiter."),
+        ],
+      ),
+    );
+    expect(screen.queryByLabelText(`Message ${harness.name}`)).toBeNull();
+    fireEvent.click(button("Resume in a fresh session…"));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Resume in a fresh session",
+    });
+    const choices = within(dialog).getByRole("radiogroup", {
+      name: "History to give the new session",
+    });
+    expect(
+      within(choices).getByRole("radio", { name: /The last response/ }),
+    ).toHaveProperty("checked", true);
+    expect(within(choices).getByText("2 messages")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
+    expect(
+      await screen.findByText("Fresh session · started with the last response"),
+    ).toBeTruthy();
+    expect(
+      await screen.findByLabelText(`Message ${harness.name}`),
+    ).toBeTruthy();
+    // Nothing was sent on the person's behalf.
+    const { items } = await client.openChat("c1");
+    expect(items.filter((item) => item.kind === "user")).toHaveLength(1);
+  },
+);
 
 test("picking messages turns the transcript into the history picker", async () => {
   await open(
@@ -704,7 +881,7 @@ test("picking messages turns the transcript into the history picker", async () =
         id: "c1",
         title: "Limiter",
         activity: "failed",
-        problem: { kind: "history_lost" },
+        problem: { kind: "history_lost", history_recovery: "select_history" },
       },
       [
         {
@@ -995,6 +1172,102 @@ const youSaid: TranscriptItem = {
   delivery: "delivered",
   turn_id: "t1",
 };
+
+test("Antigravity's native quota diagnostic is shown once with both failure statuses", async () => {
+  const diagnostic =
+    "\n⚠ agent executor error: generating and executing: Error 429, Message: Synthetic fixture quota exhausted for this test., Status: RESOURCE_EXHAUSTED, Details: []\n";
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Native quota failure",
+        harness: { id: "antigravity", name: "Antigravity" },
+        activity: "failed",
+        problem: {
+          kind: "usage_limit",
+          past: true,
+          message: diagnostic,
+          resets_at: null,
+        },
+      },
+      [
+        { ...youSaid, text: "QA566_QUOTA_FINAL_STATUS" },
+        turnTiming("failed", "2026-11-10T10:00:01Z"),
+        inTurn(reply("r1", diagnostic)),
+        inTurn({
+          id: "t1",
+          at: "2026-11-10T10:00:01Z",
+          kind: "marker",
+          reason: "failed",
+          message: diagnostic,
+        }),
+      ],
+    ),
+  );
+
+  const notice = screen.getByRole("alert");
+  const pane = notice.closest(".chat-body");
+  expect(pane?.textContent?.split(diagnostic.trim())).toHaveLength(2);
+  expect(conversation().getByText(diagnostic.trim())).toBeTruthy();
+  expect(
+    conversation().getByText(
+      "This turn failed. What it finished before that is kept.",
+    ),
+  ).toBeTruthy();
+  expect(notice.textContent).toContain("Antigravity reached your usage limit");
+  expect(notice.textContent).toContain("It didn't say when it resets.");
+
+  act(() => client.patch("c1", { activity: "idle", problem: null }));
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  expect(pane?.textContent?.split(diagnostic.trim())).toHaveLength(2);
+});
+
+test.each([
+  { id: "antigravity", name: "Antigravity" },
+  { id: "codex", name: "Codex" },
+])(
+  "$name keeps distinct assistant text, turn failure detail and usage-limit detail",
+  async (harness) => {
+    await open(
+      one(
+        {
+          id: "c1",
+          title: "Quota failure with partial work",
+          harness,
+          activity: "failed",
+          problem: {
+            kind: "usage_limit",
+            past: true,
+            message: "The account's usage limit was reached",
+          },
+        },
+        [
+          youSaid,
+          turnTiming("failed", "2026-11-10T10:00:01Z"),
+          inTurn(reply("r1", "I finished the draft.")),
+          inTurn({
+            id: "t1",
+            at: "2026-11-10T10:00:01Z",
+            kind: "marker",
+            reason: "failed",
+            message: "The harness could not run the final check",
+          }),
+        ],
+      ),
+    );
+
+    expect(conversation().getByText("I finished the draft.")).toBeTruthy();
+    expect(
+      conversation().getByText(
+        /This turn failed\. The harness could not run the final check/,
+      ),
+    ).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "The account's usage limit was reached.",
+    );
+  },
+);
+
 const failedRun: Step = {
   kind: "run",
   target: "npm run test:all",
@@ -1889,6 +2162,48 @@ test("New Chat says how the harness is signed in before the first message is sen
   ).toBeTruthy();
 });
 
+test("a signed-out Antigravity Chat shows one sign-in instruction and holds its input", async () => {
+  const user = userEvent.setup();
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Antigravity Chat",
+      harness: { id: "antigravity", name: "Antigravity" },
+      problem: {
+        kind: "not_signed_in",
+        command: "agy",
+        message: "The credentials for this profile expired",
+      },
+      queue_paused: true,
+      queue: [{ id: "q1", text: "Write the changelog" }],
+    }),
+  );
+  const notice = screen.getByRole("alert");
+  expect(
+    notice.textContent?.match(/Antigravity isn't signed in/g),
+  ).toHaveLength(1);
+  expect(
+    notice.textContent?.match(/Run agy in a terminal and sign in/g),
+  ).toHaveLength(1);
+  expect(notice.textContent).toContain(
+    "The credentials for this profile expired.",
+  );
+  await user.click(
+    within(notice).getByRole("button", { name: "Copy command" }),
+  );
+  expect(await navigator.clipboard.readText()).toBe("agy");
+  await user.click(within(notice).getByRole("button", { name: "Check again" }));
+  expect(
+    within(screen.getByRole("list", { name: "Queued messages" })).getByText(
+      "Write the changelog",
+    ),
+  ).toBeTruthy();
+  expect(queueHead("Queued 1 · Paused")).toBeTruthy();
+  expect((await client.openChat("c1")).chat.problem?.kind).toBe(
+    "not_signed_in",
+  );
+});
+
 test("a Project is linked like a ticket or Document and has no page to open", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
   await linkFromMenu();
@@ -1984,6 +2299,7 @@ test("New Chat picks harness, model and effort in one composer picker and starts
       status: "not_signed_in",
       command: "codex login",
     },
+    { id: "fixture-harness", name: "Fixture Harness", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   // No radios: the harness is the picker's, beside Send.
@@ -1996,6 +2312,9 @@ test("New Chat picks harness, model and effort in one composer picker and starts
   // A harness that isn't ready is dimmed with its word.
   expect(
     within(tabs).getByRole("tab", { name: /Codex.*Not signed in/ }),
+  ).toBeTruthy();
+  expect(
+    within(tabs).getByRole("tab", { name: "Fixture Harness" }),
   ).toBeTruthy();
   fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
   fireEvent.click(await screen.findByRole("radio", { name: "High" }));
@@ -2017,6 +2336,33 @@ test("New Chat picks harness, model and effort in one composer picker and starts
       permission: "default",
     }),
   );
+});
+
+test("New Chat shows why the Antigravity model check failed beside Default", async () => {
+  localStorage.clear();
+  const client = await open([]);
+  const reason =
+    "Antigravity's model check failed (exit status: 23). Run agy models in a terminal for details.";
+  client.options.set("antigravity", {
+    harness_id: "antigravity",
+    models: [],
+    unavailable: reason,
+  });
+  client.setHarnesses([
+    { id: "antigravity", name: "Antigravity", status: "ready" },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Antigravity, model Default" }),
+  );
+
+  const picker = await screen.findByRole("dialog", {
+    name: "Harness and model",
+  });
+  expect(within(picker).getByText("Default")).toBeTruthy();
+  expect(
+    within(picker).getByText(`${reason} It will use its default model.`),
+  ).toBeTruthy();
 });
 
 test("New Chat starts with the model and effort its picker shows, even when they were already selected", async () => {

@@ -9,7 +9,7 @@ const statusSchema = z.enum(ticketStatuses);
 export const automationAgentSettingsSchema = z.object({
   name: z.string(),
   /** The harness as the Chat host names it. */
-  harness: z.enum(["claude-code", "codex"]),
+  harness: z.string().min(1),
   /** null is the harness's own default model. */
   model: z.string().nullable(),
   instructions: z.string(),
@@ -296,12 +296,6 @@ export function editSteps(
 export function definitionOf(automation: Automation): AutomationDefinition {
   return automationDefinitionSchema.parse(automation);
 }
-
-/** The harnesses by the names people know them by. */
-export const HARNESS_NAMES = {
-  "claude-code": "Claude Code",
-  codex: "Codex",
-} as const;
 
 /**
  * How a pane says how a read it makes by itself went: `what` names the read,

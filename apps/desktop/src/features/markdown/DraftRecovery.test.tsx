@@ -518,10 +518,12 @@ test("source Undo and rich/source transitions keep independent history protectio
   fireEvent.keyDown(source, { key: "z", code: "KeyZ", ctrlKey: true });
   await waitFor(() => expect(source.textContent).toContain(body));
   fireEvent.click(screen.getByRole("button", { name: "Use rich editor" }));
-  expect(
-    screen.getByRole("textbox", { name: "Markdown document rich text" })
-      .textContent,
-  ).toContain("Trace");
+  await waitFor(() =>
+    expect(
+      screen.getByRole("textbox", { name: "Markdown document rich text" })
+        .textContent,
+    ).toContain("Trace"),
+  );
   const writes = vi
     .mocked(invoke)
     .mock.calls.filter(([command]) => command === "retain_draft")

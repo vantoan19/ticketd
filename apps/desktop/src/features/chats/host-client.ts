@@ -10,6 +10,7 @@ import {
   chatSummarySchema,
   createdChatSchema,
   folderFileSchema,
+  harnessInfoSchema,
   harnessOptionsSchema,
   harnessStatusSchema,
   linkedRecordSchema,
@@ -220,6 +221,8 @@ export function createHostChatClient(
       z.array(chatSummarySchema).parse(await call("chat_list", { scope })),
     harnesses: async () =>
       z.array(harnessStatusSchema).parse(await call("chat_harnesses")),
+    harnessCatalog: async () =>
+      z.array(harnessInfoSchema).parse(await call("chat_harness_catalog")),
     harnessOptions: async (harnessId) =>
       harnessOptionsSchema.parse(
         await call("chat_harness_options", { harnessId }),

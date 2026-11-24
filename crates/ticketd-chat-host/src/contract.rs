@@ -7,8 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-/// Capacity of a runtime's event channel. A full channel backpressures the adapter's
-/// protocol reader, so the supervisor must keep receiving while commands are pending.
+/// Capacity of a runtime's event channel. The supervisor keeps receiving while
+/// commands are pending. Each adapter handles saturation in its transport.
 pub const EVENT_BUFFER: usize = 256;
 
 /// Upper bound for one [`ProviderDetail`] payload.
@@ -55,11 +55,8 @@ string_id!(
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RuntimeGeneration(pub u64);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Harness {
-    ClaudeCode,
-    Codex,
-}
+/// A registered harness's stable identity and declared policy.
+pub type Harness = &'static ticketd_core::harnesses::HarnessDescriptor;
 
 // ---------------------------------------------------------------------------
 // Inspection and capabilities
@@ -124,8 +121,6 @@ pub struct SteeringBehavior {
 pub struct Capabilities {
     /// Adding input to the active turn. Without it the supervisor queues.
     pub steering: Capability<SteeringBehavior>,
-    /// Reopening a native session in a replacement process.
-    pub native_resume: Capability<()>,
 }
 
 // ---------------------------------------------------------------------------
@@ -143,7 +138,8 @@ pub struct OpenRequest {
     /// Set for the Chat of an Automation run. `None` leaves the model, permissions and
     /// tools to the harness's own configuration, with the person there to approve.
     pub unattended: Option<Unattended>,
-    /// The person's picks for a new session; empty for the harness's own settings.
+    /// The settings to apply before opening the session for dispatch. A permission
+    /// restart carries over the session's confirmed values and any later picks.
     /// An unattended run leaves it empty: its model comes from `unattended`.
     pub settings: StartSettings,
     /// What the harness last reported in effect for this Chat, as recorded
@@ -169,21 +165,23 @@ pub struct Unattended {
     pub run_id: String,
     /// `None` is the harness's default model.
     pub model: Option<String>,
-    /// The agent's switches as saved. Codex has no command list (`any_command` and
-    /// `allowed_commands`: with `run_commands` it runs any), and no read switch of its
-    /// own: its shell does the reading.
+    /// The agent's switches as saved. Codex reads through its shell, which needs
+    /// both `run_commands` and `any_command`.
     pub tools: ticketd_core::AutomationAgentTools,
     /// How many turns the agent may take, where the harness can cap them. Codex
     /// cannot.
     pub turn_limit: u32,
 }
 
-/// Settings a new session opens with, as chosen in New Chat. `None` leaves the
-/// harness's own setting. Values are option ids the harness listed.
+/// Settings a session opens with. `None` leaves the harness's own setting.
+/// Values are option ids the harness listed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StartSettings {
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// A confirmed effort carried across a permission restart and model change.
+    /// The harness can keep the new model's default if it no longer offers this level.
+    pub retain_effort_if_supported: bool,
     pub permission: Option<String>,
 }
 
@@ -226,6 +224,7 @@ pub struct InteractionResponse {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InteractionAnswer {
     Approval(ApprovalDecision),
+    NativeApproval(String),
     Answers(Vec<QuestionAnswer>),
 }
 
@@ -276,6 +275,8 @@ pub enum Refusal {
     StaleGeneration { current: RuntimeGeneration },
     /// The expected turn is not the active turn.
     TurnMismatch { active: Option<NativeTurnId> },
+    /// The harness has not confirmed the previous start.
+    StartUnconfirmed,
     /// No live request has this identity: never issued, already answered or withdrawn.
     UnknownRequest,
     /// The effective capabilities do not include this operation.
@@ -290,6 +291,7 @@ impl Refusal {
         match self {
             Self::StaleGeneration { .. } => "the harness session had been replaced",
             Self::TurnMismatch { .. } => "the turn it was meant for had ended",
+            Self::StartUnconfirmed => "the harness has not confirmed the previous message",
             Self::UnknownRequest => "the request was no longer open",
             Self::Unsupported => "the harness can't do that here",
             Self::RuntimeClosed => "the harness session had closed",
@@ -341,6 +343,9 @@ pub enum SettingOutcome {
     Refused { reason: String },
     /// Written without an answer in time: the harness may still use the old value.
     Unconfirmed,
+    /// A permission change requires replacing the process and resuming the session.
+    /// The adapter confirms the requested settings before returning the replacement.
+    ReopenSession,
     /// This harness cannot change this setting from ticketd.
     Unsupported,
 }
@@ -424,7 +429,7 @@ pub enum EventKind {
     /// The provider process or its transport is gone. Always the last event.
     RuntimeLost {
         exit_code: Option<i32>,
-        /// Bounded tail of stderr.
+        /// Diagnostic detail, which may include a bounded tail of stderr.
         diagnostics: String,
     },
     /// A non-terminal observation about the session or a turn. It never starts, ends
@@ -604,6 +609,8 @@ impl Setting {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HarnessOptions {
     pub models: Vec<ModelChoice>,
+    /// Why model discovery failed when permission choices are still available.
+    pub model_list_error: Option<String>,
     /// `current` is the harness's own setting when it said; `unchangeable` when
     /// ticketd cannot choose it.
     pub permission: Option<Setting>,
@@ -629,6 +636,29 @@ pub struct SettingOption {
     pub permission: Option<PermissionKind>,
     /// The harness's own policy allows choosing it.
     pub allowed: bool,
+}
+
+impl SettingOption {
+    pub(crate) fn from_permission(
+        choice: &ticketd_core::harnesses::PermissionChoice,
+        allowed: bool,
+    ) -> Self {
+        use ticketd_core::harnesses::PermissionSemantics;
+        Self {
+            id: choice.id.to_owned(),
+            label: choice.label.to_owned(),
+            description: choice.description.map(str::to_owned),
+            is_default: choice.is_default,
+            permission: match choice.semantics {
+                PermissionSemantics::OwnSettings => None,
+                PermissionSemantics::Ask => Some(PermissionKind::Ask),
+                PermissionSemantics::AcceptEdits => Some(PermissionKind::AcceptEdits),
+                PermissionSemantics::ReadOnly => Some(PermissionKind::ReadOnly),
+                PermissionSemantics::FullAccess => Some(PermissionKind::FullAccess),
+            },
+            allowed,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -708,9 +738,21 @@ pub enum InteractionKind {
         /// The decisions this harness accepts for this request.
         decisions: Vec<ApprovalDecision>,
     },
+    NativeApproval {
+        description: String,
+        reason: Option<String>,
+        options: Vec<ApprovalOption>,
+    },
     Question {
         questions: Vec<Question>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalOption {
+    pub id: String,
+    pub label: String,
+    pub warning: Option<String>,
 }
 
 impl InteractionKind {
@@ -853,6 +895,20 @@ impl ProviderDetail {
         }
     }
 
+    /// A reader can compact a JSON payload to its own evidence budget before it
+    /// reaches storage. Cutting the serialized string here would break its shape.
+    pub(crate) fn from_compacted_tool_input(
+        kind: &str,
+        payload: String,
+        original_bytes: usize,
+    ) -> Self {
+        Self {
+            kind: kind.to_owned(),
+            payload,
+            original_bytes,
+        }
+    }
+
     pub fn kind(&self) -> &str {
         &self.kind
     }
@@ -945,7 +1001,8 @@ pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
         SettingOutcome::Unsupported
     }
 
-    /// Stops the owned process tree with bounded cleanup and ends the event stream.
+    /// Stops the owned process with bounded cleanup and ends the event stream.
+    /// The host may call this again to check for exit after an unconfirmed result.
     async fn close(&self) -> CloseOutcome;
 }
 

@@ -193,8 +193,10 @@ async fn a_permission_names_the_command_apart_from_why_it_is_asked() {
         [
             "turn-started local-turn-1",
             &processing("sub-1", "local-turn-1"),
+            "tool toolu_1 \"Bash\" Running None",
             "approval 7-1 \"npm test\" Some(\"Runs the project's tests\") [Allow, Deny]",
             // With only a reason given, it is the request's one description.
+            "tool toolu_2 \"WebFetch\" Running None",
             "approval 7-2 \"Fetching is not allowed by your settings\" None [Allow, Deny]",
         ]
     );
@@ -576,6 +578,7 @@ async fn a_new_session_opens_with_new_chats_picks() {
             model: Some("sonnet".to_owned()),
             effort: Some("high".to_owned()),
             permission: Some("acceptEdits".to_owned()),
+            ..StartSettings::default()
         },
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());
@@ -888,7 +891,6 @@ async fn inspection_judges_the_pairing_without_opening_a_session() {
         "the check lists its options too"
     );
     assert!(matches!(capabilities.steering, Capability::Unknown { .. }));
-    assert!(capabilities.native_resume.behavior().is_some());
 }
 
 #[test]
@@ -987,7 +989,14 @@ async fn the_built_bridge_answers_hello() {
         eprintln!("skipped: {} has not been built", bridge.display());
         return;
     }
-    let mut io = spawn(&bridge, &[], crate::stdio::Serving::Nothing).expect("the bridge starts");
+    let mut io = spawn(
+        &bridge,
+        &[],
+        crate::stdio::Serving::Nothing,
+        &ticketd_core::harnesses::CLAUDE_CODE,
+        None,
+    )
+    .expect("the bridge starts");
     let hello = b"{\"id\":\"t1\",\"cmd\":\"hello\",\"protocol\":1}\n";
     io.stdin.write_all(hello).await.expect("stdin");
     io.stdin.flush().await.expect("stdin");
@@ -1313,6 +1322,186 @@ fn a_tool_that_failed_after_a_stop_is_reported_as_such() {
         )),
         "{events:?}"
     );
+}
+
+fn recorded_step_frames() -> impl Iterator<Item = Value> {
+    fixture!("recorded-steps").lines().filter_map(|line| {
+        let mut frame: Value = serde_json::from_str(line).expect("recorded frame");
+        frame.as_object_mut()?.remove("server")
+    })
+}
+
+#[test]
+fn a_recorded_approval_can_be_read_before_its_assistant_content_arrives() {
+    use crate::{RunAction, StepAction, ToolEvidence, read_claude_steps};
+    use ticketd_core::ChatToolState;
+
+    let approval = recorded_step_frames()
+        .find(|event| event["event"] == "permission_request")
+        .expect("recorded permission");
+    let mut session = super::session::Session::default();
+    let (events, _) = session
+        .event("permission_request", &approval)
+        .expect("modeled");
+    let [
+        EventKind::TurnStarted { .. },
+        EventKind::ToolUpdated {
+            item,
+            title,
+            detail: Some(detail),
+            status: crate::ToolStatus::Running,
+            ..
+        },
+        EventKind::InteractionRequested(request),
+    ] = events.as_slice()
+    else {
+        panic!("tool evidence must arrive before the approval: {events:?}");
+    };
+    assert_eq!(request.item.as_ref(), Some(item));
+    let steps = read_claude_steps(ToolEvidence {
+        name: title,
+        input: detail.payload(),
+        output: None,
+        state: ChatToolState::Running,
+        working_directory: "/fixture/work",
+    });
+    assert_eq!(steps.len(), 1);
+    assert_eq!(steps[0].action, StepAction::Run(RunAction::Command));
+    assert_eq!(
+        steps[0].command.as_ref().expect("command").exact,
+        "touch ../approval-probe.txt"
+    );
+}
+
+#[test]
+fn completed_tool_calls_from_a_recorded_chat_have_typed_actions() {
+    use crate::{
+        FileTargets, LineCounts, ReadAction, ReadTarget, RunAction, SearchScope, SearchTarget,
+        StepAction, ToolEvidence, ToolStatus, read_claude_steps,
+    };
+    use ticketd_core::ChatToolState;
+
+    let mut session = super::session::Session::default();
+    let mut completed = Vec::new();
+    for event in recorded_step_frames() {
+        let event_name = event["event"].as_str().expect("event name");
+        let (events, _) = session.event(event_name, &event).expect("modeled");
+        completed.extend(events.into_iter().filter_map(|event| match event {
+            EventKind::ToolUpdated {
+                title,
+                status: ToolStatus::Succeeded,
+                output,
+                detail: Some(detail),
+                ..
+            } => Some(read_claude_steps(ToolEvidence {
+                name: &title,
+                input: detail.payload(),
+                output: output.as_deref(),
+                state: ChatToolState::Completed,
+                working_directory: "/fixture/work",
+            })),
+            _ => None,
+        }));
+    }
+    let [[read], [search], [edit], [write], [bash]] = completed
+        .iter()
+        .map(Vec::as_slice)
+        .collect::<Vec<_>>()
+        .as_slice()
+    else {
+        panic!("five completed tool calls, one action each");
+    };
+    let example = "/fixture/work/example.txt".to_owned();
+    assert_eq!(
+        read.action,
+        StepAction::Read(ReadAction::Files(vec![ReadTarget {
+            path: example.clone(),
+            lines: None,
+        }]))
+    );
+    assert_eq!(
+        search.action,
+        StepAction::Search {
+            targets: vec![SearchTarget {
+                query: "fixture-marker-absent-935".to_owned(),
+                scope: Some(SearchScope::Path(example.clone())),
+            }],
+            no_matches: true,
+        }
+    );
+    assert_eq!(
+        edit.action,
+        StepAction::Edit {
+            targets: FileTargets::Paths(vec![example]),
+            counts: LineCounts {
+                added: Some(1),
+                removed: Some(1),
+            },
+        }
+    );
+    assert_eq!(
+        write.action,
+        StepAction::Create {
+            targets: FileTargets::Paths(vec!["/fixture/work/large.txt".to_owned()]),
+            counts: LineCounts {
+                added: Some(220),
+                removed: Some(0),
+            },
+        }
+    );
+    assert_eq!(bash.action, StepAction::Run(RunAction::Command));
+    assert_eq!(
+        bash.command.as_ref().expect("recorded command").exact,
+        r"printf 'capture-first\n'; sleep 2; printf 'capture-second\n'; sleep 2; printf 'capture-third\n'"
+    );
+}
+
+#[test]
+fn a_recorded_large_write_keeps_its_path_and_counts_in_stored_evidence() {
+    let mut session = super::session::Session::default();
+    let mut write = None;
+    let mut seen = Vec::new();
+    for event in recorded_step_frames() {
+        let event_name = match event["event"].as_str() {
+            Some("assistant_content") if event["blocks"][0]["name"] == "Write" => {
+                let block = &event["blocks"][0];
+                assert!(block["input"]["content"].as_str().expect("file body").len() > 16 * 1024);
+                write = block["id"].as_str().map(str::to_owned);
+                "assistant_content"
+            }
+            Some("tool_result") if write.as_deref() == event["tool_use_id"].as_str() => {
+                "tool_result"
+            }
+            _ => continue,
+        };
+        let (events, _) = session.event(event_name, &event).expect("modeled");
+        seen.extend(events);
+    }
+    let evidence: Vec<_> = seen
+        .iter()
+        .filter_map(|event| match event {
+            EventKind::ToolUpdated {
+                status,
+                detail: Some(detail),
+                ..
+            } => Some((*status, detail.payload())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(evidence.len(), 2);
+    for (status, input) in evidence {
+        assert!(input.len() < 16 * 1024);
+        // The change feed encodes the saved JSON again as a string.
+        assert!(
+            serde_json::to_vec(input).expect("feed field").len() < crate::SUBSCRIBER_BACKLOG_BYTES
+        );
+        let input: Value = serde_json::from_str(input).expect("valid stored input");
+        assert_eq!(input["file_path"], "/fixture/work/large.txt");
+        assert!(input.get("content").is_none());
+        if status == crate::ToolStatus::Succeeded {
+            assert_eq!(input["ticketd_lines"], json!({"added": 220, "removed": 0}));
+        }
+    }
 }
 
 /// The lines an edit added and removed, from its result, stay with the tool so its

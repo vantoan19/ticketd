@@ -56,7 +56,7 @@ fn describe(agent: &'static Agent, home: &Path) -> AgentSkill {
         Err(error) => (None, Some(error.to_string())),
     };
     AgentSkill {
-        id: agent.id,
+        id: agent.key.as_str(),
         name: agent.name,
         path: display(&directory, home),
         detected: agent.detected(home, harness_env),
