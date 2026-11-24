@@ -311,6 +311,75 @@ async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
 }
 
 #[tokio::test]
+async fn large_approval_input_keeps_the_exact_command() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("tool")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+
+    let command = "printf '%s' 'fixture command'";
+    let path = format!("/workspace/{}", "a".repeat(3500));
+    send(
+        &mut peer,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "permission-1",
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "session-1",
+                "toolCall": {
+                    "toolCallId": "tool-1",
+                    "title": "Print a marker",
+                    "kind": "execute",
+                    "rawInput": {
+                        "CommandLine": command,
+                        "AbsolutePath": path,
+                        "TargetFile": path,
+                        "SourcePath": path,
+                        "DestinationPath": path,
+                        "WorkingDirectory": path
+                    }
+                },
+                "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]
+            }
+        }),
+    )
+    .await;
+
+    let events = drain(&mut opened.events).await;
+    let [
+        ..,
+        EventKind::ToolUpdated {
+            title,
+            detail: Some(detail),
+            ..
+        },
+        EventKind::InteractionRequested(_),
+    ] = events.as_slice()
+    else {
+        panic!("expected tool evidence followed by approval");
+    };
+    assert!(detail.payload().len() <= crate::MAX_PROVIDER_DETAIL_BYTES);
+    let steps = crate::read_tool_steps(
+        ticketd_core::harnesses::ANTIGRAVITY.key.as_str(),
+        crate::ToolEvidence {
+            name: title,
+            input: detail.payload(),
+            output: None,
+            state: ticketd_core::ChatToolState::Running,
+            working_directory: "/workspace",
+        },
+    );
+    assert_eq!(
+        steps[0].command.as_ref().map(|shell| shell.exact.as_str()),
+        Some(command)
+    );
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
 async fn forwards_the_native_warning_and_choice_for_allow_always() {
     let (mut peer, mut opened) = open(
         RESUME,

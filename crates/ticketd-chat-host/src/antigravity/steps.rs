@@ -320,6 +320,17 @@ impl Tool {
             native.content.clear();
             detail = serde_json::to_string(&native).unwrap_or_default();
         }
+        if detail.len() > MAX_PROVIDER_DETAIL_BYTES && native.kind == acp::ToolKind::Execute {
+            // An approval needs the exact command even when ancillary fields won't fit.
+            let input = native.raw_input.as_ref().unwrap_or(&Value::Null);
+            let command = COMMAND
+                .iter()
+                .find_map(|key| input[*key].as_str())
+                .unwrap_or(self.title());
+            native.raw_input = Some(json!({"CommandLine": command}));
+            native.name = None;
+            detail = serde_json::to_string(&native).unwrap_or_default();
+        }
         if detail.len() > MAX_PROVIDER_DETAIL_BYTES {
             detail.clear();
         }
