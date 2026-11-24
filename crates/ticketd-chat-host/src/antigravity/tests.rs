@@ -20,6 +20,57 @@ const MISSING_RESUME: &str =
     include_str!("../../tests/fixtures/antigravity/resume-missing-session.jsonl");
 const SIGNED_OUT: &str = include_str!("../../tests/fixtures/antigravity/signed-out.jsonl");
 
+#[cfg(unix)]
+#[tokio::test]
+async fn inspection_disables_auto_updates_for_its_version_probe() {
+    use std::fs::{self, Permissions};
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    use crate::{HarnessAdapter, Inspection};
+
+    const CHILD: &str = "TICKETD_TEST_ANTIGRAVITY_VERSION_PROBE";
+    const TEST: &str = "antigravity::tests::inspection_disables_auto_updates_for_its_version_probe";
+    if std::env::var_os(CHILD).is_some() {
+        let inspection = super::Antigravity.inspect().await;
+        assert!(
+            matches!(
+                &inspection,
+                Inspection::Installed { version: Some(version), .. } if version == "agy 1.5.15"
+            ),
+            "{inspection:?}"
+        );
+        assert_eq!(std::env::var("AGY_CLI_DISABLE_AUTO_UPDATE").unwrap(), "0");
+        return;
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("agy");
+    fs::write(
+        &executable,
+        "#!/bin/sh\n[ \"$1\" = --version ] || exit 2\n\
+         [ \"$AGY_CLI_DISABLE_AUTO_UPDATE\" = 1 ] || exit 3\n\
+         [ \"$TICKETD_TEST_ANTIGRAVITY_VERSION_PROBE\" = inherited ] || exit 4\n\
+         printf 'agy 1.5.15\\n'\n",
+    )
+    .unwrap();
+    fs::set_permissions(&executable, Permissions::from_mode(0o700)).unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", TEST])
+        .env("PATH", directory.path())
+        .env("HOME", directory.path())
+        .env(CHILD, "inherited")
+        .env("AGY_CLI_DISABLE_AUTO_UPDATE", "0")
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 fn recorded(fixture: &str) -> Vec<Value> {
     fixture
         .lines()
