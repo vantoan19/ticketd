@@ -107,12 +107,21 @@ impl HarnessAdapter for Antigravity {
     }
 
     async fn options(&self) -> Result<HarnessOptions, String> {
-        let models = match self.inspect().await {
+        let listed = match self.inspect().await {
             Inspection::Installed { executable, .. } => models::listed(&executable).await,
-            _ => Vec::new(),
+            Inspection::NotInstalled => Err("Antigravity CLI (agy) was not found".to_owned()),
+            Inspection::Incompatible { requirement, .. } => {
+                Err(format!("Install {requirement} to list models"))
+            }
+            Inspection::ProbeFailed { reason } => Err(reason),
+        };
+        let (models, model_list_error) = match listed {
+            Ok(models) => (models, None),
+            Err(reason) => (Vec::new(), Some(reason)),
         };
         Ok(HarnessOptions {
             models,
+            model_list_error,
             permission: self.permission_before_session(None, None),
         })
     }

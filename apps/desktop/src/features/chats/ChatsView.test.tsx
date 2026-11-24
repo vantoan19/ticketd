@@ -2181,6 +2181,33 @@ test("New Chat picks harness, model and effort in one composer picker and starts
   );
 });
 
+test("New Chat shows why the Antigravity model check failed beside Default", async () => {
+  localStorage.clear();
+  const client = await open([]);
+  const reason =
+    "Antigravity's model check failed (exit status: 23). Run agy models in a terminal for details.";
+  client.options.set("antigravity", {
+    harness_id: "antigravity",
+    models: [],
+    unavailable: reason,
+  });
+  client.setHarnesses([
+    { id: "antigravity", name: "Antigravity", status: "ready" },
+  ]);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Antigravity, model Default" }),
+  );
+
+  const picker = await screen.findByRole("dialog", {
+    name: "Harness and model",
+  });
+  expect(within(picker).getByText("Default")).toBeTruthy();
+  expect(
+    within(picker).getByText(`${reason} It will use its default model.`),
+  ).toBeTruthy();
+});
+
 test("New Chat starts with the model and effort its picker shows, even when they were already selected", async () => {
   // LIVE-7: the picker showed Codex's listed default, and choosing the row that
   // was already checked changed nothing, so nothing was sent and Codex ran its

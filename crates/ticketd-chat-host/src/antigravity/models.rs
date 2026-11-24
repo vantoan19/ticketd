@@ -17,29 +17,46 @@ const EFFORTS: &[(&str, &str)] = &[
     ("max", "Max"),
 ];
 
-pub(super) async fn listed(executable: &Path) -> Vec<ModelChoice> {
+pub(super) async fn listed(executable: &Path) -> Result<Vec<ModelChoice>, String> {
     let mut command = command(executable, &["models"], Serving::Nothing);
     command
         .stdin(Stdio::null())
         .stderr(Stdio::null())
         .env("AGY_CLI_DISABLE_AUTO_UPDATE", "1");
     let output = tokio::time::timeout(CHECK_TIMEOUT, async {
-        let mut child = command.spawn().ok()?;
+        let mut child = command
+            .spawn()
+            .map_err(|error| format!("Could not start Antigravity to list models ({error})"))?;
         // Allow one extra byte to distinguish a complete list at the limit from overflow.
-        let mut stdout = child.stdout.take()?.take(MAX_MODEL_LIST_BYTES as u64 + 1);
+        let mut stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "Antigravity's model check has no output stream".to_owned())?
+            .take(MAX_MODEL_LIST_BYTES as u64 + 1);
         let mut output = Vec::new();
-        stdout.read_to_end(&mut output).await.ok()?;
+        stdout
+            .read_to_end(&mut output)
+            .await
+            .map_err(|error| format!("Could not read Antigravity's model list ({error})"))?;
         if output.len() > MAX_MODEL_LIST_BYTES {
             // The command kills its child on drop, including when the probe times out.
-            return None;
+            return Err(format!(
+                "Antigravity's model output exceeded {} KiB",
+                MAX_MODEL_LIST_BYTES / 1024
+            ));
         }
-        child.wait().await.ok()?.success().then_some(output)
+        let status = child.wait().await.map_err(|error| {
+            format!("Could not get Antigravity's model check exit status ({error})")
+        })?;
+        if !status.success() {
+            return Err(format!("Antigravity's model check failed ({status})"));
+        }
+        Ok(output)
     })
-    .await;
-    match output {
-        Ok(Some(output)) => parse(&String::from_utf8_lossy(&output)),
-        _ => Vec::new(),
-    }
+    .await
+    .unwrap_or_else(|_| Err("Antigravity took too long to list models".to_owned()))
+    .map_err(|reason| format!("{reason}. Run agy models in a terminal for details."))?;
+    Ok(parse(&String::from_utf8_lossy(&output)))
 }
 
 fn option(id: &str, label: &str) -> SettingOption {
@@ -134,13 +151,15 @@ mod tests {
         let mut output = b"test-model  Test Model\n".to_vec();
         output.resize(OUTPUT_BUDGET, b'\n');
         fs::write(&listing, &output).unwrap();
-        let models = super::listed(&executable).await;
+        let models = super::listed(&executable).await.unwrap();
         assert_eq!(models.len(), 1);
         assert_eq!(models[0].model.id, "test-model");
 
         output.push(b'\n');
         fs::write(&listing, &output).unwrap();
-        assert!(super::listed(&executable).await.is_empty());
+        let reason = super::listed(&executable).await.unwrap_err();
+        assert!(reason.contains("exceeded 64 KiB"));
+        assert!(!reason.contains("Test Model") && !reason.contains("diagnostic-only"));
     }
 
     #[test]

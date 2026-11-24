@@ -647,6 +647,7 @@ pub(super) fn listed_options(models: &[Value], profiles: Option<&[Value]>) -> Ha
         Listing::Listed(profiles.to_vec())
     });
     HarnessOptions {
+        model_list_error: None,
         models: models
             .iter()
             .filter_map(|entry| {
