@@ -33,7 +33,8 @@ function catalogStore(client: ChatClient) {
     getEntries: () => snapshot.entries,
     subscribe(listener: () => void) {
       listeners.add(listener);
-      if (snapshot.status === "idle") void load();
+      // Other catalog readers can recover upon mounting after a failure.
+      void load();
       return () => listeners.delete(listener);
     },
     retry: () => void load(),
