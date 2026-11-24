@@ -117,6 +117,7 @@ export function useTicketWorkspace(
   const [source, setSourceFilter] = useState("all");
   // The connectors and what is saved for each. The source filter appears once one is saved.
   const [sourceEntries, setSourceEntries] = useState<SourceEntry[]>([]);
+  const sourceRead = useRef(0);
   const configuredSources = [
     ...new Set(
       sourceEntries
@@ -325,18 +326,21 @@ export function useTicketWorkspace(
       takeExplanation,
     ],
   );
-  useEffect(() => {
-    let active = true;
-    void sourcesClient.list().then(
+  const readSourceEntries = useCallback(async () => {
+    const request = ++sourceRead.current;
+    await sourcesClient.list().then(
       (entries) => {
-        if (active) setSourceEntries(entries);
+        if (request === sourceRead.current) setSourceEntries(entries);
       },
       () => {},
     );
+  }, []);
+  useEffect(() => {
+    void readSourceEntries();
     return () => {
-      active = false;
+      sourceRead.current += 1;
     };
-  }, [pollTick]);
+  }, [pollTick, readSourceEntries]);
   useEffect(() => {
     let active = true;
     void sourcesClient.health().then(
@@ -363,6 +367,24 @@ export function useTicketWorkspace(
   // Changes from anywhere (the CLI, an agent, another window) refetch the list
   // quietly; an unchanged workspace costs nothing here.
   useOnWorkspaceChange(() => void refresh());
+  async function sourceConnectionsChanged(added?: SourceEntry) {
+    const id = added?.saved?.id;
+    if (!added || !id) {
+      await refresh();
+      return;
+    }
+    // The save already committed. Make its settings page available while the
+    // catalog read catches up, and wait for Core to assign the next Add ID.
+    setSourceEntries((current) => [
+      ...current.filter(
+        ({ connector, saved }) =>
+          connector.provider !== added.connector.provider ||
+          (saved && saved.id !== id),
+      ),
+      { ...added, next_id: undefined },
+    ]);
+    await readSourceEntries();
+  }
   // Next past the last shown ticket opens the next one once it has loaded.
   if (pendingNext !== null && tickets.length > pendingNext) {
     const target = tickets[pendingNext];
@@ -555,6 +577,7 @@ export function useTicketWorkspace(
     sourceCounts,
     configuredSources,
     sourceEntries,
+    sourceConnectionsChanged,
     sourceRefresh,
     sourceHealth,
     refreshSources,

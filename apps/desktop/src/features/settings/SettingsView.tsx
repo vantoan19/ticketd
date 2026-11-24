@@ -2,6 +2,7 @@ import { modifierKeyLabel } from "@/lib/platform";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { useSources } from "@/features/settings/sources/use-sources";
+import type { SourceEntry } from "@/lib/api/sources";
 import { AboutPage } from "@/features/settings/pages/AboutPage";
 import { AgentSkillsPage } from "@/features/settings/pages/AgentSkillsPage";
 import { AppearancePage } from "@/features/settings/pages/AppearancePage";
@@ -55,7 +56,7 @@ export function SettingsView({
   /** Called after anything replaced the Workspace: a restore, or a download from Drive. */
   onRestore: () => Promise<void>;
   onOpenInbox: () => void;
-  onSourcesChanged?: () => Promise<void>;
+  onSourcesChanged?: (added?: SourceEntry) => Promise<void>;
 }) {
   // The parent mounts this only while Settings is open, so every page reads
   // fresh data on each visit. A restore or a download replaces the workspace

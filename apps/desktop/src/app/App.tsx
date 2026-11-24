@@ -484,6 +484,7 @@ function AppContent() {
     refresh,
     sourceHealth,
     sourceEntries,
+    sourceConnectionsChanged,
     sourceRefresh,
     refreshSources,
     create,
@@ -1248,7 +1249,9 @@ function AppContent() {
                                           onSelect={setSettingsSection}
                                           onOpenInbox={() => setView("inbox")}
                                           onRestore={replaceWorkspace}
-                                          onSourcesChanged={refresh}
+                                          onSourcesChanged={
+                                            sourceConnectionsChanged
+                                          }
                                         />
                                       )}
                                     {view === "attachments" &&

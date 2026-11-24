@@ -13116,6 +13116,56 @@ test("Settings renders the registered providers' display data as text and an iso
   expect(icon?.querySelector("script")).toBeNull();
 });
 
+test("a new connection can be configured while the shared source list is refreshing", async () => {
+  const available = { ...beaconSource, saved: null, next_id: "beacon" };
+  const source = {
+    id: "beacon",
+    name: "Work tracker",
+    provider: "beacon",
+    account: "demo",
+    config: { team: "PLATFORM" },
+    saved_at: "2026-02-01T00:00:00Z",
+  };
+  const preview = {
+    provider: "beacon",
+    account: "demo",
+    matched: 0,
+    complete: true,
+    issues: [],
+  };
+  const readAfterAdd = vi.fn(() => new Promise(() => {}));
+  let added = false;
+  await renderReviewApp({
+    list_sources: () => (added ? readAfterAdd() : [available]),
+    source_check_connection: { account: "demo" },
+    source_preview: preview,
+    add_source_connection: () => {
+      added = true;
+      return { source, preview };
+    },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Sources" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Add Beacon Tracker connection",
+    }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: source.name },
+  });
+  fireEvent.change(screen.getByPlaceholderText("e.g. PLATFORM"), {
+    target: { value: source.config.team },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByText(/No open issues match these rules/);
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
+  await screen.findByRole("heading", { name: source.name });
+  await waitFor(() => expect(readAfterAdd).toHaveBeenCalled());
+});
+
 test("a known ticket keeps its saved wrapped title and body while a fresh detail read is pending", async () => {
   const ticket = bulkTicket(1, {
     title:

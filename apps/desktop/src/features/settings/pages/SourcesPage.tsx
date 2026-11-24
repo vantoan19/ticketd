@@ -30,7 +30,7 @@ export function SourcesPage({
   onChanged,
 }: {
   onOpen: (id: string) => void;
-  onChanged?: (() => Promise<void>) | undefined;
+  onChanged?: ((added?: SourceEntry) => Promise<void>) | undefined;
 }) {
   const { entries, loading } = useSources();
   const [adding, setAdding] = useState<SourceEntry | null>(null);
@@ -63,11 +63,13 @@ export function SourcesPage({
   for (const id of removed) connections.delete(id);
 
   function record(entry: SourceEntry, source: SavedSource) {
+    const updated = { ...entry, saved: source };
     setRemoved((current) => current.filter((id) => id !== source.id));
     setChanges((current) => [
       ...current.filter(({ saved }) => saved?.id !== source.id),
-      { ...entry, saved: source },
+      updated,
     ]);
+    return updated;
   }
 
   async function saveName(entry: SourceEntry, id: string, name: string) {
@@ -107,8 +109,9 @@ export function SourcesPage({
           id: adding.next_id,
           onCancel: () => setAdding(null),
           onAdded: (source) => {
-            record(adding, source);
+            const added = record(adding, source);
             setAdding(null);
+            void onChanged?.(added);
           },
         }}
       />
