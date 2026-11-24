@@ -872,14 +872,14 @@ fn a_definite_failure_leaves_the_ticket_local_and_allows_a_later_attempt() {
     let PublicationError::Failed { source, .. } = &error else {
         panic!("expected a definite failure, got {error}");
     };
-    assert_eq!(source.code(), "forbidden");
+    assert_eq!(source.code(), "rejected");
     assert!(error.to_string().contains("remains a local ticket"));
     let after = f.ticket(&ticket.reference);
     assert!(after.source.is_none() && after.publication.is_none());
     let attempts = f.workspace.publication_attempts(&ticket.reference).unwrap();
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].state, AttemptState::Failed);
-    assert_eq!(attempts[0].failure.as_ref().unwrap().code, "forbidden");
+    assert_eq!(attempts[0].failure.as_ref().unwrap().code, "rejected");
 
     f.mode(Mode::Create);
     assert!(f.publish(&ticket.reference).is_ok());

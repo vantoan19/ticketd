@@ -263,38 +263,28 @@ fn conversation_of_an_unbound_ticket_uses_the_live_discovery_parts() {
         remote.issues.insert(1, issue);
     }
     // A synced record can arrive before the device learns the new discovery part.
-    let synced = SyncRecord::parse(
-        r#"---
-kind: ticket
-format: 1
-id: "4678954d-3fb2-4876-9ebc-4f51606ea5dc"
-ref: "T-SD9"
-title: "Synced issue"
-status: "Todo"
-source_provider: "fake"
-source_external_id: "1"
-source_locator: "owner/added#1"
-source_display: "owner/added#1"
-source_url: "https://example.test/owner/added/issues/1"
-source_origin: "imported"
-source_linked_at: "2026-01-01T00:00:00Z"
-source_authority: "external"
-source_authority_changed_at: "2026-01-01T00:00:00Z"
-source_partition: "owner/added"
-source_state_category: "open"
-source_updated_at: "2026-01-01T00:00:00Z"
----
-"#,
-    )
-    .unwrap();
+    let mut other = Workspace::open(folder.path().join("other.sqlite3")).unwrap();
+    other
+        .add_source_connection(&engine, "fake", None, None, &values("octo", "owner/added"))
+        .unwrap();
+    let imported = other
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    let reference = &imported.imported[0];
+    let ticket = other.show_ticket(reference).unwrap();
+    let synced = other
+        .export_sync_record(SyncKind::Ticket, &ticket.id)
+        .unwrap();
     workspace.apply_sync_record(&synced).unwrap();
+    assert_eq!(workspace.ticket_source_connection(reference).unwrap(), None);
+    remote.0.lock().unwrap().conversation_calls.clear();
     workspace
         .refresh_sources(&engine, &RefreshOptions::default())
         .unwrap();
     assert_eq!(remote.0.lock().unwrap().conversation_calls, [1]);
     assert_eq!(
         workspace
-            .ticket_source_connection("T-SD9")
+            .ticket_source_connection(reference)
             .unwrap()
             .as_deref(),
         Some("fake")
