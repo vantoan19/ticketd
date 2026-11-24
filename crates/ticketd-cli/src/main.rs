@@ -825,6 +825,9 @@ enum SourceCommand {
         /// With no other flag, skip the search of the destination (no network)
         #[arg(long)]
         no_search: bool,
+        /// Record the independently verified host of a legacy attempt without looking up an issue
+        #[arg(long, conflicts_with_all = ["issue", "attach", "not_created", "no_search", "accept_different", "agent"])]
+        confirm_host: Option<String>,
         /// Attach an issue whose title or description differs from what was sent. Its text
         /// then replaces the ticket's, and the ticket's own text is kept as a note
         #[arg(long)]
@@ -2270,10 +2273,23 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             command:
                 SourceCommand::Resolve {
                     ticket,
+                    confirm_host: Some(host),
+                    ..
+                },
+        } => serde_json::to_string(&workspace.confirm_publication_host(
+            &ticketd_core::source::Engine::builtin(),
+            &ticket,
+            &host,
+        )?)?,
+        Command::Source {
+            command:
+                SourceCommand::Resolve {
+                    ticket,
                     issue,
                     attach,
                     not_created,
                     no_search,
+                    confirm_host: None,
                     accept_different,
                     agent,
                 },

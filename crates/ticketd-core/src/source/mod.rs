@@ -160,6 +160,12 @@ pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(
     publication::migrate(connection)
 }
 
+pub(crate) fn migrate_publication_destination_host(
+    connection: &rusqlite::Connection,
+) -> Result<(), Error> {
+    publication::migrate_destination_host(connection)
+}
+
 /// How a provider and one of its issues are named for people: the provider's
 /// display name, where the issue lives and its short number. The locator is the
 /// connector's own, so the splitting belongs with the connector's module.

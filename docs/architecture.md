@@ -945,9 +945,9 @@ and `ticketd source status` work without the desktop.
 Publication cannot be atomic across GitHub and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks
 eligibility, resolves the destination against the current ticket and saved source,
-and saves the attempt as `in_flight` with the exact title, description and
-destination. A unique partial index allows one open attempt per ticket. The
-connector supplies the host for matching the Project remote to a listed
+and saves the attempt as `in_flight` with the exact title, description,
+destination and GitHub host. A unique partial index allows one open attempt per
+ticket. The connector supplies the host for matching the Project remote to a listed
 repository. When using this default, the write also requires a matching preview
 fingerprint. The connector's create call runs with no transaction open. A second
 short write links the confirmed issue (`external_identities` with origin
@@ -958,6 +958,13 @@ answer, an issue that could not be recorded, a crash) leaves it `in_flight` past
 its lease or `unresolved`: the ticket stays local and a second create is
 refused until the attempt is resolved. Replaying a request for an already
 published ticket returns it without calling the connector.
+
+Recovery checks the recorded host against the current connector before looking
+up any issue or ruling out creation. Format 89 recovers the host of an open
+legacy attempt when the recorded create response has an issue URL that matches
+the attempt's repository, issue locator and saved issue host. When the original
+host is unknown, it must be explicitly confirmed against the configured connector
+before recovery can proceed.
 
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only
