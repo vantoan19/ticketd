@@ -14,7 +14,8 @@ use super::{
     contract::{
         CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
         DiscoveryRequest, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
+        FetchedIssue, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
+        SourceError,
     },
     github::GithubConnector,
     schema::{ChoiceOption, ConfigValues, FieldKind, OptionSource},
@@ -30,6 +31,10 @@ const PREVIEW_SCAN_LIMIT: usize = 200;
 const PREVIEW_LIST_LIMIT: usize = 25;
 /// Most options returned for a selector.
 const OPTION_LIMIT: usize = 50;
+
+fn different_issue() -> SourceError {
+    SourceError::Protocol("the source returned a different issue than requested".into())
+}
 
 /// An issue as listed in a preview. It carries no description, so a preview
 /// never renders more of the external record than it needs to.
@@ -324,6 +329,20 @@ impl Engine {
         raw: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError> {
+        let fetched = self.fetch_tracked(provider, raw, reference)?;
+        if fetched.transferred_from.is_some() {
+            return Err(different_issue());
+        }
+        Ok(fetched.issue)
+    }
+
+    /// Only refresh can use a verified transfer to update a saved identity.
+    pub(super) fn fetch_tracked(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<FetchedIssue, SourceError> {
         let connector = self.connector(provider)?;
         if !connector
             .descriptor()
@@ -333,13 +352,14 @@ impl Engine {
             return Err(SourceError::Unsupported("fetching"));
         }
         let config = self.validate(provider, raw)?;
-        let issue = connector.fetch(&config, reference)?;
-        if issue.reference.identity != reference.identity {
-            return Err(SourceError::Protocol(
-                "the source returned a different issue than requested".into(),
-            ));
+        let fetched = connector.fetch_tracked(&config, reference)?;
+        if fetched.issue.reference.identity != reference.identity
+            && (fetched.transferred_from.as_ref() != Some(reference)
+                || fetched.issue.reference.identity.provider != reference.identity.provider)
+        {
+            return Err(different_issue());
         }
-        Ok(issue)
+        Ok(fetched)
     }
 
     /// Where `provider` can publish, for the saved configuration.

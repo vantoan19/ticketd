@@ -877,8 +877,13 @@ When a connector reports a repository, the import write matches its normalized
 and a project membership history entry in the same transaction as the new ticket.
 Refresh preserves existing project membership. It retains a previously observed
 repository while the issue's locator and URL stay the same. A changed location
-without a repository report clears the old observation. GitHub derives the web
-host from the API host. It maps `api.github.com` to `github.com` and
+without a repository report clears the old observation. For an externally owned
+ticket, refresh can follow a GitHub repository transfer even if its REST ID changes.
+This requires a permanent redirect from the saved issue path within the same API
+and a destination response that corroborates the new issue's location. Refresh
+updates provenance on the same ticket before discovery can import the destination.
+An identity already held by another ticket is reported as a conflict. GitHub
+derives the web host from the API host. It maps `api.github.com` to `github.com` and
 `api.<tenant>.ghe.com` to `<tenant>.ghe.com`. GitHub Enterprise Server uses its
 configured host. Enterprise issue identities include the web host, so issues
 with the same numeric ID on different hosts stay separate after a source change.

@@ -29,6 +29,8 @@ use serde::{Deserialize, Serialize};
 pub use connect_source::{
     ConnectSourceAction, ConnectSourceMatchCount, ConnectSourceOutcome, ConnectSourcePreview,
 };
+#[doc(hidden)]
+pub use contract::FetchedIssue;
 pub use contract::{
     CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector, ConnectorDescriptor,
     Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
