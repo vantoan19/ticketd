@@ -637,7 +637,12 @@ impl S3Transport for Held<'_> {
         };
         if let Some(reached) = reached {
             reached.send(()).unwrap();
-            self.release.lock().unwrap().recv().unwrap();
+            // A bounded wait, so a test that fails before releasing it ends instead of hanging.
+            self.release
+                .lock()
+                .unwrap()
+                .recv_timeout(std::time::Duration::from_secs(30))
+                .expect("the test releases the held listing");
         }
         self.sim.send(request)
     }
@@ -661,10 +666,14 @@ fn a_check_that_began_before_a_null_version_write_does_not_keep_its_pass() {
         .with_pause(|_| {});
     std::thread::scope(|scope| {
         let checking = scope.spawn(|| remote.check_bucket());
-        arrived.recv().unwrap();
+        arrived
+            .recv_timeout(std::time::Duration::from_secs(30))
+            .expect("the check reaches its listing");
         bench.sim.versioning(s3_sim::Versioning::Suspended);
-        assert!(put(&remote, &folder, &ticket(), None, b"one").is_err());
+        let wrote = put(&remote, &folder, &ticket(), None, b"one");
+        // Release the check before asserting, so a failed assertion cannot leave it waiting.
         release.send(()).unwrap();
+        assert!(wrote.is_err());
         checking.join().unwrap().unwrap();
     });
     assert_eq!(

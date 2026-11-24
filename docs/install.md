@@ -279,8 +279,10 @@ Give the profile no more than this. Replace `my-bucket` and the `ticketd/` prefi
 - The three multipart permissions (`s3:AbortMultipartUpload`,
   `s3:ListMultipartUploadParts` and `s3:ListBucketMultipartUploads`) are used only for
   Attachments over 16 MiB. The bucket check tries `s3:ListBucketMultipartUploads`, but
-  not the other two, so a policy that lacks them first fails when such an Attachment
-  uploads.
+  not the other two. Without `s3:ListMultipartUploadParts`, an interrupted upload
+  cannot resume. Without `s3:AbortMultipartUpload`, abandoned parts stay in the bucket,
+  and are billed, until a lifecycle rule that aborts incomplete multipart uploads
+  removes them.
 - For a bucket encrypted with a KMS key, also allow `kms:GenerateDataKey` and
   `kms:Decrypt` on that key.
 
