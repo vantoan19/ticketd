@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { CallsToAction } from "../components/SiteChrome";
 import { ScreenZoom } from "./ScreenZoom";
 import { featureRef } from "../demo/workspace";
@@ -44,10 +45,17 @@ const integrations = [
   ],
   [
     "Google Drive",
-    "Sync the workspace between your own computers.",
+    <>
+      Optional. Attach Drive files to tickets and sync the workspace between
+      your own computers. ticketd reaches only the files it creates or you
+      choose.{" "}
+      <a href={siteUrl("/docs/reference/privacy")}>
+        How ticketd uses Google data
+      </a>
+    </>,
     "/docs/concepts/context#workspace-sync",
   ],
-] as const;
+] as const satisfies readonly (readonly [string, ReactNode, string])[];
 export function Foundations() {
   return (
     <section className="foundations" aria-label="About ticketd">

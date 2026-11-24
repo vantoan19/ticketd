@@ -16,7 +16,7 @@
     "tauri": "node scripts/tauri.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint . --max-warnings 0",
-    "test": "vitest run --passWithNoTests"
+    "test": "vitest run"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.2",

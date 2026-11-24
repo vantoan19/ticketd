@@ -33,7 +33,7 @@ export function seedWorkspace(directory, cli) {
   try {
     // Set a repeatable installation identity before the first Ticket is issued.
     db.prepare(
-      "UPDATE device SET code = 'LG', issued = 8 WHERE id = 1 AND issued = 0",
+      "UPDATE device SET code = 'RL', issued = 8 WHERE id = 1 AND issued = 0",
     ).run();
   } finally {
     db.close();
@@ -46,7 +46,12 @@ export function seedWorkspace(directory, cli) {
     "--body",
     specification,
   );
-  run("plan", "purpose", plan.id, "Make repeated sign-in attempts safe.");
+  run(
+    "plan",
+    "purpose",
+    plan.id,
+    "Keep the API responsive under request bursts.",
+  );
   run("plan", "spec", plan.id, spec.id);
   for (const ticket of demoTickets(0)) {
     const made = run("create", ticket.title, "--plan", plan.id);
@@ -61,9 +66,9 @@ export function seedWorkspace(directory, cli) {
       ticket.status,
     );
   }
-  run("set-parent", "T-LG14", "--parent", featureRef);
+  run("set-parent", "T-RL14", "--parent", featureRef);
   run("add-dependency", featureRef, dependentRef);
-  run("add-dependency", dependentRef, "T-LG10");
+  run("add-dependency", dependentRef, "T-RL10");
   run("document", "link-ticket", spec.id, featureRef);
   execFileSync(cli, ["write", "-"], {
     cwd: directory,
@@ -109,7 +114,7 @@ export function seedWorkspace(directory, cli) {
     "--name",
     "Limiter branch",
     "--value",
-    "auth/login-limiter",
+    "api/rate-limiter",
     "--agent",
     agentName,
   );
