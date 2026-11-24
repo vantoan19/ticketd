@@ -240,6 +240,118 @@ fn a_provider_account_id_deduplicates_different_display_names() {
 }
 
 #[test]
+fn conversation_of_an_unbound_ticket_uses_the_live_discovery_parts() {
+    let remote = fake_source::FakeSource::default();
+    let mut engine = Engine::new();
+    engine.register(Box::new(remote.clone())).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(folder.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            "fake",
+            None,
+            None,
+            &values("octo", "owner/previous"),
+        )
+        .unwrap();
+    let issue = fake_source::issue_in("owner/added", 1, "Issue from the new part");
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote.checked_partitions = Some(vec!["owner/added".into()]);
+        remote.matching.push(1);
+        remote.issues.insert(1, issue);
+    }
+    // A synced record can arrive before the device learns the new discovery part.
+    let synced = SyncRecord::parse(
+        r#"---
+kind: ticket
+format: 1
+id: "4678954d-3fb2-4876-9ebc-4f51606ea5dc"
+ref: "T-SD9"
+title: "Synced issue"
+status: "Todo"
+source_provider: "fake"
+source_external_id: "1"
+source_locator: "owner/added#1"
+source_display: "owner/added#1"
+source_url: "https://example.test/owner/added/issues/1"
+source_origin: "imported"
+source_linked_at: "2026-01-01T00:00:00Z"
+source_authority: "external"
+source_authority_changed_at: "2026-01-01T00:00:00Z"
+source_partition: "owner/added"
+source_state_category: "open"
+source_updated_at: "2026-01-01T00:00:00Z"
+---
+"#,
+    )
+    .unwrap();
+    workspace.apply_sync_record(&synced).unwrap();
+    workspace
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(remote.0.lock().unwrap().conversation_calls, [1]);
+    assert_eq!(
+        workspace
+            .ticket_source_connection("T-SD9")
+            .unwrap()
+            .as_deref(),
+        Some("fake")
+    );
+}
+
+#[test]
+fn conversation_survives_removal_of_the_first_connection_that_found_an_issue() {
+    let remote = fake_source::FakeSource::default();
+    let mut engine = Engine::new();
+    engine.register(Box::new(remote.clone())).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    remote.0.lock().unwrap().account_from_assignee = true;
+    for account in ["alice", "bob"] {
+        workspace
+            .add_source_connection(
+                &engine,
+                "fake",
+                None,
+                None,
+                &values(account, "owner/shared"),
+            )
+            .unwrap();
+    }
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote
+            .issues
+            .insert(1, fake_source::issue_in("owner/shared", 1, "Shared issue"));
+        remote.matching.push(1);
+        remote.before_conversation.insert(
+            1,
+            std::sync::Arc::new(move || {
+                Workspace::open(&path)
+                    .unwrap()
+                    .remove_source_connection("fake")
+                    .unwrap();
+            }),
+        );
+    }
+    let report = workspace
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(report.imported.len(), 1);
+    assert_eq!(
+        workspace
+            .ticket_source_connection(&report.imported[0])
+            .unwrap()
+            .as_deref(),
+        Some("fake-2")
+    );
+    assert_eq!(remote.0.lock().unwrap().conversation_calls, [1, 1]);
+}
+
+#[test]
 fn publication_review_uses_the_bound_connection_until_it_is_removed() {
     let source = fake_source::FakeSource::default();
     {

@@ -1026,7 +1026,6 @@ impl Workspace {
             )
         };
         let mut gathered = Vec::new();
-        let mut conversations = HashSet::new();
         for pair in jobs.chunks(2) {
             engine.check_refresh_canceled()?;
             let batches = if let [first, second] = pair {
@@ -1053,7 +1052,6 @@ impl Workspace {
                         &scoped,
                         source,
                         &tracked,
-                        &mut conversations,
                         &mut batch,
                         received_at,
                     )?;
@@ -1361,23 +1359,29 @@ fn gather_conversations(
     engine: &Engine,
     source: &super::ConfiguredSource,
     tracked: &[Tracked],
-    conversations: &mut HashSet<(String, String)>,
     gathered: &mut Gathered,
     received_at: &dyn Fn() -> Option<String>,
 ) -> Result<(), Error> {
-    let due: Vec<ExternalIssue> = gathered.issues.clone();
-    for issue in due {
+    let checked_partitions = gathered
+        .configurations
+        .get(&source.saved.provider)
+        .and_then(Option::as_ref)
+        .and_then(|check| check.derived.as_ref())
+        .map(|derived| derived.partitions.as_slice());
+    // Another connection's batch may be discarded before apply. Each eligible
+    // batch needs a conversation from its own account.
+    let mut seen = HashSet::new();
+    for issue in &gathered.issues {
         engine.check_refresh_canceled()?;
         let identity = &issue.reference.identity;
-        // Overlapping discovery can return the same new issue before either
-        // batch is applied. The first eligible connection will take its route.
         if !issue_can_refresh(
             connection,
-            &issue,
+            issue,
             &gathered.partitions,
             Some(&source.saved.id),
             false,
-        )? || !conversations.insert((identity.provider.clone(), identity.id.clone()))
+            checked_partitions,
+        )? || !seen.insert(&identity.id)
         {
             continue;
         }
@@ -1519,6 +1523,7 @@ fn issue_can_refresh(
     discovery: &HashMap<(String, String), String>,
     source_id: Option<&str>,
     replaced_config: bool,
+    checked_partitions: Option<&[String]>,
 ) -> Result<bool, Error> {
     let reference = &issue.reference;
     let identity = &reference.identity;
@@ -1543,6 +1548,9 @@ fn issue_can_refresh(
     let removed = super::connection_removed_at(connection, &id)?.is_some();
     let discovered = discovery.contains_key(&(identity.provider.clone(), identity.id.clone()));
     if !replaced_config && discovered && (removed || !bound) {
+        if let Some(partitions) = checked_partitions {
+            return Ok(partitions.contains(&reference.partition));
+        }
         return Ok(source_id
             .map(|id| super::configured_source(connection, id))
             .transpose()?
@@ -1650,6 +1658,7 @@ impl Workspace {
                     &gathered.partitions,
                     source_id,
                     replaced_config,
+                    None,
                 )? {
                     continue;
                 }

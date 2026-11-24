@@ -66,6 +66,7 @@ pub struct Remote {
     pub account_from_assignee: bool,
     pub account_id: Option<String>,
     pub rate_limited_account: Option<String>,
+    pub checked_partitions: Option<Vec<String>>,
     pub publish_destinations: Option<Vec<String>>,
     pub after_check: Option<Hook>,
     pub validate_config: Option<fn(&ConfigValues) -> Vec<FieldIssue>>,
@@ -178,6 +179,7 @@ impl Connector for FakeSource {
             account_from_assignee,
             account_id,
             rate_limited_account,
+            checked_partitions,
         ) = {
             let mut remote = self.0.lock().unwrap();
             (
@@ -187,6 +189,7 @@ impl Connector for FakeSource {
                 remote.account_from_assignee,
                 remote.account_id.clone(),
                 remote.rate_limited_account.clone(),
+                remote.checked_partitions.clone(),
             )
         };
         if let Some(hook) = hook {
@@ -206,10 +209,12 @@ impl Connector for FakeSource {
         if rate_limited_account.as_deref() == Some(account) {
             return Err(Failure::RateLimited(Some(1800)).error());
         }
-        let partitions: Vec<String> = strings(config, "repositories")
-            .into_iter()
-            .map(str::to_owned)
-            .collect();
+        let partitions = checked_partitions.unwrap_or_else(|| {
+            strings(config, "repositories")
+                .into_iter()
+                .map(str::to_owned)
+                .collect()
+        });
         Ok(ConnectionCheck {
             connection: ConnectionInfo {
                 account: account.into(),
