@@ -318,9 +318,11 @@ impl Session {
         ]
         .into_iter()
         .flatten()
-        .chain(options.iter().filter_map(|option| {
-            option.meta.as_ref()?.get("agy.security.warning")?.as_str()
-        }))
+        .chain(
+            options
+                .iter()
+                .filter_map(|option| option.meta.as_ref()?.get("agy.security.warning")?.as_str()),
+        )
         .collect::<Vec<_>>()
         .join("\n");
         if !self.runtime.register_request(
