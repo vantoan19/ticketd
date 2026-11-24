@@ -168,6 +168,9 @@ fn installs_only_after_consent_and_refuses_a_changed_install() {
     let example =
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/ticket-source-example-ts");
     let tracker = fs::read_to_string(example.join("tracker.ts")).unwrap();
+    // An optional capability from a newer extension must not prevent this
+    // host from installing it and using the capabilities it already knows.
+    let tracker = tracker.replace("capabilities: [", "capabilities: [\"future_optional\", ");
     fs::write(
         package.join("tracker.ts"),
         format!(

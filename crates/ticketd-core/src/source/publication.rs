@@ -429,8 +429,8 @@ pub struct PublicationReview {
     /// Issues in the destination whose title or description equals what was sent.
     /// While any exists, "not created" is refused.
     pub candidates: Vec<PublicationCandidate>,
-    /// Other issues the connected account created in the window. For information:
-    /// they do not block "not created" and can still be attached.
+    /// Other issues the connected account created in the window. They may be
+    /// edited results of the attempt, so they block "not created" and can be attached.
     pub other_recent: Vec<PublicationCandidate>,
     /// `None` when no search ran or it failed; `Some(true)` when the whole
     /// window was read and enough time has passed for a just-created issue to be
@@ -575,8 +575,10 @@ pub(crate) fn awaited_by_open_attempt(
     issue: &ExternalIssue,
 ) -> Result<bool, Error> {
     let mut statement = connection.prepare(
-        "SELECT a.title, a.body, COALESCE(c.tracker_started_at, a.started_at)
+        "SELECT a.title, a.body, COALESCE(c.tracker_started_at, a.started_at),
+                a.destination, s.derived_configuration
          FROM publication_attempts a LEFT JOIN publication_connections c ON c.attempt_id = a.id
+         LEFT JOIN source_connections s ON s.id = c.connection_id
          WHERE a.provider = ?1 AND a.status IN ('in_flight', 'unresolved')",
     )?;
     let attempts = statement
@@ -585,14 +587,37 @@ pub(crate) fn awaited_by_open_attempt(
                 row.get::<_, String>(0)?,
                 row.get::<_, String>(1)?,
                 row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
             ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    Ok(attempts.iter().any(|(title, body, started_at)| {
-        !predates(&issue.created_at, started_at)
-            && (plain(&issue.title) == plain(title)
-                || (!plain(body).is_empty() && plain(&issue.body) == plain(body)))
-    }))
+    for (title, body, started_at, destination, configuration) in attempts {
+        let partition = &issue.reference.partition;
+        if let Some(configuration) = configuration
+            && !partition.is_empty()
+        {
+            let configuration: super::DerivedConfiguration = serde_json::from_str(&configuration)?;
+            let rules = &configuration.publication;
+            // Only use a partition as evidence when the connector's saved
+            // discovery parts actually identify the publication destination.
+            if configuration
+                .partitions
+                .iter()
+                .any(|part| same_destination(rules, part, &destination))
+                && !same_destination(rules, partition, &destination)
+            {
+                continue;
+            }
+        }
+        if !predates(&issue.created_at, &started_at)
+            && (plain(&issue.title) == plain(&title)
+                || (!plain(&body).is_empty() && plain(&issue.body) == plain(&body)))
+        {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Step 26: publication attempts.
@@ -1193,7 +1218,19 @@ impl Workspace {
         // write the workspace meanwhile and sees the attempt in flight.
         let (result, sent) = match started.source.check(engine) {
             Ok((scoped, checked)) => {
-                match self.claim_dispatch(&started, &checked.connection, options.now.as_deref()) {
+                let claim = if destination_refusal(
+                    &checked.derived.publication,
+                    &started.request.destination,
+                )
+                .is_some()
+                {
+                    Err(SourceError::NotSent(
+                        "the selected destination is no longer available. Preview publication again".into(),
+                    ))
+                } else {
+                    self.claim_dispatch(&started, &checked.connection, options.now.as_deref())
+                };
+                match claim {
                     Ok(deadline) => (
                         scoped.publish_before(
                             provider,
@@ -1454,7 +1491,7 @@ impl Workspace {
              external_id = COALESCE(?6, external_id), locator = COALESCE(?7, locator), display = COALESCE(?8, display), url = COALESCE(?9, url), \
              partition = COALESCE(?11, partition), \
              lease_expires_at = CASE WHEN status = 'in_flight' AND ?2 = 'unresolved'
-                  THEN MAX(?3, strftime('%Y-%m-%dT%H:%M:%fZ', started_at, ?12))
+                  THEN MAX(lease_expires_at, ?3, strftime('%Y-%m-%dT%H:%M:%fZ', started_at, ?12))
                   ELSE lease_expires_at END \
              WHERE id = ?1 AND (status IN ('in_flight', 'unresolved') \
                 OR (status = 'failed' AND failure_code = ?10 AND ?6 IS NOT NULL \
@@ -1636,6 +1673,7 @@ impl Workspace {
             && source.is_some()
             && attempt.issue.is_none()
             && candidates.is_empty()
+            && other_recent.is_empty()
             && !search_blocks;
         let conflict = attempt
             .failure
@@ -1678,7 +1716,7 @@ impl Workspace {
                     "The original publication connection is unavailable on this desktop.".into()
                 } else if attempt.issue.is_some() {
                     "Not possible: the issue is known to exist.".into()
-                } else if !candidates.is_empty() {
+                } else if !candidates.is_empty() || !other_recent.is_empty() {
                     "Not possible: issues that may be this publication already exist.".into()
                 } else if lookup_failure.is_some() {
                     format!(
@@ -1691,12 +1729,12 @@ impl Workspace {
                     )
                 } else if candidates_complete == Some(false) {
                     format!(
-                        "Not possible: only part of the recent issues in {} could be read.",
+                        "Not possible: {name} could not verify that no issue was created in {}.",
                         attempt.display_destination()
                     )
                 } else {
                     format!(
-                        "Only when {name}'s recent issues in {} can be read completely and none matches. Anything less leaves this unresolved.",
+                        "Only when {name}'s recent issues in {} can be read completely and none could be the created issue.",
                         attempt.display_destination()
                     )
                 },
@@ -2082,16 +2120,21 @@ impl Workspace {
         let found = engine
             .find_published(&attempt.provider, &source.saved.config, &search)
             .map_err(unverified)?;
-        if !found.matches.is_empty() {
+        if !found.matches.is_empty() || !found.recent.is_empty() {
             return Err(publication(PublicationError::Candidates {
                 reference: ticket.reference.clone(),
                 attempt_id: attempt.id.clone(),
-                issues: found.matches.iter().map(published).collect(),
+                issues: found
+                    .matches
+                    .iter()
+                    .chain(&found.recent)
+                    .map(published)
+                    .collect(),
             }));
         }
         if !found.complete {
             return Err(unverified(SourceError::Unavailable(format!(
-                "only part of the recent issues in {} could be read",
+                "the source could not verify that no issue was created in {}",
                 attempt.display_destination()
             ))));
         }
@@ -2109,7 +2152,7 @@ impl Workspace {
                 now,
                 RULED_OUT,
                 format!(
-                    "Confirmed not created: the recent issues in {} were read completely and none matched, so a new attempt is safe.",
+                    "Confirmed not created: the recent issues in {} were read completely and none could be the result.",
                     attempt.display_destination()
                 ),
             ],
@@ -2448,13 +2491,18 @@ pub(super) fn check_destination(rules: &DestinationRules, chosen: &str) -> Resul
 
 fn destination_allowed(rules: &DestinationRules, chosen: &str) -> bool {
     rules.destinations.is_empty()
-        || rules.destinations.iter().any(|destination| {
-            if rules.case_insensitive {
-                destination.eq_ignore_ascii_case(chosen)
-            } else {
-                destination == chosen
-            }
-        })
+        || rules
+            .destinations
+            .iter()
+            .any(|destination| same_destination(rules, destination, chosen))
+}
+
+fn same_destination(rules: &DestinationRules, left: &str, right: &str) -> bool {
+    if rules.case_insensitive {
+        left.eq_ignore_ascii_case(right)
+    } else {
+        left == right
+    }
 }
 
 /// The same checks publication makes before it records an attempt.

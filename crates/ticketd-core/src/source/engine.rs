@@ -153,6 +153,11 @@ impl Engine {
 
     /// Scopes progress and cancellation to this refresh and its connection calls.
     pub fn with_refresh_control(mut self, control: super::RefreshControl) -> Self {
+        for connector in &mut self.connectors {
+            if let Some(scoped) = connector.for_refresh(&control) {
+                *connector = scoped.into();
+            }
+        }
         self.refresh = Some(control);
         self
     }
@@ -358,11 +363,7 @@ impl Engine {
             )?;
             skipped.extend(page.skipped);
             for issue in page.issues {
-                if issue.reference.identity.provider != descriptor.provider {
-                    return Err(SourceError::Protocol(
-                        "an issue named a different provider".into(),
-                    ));
-                }
+                verify_identity(provider, &issue.reference.identity)?;
                 if !seen_identities.insert(issue.reference.identity.clone()) {
                     continue;
                 }
@@ -486,6 +487,7 @@ impl Engine {
         raw: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError> {
+        verify_identity(provider, &reference.identity)?;
         let connector = self.connector(provider)?;
         if !connector
             .descriptor()
@@ -537,11 +539,7 @@ impl Engine {
             None => publication.publish(&config, request),
         };
         let issue = with_guidance(connector, result)?;
-        if issue.reference.identity.provider != provider {
-            return Err(SourceError::Protocol(
-                "the created issue named a different provider".into(),
-            ));
-        }
+        verify_identity(provider, &issue.reference.identity)?;
         if issue.state.category != StateCategory::Open {
             return Err(SourceError::Protocol(
                 "the created issue was not reported open".into(),
@@ -563,11 +561,7 @@ impl Engine {
         let publication = publication(connector)?;
         let config = connector.configuration_for_request(raw)?;
         let issue = with_guidance(connector, publication.locate(&config, destination, text))?;
-        if issue.reference.identity.provider != provider {
-            return Err(SourceError::Protocol(
-                "the issue named a different provider".into(),
-            ));
-        }
+        verify_identity(provider, &issue.reference.identity)?;
         Ok(issue)
     }
 
@@ -582,15 +576,8 @@ impl Engine {
         let publication = publication(connector)?;
         let config = connector.configuration_for_request(raw)?;
         let found = with_guidance(connector, publication.find_published(&config, search))?;
-        if found
-            .matches
-            .iter()
-            .chain(&found.recent)
-            .any(|issue| issue.reference.identity.provider != provider)
-        {
-            return Err(SourceError::Protocol(
-                "an issue named a different provider".into(),
-            ));
+        for issue in found.matches.iter().chain(&found.recent) {
+            verify_identity(provider, &issue.reference.identity)?;
         }
         Ok(found)
     }
@@ -644,6 +631,24 @@ impl Engine {
         self.find(provider)
             .ok_or_else(|| SourceError::UnknownProvider(provider.to_owned()))
     }
+}
+
+/// Reject malformed identities before any source result can reach a Workspace write.
+pub(super) fn verify_identity(
+    provider: &str,
+    identity: &ExternalIdentity,
+) -> Result<(), SourceError> {
+    if identity.provider != provider {
+        return Err(SourceError::Protocol(
+            "an issue named a different provider".into(),
+        ));
+    }
+    if identity.id.trim().is_empty() {
+        return Err(SourceError::Protocol(
+            "an issue must have a stable ID".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn describe(connector: &dyn Connector) -> SourceDescription {

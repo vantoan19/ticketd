@@ -272,24 +272,6 @@ impl GithubConnector {
         }
     }
 
-    /// How far GitHub's clock is ahead of this machine's (negative when this
-    /// machine is ahead), from the `Date` header of a request that costs nothing.
-    /// Zero when it cannot be measured.
-    fn clock_skew(&self) -> chrono::Duration {
-        let measured = (|| {
-            let response = self
-                .get(&format!("{}/rate_limit", self.api_url), "the rate limit")
-                .ok()?;
-            let server = chrono::DateTime::parse_from_rfc2822(response.header("date")?).ok()?;
-            let local = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()?;
-            let local = chrono::DateTime::from_timestamp(i64::try_from(local.as_secs()).ok()?, 0)?;
-            Some(server.with_timezone(&chrono::Utc) - local)
-        })();
-        measured.unwrap_or_else(chrono::Duration::zero)
-    }
-
     /// GitHub Enterprise Server serves GraphQL beside, not under, its REST root.
     fn graphql_url(&self) -> String {
         match self.api_url.strip_suffix("/api/v3") {
@@ -374,9 +356,7 @@ impl GithubConnector {
     fn json(&self, url: &str, subject: &str) -> Result<(Value, Option<String>), SourceError> {
         let response = self.get(url, subject)?;
         let next = response.header("link").and_then(next_link);
-        let value = serde_json::from_slice(&response.body)
-            .map_err(|_| SourceError::Protocol("GitHub returned a body that is not JSON".into()))?;
-        Ok((value, next))
+        Ok((response_json(&response)?, next))
     }
 
     fn repositories(config: &ConfigValues) -> Vec<String> {
@@ -530,10 +510,18 @@ impl Connector for GithubConnector {
     }
 
     fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionCheck, SourceError> {
-        let (user, _) = self.json(
+        let response = self.get(
             &format!("{}/user", self.api_url),
             "the signed-in GitHub user",
         )?;
+        let user = response_json(&response)?;
+        let tracker_time = response
+            .header("date")
+            .and_then(|value| chrono::DateTime::parse_from_rfc2822(value).ok())
+            .map(|time| {
+                time.to_utc()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            });
         let account = user
             .get("login")
             .and_then(Value::as_str)
@@ -554,7 +542,7 @@ impl Connector for GithubConnector {
                 account: account.to_owned(),
                 account_id: Some(account.to_ascii_lowercase()),
                 site: self.site(),
-                tracker_time: None,
+                tracker_time,
                 publication_requires_tracker_time: false,
             },
             derived: Self::derived_configuration(config),
@@ -839,26 +827,26 @@ impl Publication for GithubConnector {
     ) -> Result<PublicationCandidates, SourceError> {
         let destination = &search.request.destination;
         require_repository(destination)?;
-        // The window was written with this machine's clock. When that clock runs
-        // ahead of GitHub's, the window would start after the real creation and
-        // miss it, so it is moved back by the measured difference.
-        let since = chrono::DateTime::parse_from_rfc3339(&search.since)
-            .ok()
-            .map(|since| since + self.clock_skew().min(chrono::Duration::zero()));
-        let since_text = since.map_or_else(
-            || search.since.clone(),
-            |since| {
-                since
-                    .with_timezone(&chrono::Utc)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-            },
-        );
-        let mut url = Some(format!(
-            "{}/repos/{}/issues?state=all&sort=created&direction=desc&per_page=100&since={}",
+        // Only the tracker clock observed before creation establishes the
+        // lower bound. Older attempts can still show possible matches.
+        let since = search
+            .tracker_since
+            .as_deref()
+            .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok());
+        let mut request = format!(
+            "{}/repos/{}/issues?state=all&sort=created&direction=desc&per_page=100",
             self.api_url,
             encode_path(destination),
-            encode_component(&since_text)
-        ));
+        );
+        if let Some(since) = since {
+            let since_text = since
+                .to_utc()
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            request.push_str("&since=");
+            request.push_str(&encode_component(&since_text));
+        }
+        let mut url = Some(request);
+        let mut reliable = since.is_some();
         let subject = format!("repository {destination}");
         let mut matches = Vec::new();
         let mut recent = Vec::new();
@@ -876,18 +864,19 @@ impl Publication for GithubConnector {
                 };
                 // Newest first: the first issue older than the window ends the read.
                 let created = chrono::DateTime::parse_from_rfc3339(&issue.created_at).ok();
+                reliable &= created.is_some();
                 if let (Some(created), Some(since)) = (created, since)
                     && created < since
                 {
                     return Ok(PublicationCandidates {
                         matches,
                         recent,
-                        complete: true,
+                        complete: reliable,
                     });
                 }
                 // An issue the connected account created in the window may have been
-                // rewritten by a teammate or an automation, so it is listed and can be
-                // attached; only a text match blocks "not created".
+                // rewritten by a teammate or an automation, so it is also a
+                // candidate and blocks "not created".
                 let by_account = search.account.as_deref().is_some_and(|account| {
                     item.pointer("/user/login")
                         .and_then(Value::as_str)
@@ -904,7 +893,7 @@ impl Publication for GithubConnector {
         Ok(PublicationCandidates {
             matches,
             recent,
-            complete: url.is_none(),
+            complete: reliable && url.is_none(),
         })
     }
 }
@@ -1351,6 +1340,11 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
     };
     // An arbitrary response message can echo credentials or submitted content.
     Err(error.with_detail(format_args!("HTTP {status}")))
+}
+
+fn response_json(response: &HttpResponse) -> Result<Value, SourceError> {
+    serde_json::from_slice(&response.body)
+        .map_err(|_| SourceError::Protocol("GitHub returned a body that is not JSON".into()))
 }
 
 fn response_message(response: &HttpResponse) -> Option<String> {

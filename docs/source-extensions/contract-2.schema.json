@@ -920,7 +920,7 @@
       ]
     },
     "PublicationCandidates": {
-      "description": "What a search found. `matches` holds every issue the connector saw whose\ntitle or non-empty description equals what the attempt sent. `recent` holds\nthe other issues the connected account created in the window: they are shown\nfor information and may be attached, but never block a \"not created\" verdict.\n`complete` is true only when the connector read the whole window: then an\nempty `matches` proves that nothing was created, while an incomplete read\nproves nothing.",
+      "description": "What a search found. `matches` holds every issue the connector saw whose\ntitle or non-empty description equals what the attempt sent. `recent` holds\nother issues the connected account created in the window, including issues\nthat may have been edited since publication. `complete` describes search\ncoverage. It is true only when the connector covered every possible result\nof the attempt. Either populated list or incomplete coverage keeps a\n\"not created\" resolution unavailable.",
       "type": "object",
       "properties": {
         "complete": {

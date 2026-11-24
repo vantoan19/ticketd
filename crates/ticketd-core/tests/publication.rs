@@ -182,8 +182,19 @@ fn publication_uses_the_last_successful_connection_answers_offline() {
     assert_eq!(preview(&f).destination.as_deref(), Some("o/new"));
 
     f.fake.0.lock().unwrap().connection_error = None;
+    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
+    assert!(matches!(error, PublicationError::Failed { .. }), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("destination is no longer available")
+    );
+    assert_eq!(f.created(), 0);
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
     let sent = f.publish(&ticket.reference).unwrap();
-    assert_eq!(sent.attempt.destination, "o/new");
+    assert_eq!(sent.attempt.destination, "o/unconfirmed");
 }
 
 #[test]
@@ -1947,12 +1958,15 @@ fn attaching_the_issue_that_holds_the_sent_text_needs_no_confirmation() {
 }
 
 #[test]
-fn other_recent_issues_are_listed_but_do_not_block_not_created() {
+fn an_edited_issue_may_be_the_attempt_and_blocks_not_created() {
     let mut f = Fixture::new();
-    let ticket = f.lost_response("Never landed");
-    let other = unrelated_issue(&f, 18, "Another ticket", "Another body");
-    f.fake.0.lock().unwrap().issues.clear();
-    f.fake.0.lock().unwrap().issues.insert(18, other);
+    let ticket = f.lost_response("Initially published");
+    {
+        let mut source = f.fake.0.lock().unwrap();
+        let edited = source.issues.get_mut(&101).unwrap();
+        edited.title = "Edited title".into();
+        edited.body = "Edited body".into();
+    }
 
     let review = f
         .workspace
@@ -1960,15 +1974,30 @@ fn other_recent_issues_are_listed_but_do_not_block_not_created() {
         .unwrap();
     assert!(review.candidates.is_empty());
     assert_eq!(review.other_recent.len(), 1);
-    assert_eq!(review.other_recent[0].title, "Another ticket");
+    assert_eq!(review.other_recent[0].title, "Edited title");
     assert!(
         review
             .actions
             .iter()
-            .any(|a| a.kind == ActionKind::NotCreated && a.available)
+            .any(|a| a.kind == ActionKind::NotCreated && !a.available)
     );
-    let outcome = f.resolve(&ticket.reference, &not_created()).unwrap();
-    assert_eq!(outcome.attempt.state, AttemptState::Failed);
+    let error = publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err());
+    assert!(matches!(error, PublicationError::Candidates { .. }));
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn an_uncertain_reply_preserves_the_dispatch_lease() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let attempt = f.ticket(&ticket.reference).publication.unwrap();
+    let review = f
+        .workspace
+        .review_publication(&f.engine, &ticket.reference, false)
+        .unwrap();
+    let started = chrono::DateTime::parse_from_rfc3339(&attempt.started_at).unwrap();
+    let ready = chrono::DateTime::parse_from_rfc3339(&review.search_ready_at.unwrap()).unwrap();
+    assert!(ready - started >= chrono::Duration::minutes(6));
 }
 
 #[test]

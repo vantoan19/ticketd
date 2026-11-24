@@ -172,10 +172,9 @@ pub(crate) fn find_published(
             }
         }
         match next {
-            Ok(None) => {
-                found.complete = since.is_some();
-                break;
-            }
+            // An issue can move to another team after creation. Exhausting
+            // the original team's current issues cannot establish absence.
+            Ok(None) => break,
             Ok(Some(next)) if seen_cursors.insert(next.clone()) => cursor = Some(next),
             _ => break,
         }

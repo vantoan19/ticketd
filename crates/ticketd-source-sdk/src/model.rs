@@ -2,7 +2,7 @@
 use std::collections::BTreeMap;
 
 use crate::{ConfigSchema, ConfigValues, ValueFormat};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::value};
 
 /// The contract version this build of ticketd speaks. The engine refuses to
 /// register a connector that declares a different one.
@@ -28,8 +28,21 @@ pub struct ConnectorDescriptor {
     pub provider: String,
     pub name: String,
     pub contract_version: u32,
+    #[serde(deserialize_with = "known_capabilities")]
     pub capabilities: Vec<Capability>,
     pub schema: ConfigSchema,
+}
+
+// A future optional capability cannot invalidate the operations this host knows.
+fn known_capabilities<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<Capability>, D::Error> {
+    Ok(Vec::<String>::deserialize(deserializer)?
+        .into_iter()
+        .filter_map(|name| {
+            Capability::deserialize(value::StringDeserializer::<value::Error>::new(name)).ok()
+        })
+        .collect())
 }
 
 /// The account the connector is acting as. Never contains a credential.
@@ -334,11 +347,11 @@ pub struct PublicationSearch {
 
 /// What a search found. `matches` holds every issue the connector saw whose
 /// title or non-empty description equals what the attempt sent. `recent` holds
-/// the other issues the connected account created in the window: they are shown
-/// for information and may be attached, but never block a "not created" verdict.
-/// `complete` is true only when the connector read the whole window: then an
-/// empty `matches` proves that nothing was created, while an incomplete read
-/// proves nothing.
+/// other issues the connected account created in the window, including issues
+/// that may have been edited since publication. `complete` describes search
+/// coverage. It is true only when the connector covered every possible result
+/// of the attempt. Either populated list or incomplete coverage keeps a
+/// "not created" resolution unavailable.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct PublicationCandidates {
     pub matches: Vec<ExternalIssue>,

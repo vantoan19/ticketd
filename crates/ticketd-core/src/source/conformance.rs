@@ -9,9 +9,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Capability, ConfigValues, Connector, DiscoveryRequest, Engine, ErrorClass, ExternalIdentity,
-    ExternalIssue, ExternalRef, FieldKind, OptionSource, PublicationSearch, PublishRequest,
-    SourceError, StateCategory, publication::check_destination,
+    Capability, ConfigValues, Connector, DiscoveryRequest, Engine, ErrorClass, ExternalIssue,
+    ExternalRef, FieldKind, OptionSource, PublicationSearch, PublishRequest, SourceError,
+    StateCategory, engine::verify_identity, publication::check_destination,
 };
 
 #[cfg(test)]
@@ -577,16 +577,6 @@ fn check_publication(
             .iter()
             .any(|candidate| candidate.reference.identity == issue.reference.identity),
         "the publication recovery search did not return the issue just created",
-    )
-}
-
-pub(super) fn verify_identity(
-    provider: &str,
-    identity: &ExternalIdentity,
-) -> Result<(), SourceError> {
-    require(
-        identity.provider == provider && !identity.id.trim().is_empty(),
-        "an issue must have a stable ID under its source provider",
     )
 }
 

@@ -1228,7 +1228,7 @@ fn search_for_title(engine: &Engine) -> Result<PublicationCandidates, SourceErro
         "github",
         &config(json!({"repositories": ["o/r"]})),
         &PublicationSearch {
-            tracker_since: None,
+            tracker_since: Some("2026-03-01T00:00:00Z".into()),
             account: None,
             request: publish_request(),
             since: "2026-03-01T00:00:00Z".into(),
@@ -1277,7 +1277,7 @@ fn searching_reads_the_whole_window_and_matches_by_content() {
 }
 
 #[test]
-fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_match_blocks() {
+fn the_accounts_other_issues_in_the_window_are_listed_apart_from_text_matches() {
     let (fixture, engine) = setup(Some(TOKEN));
     let mut rewritten = created(issue(9, 9, "o/r"), "2026-03-02T00:00:00Z");
     rewritten["title"] = json!("Renamed by a teammate");
@@ -1293,15 +1293,14 @@ fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_matc
             "github",
             &config(json!({"repositories": ["o/r"]})),
             &PublicationSearch {
-                tracker_since: None,
+                tracker_since: Some("2026-03-01T00:00:00Z".into()),
                 account: Some("octo".into()),
                 request: publish_request(),
                 since: "2026-03-01T00:00:00Z".into(),
             },
         )
         .unwrap();
-    // The rewritten issue does not match the sent text, so it is listed for
-    // information only; someone else's issue is not listed at all.
+    // The rewritten issue has no text match but remains a recovery candidate.
     assert!(found.matches.is_empty());
     let ids: Vec<_> = found
         .recent
@@ -1312,29 +1311,58 @@ fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_matc
 }
 
 #[test]
-fn a_local_clock_ahead_of_githubs_moves_the_search_window_back() {
+fn a_recovery_search_uses_the_authenticated_clock_observed_at_dispatch() {
     let (fixture, engine) = setup(Some(TOKEN));
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    // GitHub says it is an hour earlier than this machine thinks.
-    let github_now = chrono::DateTime::from_timestamp(i64::try_from(now).unwrap() - 3600, 0)
-        .unwrap()
-        .to_rfc2822();
     fixture.respond(
-        &format!("{API}/rate_limit"),
-        ok_with(json!({}), &[("date", &github_now)]),
+        &format!("{API}/user"),
+        ok_with(
+            json!({ "login": "octo" }),
+            &[("date", "Sun, 01 Mar 2026 00:00:00 GMT")],
+        ),
     );
-    // Whether the search itself is answered does not matter; its window does.
-    let _ = search_for_title(&engine);
-    let urls = fixture.urls();
-    let search = urls.iter().find(|url| url.contains("since=")).unwrap();
-    let since = search.split("since=").nth(1).unwrap().replace("%3A", ":");
-    let since = chrono::DateTime::parse_from_rfc3339(&since).unwrap();
-    let expected = chrono::DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z").unwrap()
-        - chrono::Duration::seconds(3600);
-    assert!((since - expected).num_seconds().abs() <= 5, "{since}");
+    let settings = config(json!({"repositories": ["o/r"]}));
+    let checked = engine.check("github", &settings).unwrap();
+    assert_eq!(
+        checked.connection.tracker_time.as_deref(),
+        Some("2026-03-01T00:00:00Z")
+    );
+    let mut received = created(issue(9, 9, "o/r"), "2026-03-01T00:30:00Z");
+    received["title"] = json!("Escalate");
+    fixture.respond(SEARCH_URL, ok(json!([received])));
+    let found = engine
+        .find_published(
+            "github",
+            &settings,
+            &PublicationSearch {
+                tracker_since: checked.connection.tracker_time,
+                account: None,
+                request: publish_request(),
+                since: "2026-03-01T02:00:00Z".into(),
+            },
+        )
+        .unwrap();
+    assert!(found.complete);
+    assert_eq!(found.matches[0].reference.identity.id, "9");
+}
+
+#[test]
+fn an_older_attempt_without_a_tracker_clock_cannot_prove_absence() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(SEARCH_URL.split("&since=").next().unwrap(), ok(json!([])));
+    let found = engine
+        .find_published(
+            "github",
+            &config(json!({"repositories": ["o/r"]})),
+            &PublicationSearch {
+                tracker_since: None,
+                account: None,
+                request: publish_request(),
+                since: "2026-03-01T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+    assert!(found.matches.is_empty());
+    assert!(!found.complete);
 }
 
 #[test]
