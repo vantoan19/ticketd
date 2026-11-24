@@ -116,7 +116,8 @@ pub(crate) struct TurnMarks {
 #[derive(Debug)]
 enum ActiveTurn {
     Named(NativeTurnId),
-    Unnamed,
+    /// A start may be delivered, but the harness has not identified its turn.
+    Unconfirmed(SubmissionId),
 }
 
 impl<R> Default for RuntimeState<R> {
@@ -137,7 +138,7 @@ impl<R> RuntimeState<R> {
     fn active_turn_id(&self) -> Option<&NativeTurnId> {
         match &self.active {
             Some(ActiveTurn::Named(id)) => Some(id),
-            Some(ActiveTurn::Unnamed) | None => None,
+            Some(ActiveTurn::Unconfirmed(_)) | None => None,
         }
     }
 
@@ -168,12 +169,24 @@ impl<R> RuntimeState<R> {
 
     /// Completion can precede the reply that identifies the turn. A late reply
     /// must not reactivate it.
-    pub(crate) fn turn_started(&mut self, turn: Option<&NativeTurnId>) {
-        match turn {
-            Some(id) if self.ended_turns.contains(id) => {}
-            Some(id) => self.active = Some(ActiveTurn::Named(id.clone())),
-            None => self.active = Some(ActiveTurn::Unnamed),
+    pub(crate) fn turn_started(&mut self, turn: &NativeTurnId) {
+        if !self.ended_turns.contains(turn) {
+            self.active = Some(ActiveTurn::Named(turn.clone()));
         }
+    }
+
+    /// Reserve the turn as its write starts, including while the reply is late.
+    pub(crate) fn start_written(&mut self, submission: &SubmissionId) {
+        self.active = Some(ActiveTurn::Unconfirmed(submission.clone()));
+        self.submission_written(submission);
+    }
+
+    pub(crate) fn resolve_start(&mut self, submission: &SubmissionId) -> bool {
+        if matches!(&self.active, Some(ActiveTurn::Unconfirmed(written)) if written == submission) {
+            self.active = None;
+            return true;
+        }
+        false
     }
 
     /// Remembers a submission as its write starts so a provider echo can be
@@ -203,11 +216,19 @@ impl<R> RuntimeState<R> {
         submission: SubmissionId,
         turn: NativeTurnId,
     ) -> Option<EventKind> {
-        (self.written_submissions.contains(&submission) && self.correlate(&turn, &submission))
-            .then_some(EventKind::SubmissionEvidence {
+        if !self.written_submissions.contains(&submission) {
+            return None;
+        }
+        let was_unconfirmed = self.resolve_start(&submission);
+        if was_unconfirmed {
+            self.turn_started(&turn);
+        }
+        (self.correlate(&turn, &submission) || was_unconfirmed).then_some(
+            EventKind::SubmissionEvidence {
                 submission,
                 evidence: DeliveryEvidence::Processing { turn },
-            })
+            },
+        )
     }
 
     fn correlate(&mut self, turn: &NativeTurnId, submission: &SubmissionId) -> bool {
@@ -322,9 +343,7 @@ impl<R> RuntimeState<R> {
         outcome: TurnOutcome,
         evidence_from: impl FnOnce(TurnMarks) -> TurnEvidence,
     ) -> Vec<EventKind> {
-        let is_unnamed = matches!(self.active, Some(ActiveTurn::Unnamed));
-        if self.active_turn_id() == Some(&turn) || (is_unnamed && !self.ended_turns.contains(&turn))
-        {
+        if self.active_turn_id() == Some(&turn) {
             self.active = None;
         }
         if self.ended_turns.len() == MAX_REMEMBERED {
@@ -381,12 +400,12 @@ mod tests {
         let turn = NativeTurnId::new("first");
         let granted = NativeRequestId::new("granted");
         let pending = NativeRequestId::new("pending");
-        runtime.turn_started(None);
+        runtime.start_written(&SubmissionId::new("first-submission"));
         assert_eq!(
             runtime.check_submission(&SubmissionKind::StartTurn, false),
             Err(Refusal::TurnMismatch { active: None }),
         );
-        runtime.turn_started(Some(&turn));
+        runtime.turn_started(&turn);
         assert!(runtime.register_request(granted.clone(), Some(&turn), "first answer"));
         assert!(!runtime.register_request(granted.clone(), Some(&turn), "duplicate"));
         assert!(runtime.register_request(pending.clone(), Some(&turn), "no answer"));
@@ -441,7 +460,7 @@ mod tests {
             );
         }
 
-        runtime.turn_started(Some(&turn));
+        runtime.turn_started(&turn);
         assert_eq!(
             runtime.check_submission(&SubmissionKind::StartTurn, false),
             Ok(())

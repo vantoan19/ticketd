@@ -274,7 +274,8 @@ pub struct InterruptRequest {
 pub enum Refusal {
     /// The command names a generation other than this runtime's.
     StaleGeneration { current: RuntimeGeneration },
-    /// The expected turn is not the active turn.
+    /// The command conflicts with the runtime's turn state. An active turn may
+    /// still be awaiting its native identity.
     TurnMismatch { active: Option<NativeTurnId> },
     /// No live request has this identity: never issued, already answered or withdrawn.
     UnknownRequest,
