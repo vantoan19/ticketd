@@ -6,11 +6,17 @@ export type StorageName = {
   full: string;
   /** For a line that has little room: "Drive", "S3". */
   short: string;
+  /** Where a file is kept, after "in": "your Google Drive", "your S3 bucket". */
+  place: string;
 };
 
 const NAMES: Record<SyncProvider, StorageName> = {
-  google_drive: { full: "Google Drive", short: "Drive" },
-  s3: { full: "S3", short: "S3" },
+  google_drive: {
+    full: "Google Drive",
+    short: "Drive",
+    place: "your Google Drive",
+  },
+  s3: { full: "S3", short: "S3", place: "your S3 bucket" },
 };
 
 /**

@@ -63,6 +63,8 @@ import {
   useAvailability,
 } from "@/features/sync-review/availability";
 import { syncApi } from "@/lib/sync-api";
+import { storageName } from "@/features/sync/storage-name";
+import { useSyncStatus } from "@/features/sync/sync-status";
 import { AttachmentPicker } from "./AttachmentPicker";
 import { DriveReferenceDetails } from "./DriveReferenceDetails";
 import { DriveAccessRecovery } from "./DriveAccessRecovery";
@@ -179,7 +181,7 @@ function usePreview(target: PreviewTarget) {
     file && file.kind !== "external_reference" ? [file.id] : [],
   );
   const stored = file ? availability.of(file.id) : undefined;
-  // The bytes are still in Drive, or on their way: there is nothing to preview
+  // The bytes are still in the sync storage, or on their way: there is nothing to preview
   // yet. Once they arrive the preview is read again.
   const awaited = stored !== undefined && stored.state !== "downloaded";
   const absent = stored?.state === "not_downloaded" ? stored.id : "";
@@ -293,7 +295,7 @@ function usePreview(target: PreviewTarget) {
     external,
     uploadedCopy,
     gone: file ? purged(file) : false,
-    // A file still in Drive reads as missing here; it is waiting, not lost.
+    // A file still in the sync storage reads as missing here; it is waiting, not lost.
     missing:
       !awaited &&
       availability.known &&
@@ -576,6 +578,7 @@ function PreviewStage({
 }) {
   const { file, info, busy, error, external, awaited, failed } = preview;
   const type = fileType(file?.original_filename ?? "", info?.media_type);
+  const storage = storageName(useSyncStatus().status?.provider);
   const notice = file?.quarantined && !preview.gone && (
     <Alert size="compact">
       <AlertDescription>
@@ -662,7 +665,7 @@ function PreviewStage({
         <EmptyState
           icon={<FileIcon family={type.family} />}
           title={storageWord(preview.stored)}
-          description="This file is in your Google Drive."
+          description={`This file is in ${storage.place}.`}
           role="status"
           {...(preview.stored?.state === "not_downloaded" && {
             action: (
