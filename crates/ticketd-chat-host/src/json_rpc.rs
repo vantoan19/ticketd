@@ -249,10 +249,13 @@ impl<P: Peer> State<P> {
         self.closed
     }
 
-    fn disconnect(&mut self) {
+    /// Disconnects the peer and returns whether the runtime was still open.
+    fn disconnect(&mut self) -> bool {
+        let was_open = !self.closed;
         self.closed = true;
         self.pending.fail_all();
         self.peer.disconnected();
+        was_open
     }
 
     fn apply(&mut self, frame: Frame) -> (Vec<EventKind>, Option<Response>) {
@@ -415,8 +418,30 @@ impl<P: Peer> Connection<P> {
     async fn read(self: Arc<Self>, stdout: Reader, events: mpsc::Sender<RuntimeEvent>) {
         let generation = self.generation;
         let mut stdout = BufReader::new(stdout);
-        while let Ok(Some(frame)) = read_frame(&mut stdout, MAX_FRAME_BYTES).await {
-            let (kinds, response) = self.state().apply(frame);
+        let (was_open, overflow) = loop {
+            let frame = read_frame(&mut stdout, MAX_FRAME_BYTES).await;
+            let response = {
+                let mut state = self.state();
+                let Ok(Some(frame)) = frame else {
+                    break (state.disconnect(), Vec::new());
+                };
+                let (kinds, response) = state.apply(frame);
+                // Reserve the entire batch without waiting. On saturation the
+                // runtime stops here, keeping its final observed frame intact.
+                match events.try_reserve_many(kinds.len()) {
+                    Ok(permits) => {
+                        for (permit, kind) in permits.zip(kinds) {
+                            permit.send(RuntimeEvent { generation, kind });
+                        }
+                    }
+                    Err(mpsc::error::TrySendError::Full(())) if !events.is_closed() => {
+                        break (state.disconnect(), kinds);
+                    }
+                    // Some callers intentionally discard events while using RPC.
+                    Err(_) => {}
+                }
+                response
+            };
             if let Some(response) = response {
                 // A full input pipe or a slow answer must leave the reader free.
                 let connection = Arc::clone(&self);
@@ -428,21 +453,33 @@ impl<P: Peer> Connection<P> {
                     let _ = connection.write(|_| Ok(frame)).await;
                 });
             }
-            for kind in kinds {
-                // A supervisor that dropped the stream still needs the pipe drained.
-                let _ = events.send(RuntimeEvent { generation, kind }).await;
-            }
-        }
-
-        let closing = {
-            let mut state = self.state();
-            let closing = state.closed;
-            state.disconnect();
-            closing
         };
-        if !closing {
-            let kind = runtime_lost(&self.stdin, &self.child, &self.stderr).await;
-            let _ = events.send(RuntimeEvent { generation, kind }).await;
+        drop(stdout);
+        let loss = if was_open {
+            let mut loss = runtime_lost(&self.stdin, &self.child, &self.stderr).await;
+            if !overflow.is_empty()
+                && let EventKind::RuntimeLost { diagnostics, .. } = &mut loss
+            {
+                if !diagnostics.is_empty() {
+                    diagnostics.insert(0, '\n');
+                }
+                diagnostics.insert_str(0, "the harness event buffer filled");
+            }
+            Some(loss)
+        } else {
+            None
+        };
+        drop(self);
+        // No further RPC can succeed. Finish delivering the overflow batch and
+        // the terminal event after the observations already in the channel.
+        for kind in overflow.into_iter().chain(loss) {
+            if events
+                .send(RuntimeEvent { generation, kind })
+                .await
+                .is_err()
+            {
+                break;
+            }
         }
     }
 }
@@ -483,7 +520,14 @@ mod tests {
     impl Peer for EchoPeer {
         type Call = ();
 
-        fn replied(&mut self, (): (), _: &Reply, _: bool) -> Vec<EventKind> {
+        fn replied(&mut self, (): (), reply: &Reply, _: bool) -> Vec<EventKind> {
+            if matches!(reply, Ok(result) if result == "completed") {
+                return vec![EventKind::TurnEnded {
+                    turn: crate::NativeTurnId::new("turn"),
+                    outcome: crate::TurnOutcome::Completed,
+                    submissions: vec![crate::SubmissionId::new("first")],
+                }];
+            }
             Vec::new()
         }
 
@@ -491,6 +535,16 @@ mod tests {
             let response = match incoming {
                 Incoming::Request { id, method, params } if method == "example/echo" => {
                     Some(Response::Immediate(json!({"id": id, "result": params})))
+                }
+                Incoming::Notification { method, params } if method == "example/progress" => {
+                    return (
+                        vec![EventKind::TextDelta {
+                            turn: crate::NativeTurnId::new("turn"),
+                            item: crate::NativeItemId::new("item"),
+                            text: params.to_string(),
+                        }],
+                        None,
+                    );
                 }
                 _ => None,
             };
@@ -538,6 +592,79 @@ mod tests {
             command.await,
             Ok(CallOutcome::Reply(Value::Bool(true)))
         ));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_full_event_stream_preserves_reply_evidence_and_reports_saturation() {
+        let (mut peer, io) = crate::scripted::pipes();
+        let generation = RuntimeGeneration(13);
+        let (connection, mut events) = Connection::start(
+            io,
+            EchoPeer,
+            generation,
+            Options {
+                harness: &ticketd_core::harnesses::CODEX,
+                include_version: false,
+                reply_timeout: Duration::from_secs(1),
+            },
+        );
+        let call = |method| {
+            let connection = Arc::clone(&connection);
+            tokio::spawn(async move { connection.call(method, |_| Ok((json!({}), ()))).await })
+        };
+        let first = call("example/first");
+        let first_id = peer.written().await["id"].clone();
+        let second = call("example/second");
+        let second_id = peer.written().await["id"].clone();
+
+        for sequence in 0..EVENT_BUFFER {
+            let frame = json!({"method": "example/progress", "params": sequence});
+            peer.send(&format!("{frame}\n")).await;
+        }
+        peer.send("{\"id\":\"server-1\",\"method\":\"example/echo\",\"params\":true}\n")
+            .await;
+        assert_eq!(
+            peer.written().await,
+            json!({"id": "server-1", "result": true})
+        );
+
+        let first_reply = json!({"id": first_id, "result": "completed"});
+        let second_reply = json!({"id": second_id, "result": true});
+        peer.send(&format!("{first_reply}\n{second_reply}\n")).await;
+        assert!(matches!(first.await, Ok(CallOutcome::Reply(result)) if result == "completed"));
+        assert!(matches!(second.await, Ok(CallOutcome::Lost)));
+        assert!(matches!(
+            connection
+                .call("example/third", |_| Ok((json!({}), ())))
+                .await,
+            CallOutcome::Refused(Refusal::RuntimeClosed)
+        ));
+        peer.exit(23);
+
+        for sequence in 0..EVENT_BUFFER {
+            assert!(matches!(
+                events.recv().await,
+                Some(RuntimeEvent { generation: observed, kind: EventKind::TextDelta { text, .. } })
+                    if observed == generation && text == sequence.to_string()
+            ));
+        }
+        assert_eq!(
+            events.recv().await,
+            Some(RuntimeEvent {
+                generation,
+                kind: EventKind::TurnEnded {
+                    turn: crate::NativeTurnId::new("turn"),
+                    outcome: crate::TurnOutcome::Completed,
+                    submissions: vec![crate::SubmissionId::new("first")],
+                },
+            })
+        );
+        assert!(matches!(
+            events.recv().await,
+            Some(RuntimeEvent { generation: observed, kind: EventKind::RuntimeLost { exit_code: Some(23), diagnostics } })
+                if observed == generation && diagnostics.contains("event buffer")
+        ));
+        assert_eq!(events.recv().await, None);
     }
 
     #[tokio::test]

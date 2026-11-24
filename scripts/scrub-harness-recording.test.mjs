@@ -183,6 +183,58 @@ test("keeps protocol labels and known login metadata when an alias shares their 
   assert.equal(reply.server.account.subscription_type, "max");
 });
 
+test("replaces a known account alias in a protocol label", (t) => {
+  const { output, scrub } = capture(t);
+  const alias = "syntheticAccountAlias";
+  const result = scrub([
+    [1, line({ method: "thread/resume", params: { name: alias } })],
+    [2, line({ account: { displayName: alias } })],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const [request, reply] = readFileSync(output, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map(JSON.parse);
+  assert.equal(request.client.method, "thread/resume");
+  assert.equal(request.client.params.name, "fixture-account-1");
+  assert.equal(reply.server.account.displayName, request.client.params.name);
+});
+
+test("replaces a known account alias used as an identifier-shaped dictionary key", (t) => {
+  const { output, scrub } = capture(t);
+  const alias = "syntheticAccountAlias";
+  const result = scrub([
+    [2, line({ account: { displayName: alias } })],
+    [2, line({ entries: { [alias]: 42, ordinaryKey: 7 } })],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const [account, dictionary] = readFileSync(output, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map(JSON.parse);
+  assert.equal(account.server.account.displayName, "fixture-account-1");
+  assert.deepEqual(dictionary.server.entries, {
+    "fixture-account-1": 42,
+    ordinaryKey: 7,
+  });
+});
+
+test("rejects a dictionary when account alias redaction would duplicate a key", (t) => {
+  const { output, scrub } = capture(t);
+  const alias = "syntheticAccountAlias";
+  const result = scrub([
+    [2, line({ account: { displayName: alias } })],
+    [2, line({ entries: { [alias]: 42, "fixture-account-1": 7 } })],
+  ]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "Scrubbing would produce duplicate object keys.\n",
+  );
+  assert.equal(existsSync(output), false);
+});
+
 test("rejects frames with integers the scrubber cannot preserve", (t) => {
   const { output, scrub } = capture(t);
   const result = scrub([
