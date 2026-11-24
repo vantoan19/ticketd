@@ -425,6 +425,8 @@ pub enum Error {
     Remote(#[from] sync::remote::RemoteError),
     #[error("unreadable sync file: {0}")]
     SyncFile(String),
+    #[error("the legacy issue identifier is already used by an issue at a different site")]
+    SyncFileIdentityCollision,
     #[error("sync: {0}")]
     Sync(String),
     #[error(

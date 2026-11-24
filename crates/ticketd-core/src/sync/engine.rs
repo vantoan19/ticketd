@@ -291,7 +291,7 @@ fn notify_once(
 fn ticket_file_of(cause: &str) -> Option<&str> {
     let mut parts = cause.split(':');
     match (parts.next()?, parts.next()?, parts.next()?) {
-        ("unreadable" | "replaced" | "oversized", kind, id)
+        ("unreadable" | "replaced" | "oversized" | "identity-collision", kind, id)
             if kind == name(SyncKind::Ticket) && !id.is_empty() =>
         {
             Some(id)
@@ -300,12 +300,23 @@ fn ticket_file_of(cause: &str) -> Option<&str> {
     }
 }
 
+fn identity_collision_cause(kind: SyncKind, id: &str) -> String {
+    format!("identity-collision:{}:{id}", name(kind))
+}
+
+/// A collision notice holds its file even after someone reads the notice.
+pub(super) const HELD_FILE_IDS: &str = "SELECT id FROM sync_files WHERE newer
+    OR EXISTS (SELECT 1 FROM sync_notices WHERE cause = 'identity-collision:' || sync_files.kind || ':' || sync_files.id)";
+
 /// Take back the notices about a record's file in the storage that could not
 /// be read: the file reads again or is gone.
 fn withdraw_unreadable(connection: &Connection, kind: SyncKind, id: &str) -> Result<(), Error> {
     let withdrawn = connection.execute(
-        "DELETE FROM sync_notices WHERE instr(cause, ?1) = 1",
-        [format!("unreadable:{}:{id}:", name(kind))],
+        "DELETE FROM sync_notices WHERE instr(cause, ?1) = 1 OR cause = ?2",
+        [
+            format!("unreadable:{}:{id}:", name(kind)),
+            identity_collision_cause(kind, id),
+        ],
     )?;
     if withdrawn > 0 {
         touch(connection)?;
@@ -365,9 +376,7 @@ fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<
     if let Some(incoming_url) = field("source_url")
         && !crate::source::legacy_issue_origin_matches(provider, &stored_url, incoming_url)
     {
-        return Err(Error::SyncFile(
-            "the legacy issue identifier is already used by an issue at a different site".into(),
-        ));
+        return Err(Error::SyncFileIdentityCollision);
     }
     Ok((ticket != record.id).then_some(ticket))
 }
@@ -539,13 +548,21 @@ fn later_refresh(
     }
 }
 
-/// Old conflicts stored individual field values. If they have a last-synced
-/// copy of the same issue, settle its observation together with the local one.
-/// Leave provenance, status and any unrelated conflicts alone.
+fn source_identity(record: &SyncRecord) -> Option<(&SyncValue, &SyncValue)> {
+    Some((
+        record.fields.get("source_provider")?,
+        record.fields.get("source_external_id")?,
+    ))
+}
+
+/// A legacy review can be settled as a group only when its remote values are
+/// all present in the last-synced observation of the same issue. An upload may
+/// already have moved that base past the values still waiting for review.
 pub(crate) fn migrate_source_state_conflicts(connection: &Connection) -> Result<(), Error> {
     const OBSERVATION: &str =
         "kind = 'ticket' AND field IN ('source_state', 'source_closure_reason',
-        'source_updated_at', 'source_locator', 'source_display', 'source_url')";
+        'source_state_category', 'source_state_name', 'source_updated_at',
+        'source_locator', 'source_display', 'source_url')";
     let affected: Vec<String> = connection
         .prepare(&format!(
             "SELECT DISTINCT id FROM sync_conflicts WHERE {OBSERVATION}"
@@ -556,37 +573,52 @@ pub(crate) fn migrate_source_state_conflicts(connection: &Connection) -> Result<
         let kind = SyncKind::Ticket;
         let local =
             crate::sync_files::read_record_before_source_presentation(connection, kind, &id)?;
-        let remote = stored(connection, kind, &id)?.base;
-        if let (Some(local), Some(remote)) = (&local, &remote)
-            && ["source_provider", "source_external_id"]
-                .into_iter()
-                .all(|name| {
-                    local
-                        .fields
-                        .get(name)
-                        .is_some_and(|value| remote.fields.get(name) == Some(value))
-                })
+        translate_legacy_state_conflicts(connection, &id, local.as_ref())?;
+        let Some(mut local) = local else {
+            continue;
+        };
+        let Some(remote) = stored(connection, kind, &id)?.base else {
+            continue;
+        };
+        if source_identity(&local).is_none() || source_identity(&local) != source_identity(&remote)
         {
-            let mut local = local.clone();
-            let ours = refresh_fields(&local);
-            let theirs = refresh_fields(remote);
-            let later = later_refresh(ours.clone(), theirs.clone());
-            if later != ours {
-                local
-                    .fields
-                    .retain(|name, _| !REFRESHED.contains(&name.as_str()));
-                local.fields.extend(later);
-                write_source(connection, &local)?;
-            } else if later != theirs {
-                mark_dirty(connection, RecordKind::Ticket, &id)?;
-            }
-            connection.execute(
-                &format!("DELETE FROM sync_conflicts WHERE {OBSERVATION} AND id = ?1"),
-                [&id],
-            )?;
-        } else {
-            translate_legacy_state_conflicts(connection, &id, local.as_ref())?;
+            continue;
         }
+        match source_holder(connection, &remote) {
+            Ok(_) => {}
+            Err(Error::SyncFileIdentityCollision) => continue,
+            Err(error) => return Err(error),
+        }
+        let mut statement = connection.prepare(&format!(
+            "SELECT field, remote FROM sync_conflicts WHERE {OBSERVATION} AND id = ?1"
+        ))?;
+        let reviews = statement
+            .query_map([&id], |row| Ok((row.get::<_, String>(0)?, row.get(1)?)))?
+            .collect::<Result<Vec<_>, _>>()?;
+        let mut matches_remote = true;
+        for (field, value) in reviews {
+            matches_remote &= value_at(&remote, &field) == from_json(value)?.as_ref();
+        }
+        if !matches_remote {
+            continue;
+        }
+
+        let ours = refresh_fields(&local);
+        let theirs = refresh_fields(&remote);
+        let later = later_refresh(ours.clone(), theirs.clone());
+        if later != ours {
+            local
+                .fields
+                .retain(|name, _| !REFRESHED.contains(&name.as_str()));
+            local.fields.extend(later);
+            write_source(connection, &local)?;
+        } else if later != theirs {
+            mark_dirty(connection, RecordKind::Ticket, &id)?;
+        }
+        connection.execute(
+            &format!("DELETE FROM sync_conflicts WHERE {OBSERVATION} AND id = ?1"),
+            [&id],
+        )?;
     }
     Ok(())
 }
@@ -675,6 +707,36 @@ fn settle_source(
     remote: &SyncRecord,
     merged: &mut super::merge::Merged,
 ) {
+    let (our_identity, their_identity) = (source_identity(local), source_identity(remote));
+    if our_identity != their_identity {
+        let previous = base.and_then(source_identity);
+        let keep = if our_identity == previous {
+            remote
+        } else if their_identity == previous {
+            local
+        } else {
+            // Concurrent publications of the same ticket can create two
+            // different issues. The lower identity wins on every device.
+            match (our_identity, their_identity) {
+                (Some(ours), Some(theirs)) if ours <= theirs => local,
+                (_, Some(_)) => remote,
+                _ => local,
+            }
+        };
+        let source_field = |name: &str| name.starts_with("source_");
+        merged.fields.retain(|name, _| !source_field(name));
+        merged.fields.extend(
+            keep.fields
+                .iter()
+                .filter(|(name, _)| source_field(name))
+                .map(|(name, value)| (name.clone(), value.clone())),
+        );
+        merged
+            .conflicts
+            .retain(|conflict| !source_field(&conflict.field));
+        return;
+    }
+
     let (ours, theirs) = (refresh_fields(local), refresh_fields(remote));
     let before = base.map(refresh_fields).unwrap_or_default();
     if ours == theirs || ours == before || theirs == before {
@@ -869,7 +931,7 @@ fn with_device(file: &str, device: &str) -> String {
 /// A failure that condemns one file, not the run: the file is skipped with a notice.
 fn is_file_fault(error: &Error) -> bool {
     match error {
-        Error::SyncFile(_) => true,
+        Error::SyncFile(_) | Error::SyncFileIdentityCollision => true,
         Error::Database(rusqlite::Error::SqliteFailure(failure, _)) => {
             failure.code == rusqlite::ErrorCode::ConstraintViolation
         }
@@ -1121,9 +1183,14 @@ impl Workspace {
             Error::SyncFile(reason) => reason.clone(),
             error => error.to_string(),
         };
+        let cause = if matches!(error, Error::SyncFileIdentityCollision) {
+            identity_collision_cause(kind, id)
+        } else {
+            format!("unreadable:{}:{id}:{}", name(kind), file.version)
+        };
         notify(
             &transaction,
-            &format!("unreadable:{}:{id}:{}", name(kind), file.version),
+            &cause,
             &SyncNoticeKind::UnreadableFile {
                 path: format!("{}/{}", kind.table(), file.name),
                 reason,
@@ -1402,8 +1469,12 @@ impl Workspace {
                 continue;
             };
             let mut stored = stored(&self.connection, kind, &dirty.id)?;
-            if stored.newer {
-                // Stays pending until this desktop can read what is there.
+            let collision: bool = self.connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM sync_notices WHERE cause = ?1)",
+                [identity_collision_cause(kind, &dirty.id)],
+                |row| row.get(0),
+            )?;
+            if stored.newer || collision {
                 continue;
             }
             let Some(local) = local_view(&self.connection, kind, &dirty.id, &stored)? else {

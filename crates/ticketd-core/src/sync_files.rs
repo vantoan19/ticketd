@@ -1837,6 +1837,24 @@ impl Apply<'_> {
                 (created, true)
             }
         };
+        if record.kind == SyncKind::Ticket
+            && current.fields.contains_key("source_provider")
+            && ["source_provider", "source_external_id"]
+                .into_iter()
+                .any(|field| current.fields.get(field) != record.fields.get(field))
+        {
+            // Sync can select a different identity after concurrent publications.
+            // The former issue's routing, freshness and conversation do not follow it.
+            for sql in [
+                "DELETE FROM source_connection_tickets WHERE ticket_id = ?1",
+                "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
+                "DELETE FROM source_conversation WHERE ticket_id = ?1",
+                "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
+                "DELETE FROM source_sync WHERE ticket_id = ?1",
+            ] {
+                c.execute(sql, [&record.id])?;
+            }
+        }
         let (schema, _) = shape(Block::Record(record.kind), FILE_FORMAT);
         for name in schema.map(|field| field.0).chain(["body"]) {
             if present(&current.fields, name) != present(&record.fields, name) {

@@ -2344,6 +2344,23 @@ fn format_87_source_states_conversation_and_retry_results_upgrade_together() {
             VALUES ('ticket', ?1, ?2, ?3, ?4, 'Other desktop', ?5, ?5)",
             params![unresolved, field, base.map(encode), encode(remote), at]).unwrap();
     }
+    // An upload advanced the cached sync base without settling the pending
+    // review. The cached file now represents the local open observation.
+    let uploaded = format!(
+        "---\nkind: ticket\nformat: 1\nid: \"{unresolved}\"\nref: \"T-KQ10\"\n\
+         title: \"Tracked issue\"\nstatus: \"In review\"\ntrashed: false\nfollowing: false\n\
+         source_provider: \"github\"\nsource_external_id: \"T-KQ10\"\n\
+         source_locator: \"Org/Kit#10\"\nsource_display: \"Org/Kit#10\"\n\
+         source_url: \"https://example.test/issue\"\nsource_origin: \"imported\"\n\
+         source_linked_at: \"{at}\"\nsource_authority: \"external\"\n\
+         source_authority_changed_at: \"{at}\"\nsource_state: \"open\"\nsource_updated_at: \"{at}\"\n---\n"
+    );
+    ticketd_core::SyncRecord::parse(&uploaded).unwrap();
+    db.execute(
+        "INSERT INTO sync_files (kind, id, version, content) VALUES ('ticket', ?1, 'our-upload', ?2)",
+        params![unresolved, uploaded],
+    )
+    .unwrap();
     let mut f = Fixture::new();
     f.publish(issue(1, "Old snapshot"), true);
     f.refresh();

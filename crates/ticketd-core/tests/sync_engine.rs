@@ -1528,23 +1528,49 @@ fn a_synced_ticket_cannot_change_sites_under_the_same_legacy_issue_id() {
         .replace("example.test", "different-enterprise.test")
         .replace("From the tracker.", "Another tracker’s description.");
     devices.hand_edit(RemoteKind::Ticket, id, &incoming);
+    devices.workspaces[0]
+        .change_ticket(
+            "T-ZZ7",
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
 
-    assert_eq!(devices.sync(0).skipped, 1);
+    let report = devices.sync(0);
+    assert_eq!((report.skipped, report.uploaded), (1, 0));
+    assert_eq!(devices.remote_text(RemoteKind::Ticket, id).1, incoming);
     let ticket = devices.workspaces[0].show_ticket("T-ZZ7").unwrap();
+    assert_eq!(ticket.status, Status::InProgress);
     assert_eq!(ticket.body.trim(), "From the tracker.");
     assert_eq!(
         ticket.source.unwrap().url,
         "https://example.test/acme/site/issues/42"
     );
+    let notice = devices.workspaces[0].sync_notices().unwrap().remove(0);
     assert!(
-        devices.workspaces[0]
-            .sync_notices()
-            .unwrap()
-            .iter()
-            .any(|notice| {
-                matches!(&notice.notice, SyncNoticeKind::UnreadableFile { reason, .. }
-            if reason.contains("legacy issue identifier"))
-            })
+        matches!(&notice.notice, SyncNoticeKind::UnreadableFile { reason, .. }
+        if reason.contains("legacy issue identifier"))
+    );
+    devices.workspaces[0]
+        .set_sync_read(&[notice.id], true)
+        .unwrap();
+    assert_eq!(devices.sync(0).uploaded, 0);
+    assert_eq!(devices.remote_text(RemoteKind::Ticket, id).1, incoming);
+    assert_eq!(
+        devices.workspaces[0].sync_status().unwrap().state,
+        SyncState::NeedsAttention
+    );
+
+    devices.hand_edit(RemoteKind::Ticket, id, &original);
+    assert_eq!(devices.sync(0).uploaded, 1);
+    assert!(devices.workspaces[0].sync_notices().unwrap().is_empty());
+    assert!(
+        devices
+            .remote_text(RemoteKind::Ticket, id)
+            .1
+            .contains("status: \"In progress\"")
     );
 }
 
@@ -1608,6 +1634,52 @@ fn a_format_one_cached_base_merges_a_format_two_observation_with_local_progress(
                 .unwrap()
                 .is_empty()
         );
+    }
+}
+
+#[test]
+fn concurrent_publications_of_one_ticket_keep_one_complete_identity_on_all_devices() {
+    for order in [[0, 1, 2], [1, 0, 2]] {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("One local ticket");
+        let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+        let linked = |state, updated, external, repository: &str| {
+            ticketd_core::SyncRecord::parse(
+                &sourced(state, updated)
+                    .replace("3f2c9a1e-0000-4000-8000-000000000001", &id)
+                    .replace("T-ZZ7", &reference)
+                    .replace("I_42", external)
+                    .replace("acme/site", repository)
+                    .replace("imported", "published"),
+            )
+            .unwrap()
+        };
+        let winner = linked("open", "2026-01-03T00:00:00Z", "I_1", "acme/first");
+        let other = linked("closed", "2026-01-04T00:00:00Z", "I_2", "acme/other");
+
+        devices.workspaces[0].apply_sync_record(&winner).unwrap();
+        devices.workspaces[1].apply_sync_record(&other).unwrap();
+        devices.settle(order);
+        devices.assert_converged();
+
+        for workspace in &devices.workspaces {
+            let record = workspace.export_sync_record(SyncKind::Ticket, &id).unwrap();
+            for field in [
+                "source_external_id",
+                "source_partition",
+                "source_locator",
+                "source_display",
+                "source_url",
+                "source_state_category",
+                "source_updated_at",
+            ] {
+                assert_eq!(
+                    record.fields[field], winner.fields[field],
+                    "{field} {order:?}"
+                );
+            }
+            assert!(workspace.sync_conflicts().unwrap().is_empty());
+        }
     }
 }
 
