@@ -88,8 +88,9 @@ const MAX_REMEMBERED: usize = 64;
 #[derive(Debug)]
 struct LiveRequest<R> {
     turn: Option<NativeTurnId>,
-    /// Once answered, keep the ID for correlation without retaining its payload.
+    /// The payload stays available to a bridge that can confirm an answer was refused.
     payload: Option<R>,
+    answered: bool,
 }
 
 /// State the codec updates while interpreting frames and preparing commands.
@@ -290,6 +291,7 @@ impl<R> RuntimeState<R> {
     pub(crate) fn unanswered(&self) -> impl Iterator<Item = (&NativeRequestId, &R)> {
         self.requests
             .iter()
+            .filter(|(_, live)| !live.answered)
             .filter_map(|(id, live)| live.payload.as_ref().map(|payload| (id, payload)))
     }
 
@@ -305,6 +307,7 @@ impl<R> RuntimeState<R> {
                 entry.insert(LiveRequest {
                     turn: turn.cloned(),
                     payload: Some(payload),
+                    answered: false,
                 });
                 true
             }
@@ -318,29 +321,52 @@ impl<R> RuntimeState<R> {
         request: &NativeRequestId,
         encode: impl FnOnce(&R) -> Result<T, Refusal>,
     ) -> Result<T, Refusal> {
+        self.answer_request(request, encode, false)
+    }
+
+    /// Keeps what the bridge needs to reopen a request after a confirmed refusal.
+    pub(crate) fn answer_and_retain<T>(
+        &mut self,
+        request: &NativeRequestId,
+        encode: impl FnOnce(&R) -> Result<T, Refusal>,
+    ) -> Result<T, Refusal> {
+        self.answer_request(request, encode, true)
+    }
+
+    fn answer_request<T>(
+        &mut self,
+        request: &NativeRequestId,
+        encode: impl FnOnce(&R) -> Result<T, Refusal>,
+        retain_payload: bool,
+    ) -> Result<T, Refusal> {
         let live = self
             .requests
             .get_mut(request)
+            .filter(|live| !live.answered)
             .ok_or(Refusal::UnknownRequest)?;
         let payload = live.payload.as_ref().ok_or(Refusal::UnknownRequest)?;
         let frame = encode(payload)?;
-        live.payload = None;
+        live.answered = true;
+        if !retain_payload {
+            live.payload = None;
+        }
         Ok(frame)
     }
 
     pub(crate) fn reopen_request(&mut self, request: &NativeRequestId) -> Option<&R> {
         let live = self.requests.get_mut(request)?;
+        let payload = live.payload.as_ref()?;
         live.answered = false;
-        Some(&live.payload)
+        Some(payload)
     }
 
     pub(crate) fn remove_request(&mut self, request: &NativeRequestId) -> Option<R> {
-        self.requests.remove(request).map(|live| live.payload)
+        self.requests.remove(request).and_then(|live| live.payload)
     }
 
     pub(crate) fn resolve_request(&mut self, request: &NativeRequestId) -> Option<EventKind> {
         let live = self.requests.remove(request)?;
-        let resolution = if live.payload.is_none() {
+        let resolution = if live.answered {
             InteractionResolution::Answered
         } else {
             InteractionResolution::Withdrawn
@@ -371,7 +397,7 @@ impl<R> RuntimeState<R> {
             if live.turn.as_ref() != Some(&turn) {
                 return true;
             }
-            if live.payload.is_some() {
+            if !live.answered {
                 events.push(EventKind::InteractionResolved {
                     request: request.clone(),
                     resolution: InteractionResolution::Withdrawn,
@@ -489,5 +515,34 @@ mod tests {
             runtime.check_submission(&SubmissionKind::StartTurn, false),
             Ok(())
         );
+    }
+
+    #[test]
+    fn only_a_bridge_with_confirmed_refusals_can_retry_an_answer() {
+        let mut runtime = RuntimeState::default();
+        let retryable = NativeRequestId::new("retryable");
+        let consumed = NativeRequestId::new("consumed");
+        assert!(runtime.register_request(retryable.clone(), None, "bridge payload"));
+        assert!(runtime.register_request(consumed.clone(), None, "ACP payload"));
+
+        assert_eq!(
+            runtime.answer_and_retain(&retryable, |payload| Ok(*payload)),
+            Ok("bridge payload"),
+        );
+        assert_eq!(
+            runtime.answer_and_retain(&retryable, |_| Ok(())),
+            Err(Refusal::UnknownRequest),
+        );
+        assert_eq!(runtime.answer(&consumed, |_| Ok(())), Ok(()));
+        assert_eq!(runtime.unanswered().count(), 0);
+
+        assert_eq!(runtime.reopen_request(&consumed), None);
+        assert_eq!(runtime.reopen_request(&retryable), Some(&"bridge payload"));
+        assert_eq!(runtime.unanswered().count(), 1);
+        assert_eq!(
+            runtime.answer_and_retain(&retryable, |payload| Ok(*payload)),
+            Ok("bridge payload"),
+        );
+        assert_eq!(runtime.remove_request(&retryable), Some("bridge payload"));
     }
 }
