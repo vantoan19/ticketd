@@ -113,17 +113,18 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     .is_none_or(|output| output.trim().is_empty()),
         },
         acp::ToolKind::Edit | acp::ToolKind::Move => {
+            let diff_paths = || {
+                diffs(&tool)
+                    .map(|diff| diff.path.to_string_lossy().into_owned())
+                    .collect()
+            };
             let all_files_added = input[ALL_FILES_ADDED].as_bool().unwrap_or_else(|| {
                 let mut diffs = diffs(&tool).peekable();
                 diffs.peek().is_some() && diffs.all(|diff| diff.old_text.is_none())
             });
             if tool.kind == acp::ToolKind::Edit && all_files_added {
                 StepAction::Create {
-                    targets: FileTargets::Paths(
-                        diffs(&tool)
-                            .map(|diff| diff.path.to_string_lossy().into_owned())
-                            .collect(),
-                    ),
+                    targets: FileTargets::Paths(diff_paths()),
                     counts: LineCounts {
                         added: input[ADDED_LINES]
                             .as_u64()
@@ -132,8 +133,15 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     },
                 }
             } else {
+                let targets = locations();
                 StepAction::Edit {
-                    targets: FileTargets::Paths(locations()),
+                    targets: FileTargets::Paths(
+                        if tool.kind == acp::ToolKind::Edit && targets.is_empty() {
+                            diff_paths()
+                        } else {
+                            targets
+                        },
+                    ),
                     counts: LineCounts::default(),
                 }
             }
