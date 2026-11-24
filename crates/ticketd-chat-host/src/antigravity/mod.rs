@@ -126,7 +126,7 @@ impl HarnessAdapter for Antigravity {
             &[],
             picked
                 .or(record.permission.as_deref())
-                .unwrap_or(settings::OWN),
+                .or(Some(settings::OWN)),
         ))
     }
 
