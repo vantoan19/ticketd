@@ -9,10 +9,10 @@ const FEED_HEADS: &str = "json_object(
     'history', COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'ticket_history'), 0),
     'activities', COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'activities'), 0))";
 
-/// The observed Turn whose receipt is due when its runtime is lost. Keep this value
-/// across storage failures so a retry uses the first end boundary it could read.
-pub struct ChatRuntimeLossReceipt {
-    pub(super) turn_id: String,
+/// The observed Turn whose receipt is due. Keep this value across storage failures
+/// so a retry uses the first end boundary it could read.
+pub struct ChatTurnReceipt {
+    turn_id: String,
     end: Option<EndBoundary>,
 }
 
@@ -21,19 +21,27 @@ struct EndBoundary {
     feed_heads: String,
 }
 
-impl ChatRuntimeLossReceipt {
+impl ChatTurnReceipt {
     pub fn new(turn_id: String) -> Self {
         Self { turn_id, end: None }
     }
 
-    pub(super) fn record_end(
-        &mut self,
+    pub fn turn_id(&self) -> &str {
+        &self.turn_id
+    }
+
+    pub(super) fn capture_end(&mut self, connection: &Connection) -> Result<(), Error> {
+        Self::end_boundary(&mut self.end, connection)?;
+        Ok(())
+    }
+
+    fn end_boundary<'a>(
+        end: &'a mut Option<EndBoundary>,
         connection: &Connection,
-        chat_id: &str,
-    ) -> Result<&str, Error> {
+    ) -> Result<&'a EndBoundary, Error> {
         // Read under the settlement's write lock so the time and both feed heads
         // describe the same boundary. Keep them even if the transaction rolls back.
-        let end = match &mut self.end {
+        Ok(match end {
             Some(end) => end,
             absent => absent.insert(connection.query_row(
                 &format!("SELECT {NOW}, {FEED_HEADS}"),
@@ -45,14 +53,7 @@ impl ChatRuntimeLossReceipt {
                     })
                 },
             )?),
-        };
-        save_boundary(
-            connection,
-            chat_id,
-            Boundary::End(&self.turn_id),
-            Some(&end.feed_heads),
-        )?;
-        Ok(&end.at)
+        })
     }
 }
 
@@ -90,6 +91,23 @@ pub(super) fn record_boundary(
     boundary: Boundary<'_>,
 ) -> Result<(), Error> {
     save_boundary(connection, chat_id, boundary, None)
+}
+
+/// Use the retained boundary when ending the Turn or first observing it at its end.
+pub(super) fn record_turn_boundary<'a>(
+    connection: &Connection,
+    chat_id: &str,
+    boundary: Boundary<'_>,
+    pending: Option<&'a mut ChatTurnReceipt>,
+) -> Result<Option<&'a str>, Error> {
+    let matching = |receipt: &&mut ChatTurnReceipt| matches!(boundary, Boundary::Start(id) | Boundary::End(id) if id == receipt.turn_id);
+    if let Some(receipt) = pending.filter(matching) {
+        let end = ChatTurnReceipt::end_boundary(&mut receipt.end, connection)?;
+        save_boundary(connection, chat_id, boundary, Some(&end.feed_heads))?;
+        return Ok(Some(&end.at));
+    }
+    record_boundary(connection, chat_id, boundary)?;
+    Ok(None)
 }
 
 fn save_boundary(

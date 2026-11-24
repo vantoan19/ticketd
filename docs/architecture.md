@@ -164,16 +164,25 @@ Prompt at a time and ends its Turn on the Prompt reply. It applies partial
 tool updates by native tool ID and preserves native approval choice IDs until
 a person responds.
 
+During ordinary Chat resume, if Antigravity reports missing history for the
+requested Session or an unsupported resume method, the supervisor posts a
+notice and opens an empty Session without replaying the transcript. Other
+resume failures pause the queue and surface the harness error.
+
 The supervisor holds dispatch across a permission change that needs another
 process. It closes the old generation, opens with the person's chosen mode
 and resumes the same native Session. If the restart fails, the queue pauses.
+When the native Session is unavailable during this restart, the person can
+choose **Start fresh** explicitly. Antigravity recovery uses native Sessions
+without transcript replay.
 If exit is unconfirmed, the old generation can only be used for cleanup. Its
 requests expire, new messages stay queued, and the next explicit recovery
-checks for exit before opening a replacement. Turning Chat off and back on in
-the same desktop process preserves that exit check. Tools the previous
-generation started may still be running after its own exit is confirmed.
-The descriptor enforces native-only history recovery and excludes unattended
-use.
+checks for exit before opening a replacement. Turning Chat off or restoring a
+Workspace in the same desktop process preserves that exit check for the same
+Chat. On restore, the next supervisor takes its settings and queue from the
+current Workspace. Tools the previous generation started may still be running
+after its own exit is confirmed.
+The descriptor excludes unattended use.
 
 ### Persistence and delivery observations
 

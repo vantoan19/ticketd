@@ -11,6 +11,8 @@ use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use crate::install::is_executable;
+
 const EXECUTABLE: &str = if cfg!(windows) {
     "ticketd.exe"
 } else {
@@ -50,24 +52,6 @@ fn suggested_directory() -> String {
         r"%LOCALAPPDATA%\Programs\ticketd-cli".into()
     } else {
         "~/.local/bin".into()
-    }
-}
-
-fn is_executable(path: &Path) -> bool {
-    let Ok(metadata) = std::fs::metadata(path) else {
-        return false;
-    };
-    if !metadata.is_file() {
-        return false;
-    }
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        metadata.permissions().mode() & 0o111 != 0
-    }
-    #[cfg(not(unix))]
-    {
-        true
     }
 }
 

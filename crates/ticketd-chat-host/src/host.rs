@@ -9,12 +9,12 @@ use std::time::Duration;
 use ticketd_core::{ChatMessage, ChatSnapshot, Error, WorkspaceGuard};
 use tokio::sync::{mpsc, oneshot, watch};
 
-use crate::supervisor::{Command, Reply, Supervisor};
+use crate::supervisor::{Command, Reply, Supervisor, bounded_close};
 use crate::unattended::{UnattendedChat, set_aside_first_message};
 use crate::{
-    ContextUsage, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessSettings, Inspection,
-    InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey, SettingOutcome,
-    StartSettings, SteeringBehavior, Subscription,
+    ContextUsage, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessRuntime, HarnessSettings,
+    Inspection, InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey,
+    SettingOutcome, StartSettings, SteeringBehavior, Subscription,
 };
 use crate::{StopReason, TurnEnding};
 
@@ -360,12 +360,76 @@ struct Inner {
     /// The settings of each Chat that is running unattended, read when its
     /// supervisor starts.
     unattended: Mutex<HashMap<String, Arc<UnattendedChat>>>,
+    lifecycle: Arc<HostLifecycle>,
+}
+
+/// Eligibility and process cleanup outlive any one supervisor.
+#[derive(Default)]
+pub(crate) struct HostLifecycle {
     quitting: AtomicBool,
     /// Set while the workspace is being replaced by a backup. Checked where `quitting`
     /// is, so every clone of the host refuses to start or reach a supervisor.
     restoring: AtomicBool,
     /// Set while Chat is switched off in Settings, for the same reason.
-    off: Arc<AtomicBool>,
+    off: AtomicBool,
+    // Only the old process handle survives Restore. The next supervisor reads
+    // the Chat, its settings and its queue from the current Workspace.
+    retired_permission_runtimes: Mutex<HashMap<String, Arc<dyn HarnessRuntime>>>,
+}
+
+impl HostLifecycle {
+    pub(crate) fn is_off(&self) -> bool {
+        self.off.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn serving(&self) -> Result<(), HostError> {
+        if self.quitting.load(Ordering::SeqCst) {
+            return Err(HostError::Quitting);
+        }
+        if self.restoring.load(Ordering::SeqCst) {
+            return Err(HostError::Restoring);
+        }
+        if self.is_off() {
+            return Err(HostError::TurnedOff);
+        }
+        Ok(())
+    }
+
+    fn retired_permission_runtimes(
+        &self,
+    ) -> MutexGuard<'_, HashMap<String, Arc<dyn HarnessRuntime>>> {
+        self.retired_permission_runtimes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(crate) fn has_retired_permission_runtime(&self, chat_id: &str) -> bool {
+        self.retired_permission_runtimes().contains_key(chat_id)
+    }
+
+    pub(crate) fn retire_permission_runtime(
+        &self,
+        chat_id: &str,
+        runtime: Arc<dyn HarnessRuntime>,
+    ) {
+        self.retired_permission_runtimes()
+            .insert(chat_id.to_owned(), runtime);
+    }
+
+    pub(crate) async fn close_retired_permission_runtime(&self, chat_id: &str) -> Option<String> {
+        let handle = self.retired_permission_runtimes().get(chat_id).cloned()?;
+        let unconfirmed = bounded_close(handle.as_ref()).await;
+        if unconfirmed.is_none() {
+            let mut retired = self.retired_permission_runtimes();
+            if retired
+                .get(chat_id)
+                .is_some_and(|current| Arc::ptr_eq(current, &handle))
+            {
+                retired.remove(chat_id);
+            }
+        }
+        unconfirmed
+    }
 }
 
 impl ChatHost {
@@ -405,9 +469,7 @@ impl ChatHost {
                     .collect(),
                 chats: Mutex::new(HashMap::new()),
                 unattended: Mutex::new(HashMap::new()),
-                quitting: AtomicBool::new(false),
-                restoring: AtomicBool::new(false),
-                off: Arc::new(AtomicBool::new(false)),
+                lifecycle: Arc::new(HostLifecycle::default()),
             }),
         })
     }
@@ -679,14 +741,14 @@ impl ChatHost {
     /// Chat was switched off: refuses every request that would reach or start a
     /// supervisor, on every clone of this host, then stops every running Chat.
     pub async fn turn_off(&self) -> Vec<UnconfirmedCleanup> {
-        self.inner.off.store(true, Ordering::SeqCst);
+        self.inner.lifecycle.off.store(true, Ordering::SeqCst);
         self.stop_all(StopReason::TurnedOff).await
     }
 
     /// Chat was switched on again. A pending permission restart still requires
     /// confirmed exit of the previous harness before it can open a replacement.
     pub fn turn_on(&self) {
-        self.inner.off.store(false, Ordering::SeqCst);
+        self.inner.lifecycle.off.store(false, Ordering::SeqCst);
     }
 
     /// Stops every running Chat with bounded cleanup and keeps the host usable.
@@ -720,46 +782,35 @@ impl ChatHost {
 
     /// Refuses new work, then stops every running Chat. Close storage after this returns.
     pub async fn quit(&self) -> Vec<UnconfirmedCleanup> {
-        self.inner.quitting.store(true, Ordering::SeqCst);
+        self.inner.lifecycle.quitting.store(true, Ordering::SeqCst);
         self.stop_all(StopReason::Quit).await
     }
 
     /// Accept new work again when an installer handoff fails to close the app.
     #[cfg(windows)]
     pub fn cancel_quit(&self) {
-        self.inner.quitting.store(false, Ordering::SeqCst);
+        self.inner.lifecycle.quitting.store(false, Ordering::SeqCst);
     }
 
     /// Before the workspace is replaced by a backup: refuses every request that would
     /// reach or start a supervisor, on every clone of this host, then stops every
     /// running Chat. Nothing runs until `finish_restore`.
     pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
-        self.inner.restoring.store(true, Ordering::SeqCst);
+        self.inner.lifecycle.restoring.store(true, Ordering::SeqCst);
         self.stop_all(StopReason::Restore).await
     }
 
     /// The restore is over, whether or not it replaced anything; requests are served again.
     pub fn finish_restore(&self) {
-        self.inner.restoring.store(false, Ordering::SeqCst);
+        self.inner
+            .lifecycle
+            .restoring
+            .store(false, Ordering::SeqCst);
     }
 
     /// Whether Chats are served: `Err` says why not (quitting, restoring, turned off).
     pub fn serving(&self) -> Result<(), HostError> {
-        self.closed()
-    }
-
-    /// Why no supervisor may be reached or started right now, if any reason.
-    fn closed(&self) -> Result<(), HostError> {
-        if self.inner.quitting.load(Ordering::SeqCst) {
-            return Err(HostError::Quitting);
-        }
-        if self.inner.restoring.load(Ordering::SeqCst) {
-            return Err(HostError::Restoring);
-        }
-        if self.inner.off.load(Ordering::SeqCst) {
-            return Err(HostError::TurnedOff);
-        }
-        Ok(())
+        self.inner.lifecycle.serving()
     }
 
     async fn ask<T>(
@@ -779,7 +830,7 @@ impl ChatHost {
     // ponytail: supervisors and idle runtimes live until quit or trash; add an idle
     // timeout when the number of open harness processes becomes a cost.
     fn sender(&self, chat_id: &str) -> Result<mpsc::Sender<Command>, HostError> {
-        self.closed()?;
+        self.serving()?;
         if let Some(commands) = self.chats().get(chat_id).filter(|c| !c.is_closed()) {
             return Ok(commands.clone());
         }
@@ -788,7 +839,7 @@ impl ChatHost {
         let mut chats = self.chats();
         // Checked again under the lock `stop_all` uses, so a request racing shutdown
         // cannot add a supervisor after the running ones were stopped.
-        self.closed()?;
+        self.serving()?;
         let commands = chats
             .entry(chat_id.to_owned())
             .and_modify(|commands| {
@@ -811,7 +862,7 @@ impl ChatHost {
         &self,
         chat_id: &str,
     ) -> Result<Option<mpsc::Sender<Command>>, HostError> {
-        self.closed()?;
+        self.serving()?;
         let chat = (self.inner.open_workspace)()?.chat(chat_id)?;
         let adapter = self.inner.adapters.get(chat.harness.as_str()).cloned();
         let descriptor = adapter
@@ -829,7 +880,7 @@ impl ChatHost {
             .into());
         }
         let mut chats = self.chats();
-        self.closed()?;
+        self.serving()?;
         let Some(unattended) = self.settings(chat_id) else {
             return Ok(None);
         };
@@ -854,7 +905,7 @@ impl ChatHost {
             self.inner.context.clone(),
             self.inner.board.clone(),
             unattended,
-            self.inner.off.clone(),
+            self.inner.lifecycle.clone(),
         )
     }
 

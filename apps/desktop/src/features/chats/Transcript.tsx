@@ -352,7 +352,7 @@ const opensFiles = (step: Step) =>
   step.kind === "edit" ||
   step.kind === "create";
 
-/** What an opened step row holds: its command and output, its targets or its output. */
+/** An opened step shows its command or targets alongside any tool output. */
 function StepDetail({
   id,
   step,
@@ -400,31 +400,35 @@ function StepDetail({
           command={command}
           output={output}
         />
-      ) : targets.length > 2 || (step.omitted_files && targets.length > 0) ? (
-        <ul>
-          {targets.map((target, index) => (
-            <li key={index}>
-              {files ? (
-                <FileName
-                  path={target.text}
-                  shown={target.text}
-                  onFailed={setFailure}
-                />
-              ) : (
-                <code>{target.text}</code>
-              )}
-              {target.scope && (
-                <>
-                  {" "}
-                  in <code>{target.scope}</code>
-                </>
-              )}
-              {target.lines && <small>{targetLines(target)}</small>}
-            </li>
-          ))}
-        </ul>
       ) : (
-        output && <pre className="chat-out">{plainOutput(output)}</pre>
+        <>
+          {(targets.length > 2 ||
+            (step.omitted_files && targets.length > 0)) && (
+            <ul>
+              {targets.map((target, index) => (
+                <li key={index}>
+                  {files ? (
+                    <FileName
+                      path={target.text}
+                      shown={target.text}
+                      onFailed={setFailure}
+                    />
+                  ) : (
+                    <code>{target.text}</code>
+                  )}
+                  {target.scope && (
+                    <>
+                      {" "}
+                      in <code>{target.scope}</code>
+                    </>
+                  )}
+                  {target.lines && <small>{targetLines(target)}</small>}
+                </li>
+              ))}
+            </ul>
+          )}
+          {output && <pre className="chat-out">{plainOutput(output)}</pre>}
+        </>
       )}
       {failure && (
         <p className="chat-fine" role="alert">

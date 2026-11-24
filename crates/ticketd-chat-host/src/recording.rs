@@ -18,7 +18,7 @@ use crate::Harness;
 use crate::stdio::{Io, Reader, Serving, Writer};
 
 pub(super) const SWITCH: &str = "TICKETD_RECORD_HARNESS";
-const HEADER: &[u8] = b"ticketd-harness-recording-v1\n";
+const HEADER: &[u8] = b"ticketd-harness-recording-v2\n";
 const CHUNK_BYTES: usize = 64 * 1024;
 const MAX_RECORDING_BYTES: usize = 64 * 1024 * 1024;
 
@@ -55,6 +55,15 @@ pub fn prepare_harness_recording(
     {
         return Err(invalid_run());
     }
+    // Keep both the launch spelling and physical path for scrubbing a copy.
+    let roots = [
+        parent.to_str().ok_or_else(invalid_run)?,
+        directory.to_str().ok_or_else(invalid_run)?,
+    ];
+    let mut header = HEADER.to_vec();
+    serde_json::to_writer(&mut header, &roots).map_err(io::Error::other)?;
+    header.push(b'\n');
+
     // SQLite also opens sidecar files by name. The only existing entry may be
     // the synthetic work folder, so no old database, lock or sidecar is reused.
     let mut entries = fs::read_dir(&directory).map_err(|_| invalid_run())?;
@@ -85,6 +94,7 @@ pub fn prepare_harness_recording(
     }
     let run = RecordingRun {
         harness,
+        header,
         directory,
         workspace,
         work,
@@ -112,6 +122,7 @@ static RUN: OnceLock<RecordingRun> = OnceLock::new();
 
 pub(super) struct RecordingRun {
     harness: Harness,
+    header: Vec<u8>,
     directory: PathBuf,
     workspace: PathBuf,
     work: PathBuf,
@@ -199,8 +210,8 @@ impl RecordingRun {
         &self.work
     }
 
-    pub(super) fn tap(&self, mut io: Io) -> io::Result<Io> {
-        let sender = start(&self.directory, self.harness.key.as_str())?;
+    pub(super) fn tap(&'static self, mut io: Io) -> io::Result<Io> {
+        let sender = start(self)?;
         io.stdout = Box::new(TappedReader(io.stdout, Arc::clone(&sender)));
         io.stdin = Box::new(TappedWriter(io.stdin, sender));
         Ok(io)
@@ -244,10 +255,11 @@ impl Queue {
     }
 }
 
-fn start(directory: &Path, harness: &'static str) -> io::Result<Sender> {
+fn start(run: &'static RecordingRun) -> io::Result<Sender> {
+    let harness = run.harness.key.as_str();
     let stem = format!("{harness}-{}", uuid::Uuid::new_v4());
-    let pending = directory.join(format!("{stem}.wire.partial"));
-    let completed = directory.join(format!("{stem}.wire"));
+    let pending = run.directory.join(format!("{stem}.wire.partial"));
+    let completed = run.directory.join(format!("{stem}.wire"));
     let file = OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -273,7 +285,7 @@ fn start(directory: &Path, harness: &'static str) -> io::Result<Sender> {
                 &incomplete,
                 &pending_for_worker,
                 &completed,
-                harness,
+                run,
                 &span,
             )
         })
@@ -290,10 +302,11 @@ fn finish(
     incomplete: &AtomicBool,
     pending: &Path,
     completed: &Path,
-    harness: &'static str,
+    run: &RecordingRun,
     span: &tracing::Span,
 ) {
-    match save(file, receive) {
+    let harness = run.harness.key.as_str();
+    match save(file, receive, &run.header) {
         Ok(()) if incomplete.load(Ordering::Acquire) => {
             span.in_scope(|| tracing::warn!(harness, "harness recording incomplete"));
         }
@@ -314,10 +327,10 @@ fn finish(
     let _ = fs::remove_file(pending);
 }
 
-fn save(file: File, receive: Receiver<Chunk>) -> io::Result<()> {
+fn save(file: File, receive: Receiver<Chunk>, header: &[u8]) -> io::Result<()> {
     let mut output = BufWriter::new(file);
-    output.write_all(HEADER)?;
-    let mut total = HEADER.len();
+    output.write_all(header)?;
+    let mut total = header.len();
     for chunk in receive {
         // A direction byte and little-endian length precede each exact chunk.
         let size = chunk.bytes.len() as u32;

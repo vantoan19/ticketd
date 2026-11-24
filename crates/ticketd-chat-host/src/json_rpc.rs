@@ -14,7 +14,7 @@ use std::time::Duration;
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, BufReader};
 use tokio::sync::{Mutex as AsyncMutex, Semaphore, mpsc, oneshot};
-use tokio::time::timeout;
+use tokio::time::{Instant, timeout};
 
 use crate::stdio::{
     ChildProcess, Io, Line, Reader, StderrTail, Writer, close_outcome, read_line, runtime_lost,
@@ -344,28 +344,40 @@ impl<P: Peer> Connection<P> {
 
     /// Runs the final state checks after obtaining the input pipe, so nothing can
     /// write between the checks and the start of the write.
-    async fn write_checked<T>(
+    async fn write_checked<T, Frames: IntoIterator<Item = Value>>(
         &self,
-        prepare: impl FnOnce(&mut State<P>) -> Result<(Value, T), Refusal>,
+        prepare: impl FnOnce(&mut State<P>) -> Result<(Frames, T), Refusal>,
     ) -> Result<T, WriteFailure> {
         let mut stdin = self.stdin.lock().await;
-        let (frame, prepared) = {
+        let (frames, prepared) = {
             let mut state = self.state();
             if state.closed {
                 return Err(WriteFailure::Refused(Refusal::RuntimeClosed));
             }
             prepare(&mut state).map_err(WriteFailure::Refused)?
         };
-        let bytes = encode(frame, self.options.include_version);
-        write_bounded(&mut stdin, &self.child, &bytes, WRITE_TIMEOUT)
-            .await
-            .map_err(|_| WriteFailure::Lost)?;
+        let deadline = Instant::now() + WRITE_TIMEOUT;
+        for frame in frames {
+            let bytes = encode(frame, self.options.include_version);
+            let remaining = deadline.saturating_duration_since(Instant::now());
+            write_bounded(&mut stdin, &self.child, &bytes, remaining)
+                .await
+                .map_err(|_| WriteFailure::Lost)?;
+        }
         Ok(prepared)
     }
 
     pub(crate) async fn write(
         &self,
         prepare: impl FnOnce(&mut P) -> Result<Value, Refusal>,
+    ) -> Result<(), WriteFailure> {
+        self.write_frames(|peer| Ok([prepare(peer)?])).await
+    }
+
+    /// Writes a checked sequence under one input lock and one deadline.
+    pub(crate) async fn write_frames<Frames: IntoIterator<Item = Value>>(
+        &self,
+        prepare: impl FnOnce(&mut P) -> Result<Frames, Refusal>,
     ) -> Result<(), WriteFailure> {
         self.write_checked(|state| Ok((prepare(&mut state.peer)?, ())))
             .await
@@ -409,7 +421,7 @@ impl<P: Peer> Connection<P> {
             state.next_id += 1;
             let receiver = state.pending.register(id, call);
             let frame = json!({"id": id, "method": method, "params": params});
-            Ok((frame, (id, receiver)))
+            Ok(([frame], (id, receiver)))
         })
         .await
     }
