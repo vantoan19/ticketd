@@ -105,8 +105,12 @@ A Todo ticket that is not in the trash and has no unresolved blocking dependenci
 A Todo ticket that is not in the trash and has unresolved blocking dependencies. Started, terminal, and trashed tickets have neither Ready nor Blocked indicators; their dependency lists still show unresolved prerequisites.
 
 **Project**:
-A repository associated with tickets, with an explicit identity preserved across repository moves and renames. Multiple local checkouts of the same repository represent the same project.
+A repository associated with tickets, with an explicit identity preserved across repository moves and renames. Multiple local checkouts of the same repository represent the same project. A Project remote can identify its hosted repository.
 _Avoid_: Work grouping
+
+**Project remote**:
+The hosted repository a project corresponds to, identified as `host/owner/name`. A project can have at most one Project remote, and each Project remote can belong to at most one project in a workspace. Matching ignores case.
+_Avoid_: origin, git link
 
 **Project context**:
 The project selected for a particular UI or CLI interaction, independent of other interactions. Explicit selection takes precedence over inference from a registered checkout; without either, new tickets remain unlinked. The unlinked choice is shown to users as "No project".

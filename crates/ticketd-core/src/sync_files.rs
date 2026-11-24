@@ -75,9 +75,10 @@ pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// YAML reader bounds `[`-style nesting itself. ticketd writes two columns.
 const MAX_HEADER_INDENT: usize = 64;
 
-/// The format of sync files this version writes. A file that says a higher
-/// number is left alone until this desktop runs a ticketd that reads it.
-pub(crate) const FILE_FORMAT: i64 = 3;
+const FILE_FORMAT_WITH_TYPED_SOURCE: i64 = 3;
+/// The highest format this version reads. A file that says a higher number
+/// is left alone until this desktop runs a ticketd that reads it.
+const LATEST_FILE_FORMAT: i64 = FILE_FORMAT_WITH_TYPED_SOURCE;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -224,7 +225,7 @@ const SOURCE_STATE_V1: &[Field] = &[
     ),
     ("source_updated_at", Type::Text, false),
 ];
-const SOURCE_STATE_V2: &[Field] = &[
+const SOURCE_STATE_V3: &[Field] = &[
     (
         "source_state_category",
         Type::Choice(&["open", "completed", "not_planned", "duplicate", "unknown"]),
@@ -343,12 +344,16 @@ fn shape(block: Block, format: i64) -> (impl Iterator<Item = &'static Field> + C
         Block::Part(SyncPartKind::Evidence) => (EVIDENCE, false),
     };
     let state_fields = match block {
-        Block::Record(SyncKind::Ticket) if format == 1 => SOURCE_STATE_V1,
-        Block::Record(SyncKind::Ticket) => SOURCE_STATE_V2,
+        Block::Record(SyncKind::Ticket) if format < FILE_FORMAT_WITH_TYPED_SOURCE => {
+            SOURCE_STATE_V1
+        }
+        Block::Record(SyncKind::Ticket) => SOURCE_STATE_V3,
         _ => &[],
     };
     let presentation = match block {
-        Block::Record(SyncKind::Ticket) if format >= 3 => SOURCE_PRESENTATION,
+        Block::Record(SyncKind::Ticket) if format >= FILE_FORMAT_WITH_TYPED_SOURCE => {
+            SOURCE_PRESENTATION
+        }
         _ => &[],
     };
     (
@@ -656,13 +661,8 @@ fn quote(text: &str) -> String {
 type Labels = BTreeMap<String, String>;
 
 fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels: &Labels) {
-    let format = if SOURCE_PRESENTATION_NAMES
-        .iter()
-        .any(|name| fields.contains_key(*name))
-    {
-        3
-    } else if fields.contains_key("source_provider") {
-        2
+    let format = if fields.contains_key("source_provider") {
+        FILE_FORMAT_WITH_TYPED_SOURCE
     } else {
         1
     };
@@ -911,7 +911,8 @@ pub(crate) fn from_newer_version(file: &str) -> bool {
         .collect();
     read_block(&record).is_ok_and(|(entries, _)| {
         entries.iter().any(|(name, value)| {
-            name == "format" && matches!(value, Raw::Integer(format) if *format > FILE_FORMAT)
+            name == "format"
+                && matches!(value, Raw::Integer(format) if *format > LATEST_FILE_FORMAT)
         })
     })
 }
@@ -1043,12 +1044,18 @@ impl SyncRecord {
 
     /// Read and validate a file's text. Nothing is read from or written to a Workspace.
     pub fn parse(file: &str) -> Result<Self, Error> {
+        Self::parse_with_legacy_github_id(file).map(|(record, _)| record)
+    }
+
+    /// Keep an old bare GitHub ID available to the sync engine while normalizing the record.
+    pub(crate) fn parse_with_legacy_github_id(file: &str) -> Result<(Self, Option<String>), Error> {
         let mut record = None;
+        let mut legacy_github_id = None;
         for (part, block) in blocks(file)? {
             let (mut entries, body) = read_block(&block)?;
             match (part, &mut record) {
                 (Some(kind), Some(SyncRecord { parts, .. })) => {
-                    let (id, fields) = typed(Block::Part(kind), FILE_FORMAT, entries, body)?;
+                    let (id, fields) = typed(Block::Part(kind), LATEST_FILE_FORMAT, entries, body)?;
                     parts.push(SyncPart { kind, id, fields });
                 }
                 _ => {
@@ -1068,8 +1075,12 @@ impl SyncRecord {
                     let format = match take("format") {
                         // Files from before the marker are format 1.
                         None | Some(Raw::Null) => 1,
-                        Some(Raw::Integer(format)) if (1..=FILE_FORMAT).contains(&format) => format,
-                        Some(Raw::Integer(format)) if format > FILE_FORMAT => {
+                        Some(Raw::Integer(format))
+                            if (1..=LATEST_FILE_FORMAT).contains(&format) =>
+                        {
+                            format
+                        }
+                        Some(Raw::Integer(format)) if format > LATEST_FILE_FORMAT => {
                             return Err(bad(format!(
                                 "the file is in format {format}, which a newer ticketd wrote; update ticketd on this desktop to read it"
                             )));
@@ -1078,9 +1089,20 @@ impl SyncRecord {
                     };
                     let block = Block::Record(kind);
                     let (id, mut fields) = typed(block, format, entries, body)?;
-                    if format == 1 && kind == SyncKind::Ticket && has_source(&fields) {
+                    let legacy_source = format < FILE_FORMAT_WITH_TYPED_SOURCE
+                        && kind == SyncKind::Ticket
+                        && has_source(&fields);
+                    if legacy_source {
                         validate(block, format, &id, &fields)?;
                         validate_source(&fields, "source_state")?;
+                        if text(&fields, "source_provider") == Some("github") {
+                            legacy_github_id = text(&fields, "source_external_id")
+                                .filter(|id| id.parse::<u64>().is_ok())
+                                .map(str::to_owned);
+                        }
+                    }
+                    scope_source_identity(&mut fields);
+                    if legacy_source {
                         normalize_legacy_source(&mut fields);
                     }
                     record = Some(SyncRecord {
@@ -1095,14 +1117,14 @@ impl SyncRecord {
         let mut record = record.ok_or_else(|| bad("a sync file must start with a '---' line"))?;
         record.parts.sort_by(|a, b| a.order().cmp(&b.order()));
         record.validate()?;
-        Ok(record)
+        Ok((record, legacy_github_id))
     }
 
     /// Check a record built or merged in code the way a parsed file is checked.
     pub fn validate(&self) -> Result<(), Error> {
         validate(
             Block::Record(self.kind),
-            FILE_FORMAT,
+            LATEST_FILE_FORMAT,
             &self.id,
             &self.fields,
         )?;
@@ -1111,7 +1133,12 @@ impl SyncRecord {
             if self.kind != SyncKind::Ticket {
                 return Err(bad("only a ticket has Activity and evidence sections"));
             }
-            validate(Block::Part(part.kind), FILE_FORMAT, &part.id, &part.fields)?;
+            validate(
+                Block::Part(part.kind),
+                LATEST_FILE_FORMAT,
+                &part.id,
+                &part.fields,
+            )?;
             if !seen.insert(&part.id) {
                 return Err(bad(format!("section id '{}' is used twice", part.id)));
             }
@@ -1155,6 +1182,18 @@ fn has_source(fields: &Fields) -> bool {
     fields.keys().any(|name| name.starts_with("source_"))
 }
 
+fn scope_source_identity(fields: &mut Fields) {
+    let field = |key| text(fields, key).unwrap_or_default();
+    if let Some(id) = source::scope_saved_issue_identity(
+        field("source_provider"),
+        field("source_external_id"),
+        field("source_locator"),
+        field("source_url"),
+    ) {
+        fields.insert("source_external_id".into(), SyncValue::Text(id));
+    }
+}
+
 fn validate_source(fields: &Fields, category: &str) -> Result<(), Error> {
     if has_source(fields)
         && let Some(name) = SOURCE_REQUIRED
@@ -1192,6 +1231,7 @@ fn normalize_legacy_source(fields: &mut Fields) {
     );
     let partition = source::legacy_reference_partition(
         provider,
+        text(fields, "source_external_id").unwrap_or_default(),
         text(fields, "source_locator").unwrap_or_default(),
     );
     fields.remove("source_state");
@@ -1257,14 +1297,21 @@ pub(crate) fn write_source(c: &Connection, record: &SyncRecord) -> Result<(), Er
         c.execute("DELETE FROM external_identities WHERE ticket_id = ?1", [id])?;
         return Ok(());
     };
+    let repository = field("source_locator")
+        .zip(field("source_url"))
+        .and_then(|(locator, url)| source::repository_from_saved_issue(provider, locator, url));
+    // A changed location invalidates the connector's last repository observation.
     c.execute(
-        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition, repository)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
          ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id,
          locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin,
-         linked_at = excluded.linked_at, partition = excluded.partition",
+         linked_at = excluded.linked_at, partition = excluded.partition, repository = CASE
+             WHEN external_identities.provider = excluded.provider AND external_identities.external_id = excluded.external_id
+                  AND external_identities.locator = excluded.locator AND external_identities.url = excluded.url
+             THEN COALESCE(external_identities.repository, excluded.repository) ELSE excluded.repository END",
         params![id, provider, field("source_external_id"), field("source_locator"), field("source_display"),
-            field("source_url"), field("source_origin"), field("source_linked_at"), field("source_partition")],
+            field("source_url"), field("source_origin"), field("source_linked_at"), field("source_partition"), repository],
     )?;
     c.execute(
         "INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3)
@@ -1297,7 +1344,7 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
     Ok(record)
 }
 
-/// Format 88 reads the earlier shape while it repairs source observations.
+/// Format 92 reads the earlier shape while it repairs source observations.
 pub(crate) fn read_record_before_source_presentation(
     c: &Connection,
     kind: SyncKind,
@@ -1384,7 +1431,7 @@ pub(crate) fn read_record_before_source_presentation(
             None => {}
         }
     }
-    for (name, _, _) in shape(Block::Record(kind), FILE_FORMAT).0 {
+    for (name, _, _) in shape(Block::Record(kind), LATEST_FILE_FORMAT).0 {
         if let Some(relation) = relation(kind, name) {
             let members = relation.members(c, id)?;
             if !members.is_empty() {
@@ -1855,7 +1902,7 @@ impl Apply<'_> {
                 c.execute(sql, [&record.id])?;
             }
         }
-        let (schema, _) = shape(Block::Record(record.kind), FILE_FORMAT);
+        let (schema, _) = shape(Block::Record(record.kind), LATEST_FILE_FORMAT);
         for name in schema.map(|field| field.0).chain(["body"]) {
             if present(&current.fields, name) != present(&record.fields, name) {
                 self.write(name)?;
@@ -2058,9 +2105,7 @@ mod tests {
         );
     }
 
-    /// What a file of format 1 holds after `kind`, `format` and `id`. Automations
-    /// and their agents joined without a new number: a ticketd from before them
-    /// does not look in their folders, so it never meets a kind it does not know.
+    /// Formats 1 and 2 share the same fields after `kind`, `format` and `id`.
     const FORMAT_1: &str = "\
 project: name
 document: title created_at tags origin_activity trashed kept pinned
@@ -2075,7 +2120,7 @@ automation: name trashed
     /// Pins field names and section markers only, not the forms their values
     /// take. A new value form in an existing field (such as the `<GUID> <n>` item
     /// of `parent_removed`) is rejected by a ticketd that does not
-    /// know it just the same, so it also requires raising FILE_FORMAT, with
+    /// know it just the same, so it also requires raising the format, with
     /// nothing here failing to say so.
     #[test]
     fn the_fields_and_section_markers_of_the_current_format_are_pinned() {
@@ -2083,22 +2128,12 @@ automation: name trashed
         match SyncPartKind::Activity {
             SyncPartKind::Activity | SyncPartKind::Evidence => {}
         }
-        let format_2 = FORMAT_1.replace(
+        let format_3 = FORMAT_1.replace(
             "source_state source_closure_reason source_updated_at",
-            "source_state_category source_state_name source_updated_at source_partition",
+            "source_state_category source_state_name source_updated_at source_partition source_provider_name source_provider_icon_svg",
         );
-        let format_3 = format_2.replace(
-            "source_partition
-",
-            "source_partition source_provider_name source_provider_icon_svg
-",
-        );
-        assert_eq!(FILE_FORMAT, 3);
-        for (format, expected) in [
-            (1, FORMAT_1),
-            (2, format_2.as_str()),
-            (3, format_3.as_str()),
-        ] {
+        assert_eq!(LATEST_FILE_FORMAT, 3);
+        for (format, expected) in [(1, FORMAT_1), (2, FORMAT_1), (3, format_3.as_str())] {
             let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
             let blocks = SyncKind::ALL
                 .into_iter()

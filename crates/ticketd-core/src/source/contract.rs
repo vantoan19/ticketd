@@ -6,7 +6,7 @@
 //! when to call it, and ticketd's workflows persist whatever it returns.
 //!
 //! Changes to existing operations and types require a version bump. Adding an
-//! optional capability keeps the version.
+//! optional field or capability keeps the version.
 
 use super::schema::{ChoiceOption, ConfigValues, FieldIssue};
 use super::{SignInGuidance, SourcePresentation, SummaryPart};
@@ -318,6 +318,13 @@ fn describe_issues(issues: &[FieldIssue]) -> String {
         .join("; ")
 }
 
+/// The latest issue and the reference a built-in connector proved it moved from.
+#[doc(hidden)]
+pub struct FetchedIssue {
+    pub(crate) issue: ExternalIssue,
+    pub(crate) transferred_from: Option<ExternalRef>,
+}
+
 /// A provider integration. Every method is synchronous and may block on the
 /// network; the engine never calls one while holding a database transaction.
 pub trait Connector: Send + Sync {
@@ -367,6 +374,12 @@ pub trait Connector: Send + Sync {
 
     /// Site known locally before credentials are used, when the connector can tell.
     fn effective_site(&self) -> Option<String> {
+        None
+    }
+
+    /// Host for trackers that scope issue identities to a web host.
+    #[doc(hidden)]
+    fn issue_host(&self) -> Option<&str> {
         None
     }
 
@@ -427,6 +440,30 @@ pub trait Connector: Send + Sync {
         config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError>;
+
+    /// Refreshes a tracked issue, with optional verified transfer evidence.
+    #[doc(hidden)]
+    fn fetch_tracked(
+        &self,
+        config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<FetchedIssue, SourceError> {
+        Ok(FetchedIssue {
+            issue: self.fetch(config, reference)?,
+            transferred_from: None,
+        })
+    }
+
+    /// The Project remote of a configured repository or publication destination.
+    /// An offline answer for connectors that can map repositories.
+    fn repository_for_destination(&self, _destination: &str) -> Option<String> {
+        None
+    }
+
+    /// Whether both spellings name the same destination.
+    fn same_destination(&self, first: &str, second: &str) -> bool {
+        first == second
+    }
 
     /// Returns every comment and timeline event of one issue, following the
     /// provider's paging itself. Only called when the descriptor declares

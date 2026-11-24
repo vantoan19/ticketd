@@ -51,8 +51,9 @@ See [in-app updates](install.md#in-app-updates).
   prints its path and format versions.
 - A **Project** represents one repository, not a grouping of work. Its explicit
   identity survives repository moves and renames, and several local checkouts may
-  refer to it. Registered checkout paths locate projects without implying Git
-  integration. A ticket optionally links to one project ("No project" is valid).
+  refer to it. Registered checkout paths locate projects and can suggest a Project
+  remote from Git configuration. Git is optional. A ticket optionally links to
+  one project ("No project" is valid).
 - **Project context** is local to each UI or CLI interaction. An explicit selection
   takes precedence; the CLI otherwise infers the project from a registered checkout
   that contains the current directory. With neither, new tickets stay unlinked.
@@ -431,19 +432,28 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   issue returns to Todo. The detail shows the tracker's state name alongside
   ticketd's status, for example “GitHub: Closed (not planned)”.
 - A **locally owned** ticket in Todo, In progress, or In review can be published once
-  through a connection that supports publication. Preview shows exactly what
-  would be sent. Ownership transfers after ticketd confirms the issue exists.
-  An uncertain result is resolved
-  before any retry so no second issue is created. Local Activities, Plan membership,
+  through a connection that supports publication. The preview shows exactly what
+  would be sent. When the selected connection lists the ticket's Project remote
+  on the matching host, the preview selects that repository. You can choose
+  another allowed destination. Using the Project remote as the default requires
+  the preview's fingerprint. Ownership transfers after ticketd confirms that the
+  issue exists. Resolve an uncertain result before retrying to avoid creating a
+  second issue. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
   Linear publishes to one of the connection’s selected teams. Desktop shows the
   team name and key. On the CLI, pass the team UUID from `--preview` as
   `--destination` when more than one team is configured. The Linear key must
   allow issue creation.
+- Recovery of an unresolved GitHub publication uses the original connection
+  and host. [Recover an unresolved publication](cli.md#recover-an-unresolved-publication)
 - If an issue disappears or becomes unavailable, ticketd keeps its status, content,
   and local work and shows a warning. **Take ownership** makes it local and stops
   synchronization.
+- A legacy GitHub ticket with an unverified host can hold a potential duplicate
+  import until you confirm the issue's current URL on its original host. This
+  repairs the link on the existing ticket and preserves its ownership.
+  [Recover a legacy GitHub issue link](cli.md#recover-a-legacy-github-issue-link)
 - A saved connection remains in Sources when its extension is uninstalled.
   You can rename or remove it while the extension is unavailable.
 - Remove a connection in Settings → Sources or with
@@ -457,6 +467,34 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
 - Use `ticketd source add PROVIDER` to add a connection and `ticketd source list`
   to find its ID. When several connections can publish, pass
   `ticketd source publish T-XYZ --connection CONNECTION --preview`.
+
+#### Project remote routing
+
+A newly imported GitHub issue is linked to the project whose Project remote
+matches its repository, including the host. If no project claims the repository,
+the ticket arrives in No project. When import links a project, it records an
+ordinary project membership change in the ticket's history. Project links remain
+locally editable.
+When GitHub confirms a transfer to another repository, refresh follows the issue
+on the same ticket and keeps its existing project link and local work.
+Changing or clearing a Project remote affects future imports. Each device keeps
+its own Project remotes alongside checkout and source settings. Workspace export
+and backups include them.
+[ADR 0021](adr/0021-route-external-tickets-to-projects-by-project-remote.md)
+
+After setting a Project remote, you can pick a matching connection, review its
+effect, and confirm. This adds the repository to discovery when needed and links the existing non-trashed,
+unlinked tickets whose source still owns them and reports the same repository.
+Backfill includes tickets outside the current discovery filters and records an
+ordinary project membership change for each ticket. If the repository is already
+listed, backfill works offline. If the source needs setup, the preview identifies
+the repository to add. Confirming applies the reviewed changes together. If the
+effect changes before confirmation, review the updated preview.
+
+GitHub source settings show the project each saved discovery repository routes to.
+Link an unclaimed repository to a project with a local checkout and no Project
+remote, or create a project from a checkout folder, then review backfill. Removing a repository from
+discovery leaves its Project remote on the project.
 
 ### Workspace sync
 

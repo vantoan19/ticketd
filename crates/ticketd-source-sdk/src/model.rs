@@ -125,8 +125,8 @@ pub struct DestinationValidation {
     pub message: String,
 }
 
-/// An external issue's immutable identity. Titles, numbers and repository
-/// names can change; this cannot. Never match issues by display text.
+/// An issue's immutable record key on its provider. It must be stable across
+/// every account and site. Never match issues by display text.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct ExternalIdentity {
     pub provider: String,
@@ -212,6 +212,9 @@ pub struct ExternalIssue {
     /// Human-readable name such as `owner/name#12`. Display only.
     pub display: String,
     pub url: String,
+    /// The issue's repository as a normalized `host/owner/name`, when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<String>,
     pub title: String,
     pub body: String,
     pub state: ExternalState,

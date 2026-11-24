@@ -8,7 +8,7 @@
 #   v55  dbf9154c  attachments (#214)
 #   v65  7b65e8e1  personal sync through Google Drive (#284)
 #   v72  20efcc73  Chat experience (#375)
-#   v90  6210a65c  ticket source connections (#562)
+#   v89  f0e389b1  GitHub publication recovery and project remotes (#568)
 #
 # For each commit the script checks it out in a temporary git worktree outside this
 # repository, builds `ticketd-cli` there with its own target directory, seeds a new
@@ -49,8 +49,8 @@ commits() {
     v55) echo dbf9154c ;;
     v65) echo 7b65e8e1 ;;
     v72) echo 20efcc73 ;;
-    v90) echo 6210a65c ;;
-    *) echo "unknown fixture: $1 (expected v55, v65, v72 or v90)" >&2; return 1 ;;
+    v89) echo f0e389b1 ;;
+    *) echo "unknown fixture: $1 (expected v55, v65, v72 or v89)" >&2; return 1 ;;
   esac
 }
 
@@ -121,7 +121,7 @@ if [[ "${1:-}" == seed ]]; then
   exit
 fi
 
-for version in "${@:-v55 v65 v72 v90}"; do
+for version in "${@:-v55 v65 v72 v89}"; do
   for each in $version; do
     build_and_seed "$each"
   done

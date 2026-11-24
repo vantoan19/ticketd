@@ -227,8 +227,18 @@ fn every_record_kind_round_trips_into_an_empty_workspace() {
 #[test]
 fn device_local_data_is_not_exported() {
     let directory = tempfile::tempdir().unwrap();
-    let source = populated(&directory);
+    let mut source = populated(&directory);
     let checkout = directory.path().join("checkout").canonicalize().unwrap();
+    let project = source.list_projects().unwrap().remove(0);
+    let remote = "github.com/acme/website";
+    source
+        .edit_project_with_remote(
+            &project.id,
+            &project.name,
+            &project.path,
+            ticketd_core::ProjectRemoteChange::Set(remote),
+        )
+        .unwrap();
 
     let files = export_all(&source);
 
@@ -236,13 +246,17 @@ fn device_local_data_is_not_exported() {
     for (path, text) in &files {
         assert!(!text.contains("checkout"), "{path} carries a checkout path");
         assert!(!text.contains(checkout.to_str().unwrap()));
+        assert!(!text.contains(remote), "{path} carries a Project remote");
         assert!(!text.contains("read"), "{path} carries inbox state");
     }
     let mut target = workspace(&directory, "target.sqlite3");
     import_all(&mut target, &files);
+    let imported = target.show_project(&project.id).unwrap();
+    assert!(imported.paths.is_empty());
+    assert!(imported.remote.is_none());
     assert_eq!(
-        target.list_projects().unwrap()[0].paths,
-        Vec::<String>::new()
+        target.show_ticket("T-KQ1").unwrap().project_id.as_deref(),
+        Some(project.id.as_str())
     );
     assert_eq!(target.inbox(10, 0).unwrap(), []);
 }
@@ -487,7 +501,7 @@ fn a_file_that_cannot_be_applied_leaves_the_workspace_unchanged() {
 fn external_source_provenance_travels_with_the_ticket() {
     let directory = tempfile::tempdir().unwrap();
     let mut workspace = workspace(&directory, "a.sqlite3");
-    let text = "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Done\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"I_42\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"closed\"\nsource_closure_reason: \"completed\"\nsource_updated_at: \"2026-01-03T00:00:00Z\"\n---\nFrom the tracker.\n";
+    let text = "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Done\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"7\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"closed\"\nsource_closure_reason: \"completed\"\nsource_updated_at: \"2026-01-03T00:00:00Z\"\n---\nFrom the tracker.\n";
     let record = SyncRecord::parse(text).unwrap();
 
     workspace.apply_sync_record(&record).unwrap();
@@ -496,6 +510,10 @@ fn external_source_provenance_travels_with_the_ticket() {
     let source = ticket.source.unwrap();
     assert_eq!(source.locator, "acme/site#42");
     assert_eq!(source.ownership, ticketd_core::source::Ownership::External);
+    let repository = |workspace: &Workspace| {
+        workspace.export().unwrap()["external_identities"][0]["repository"].clone()
+    };
+    assert_eq!(repository(&workspace), "example.test/acme/site");
     assert_eq!(
         source.state.category,
         ticketd_core::source::StateCategory::Completed
@@ -505,10 +523,10 @@ fn external_source_provenance_travels_with_the_ticket() {
         .export_sync_record(SyncKind::Ticket, &ticket.id)
         .unwrap()
         .to_markdown();
-    assert!(markdown.contains("format: 2\n"));
+    assert!(markdown.contains("format: 3\n"));
     assert!(markdown.contains("source_state_category: \"completed\"\n"));
     assert!(markdown.contains("source_state_name: \"Closed\"\n"));
-    assert!(markdown.contains("source_partition: \"acme/site\"\n"));
+    assert!(markdown.contains("source_partition: \"@example.test/acme/site\"\n"));
     let parsed = SyncRecord::parse(&markdown).unwrap();
     assert_eq!(parsed, record);
     let mut other = Workspace::open(directory.path().join("b.sqlite3")).unwrap();
@@ -528,9 +546,24 @@ fn external_source_provenance_travels_with_the_ticket() {
         SyncRecord::parse(&text.replace("format: 1\n", "")).unwrap(),
         record
     );
-    assert!(SyncRecord::parse(&markdown.replace("format: 2", "format: 1")).is_err());
+    assert!(SyncRecord::parse(&markdown.replace("format: 3", "format: 2")).is_err());
+    // A transfer on another device replaces the stored repository as well as the locator.
+    let transferred = text.replace("acme/site", "acme/moved");
+    workspace
+        .apply_sync_record(&SyncRecord::parse(&transferred).unwrap())
+        .unwrap();
+    assert_eq!(repository(&workspace), "example.test/acme/moved");
+    // A locator without a matching canonical URL cannot contribute a repository.
+    let unknown = transferred.replace(
+        "source_locator: \"acme/moved",
+        "source_locator: \"acme/elsewhere",
+    );
+    workspace
+        .apply_sync_record(&SyncRecord::parse(&unknown).unwrap())
+        .unwrap();
+    assert!(repository(&workspace).is_null());
     // Another device taking the ticket over arrives as a changed field.
-    let taken = SyncRecord::parse(&text.replace(
+    let taken = SyncRecord::parse(&unknown.replace(
         "source_authority: \"external\"",
         "source_authority: \"local\"",
     ))

@@ -153,6 +153,27 @@ export function providerName(
   );
 }
 
+const sourceRepositoryRouteSchema = lazySchema(() =>
+  z.object({
+    repository: z.string(),
+    project_remote: z.string().nullable(),
+    project: z.object({ id: z.string(), name: z.string() }).nullable(),
+  }),
+);
+export type SourceRepositoryRoute = z.infer<typeof sourceRepositoryRouteSchema>;
+
+const projectSourceCandidateSchema = lazySchema(() =>
+  z.object({
+    source: z.string(),
+    provider: z.string(),
+    connection_id: z.string().nullable(),
+    name: z.string(),
+  }),
+);
+export type ProjectSourceCandidate = z.infer<
+  typeof projectSourceCandidateSchema
+>;
+
 const previewSchema = lazySchema(() =>
   z.object({
     provider: z.string(),
@@ -181,6 +202,34 @@ const saveOutcomeSchema = lazySchema(() =>
   z.object({
     source: savedSourceSchema,
     preview: previewSchema,
+  }),
+);
+
+const connectSourcePreviewSchema = lazySchema(() =>
+  z.object({
+    project_id: z.string(),
+    project_remote: z.string(),
+    provider: z.string(),
+    connection_id: z.string().nullable(),
+    repository: z.string(),
+    source: z.enum(["not_connected", "add_repository", "already_listed"]),
+    tickets: z.array(z.string()),
+    fingerprint: z.string(),
+  }),
+);
+export type ConnectSourcePreview = z.infer<typeof connectSourcePreviewSchema>;
+
+const connectSourceMatchCountSchema = lazySchema(() =>
+  z.object({ matched: z.number(), complete: z.boolean() }).nullable(),
+);
+export type ConnectSourceMatchCount = NonNullable<
+  z.infer<typeof connectSourceMatchCountSchema>
+>;
+
+const connectSourceOutcomeSchema = lazySchema(() =>
+  z.object({
+    repository_added: z.boolean(),
+    linked_tickets: z.array(z.string()),
   }),
 );
 
@@ -279,6 +328,7 @@ const eligibilitySchema = lazySchema(() =>
         "internal_attachments",
         "invalid_destination",
         "destination_not_allowed",
+        "preview_required",
       ]),
       message: z.string(),
     }),
@@ -435,6 +485,11 @@ export const sourcesClient = {
       .array(sourceEntrySchema)
       .parse(await structured(invoke("list_sources")));
   },
+  async repositoryRoutes(connection: string) {
+    return z
+      .array(sourceRepositoryRouteSchema)
+      .parse(await invoke("source_repository_routes", { connection }));
+  },
   async checkConnection(
     provider: string,
     config: SourceConfig,
@@ -476,6 +531,42 @@ export const sourcesClient = {
           ...(connection && { connection }),
         }),
       ),
+    );
+  },
+  async projectSourceCandidates(projectId: string) {
+    return z
+      .array(projectSourceCandidateSchema)
+      .parse(await invoke("project_source_candidates", { projectId }));
+  },
+  async previewConnectSource(source: string, projectId: string) {
+    return connectSourcePreviewSchema.parse(
+      await invoke("preview_connect_source", { source, projectId }),
+    );
+  },
+  async connectSourceMatchCount(
+    source: string,
+    projectId: string,
+    expectedFingerprint: string,
+  ) {
+    return connectSourceMatchCountSchema.parse(
+      await invoke("connect_source_match_count", {
+        source,
+        projectId,
+        expectedFingerprint,
+      }),
+    );
+  },
+  async connectSource(
+    source: string,
+    projectId: string,
+    expectedFingerprint: string,
+  ) {
+    return connectSourceOutcomeSchema.parse(
+      await invoke("connect_source", {
+        source,
+        projectId,
+        expectedFingerprint,
+      }),
     );
   },
   /** Lists what discovery would match. Imports and saves nothing. */

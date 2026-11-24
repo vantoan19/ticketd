@@ -532,7 +532,7 @@
       ]
     },
     "ExternalIdentity": {
-      "description": "An external issue's immutable identity. Titles, numbers and repository\nnames can change; this cannot. Never match issues by display text.",
+      "description": "An issue's immutable record key on its provider. It must be stable across\nevery account and site. Never match issues by display text.",
       "type": "object",
       "properties": {
         "id": {
@@ -609,6 +609,13 @@
         },
         "reference": {
           "$ref": "#/$defs/ExternalRef"
+        },
+        "repository": {
+          "description": "The issue's repository as a normalized `host/owner/name`, when known.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "state": {
           "$ref": "#/$defs/ExternalState"

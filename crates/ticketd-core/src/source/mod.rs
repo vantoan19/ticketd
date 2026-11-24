@@ -11,6 +11,7 @@
 //!   network I/O ever happens while the database is locked.
 
 mod conformance;
+mod connect_source;
 mod contract;
 mod conversation;
 mod credentials;
@@ -21,6 +22,7 @@ mod github;
 mod presentation;
 mod publication;
 mod refresh_control;
+mod repository_routes;
 mod schedule;
 mod schema;
 mod takeover;
@@ -34,6 +36,12 @@ use serde::{Deserialize, Serialize};
 pub use conformance::{
     ClosureProbes, ConformanceCheck, ConformanceOptions, ConformanceOutcome, ConformanceReport,
 };
+pub use connect_source::{
+    ConnectSourceAction, ConnectSourceMatchCount, ConnectSourceOutcome, ConnectSourcePreview,
+    ProjectSourceCandidate,
+};
+#[doc(hidden)]
+pub use contract::FetchedIssue;
 pub use contract::{
     CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector, ConnectorDescriptor,
     Conversation, DerivedConfiguration, DestinationRules, DestinationValidation, DiscoveryPage,
@@ -61,6 +69,7 @@ pub use publication::{
     PublishedIssue, Resolution, ResolutionAction, ResolveOptions,
 };
 pub use refresh_control::{RefreshControl, RefreshProgress};
+pub use repository_routes::{SourceRepositoryProject, SourceRepositoryRoute};
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, FieldPattern, OptionSource,
@@ -74,6 +83,8 @@ pub use tracking::{
 };
 
 use crate::{Error, Workspace};
+
+const REPOSITORIES: &str = "repositories";
 
 /// A source's validated configuration as saved in the workspace.
 ///
@@ -131,6 +142,39 @@ pub(crate) fn migrate_issue_opening(connection: &rusqlite::Connection) -> Result
     tracking::migrate_issue_opening(connection)
 }
 
+pub(crate) use tracking::{migrate_github_issue_hosts, migrate_issue_repository};
+
+/// Derive a repository from existing external identity without a connector or network access.
+pub(crate) fn repository_from_saved_issue(
+    provider: &str,
+    locator: &str,
+    url: &str,
+) -> Option<String> {
+    match provider {
+        github::PROVIDER => github::repository_from_issue_url(locator, url),
+        _ => None,
+    }
+}
+
+/// Older Drive records still carry bare numeric GitHub IDs; normalize those
+/// before comparing them to identities in the upgraded Workspace.
+pub(crate) fn scope_saved_issue_identity(
+    provider: &str,
+    id: &str,
+    locator: &str,
+    url: &str,
+) -> Option<String> {
+    if provider != github::PROVIDER {
+        return None;
+    }
+    let repository = repository_from_saved_issue(provider, locator, url);
+    let host = repository
+        .as_deref()
+        .and_then(|remote| remote.split_once('/'))
+        .map(|(host, _)| host);
+    github::scope_legacy_issue_id(id, host).filter(|scoped| scoped != id)
+}
+
 /// Format version 82: the parts of each source that have been read.
 pub(crate) fn migrate_read_partitions(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate_read_partitions(connection)
@@ -146,7 +190,13 @@ pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(
     publication::migrate(connection)
 }
 
-/// Format version 86: device-local presentation cached from registered sources.
+pub(crate) fn migrate_publication_destination_host(
+    connection: &rusqlite::Connection,
+) -> Result<(), Error> {
+    publication::migrate_destination_host(connection)
+}
+
+/// Format version 90: device-local presentation cached from registered sources.
 pub(crate) fn migrate_presentations(connection: &rusqlite::Connection) -> Result<(), Error> {
     connection.execute_batch(
         "CREATE TABLE IF NOT EXISTS source_presentations (provider TEXT PRIMARY KEY, description TEXT NOT NULL);",
@@ -154,7 +204,7 @@ pub(crate) fn migrate_presentations(connection: &rusqlite::Connection) -> Result
     Ok(())
 }
 
-/// Format version 87: derived answers from source connection checks and the
+/// Format version 91: derived answers from source connection checks and the
 /// part carried in each observed issue reference.
 pub(crate) fn migrate_contract_data(connection: &Connection) -> Result<(), Error> {
     for (table, column, definition) in [
@@ -269,7 +319,7 @@ pub(crate) fn migrate_connections(connection: &Connection) -> Result<(), Error> 
     Ok(())
 }
 
-/// Format 92: retain verified dates and keep retired environment names device-local.
+/// Format 96: retain verified dates and keep retired environment names device-local.
 pub(crate) fn migrate_recovery_safety(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "ALTER TABLE publication_connections ADD COLUMN tracker_started_at TEXT;
@@ -300,7 +350,7 @@ pub(crate) fn migrate_recovery_safety(connection: &Connection) -> Result<(), Err
     Ok(())
 }
 
-/// Format 90: device-local removal state and portable ticket presentation.
+/// Format 94: device-local removal state and portable ticket presentation.
 pub(crate) fn migrate_connection_lifecycle(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(
         "ALTER TABLE external_identities ADD COLUMN provider_name TEXT;
@@ -387,7 +437,7 @@ fn connection_removed_at(
         .optional()?)
 }
 
-/// Format version 88: preserve the last typed observation and source label
+/// Format version 92: preserve the last typed observation and source label
 /// independently of the local ticket's status and workflow history.
 pub(crate) fn migrate_state_categories(connection: &rusqlite::Connection) -> Result<(), Error> {
     let legacy: bool = connection.query_row(
@@ -412,15 +462,17 @@ pub(crate) fn migrate_state_categories(connection: &rusqlite::Connection) -> Res
          ALTER TABLE source_sync DROP COLUMN closure_reason;
          ALTER TABLE source_sync DROP COLUMN external_state;",
     )?;
-    let legacy: Vec<(String, String)> = connection
-        .prepare("SELECT ticket_id, locator FROM external_identities WHERE provider = 'github' AND partition IS NULL")?
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+    let legacy: Vec<(String, String, String)> = connection
+        .prepare("SELECT ticket_id, external_id, locator FROM external_identities WHERE provider = 'github' AND partition IS NULL")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?
         .collect::<Result<_, _>>()?;
-    for (id, locator) in legacy {
-        if let Some(partition) = github::legacy_reference_partition("github", &locator) {
+    for (ticket_id, external_id, locator) in legacy {
+        if let Some(partition) =
+            github::legacy_reference_partition("github", &external_id, &locator)
+        {
             connection.execute(
                 "UPDATE external_identities SET partition = ?2 WHERE ticket_id = ?1",
-                rusqlite::params![id, partition],
+                rusqlite::params![ticket_id, partition],
             )?;
         }
     }
@@ -429,8 +481,12 @@ pub(crate) fn migrate_state_categories(connection: &rusqlite::Connection) -> Res
 
 /// Older Workspace sync files carry the locator but no part. GitHub was the
 /// only source that could create them and its locator names the repository.
-pub(crate) fn legacy_reference_partition(provider: &str, locator: &str) -> Option<String> {
-    github::legacy_reference_partition(provider, locator)
+pub(crate) fn legacy_reference_partition(
+    provider: &str,
+    id: &str,
+    locator: &str,
+) -> Option<String> {
+    github::legacy_reference_partition(provider, id, locator)
 }
 
 /// Convert the state tuple saved before typed categories and display names.
@@ -914,9 +970,6 @@ impl Workspace {
         let (preview, derived, verified) =
             self.preview_source_with_config(&scoped, provider, &config)?;
         let (config, staged) = stage_credentials(&scoped.descriptor(provider)?.schema, id, config)?;
-        let configuration = serde_json::to_string(&config)?;
-        let derived_configuration = serde_json::to_string(&derived)?;
-        let revision = uuid::Uuid::new_v4().to_string();
         let description = serde_json::to_string(&engine.description(provider)?)?;
         let account_key = verified.account_key();
         let outcome = crate::write_scope::run(&self.connection, |transaction| {
@@ -939,7 +992,8 @@ impl Workspace {
                     "INSERT INTO source_connections
                         (id, name, provider, site, configuration, account, account_key, contract_version, saved_at, derived_configuration, revision)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, strftime('%Y-%m-%dT%H:%M:%fZ','now'), ?9, ?10)",
-                    params![id, name, provider, verified.site, configuration, verified.account, account_key, CONTRACT_VERSION, derived_configuration, revision],
+                    params![id, name, provider, verified.site, serde_json::to_string(&config)?, verified.account,
+                        account_key, CONTRACT_VERSION, serde_json::to_string(&derived)?, uuid::Uuid::new_v4().to_string()],
                 )?;
             } else {
                 let current =
@@ -950,16 +1004,7 @@ impl Workspace {
                 {
                     return Err(stale_source());
                 }
-                current.verify_account(&verified)?;
-                if current.saved.config != config || !same_discovery(&current.derived, &derived) {
-                    clear_discovery_matches(transaction, &current)?;
-                }
-                transaction.execute(
-                    "UPDATE source_connections SET configuration = ?2, account = ?3, contract_version = ?4,
-                         saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), derived_configuration = ?5,
-                         revision = ?6, derived_checked_at = NULL WHERE id = ?1",
-                    params![id, configuration, verified.account, CONTRACT_VERSION, derived_configuration, revision],
-                )?;
+                update_saved_configuration(transaction, &current, &config, &derived, &verified)?;
             }
             reserve_credential_environment(transaction, id, &names)?;
             credentials::store_references(transaction, id, &staged.references)?;
@@ -977,6 +1022,33 @@ impl Workspace {
         staged.committed(previous.as_ref().map_or(&empty, |old| &old.credentials));
         Ok(outcome)
     }
+}
+
+fn update_saved_configuration(
+    transaction: &Connection,
+    current: &ConfiguredSource,
+    config: &ConfigValues,
+    derived: &DerivedConfiguration,
+    verified: &ConnectionInfo,
+) -> Result<(), Error> {
+    current.verify_account(verified)?;
+    if &current.saved.config != config || !same_discovery(&current.derived, derived) {
+        clear_discovery_matches(transaction, current)?;
+    }
+    transaction.execute(
+        "UPDATE source_connections SET configuration = ?2, account = ?3, contract_version = ?4,
+             saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'), derived_configuration = ?5,
+             revision = ?6, derived_checked_at = NULL WHERE id = ?1",
+        params![
+            current.saved.id,
+            serde_json::to_string(config)?,
+            verified.account,
+            CONTRACT_VERSION,
+            serde_json::to_string(derived)?,
+            uuid::Uuid::new_v4().to_string()
+        ],
+    )?;
+    Ok(())
 }
 
 fn check_credential_environment(
@@ -1282,17 +1354,17 @@ fn configured_row(
         session_secret_fields: credentials::session_fields(&credentials),
     };
     let raw: Option<String> = row.get(6)?;
+    let site: String = row.get(8)?;
     let derived = match raw {
         Some(raw) => serde_json::from_str(&raw)?,
-        None => {
-            github::legacy_derived_configuration(&saved.provider, &saved.config).unwrap_or_default()
-        }
+        None => github::legacy_derived_configuration(&saved.provider, &site, &saved.config)
+            .unwrap_or_default(),
     };
     Ok(ConfiguredSource {
         saved,
         derived,
         revision: row.get(7)?,
-        site: row.get(8)?,
+        site,
         credentials,
         permitted_env,
         account_key: row.get(9)?,

@@ -174,7 +174,7 @@ pub(in crate::source) fn discovered_refs_name_the_parts_returned_by_check<D: Dri
     let fixture = D::discovery();
     let checked = fixture.connector.check_connection(&fixture.config).unwrap();
     assert_eq!(checked.connection.account, "octo");
-    assert_eq!(checked.derived.partitions, ["o/r"]);
+    assert_eq!(checked.derived.partitions.len(), 1);
     assert_eq!(checked.derived.publication.destinations, ["o/r"]);
     let first = fixture
         .connector
@@ -184,7 +184,10 @@ pub(in crate::source) fn discovered_refs_name_the_parts_returned_by_check<D: Dri
             page_size: 100,
         })
         .unwrap();
-    assert_eq!(first.issues[0].reference.partition, "o/r");
+    assert_eq!(
+        first.issues[0].reference.partition,
+        checked.derived.partitions[0]
+    );
 }
 
 pub(in crate::source) fn invalid_configuration_is_a_configuration_error<D: Driver>() {

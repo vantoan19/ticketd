@@ -1032,18 +1032,31 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column source_sync.external_created_at
 
 ## 86
++ column projects.remote
++ unique index projects_remote
+
+## 87
++ column external_identities.repository
+
+## 88
+(no table, column, trigger or unique index changes)
+
+## 89
++ column publication_attempts.destination_host
+
+## 90
 + table source_presentations
 + column source_presentations.description
 + column source_presentations.provider
 
-## 87
+## 91
 + column external_identities.partition
 + column publication_attempts.partition
 + column source_configurations.derived_checked_at
 + column source_configurations.derived_configuration
 + column source_configurations.revision
 
-## 88
+## 92
 + column source_conversation.state_category
 + column source_sync.state_category
 + column source_sync.state_name
@@ -1051,7 +1064,7 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 - column source_sync.closure_reason
 - column source_sync.external_state
 
-## 89
+## 93
 + table publication_connections
 + table source_connection_status
 + table source_connection_tickets
@@ -1104,7 +1117,7 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 - trigger workspace_change_source_configurations_INSERT
 - trigger workspace_change_source_configurations_UPDATE
 
-## 90
+## 94
 + table source_connection_removals
 + column external_identities.provider_icon_svg
 + column external_identities.provider_name
@@ -1114,13 +1127,13 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + trigger workspace_change_source_connection_removals_INSERT
 + trigger workspace_change_source_connection_removals_UPDATE
 
-## 91
+## 95
 + table source_secret_references
 + column source_secret_references.connection_id
 + column source_secret_references.field
 + column source_secret_references.reference
 
-## 92
+## 96
 + table source_connection_id_reservations
 + table source_credential_env_reservations
 + column publication_connections.tracker_started_at

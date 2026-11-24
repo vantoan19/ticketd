@@ -64,6 +64,7 @@ pub struct Remote {
     pub outage: Option<Failure>,
     pub connection_error: Option<String>,
     pub account_from_assignee: bool,
+    pub filter_by_assignee: bool,
     pub account_id: Option<String>,
     pub rate_limited_account: Option<(String, u64)>,
     pub checked_partitions: Option<Vec<String>>,
@@ -74,8 +75,10 @@ pub struct Remote {
     pub display_name: Option<String>,
     pub presentation: SourcePresentation,
     pub repositories_optional: bool,
+    pub repository_host: Option<String>,
     pub extra_fields: Vec<SchemaField>,
     pub discover_calls: usize,
+    pub connection_calls: usize,
     pub cursors_seen: Vec<Option<String>>,
     pub fetch_calls: Vec<u64>,
     pub deleted: Vec<u64>,
@@ -183,6 +186,7 @@ impl Connector for FakeSource {
             checked_partitions,
         ) = {
             let mut remote = self.0.lock().unwrap();
+            remote.connection_calls += 1;
             (
                 remote.connection_error.clone(),
                 remote.publish_destinations.clone(),
@@ -330,6 +334,18 @@ impl Connector for FakeSource {
             .and_then(|name| remote.conversations_by_account.get(&(name.to_owned(), id)))
             .or_else(|| remote.conversations.get(&id));
         Ok(conversation.cloned().unwrap_or_default())
+    }
+
+    fn repository_for_destination(&self, destination: &str) -> Option<String> {
+        ValueFormat::OwnerName.is_valid(destination).then(|| {
+            let remote = self.0.lock().unwrap();
+            let host = remote.repository_host.as_deref().unwrap_or("example.test");
+            format!("{host}/{}", destination.to_ascii_lowercase())
+        })
+    }
+
+    fn same_destination(&self, first: &str, second: &str) -> bool {
+        first.eq_ignore_ascii_case(second)
     }
 
     fn publication(&self) -> Option<&dyn Publication> {
@@ -529,6 +545,16 @@ fn issue_page(remote: &Remote, request: DiscoveryRequest<'_>, start: usize) -> D
         .filter_map(|id| remote.issues.get(id))
         .filter(|issue| issue.state.category == StateCategory::Open)
         .filter(|issue| {
+            request
+                .config
+                .get("assignee")
+                .and_then(serde_json::Value::as_str)
+                .is_none_or(|assignee| {
+                    !remote.filter_by_assignee
+                        || issue.assignees.iter().any(|name| name == assignee)
+                })
+        })
+        .filter(|issue| {
             labels
                 .iter()
                 .all(|label| issue.labels.iter().any(|actual| actual == label))
@@ -588,6 +614,7 @@ pub fn issue_in(repository: &str, id: u64, title: &str) -> ExternalIssue {
         },
         display: format!("{repository}#{id}"),
         url: format!("https://example.test/{repository}/issues/{id}"),
+        repository: None,
         title: title.into(),
         body: format!("Body of {title}"),
         state: ExternalState::named(StateCategory::Open, "Open"),

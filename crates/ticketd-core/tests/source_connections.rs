@@ -17,7 +17,7 @@ const CREDENTIAL_REF: &str = "a7b37ef9-2b34-4567-b879-3eb4acff93d3";
 fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
     let folder = tempfile::tempdir().unwrap();
     let path = folder.path().join("workspace.sqlite3");
-    ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
+    ticketd_core::create_workspace_at_format_version(&path, 92).unwrap();
     let old = Connection::open(&path).unwrap();
     old.execute_batch(
         "INSERT INTO tickets (id, reference, title, status) VALUES
@@ -81,7 +81,7 @@ fn migrates_the_predecessor_and_keeps_publication_and_recovery_evidence() {
     let format: i64 = raw
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .unwrap();
-    assert_eq!(format, 88);
+    assert_eq!(format, 92);
     let account: String = raw
         .query_row("SELECT account FROM source_configurations", [], |row| {
             row.get(0)
@@ -1001,6 +1001,67 @@ fn values(account: &str, repository: &str) -> ticketd_core::source::ConfigValues
     ]
     .into_iter()
     .collect()
+}
+
+#[test]
+fn project_source_review_binds_to_the_selected_connection() {
+    let fake = fake_source::FakeSource::default();
+    fake.0.lock().unwrap().account_from_assignee = true;
+    let mut engine = Engine::new();
+    engine.register(Box::new(fake)).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(folder.path().join("workspace.sqlite3")).unwrap();
+    let first = workspace
+        .add_source_connection(
+            &engine,
+            "fake",
+            None,
+            Some("Alice"),
+            &values("alice", "a/one"),
+        )
+        .unwrap()
+        .source;
+    let second = workspace
+        .add_source_connection(&engine, "fake", None, Some("Bob"), &values("bob", "a/two"))
+        .unwrap()
+        .source;
+    let project = workspace
+        .create_project_with_remote(
+            "Project",
+            folder.path().to_str().unwrap(),
+            Some("example.test/a/project"),
+        )
+        .unwrap();
+    let candidates = workspace
+        .project_source_candidates(&engine, &project.id)
+        .unwrap();
+    assert_eq!(
+        candidates
+            .iter()
+            .map(|candidate| candidate.source.as_str())
+            .collect::<Vec<_>>(),
+        [first.id.as_str(), second.id.as_str()],
+    );
+    let review = workspace
+        .preview_connect_source(&engine, &second.id, &project.id)
+        .unwrap();
+    assert_eq!(review.connection_id.as_deref(), Some(second.id.as_str()));
+    assert!(matches!(
+        workspace.connect_source(&engine, &first.id, &project.id, &review.fingerprint),
+        Err(ticketd_core::Error::ConnectSourceChanged)
+    ));
+    let outcome = workspace
+        .connect_source(&engine, &second.id, &project.id, &review.fingerprint)
+        .unwrap();
+    assert!(outcome.repository_added);
+    assert_eq!(
+        workspace.source_connection(&first.id).unwrap().config,
+        first.config
+    );
+    assert_eq!(
+        workspace.source_connection(&second.id).unwrap().config["repositories"],
+        serde_json::json!(["a/two", "a/project"]),
+    );
 }
 
 #[test]

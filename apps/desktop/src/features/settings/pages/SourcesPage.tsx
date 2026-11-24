@@ -7,6 +7,7 @@ import { DialogShell } from "@/components/ui/dialog-shell";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { FailureAlert } from "@/components/ui/failure-alert";
+import type { ProjectSourceSetup } from "@/features/projects/ConnectProjectSource";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import {
   SettingsList,
@@ -28,9 +29,15 @@ import {
 export function SourcesPage({
   onOpen,
   onChanged,
+  projectSetup,
 }: {
   onOpen: (id: string) => void;
   onChanged?: ((added?: SourceEntry) => Promise<void>) | undefined;
+  projectSetup?: {
+    setup: ProjectSourceSetup;
+    onSaved: (connection: string) => void;
+    onCancel: () => void;
+  };
 }) {
   const { entries, loading } = useSources();
   const [adding, setAdding] = useState<SourceEntry | null>(null);
@@ -55,6 +62,12 @@ export function SourcesPage({
   const byProvider = new Map(
     entries.map((entry) => [entry.connector.provider, entry]),
   );
+  const projectEntry = projectSetup
+    ? entries.find(
+        ({ connector, next_id }) =>
+          connector.provider === projectSetup.setup.provider && next_id,
+      )
+    : undefined;
   const connections = new Map<string, SourceEntry>();
   for (const entry of [...entries, ...changes]) {
     if (entry.saved)
@@ -101,6 +114,23 @@ export function SourcesPage({
     }
   }
 
+  if (projectSetup && projectEntry?.next_id) {
+    return (
+      <SourceCard
+        key={projectEntry.next_id}
+        entry={{ ...projectEntry, saved: null }}
+        initialRepository={projectSetup.setup.repository}
+        adding={{
+          id: projectEntry.next_id,
+          onCancel: projectSetup.onCancel,
+          onAdded: (source) => {
+            void onChanged?.(record(projectEntry, source));
+            if (source.id) projectSetup.onSaved(source.id);
+          },
+        }}
+      />
+    );
+  }
   if (adding?.next_id) {
     return (
       <SourceCard
@@ -127,6 +157,18 @@ export function SourcesPage({
         <p role="status">Loading sources…</p>
       ) : (
         <>
+          {projectSetup && (
+            <p>
+              Source setup is unavailable.{" "}
+              <Button
+                variant="link"
+                size="inline"
+                onClick={projectSetup.onCancel}
+              >
+                Return to project
+              </Button>
+            </p>
+          )}
           <SettingsSection title="Connections">
             <SettingsList>
               {connections.size === 0 && (

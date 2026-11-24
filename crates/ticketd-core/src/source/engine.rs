@@ -15,7 +15,7 @@ use super::{
     contract::{
         CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector,
         ConnectorDescriptor, Conversation, DerivedConfiguration, DiscoveryRequest,
-        ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, Publication,
+        ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, FetchedIssue, Publication,
         PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
         StateCategory,
     },
@@ -487,6 +487,20 @@ impl Engine {
         raw: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError> {
+        let fetched = self.fetch_tracked(provider, raw, reference)?;
+        if fetched.transferred_from.is_some() {
+            return Err(different_issue());
+        }
+        Ok(fetched.issue)
+    }
+
+    /// Refresh alone can adopt verified changes to the identity of a saved issue.
+    pub(super) fn fetch_tracked(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<FetchedIssue, SourceError> {
         verify_identity(provider, &reference.identity)?;
         let connector = self.connector(provider)?;
         if !connector
@@ -497,14 +511,39 @@ impl Engine {
             return Err(SourceError::Unsupported("fetching"));
         }
         let config = connector.configuration_for_request(raw)?;
-        let issue = with_guidance(connector, connector.fetch(&config, reference))?;
-        verify_issue(provider, &issue)?;
-        if issue.reference.identity != reference.identity {
-            return Err(SourceError::Protocol(
-                "the source returned a different issue than requested".into(),
-            ));
+        let fetched = with_guidance(connector, connector.fetch_tracked(&config, reference))?;
+        verify_issue(provider, &fetched.issue)?;
+        if fetched.issue.reference.identity != reference.identity
+            && fetched.transferred_from.as_ref() != Some(reference)
+        {
+            return Err(different_issue());
         }
-        Ok(issue)
+        Ok(fetched)
+    }
+
+    pub(super) fn issue_host(&self, provider: &str) -> Result<Option<&str>, SourceError> {
+        Ok(self.connector(provider)?.issue_host())
+    }
+
+    /// Maps a configured repository or publication destination to a Project remote, offline.
+    pub fn repository_for_destination(
+        &self,
+        provider: &str,
+        destination: &str,
+    ) -> Result<Option<String>, SourceError> {
+        Ok(self
+            .connector(provider)?
+            .repository_for_destination(destination))
+    }
+
+    /// Whether both spellings name the same destination under the provider's rules.
+    pub(super) fn same_destination(
+        &self,
+        provider: &str,
+        first: &str,
+        second: &str,
+    ) -> Result<bool, SourceError> {
+        Ok(self.connector(provider)?.same_destination(first, second))
     }
 
     /// Whether `provider` declares the optional publication capability.
@@ -634,8 +673,19 @@ impl Engine {
     }
 }
 
+fn different_issue() -> SourceError {
+    SourceError::Protocol("the source returned a different issue than requested".into())
+}
+
 fn verify_issue(provider: &str, issue: &ExternalIssue) -> Result<(), SourceError> {
     verify_identity(provider, &issue.reference.identity)?;
+    if let Some(repository) = &issue.repository
+        && crate::project_remote::normalize_project_remote(repository).as_ref() != Some(repository)
+    {
+        return Err(SourceError::Protocol(
+            "an issue's repository must be a normalized host/owner/name".into(),
+        ));
+    }
     verify_issue_timestamps(issue, false)
 }
 

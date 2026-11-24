@@ -181,10 +181,10 @@ fn reference(number: u64, id: u64) -> ExternalRef {
     ExternalRef {
         identity: ExternalIdentity {
             provider: "github".into(),
-            id: id.to_string(),
+            id: format!("@api.example.test:{id}"),
         },
         locator: format!("o/r#{number}"),
-        partition: "o/r".into(),
+        partition: "@api.example.test/o/r".into(),
     }
 }
 

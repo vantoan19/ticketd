@@ -53,7 +53,7 @@ Reproduced with an expired session cookie.
 
 The same record always produces the same bytes, so a file changes only when its record does.
 
-- `kind` comes first, then `format`, the number of the file format (1), then `id`.
+- `kind` comes first, then `format`, then `id`. A ticket with an external source uses format 3. Other records use format 1.
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
 - Every text value is a double-quoted YAML string on one line. A whole number is written bare. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
@@ -140,13 +140,17 @@ The ticket that lost the relationship lists it in `blocked_by_removed` or `paren
 
 The text after the header is the description. Activities and Implementation evidence follow as sections, oldest first.
 
-An externally sourced ticket uses `format: 2`. It carries `source_provider`, `source_external_id`, `source_locator`, `source_display`, `source_url`, `source_origin` (imported or published), `source_linked_at`, `source_authority` (external or local), `source_authority_changed_at` and `source_state_category` (open, completed, not_planned, duplicate or unknown). The observed state can also carry `source_state_name` (the tracker’s display label), `source_updated_at` and `source_partition` (the provider-defined part, such as a GitHub repository). The identity and observation travel between devices. Connection settings, IDs and removal state stay on each device.
+An externally sourced ticket carries `source_provider`, `source_external_id`, `source_locator`, `source_display`, `source_url`, `source_origin` (imported or published), `source_linked_at`, `source_authority` (external or local), `source_authority_changed_at` and `source_state_category` (open, completed, not_planned, duplicate or unknown). The observed state can also carry `source_state_name` (the tracker’s display label), `source_updated_at` and `source_partition` (the provider-defined part, such as a GitHub repository). The identity and observation travel between devices. Connection settings, IDs and removal state stay on each device.
 
-A ticket with a cached provider presentation uses `format: 3` and includes the optional
+When the ticket has cached provider details, it includes the optional
 `source_provider_name` and `source_provider_icon_svg` fields. The desktop displays
 the mark as an image and uses the provider name when it has no covering local connection.
 
-Format 1 and unmarked files use `source_state` (open or closed) and optional `source_closure_reason`. A reader converts a closed issue whose reason is absent or marked unknown to the unknown category. For GitHub it recovers the display label and repository from the stored state and locator. A writer still uses format 1 for local tickets and other record kinds. Readers continue to accept formats 1 and 2. Older clients leave files with newer formats untouched.
+Formats 1 and 2 use `source_state` (open or closed) and optional `source_closure_reason`. A reader converts a closed issue whose reason is absent or marked unknown to the unknown category. For GitHub it recovers the display label from the state and derives the repository from the saved URL and locator. Older clients leave files with newer formats untouched.
+
+Public GitHub issue IDs are numeric. Formats 2 and 3 carry GitHub Enterprise issue IDs as `@<host>:<id>` and unverified GitHub issue IDs as `@:<id>`. When reading a legacy numeric ID, ticketd verifies the host from the saved issue URL and locator. Missing or ambiguous host evidence leaves the ID unverified.
+
+When two desktops observe different IDs for an already-linked GitHub issue, the latest issue update timestamp determines which identity the ticket keeps. This covers host verification and repository transfers. Equal timestamps are ordered by the field values. Concurrent links to different issues keep the lower provider and ID pair in text order. The winning issue ID, location, and associated observation travel together.
 
 ### Activity section
 

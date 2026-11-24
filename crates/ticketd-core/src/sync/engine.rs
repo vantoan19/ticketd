@@ -522,12 +522,20 @@ const REFRESHED: [&str; 7] = [
     "source_display",
     "source_url",
 ];
+const SOURCE_LINK: [&str; 3] = ["source_external_id", "source_origin", "source_linked_at"];
 
-fn refresh_fields(record: &SyncRecord) -> BTreeMap<String, SyncValue> {
+fn observation_field(name: &str, updating_github_identity: bool) -> bool {
+    REFRESHED.contains(&name) || (updating_github_identity && SOURCE_LINK.contains(&name))
+}
+
+fn refresh_fields(
+    record: &SyncRecord,
+    updating_github_identity: bool,
+) -> BTreeMap<String, SyncValue> {
     record
         .fields
         .iter()
-        .filter(|(name, _)| REFRESHED.contains(&name.as_str()))
+        .filter(|(name, _)| observation_field(name, updating_github_identity))
         .map(|(name, value)| (name.clone(), value.clone()))
         .collect()
 }
@@ -553,6 +561,35 @@ fn source_identity(record: &SyncRecord) -> Option<(&SyncValue, &SyncValue)> {
         record.fields.get("source_provider")?,
         record.fields.get("source_external_id")?,
     ))
+}
+
+fn github_issue_id(record: &SyncRecord) -> Option<&str> {
+    match source_identity(record) {
+        Some((SyncValue::Text(provider), SyncValue::Text(id))) if provider == "github" => Some(id),
+        _ => None,
+    }
+}
+
+fn github_issue_number(record: &SyncRecord) -> Option<&str> {
+    let id = github_issue_id(record)?;
+    let number = id
+        .strip_prefix('@')
+        .and_then(|scoped| scoped.rsplit_once(':'))
+        .map_or(id, |(_, number)| number);
+    number.parse::<u64>().ok().map(|_| number)
+}
+
+/// A bare ID alone cannot authorize a hand-edited change of site.
+fn legacy_github_site_matches(local: &SyncRecord, remote: &SyncRecord, number: &str) -> bool {
+    fn url(record: &SyncRecord) -> &str {
+        match record.fields.get("source_url") {
+            Some(SyncValue::Text(url)) => url,
+            _ => "",
+        }
+    }
+    github_issue_number(local) != Some(number)
+        || github_issue_id(local) == github_issue_id(remote)
+        || crate::source::legacy_issue_origin_matches("github", url(local), url(remote))
 }
 
 /// A legacy review can be settled as a group only when its remote values are
@@ -603,8 +640,8 @@ pub(crate) fn migrate_source_state_conflicts(connection: &Connection) -> Result<
             continue;
         }
 
-        let ours = refresh_fields(&local);
-        let theirs = refresh_fields(&remote);
+        let ours = refresh_fields(&local, false);
+        let theirs = refresh_fields(&remote, false);
         let later = later_refresh(ours.clone(), theirs.clone());
         if later != ours {
             local
@@ -699,8 +736,9 @@ fn translate_legacy_state_conflicts(
 }
 
 /// When both sides refreshed, the later `source_updated_at` wins for the
-/// refreshed fields as a whole: mixing two refreshes field by field, or asking
-/// a person, helps nobody.
+/// refreshed fields as a whole. For a previously linked GitHub issue, host
+/// verification and repository transfers can update the ID as part of that
+/// observation. Authority still merges independently.
 fn settle_source(
     base: Option<&SyncRecord>,
     local: &SyncRecord,
@@ -708,7 +746,17 @@ fn settle_source(
     merged: &mut super::merge::Merged,
 ) {
     let (our_identity, their_identity) = (source_identity(local), source_identity(remote));
-    if our_identity != their_identity {
+    let updating_github_identity = our_identity != their_identity
+        && github_issue_id(local).is_some()
+        && github_issue_id(remote).is_some()
+        && base.is_some_and(|base| {
+            github_issue_id(base).is_some()
+                && ["source_origin", "source_linked_at"].iter().all(|field| {
+                    let before = base.fields.get(*field);
+                    local.fields.get(*field) == before && remote.fields.get(*field) == before
+                })
+        });
+    if our_identity != their_identity && !updating_github_identity {
         let previous = base.and_then(source_identity);
         let keep = if our_identity == previous {
             remote
@@ -748,13 +796,14 @@ fn settle_source(
         return;
     }
 
-    let (ours, theirs) = (refresh_fields(local), refresh_fields(remote));
-    let before = base.map(refresh_fields).unwrap_or_default();
+    let group = |record: &SyncRecord| refresh_fields(record, updating_github_identity);
+    let (ours, theirs) = (group(local), group(remote));
+    let before = base.map(group).unwrap_or_default();
     if ours == theirs || ours == before || theirs == before {
         return;
     }
     let later = later_refresh(ours, theirs);
-    let refreshed = |name: &str| REFRESHED.contains(&name);
+    let refreshed = |name: &str| observation_field(name, updating_github_identity);
     merged.fields.retain(|name, _| !refreshed(name));
     merged.fields.extend(later);
     merged
@@ -1221,7 +1270,7 @@ impl Workspace {
         file: &str,
         arrived: &mut BTreeSet<String>,
     ) -> Result<usize, Error> {
-        let mut remote = SyncRecord::parse(file)?;
+        let (mut remote, legacy_github_id) = SyncRecord::parse_with_legacy_github_id(file)?;
         if remote.kind != kind || remote.id != id {
             return Err(Error::SyncFile(
                 "the file's kind and id do not match where it is stored".into(),
@@ -1242,7 +1291,14 @@ impl Workspace {
                 stored.base = None;
             }
             let (merged, conflicts) = match local_view(&workspace.connection, kind, id, &stored)? {
-                Some(local) => merge_records(stored.base.as_ref(), &local, &remote),
+                Some(local) => {
+                    if legacy_github_id.as_deref().is_some_and(|number| {
+                        !legacy_github_site_matches(&local, &remote, number)
+                    }) {
+                        return Err(Error::SyncFileIdentityCollision);
+                    }
+                    merge_records(stored.base.as_ref(), &local, &remote)
+                }
                 None => {
                     arrived.insert(id.to_owned());
                     (remote.clone(), Vec::new())

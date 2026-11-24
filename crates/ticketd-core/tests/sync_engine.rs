@@ -1575,10 +1575,15 @@ fn a_synced_ticket_cannot_change_sites_under_the_same_legacy_issue_id() {
 }
 
 #[test]
-fn a_format_one_cached_base_merges_a_format_two_observation_with_local_progress() {
+fn a_format_two_cached_base_merges_a_format_three_observation_with_local_progress() {
     let mut devices = devices();
     let id = "3f2c9a1e-0000-4000-8000-000000000001";
-    let legacy = sourced("open", "2026-01-03T00:00:00Z");
+    let issue = |updated| {
+        sourced("open", updated)
+            .replace("format: 1", "format: 2")
+            .replace("I_42", "@example.test:42")
+    };
+    let legacy = issue("2026-01-03T00:00:00Z");
     let key = RemoteKey::new(RemoteKind::Ticket, id);
     devices
         .remote
@@ -1609,7 +1614,7 @@ fn a_format_one_cached_base_merges_a_format_two_observation_with_local_progress(
             },
         )
         .unwrap();
-    let incoming = ticketd_core::SyncRecord::parse(&sourced("open", "2026-01-04T00:00:00Z"))
+    let incoming = ticketd_core::SyncRecord::parse(&issue("2026-01-04T00:00:00Z"))
         .unwrap()
         .to_markdown()
         .replace(
@@ -1683,6 +1688,127 @@ fn concurrent_publications_of_one_ticket_keep_one_complete_identity_on_all_devic
                 );
             }
             assert!(workspace.sync_conflicts().unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
+fn legacy_numeric_github_ids_round_trip_with_their_host() {
+    const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    for (url, id) in [
+        (
+            "https://example.test/acme/site/issues/42",
+            "@example.test:7",
+        ),
+        ("", "@:7"),
+        ("https://github.com/acme/site/issues/42", "7"),
+    ] {
+        let mut devices = devices();
+        let legacy = sourced("open", "2026-01-03T00:00:00Z")
+            .replace("source_external_id: \"I_42\"", "source_external_id: \"7\"")
+            .replace("https://example.test/acme/site/issues/42", url);
+        devices.hand_edit(RemoteKind::Ticket, ID, &legacy);
+        assert_eq!(devices.sync(0).skipped, 0, "{url}");
+        assert_eq!(devices.remote_text(RemoteKind::Ticket, ID).1, legacy);
+
+        devices.workspaces[0].add_tag("T-ZZ7", "synced").unwrap();
+        assert_eq!(devices.sync(0).uploaded, 1, "{url}");
+        let written = devices.remote_text(RemoteKind::Ticket, ID).1;
+        assert!(written.contains("\nformat: 3\n"), "{written}");
+        assert!(written.contains(&format!("\nsource_external_id: \"{id}\"\n")));
+
+        assert_eq!(devices.sync(1).skipped, 0, "{url}");
+        let received = devices.workspaces[1]
+            .export_sync_record(SyncKind::Ticket, ID)
+            .unwrap();
+        assert_eq!(
+            received.fields["source_external_id"],
+            SyncValue::Text(id.into())
+        );
+        assert_eq!(devices.sync(1).uploaded, 0, "{url}");
+    }
+}
+
+#[test]
+fn concurrent_github_identity_updates_keep_the_issue_and_its_observation_together() {
+    const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    const ENTERPRISE: &str = "https://example.test/acme/site/issues/42";
+    let issue = |id: &str, url: &str, state: &str, updated: &str| {
+        sourced(state, updated)
+            .replace("format: 1", "format: 2")
+            .replace("\"I_42\"", &format!("\"{id}\""))
+            .replace(ENTERPRISE, url)
+    };
+    let apply = |workspace: &mut Workspace, text: &str| {
+        let record = ticketd_core::SyncRecord::parse(text).unwrap();
+        workspace.apply_sync_record(&record).unwrap();
+    };
+    for (previous_id, previous_url, earlier_id, earlier_url, later_id, repository) in [
+        // Two host confirmations for one unverified issue.
+        (
+            "@:5",
+            "",
+            "5",
+            "https://github.com/acme/site/issues/42",
+            "@example.test:5",
+            "acme/site",
+        ),
+        // Two observations across transfers of an already-qualified issue.
+        (
+            "@example.test:500",
+            ENTERPRISE,
+            "@example.test:4",
+            ENTERPRISE,
+            "@example.test:9",
+            "acme/moved",
+        ),
+    ] {
+        let mut devices = devices();
+        apply(
+            &mut devices.workspaces[0],
+            &issue(previous_id, previous_url, "open", "2026-01-03T00:00:00Z"),
+        );
+        devices.settle([0, 1, 2]);
+
+        let earlier = issue(earlier_id, earlier_url, "open", "2026-01-03T00:00:00Z")
+            .replace(
+                "source_authority: \"external\"",
+                "source_authority: \"local\"",
+            )
+            .replace(
+                "source_authority_changed_at: \"2026-01-02T03:04:05.000Z\"",
+                "source_authority_changed_at: \"2026-01-04T00:00:00.000Z\"",
+            );
+        apply(&mut devices.workspaces[0], &earlier);
+
+        let later = issue(later_id, ENTERPRISE, "closed", "2026-01-05T00:00:00Z")
+            .replace("acme/site", repository);
+        apply(&mut devices.workspaces[1], &later);
+        devices.sync(1);
+        devices.sync(0);
+
+        let written = devices.remote_text(RemoteKind::Ticket, ID).1;
+        assert!(written.contains("\nformat: 3\n"), "{written}");
+        assert!(
+            written.contains(&format!("\nsource_external_id: \"{later_id}\"\n")),
+            "{written}"
+        );
+
+        devices.settle([0, 1, 2]);
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_conflicts().unwrap(), []);
+            let source = workspace.show_ticket("T-ZZ7").unwrap().source.unwrap();
+            assert_eq!(source.id, later_id);
+            assert_eq!(source.url, ENTERPRISE.replace("acme/site", repository));
+            assert_eq!(
+                source.state.category,
+                ticketd_core::source::StateCategory::Completed
+            );
+            assert_eq!(source.ownership, ticketd_core::source::Ownership::Local);
+            assert_eq!(
+                workspace.export().unwrap()["external_identities"][0]["repository"],
+                format!("example.test/{repository}")
+            );
         }
     }
 }

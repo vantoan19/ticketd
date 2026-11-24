@@ -110,6 +110,7 @@ impl Issue {
         duplicate: Option<RelatedIssue>,
     ) -> ExternalIssue {
         ExternalIssue {
+            repository: None,
             reference: reference(self.id, self.identifier.clone(), self.team.id),
             display: self.identifier,
             url: self.url,

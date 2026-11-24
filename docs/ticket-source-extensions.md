@@ -182,7 +182,11 @@ and return the same issue by identity from `fetch`. A page is
 in RFC 3339 format. Use an opaque immutable
 ID unique across all accounts and sites of this provider, with the provider in
 `reference.identity`. Each `reference.partition` matches a partition from
-`check_connection`. Use the tracker's typed state for `state.category`, with
+`check_connection`. If the issue belongs to a hosted code repository, its
+optional `repository` is the Project remote in `host/owner/name` form. Supply
+the lowercase web host and leave the field absent when the repository is
+unknown. Ticketd uses this value to route new issues to matching projects.
+Use the tracker's typed state for `state.category`, with
 its original state name in `state.name`. The categories are `open`,
 `completed`, `not_planned`, `duplicate` and `unknown`. An absent or
 inaccessible issue is an error. Only positive tracker evidence can confirm a

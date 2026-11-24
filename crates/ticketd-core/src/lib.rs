@@ -52,6 +52,7 @@ pub use retry::{WriteRequest, WriteResult};
 mod graph;
 mod hierarchy;
 pub use graph::{DependencyGraph, GraphEdge, GraphNode};
+mod project_remote;
 mod projects;
 mod relationships;
 pub use relationships::RelationshipKind;
@@ -161,7 +162,8 @@ pub use chats::{
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};
-pub use projects::Project;
+pub use project_remote::{ProjectRemoteCandidate, ProjectRemoteDetection, detect_project_remote};
+pub use projects::{CheckoutRegistration, CheckoutRemoteMismatch, Project, ProjectRemoteChange};
 pub use readiness::Readiness;
 
 mod format;
@@ -296,8 +298,37 @@ pub enum Error {
     InvalidCheckoutPath,
     #[error("project name and path must not be empty")]
     EmptyProject,
+    #[error("Enter a Project remote in host/owner/name format.")]
+    InvalidProjectRemote,
+    #[error(
+        "Project remote {remote} belongs to {project}. Choose another remote or clear it on that project."
+    )]
+    ProjectRemoteTaken { remote: String, project: String },
+    #[error("{0} already has a Project remote. Choose a project without one.")]
+    ProjectAlreadyHasRemote(String),
+    #[error("Register a checkout for {0} before linking it to a discovery repository.")]
+    ProjectCheckoutRequired(String),
+    #[error(
+        "{0} is no longer in the saved discovery repositories. Reload the routes and choose a saved repository."
+    )]
+    SourceRepositoryNotListed(String),
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
+    #[error("Set a Project remote on {0} before connecting its ticket source.")]
+    ProjectRemoteRequired(String),
+    #[error(
+        "Project remote {remote} is on a different host from the {provider} source. Select a remote on the source's host to connect it."
+    )]
+    ProjectSourceHostMismatch { remote: String, provider: String },
+    #[error(
+        "Connect the {provider} ticket source with {repository} in its discovery repositories, then preview again."
+    )]
+    ProjectSourceNotConnected {
+        provider: String,
+        repository: String,
+    },
+    #[error("The connection preview changed. Preview again before confirming.")]
+    ConnectSourceChanged,
     #[error("agent '{0}' was not found")]
     AutomationAgentNotFound(String),
     #[error("invalid agent: {0}")]

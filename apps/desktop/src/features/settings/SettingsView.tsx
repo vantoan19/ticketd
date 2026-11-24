@@ -1,3 +1,4 @@
+import type { ProjectSourceSetup } from "@/features/projects/ConnectProjectSource";
 import { modifierKeyLabel } from "@/lib/platform";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
@@ -48,6 +49,10 @@ export function SettingsView({
   onOpenInbox,
   onSourcesChanged,
   onSelect,
+  projectSourceSetup,
+  onProjectSourceSaved,
+  onProjectSourceCancel,
+  onProjectLinked,
   selected: chosen = "appearance",
 }: {
   selected?: SettingsPageId;
@@ -57,6 +62,10 @@ export function SettingsView({
   onRestore: () => Promise<void>;
   onOpenInbox: () => void;
   onSourcesChanged?: (added?: SourceEntry) => Promise<void>;
+  projectSourceSetup?: ProjectSourceSetup;
+  onProjectSourceSaved?: (connection: string) => void;
+  onProjectSourceCancel?: () => void;
+  onProjectLinked?: (projectId: string, connection: string) => void;
 }) {
   // The parent mounts this only while Settings is open, so every page reads
   // fresh data on each visit. A restore or a download replaces the workspace
@@ -116,6 +125,15 @@ export function SettingsView({
         <SourcesPage
           onOpen={(id) => onSelect?.(`source-${id}`)}
           onChanged={onSourcesChanged}
+          {...(projectSourceSetup &&
+            onProjectSourceSaved &&
+            onProjectSourceCancel && {
+              projectSetup: {
+                setup: projectSourceSetup,
+                onSaved: onProjectSourceSaved,
+                onCancel: onProjectSourceCancel,
+              },
+            })}
         />
       )}
       {sources.map((entry) => (
@@ -125,6 +143,7 @@ export function SettingsView({
           active={
             selected === `source-${entry.saved?.id ?? entry.connector.provider}`
           }
+          {...(onProjectLinked && { onProjectLinked })}
         />
       ))}
     </div>

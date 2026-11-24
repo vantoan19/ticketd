@@ -65,21 +65,46 @@ reasons. Use `--strict` to require the observations described in help.
 When the task calls for a test write, `--publish DESTINATION` permits one
 creation and checks the recovery queries.
 
-## Publication and uncertain outcomes
+If refresh asks for the original host of a legacy GitHub ticket, confirm its
+current issue URL on that host with `source reconcile-github T-KQ1 --issue URL`.
+Restore a trashed ticket before confirming its link. GitHub's reply must match
+the saved stable issue ID and the supplied URL. The ticket keeps its current
+ownership, even after takeover.
 
-When publication is requested, first inspect its exact payload and destination:
+## Connect a project to its source
 
 ```sh
-ticketd source publish T-KQ1 --connection CONNECTION --destination DESTINATION --preview
+ticketd project connect-source PROJECT_ID --preview
+ticketd project connect-source PROJECT_ID --expect FINGERPRINT
 ```
 
-A saved source publishes to its allowed destinations. The preview checks your
-choice before anything is sent. Omit `--connection` when only one connection can publish.
+The preview is offline. It reports whether the selected connection needs to
+add the repository to discovery, which unlinked tickets would be linked, and
+what fingerprint to confirm. If several connections match the Project remote,
+pass `--connection CONNECTION` for both preview and confirmation. If the
+repository is already listed, confirmation works offline. If the preview
+reports `not_connected`, use `source add PROVIDER --set repositories=OWNER/NAME`
+with its `provider` and `repository`, then preview again.
 
-Use the returned fingerprint with `--expect FINGERPRINT` when executing the
-publication. It creates an external issue and transfers authority while preserving
-ticketd identity. A changed payload or destination invalidates the preview.
-Publication is not ongoing outbound synchronization.
+## Publication and uncertain outcomes
+
+Start by previewing the publication to inspect its exact payload and destination.
+
+```sh
+ticketd source publish T-KQ1 --preview
+```
+
+The preview defaults to the ticket's Project remote when the saved source lists
+that repository on the matching host. Without a match, it selects the sole listed
+repository if there is one. Use `--destination owner/repository` to choose
+explicitly. If the saved source lists repositories, it only publishes to those
+repositories.
+
+Keep the same destination arguments and pass the returned fingerprint with
+`--expect FINGERPRINT` when publishing. Using the Project remote as the default
+requires this fingerprint. A changed payload or destination invalidates the
+preview. Publication creates one external issue and transfers authority while
+preserving ticketd identity.
 
 If the outcome is unresolved, use `source resolve T-KQ1` to inspect the attempt and
 search for the possible issue. `--no-search` avoids network access. Then use the

@@ -13,9 +13,11 @@ import "@/features/settings/sources/sources.css";
 export function SourcePage({
   entry,
   active,
+  onProjectLinked,
 }: {
   entry: SourceEntry;
   active: boolean;
+  onProjectLinked?: (projectId: string, connection: string) => void;
 }) {
   const [visited, setVisited] = useState(active);
   if (active && !visited) setVisited(true);
@@ -29,5 +31,11 @@ export function SourcePage({
         children={null}
       />
     ) : null;
-  return <SourceCard entry={entry} hidden={!active} />;
+  return (
+    <SourceCard
+      entry={entry}
+      hidden={!active}
+      {...(onProjectLinked && { onProjectLinked })}
+    />
+  );
 }

@@ -78,6 +78,7 @@ vi.mock("@/lib/api/sources", async (original) => ({
     list: vi.fn(),
     checkConnection: vi.fn(),
     configurationSummary: vi.fn(),
+    repositoryRoutes: vi.fn().mockResolvedValue([]),
     options: vi.fn(),
     preview: vi.fn(),
     save: vi.fn(),

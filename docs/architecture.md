@@ -822,7 +822,7 @@ The engine uses the same connector interface for built-in GitHub and
 out-of-process extensions. The Rust SDK owns the shared protocol types and
 the extension-side stdio server. The wire contract is described in the
 schema, and the author guide covers installation, development and conformance.
-[ADR 0021](adr/0021-ticket-source-extensions-run-out-of-process.md) ·
+[ADR 0024](adr/0024-ticket-source-extensions-run-out-of-process.md) ·
 [Contract 2 JSON Schema](source-extensions/contract-2.schema.json) ·
 [Author guide](ticket-source-extensions.md)
 
@@ -835,7 +835,9 @@ The code lives in `ticketd_core::source`, from the inside out:
   `SourceError`). `CONTRACT_VERSION` identifies the contract; the engine refuses
   a connector that declares another version. Once published, changes to existing
   operations and types bump the version, while optional capabilities can be added
-  within a version. Publication is one optional capability covering creation,
+  within a version. An optional `ExternalIssue.repository` supplies the canonical
+  Project remote. Repository-aware connectors can also map publication
+  destinations to that identity offline. Publication is one optional capability covering creation,
   lookup and uncertain-publication search. Source errors pair a stable code with a
   configuration, authentication, transient or system class. The interface receives
   the person's message, and diagnostics go to the local log.
@@ -869,7 +871,7 @@ The code lives in `ticketd_core::source`, from the inside out:
   (environment token or `gh auth token`), which is never stored, exported,
   backed up, logged, or sent to any host other than the API.
 - **Workflows** (`source/tracking.rs`, `publication.rs`, `takeover.rs`,
-  `conversation.rs`, `freshness.rs`, and `mod.rs` for saved configuration):
+  `conversation.rs`, `freshness.rs`, `connect_source.rs`, and `mod.rs` for saved configuration):
   methods on `Workspace` that call the engine first and then write in one short
   transaction, so no network I/O happens while the database is locked.
   Workspace check, preview, and option lookups bind the draft to its source
@@ -895,10 +897,7 @@ before dispatch. For an older attempt with no tracker time, only a complete
 listing with no issues in its destination can clear the attempt as not created.
 A listing with issues can still supply candidates for review.
 
-External identity remains provider plus opaque ID. Historical GitHub issue IDs
-are numeric. If two GitHub sites return the same ID with different issue hosts,
-ticketd refuses to overwrite, rebind or adopt the first issue. The two issues
-cannot coexist under that legacy ID. A device refreshes a ticket
+External identity uses the provider and its stable opaque ID. A device refreshes a ticket
 through its local discovery connection, or the first saved connection that
 covers the issue's part. Tickets with no covering connection keep their cached
 source content. Connection settings, discovery affinity and refresh scheduling
@@ -907,18 +906,72 @@ the destination device's settings. The private copy taken before a migration
 keeps the pre-migration Workspace intact.
 
 An imported ticket stores three things apart, each keyed by the ticket:
-`external_identities` (provenance: which external issue it is or was, never
-deleted), `external_ownership` (authority: `external` means synchronized and
-read-only, `local` means ticketd owns it), and `source_sync` (the last observed
-external state, who opened the issue and when, and freshness). Imported title and description live in the
-ordinary ticket columns. `Workspace::refresh_sources` gathers through the engine
-with no transaction open and then applies the result in one short write that
-re-reads each ticket's ownership; the core rejects title, description and
+`external_identities` (provenance: which external issue it is or was, including its
+last reported repository), `external_ownership` (authority: `external` means
+synchronized and read-only, `local` means ticketd owns it), and `source_sync`
+(the last observed external state, who opened the issue and when, and freshness).
+Imported title and description live in the ordinary ticket columns.
+`Workspace::refresh_sources` gathers through the engine with no transaction
+open and then applies the result in one short write that re-reads each ticket's
+ownership; the core rejects title, description and
 closure-owned status edits to externally owned tickets. The same write re-reads
 the connection. If its rules changed during network work, a successful read
 can still update a ticket that remains assigned to it. The old rules cannot
 import tickets or change discovery membership, failures, or run health. Saving changed rules
 invalidates match membership until the next complete discovery walk.
+
+When a connector reports a repository, the import write matches its normalized
+`host/owner/name` against the Project remote. It saves the matching project link
+and a project membership history entry in the same transaction as the new ticket.
+Refresh preserves existing project membership. It retains a previously observed
+repository while the issue's locator and URL stay the same. A changed location
+without a repository report clears the old observation. For an externally owned
+ticket, refresh can follow a GitHub repository transfer even if its REST ID changes.
+This requires a permanent redirect from the saved issue path within the same API
+and a destination response that corroborates the new location and agrees with
+the saved issue's creation time. Missing or mismatched creation times leave the
+current link in place and report a refresh error. Matching creation times help discovery
+identify possible transfers between repository reads for a direct check. Refresh
+updates provenance on the same ticket before discovery can import the destination.
+An identity already held by another ticket is reported as a conflict, and that
+ticket can still apply its own source observation. GitHub
+derives the web host from the API host. It maps `api.github.com` to `github.com` and
+`api.<tenant>.ghe.com` to `<tenant>.ghe.com`. GitHub Enterprise Server uses its
+configured host. Enterprise issue identities include the web host, so issues
+with the same numeric ID on different hosts stay separate after a source change.
+[GitHub Enterprise Cloud data residency](https://docs.github.com/en/enterprise-cloud@latest/admin/data-residency/about-github-enterprise-cloud-with-data-residency#api-access)
+
+Public GitHub keeps its numeric IDs. Format version 87 populates the repository
+when a legacy issue URL agrees with its locator. Format version 88 qualifies
+legacy IDs using stored host evidence. A legacy ID without host evidence remains
+unverified. Discovery holds a potential new import with the same numeric ID
+as an unverified ticket, including candidates at a different location. A person
+can confirm the issue's current URL on its original host with
+`ticketd source reconcile-github`. Core verifies the configured host, saved
+stable ID, and current location through GitHub before atomically repairing
+provenance on the existing ticket. Discovery can then import a separate issue
+with the same numeric ID on a different host.
+Drive sync applies the same qualification to older incoming issue records and
+derives their repository when a ticket gains or changes its external location.
+Initial discovery history uses host-qualified repository keys on Enterprise and
+the existing bare repository keys on public GitHub. A complete refresh records
+discovery membership for the configured GitHub host.
+
+`Workspace::preview_connect_source` reads one local snapshot of the Project
+remote, the selected connection, and the exact set of eligible ticket identities.
+It matches stored repositories on the connection's host independently of the
+discovery filters and fingerprints the effect. The fingerprint also captures
+saved discovery rules and the account when confirmation would add a repository.
+`Workspace::connect_source` checks this
+fingerprint before contacting the provider, then rechecks under the write lock.
+When adding a repository, it shares the validation and persistence path of
+`save_source`. If the bounded preview stops early, a separate preview checks the
+added repository with the same filters. Provider validation and discovery preview
+finish before the lock. The transaction saves the new rules, invalidates discovery membership, and applies
+the reviewed project links using the ordinary history path. If the rules already
+list the repository, the transaction only applies the links and can run offline.
+A separate bounded match count for the new repository keeps the saved assignee
+and label filters and has no effect on the fingerprint or the confirmation.
 
 The source conversation (an external ticket's comments and timeline events) is
 a read-only mirror in `source_conversation`, keyed by ticket and the source's
@@ -956,9 +1009,12 @@ CLI refresh and status take a connection ID and work without the desktop.
 
 Publication cannot be atomic across a tracker and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks
-eligibility and saves the attempt as `in_flight` with the exact title,
-description and destination. It binds the attempt to the original connection
-on that device. A unique partial index allows one open attempt per ticket. The connector's create call then runs with no transaction open. A second
+eligibility, resolves the destination against the ticket and selected connection,
+and saves the attempt as `in_flight` with the exact title, description, destination
+and known repository host. It binds the attempt to the original connection on
+that device. A unique partial index allows one open attempt per ticket. Using the
+Project remote as the default requires a matching preview fingerprint. The
+connector's create call runs with no transaction open. A second
 short write links the confirmed issue (`external_identities` with origin
 `published`, ownership `external`) and marks the attempt `succeeded`. A refusal
 the provider proves (`SourceError::ruled_out_creation`) marks it `failed` and
@@ -976,6 +1032,18 @@ discovery and recovery across restarts. When the date is missing, Linear can sti
 search a bounded set of issues for candidates and cannot confirm absence.
 Linear uses team UUIDs throughout publication and retains human-readable team
 labels in its connection’s derived configuration for preview.
+
+Recovery checks the recorded host against the current connector before looking
+up any issue or ruling out creation. Format 89 recovers the host of an open
+legacy attempt when the recorded create response has an issue URL that matches
+the attempt's repository, issue locator and saved issue host. When the original
+host is unknown, it must be explicitly confirmed against the configured connector
+before recovery can proceed.
+
+GitHub discovery compares a matching issue's identity host and locator
+repository to the open attempt's destination. This comparison is independent of
+Project remote validation. An attempt with an unknown host can still hold a
+match in the same owner and repository name until the original host is confirmed.
 
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only

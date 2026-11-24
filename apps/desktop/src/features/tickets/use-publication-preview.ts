@@ -109,6 +109,7 @@ export function publicationReason(preview: PublicationPreview): string {
     case "internal_attachments":
     case "invalid_destination":
     case "destination_not_allowed":
+    case "preview_required":
       return preview.eligibility.message;
   }
 }

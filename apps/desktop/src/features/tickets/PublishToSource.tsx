@@ -301,7 +301,7 @@ export function PublishDialog({
       await sourcesClient.publish(
         ticket.reference,
         provider,
-        chosen,
+        destination,
         preview.fingerprint,
       );
     } catch (reason) {

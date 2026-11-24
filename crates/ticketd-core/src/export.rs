@@ -40,7 +40,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ("document_opens", "sequence, document_id"),
     ("document_pins", "document_id"),
     ("document_tags", "document_id, tag_name"),
-    ("projects", "id, name, path"),
+    ("projects", "id, name, path, remote"),
     ("project_checkouts", "project_id, path"),
     ("plans", "id, name, archived, purpose, spec_document_id"),
     ("plan_documents", "plan_id, document_id"),
@@ -78,7 +78,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ("ticket_parents", "child_id, parent_id"),
     (
         "external_identities",
-        "ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition, provider_name, provider_icon_svg",
+        "ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition, provider_name, provider_icon_svg, repository",
     ),
     ("external_ownership", "ticket_id, authority, changed_at"),
     (
@@ -99,7 +99,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "publication_attempts",
-        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, partition",
+        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, partition, destination_host",
     ),
     (
         "chats",

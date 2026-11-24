@@ -4,7 +4,8 @@ use clap::{Args, Parser, Subcommand, ValueEnum};
 use std::io::{Read, Write};
 use ticketd_core::{
     ActivityPatch, Availability, BatchOperation, ContextOptions, DocumentPatch, EvidenceInput,
-    EvidenceKind, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
+    EvidenceKind, ProjectRemoteChange, Status, TicketFilter, TicketPatch, Workspace, WriteRequest,
+    WriteResult,
 };
 
 mod output;
@@ -786,6 +787,14 @@ enum SourceCommand {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Verify the original GitHub host of a legacy ticket using its full issue URL
+    ReconcileGithub {
+        /// The legacy ticket, for example T-KQ12
+        reference: String,
+        /// The current issue URL on its original GitHub host
+        #[arg(long)]
+        issue: String,
+    },
     /// Publish a local Todo, In progress or In review ticket as one ordinary issue.
     /// Use --preview first: it prints exactly what would be sent and sends nothing
     Publish {
@@ -794,15 +803,16 @@ enum SourceCommand {
         /// The source connection. Can be omitted when only one can publish
         #[arg(long)]
         connection: Option<String>,
-        /// Where to create the issue. Must be one of the source’s saved
-        /// destinations. Can be omitted when there is only one
+        /// Where to create the issue, for example owner/name. Defaults to the
+        /// ticket's Project remote when listed by the source, or to the only
+        /// listed repository. A configured list limits where issues can be sent
         #[arg(long)]
         destination: Option<String>,
         /// Print the title, description, destination and eligibility; create nothing
         #[arg(long)]
         preview: bool,
-        /// The `fingerprint` printed by --preview. When given, nothing is sent if the
-        /// title, description or destination changed since
+        /// The fingerprint printed by --preview. Required to use a Project remote
+        /// as the default. Refuses publication if the previewed issue changed
         #[arg(long)]
         expect: Option<String>,
         #[arg(long)]
@@ -828,6 +838,9 @@ enum SourceCommand {
         /// With no other flag, skip the search of the destination (no network)
         #[arg(long)]
         no_search: bool,
+        /// Record the independently verified host of a legacy attempt without looking up an issue
+        #[arg(long, conflicts_with_all = ["issue", "attach", "not_created", "no_search", "accept_different", "agent"])]
+        confirm_host: Option<String>,
         /// Attach an issue whose title or description differs from what was sent. Its text
         /// then replaces the ticket's, and the ticket's own text is kept as a note
         #[arg(long)]
@@ -1053,17 +1066,43 @@ enum ProjectCommand {
         name: String,
         /// The repository folder
         path: String,
+        /// Use this Project remote (host/owner/name)
+        #[arg(long, conflicts_with = "no_remote")]
+        remote: Option<String>,
+        /// Skip Git remote detection
+        #[arg(long)]
+        no_remote: bool,
     },
-    /// Change a project's name and path
+    /// Change a project's name, path, or Project remote
     Edit {
         id: String,
         /// The project's new name
         name: String,
         /// The repository folder
         path: String,
+        /// Set the Project remote (host/owner/name)
+        #[arg(long, conflicts_with = "clear_remote")]
+        remote: Option<String>,
+        /// Clear the Project remote
+        #[arg(long)]
+        clear_remote: bool,
     },
     /// Show a project
     Show { id: String },
+    /// Add the Project remote to discovery and link its existing unlinked tickets
+    ConnectSource {
+        /// The project's ID
+        project: String,
+        /// The source connection. Defaults to the one matching the Project remote
+        #[arg(long)]
+        connection: Option<String>,
+        /// Show the local effect and fingerprint without contacting the source
+        #[arg(long)]
+        preview: bool,
+        /// Apply the effect from the reviewed preview
+        #[arg(long, required_unless_present = "preview", conflicts_with = "preview")]
+        expect: Option<String>,
+    },
     /// List projects
     List,
     /// Register another checkout path for a project
@@ -1829,15 +1868,86 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             serde_json::to_string(&workspace.apply_batch(operations)?)?
         }
         Command::Project { command } => match command {
-            ProjectCommand::Create { name, path } => {
-                serde_json::to_string(&workspace.create_project(&name, &path)?)?
+            ProjectCommand::Create {
+                name,
+                path,
+                remote,
+                no_remote,
+            } => {
+                let remote = remote.or_else(|| {
+                    if no_remote {
+                        return None;
+                    }
+                    ticketd_core::detect_project_remote(std::path::Path::new(path.trim())).suggested
+                });
+                let project = workspace.create_project_with_remote(
+                    &name,
+                    &path,
+                    remote.as_deref(),
+                )?;
+                if project.remote.is_some() {
+                    // The hint is best effort so stdout can report the committed project.
+                    let _ = writeln!(
+                        std::io::stderr().lock(),
+                        "hint: Preview connecting this project with `ticketd project connect-source {} --preview`.",
+                        project.id
+                    );
+                }
+                serde_json::to_string(&project)?
             }
-            ProjectCommand::Edit { id, name, path } => {
-                serde_json::to_string(&workspace.edit_project(&id, &name, &path)?)?
+            ProjectCommand::Edit {
+                id,
+                name,
+                path,
+                remote,
+                clear_remote,
+            } => {
+                let remote = match remote.as_deref() {
+                    Some(remote) => ProjectRemoteChange::Set(remote),
+                    None if clear_remote => ProjectRemoteChange::Clear,
+                    None => ProjectRemoteChange::Keep,
+                };
+                serde_json::to_string(&workspace.edit_project_with_remote(&id, &name, &path, remote)?)?
             }
             ProjectCommand::Show { id } => serde_json::to_string(&workspace.show_project(&id)?)?,
+            ProjectCommand::ConnectSource {
+                project,
+                connection,
+                preview,
+                expect,
+            } => {
+                let engine = ticketd_core::source::ExtensionRegistry::device()?.engine()?;
+                let source = match connection {
+                    Some(connection) => workspace.source_connection(&connection)?.id,
+                    None => {
+                        let candidates = workspace.project_source_candidates(&engine, &project)?;
+                        match candidates.as_slice() {
+                            [candidate] => candidate.source.clone(),
+                            [] => return Err("No available source matches the Project remote. Add a connection for its site.".into()),
+                            _ => {
+                                let connections: Vec<_> = candidates.iter().filter_map(|candidate| candidate.connection_id.as_deref()).collect();
+                                return Err(format!("Select --connection from: {}", connections.join(", ")).into());
+                            }
+                        }
+                    }
+                };
+                if preview {
+                    serde_json::to_string(&workspace.preview_connect_source(&engine, &source, &project)?)?
+                } else {
+                    let fingerprint = expect.as_deref().ok_or("supply --expect FINGERPRINT or --preview")?;
+                    serde_json::to_string(&workspace.connect_source(&engine, &source, &project, fingerprint)?)?
+                }
+            }
             ProjectCommand::Register { id, path } => {
-                serde_json::to_string(&workspace.register_checkout(&id, &path)?)?
+                let registration = workspace.register_checkout_with_warning(&id, &path)?;
+                if let Some(warning) = registration.warning {
+                    let _ = writeln!(
+                        std::io::stderr().lock(),
+                        "warning: The checkout's detected remote {} differs from the Project remote {}.",
+                        warning.checkout_remote, warning.project_remote
+                    );
+                }
+                serde_json::to_string(&registration.project)?
             }
             ProjectCommand::Unregister { id, path } => {
                 serde_json::to_string(&workspace.remove_checkout(&id, &path)?)?
@@ -2249,6 +2359,13 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         Command::Workspace => return Err("workspace status was not printed".into()),
         Command::Show { reference } => serde_json::to_string(&workspace.show_ticket(&reference)?)?,
         Command::Source {
+            command: SourceCommand::ReconcileGithub { reference, issue },
+        } => serde_json::to_string(&workspace.reconcile_github_issue(
+            &ticketd_core::source::ExtensionRegistry::device()?.engine()?,
+            &reference,
+            &issue,
+        )?)?,
+        Command::Source {
             command:
                 SourceCommand::Publish {
                     ticket,
@@ -2309,10 +2426,23 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             command:
                 SourceCommand::Resolve {
                     ticket,
+                    confirm_host: Some(host),
+                    ..
+                },
+        } => serde_json::to_string(&workspace.confirm_publication_host(
+            &ticketd_core::source::ExtensionRegistry::device()?.engine()?,
+            &ticket,
+            &host,
+        )?)?,
+        Command::Source {
+            command:
+                SourceCommand::Resolve {
+                    ticket,
                     issue,
                     attach,
                     not_created,
                     no_search,
+                    confirm_host: None,
                     accept_different,
                     agent,
                 },
@@ -2504,6 +2634,7 @@ fn source_command(
         SourceCommand::Connection(_)
         | SourceCommand::Extension { .. }
         | SourceCommand::Conformance { .. }
+        | SourceCommand::ReconcileGithub { .. }
         | SourceCommand::Publish { .. }
         | SourceCommand::Resolve { .. } => {
             return Err(

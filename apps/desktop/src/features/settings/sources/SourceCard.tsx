@@ -42,6 +42,7 @@ import {
   draftFromConfig,
   type Draft,
 } from "@/features/settings/sources/config-values";
+import { SourceRepositoryRoutes } from "@/features/settings/sources/SourceRepositoryRoutes";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { useNow } from "@/lib/use-now";
 import { formatDateTime } from "@/lib/format";
@@ -229,8 +230,8 @@ function PreviewPanel({
         </Button>
       </div>
       {preview.issues.length > 0 && (
-        <div className="source-preview-table-scroll">
-          <table>
+        <div className="source-table-scroll">
+          <table className="source-table">
             <thead>
               <tr>
                 <th scope="col">Issue</th>
@@ -295,6 +296,8 @@ export function SourceCard({
   entry,
   hidden = false,
   adding,
+  initialRepository,
+  onProjectLinked,
 }: {
   entry: SourceEntry;
   adding?: {
@@ -304,6 +307,9 @@ export function SourceCard({
   };
   /** Keeps the page mounted but out of sight, so its draft and preview survive. */
   hidden?: boolean;
+  /** The repository that opened first-time source setup. */
+  initialRepository?: string;
+  onProjectLinked?: (projectId: string, connection: string) => void;
 }) {
   const now = useNow();
   const { connector } = entry;
@@ -329,7 +335,11 @@ export function SourceCard({
     health.health === "waiting";
   const fields = connector.schema.fields;
   const [draft, setDraft] = useState<Draft>(() =>
-    draftFromConfig(fields, entry.saved?.config),
+    draftFromConfig(
+      fields,
+      entry.saved?.config ??
+        (initialRepository ? { repositories: [initialRepository] } : undefined),
+    ),
   );
   const [busy, setBusy] = useState<Busy>(null);
   const [failure, setFailure] = useState<SourceFailure | null>(null);
@@ -344,6 +354,12 @@ export function SourceCard({
   const [notice, setNotice] = useState("");
   // A stale response must not overwrite a newer draft's outcome.
   const latest = useRef(0);
+  useEffect(
+    () => () => {
+      latest.current += 1;
+    },
+    [],
+  );
 
   const storedSecrets = saved?.secret_fields ?? NO_SECRETS;
   const config = useMemo(
@@ -925,6 +941,14 @@ export function SourceCard({
             setSaved(updated);
             setAccount({ status: "signed_in", account: updated.account });
           }}
+        />
+      )}
+      {connector.provider === "github" && saved?.id && (
+        <SourceRepositoryRoutes
+          connection={saved.id}
+          hidden={hidden}
+          savedKey={configKey(saved.config)}
+          {...(onProjectLinked && { onProjectLinked })}
         />
       )}
       <SettingsSection

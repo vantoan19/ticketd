@@ -37,6 +37,7 @@ use super::{
     contract::FailureCode,
     conversation,
     freshness::{self, ProviderRun, SourceUnavailable},
+    github,
 };
 use crate::{Error, Status, Ticket, Workspace, duplicates, history};
 
@@ -198,7 +199,7 @@ pub(crate) fn availability_projection(
 ) -> Result<Option<SourceAvailability>, Error> {
     let mut query = connection.prepare_cached(
         "SELECT o.authority, s.last_error_code, s.last_error_message, s.failing_since,
-                s.last_attempt_at, i.provider, i.locator, i.partition, i.linked_at
+                s.last_attempt_at, i.provider, i.locator, i.partition, i.linked_at, i.external_id
          FROM external_identities i
          JOIN external_ownership o ON o.ticket_id = i.ticket_id
          JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1",
@@ -211,8 +212,12 @@ pub(crate) fn availability_projection(
     let provider: String = row.get(5)?;
     let part = match row.get::<_, Option<String>>(7)? {
         Some(part) => part,
-        None => super::legacy_reference_partition(&provider, &row.get::<_, String>(6)?)
-            .unwrap_or_default(),
+        None => super::legacy_reference_partition(
+            &provider,
+            &row.get::<_, String>(9)?,
+            &row.get::<_, String>(6)?,
+        )
+        .unwrap_or_default(),
     };
     let attempted: Option<String> = row.get(4)?;
     let unavailable = if authority != "external" {
@@ -377,6 +382,131 @@ pub(crate) fn migrate_issue_opening(connection: &Connection) -> Result<(), Error
         if !present {
             connection
                 .execute_batch(&format!("ALTER TABLE source_sync ADD COLUMN {column} TEXT"))?;
+        }
+    }
+    Ok(())
+}
+
+/// Format version 87: repository identity for import routing and offline backfill.
+/// Legacy GitHub rows can supply it immediately when their saved location is consistent.
+pub(crate) fn migrate_issue_repository(connection: &Connection) -> Result<(), Error> {
+    let present: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('external_identities') WHERE name = 'repository')",
+        [],
+        |row| row.get(0),
+    )?;
+    if !present {
+        connection.execute_batch(
+            "ALTER TABLE external_identities ADD COLUMN repository TEXT COLLATE NOCASE",
+        )?;
+    }
+    let mut pending = connection.prepare(
+        "SELECT ticket_id, locator, url FROM external_identities WHERE provider = ?1 AND repository IS NULL",
+    )?;
+    let rows = pending
+        .query_map([super::github::PROVIDER], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut update = connection
+        .prepare("UPDATE external_identities SET repository = ?2 WHERE ticket_id = ?1")?;
+    for (id, locator, url) in rows {
+        if let Some(repository) = super::github::repository_from_issue_url(&locator, &url) {
+            update.execute(params![id, repository])?;
+        }
+    }
+    connection.execute_batch(
+        "CREATE INDEX IF NOT EXISTS external_identities_repository ON external_identities(provider, repository) WHERE repository IS NOT NULL",
+    )?;
+    Ok(())
+}
+
+/// Format version 88: GitHub Enterprise identities need the host as well as the
+/// database ID. This covers local takeover provenance and saved duplicate targets.
+pub(crate) fn migrate_github_issue_hosts(connection: &Connection) -> Result<(), Error> {
+    use super::github::{
+        PROVIDER, issue_id_host, repository_from_issue_url, scope_legacy_issue_id, web_host_for_api,
+    };
+
+    let mut identities = connection.prepare(
+        "SELECT ticket_id, external_id, repository, locator, url FROM external_identities WHERE provider = ?1",
+    )?;
+    let rows = identities
+        .query_map([PROVIDER], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (ticket, id, repository, locator, url) in rows {
+        let canonical_repository = match repository.as_deref() {
+            Some(remote) => remote.split_once('/').and_then(|(host, name)| {
+                let web_host = web_host_for_api(host);
+                (web_host != host).then(|| format!("{web_host}/{name}"))
+            }),
+            None => repository_from_issue_url(&locator, &url),
+        };
+        let host = canonical_repository
+            .as_deref()
+            .or(repository.as_deref())
+            .and_then(|remote| remote.split_once('/'))
+            .map(|(host, _)| host);
+        let scoped = scope_legacy_issue_id(&id, host).filter(|scoped| scoped != &id);
+        if canonical_repository.is_some() || scoped.is_some() {
+            connection.execute(
+                "UPDATE external_identities SET external_id = COALESCE(?2, external_id), repository = COALESCE(?3, repository) WHERE ticket_id = ?1",
+                params![ticket, scoped, canonical_repository],
+            )?;
+        }
+    }
+
+    // Both records can retain an issue ID even after it is no longer fetchable.
+    for (select, update) in [
+        (
+            "SELECT r.ticket_id, r.external_id, r.locator, r.url, i.external_id
+             FROM external_duplicate_targets r LEFT JOIN external_identities i ON i.ticket_id = r.ticket_id AND i.provider = r.provider
+             WHERE r.provider = ?1 AND r.external_id IS NOT NULL",
+            "UPDATE external_duplicate_targets SET external_id = ?2 WHERE ticket_id = ?1",
+        ),
+        (
+            "SELECT r.id, r.external_id, r.locator, r.url, i.external_id
+             FROM publication_attempts r LEFT JOIN external_identities i ON i.ticket_id = r.ticket_id AND i.provider = r.provider
+             WHERE r.provider = ?1 AND r.external_id IS NOT NULL",
+            "UPDATE publication_attempts SET external_id = ?2 WHERE id = ?1",
+        ),
+    ] {
+        let mut related = connection.prepare(select)?;
+        let rows = related
+            .query_map([PROVIDER], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+        for (record, id, locator, url, owner) in rows {
+            let repository = locator
+                .zip(url)
+                .and_then(|(locator, url)| repository_from_issue_url(&locator, &url));
+            let host = repository
+                .as_deref()
+                .and_then(|remote| remote.split_once('/'))
+                .map(|(host, _)| host)
+                .or_else(|| owner.as_deref().and_then(issue_id_host));
+            if let Some(scoped) = scope_legacy_issue_id(&id, host).filter(|scoped| scoped != &id) {
+                connection.execute(update, params![record, scoped])?;
+            }
         }
     }
     Ok(())
@@ -808,23 +938,94 @@ pub(crate) fn status_for(
     }
 }
 
+/// A legacy issue and a discovery result may describe the same issue. Hold
+/// imports until a person confirms the host, including for tickets now local.
+/// The issue may have moved while retaining its database ID.
+fn unverified_github_match(
+    connection: &Connection,
+    identity: &ExternalIdentity,
+) -> Result<Option<String>, Error> {
+    if identity.provider != github::PROVIDER || github::issue_id_host(&identity.id).is_none() {
+        return Ok(None);
+    }
+    let database_id = identity.id.rsplit(':').next().unwrap_or(&identity.id);
+    Ok(connection
+        .prepare_cached(
+            "SELECT t.reference FROM external_identities i JOIN tickets t ON t.id = i.ticket_id
+             WHERE i.provider = ?1 AND i.external_id = ?2
+             AND NOT EXISTS (SELECT 1 FROM external_identities WHERE provider = ?1 AND external_id = ?3)",
+        )?
+        .query_row(
+            params![github::PROVIDER, format!("@:{database_id}"), identity.id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn github_host_confirmation(reference: &str) -> String {
+    format!(
+        "Confirm the GitHub issue URL for {reference} with `ticketd source reconcile-github {reference} --issue URL`"
+    )
+}
+
+fn issue_opened_at(time: &str) -> Option<chrono::DateTime<chrono::Utc>> {
+    chrono::DateTime::parse_from_rfc3339(time)
+        .ok()
+        .map(|time| time.to_utc())
+}
+
 /// One thing a refresh could not do, before it is applied.
 struct Found {
     scope: FailureScope,
     /// The ticket it concerns; `None` for the source as a whole or for an issue
     /// that has no ticket yet.
     reference: Option<String>,
+    conversation_of: Option<ExternalIdentity>,
     provider: String,
     failure: SourceFailure,
 }
 
+struct DiscoveryMembership {
+    provider: String,
+    github_host: Option<String>,
+    seen: HashSet<String>,
+}
+
+#[derive(Default)]
+struct Transfer {
+    origins: Vec<Tracked>,
+    /// A collision can still refresh a separate ticket observed independently.
+    independent: Option<ExternalIssue>,
+}
+
+#[derive(Default)]
+struct RefreshTransfers {
+    origins_by_destination: HashMap<(String, String), Vec<Tracked>>,
+    retired: HashSet<(String, String)>,
+}
+
+struct DiscoveryRead {
+    gathered: Gathered,
+    scoped: Option<Engine>,
+    blocked: Option<SourceFailure>,
+    discovery_failed: Option<SourceFailure>,
+    skipped: Vec<String>,
+    read_partitions: Vec<String>,
+    skipped_partitions: Vec<String>,
+    seen: HashSet<String>,
+    full_refresh: bool,
+}
+
 /// An issue found by the connector, or the reason a tracked one could not be read.
+#[derive(Default)]
 struct Gathered {
     conversation_engine: Option<Engine>,
     retry_limit: Option<freshness::RateLimitHold>,
     configurations: HashMap<String, Option<CheckedConfiguration>>,
-    discovery: Vec<(String, HashSet<String>)>,
+    discovery: Vec<DiscoveryMembership>,
     issues: Vec<ExternalIssue>,
+    transfers: HashMap<(String, String), Transfer>,
+    held_transfers: HashSet<String>,
     /// Conversations read this time, by (provider, external id). An issue absent
     /// here keeps the conversation it already has.
     conversations: HashMap<(String, String), Conversation>,
@@ -843,6 +1044,7 @@ struct CheckedConfiguration {
     derived: Option<DerivedConfiguration>,
 }
 
+#[derive(Clone)]
 pub(super) struct Tracked {
     pub(super) ticket_id: String,
     reference: String,
@@ -908,6 +1110,151 @@ struct Applied {
 }
 
 impl Workspace {
+    /// Verifies a legacy GitHub issue's host and current location with its saved
+    /// stable ID and a person-supplied URL. Only provenance is repaired.
+    pub fn reconcile_github_issue(
+        &mut self,
+        engine: &Engine,
+        reference: &str,
+        issue_url: &str,
+    ) -> Result<Ticket, Error> {
+        let invalid = |message: String| {
+            SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field("issue", message)])
+        };
+        let ticket = self.show_ticket(reference)?;
+        if ticket.trashed {
+            return Err(Error::Trashed(reference.to_owned()));
+        }
+        let (source, database_id) = ticket
+            .source
+            .as_ref()
+            .filter(|source| source.provider == github::PROVIDER)
+            .and_then(|source| github::unverified_issue_id(&source.id).map(|id| (source, id)))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{reference} has no GitHub issue with an unverified host"
+                ))
+            })?;
+        let issue_url = issue_url.trim();
+        let (locator, repository) =
+            github::issue_location_from_url(issue_url).ok_or_else(|| {
+                invalid(format!(
+                    "use the full current GitHub issue URL for {reference}"
+                ))
+            })?;
+        let (host, destination) = repository
+            .split_once('/')
+            .ok_or_else(|| invalid("the GitHub issue URL has no repository".into()))?;
+        let expected = github::scope_legacy_issue_id(database_id, Some(host))
+            .ok_or_else(|| invalid(format!("{reference} has an invalid saved GitHub issue ID")))?;
+        let partition = github::partition_name(Some(host), destination);
+        let sources = super::configured_sources(&self.connection)?;
+        let mut candidates = Vec::new();
+        for source in sources
+            .iter()
+            .filter(|source| source.saved.provider == github::PROVIDER)
+        {
+            let scoped = source.bind(engine);
+            if source.verify_effective_site(&scoped).is_ok()
+                && scoped
+                    .repository_for_destination(github::PROVIDER, destination)?
+                    .as_deref()
+                    == Some(repository.as_str())
+            {
+                candidates.push(source);
+            }
+        }
+        let saved = candidates
+            .iter()
+            .copied()
+            .find(|source| source.derived.partitions.contains(&partition))
+            .or_else(|| candidates.first().copied())
+            .ok_or_else(|| {
+                invalid("connect GitHub on this host before confirming the issue".into())
+            })?;
+        let (scoped, _) = saved.check(engine)?;
+        let issue = scoped.locate(
+            github::PROVIDER,
+            &saved.saved.config,
+            destination,
+            issue_url,
+        )?;
+        if issue.reference.identity.id != expected
+            || !issue.reference.locator.eq_ignore_ascii_case(&locator)
+        {
+            return Err(invalid(format!(
+                "GitHub did not confirm the saved issue ID at the supplied URL for {reference}"
+            ))
+            .into());
+        }
+
+        crate::write_scope::run(&self.connection, |transaction| {
+            let id = transaction.editable(reference)?;
+            if !super::configured_source(transaction, &saved.saved.id)?
+                .is_some_and(|current| current.revision == saved.revision)
+            {
+                return Err(super::stale_source());
+            }
+            if let Some(owner) = ticket_for_identity(transaction, &issue.reference.identity)? {
+                if owner == id && id == ticket.id {
+                    // A second confirmation of the same issue finished first.
+                    return crate::read_ticket(transaction, reference);
+                }
+                let owner_ref: String = transaction.query_row(
+                    "SELECT reference FROM tickets WHERE id = ?1",
+                    [&owner],
+                    |row| row.get(0),
+                )?;
+                return Err(invalid(format!("this issue is already linked to {owner_ref}")).into());
+            }
+            if id != ticket.id
+                || transaction.execute(
+                    "UPDATE external_identities SET external_id = ?2, locator = ?3, display = ?4, url = ?5, repository = ?6, partition = ?7
+                     WHERE ticket_id = ?1 AND provider = ?8 AND external_id = ?9 AND locator = ?10",
+                    params![
+                        id,
+                        expected,
+                        issue.reference.locator,
+                        issue.display,
+                        issue_url,
+                        repository,
+                        issue.reference.partition,
+                        github::PROVIDER,
+                        source.id,
+                        source.locator
+                    ],
+                )? == 0
+            {
+                return Err(invalid(format!(
+                    "{reference} changed while GitHub was being checked"
+                ))
+                .into());
+            }
+            transaction.execute(
+                "UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id = ?1",
+                [&id],
+            )?;
+            // GitHub returned a canonical target on the same host as its duplicate.
+            // The confirmed host is evidence for this ticket's saved target only.
+            let target: Option<String> = transaction.query_row(
+                "SELECT external_id FROM external_duplicate_targets WHERE ticket_id = ?1 AND provider = ?2",
+                params![id, github::PROVIDER],
+                |row| row.get(0),
+            ).optional()?;
+            if let Some(scoped) = target
+                .as_deref()
+                .and_then(github::unverified_issue_id)
+                .and_then(|id| github::scope_legacy_issue_id(id, Some(host)))
+            {
+                transaction.execute(
+                    "UPDATE external_duplicate_targets SET external_id = ?2 WHERE ticket_id = ?1",
+                    params![id, scoped],
+                )?;
+            }
+            crate::read_ticket(transaction, reference)
+        })
+    }
+
     /// Imports issues matching each saved source's discovery rules and refreshes
     /// every externally owned ticket, whether or not it still matches them.
     ///
@@ -1024,8 +1371,8 @@ impl Workspace {
                             .any(|ticket| routed(ticket) == Some(&source.saved.id)))
             })
             .collect();
-        let gather = |source: &super::ConfiguredSource| {
-            gather_connection(
+        let mut discovered = gather_pairs(jobs.iter().copied(), |source| {
+            let batch = gather_discovery(
                 engine,
                 options,
                 &tracked,
@@ -1033,42 +1380,9 @@ impl Workspace {
                 &source.saved.provider,
                 Some(source),
                 received_at,
-            )
-        };
-        let mut gathered = Vec::new();
-        for pair in jobs.chunks(2) {
-            engine.check_refresh_canceled()?;
-            let batches = if let [first, second] = pair {
-                std::thread::scope(|scope| {
-                    let first_worker = scope.spawn(|| gather(first));
-                    let second_batch = gather(second);
-                    let first_batch = first_worker.join().map_err(|_| {
-                        Error::Source(SourceError::Protocol(
-                            "a source refresh worker stopped".into(),
-                        ))
-                    })?;
-                    Ok::<_, Error>(vec![(*first, first_batch?), (*second, second_batch?)])
-                })?
-            } else {
-                pair.iter()
-                    .map(|source| Ok((*source, gather(source)?)))
-                    .collect::<Result<Vec<_>, Error>>()?
-            };
-            for (source, mut batch) in batches {
-                engine.check_refresh_canceled()?;
-                if let Some(scoped) = batch.conversation_engine.take() {
-                    gather_conversations(
-                        &self.connection,
-                        &scoped,
-                        source,
-                        &tracked,
-                        &mut batch,
-                        received_at,
-                    )?;
-                }
-                gathered.push((Some(source.saved.id.as_str()), batch));
-            }
-        }
+            )?;
+            Ok((Some(source), source.saved.provider.as_str(), batch))
+        })?;
         if selected.is_none() {
             let missing: HashSet<_> = tracked
                 .iter()
@@ -1076,8 +1390,7 @@ impl Workspace {
                 .map(|ticket| ticket.provider.as_str())
                 .collect();
             for provider in missing {
-                engine.check_refresh_canceled()?;
-                let batch = gather_connection(
+                let batch = gather_discovery(
                     engine,
                     options,
                     &tracked,
@@ -1086,7 +1399,76 @@ impl Workspace {
                     None,
                     received_at,
                 )?;
-                gathered.push((None, batch));
+                discovered.push((None, provider, batch));
+            }
+        }
+
+        // The two sides of a GitHub transfer can appear in repository lists
+        // read by different connections in the same refresh.
+        let github_discovered: Vec<_> = discovered
+            .iter()
+            .filter(|(_, provider, _)| *provider == github::PROVIDER)
+            .flat_map(|(_, _, batch)| &batch.gathered.issues)
+            .collect();
+        let rechecks = if github_discovered.len() > 1 {
+            github_transfer_rechecks(
+                &github_discovered,
+                &tracked,
+                &github_identities(&self.connection)?,
+            )
+        } else {
+            HashMap::new()
+        };
+        let mut gathered = gather_pairs(discovered.into_iter(), |(source, provider, batch)| {
+            let batch = gather_tracked(
+                batch,
+                &tracked,
+                &sources,
+                provider,
+                source,
+                &rechecks,
+                received_at,
+            )?;
+            Ok((source, batch))
+        })?;
+        let mut transfers = RefreshTransfers::default();
+        let mut held = HashSet::new();
+        for (_, batch) in &mut gathered {
+            for (destination, transfer) in &batch.transfers {
+                transfers.retired.extend(
+                    transfer
+                        .origins
+                        .iter()
+                        .map(|origin| (origin.provider.clone(), origin.external_id.clone())),
+                );
+                transfers
+                    .origins_by_destination
+                    .entry(destination.clone())
+                    .or_default()
+                    .extend(transfer.origins.iter().cloned());
+            }
+            held.extend(batch.held_transfers.drain());
+        }
+        held.retain(|id| {
+            !transfers
+                .origins_by_destination
+                .contains_key(&(github::PROVIDER.into(), id.clone()))
+        });
+        for (source, batch) in &mut gathered {
+            if !held.is_empty() {
+                suppress_unconfirmed_transfers(batch, &held);
+            }
+            engine.check_refresh_canceled()?;
+            if let (Some(source), Some(scoped)) = (source, batch.conversation_engine.take()) {
+                gather_conversations(
+                    &self.connection,
+                    &scoped,
+                    source,
+                    &tracked,
+                    batch,
+                    &transfers,
+                    received_at,
+                )?;
             }
         }
         engine.check_refresh_canceled()?;
@@ -1098,9 +1480,16 @@ impl Workspace {
                 failures: Vec::new(),
                 refreshed_at: started.clone(),
             };
-            for (source_id, batch) in gathered {
+            for (source, batch) in gathered {
                 engine.check_refresh_canceled()?;
-                let batch = workspace.apply_refresh(batch, &started, &tracked, source_id)?;
+                let batch = workspace.apply_refresh(
+                    engine,
+                    batch,
+                    &started,
+                    &tracked,
+                    source.map(|source| source.saved.id.as_str()),
+                    &transfers,
+                )?;
                 report.imported.extend(batch.imported);
                 report.updated.extend(batch.updated);
                 report.unchanged = report.unchanged.saturating_add(batch.unchanged);
@@ -1116,7 +1505,40 @@ impl Workspace {
     }
 }
 
-fn gather_connection(
+fn github_identities(connection: &Connection) -> Result<HashSet<String>, Error> {
+    Ok(connection
+        .prepare_cached("SELECT external_id FROM external_identities WHERE provider = ?1")?
+        .query_map([github::PROVIDER], |row| row.get(0))?
+        .collect::<Result<_, _>>()?)
+}
+
+// Limit simultaneous connector work while preserving the saved connection order.
+fn gather_pairs<T: Send, R: Send>(
+    mut jobs: impl Iterator<Item = T>,
+    gather: impl Fn(T) -> Result<R, Error> + Sync,
+) -> Result<Vec<R>, Error> {
+    let mut gathered = Vec::new();
+    while let Some(first) = jobs.next() {
+        if let Some(second) = jobs.next() {
+            let (first, second) = std::thread::scope(|scope| {
+                let first = scope.spawn(|| gather(first));
+                let second = gather(second);
+                let first = first.join().map_err(|_| {
+                    Error::Source(SourceError::Protocol(
+                        "a source refresh worker stopped".into(),
+                    ))
+                })?;
+                Ok::<_, Error>((first?, second?))
+            })?;
+            gathered.extend([first, second]);
+        } else {
+            gathered.push(gather(first)?);
+        }
+    }
+    Ok(gathered)
+}
+
+fn gather_discovery(
     engine: &Engine,
     options: &RefreshOptions,
     tracked: &[Tracked],
@@ -1124,7 +1546,7 @@ fn gather_connection(
     provider: &str,
     configured: Option<&super::ConfiguredSource>,
     received_at: &dyn Fn() -> Option<String>,
-) -> Result<Gathered, Error> {
+) -> Result<DiscoveryRead, Error> {
     engine.check_refresh_canceled()?;
     let source_id = configured.map(|source| source.saved.id.as_str());
     let assigned = |ticket: &Tracked| {
@@ -1137,20 +1559,9 @@ fn gather_connection(
     let _source =
         tracing::info_span!("source", source_id = source_id.unwrap_or(provider)).entered();
     let provider = provider.to_owned();
-    let mut gathered = Gathered {
-        conversation_engine: None,
-        retry_limit: None,
-        issues: Vec::new(),
-        conversations: HashMap::new(),
-        failures: Vec::new(),
-        runs: Vec::new(),
-        discovery: Vec::new(),
-        configurations: HashMap::new(),
-        partitions: HashMap::new(),
-        imported_partitions: HashMap::new(),
-    };
+    let mut gathered = Gathered::default();
     let config = configured.map(|source| &source.saved.config);
-    let mut seen: HashSet<String> = HashSet::new();
+    let mut seen = HashSet::new();
     // Set when the source as a whole cannot be read, so asking for more
     // tickets would only repeat the failure.
     let mut blocked: Option<SourceFailure> = None;
@@ -1170,6 +1581,7 @@ fn gather_connection(
                 gathered.failures.push(Found {
                     scope: FailureScope::Source,
                     reference: None,
+                    conversation_of: None,
                     provider: provider.clone(),
                     failure: failure.clone(),
                 });
@@ -1238,7 +1650,11 @@ fn gather_connection(
         match result {
             Ok(summary) => {
                 if summary.complete && summary.skipped.is_empty() {
-                    gathered.discovery.push((provider.clone(), seen.clone()));
+                    gathered.discovery.push(DiscoveryMembership {
+                        provider: provider.clone(),
+                        github_host: engine.issue_host(&provider)?.map(str::to_owned),
+                        seen: seen.clone(),
+                    });
                 }
                 skipped_partitions = summary
                     .skipped
@@ -1252,6 +1668,7 @@ fn gather_connection(
                     gathered.failures.push(Found {
                         scope: FailureScope::Partition,
                         reference: None,
+                        conversation_of: None,
                         provider: provider.clone(),
                         failure: SourceFailure {
                             code: part.code,
@@ -1265,6 +1682,7 @@ fn gather_connection(
                 gathered.failures.push(Found {
                     scope: FailureScope::Source,
                     reference: None,
+                    conversation_of: None,
                     provider: provider.clone(),
                     failure: failure.clone(),
                 });
@@ -1275,21 +1693,84 @@ fn gather_connection(
             }
         }
     }
-    for ticket in tracked
+    gathered.configurations.insert(provider, checked);
+    Ok(DiscoveryRead {
+        gathered,
+        scoped,
+        blocked,
+        discovery_failed,
+        skipped,
+        read_partitions,
+        skipped_partitions,
+        seen,
+        full_refresh: options.ticket.is_none(),
+    })
+}
+
+fn gather_tracked(
+    discovery: DiscoveryRead,
+    tracked: &[Tracked],
+    sources: &[super::ConfiguredSource],
+    provider: &str,
+    configured: Option<&super::ConfiguredSource>,
+    rechecks: &HashMap<String, Vec<String>>,
+    received_at: &dyn Fn() -> Option<String>,
+) -> Result<Gathered, Error> {
+    let DiscoveryRead {
+        mut gathered,
+        scoped,
+        mut blocked,
+        discovery_failed,
+        mut skipped,
+        read_partitions,
+        skipped_partitions,
+        mut seen,
+        full_refresh,
+    } = discovery;
+    let source_id = configured.map(|source| source.saved.id.as_str());
+    let _source =
+        tracing::info_span!("source", source_id = source_id.unwrap_or(provider)).entered();
+    let provider = provider.to_owned();
+    let config = configured.map(|source| &source.saved.config);
+    let engine = scoped.as_ref();
+    let mut issue_indexes: HashMap<_, _> = gathered
+        .issues
         .iter()
-        .filter(|t| t.provider == provider && assigned(t))
-    {
-        if seen.contains(&ticket.external_id) {
+        .enumerate()
+        .map(|(index, issue)| (issue.reference.identity.id.clone(), index))
+        .collect();
+    let mut retired = HashSet::new();
+    let listed = seen.clone();
+    for ticket in tracked.iter().filter(|ticket| {
+        ticket.provider == provider
+            && !ticket.removed
+            && ticket
+                .connection(sources)
+                .map(|source| source.saved.id.as_str())
+                == source_id
+    }) {
+        let possible_transfers = (provider == github::PROVIDER
+            && listed.contains(&ticket.external_id))
+        .then(|| rechecks.get(&ticket.external_id))
+        .flatten();
+        if listed.contains(&ticket.external_id) && possible_transfers.is_none() {
             continue;
         }
         let reference = Some(ticket.reference.clone());
         if let Some(cause) = &blocked {
+            if let Some(possible_transfers) = possible_transfers {
+                gathered
+                    .held_transfers
+                    .extend(possible_transfers.iter().cloned());
+                continue;
+            }
             // Not asked, because the source as a whole could not be read.
             // The cause is the source's, and is said to be, never passed
             // off as this issue's own answer.
             gathered.failures.push(Found {
                 scope: FailureScope::Ticket,
                 reference,
+                conversation_of: None,
                 provider: provider.clone(),
                 failure: SourceFailure {
                     code: cause.code.clone(),
@@ -1305,6 +1786,7 @@ fn gather_connection(
             gathered.failures.push(Found {
                 scope: FailureScope::Ticket,
                 reference,
+                conversation_of: None,
                 provider: provider.clone(),
                 failure: SourceFailure {
                     code: FailureCode::NotConfigured.as_str().into(),
@@ -1325,28 +1807,86 @@ fn gather_connection(
         // Count an issue once whether it was discovered or fetched, and
         // include attempted reads that returned a ticket-level failure.
         seen.insert(ticket.external_id.clone());
-        match engine.fetch(&provider, config, &external) {
-            Ok(issue) => gathered.issues.push(issue),
+        let read = if provider == github::PROVIDER
+            && github::unverified_issue_id(&ticket.external_id).is_some()
+        {
+            Err(SourceError::NotFound(github_host_confirmation(
+                &ticket.reference,
+            )))
+        } else {
+            engine.fetch_tracked(&provider, config, &external)
+        };
+        match read {
+            Ok(fetched) => {
+                let issue = fetched.issue;
+                let id = &issue.reference.identity.id;
+                let key = (provider.clone(), id.clone());
+                let index = *issue_indexes
+                    .entry(id.clone())
+                    .or_insert(gathered.issues.len());
+                if fetched.transferred_from.is_some() {
+                    seen.remove(&ticket.external_id);
+                    seen.insert(id.clone());
+                    retired.insert(ticket.external_id.clone());
+                    let transfer = gathered.transfers.entry(key).or_default();
+                    if transfer.origins.is_empty() {
+                        transfer.independent = gathered.issues.get(index).cloned();
+                    }
+                    transfer.origins.push(ticket.clone());
+                } else if let Some(transfer) = gathered.transfers.get_mut(&key) {
+                    transfer.independent = Some(issue);
+                    continue;
+                }
+                // Discovery may have seen the destination before the
+                // tracked read supplied proof that it is the same issue.
+                if let Some(existing) = gathered.issues.get_mut(index) {
+                    *existing = issue;
+                } else {
+                    gathered.issues.push(issue);
+                }
+            }
             Err(error) => {
                 let failure = refresh_failure(&error, &mut gathered.retry_limit, received_at);
                 if error.failure_code().interrupts_source() {
                     blocked = Some(failure.clone());
                 }
+                let scope = if let Some(possible_transfers) = possible_transfers {
+                    // The earlier discovery read succeeded. A failed
+                    // recheck holds the candidates without marking it unavailable.
+                    gathered
+                        .held_transfers
+                        .extend(possible_transfers.iter().cloned());
+                    skipped.push(format!(
+                        "could not verify a possible transfer of {}",
+                        ticket.reference
+                    ));
+                    FailureScope::Partition
+                } else {
+                    FailureScope::Ticket
+                };
                 gathered.failures.push(Found {
-                    scope: FailureScope::Ticket,
+                    scope,
                     reference,
+                    conversation_of: None,
                     provider: provider.clone(),
                     failure,
                 });
             }
         }
     }
+    if !retired.is_empty() {
+        gathered
+            .issues
+            .retain(|issue| !retired.contains(&issue.reference.identity.id));
+        for membership in &mut gathered.discovery {
+            membership.seen.retain(|id| !retired.contains(id));
+        }
+    }
     if blocked.is_none() {
         gathered.conversation_engine = scoped;
     }
-    gathered.configurations.insert(provider.clone(), checked);
-    if options.ticket.is_none()
-        && let Some(configured) = configured
+    if let Some(configured) = configured
+        && full_refresh
     {
         gathered.runs.push(ProviderRun {
             provider: provider.clone(),
@@ -1361,6 +1901,105 @@ fn gather_connection(
     Ok(gathered)
 }
 
+// Keep a repository's first read incomplete while it contains a potential
+// transfer whose comparison could not be completed.
+fn suppress_unconfirmed_transfers(gathered: &mut Gathered, held: &HashSet<String>) {
+    let mut suppressed = false;
+    gathered.issues.retain(|issue| {
+        let identity = &issue.reference.identity;
+        let keep = identity.provider != github::PROVIDER || !held.contains(&identity.id);
+        suppressed |= !keep;
+        keep
+    });
+    if !suppressed {
+        return;
+    }
+    gathered.discovery.clear();
+    for run in &mut gathered.runs {
+        let skipped_before = run.skipped_partitions.len();
+        for id in held {
+            if let Some(part) = gathered
+                .partitions
+                .get(&(github::PROVIDER.into(), id.clone()))
+                && run.read_partitions.contains(part)
+            {
+                run.read_partitions.retain(|read| read != part);
+                run.skipped_partitions.push(part.clone());
+            }
+        }
+        if run.skipped.is_empty() && run.skipped_partitions.len() > skipped_before {
+            run.skipped
+                .push("could not verify a possible GitHub issue transfer".into());
+        }
+    }
+}
+
+/// An issue can move between two repository list reads. Equal creation
+/// times narrow the extra GETs to plausible pairs. Only the GET can verify
+/// a transfer, so unrelated issues created in the same second stay separate.
+fn github_transfer_rechecks(
+    discovered: &[&ExternalIssue],
+    tracked: &[Tracked],
+    known: &HashSet<String>,
+) -> HashMap<String, Vec<String>> {
+    let tracked: HashSet<_> = tracked
+        .iter()
+        .filter(|t| t.provider == github::PROVIDER)
+        .map(|t| t.external_id.as_str())
+        .collect();
+    if tracked.is_empty() || discovered.len() < 2 {
+        return HashMap::new();
+    }
+    let mut origins_by_opened: HashMap<_, Vec<_>> = HashMap::new();
+    for issue in discovered {
+        let id = &issue.reference.identity.id;
+        if tracked.contains(id.as_str())
+            && let (Some(opened), Some(repository), Some(host)) = (
+                issue_opened_at(&issue.created_at),
+                &issue.repository,
+                github::issue_id_host(id),
+            )
+        {
+            origins_by_opened
+                .entry((host, opened))
+                .or_default()
+                .push((repository, id));
+        }
+    }
+    let mut rechecks: HashMap<String, Vec<String>> = HashMap::new();
+    for issue in discovered {
+        let identity = &issue.reference.identity;
+        let Some(repository) = &issue.repository else {
+            continue;
+        };
+        let Some(opening) =
+            github::issue_id_host(&identity.id).zip(issue_opened_at(&issue.created_at))
+        else {
+            continue;
+        };
+        let Some(origins) = origins_by_opened.get(&opening) else {
+            continue;
+        };
+        let different_repository = |other: &str| !other.eq_ignore_ascii_case(repository);
+        if tracked.contains(identity.id.as_str())
+            || !origins.iter().any(|(other, _)| different_repository(other))
+            || known.contains(&identity.id)
+        {
+            continue;
+        }
+        for (_, origin_id) in origins
+            .iter()
+            .filter(|(other, _)| different_repository(other))
+        {
+            rechecks
+                .entry((*origin_id).clone())
+                .or_default()
+                .push(identity.id.clone());
+        }
+    }
+    rechecks
+}
+
 /// Reads the conversation of each gathered issue whose
 /// stored conversation is older than the issue itself. A failure keeps what
 /// was stored and leaves the issue due again next time. It is recorded as a
@@ -1373,6 +2012,7 @@ fn gather_conversations(
     source: &super::ConfiguredSource,
     tracked: &[Tracked],
     gathered: &mut Gathered,
+    transfers: &RefreshTransfers,
     received_at: &dyn Fn() -> Option<String>,
 ) -> Result<(), Error> {
     let checked_partitions = gathered
@@ -1387,14 +2027,21 @@ fn gather_conversations(
     for issue in &gathered.issues {
         engine.check_refresh_canceled()?;
         let identity = &issue.reference.identity;
-        if !issue_can_refresh(
-            connection,
-            issue,
-            &gathered.partitions,
-            Some(&source.saved.id),
-            false,
-            checked_partitions,
-        )? || !seen.insert(&identity.id)
+        let key = (identity.provider.clone(), identity.id.clone());
+        if transfers.retired.contains(&key)
+            || (transfers.origins_by_destination.contains_key(&key)
+                && !gathered.transfers.contains_key(&key)
+                && ticket_for_identity(connection, identity)?.is_none())
+            || unverified_github_match(connection, identity)?.is_some()
+            || !issue_can_refresh(
+                connection,
+                issue,
+                &gathered.partitions,
+                Some(&source.saved.id),
+                false,
+                checked_partitions,
+            )?
+            || !seen.insert(&identity.id)
         {
             continue;
         }
@@ -1448,19 +2095,25 @@ fn gather_conversations(
                             .map(|target| target.locator.clone());
                     }
                 }
-                gathered
-                    .conversations
-                    .insert((identity.provider.clone(), identity.id.clone()), read);
+                gathered.conversations.insert(key, read);
             }
             Ok(None) => break,
             Err(error) => {
                 let failure = refresh_failure(&error, &mut gathered.retry_limit, received_at);
                 let known = tracked
                     .iter()
-                    .find(|t| t.provider == identity.provider && t.external_id == identity.id);
+                    .find(|t| t.provider == identity.provider && t.external_id == identity.id)
+                    .or_else(|| {
+                        let transfer = gathered.transfers.get(&key)?;
+                        match transfer.origins.as_slice() {
+                            [origin] => Some(origin),
+                            _ => None,
+                        }
+                    });
                 gathered.failures.push(Found {
                     scope: FailureScope::Conversation,
                     reference: known.map(|t| t.reference.clone()),
+                    conversation_of: Some(identity.clone()),
                     provider: identity.provider.clone(),
                     failure: SourceFailure {
                         code: failure.code,
@@ -1492,16 +2145,19 @@ pub(super) fn tracked(connection: &Connection, only: Option<&str>) -> Result<Vec
     let rows = statement
         .query_map([only], |row| {
             let provider: String = row.get(2)?;
+            let external_id: String = row.get(3)?;
             let locator: String = row.get(4)?;
             let stored_partition: Option<String> = row.get(5)?;
             Ok(Tracked {
                 ticket_id: row.get(0)?,
                 reference: row.get(1)?,
                 partition: stored_partition
-                    .or_else(|| super::legacy_reference_partition(&provider, &locator))
+                    .or_else(|| {
+                        super::legacy_reference_partition(&provider, &external_id, &locator)
+                    })
                     .unwrap_or_default(),
                 provider,
-                external_id: row.get(3)?,
+                external_id,
                 locator,
                 affinity: row.get(6)?,
                 error_code: row.get(7)?,
@@ -1586,11 +2242,17 @@ fn issue_can_refresh(
 impl Workspace {
     fn apply_refresh(
         &mut self,
-        gathered: Gathered,
+        engine: &Engine,
+        mut gathered: Gathered,
         now: &str,
         tracked: &[Tracked],
         source_id: Option<&str>,
+        transfers: &RefreshTransfers,
     ) -> Result<RefreshReport, Error> {
+        let tracked_identities: HashSet<_> = tracked
+            .iter()
+            .map(|ticket| (ticket.provider.as_str(), ticket.external_id.as_str()))
+            .collect();
         crate::write_scope::run(&self.connection, |transaction| {
             // Configuration can change while the connector is on the network.
             // Re-read it under the same write lock as the results: old discovery
@@ -1640,7 +2302,7 @@ impl Workspace {
             // arrive in a part already read, log as `sync`. The write scope folds the
             // events of an imported ticket into its one `ticket.created`.
             let own_actor = crate::events::actor(transaction)?;
-            let mut read_before: HashMap<&str, HashSet<String>> = HashMap::new();
+            let mut read_before: HashMap<String, HashSet<String>> = HashMap::new();
             for provider in gathered
                 .issues
                 .iter()
@@ -1653,29 +2315,112 @@ impl Workspace {
                         source_id.unwrap_or(provider),
                         gathered.imported_partitions.get(provider),
                     )?;
-                    read_before.insert(provider, read);
+                    read_before.insert(provider.clone(), read);
                 }
             }
+            let mut stale_membership = HashSet::new();
             for issue in &gathered.issues {
-                let existing = ticket_for_identity(transaction, &issue.reference.identity)?;
-                let replaced_config = replaced.contains(&issue.reference.identity.provider);
-                if replaced_config && existing.is_none() {
-                    continue;
-                }
-                if !issue_can_refresh(
-                    transaction,
-                    issue,
-                    &gathered.partitions,
-                    source_id,
-                    replaced_config,
-                    None,
-                )? {
-                    continue;
-                }
                 let key = (
                     issue.reference.identity.provider.clone(),
                     issue.reference.identity.id.clone(),
                 );
+                if transfers.retired.contains(&key) {
+                    stale_membership.insert(key.0.clone());
+                    continue;
+                }
+                let replaced_config = replaced.contains(&key.0);
+                let (issue, followed_transfer) = if let Some(transfer) =
+                    gathered.transfers.get(&key)
+                {
+                    if apply_transfer(
+                        transaction,
+                        transfers
+                            .origins_by_destination
+                            .get(&key)
+                            .map_or(&[], Vec::as_slice),
+                        issue,
+                        now,
+                        source_id,
+                        &mut gathered.failures,
+                    )? {
+                        (issue, true)
+                    } else if let Some(independent) = &transfer.independent
+                        && let Some(owner) =
+                            ticket_for_identity(transaction, &independent.reference.identity)?
+                        && transfer
+                            .origins
+                            .iter()
+                            .all(|origin| origin.ticket_id != owner)
+                    {
+                        (independent, false)
+                    } else {
+                        stale_membership.insert(key.0.clone());
+                        continue;
+                    }
+                } else {
+                    let already_tracked =
+                        tracked_identities.contains(&(key.0.as_str(), key.1.as_str()));
+                    if (already_tracked
+                        || replaced_config
+                        || transfers.origins_by_destination.contains_key(&key))
+                        && ticket_for_identity(transaction, &issue.reference.identity)?.is_none()
+                    {
+                        if already_tracked || transfers.origins_by_destination.contains_key(&key) {
+                            stale_membership.insert(key.0.clone());
+                        }
+                        continue;
+                    }
+                    (issue, false)
+                };
+                // The transfer write has already verified the old route. Its
+                // new identity and its new location must be applied together.
+                if !followed_transfer
+                    && !issue_can_refresh(
+                        transaction,
+                        issue,
+                        &gathered.partitions,
+                        source_id,
+                        replaced_config,
+                        None,
+                    )?
+                {
+                    continue;
+                }
+                if let Some(reference) =
+                    unverified_github_match(transaction, &issue.reference.identity)?
+                {
+                    let message = github_host_confirmation(&reference);
+                    if let Some(run) = gathered
+                        .runs
+                        .iter_mut()
+                        .find(|run| run.provider == issue.reference.identity.provider)
+                    {
+                        run.skipped.push(message.clone());
+                        // A held issue leaves the repository's first read incomplete.
+                        if let Some(part) = gathered.partitions.get(&key)
+                            && run.read_partitions.contains(part)
+                        {
+                            run.read_partitions.retain(|read| read != part);
+                            run.skipped_partitions.push(part.clone());
+                        }
+                    }
+                    if !gathered.failures.iter().any(|found| {
+                        found.reference.as_deref() == Some(&reference)
+                            && found.failure.message == message
+                    }) {
+                        gathered.failures.push(Found {
+                            provider: issue.reference.identity.provider.clone(),
+                            reference: Some(reference),
+                            conversation_of: None,
+                            scope: FailureScope::Partition,
+                            failure: SourceFailure {
+                                code: "github_host_unverified".into(),
+                                message,
+                            },
+                        });
+                    }
+                    continue;
+                }
                 // Only discovery brings in an issue that is not here yet.
                 let first_import =
                     gathered.partitions.get(&key).is_some_and(|part| {
@@ -1693,6 +2438,7 @@ impl Workspace {
                 )?;
                 apply_issue(
                     transaction,
+                    engine,
                     issue,
                     gathered.conversations.get(&key),
                     now,
@@ -1708,8 +2454,13 @@ impl Workspace {
                 }
             }
             crate::events::set_actor(transaction, own_actor)?;
-            for (provider, seen) in &gathered.discovery {
-                if replaced.contains(provider) {
+            for DiscoveryMembership {
+                provider,
+                github_host,
+                seen,
+            } in &gathered.discovery
+            {
+                if replaced.contains(provider) || stale_membership.contains(provider) {
                     continue;
                 }
                 let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id, i.locator, i.partition FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
@@ -1724,8 +2475,17 @@ impl Workspace {
                     })?
                     .collect::<Result<Vec<_>, _>>()?;
                 for (id, external_id, locator, part) in identities {
+                    if provider == github::PROVIDER
+                        && github_host
+                            .as_deref()
+                            .is_none_or(|host| github::issue_id_host(&external_id) != Some(host))
+                    {
+                        continue;
+                    }
                     let part = part
-                        .or_else(|| super::legacy_reference_partition(provider, &locator))
+                        .or_else(|| {
+                            super::legacy_reference_partition(provider, &external_id, &locator)
+                        })
                         .unwrap_or_default();
                     if super::selected_connection(transaction, &id, provider, &part)?.as_deref()
                         != source_id
@@ -1743,7 +2503,29 @@ impl Workspace {
                     continue;
                 }
                 let ticket = found.reference.as_deref().and_then(|r| by_reference.get(r));
-                if let Some(ticket) = ticket {
+                if let Some(ticket) = ticket
+                    && found.scope != FailureScope::Partition
+                {
+                    if let Some(identity) = &found.conversation_of
+                        && ticket_for_identity(transaction, identity)?.as_deref()
+                            != Some(ticket.ticket_id.as_str())
+                    {
+                        continue;
+                    }
+                    if found.conversation_of.is_none()
+                        && ticket_for_identity(
+                            transaction,
+                            &ExternalIdentity {
+                                provider: ticket.provider.clone(),
+                                id: ticket.external_id.clone(),
+                            },
+                        )?
+                        .as_deref()
+                            != Some(ticket.ticket_id.as_str())
+                    {
+                        // A transfer or a host reconciliation made this observation stale.
+                        continue;
+                    }
                     if super::selected_connection(
                         transaction,
                         &ticket.ticket_id,
@@ -1772,7 +2554,7 @@ impl Workspace {
                             if FailureCode::parse(&found.failure.code)
                                 .is_some_and(FailureCode::is_unavailable)
                             {
-                                let first: bool = transaction.query_row("SELECT failing_since IS NULL AND (last_refreshed_at IS NULL OR last_refreshed_at <= ?2) FROM source_sync WHERE ticket_id = ?1", params![ticket.ticket_id, now], |row| row.get(0))?;
+                                let first: bool = transaction.query_row("SELECT failing_since IS NULL AND (last_refreshed_at IS NULL OR last_refreshed_at <= ?2) AND EXISTS (SELECT 1 FROM external_ownership WHERE ticket_id = ?1 AND authority = 'external') FROM source_sync WHERE ticket_id = ?1", params![ticket.ticket_id, now], |row| row.get(0))?;
                                 if first {
                                     history::record(
                                         transaction,
@@ -1831,6 +2613,147 @@ impl Workspace {
     }
 }
 
+/// Reuses the original ticket's identity row. If ownership or provenance changed
+/// while the transfer was being verified, suppress the stale discovery result.
+fn apply_transfer(
+    connection: &Connection,
+    claimed: &[Tracked],
+    issue: &ExternalIssue,
+    now: &str,
+    source_id: Option<&str>,
+    failures: &mut Vec<Found>,
+) -> Result<bool, Error> {
+    let identity = &issue.reference.identity;
+    let mut report_collision = |ticket: &Tracked, message: String| {
+        failures.push(Found {
+            scope: FailureScope::Ticket,
+            reference: Some(ticket.reference.clone()),
+            conversation_of: None,
+            provider: ticket.provider.clone(),
+            failure: failure_of(&SourceError::Protocol(message)),
+        });
+    };
+    let [ticket] = claimed else {
+        for ticket in claimed {
+            report_collision(
+                ticket,
+                format!(
+                    "GitHub redirected several tracked issues to {}",
+                    issue.display
+                ),
+            );
+        }
+        return Ok(false);
+    };
+    let Some(source_id) = source_id else {
+        return Ok(false);
+    };
+    let current = connection
+        .query_row(
+            "SELECT i.external_id, i.locator, s.external_created_at, s.external_updated_at, s.last_refreshed_at, i.partition
+             FROM external_identities i
+             JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external'
+             JOIN source_sync s ON s.ticket_id = i.ticket_id
+             WHERE i.ticket_id = ?1 AND i.provider = ?2",
+            params![ticket.ticket_id, identity.provider],
+            |row| Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<String>>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, Option<String>>(5)?,
+            )),
+        )
+        .optional()?;
+    let Some((id, locator, opened_at, updated_at, last_refreshed, partition)) = current else {
+        return Ok(false);
+    };
+    if older_observation(&issue.updated_at, &updated_at)
+        || last_refreshed
+            .as_deref()
+            .is_some_and(|confirmed| older_observation(now, confirmed))
+        || super::selected_connection(
+            connection,
+            &ticket.ticket_id,
+            &ticket.provider,
+            partition.as_deref().unwrap_or(&ticket.partition),
+        )?
+        .as_deref()
+            != Some(source_id)
+    {
+        return Ok(false);
+    }
+    if id == identity.id {
+        // An overlapping refresh already followed this transfer.
+        return Ok(locator.eq_ignore_ascii_case(&issue.reference.locator));
+    }
+    if id != ticket.external_id || locator != ticket.locator {
+        return Ok(false);
+    }
+    // The old repository path may have been claimed by a different repository.
+    // A new issue at the reused path can have its own valid transfer redirect.
+    let matching_creation = opened_at
+        .as_deref()
+        .and_then(issue_opened_at)
+        .zip(issue_opened_at(&issue.created_at))
+        .is_some_and(|(saved, observed)| saved == observed);
+    if !matching_creation {
+        report_collision(
+            ticket,
+            format!(
+                "GitHub redirected this issue to {}, but its creation time could not be matched to the saved issue",
+                issue.display,
+            ),
+        );
+        return Ok(false);
+    }
+    if let Some(owner) = ticket_for_identity(connection, identity)? {
+        let owner_ref: String = connection.query_row(
+            "SELECT reference FROM tickets WHERE id = ?1",
+            [&owner],
+            |row| row.get(0),
+        )?;
+        report_collision(
+            ticket,
+            format!(
+                "GitHub moved this issue to {}, already linked to {owner_ref}",
+                issue.display
+            ),
+        );
+        return Ok(false);
+    }
+    connection.execute(
+        "UPDATE external_identities SET external_id = ?2 WHERE ticket_id = ?1",
+        params![ticket.ticket_id, identity.id],
+    )?;
+    connection.execute(
+        "UPDATE external_duplicate_targets SET external_id = ?3, locator = ?4, display = ?5, url = ?6
+         WHERE provider = ?1 AND external_id = ?2",
+        params![identity.provider, id, identity.id, issue.reference.locator, issue.display, issue.url],
+    )?;
+    super::bind_ticket(connection, &ticket.ticket_id, source_id)?;
+    // A failed destination conversation read retains the old entries, but must
+    // be retried even if the transfer reused the same source update time.
+    connection.execute(
+        "UPDATE source_sync SET discovery_matches = NULL, conversation_updated_at = NULL WHERE ticket_id = ?1",
+        [&ticket.ticket_id],
+    )?;
+    Ok(true)
+}
+
+fn older_observation(incoming: &str, saved: &str) -> bool {
+    match (
+        chrono::DateTime::parse_from_rfc3339(incoming),
+        chrono::DateTime::parse_from_rfc3339(saved),
+    ) {
+        (Ok(incoming), Ok(saved)) => incoming < saved,
+        (Err(_), Ok(_)) => true,
+        (Ok(_), Err(_)) => false,
+        (Err(_), Err(_)) => !saved.is_empty() && incoming < saved,
+    }
+}
+
 /// A tracked ticket as the refresh write reads it back.
 struct Existing {
     id: String,
@@ -1843,15 +2766,18 @@ struct Existing {
     partition: Option<String>,
     display: String,
     url: String,
+    repository: Option<String>,
     state_category: Option<String>,
     state_name: Option<String>,
     /// The source's own update time of the issue last applied.
     updated_at: String,
+    last_refreshed: Option<String>,
 }
 
 /// Applies one observed issue inside the refresh write transaction.
 fn apply_issue(
     connection: &Connection,
+    engine: &Engine,
     issue: &ExternalIssue,
     read: Option<&Conversation>,
     now: &str,
@@ -1862,7 +2788,7 @@ fn apply_issue(
         .query_row(
             "SELECT t.id, t.reference, t.title, t.body, t.status, o.authority, i.locator, i.display, i.url, \
                     s.state_category, s.state_name, \
-                    COALESCE(s.external_updated_at, ''), i.partition \
+                    COALESCE(s.external_updated_at, ''), i.partition, i.repository, s.last_refreshed_at \
              FROM external_identities i \
              JOIN tickets t ON t.id = i.ticket_id \
              LEFT JOIN external_ownership o ON o.ticket_id = i.ticket_id \
@@ -1891,6 +2817,8 @@ fn apply_issue(
                     state_name: row.get(10)?,
                     updated_at: row.get(11)?,
                     partition: row.get(12)?,
+                    repository: row.get(13)?,
+                    last_refreshed: row.get(14)?,
                 })
             },
         )
@@ -1905,15 +2833,20 @@ fn apply_issue(
     let category = issue.state.category;
     match existing {
         None => {
-            if super::publication::awaited_by_open_attempt(connection, issue)? {
+            if super::publication::awaited_by_open_attempt(connection, engine, issue)? {
                 return Ok(());
             }
             let status = status_for(None, category, Status::Todo);
             let id = Uuid::new_v4().to_string();
             let reference = crate::device::issue_reference(connection)?;
+            let project = match issue.repository.as_deref() {
+                Some(repository) => crate::projects::find_by_remote(connection, repository)?,
+                None => None,
+            };
+            let project_id = project.as_ref().map(|project| project.id.as_str());
             connection.execute(
-                "INSERT INTO tickets (id, reference, title, status, body) VALUES (?1, ?2, ?3, ?4, ?5)",
-                params![id, reference, title, status.to_string(), issue.body],
+                "INSERT INTO tickets (id, reference, title, status, body, project_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![id, reference, title, status.to_string(), issue.body, project_id],
             )?;
             crate::document_links::index_external_body(connection, &id, &issue.body)?;
             link(connection, &id, issue, Origin::Imported, now)?;
@@ -1925,6 +2858,16 @@ fn apply_issue(
                 &issue.display,
                 Some(&issue.reference.identity.provider),
             )?;
+            if let Some(project_id) = project_id {
+                history::record(
+                    connection,
+                    &id,
+                    "project",
+                    "",
+                    project_id,
+                    Some(&identity.provider),
+                )?;
+            }
             if status == Status::Duplicate {
                 set_duplicate_target(connection, &id, issue)?;
             }
@@ -1946,24 +2889,21 @@ fn apply_issue(
             partition,
             display,
             url,
+            repository,
             state_category,
             state_name,
             updated_at,
+            last_refreshed,
             ..
         }) => {
             // An overlapping run can deliver an observation older than one already
             // applied (the slower of two refreshes). Confirmed source state never
             // moves backwards, and an old observation confirms nothing now.
-            let older = match (
-                chrono::DateTime::parse_from_rfc3339(&issue.updated_at),
-                chrono::DateTime::parse_from_rfc3339(&updated_at),
-            ) {
-                (Ok(incoming), Ok(current)) => incoming < current,
-                (Err(_), Ok(_)) => true,
-                (Ok(_), Err(_)) => false,
-                (Err(_), Err(_)) => !updated_at.is_empty() && issue.updated_at < updated_at,
-            };
-            if older {
+            if older_observation(&issue.updated_at, &updated_at)
+                || last_refreshed
+                    .as_deref()
+                    .is_some_and(|confirmed| older_observation(now, confirmed))
+            {
                 return Ok(());
             }
             let previous = state_category.as_deref().map(StateCategory::parse);
@@ -2001,12 +2941,21 @@ fn apply_issue(
                 changed = true;
             }
             changed |= previous != Some(category) || state_name != issue.state.name;
-            let identity_changed =
-                locator != issue.reference.locator || display != issue.display || url != issue.url;
+            let same_location = locator == issue.reference.locator && url == issue.url;
+            let observed_repository = issue.repository.as_deref().or_else(|| {
+                if same_location {
+                    repository.as_deref()
+                } else {
+                    None
+                }
+            });
+            let identity_changed = !same_location
+                || display != issue.display
+                || repository.as_deref() != observed_repository;
             if identity_changed || partition.as_deref() != Some(&issue.reference.partition) {
                 connection.execute(
-                    "UPDATE external_identities SET locator = ?2, display = ?3, url = ?4, partition = ?5 WHERE ticket_id = ?1",
-                    params![id, issue.reference.locator, issue.display, issue.url, issue.reference.partition],
+                    "UPDATE external_identities SET locator = ?2, display = ?3, url = ?4, partition = ?5, repository = ?6 WHERE ticket_id = ?1",
+                    params![id, issue.reference.locator, issue.display, issue.url, issue.reference.partition, observed_repository],
                 )?;
                 changed |= identity_changed;
             }
@@ -2206,8 +3155,8 @@ pub(crate) fn link(
     let identity = &issue.reference.identity;
     let category = issue.state.category;
     connection.execute(
-        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition) \
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition, repository) \
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
             ticket_id,
             identity.provider,
@@ -2221,6 +3170,7 @@ pub(crate) fn link(
             },
             now,
             issue.reference.partition,
+            issue.repository,
         ],
     )?;
     super::cache_ticket_presentation(connection, ticket_id, &identity.provider)?;
