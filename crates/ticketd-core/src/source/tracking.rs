@@ -838,24 +838,6 @@ struct Gathered {
     imported_partitions: HashMap<String, HashSet<String>>,
 }
 
-impl Gathered {
-    fn failure(
-        &mut self,
-        error: &SourceError,
-        received_at: &dyn Fn() -> Option<String>,
-    ) -> SourceFailure {
-        let SourceError::RateLimited { retry_after_secs } = error else {
-            return failure_of(error);
-        };
-        let hold = freshness::RateLimitHold::new(received_at().as_deref(), *retry_after_secs);
-        let failure = failure_of(&SourceError::RateLimited {
-            retry_after_secs: retry_after_secs.map(|_| hold.seconds),
-        });
-        self.retry_limit = Some(hold);
-        failure
-    }
-}
-
 struct CheckedConfiguration {
     revision: String,
     derived: Option<DerivedConfiguration>,
@@ -895,6 +877,22 @@ pub(crate) fn failure_of(error: &SourceError) -> SourceFailure {
         code: error.code().to_owned(),
         message: error.to_string(),
     }
+}
+
+fn refresh_failure(
+    error: &SourceError,
+    retry_limit: &mut Option<freshness::RateLimitHold>,
+    received_at: &dyn Fn() -> Option<String>,
+) -> SourceFailure {
+    let SourceError::RateLimited { retry_after_secs } = error else {
+        return failure_of(error);
+    };
+    let hold = freshness::RateLimitHold::new(received_at().as_deref(), *retry_after_secs);
+    let failure = failure_of(&SourceError::RateLimited {
+        retry_after_secs: retry_after_secs.map(|_| hold.seconds),
+    });
+    *retry_limit = Some(hold);
+    failure
 }
 
 pub(super) struct RefreshRun {
@@ -1168,7 +1166,7 @@ fn gather_connection(
                 Some(checked.derived)
             }
             Err(error) => {
-                let failure = gathered.failure(&error, received_at);
+                let failure = refresh_failure(&error, &mut gathered.retry_limit, received_at);
                 gathered.failures.push(Found {
                     scope: FailureScope::Source,
                     reference: None,
@@ -1263,7 +1261,7 @@ fn gather_connection(
                 }
             }
             Err(error) => {
-                let failure = gathered.failure(&error, received_at);
+                let failure = refresh_failure(&error, &mut gathered.retry_limit, received_at);
                 gathered.failures.push(Found {
                     scope: FailureScope::Source,
                     reference: None,
@@ -1330,7 +1328,7 @@ fn gather_connection(
         match engine.fetch(&provider, config, &external) {
             Ok(issue) => gathered.issues.push(issue),
             Err(error) => {
-                let failure = gathered.failure(&error, received_at);
+                let failure = refresh_failure(&error, &mut gathered.retry_limit, received_at);
                 if error.failure_code().interrupts_source() {
                     blocked = Some(failure.clone());
                 }
@@ -1457,7 +1455,7 @@ fn gather_conversations(
             }
             Ok(None) => break,
             Err(error) => {
-                let failure = gathered.failure(&error, received_at);
+                let failure = refresh_failure(&error, &mut gathered.retry_limit, received_at);
                 let known = tracked
                     .iter()
                     .find(|t| t.provider == identity.provider && t.external_id == identity.id);
