@@ -723,7 +723,18 @@ fn settle_source(
                 _ => local,
             }
         };
-        let source_field = |name: &str| name.starts_with("source_");
+        // Status and its duplicate link describe the chosen issue when two
+        // different external identities competed for the same ticket.
+        let keep_status = our_identity.is_some()
+            && their_identity.is_some()
+            && matches!(
+                keep.fields.get("source_authority"),
+                Some(SyncValue::Text(authority)) if authority == "external"
+            );
+        let source_field = |name: &str| {
+            name.starts_with("source_")
+                || (keep_status && matches!(name, "status" | "duplicate_of" | "duplicate_restore"))
+        };
         merged.fields.retain(|name, _| !source_field(name));
         merged.fields.extend(
             keep.fields

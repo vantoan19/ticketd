@@ -1655,7 +1655,10 @@ fn concurrent_publications_of_one_ticket_keep_one_complete_identity_on_all_devic
             .unwrap()
         };
         let winner = linked("open", "2026-01-03T00:00:00Z", "I_1", "acme/first");
-        let other = linked("closed", "2026-01-04T00:00:00Z", "I_2", "acme/other");
+        let mut other = linked("closed", "2026-01-04T00:00:00Z", "I_2", "acme/other");
+        other
+            .fields
+            .insert("status".into(), SyncValue::Text("Done".into()));
 
         devices.workspaces[0].apply_sync_record(&winner).unwrap();
         devices.workspaces[1].apply_sync_record(&other).unwrap();
@@ -1672,6 +1675,7 @@ fn concurrent_publications_of_one_ticket_keep_one_complete_identity_on_all_devic
                 "source_url",
                 "source_state_category",
                 "source_updated_at",
+                "status",
             ] {
                 assert_eq!(
                     record.fields[field], winner.fields[field],
