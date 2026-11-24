@@ -271,14 +271,14 @@ async function dispatch({ id, method, params }, signal) {
               ? [
                   {
                     id: "201",
-                    kind: {event: "future_event", category: {extra: true}},
+                    kind: { event: "future_event", category: { extra: true } },
                     actor: null,
                     subject: null,
                     created_at: now,
                   },
                   {
                     id: "202",
-                    kind: {event: "assigned"},
+                    kind: { event: "assigned" },
                     actor: null,
                     subject: "alice",
                     created_at: now,
@@ -299,19 +299,26 @@ async function dispatch({ id, method, params }, signal) {
             );
       }
       if (mode === "create_then_rate_limit") {
-        published.push(issue(String(30 + published.length), params.request.title));
-        return problem("rate_limited", "could not read the receipt", "transient");
+        published.push(
+          issue(String(30 + published.length), params.request.title),
+        );
+        return problem(
+          "rate_limited",
+          "could not read the receipt",
+          "transient",
+        );
       }
       if (mode === "refuse") return problem("rejected", "no access", "config");
       if (mode === "not_sent")
         return problem("not_sent", "request was never sent", "transient");
       return problem("unavailable", "response lost", "transient");
     case "find_published":
+      if (mode === "create_then_rate_limit") {
+        return { result: { matches: published, recent: [], complete: false } };
+      }
       return {
         result:
-          mode === "create_then_rate_limit"
-            ? { matches: published, recent: [], complete: false }
-            : mode === "complete"
+          mode === "complete"
             ? {
                 matches: [
                   issue("1", "Conformance publication"),
