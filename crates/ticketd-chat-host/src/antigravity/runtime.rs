@@ -83,21 +83,22 @@ impl Prompt {
             heading: None,
         }
     }
-    fn tool_update(&mut self, update: acp::ToolCallUpdate, events: &mut Vec<EventKind>) {
+    fn tool_update(&mut self, update: acp::ToolCallUpdate, events: &mut Vec<EventKind>) -> bool {
         let id = update.tool_call_id;
         let tool = self
             .tools
             .entry(id.clone())
             .or_insert_with(|| steps::Tool::new(id.clone()));
         tool.merge(update.fields);
-        self.report_tool(&id, events);
+        self.report_tool(&id, events)
     }
-    fn report_tool(&mut self, id: &acp::ToolCallId, events: &mut Vec<EventKind>) {
+    fn report_tool(&mut self, id: &acp::ToolCallId, events: &mut Vec<EventKind>) -> bool {
         let Some(tool) = self.tools.get(id) else {
-            return;
+            return false;
         };
         let declined = self.denied.contains(id);
-        events.push(tool.observed(self.turn.clone(), declined));
+        let (event, command_unavailable) = tool.observed(self.turn.clone(), declined);
+        events.push(event);
         if !declined && tool.status() == acp::ToolCallStatus::Completed {
             for file in tool.changes() {
                 self.files.insert(file.path.clone(), file);
@@ -109,6 +110,7 @@ impl Prompt {
                 files: self.files.values().cloned().collect(),
             });
         }
+        command_unavailable
     }
 }
 
@@ -277,7 +279,9 @@ impl Session {
                     .insert(id.clone(), steps::Tool::from_call(tool));
                 prompt.report_tool(&id, &mut events);
             }
-            acp::SessionUpdate::ToolCallUpdate(update) => prompt.tool_update(update, &mut events),
+            acp::SessionUpdate::ToolCallUpdate(update) => {
+                prompt.tool_update(update, &mut events);
+            }
             acp::SessionUpdate::Plan(plan) => {
                 events.push(EventKind::PlanUpdated {
                     turn: prompt.turn.clone(),
@@ -345,7 +349,7 @@ impl Session {
                 label: option.name.clone(),
             })
             .collect();
-        let reason = [
+        let mut reason = [
             raw["reason"].as_str(),
             raw["warning"].as_str(),
             raw["toolCall"]["rawInput"]["toolSummary"].as_str(),
@@ -376,7 +380,12 @@ impl Session {
             .into_iter()
             .collect();
         prompt.flush_message(&mut events);
-        prompt.tool_update(request.tool_call, &mut events);
+        if prompt.tool_update(request.tool_call, &mut events) {
+            if !reason.is_empty() {
+                reason.insert(0, '\n');
+            }
+            reason.insert_str(0, "The command is too large for ticketd to show in full.");
+        }
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request: native,
             turn: Some(prompt.turn.clone()),
