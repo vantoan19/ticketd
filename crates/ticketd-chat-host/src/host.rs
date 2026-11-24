@@ -692,8 +692,8 @@ impl ChatHost {
     pub async fn stop_all(&self, why: StopReason) -> Vec<UnconfirmedCleanup> {
         let turning_off = why == StopReason::TurnedOff;
         let chats = if turning_off {
-            // A supervisor may still own an unresolved permission restart. Keep its
-            // entry through shutdown so a concurrent turn_on cannot replace it.
+            // A supervisor may still hold pending recovery. Keep its entry through
+            // shutdown so a concurrent turn_on cannot replace it.
             self.chats().clone()
         } else {
             std::mem::take(&mut *self.chats())
