@@ -234,8 +234,8 @@
   line-height: var(--text-caption-line);
   font-weight: 400;
 }
-.source-preview thead th:first-child {
-  width: 96px;
+.source-preview .source-table :is(th, td):first-child {
+  white-space: nowrap;
 }
 .source-preview thead th:last-child {
   width: 150px;
