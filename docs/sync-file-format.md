@@ -211,7 +211,9 @@ A project file has no text after its header.
 | `trashed`                                             | Whether the agent was deleted.                                                                                               |
 
 The text after the header is the agent's instructions. Codex requires `any_command: true` when `run_commands` is on.
-When both desktops edit the command policy and disagree about the harness or command switches, Workspace sync keeps the local policy and puts the differences in review. With the same harness and switches, allowlist edits merge as a set.
+When both desktops edit the command policy and disagree about the harness or command switches,
+Workspace sync keeps the local policy and offers each desktop's whole policy in review.
+With the same harness and switches, allowlist edits merge as a set.
 
 ### Automation
 

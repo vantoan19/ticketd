@@ -5,6 +5,7 @@
 //! everything still marked for the next one.
 
 use std::{
+    borrow::Cow,
     collections::{BTreeMap, BTreeSet},
     io::Cursor,
 };
@@ -27,6 +28,85 @@ use crate::{
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ', 'now')";
 /// The header comment naming the desktop that wrote a file.
 const DEVICE_LINE: &str = "# synced from: ";
+const COMMAND_MODE: [&str; 3] = ["harness", "run_commands", "any_command"];
+const COMMAND_LIST: &str = "allowed_commands";
+const COMMAND_POLICY: &str = "command_policy";
+const HARNESS_CHOICE: &str = "Harness ";
+const COMMANDS_ON: &str = "Command execution on";
+const COMMANDS_OFF: &str = "Command execution off";
+const COMMANDS_ANY: &str = "Any command when enabled";
+const COMMANDS_LISTED: &str = "Only listed commands when enabled";
+const LISTED_COMMAND: &str = "Listed command ";
+
+fn field_is_on(fields: &Fields, field: &str) -> bool {
+    matches!(fields.get(field), Some(SyncValue::Flag(true)))
+}
+
+fn command_harness(fields: &Fields) -> Option<&str> {
+    match fields.get("harness") {
+        Some(SyncValue::Text(harness)) => Some(harness),
+        _ => None,
+    }
+}
+
+fn unrestricted_harness(fields: &Fields) -> Option<&str> {
+    command_harness(fields)
+        .filter(|_| field_is_on(fields, "run_commands") && field_is_on(fields, "any_command"))
+}
+
+// Review already renders sets as a list. Keep all the values needed to apply a
+// device's exact policy in that one choice, even if command execution is off.
+fn command_policy_value(fields: &Fields) -> Option<SyncValue> {
+    let harness = command_harness(fields)?;
+    let mut values = BTreeSet::from([
+        format!("{HARNESS_CHOICE}{harness}"),
+        if field_is_on(fields, "run_commands") {
+            COMMANDS_ON
+        } else {
+            COMMANDS_OFF
+        }
+        .to_owned(),
+        if field_is_on(fields, "any_command") {
+            COMMANDS_ANY
+        } else {
+            COMMANDS_LISTED
+        }
+        .to_owned(),
+    ]);
+    if let Some(SyncValue::Set(commands)) = fields.get(COMMAND_LIST) {
+        values.extend(
+            commands
+                .iter()
+                .map(|command| format!("{LISTED_COMMAND}{command}")),
+        );
+    }
+    Some(SyncValue::Set(values))
+}
+
+fn apply_command_policy(fields: &mut Fields, value: Option<&SyncValue>) -> Result<(), Error> {
+    let Some(SyncValue::Set(values)) = value else {
+        return Err(Error::SyncReviewChanged);
+    };
+    let harness = values
+        .iter()
+        .find_map(|value| value.strip_prefix(HARNESS_CHOICE))
+        .ok_or(Error::SyncReviewChanged)?;
+    let commands = values
+        .iter()
+        .filter_map(|value| value.strip_prefix(LISTED_COMMAND).map(str::to_owned))
+        .collect();
+    fields.insert("harness".into(), SyncValue::Text(harness.into()));
+    fields.insert(
+        "run_commands".into(),
+        SyncValue::Flag(values.contains(COMMANDS_ON)),
+    );
+    fields.insert(
+        "any_command".into(),
+        SyncValue::Flag(values.contains(COMMANDS_ANY)),
+    );
+    fields.insert(COMMAND_LIST.into(), SyncValue::Set(commands));
+    Ok(())
+}
 
 pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     connection.execute_batch(&format!(
@@ -547,37 +627,38 @@ fn settle_source(
 /// policy for review when both devices made different changes to it, while
 /// continuing to merge allowlists edited under the same harness and switches.
 fn merge_agent_command_policy(base: &Fields, local: &Fields, remote: &Fields, merged: &mut Merged) {
-    const MODE: [&str; 3] = ["harness", "run_commands", "any_command"];
-    const LIST: &str = "allowed_commands";
     let same_mode = |left: &Fields, right: &Fields| {
-        MODE.iter()
+        COMMAND_MODE
+            .iter()
             .all(|field| left.get(*field) == right.get(*field))
     };
-    let same_policy =
-        |left: &Fields, right: &Fields| same_mode(left, right) && left.get(LIST) == right.get(LIST);
+    let same_policy = |left: &Fields, right: &Fields| {
+        same_mode(left, right) && left.get(COMMAND_LIST) == right.get(COMMAND_LIST)
+    };
     if same_mode(local, remote) || same_policy(local, base) || same_policy(remote, base) {
         return;
     }
     merged
         .conflicts
-        .retain(|conflict| !MODE.contains(&conflict.field.as_str()) && conflict.field != LIST);
-    for field in MODE.into_iter().chain([LIST]) {
-        let (ours, theirs) = (local.get(field), remote.get(field));
-        if let Some(ours) = ours {
+        .retain(|conflict| !command_policy_field(&conflict.field));
+    for field in COMMAND_MODE.into_iter().chain([COMMAND_LIST]) {
+        if let Some(ours) = local.get(field) {
             merged.fields.insert(field.to_owned(), ours.clone());
         } else {
             merged.fields.remove(field);
         }
-        if ours != theirs {
-            merged.conflicts.push(Conflict {
-                field: field.to_owned(),
-                base: base.get(field).cloned(),
-                local: ours.cloned(),
-                remote: theirs.cloned(),
-            });
-        }
     }
+    merged.conflicts.push(Conflict {
+        field: COMMAND_POLICY.to_owned(),
+        base: command_policy_value(base),
+        local: command_policy_value(local),
+        remote: command_policy_value(remote),
+    });
     merged.conflicts.sort_by(|a, b| a.field.cmp(&b.field));
+}
+
+fn command_policy_field(field: &str) -> bool {
+    COMMAND_MODE.contains(&field) || field == COMMAND_LIST
 }
 
 /// Merge two versions of a record against their last-synced copy. Sections are
@@ -691,7 +772,10 @@ fn local_view(
     }))
 }
 
-fn value_at<'a>(record: &'a SyncRecord, field: &str) -> Option<&'a SyncValue> {
+fn conflict_value<'a>(record: &'a SyncRecord, field: &str) -> Option<Cow<'a, SyncValue>> {
+    if record.kind == SyncKind::AutomationAgent && field == COMMAND_POLICY {
+        return command_policy_value(&record.fields).map(Cow::Owned);
+    }
     match field.split_once(':') {
         Some((part, field)) => record
             .parts
@@ -701,6 +785,7 @@ fn value_at<'a>(record: &'a SyncRecord, field: &str) -> Option<&'a SyncValue> {
             .get(field),
         None => record.fields.get(field),
     }
+    .map(Cow::Borrowed)
 }
 
 fn set_at(record: &mut SyncRecord, field: &str, value: Option<SyncValue>) {
@@ -1117,11 +1202,17 @@ impl Workspace {
                 if conflicts.iter().any(|conflict| conflict.field == field) {
                     continue;
                 }
+                let replaced_by_policy = kind == SyncKind::AutomationAgent
+                    && command_policy_field(&field)
+                    && conflicts.iter().any(|conflict| conflict.field == COMMAND_POLICY);
                 let moved = stored
                     .base
                     .as_ref()
-                    .is_some_and(|base| value_at(base, &field) != value_at(&remote, &field));
-                if moved || value_at(&merged, &field) == from_json(other)?.as_ref() {
+                    .is_some_and(|base| conflict_value(base, &field) != conflict_value(&remote, &field));
+                if replaced_by_policy
+                    || moved
+                    || conflict_value(&merged, &field).as_deref() == from_json(other)?.as_ref()
+                {
                     connection.execute(
                         "DELETE FROM sync_conflicts WHERE kind = ?1 AND id = ?2 AND field = ?3",
                         params![name(kind), id, field],
@@ -1447,7 +1538,7 @@ impl Workspace {
                 |row| row.get(0),
             )?;
             fields.push(SyncConflictField {
-                local: value_at(&record, &field).cloned(),
+                local: conflict_value(&record, &field).map(Cow::into_owned),
                 local_changed_at,
                 remote_changed_at,
                 field,
@@ -1490,6 +1581,8 @@ impl Workspace {
         let mut stored = stored(&self.connection, kind, id)?;
         let mut record = local_view(&self.connection, kind, id, &stored)?
             .ok_or_else(|| Error::NotFound(format!("{} {id}", name(kind))))?;
+        let local_grant = unrestricted_harness(&record.fields).map(str::to_owned);
+        let mut remote_grant = None;
         for resolution in resolutions {
             let field = conflict
                 .fields
@@ -1499,7 +1592,18 @@ impl Workspace {
                 .ok_or(Error::SyncReviewChanged)?;
             match &resolution.choice {
                 SyncChoice::Local => {}
+                SyncChoice::Remote
+                    if kind == SyncKind::AutomationAgent && field.field == COMMAND_POLICY =>
+                {
+                    apply_command_policy(&mut record.fields, field.remote.as_ref())?;
+                    remote_grant = unrestricted_harness(&record.fields).map(str::to_owned);
+                }
                 SyncChoice::Remote => set_at(&mut record, &field.field, field.remote.clone()),
+                SyncChoice::Edited(_)
+                    if kind == SyncKind::AutomationAgent && field.field == COMMAND_POLICY =>
+                {
+                    return Err(Error::SyncReviewChanged);
+                }
                 SyncChoice::Edited(value) => {
                     set_at(
                         &mut record,
@@ -1508,6 +1612,18 @@ impl Workspace {
                     );
                 }
             }
+        }
+        // Per-field conflicts left by an older reader can combine permission
+        // flags from different desktops. An unrestricted grant needs one owner.
+        if kind == SyncKind::AutomationAgent
+            && let Some(grant) = unrestricted_harness(&record.fields)
+            && local_grant.as_deref() != Some(grant)
+            && remote_grant.as_deref() != Some(grant)
+        {
+            return Err(Error::SyncFile(
+                "Open the Automation agent to explicitly allow any command for this harness."
+                    .into(),
+            ));
         }
         let missing = self.apply_sync_record(&record)?;
         if !missing.is_empty() || stored.wanted.is_some() {

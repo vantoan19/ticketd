@@ -346,7 +346,13 @@ fn two_desktops_each_removing_a_command_never_add_up_to_any_command() {
 
 #[test]
 fn concurrent_harness_and_command_policy_edits_keep_both_choices_available() {
-    for (first, inactive_grant) in [(1, false), (0, false), (1, true), (0, true)] {
+    for (first, inactive_grant, authorized_grant) in [
+        (1, true, false),
+        (1, false, false),
+        (0, false, false),
+        (0, true, false),
+        (1, true, true),
+    ] {
         let mut devices = devices();
         let (_, agent) = devices.shared_automation();
         let initial = devices.workspaces[0].automation_agent(&agent).unwrap();
@@ -359,6 +365,7 @@ fn concurrent_harness_and_command_policy_edits_keep_both_choices_available() {
             .unwrap();
         let mut listed = initial.settings;
         listed.tools.run_commands = true;
+        listed.tools.any_command = authorized_grant;
         listed.tools.allowed_commands = vec!["fixture-command".into()];
         devices.workspaces[1]
             .update_automation_agent(&agent, listed.clone())
@@ -378,7 +385,30 @@ fn concurrent_harness_and_command_policy_edits_keep_both_choices_available() {
         let conflict = workspace
             .sync_conflict(SyncKind::AutomationAgent, &agent)
             .unwrap();
-        assert!(conflict.fields.iter().any(|field| field.field == "harness"));
+        if first == 1 && inactive_grant {
+            let run_only = SyncResolution {
+                field: "run_commands".into(),
+                choice: SyncChoice::Remote,
+                detected_at: conflict
+                    .fields
+                    .iter()
+                    .find(|field| field.field == "run_commands")
+                    .map_or_else(
+                        || conflict.detected_at.clone(),
+                        |field| field.detected_at.clone(),
+                    ),
+            };
+            assert!(matches!(
+                workspace.resolve_sync_conflict(SyncKind::AutomationAgent, &agent, &[run_only]),
+                Err(Error::SyncReviewChanged)
+            ));
+            assert_eq!(
+                workspace.automation_agent(&agent).unwrap().settings,
+                *second_local
+            );
+        }
+        assert_eq!(conflict.fields.len(), 1);
+        assert_eq!(conflict.fields[0].field, "command_policy");
         let remote: Vec<_> = conflict
             .fields
             .into_iter()
