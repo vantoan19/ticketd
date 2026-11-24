@@ -131,13 +131,25 @@ impl Driver for ProcessDriver {
 conformance::contract_tests!(scripted, super::ProcessDriver);
 
 #[test]
-fn an_unknown_settings_field_kind_requests_a_newer_host() {
-    let connector = fixture_connector(Arc::new(Host::default()), "first");
-    let mut hello = serde_json::to_value(connector.definition.cached.as_deref().unwrap()).unwrap();
-    hello["description"]["schema"]["fields"][0]["type"] = "future_field".into();
-    let result = host::parse_handshake(&connector.definition.launch, hello);
+fn registration_reports_that_a_future_field_kind_needs_a_newer_host() {
+    let scratch = tempfile::tempdir().unwrap();
+    let registry = ExtensionRegistry::new(scratch.path().join("registry"));
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension");
+    let package = scratch.path().join("package");
+    std::fs::create_dir(&package).unwrap();
+    std::fs::copy(fixture.join("driver.mjs"), package.join("driver.mjs")).unwrap();
+    let mut manifest: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(fixture.join("ticketd-source.json")).unwrap())
+            .unwrap();
+    manifest["args"] = json!(["driver.mjs", "future-field"]);
+    std::fs::write(
+        package.join("ticketd-source.json"),
+        serde_json::to_vec(&manifest).unwrap(),
+    )
+    .unwrap();
+
     assert!(matches!(
-        result,
+        registry.link(&package),
         Err(SourceError::Protocol(message)) if message.contains("needs a newer ticketd")
     ));
 }

@@ -285,14 +285,17 @@ impl Host {
         launch: Arc<Launch>,
         versions: &[u32],
     ) -> Result<Description, SourceError> {
-        self.call(
+        let response: Value = self.call(
             &Definition {
                 launch,
                 cached: None,
             },
             None,
             describe(versions),
-        )
+        )?;
+        check_description_fields(&response)?;
+        serde_json::from_value(response)
+            .map_err(|_| SourceError::Protocol("invalid source extension result".into()))
     }
 
     pub(super) fn call<T: DeserializeOwned>(
@@ -664,10 +667,15 @@ fn describe(versions: &[u32]) -> Call<'_> {
     }
 }
 
-pub(super) fn parse_handshake(
-    launch: &Launch,
-    response: Value,
-) -> Result<Description, SourceError> {
+fn parse_handshake(launch: &Launch, response: Value) -> Result<Description, SourceError> {
+    check_description_fields(&response)?;
+    let hello: Description = serde_json::from_value(response)
+        .map_err(|error| SourceError::Protocol(format!("invalid description: {error}")))?;
+    validate_handshake(launch, &hello)?;
+    Ok(hello)
+}
+
+fn check_description_fields(response: &Value) -> Result<(), SourceError> {
     if response["description"]["schema"]["fields"]
         .as_array()
         .is_some_and(|fields| {
@@ -682,10 +690,7 @@ pub(super) fn parse_handshake(
             "the source extension uses a settings field type that needs a newer ticketd".into(),
         ));
     }
-    let hello: Description = serde_json::from_value(response)
-        .map_err(|error| SourceError::Protocol(format!("invalid description: {error}")))?;
-    validate_handshake(launch, &hello)?;
-    Ok(hello)
+    Ok(())
 }
 
 pub(super) fn validate_handshake(launch: &Launch, hello: &Description) -> Result<(), SourceError> {

@@ -36,6 +36,9 @@ const schema = {
     },
   ],
 };
+if (process.argv[2] === "future-field") {
+  schema.fields[0].type = "future_field";
+}
 const description = {
   provider,
   name: "Scripted source",
