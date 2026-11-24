@@ -134,7 +134,7 @@ impl<R> Default for RuntimeState<R> {
 }
 
 impl<R> RuntimeState<R> {
-    fn active_turn_id(&self) -> Option<&NativeTurnId> {
+    pub(crate) fn active_turn_id(&self) -> Option<&NativeTurnId> {
         match &self.active {
             Some(ActiveTurn::Named(id)) => Some(id),
             Some(ActiveTurn::Unnamed) | None => None,
@@ -300,6 +300,16 @@ impl<R> RuntimeState<R> {
         let frame = encode(&live.payload)?;
         live.answered = true;
         Ok(frame)
+    }
+
+    pub(crate) fn reopen_request(&mut self, request: &NativeRequestId) -> Option<&R> {
+        let live = self.requests.get_mut(request)?;
+        live.answered = false;
+        Some(&live.payload)
+    }
+
+    pub(crate) fn remove_request(&mut self, request: &NativeRequestId) -> Option<R> {
+        self.requests.remove(request).map(|live| live.payload)
     }
 
     pub(crate) fn resolve_request(&mut self, request: &NativeRequestId) -> Option<EventKind> {
