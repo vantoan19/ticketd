@@ -1529,6 +1529,10 @@ impl Workspace {
         now: &str,
         tracked: &[Tracked],
     ) -> Result<RefreshReport, Error> {
+        let tracked_identities: HashSet<_> = tracked
+            .iter()
+            .map(|ticket| (ticket.provider.as_str(), ticket.external_id.as_str()))
+            .collect();
         crate::write_scope::run(&self.connection, |transaction| {
             // Configuration can change while the connector is on the network.
             // Re-read it under the same write lock as the results: old discovery
@@ -1579,6 +1583,7 @@ impl Workspace {
                     read_before.insert(provider.clone(), read);
                 }
             }
+            let mut stale_membership = HashSet::new();
             for issue in &gathered.issues {
                 let key = (
                     issue.reference.identity.provider.clone(),
@@ -1589,10 +1594,19 @@ impl Workspace {
                     {
                         continue;
                     }
-                } else if replaced.contains(&key.0)
-                    && ticket_for_identity(transaction, &issue.reference.identity)?.is_none()
-                {
-                    continue;
+                } else {
+                    let already_tracked =
+                        tracked_identities.contains(&(key.0.as_str(), key.1.as_str()));
+                    if (already_tracked || replaced.contains(&key.0))
+                        && ticket_for_identity(transaction, &issue.reference.identity)?.is_none()
+                    {
+                        // A newer refresh may have moved the ticket to a new ID.
+                        // A discovery result still carrying the old ID cannot import it again.
+                        if already_tracked {
+                            stale_membership.insert(key.0.clone());
+                        }
+                        continue;
+                    }
                 }
                 if let Some(reference) =
                     unverified_github_match(transaction, &issue.reference.identity)?
@@ -1660,7 +1674,7 @@ impl Workspace {
                 seen,
             } in &gathered.discovery
             {
-                if replaced.contains(provider) {
+                if replaced.contains(provider) || stale_membership.contains(provider) {
                     continue;
                 }
                 let mut statement = transaction.prepare("SELECT i.ticket_id, i.external_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external'")?;
@@ -1705,7 +1719,8 @@ impl Workspace {
                                 id: ticket.external_id.clone(),
                             },
                         )?
-                        .is_none()
+                        .as_deref()
+                            != Some(ticket.ticket_id.as_str())
                     {
                         // The issue link changed while this refresh ran.
                         continue;

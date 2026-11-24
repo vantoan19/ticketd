@@ -21,6 +21,12 @@ const TOKEN: &str = "ghp_secret_token_value";
 struct Fixture {
     routes: Mutex<BTreeMap<String, VecDeque<Result<HttpResponse, TransportError>>>>,
     requests: Mutex<Vec<HttpRequest>>,
+    on_request: Mutex<Option<RequestHook>>,
+}
+
+struct RequestHook {
+    url: String,
+    run: Box<dyn FnOnce() + Send>,
 }
 
 impl Fixture {
@@ -48,6 +54,17 @@ struct Shared(Arc<Fixture>);
 impl HttpTransport for Shared {
     fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
         self.0.requests.lock().unwrap().push(request.clone());
+        let hook = {
+            let mut hook = self.0.on_request.lock().unwrap();
+            if hook.as_ref().is_some_and(|hook| hook.url == request.url) {
+                hook.take()
+            } else {
+                None
+            }
+        };
+        if let Some(hook) = hook {
+            (hook.run)();
+        }
         self.0
             .routes
             .lock()
@@ -1015,6 +1032,82 @@ fn tracked_fetch_requires_permanent_redirect_to_the_corroborated_issue_path() {
         );
         assert!(!fixture.urls().iter().any(|url| url == foreign));
     }
+}
+
+#[test]
+fn stale_discovery_cannot_reimport_an_issue_after_an_overlapping_transfer() {
+    use crate::{Workspace, source::RefreshOptions};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let (fixture, engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+    let discovery = format!("{DEFAULT_API_URL}/repos/o/one/issues?state=open&per_page=100");
+    let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
+    let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
+    fixture.respond(
+        &format!("{DEFAULT_API_URL}/user"),
+        ok(json!({"login": "alice"})),
+    );
+    for _ in 0..3 {
+        fixture.respond(&discovery, ok(json!([public_issue(77, 7, "o/one")])));
+    }
+    for part in ["comments", "events"] {
+        for _ in 0..2 {
+            fixture.respond(&format!("{old}/{part}?per_page=100"), ok(json!([])));
+        }
+    }
+    workspace
+        .save_source(
+            &engine,
+            PROVIDER,
+            &config(json!({"repositories": ["o/one"]})),
+        )
+        .unwrap();
+    let initial = workspace
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    let reference = initial.imported[0].clone();
+
+    let (transfer, transfer_engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+    transfer.respond(&old, status(301, json!({}), &[("location", &new)]));
+    transfer.respond(&new, ok(public_issue(99, 12, "o/two")));
+    for part in ["comments", "events"] {
+        transfer.respond(&format!("{new}/{part}?per_page=100"), ok(json!([])));
+    }
+    let tracked = reference.clone();
+    *fixture.on_request.lock().unwrap() = Some(RequestHook {
+        url: discovery,
+        run: Box::new(move || {
+            let mut overlapping = Workspace::open(path).unwrap();
+            let report = overlapping
+                .refresh_sources(
+                    &transfer_engine,
+                    &RefreshOptions {
+                        ticket: Some(tracked.clone()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert!(report.failures.is_empty());
+            assert_eq!(report.updated, [tracked]);
+        }),
+    });
+    let stale = workspace
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    assert!(stale.failures.is_empty());
+    assert!(stale.imported.is_empty(), "{:#?}", stale.imported);
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+    assert_eq!(
+        workspace
+            .show_ticket(&reference)
+            .unwrap()
+            .source
+            .unwrap()
+            .id,
+        "99"
+    );
 }
 
 #[test]
