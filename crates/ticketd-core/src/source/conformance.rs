@@ -356,10 +356,10 @@ pub(super) fn run(
         match first {
             Ok(issues) => match verify_conversation(connector, &config, &issues) {
                 Ok(ConversationCheck::Stable) => report.pass("conversation"),
-                Ok(ConversationCheck::Changed) => report.skip(
+                Ok(ConversationCheck::Changed) => report.unobserved(
                     "conversation",
                     "conversation membership changed between reads",
-                    false,
+                    options,
                 ),
                 Ok(ConversationCheck::Empty) => report.unobserved(
                     "conversation",
