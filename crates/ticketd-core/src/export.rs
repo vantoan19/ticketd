@@ -299,16 +299,6 @@ const OMITTED_COLUMNS: &[(&str, &str, &str)] = &[
         "seen_through",
         "what this device's person has read",
     ),
-    (
-        "chat_submission_attempts",
-        "recorded_position",
-        "bookkeeping for crediting CLI writes to Chat Turns",
-    ),
-    (
-        "chat_turns",
-        "ended_position",
-        "bookkeeping for crediting CLI writes to Chat Turns",
-    ),
     ("documents", "body_heading", "derived from the body"),
     ("documents", "kind", "always 'document'"),
 ];
