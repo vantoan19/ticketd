@@ -1923,6 +1923,209 @@ async fn a_native_question_reaches_the_person_as_an_antigravity_message() {
     opened.runtime.close().await;
 }
 
+async fn prompt_end(events: &mut EventStream, submission: &str) -> (TurnOutcome, Vec<EventKind>) {
+    let mut preceding = Vec::new();
+    let outcome = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = events
+                .recv()
+                .await
+                .unwrap_or_else(|| panic!("event stream closed before Prompt {submission} ended"));
+            match event.kind {
+                EventKind::TurnEnded {
+                    outcome,
+                    submissions,
+                    ..
+                } if submissions.iter().any(|id| id.0 == submission) => {
+                    return outcome;
+                }
+                kind => preceding.push(kind),
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("Prompt {submission} did not end within five seconds"));
+    (outcome, preceding)
+}
+
+// The cancel notification cannot fit in this pipe without the peer reading.
+async fn interruption_peer() -> (Peer, OpenedRuntime, Value, NativeTurnId, NativeRequestId) {
+    let (mut peer, io) = crate::scripted::pipes_with_input_capacity(32);
+    let opening = tokio::spawn(runtime::open(
+        io,
+        request(SessionStart::New),
+        settings::OWN.to_owned(),
+    ));
+    startup(&mut peer, PROMPT).await;
+    let mut opened = opening.await.unwrap().unwrap();
+    let (write, prompt) = tokio::join!(
+        opened.runtime.submit(start_turn("old-prompt")),
+        peer.written()
+    );
+    assert_eq!(write, DispatchOutcome::Written);
+    let mut permission = recorded_permission();
+    permission["id"] = json!("already-answered");
+    send(&mut peer, &permission).await;
+    let answered = next_approval(&mut opened.events).await;
+    let (outcome, reply) = tokio::join!(
+        opened.runtime.respond(allow_approval(answered)),
+        peer.written(),
+    );
+    assert_eq!(outcome, RespondOutcome::Sent);
+    assert_eq!(reply["id"], "already-answered");
+    assert_eq!(reply["result"]["outcome"]["outcome"], "selected");
+    permission["id"] = json!("old-first");
+    send(&mut peer, &permission).await;
+    let first = next_approval(&mut opened.events).await;
+    permission["id"] = json!("old-second");
+    send(&mut peer, &permission).await;
+    let turn = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let EventKind::InteractionRequested(approval) =
+                opened.events.recv().await.expect("permission event").kind
+            {
+                return approval.turn.expect("approval's Turn");
+            }
+        }
+    })
+    .await
+    .expect("the second unanswered approval must be shown");
+    (peer, opened, prompt, turn, first)
+}
+
+fn allow_approval(request: NativeRequestId) -> InteractionResponse {
+    InteractionResponse {
+        generation: GENERATION,
+        request,
+        answer: InteractionAnswer::NativeApproval("allow".to_owned()),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupt_answers_the_original_permissions_after_its_prompt_ends() {
+    use std::{
+        future::{Future, poll_fn},
+        pin::pin,
+        task::Poll,
+    };
+
+    use crate::{InteractionResolution, InterruptOutcome, InterruptRequest};
+
+    let (mut peer, mut opened, original, turn, pending) = interruption_peer().await;
+    let stop = InterruptRequest {
+        generation: GENERATION,
+        expected_turn: turn,
+    };
+    let mut interrupt = pin!(opened.runtime.interrupt(stop.clone()));
+    poll_fn(|cx| {
+        assert!(interrupt.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    let mut duplicate = recorded_permission();
+    duplicate["id"] = json!("already-answered");
+    send(&mut peer, &duplicate).await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": original["id"], "result": {"stopReason": "cancelled"}}),
+    )
+    .await;
+    let (outcome, events) = prompt_end(&mut opened.events, "old-prompt").await;
+    assert_eq!(outcome, TurnOutcome::Interrupted);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                EventKind::InteractionResolved {
+                    resolution: InteractionResolution::Withdrawn,
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+
+    let read = async {
+        assert_eq!(peer.written().await["method"], "session/cancel");
+        let mut cancelled = Vec::new();
+        for _ in 0..2 {
+            let reply = peer.written().await;
+            assert_eq!(
+                reply["result"]["outcome"]["outcome"], "cancelled",
+                "{reply}"
+            );
+            cancelled.push(reply["id"].as_str().unwrap().to_owned());
+        }
+        cancelled.sort_unstable();
+        assert_eq!(cancelled, ["old-first", "old-second"]);
+        assert_eq!(peer.written().await["method"], "session/prompt");
+    };
+    let (outcome, wrote, stale, ()) = tokio::join!(
+        interrupt,
+        opened.runtime.submit(start_turn("next-prompt")),
+        opened.runtime.respond(allow_approval(pending)),
+        read,
+    );
+    assert_eq!(outcome, InterruptOutcome::Acknowledged);
+    assert_eq!(wrote, DispatchOutcome::Written);
+    assert_eq!(stale, RespondOutcome::NotSent(Refusal::UnknownRequest));
+    assert!(matches!(
+        opened.runtime.interrupt(stop).await,
+        InterruptOutcome::NotSent(Refusal::TurnMismatch { active: Some(_) })
+    ));
+
+    let mut permission = recorded_permission();
+    permission["id"] = json!("old-first");
+    send(&mut peer, &permission).await;
+    let selected = next_approval(&mut opened.events).await;
+    let (outcome, reply) = tokio::join!(
+        opened.runtime.respond(allow_approval(selected)),
+        peer.written(),
+    );
+    assert_eq!(outcome, RespondOutcome::Sent);
+    assert_eq!(reply["id"], "old-first");
+    assert_eq!(reply["result"]["outcome"]["outcome"], "selected");
+    peer.assert_nothing_written().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupt_is_unconfirmed_if_a_captured_permission_reply_cannot_be_written() {
+    use std::{
+        future::{Future, poll_fn},
+        pin::pin,
+        task::Poll,
+    };
+
+    use crate::{InterruptOutcome, InterruptRequest};
+
+    let (mut peer, mut opened, original, turn, _) = interruption_peer().await;
+    let mut interrupt = pin!(opened.runtime.interrupt(InterruptRequest {
+        generation: GENERATION,
+        expected_turn: turn,
+    }));
+    poll_fn(|cx| {
+        assert!(interrupt.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": original["id"], "result": {"stopReason": "cancelled"}}),
+    )
+    .await;
+    assert_eq!(
+        prompt_end(&mut opened.events, "old-prompt").await.0,
+        TurnOutcome::Interrupted
+    );
+    let read_cancel = async {
+        assert_eq!(peer.written().await["method"], "session/cancel");
+        drop(peer);
+    };
+    let (outcome, ()) = tokio::join!(interrupt, read_cancel);
+    assert_eq!(outcome, InterruptOutcome::Unconfirmed);
+}
+
 #[tokio::test]
 async fn stop_notifies_antigravity_and_cancels_its_unanswered_permission() {
     use crate::{InteractionResolution, InterruptOutcome, InterruptRequest, ToolStatus};
