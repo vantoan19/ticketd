@@ -23,7 +23,9 @@ use std::{
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 
-use super::{Engine, RefreshControl, RefreshOptions, RefreshReport, SourceError};
+use super::{
+    Engine, RefreshControl, RefreshOptions, RefreshReport, SourceError, tracking::RefreshRun,
+};
 use crate::{Error, Workspace};
 
 /// A source of "now" in whole seconds since the Unix epoch.
@@ -302,8 +304,7 @@ impl RefreshCoordinator {
         let result = workspace.refresh_selected_with_clock(engine, &options, Some(&due), &|| {
             timestamp(self.clock.now_secs())
         });
-        self.feed_connections(&due, &result);
-        result.map(Run::Ran)
+        self.feed_connections(&due, result).map(Run::Ran)
     }
 
     /// An explicit refresh of everything, or of one ticket by reference.
@@ -349,16 +350,24 @@ impl RefreshCoordinator {
                 &|| timestamp(self.clock.now_secs()),
             );
             if ticket.is_none() {
-                self.feed_connections(&due, &result);
+                self.feed_connections(&due, result)
+            } else {
+                result.map(|run| run.report)
             }
-            result
         })
     }
 
-    fn feed_connections(&self, due: &[String], result: &Result<RefreshReport, Error>) {
+    fn feed_connections(
+        &self,
+        fallback: &[String],
+        result: Result<RefreshRun, Error>,
+    ) -> Result<RefreshReport, Error> {
         if matches!(result, Err(Error::Source(SourceError::RefreshCanceled))) {
-            return;
+            return result.map(|run| run.report);
         }
+        let due = result
+            .as_ref()
+            .map_or(fallback, |run| run.connections.as_slice());
         let now = self.clock.now_secs();
         let mut state = self.lock();
         for id in due {
@@ -369,8 +378,8 @@ impl RefreshCoordinator {
                     next_due: now,
                     failures: 0,
                 });
-            let failure = result.as_ref().ok().and_then(|report| {
-                report.failures.iter().find(|failure| {
+            let failure = result.as_ref().ok().and_then(|run| {
+                run.report.failures.iter().find(|failure| {
                     failure.connection_id.as_deref() == Some(id) && failure.interrupts()
                 })
             });
@@ -383,5 +392,6 @@ impl RefreshCoordinator {
             );
             schedule.next_due = now.saturating_add(wait);
         }
+        result.map(|run| run.report)
     }
 }

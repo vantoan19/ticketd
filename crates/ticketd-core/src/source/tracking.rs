@@ -894,6 +894,11 @@ fn rate_limit_hold(
     ))
 }
 
+pub(super) struct RefreshRun {
+    pub(super) report: RefreshReport,
+    pub(super) connections: Vec<String>,
+}
+
 #[derive(Default)]
 struct Applied {
     imported: Vec<String>,
@@ -954,6 +959,7 @@ impl Workspace {
         selected: Option<&[String]>,
     ) -> Result<RefreshReport, Error> {
         self.refresh_selected_with_clock(engine, options, selected, &|| options.now.clone())
+            .map(|run| run.report)
     }
 
     pub(super) fn refresh_selected_with_clock(
@@ -962,7 +968,7 @@ impl Workspace {
         options: &RefreshOptions,
         selected: Option<&[String]>,
         received_at: &(dyn Fn() -> Option<String> + Sync),
-    ) -> Result<RefreshReport, Error> {
+    ) -> Result<RefreshRun, Error> {
         engine.check_refresh_canceled()?;
         let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = tracked(&self.connection, options.ticket.as_deref())?;
@@ -987,21 +993,24 @@ impl Workspace {
         if let (Some(_), Some(ticket)) = (&options.ticket, tracked.first())
             && ticket.removed
         {
-            return Ok(RefreshReport {
-                imported: Vec::new(),
-                updated: Vec::new(),
-                unchanged: 0,
-                failures: vec![RefreshFailure {
-                    provider: ticket.provider.clone(),
-                    connection_id: None,
-                    reference: Some(ticket.reference.clone()),
-                    scope: FailureScope::Ticket,
-                    code: super::CONNECTION_REMOVED.into(),
-                    message: "Add a connection and refresh discovery to resume synchronization"
-                        .into(),
-                    retry_after_secs: None,
-                }],
-                refreshed_at: started,
+            return Ok(RefreshRun {
+                report: RefreshReport {
+                    imported: Vec::new(),
+                    updated: Vec::new(),
+                    unchanged: 0,
+                    failures: vec![RefreshFailure {
+                        provider: ticket.provider.clone(),
+                        connection_id: None,
+                        reference: Some(ticket.reference.clone()),
+                        scope: FailureScope::Ticket,
+                        code: super::CONNECTION_REMOVED.into(),
+                        message: "Add a connection and refresh discovery to resume synchronization"
+                            .into(),
+                        retry_after_secs: None,
+                    }],
+                    refreshed_at: started,
+                },
+                connections: Vec::new(),
             });
         }
         let jobs: Vec<_> = sources
@@ -1080,7 +1089,7 @@ impl Workspace {
             }
         }
         engine.check_refresh_canceled()?;
-        self.in_write_scope(|workspace| {
+        let report = self.in_write_scope(|workspace| {
             let mut report = RefreshReport {
                 imported: Vec::new(),
                 updated: Vec::new(),
@@ -1098,6 +1107,10 @@ impl Workspace {
             }
             engine.check_refresh_canceled()?;
             Ok(report)
+        })?;
+        Ok(RefreshRun {
+            report,
+            connections: jobs.iter().map(|source| source.saved.id.clone()).collect(),
         })
     }
 }
