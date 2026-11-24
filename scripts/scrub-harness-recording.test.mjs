@@ -183,21 +183,70 @@ test("keeps protocol labels and known login metadata when an alias shares their 
   assert.equal(reply.server.account.subscription_type, "max");
 });
 
+test("keeps ordinary command text when a Session ID shares its spelling", (t) => {
+  const { output, scrub } = capture(t);
+  const result = scrub([
+    [
+      2,
+      line({
+        method: "session/update",
+        params: {
+          update: {
+            sessionUpdate: "tool_call",
+            command: "id -u",
+            description: 'Session ID: "id". The id command reports a user ID.',
+            resumeCommand: "example-cli --session-id id && id -u",
+            report: "Write to id@example.invalid for /home/Synthetic/report",
+          },
+        },
+      }),
+    ],
+    [1, line({ id: 1, method: "thread/resume", params: { threadId: "id" } })],
+    [2, line({ id: 1, result: { session: { id: "id" } } })],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const [notice, request, reply] = readFileSync(output, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map(JSON.parse);
+  const update = notice.server.params.update;
+  assert.equal(update.command, "id -u");
+  assert.equal(update.sessionUpdate, "tool_call");
+  const alias = "fixture-session-1";
+  assert.equal(request.client.params.threadId, alias);
+  assert.equal(reply.server.result.session.id, alias);
+  assert.equal(
+    update.description,
+    `Session ID: "${alias}". The id command reports a user ID.`,
+  );
+  assert.equal(
+    update.resumeCommand,
+    `example-cli --session-id ${alias} && id -u`,
+  );
+  assert.equal(
+    update.report,
+    "Write to fixture-email-1 for /fixture/home-1/report",
+  );
+});
+
 test("replaces a known account alias in a protocol label", (t) => {
   const { output, scrub } = capture(t);
   const alias = "syntheticAccountAlias";
   const result = scrub([
     [1, line({ method: "thread/resume", params: { name: alias } })],
     [2, line({ account: { displayName: alias } })],
+    [2, line({ sessionId: alias, text: `Report for ${alias}` })],
   ]);
   assert.equal(result.status, 0, result.stderr);
-  const [request, reply] = readFileSync(output, "utf8")
+  const [request, reply, notice] = readFileSync(output, "utf8")
     .trimEnd()
     .split("\n")
     .map(JSON.parse);
   assert.equal(request.client.method, "thread/resume");
   assert.equal(request.client.params.name, "fixture-account-1");
   assert.equal(reply.server.account.displayName, request.client.params.name);
+  assert.equal(notice.server.sessionId, "fixture-account-1");
+  assert.equal(notice.server.text, "Report for fixture-account-1");
 });
 
 test("replaces a known account alias used as an identifier-shaped dictionary key", (t) => {

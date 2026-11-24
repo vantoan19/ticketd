@@ -1,4 +1,4 @@
-import { useHarnessCatalog } from "@/features/chats/harness-catalog";
+import { useHarnessCatalogState } from "@/features/chats/harness-catalog";
 import { useId, useRef, useState, type ReactNode } from "react";
 import { ArrowLeft, Ellipsis, Maximize2, Minimize2, X } from "lucide-react";
 import {
@@ -16,6 +16,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -36,6 +37,7 @@ import {
   SettingsList,
   SettingsListFooter,
 } from "@/features/settings/layout/SettingsList";
+import { describeFailure } from "@/lib/api/describe-failure";
 import "@/features/settings/layout/settings-layout.css";
 
 type Tools = AutomationAgentSettings["tools"];
@@ -221,7 +223,8 @@ export function AgentForm({
    */
   const elsewhere = unsaved && saving === 0 && !own.includes(arrived);
   const statusOf = useHarnessStatus();
-  const catalog = useHarnessCatalog();
+  const catalogState = useHarnessCatalogState();
+  const catalog = catalogState.entries;
   const [deleting, setDeleting] = useState(false);
   /** Where the delete dialog returns focus: the menu item that opened it is gone. */
   const actions = useRef<HTMLButtonElement>(null);
@@ -381,45 +384,67 @@ export function AgentForm({
             <span className="agent-label" id={`${fieldId}-harness`}>
               Harness
             </span>
-            <ChoiceTiles
-              aria-labelledby={`${fieldId}-harness`}
-              value={draft.harness}
-              // A model names one harness's model, so it does not carry over.
-              onValueChange={(harness) => {
-                if (harness === draft.harness) return;
-                const next = catalog.find(
-                  (item) => item.id === harness,
-                )?.unattended;
-                const wouldWiden =
-                  canListCommands &&
-                  draft.tools.run_commands &&
-                  !draft.tools.any_command &&
-                  next?.commands === "off_or_any";
-                change({
-                  harness,
-                  model: null,
-                  ...(wouldWiden && {
-                    tools: { ...draft.tools, run_commands: false },
-                  }),
-                });
-              }}
-            >
-              {standings.map(({ id, name, standing }) => (
-                <ChoiceTile
-                  key={id}
-                  value={id}
-                  title={name}
-                  // The agent's own harness stays shown as chosen where it is missing.
-                  disabled={!standing.usable && id !== draft.harness}
-                  description={
-                    <span className="agent-standing">
-                      <StatusDot tone={standing.tone} />
-                      {standing.label}
-                    </span>
-                  }
-                />
-              ))}
-            </ChoiceTiles>
+            {(catalogState.status === "idle" ||
+              catalogState.status === "loading") && (
+              <p role="status" className="agent-hint">
+                Loading harness choices…
+              </p>
+            )}
+            {catalogState.status === "failed" && (
+              <FailureState
+                size="inline"
+                failure={{
+                  ...describeFailure(
+                    catalogState.error,
+                    "load harness choices",
+                  ),
+                  sentence: "The agent keeps its current harness.",
+                  action: "retry",
+                }}
+                onRetry={catalogState.retry}
+              />
+            )}
+            {catalogState.status === "ready" && (
+              <ChoiceTiles
+                aria-labelledby={`${fieldId}-harness`}
+                value={draft.harness}
+                // A model names one harness's model, so it does not carry over.
+                onValueChange={(harness) => {
+                  if (harness === draft.harness) return;
+                  const next = catalog.find(
+                    (item) => item.id === harness,
+                  )?.unattended;
+                  const wouldWiden =
+                    canListCommands &&
+                    draft.tools.run_commands &&
+                    !draft.tools.any_command &&
+                    next?.commands === "off_or_any";
+                  change({
+                    harness,
+                    model: null,
+                    ...(wouldWiden && {
+                      tools: { ...draft.tools, run_commands: false },
+                    }),
+                  });
+                }}
+              >
+                {standings.map(({ id, name, standing }) => (
+                  <ChoiceTile
+                    key={id}
+                    value={id}
+                    title={name}
+                    // The agent's own harness stays shown as chosen where it is missing.
+                    disabled={!standing.usable && id !== draft.harness}
+                    description={
+                      <span className="agent-standing">
+                        <StatusDot tone={standing.tone} />
+                        {standing.label}
+                      </span>
+                    }
+                  />
+                ))}
+              </ChoiceTiles>
+            )}
             {missing.map(({ id, name }) => (
               <p key={id} className="agent-hint">
                 {statusOf.reason(id) ??

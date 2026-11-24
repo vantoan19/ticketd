@@ -10,7 +10,7 @@ use crate::{
     RespondOutcome, SessionStart, SettingChange, SettingKey, SettingOutcome, TurnOutcome,
 };
 
-use super::{runtime, settings};
+use super::{ANTIGRAVITY, runtime, settings};
 
 const PROMPT: &str = include_str!("../../tests/fixtures/antigravity/prompt.jsonl");
 const QUESTION: &str = include_str!("../../tests/fixtures/antigravity/question.jsonl");
@@ -455,6 +455,16 @@ async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
         opened.runtime.respond(reply("allow")).await,
         RespondOutcome::NotSent(_)
     ));
+    let failure = frames
+        .iter()
+        .find(|frame| frame["server"]["params"]["update"]["status"] == "failed")
+        .unwrap();
+    send(&mut peer, &failure["server"]).await;
+    assert!(drain(&mut opened.events).await.iter().any(|kind| matches!(
+        kind,
+        EventKind::ToolUpdated { item, status: crate::ToolStatus::Declined, .. }
+            if Some(item) == shown.item.as_ref()
+    )));
     opened.runtime.close().await;
 }
 
@@ -952,17 +962,25 @@ async fn recorded_resume_error_reports_missing_history_for_the_requested_session
 
 #[tokio::test]
 async fn signed_out_reports_login_required_without_attempting_authentication() {
-    let (mut peer, io) = pipes();
-    let opening = tokio::spawn(runtime::open(
-        io,
-        request(SessionStart::New),
-        settings::OWN.to_owned(),
-    ));
-    startup(&mut peer, SIGNED_OUT).await;
-    assert_eq!(
-        opening.await.unwrap().unwrap_err().kind,
-        ProblemKind::LoginRequired
-    );
+    let detail = "Authentication required: the credentials for this profile expired";
+    for (fixture, expected_message) in [
+        (SIGNED_OUT.to_owned(), ANTIGRAVITY.sign_in_guidance),
+        (
+            SIGNED_OUT.replace("Authentication required", detail),
+            detail,
+        ),
+    ] {
+        let (mut peer, io) = pipes();
+        let opening = tokio::spawn(runtime::open(
+            io,
+            request(SessionStart::New),
+            settings::OWN.to_owned(),
+        ));
+        startup(&mut peer, &fixture).await;
+        let problem = opening.await.unwrap().unwrap_err();
+        assert_eq!(problem.kind, ProblemKind::LoginRequired);
+        assert_eq!(problem.message, expected_message);
+    }
 }
 
 use std::sync::Arc;
@@ -1140,7 +1158,7 @@ async fn a_native_question_reaches_the_person_as_an_antigravity_message() {
 
 #[tokio::test]
 async fn stop_notifies_antigravity_and_cancels_its_unanswered_permission() {
-    use crate::{InterruptOutcome, InterruptRequest};
+    use crate::{InteractionResolution, InterruptOutcome, InterruptRequest, ToolStatus};
     let (mut peer, mut opened) = open(
         RESUME,
         SessionStart::Resume(NativeSessionId::new("session-1")),
@@ -1151,21 +1169,43 @@ async fn stop_notifies_antigravity_and_cancels_its_unanswered_permission() {
         opened.runtime.submit(start_turn("stop")).await,
         DispatchOutcome::Written
     );
-    let _ = peer.written().await;
+    let outgoing = peer.written().await;
     let frames = recorded(RESUME);
     let permission = frames
         .iter()
         .find(|frame| frame["server"]["method"] == "session/request_permission")
         .unwrap();
+    let update = |update: Value| {
+        json!({"jsonrpc":"2.0","method":"session/update","params":{
+            "sessionId":"session-1","update": update
+        }})
+    };
+    send(
+        &mut peer,
+        &update(
+            json!({"sessionUpdate":"tool_call","toolCallId":"earlier-failure",
+            "title":"Earlier command","kind":"execute","status":"failed"}),
+        ),
+    )
+    .await;
+    let mut call = permission["server"]["params"]["toolCall"].clone();
+    call["status"] = json!("in_progress");
+    send(&mut peer, &update(call)).await;
+    let tool = &permission["server"]["params"]["toolCall"]["toolCallId"];
+    let tool_update = |status: &str| {
+        update(json!({"sessionUpdate":"tool_call_update","toolCallId":tool,"status":status}))
+    };
+    send(&mut peer, &tool_update("pending")).await;
     send(&mut peer, &permission["server"]).await;
-    let turn = drain(&mut opened.events)
-        .await
-        .into_iter()
+    let mut events = drain(&mut opened.events).await;
+    let approval = events
+        .iter()
         .find_map(|kind| match kind {
-            EventKind::InteractionRequested(request) => request.turn,
+            EventKind::InteractionRequested(request) => Some(request.clone()),
             _ => None,
         })
         .unwrap();
+    let turn = approval.turn.unwrap();
 
     let outcome = opened
         .runtime
@@ -1187,5 +1227,44 @@ async fn stop_notifies_antigravity_and_cancels_its_unanswered_permission() {
             "jsonrpc":"2.0","id":"1","result":{"outcome":{"outcome":"cancelled"}}
         })
     );
+
+    // agy reports the cancelled permission as an in-progress tool, then a failure.
+    send(&mut peer, &tool_update("in_progress")).await;
+    send(&mut peer, &tool_update("failed")).await;
+    send(
+        &mut peer,
+        &update(
+            json!({"sessionUpdate":"tool_call_update","toolCallId":"earlier-failure",
+            "rawOutput":{"exit_code":1}}),
+        ),
+    )
+    .await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc":"2.0","id":outgoing["id"],"result":{"stopReason":"cancelled"}}),
+    )
+    .await;
+    events.extend(drain(&mut opened.events).await);
+
+    assert_eq!(
+        crate::outcome::read_end(&events),
+        Some(TurnOutcome::Interrupted)
+    );
+    assert!(events.iter().any(|kind| matches!(
+        kind,
+        EventKind::InteractionResolved { request, resolution: InteractionResolution::Withdrawn }
+            if request == &approval.request
+    )));
+    let last_status = |id: &str| {
+        events.iter().rev().find_map(|kind| match kind {
+            EventKind::ToolUpdated { item, status, .. } if item.0 == id => Some(*status),
+            _ => None,
+        })
+    };
+    assert_eq!(
+        last_status(tool.as_str().unwrap()),
+        Some(ToolStatus::FailedAfterInterrupt)
+    );
+    assert_eq!(last_status("earlier-failure"), Some(ToolStatus::Failed));
     opened.runtime.close().await;
 }

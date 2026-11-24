@@ -1929,6 +1929,48 @@ test("New Chat says how the harness is signed in before the first message is sen
   ).toBeTruthy();
 });
 
+test("a signed-out Antigravity Chat shows one sign-in instruction and holds its input", async () => {
+  const user = userEvent.setup();
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Antigravity Chat",
+      harness: { id: "antigravity", name: "Antigravity" },
+      problem: {
+        kind: "not_signed_in",
+        command: "agy",
+        message: "The credentials for this profile expired",
+      },
+      queue_paused: true,
+      queue: [{ id: "q1", text: "Write the changelog" }],
+    }),
+  );
+  const notice = screen.getByRole("alert");
+  expect(
+    notice.textContent?.match(/Antigravity isn't signed in/g),
+  ).toHaveLength(1);
+  expect(
+    notice.textContent?.match(/Run agy in a terminal and sign in/g),
+  ).toHaveLength(1);
+  expect(notice.textContent).toContain(
+    "The credentials for this profile expired.",
+  );
+  await user.click(
+    within(notice).getByRole("button", { name: "Copy command" }),
+  );
+  expect(await navigator.clipboard.readText()).toBe("agy");
+  await user.click(within(notice).getByRole("button", { name: "Check again" }));
+  expect(
+    within(screen.getByRole("list", { name: "Queued messages" })).getByText(
+      "Write the changelog",
+    ),
+  ).toBeTruthy();
+  expect(queueHead("Queued 1 · Paused")).toBeTruthy();
+  expect((await client.openChat("c1")).chat.problem?.kind).toBe(
+    "not_signed_in",
+  );
+});
+
 test("a Project is linked like a ticket or Document and has no page to open", async () => {
   await open(one({ id: "c1", title: "Limiter" }));
   await linkFromMenu();
