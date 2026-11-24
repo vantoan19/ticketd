@@ -2,8 +2,9 @@
 
 use std::borrow::Cow;
 
-use schemars::JsonSchema;
+use schemars::{JsonSchema, Schema, transform::RecursiveTransform};
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{
     ChoiceOption, ConfigValues, ConnectionCheck, Conversation, DiscoveryPage, ErrorClass,
@@ -250,9 +251,48 @@ enum Contract2 {
     Cancel(CancelNotification),
 }
 
-pub fn schema() -> schemars::Schema {
+pub fn schema() -> Schema {
     schemars::generate::SchemaSettings::draft2020_12()
         .for_deserialize()
+        .with_transform(RecursiveTransform(|schema: &mut Schema| {
+            // Formats are advisory. These constraints match the wire decoder.
+            let (minimum, maximum) = match schema.get("format").and_then(Value::as_str) {
+                Some("int32") => (i32::MIN.into(), i32::MAX.into()),
+                Some("uint32") => (0.into(), u32::MAX.into()),
+                Some("uint64") => (0.into(), u64::MAX.into()),
+                _ => return,
+            };
+            schema.insert("minimum".to_owned(), minimum);
+            schema.insert("maximum".to_owned(), maximum);
+        }))
         .into_generator()
         .into_root_schema_for::<Contract2>()
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn schema_and_decoder_agree_on_describe_pid_limit() {
+        let schema = serde_json::to_value(schema()).unwrap();
+        let describe = &schema["$defs"]["Request"]["oneOf"][0]["properties"];
+        assert_eq!(describe["method"]["const"], "describe");
+        let pid = &describe["params"]["properties"]["pid"];
+        assert_eq!(pid["minimum"], 0);
+        assert_eq!(pid["maximum"], u32::MAX);
+
+        let mut request = json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "describe",
+            "params": {"contract_versions": [2], "pid": u32::MAX}
+        });
+        assert!(serde_json::from_value::<Request<'_>>(request.clone()).is_ok());
+        request["params"]["pid"] = json!(u64::from(u32::MAX) + 1);
+        assert!(serde_json::from_value::<Request<'_>>(request).is_err());
+    }
 }

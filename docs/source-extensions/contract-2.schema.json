@@ -48,6 +48,7 @@
         "id": {
           "type": "integer",
           "format": "uint64",
+          "maximum": 18446744073709551615,
           "minimum": 0
         }
       },
@@ -215,6 +216,7 @@
             "null"
           ],
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 0
         },
         "contract_versions": {
@@ -222,6 +224,7 @@
           "items": {
             "type": "integer",
             "format": "uint32",
+            "maximum": 4294967295,
             "minimum": 0
           }
         },
@@ -682,6 +685,7 @@
         "id": {
           "type": "integer",
           "format": "uint64",
+          "maximum": 18446744073709551615,
           "minimum": 0
         },
         "jsonrpc": {
@@ -872,12 +876,14 @@
           "description": "Number of items processed in this request so far.",
           "type": "integer",
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 0
         },
         "id": {
           "description": "ID of the active request, carried in params because this is a notification.",
           "type": "integer",
           "format": "uint64",
+          "maximum": 18446744073709551615,
           "minimum": 0
         },
         "total": {
@@ -887,6 +893,7 @@
             "null"
           ],
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 0
         }
       },
@@ -997,6 +1004,7 @@
         "id": {
           "type": "integer",
           "format": "uint64",
+          "maximum": 18446744073709551615,
           "minimum": 0
         },
         "jsonrpc": {
@@ -1019,12 +1027,14 @@
                   "items": {
                     "type": "integer",
                     "format": "uint32",
+                    "maximum": 4294967295,
                     "minimum": 0
                   }
                 },
                 "pid": {
                   "type": "integer",
                   "format": "uint32",
+                  "maximum": 4294967295,
                   "minimum": 0
                 }
               },
@@ -1340,7 +1350,9 @@
         "code": {
           "description": "Use -32800 for a request stopped by a matching cancel notification.",
           "type": "integer",
-          "format": "int32"
+          "format": "int32",
+          "maximum": 2147483647,
+          "minimum": -2147483648
         },
         "data": {
           "description": "Domain errors use code -32000 and carry the source failure in data.",
@@ -1587,6 +1599,7 @@
         "contract_version": {
           "type": "integer",
           "format": "uint32",
+          "maximum": 4294967295,
           "minimum": 0
         },
         "name": {
@@ -1700,6 +1713,7 @@
         "id": {
           "type": "integer",
           "format": "uint64",
+          "maximum": 18446744073709551615,
           "minimum": 0
         },
         "jsonrpc": {
@@ -1795,6 +1809,7 @@
             "null"
           ],
           "format": "uint64",
+          "maximum": 18446744073709551615,
           "minimum": 0
         }
       },
