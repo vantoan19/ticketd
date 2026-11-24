@@ -866,9 +866,11 @@ function AppContent() {
                     sources: sourceHealth.sources,
                     entries: sourceEntries,
                     intervalSecs: sourceHealth.interval_secs ?? null,
-                    openSettings: (provider) => {
+                    openSettings: (connection) => {
                       openView("settings");
-                      setSettingsSection(`source-${provider}`);
+                      setSettingsSection(
+                        connection ? `source-${connection}` : "sources",
+                      );
                     },
                     refreshAll: () => refreshSources(),
                   }}

@@ -112,7 +112,7 @@ fn verify_connector() {
     let engine = registry
         .engine()
         .unwrap()
-        .for_connection("linear", "conformance", &draft);
+        .for_connection("linear", "linear", &draft);
     let account = engine.check_connection("linear", &draft).unwrap();
     assert_eq!(account.account, "Fixture User");
     assert_eq!(account.site, SITE);
@@ -137,7 +137,7 @@ fn verify_connector() {
     let connector = registry
         .engine()
         .unwrap()
-        .for_connection("linear", "conformance", &config);
+        .for_connection("linear", "linear", &config);
     let assignees = connector
         .options("linear", "assignee", "", &config)
         .unwrap();

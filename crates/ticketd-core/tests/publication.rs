@@ -2001,6 +2001,37 @@ fn an_uncertain_reply_preserves_the_dispatch_lease() {
 }
 
 #[test]
+fn an_unresolved_publication_does_not_hide_discovery_in_another_destination() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let mut unrelated = unrelated_issue(&f, 42, "Escalate", "Different body");
+    unrelated.reference.partition = "o/other".into();
+    unrelated.reference.locator = "o/other#42".into();
+    unrelated.display = "o/other#42".into();
+    unrelated.created_at = chrono::Utc::now().to_rfc3339();
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.matching.push(42);
+        remote.issues.insert(42, unrelated);
+    }
+    f.workspace
+        .save_source(
+            &f.engine,
+            "fake",
+            &values(json!({"repositories": ["o/r", "o/other"]})),
+        )
+        .unwrap();
+    let report = f
+        .workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(report.imported.len(), 1, "{report:?}");
+    let imported = f.ticket(&report.imported[0]);
+    assert_eq!(imported.source.unwrap().display, "o/other#42");
+    f.still_unresolved(&ticket.reference);
+}
+
+#[test]
 fn a_refused_attach_of_an_issue_owned_elsewhere_leaves_the_attempt_untouched() {
     let mut f = Fixture::new();
     let ticket = f.lost_response("Escalate");

@@ -145,6 +145,31 @@ test("the footer's status line opens the source's settings", () => {
   expect(openSettings).toHaveBeenCalled();
 });
 
+test("unassigned tickets retain their own footer row alongside the default connection", () => {
+  const openSettings = vi.fn();
+  render(
+    withActivity(
+      {
+        openSettings,
+        sources: [
+          status({ connection_id: "github" }),
+          status({ health: "unavailable", unavailable_tickets: 1 }),
+        ],
+      },
+      <SourceStatusFooter />,
+    ),
+  );
+  const connected = screen.getByRole("button", { name: /GitHub synced/ });
+  const unassigned = screen.getByRole("button", { name: /1 source issue/ });
+  expect(connected.getAttribute("aria-describedby")).not.toBe(
+    unassigned.getAttribute("aria-describedby"),
+  );
+  fireEvent.click(connected);
+  expect(openSettings).toHaveBeenLastCalledWith("github");
+  fireEvent.click(unassigned);
+  expect(openSettings).toHaveBeenLastCalledWith(undefined);
+});
+
 test("the footer reads Refreshing GitHub… without a dot while a refresh runs", () => {
   const { container } = render(
     withActivity(
