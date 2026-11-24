@@ -186,6 +186,7 @@ test("a bounded patch shows omitted paths and qualifies its line counts", async 
     kind: "edit" as const,
     target: "src/a.ts",
     targets: [{ text: "src/a.ts" }],
+    output: "Applied the patch.",
     omitted_files: { count: 2 },
     added_lines: 4,
     removed_lines: 1,
@@ -209,7 +210,42 @@ test("a bounded patch shows omitted paths and qualifies its line counts", async 
   expect(row.textContent).toContain("At least +4 −1");
   fireEvent.click(row);
   expect(button("Open src/a.ts")).toBeTruthy();
+  expect(
+    screen.getByText("Applied the patch.", { selector: "pre" }),
+  ).toBeTruthy();
   expect(screen.getByText("+3 −0")).toBeTruthy();
+});
+
+test("an opened bounded patch shows its full failure output with the named paths", async () => {
+  const retained = "Patch failed.";
+  const full = `No matching context in src/b.ts.\n${retained}`;
+  await show(
+    [
+      {
+        chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+        items: steps({
+          kind: "edit",
+          target: "src/a.ts",
+          targets: [{ text: "src/a.ts" }, { text: "src/b.ts" }],
+          omitted_files: { count: 1 },
+          state: "failed",
+          output: retained,
+          full_output: { tool_id: "patch", bytes: full.length },
+        }),
+      },
+    ],
+    { outputs: { patch: full } },
+  );
+  fireEvent.click(button("Edit 3 files (1 path omitted), Failed"));
+  expect(screen.getByText(retained, { selector: "pre" })).toBeTruthy();
+  expect(
+    await screen.findByText(full, {
+      selector: "pre",
+      normalizer: (text) => text,
+    }),
+  ).toBeTruthy();
+  expect(button("Open src/a.ts")).toBeTruthy();
+  expect(button("Open src/b.ts")).toBeTruthy();
 });
 
 test("a command's detail strips terminal colour and says its exit and folder", async () => {
