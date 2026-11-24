@@ -354,7 +354,7 @@ impl Publication for FakeSource {
                     return Err(SourceError::NotSent("could not reach the provider".into()));
                 }
                 PublishMode::Refuse => {
-                    return Err(SourceError::Forbidden(
+                    return Err(SourceError::Rejected(
                         "no permission to create issues".into(),
                     ));
                 }
