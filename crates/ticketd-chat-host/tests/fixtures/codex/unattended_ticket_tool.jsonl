@@ -5,6 +5,8 @@
 {"client":{"id":2,"method":"config/read","params":{"cwd":"/work/chat-1"}}}
 {"server":{"id":2,"result":{"config":{"model":"gpt-test","approval_policy":null,"sandbox_mode":null},"origins":{},"layers":null}}}
 {"client":{"id":3,"method":"thread/start","params":{"cwd":"/work/chat-1","approvalPolicy":"on-request","sandbox":"workspace-write","model":"gpt-test","config":$CONFIG,"dynamicTools":[$SPEC],"developerInstructions":$INSTRUCTIONS}}}
+{"server":{"id":"early-call","method":"item/tool/call","params":{"turnId":"turn_1","callId":"early","namespace":null,"tool":"ticketd","arguments":{}}}}
+{"client":{"id":"early-call","error":{"code":-32601,"message":"ticketd offers only its own `ticketd` tool on this thread"}}}
 {"server":{"id":3,"result":{"thread":{"id":"thr_1","sessionId":"thr_1","cliVersion":"0.163.0","preview":"","ephemeral":false,"modelProvider":"openai","createdAt":1730910000,"updatedAt":1730910000,"cwd":"/work/chat-1","projectId":null,"source":"appServer","status":{"type":"idle"},"turns":[]},"model":"gpt-test","modelProvider":"openai","approvalPolicy":"on-request","approvalsReviewer":"user","sandbox":{"type":"workspaceWrite"},"cwd":"/work/chat-1","instructionSources":[]}}}
 {"mark":"the thread is open"}
 {"server":{"id":"call-1","method":"item/tool/call","params":{"threadId":"thr_1","turnId":"turn_1","callId":"c1","namespace":null,"tool":"ticketd","arguments":{"arguments":["restore-workspace","backup.db"]}}}}
