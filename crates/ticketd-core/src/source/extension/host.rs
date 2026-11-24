@@ -127,6 +127,9 @@ impl Runtime {
                         }
                     });
                 }
+                // Session tasks have stopped. The bounded stderr flush can
+                // leave an uninterruptible file write in the blocking pool.
+                runtime.shutdown_background();
             })?;
         let handle = started
             .recv()
@@ -730,6 +733,30 @@ mod tests {
     #![allow(clippy::unwrap_used)]
 
     use super::*;
+
+    #[test]
+    fn host_runtime_exits_while_a_blocking_worker_is_stalled() {
+        let runtime = Runtime::start().unwrap();
+        let (started, running) = blocking::sync_channel(1);
+        let (release, blocked) = blocking::sync_channel::<()>(1);
+        let worker = runtime.handle.spawn_blocking(move || {
+            started.send(()).unwrap();
+            let _ = blocked.recv();
+        });
+        running.recv_timeout(Duration::from_secs(3)).unwrap();
+
+        runtime.closing.send_replace(true);
+        runtime.sessions.send(Vec::new()).unwrap();
+        let (joined, finished) = blocking::sync_channel(1);
+        let join = thread::spawn(move || {
+            joined.send(runtime.thread.join()).unwrap();
+        });
+        let exited = finished.recv_timeout(Duration::from_secs(3));
+        drop(release);
+        join.join().unwrap();
+        exited.unwrap().unwrap();
+        drop(worker);
+    }
 
     #[test]
     fn a_waiting_refresh_can_cancel_while_the_connection_is_busy() {
