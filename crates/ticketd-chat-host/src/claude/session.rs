@@ -619,7 +619,7 @@ impl Session {
         request: &NativeRequestId,
         answer: &InteractionAnswer,
     ) -> Result<Value, Refusal> {
-        let (decision, declined) = self.runtime.answer(request, |live| {
+        let (decision, declined) = self.runtime.answer_and_retain(request, |live| {
             let decision = match (answer, &live.questions) {
                 (InteractionAnswer::Approval(ApprovalDecision::Deny), _) => json!({"kind": "deny"}),
                 (InteractionAnswer::Approval(ApprovalDecision::Allow), None) => {
