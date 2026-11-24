@@ -948,6 +948,14 @@ fn an_unrepresentable_rate_limit_keeps_a_healthy_batch_and_allows_retry() {
         let reopened = open().unwrap();
         let statuses = reopened.source_statuses().unwrap();
         assert_eq!(statuses[0].health, SourceHealth::Delayed);
+        assert!(
+            statuses[0]
+                .error
+                .as_ref()
+                .unwrap()
+                .message
+                .contains("300 seconds")
+        );
         assert_eq!(
             statuses[0].retry_after.as_deref(),
             Some("1970-01-01T00:05:00.000Z")
