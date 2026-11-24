@@ -151,6 +151,14 @@ pub(crate) fn brief(kind: &EventKind) -> String {
                 "approval {} {description:?} {reason:?} {decisions:?}",
                 request.request.0
             ),
+            InteractionKind::NativeApproval {
+                description,
+                reason,
+                options,
+            } => format!(
+                "approval {} {description:?} {reason:?} {options:?}",
+                request.request.0
+            ),
             InteractionKind::Question { questions } => {
                 let question = &questions[0];
                 format!(

@@ -2486,3 +2486,40 @@ mod evidence {
         assert_eq!(states, [ChatToolState::Running, ChatToolState::Failed]);
     }
 }
+
+#[tokio::test(start_paused = true)]
+async fn a_permission_restart_resumes_the_same_session_before_releasing_the_queue() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let native_session = NativeSessionId::new("native-1");
+    f.emit(EventKind::SessionIdentified {
+        native_session: native_session.clone(),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    f.queue("second").await;
+    let answer = f.fake.hold_next_setting();
+    let replacement = f.fake.hold_next_open();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    settle().await;
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+
+    assert_eq!(written_kinds(&f), ["submit", "setting"]);
+    assert_eq!(f.queued(), ["second"]);
+
+    replacement.send(()).unwrap();
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].session, SessionStart::Resume(native_session));
+    assert_ne!(opens[1].generation, opens[0].generation);
+    assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
+    assert_eq!(written_kinds(&f), ["submit", "setting", "submit"]);
+}

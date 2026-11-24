@@ -147,7 +147,8 @@ pub fn status(facts: &Facts<'_>) -> Status {
     let make = |rank, word: &str, detail: Option<String>| labelled(rank, word, word, detail);
     let requests = &facts.live.interactions;
     let approval = requests.iter().find_map(|request| match &request.kind {
-        InteractionKind::Approval { description, .. } => Some(description),
+        InteractionKind::Approval { description, .. }
+        | InteractionKind::NativeApproval { description, .. } => Some(description),
         InteractionKind::Question { .. } => None,
     });
     if let Some(description) = approval {
@@ -166,7 +167,7 @@ pub fn status(facts: &Facts<'_>) -> Status {
         InteractionKind::Question { questions } => {
             Some(questions.first().map(|question| question.prompt.as_str()))
         }
-        InteractionKind::Approval { .. } => None,
+        InteractionKind::Approval { .. } | InteractionKind::NativeApproval { .. } => None,
     });
     if let Some(prompt) = question {
         return make(Rank::Question, "Question", prompt.and_then(plain_start));

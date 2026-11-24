@@ -153,6 +153,23 @@ the transcript and approval cards. The desktop supplies the wording and
 shortens paths for display. Since the existing Chat records hold the tool
 evidence, saved Chats benefit from reader improvements without a format change.
 
+### Antigravity over ACP
+
+The Antigravity registration starts one `agy acp` process for a person's Chat
+([ADR 0023](adr/0023-antigravity-uses-acp-for-person-driven-chats.md)). Its
+dialogue uses the official ACP schema over the same JSON-RPC connection as
+Codex. The shared runtime tracks checked submissions, interruptions and
+live requests. ACP updates name a session, so the adapter accepts one
+Prompt at a time and ends its Turn on the Prompt reply. It applies partial
+tool updates by native tool ID and preserves native approval choice IDs until
+a person responds.
+
+The supervisor holds dispatch across a permission change that needs another
+process. It closes the old generation, opens with the person's chosen mode
+and resumes the same native Session. If the restart fails, the queue pauses.
+The descriptor enforces native-only history recovery and excludes unattended
+use.
+
 ### Persistence and delivery observations
 
 Chat storage uses structured records in the existing SQLite workspace for Chats

@@ -60,13 +60,27 @@ async fn probes_a_third_registered_adapter_and_exposes_its_declared_reach() {
         None,
     );
     let catalog = serde_json::to_value(chats.harness_catalog()).unwrap();
-    assert_eq!(catalog[2]["unattended"], serde_json::Value::Null);
+    let descriptor = catalog
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|entry| entry["id"] == "fixture-harness")
+        .expect("registered fixture descriptor");
+    assert_eq!(descriptor["unattended"], serde_json::Value::Null);
     chats.set_enabled(true).await;
     let statuses = chats.harnesses().await.unwrap();
-    assert_eq!(statuses.len(), 3);
-    assert!(statuses.iter().all(|status| status.usable));
-    assert_eq!(statuses[2].id, "fixture-harness");
-    assert_eq!(statuses[2].mark_id, "fixture-mark");
+    for id in ["claude-code", "codex", "fixture-harness"] {
+        assert!(
+            statuses
+                .iter()
+                .any(|status| status.id == id && status.usable)
+        );
+    }
+    assert!(
+        statuses
+            .iter()
+            .any(|status| status.id == "fixture-harness" && status.mark_id == "fixture-mark")
+    );
 }
 
 /// Lets every task run until all of them wait. The clock is paused.

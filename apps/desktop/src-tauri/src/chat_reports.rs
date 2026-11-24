@@ -404,6 +404,7 @@ pub fn change_view(value: &str, state: &SettingChangeState) -> SettingChangeView
             ("refused", Some(reason.clone()))
         }
         SettingChangeState::Done(SettingOutcome::Unconfirmed) => ("unconfirmed", None),
+        SettingChangeState::Done(SettingOutcome::ReopenSession) => ("held", None),
         SettingChangeState::Done(SettingOutcome::Unsupported) => ("unsupported", None),
     };
     SettingChangeView {

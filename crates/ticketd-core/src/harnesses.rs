@@ -262,7 +262,66 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
     ],
 };
 
-pub static HARNESS_DESCRIPTORS: &[&HarnessDescriptor] = &[&CLAUDE_CODE, &CODEX];
+pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
+    key: HarnessKey(Cow::Borrowed("antigravity")),
+    name: "Antigravity",
+    sign_in_guidance: "Antigravity isn't signed in. Run `agy` in a terminal and sign in.",
+    sign_in_command: "agy",
+    help_url: "https://antigravity.google/docs/ide/extensions/acp/",
+    config_home: ".gemini",
+    config_home_env: None,
+    skills: SkillLocation::ConfigHome("config/skills"),
+    editing_agent_aliases: &["antigravity", "agy"],
+    mark_id: "antigravity",
+    resume: ResumePolicy::NativeOnly,
+    unattended: UnattendedSupport::Unsupported {
+        reason: "Antigravity is available only for Chats you drive.",
+    },
+    permissions: &[
+        PermissionChoice {
+            id: "own",
+            label: "Antigravity settings",
+            description: None,
+            semantics: PermissionSemantics::OwnSettings,
+            availability: PermissionAvailability::Adapter,
+            is_default: true,
+        },
+        PermissionChoice {
+            id: "default",
+            label: "Ask for approval",
+            description: None,
+            semantics: PermissionSemantics::Ask,
+            availability: PermissionAvailability::Native,
+            is_default: false,
+        },
+        PermissionChoice {
+            id: "accept-edits",
+            label: "Accept edits",
+            description: None,
+            semantics: PermissionSemantics::AcceptEdits,
+            availability: PermissionAvailability::Native,
+            is_default: false,
+        },
+        PermissionChoice {
+            id: "plan",
+            label: "Plan only",
+            description: None,
+            semantics: PermissionSemantics::ReadOnly,
+            availability: PermissionAvailability::Native,
+            is_default: false,
+        },
+        PermissionChoice {
+            id: "full-access",
+            label: "Full access",
+            description: Some("Runs tools and commands without asking"),
+            semantics: PermissionSemantics::FullAccess,
+            availability: PermissionAvailability::Adapter,
+            is_default: false,
+        },
+    ],
+};
+
+pub static HARNESS_DESCRIPTORS: &[&HarnessDescriptor] = &[&CLAUDE_CODE, &CODEX, &ANTIGRAVITY];
 
 pub fn descriptor(key: &str) -> Option<&'static HarnessDescriptor> {
     find_descriptor(HARNESS_DESCRIPTORS, key)

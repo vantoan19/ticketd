@@ -259,6 +259,13 @@ impl<R> RuntimeState<R> {
         self.requests.contains_key(request)
     }
 
+    pub(crate) fn unanswered(&self) -> impl Iterator<Item = (&NativeRequestId, &R)> {
+        self.requests
+            .iter()
+            .filter(|(_, live)| !live.answered)
+            .map(|(id, live)| (id, &live.payload))
+    }
+
     pub(crate) fn register_request(
         &mut self,
         request: NativeRequestId,

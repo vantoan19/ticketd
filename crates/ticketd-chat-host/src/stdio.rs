@@ -285,6 +285,24 @@ pub(crate) fn spawn(
     harness: Harness,
     working_directory: Option<&Path>,
 ) -> io::Result<Io> {
+    spawn_configured(
+        executable,
+        arguments,
+        serving,
+        harness,
+        working_directory,
+        |_| {},
+    )
+}
+
+pub(crate) fn spawn_configured(
+    executable: &Path,
+    arguments: &[&str],
+    serving: Serving,
+    harness: Harness,
+    working_directory: Option<&Path>,
+    configure: impl FnOnce(&mut Command),
+) -> io::Result<Io> {
     #[cfg(all(debug_assertions, unix))]
     let recording = crate::recording::before_spawn(harness, serving, working_directory)?;
     #[cfg(all(debug_assertions, unix))]
@@ -296,6 +314,7 @@ pub(crate) fn spawn(
     #[cfg(not(all(debug_assertions, unix)))]
     let _ = (harness, working_directory);
     let mut command = command(executable, arguments, serving);
+    configure(&mut command);
     #[cfg(all(debug_assertions, unix))]
     if let Some(recording) = recording {
         command.current_dir(recording.work());

@@ -4,6 +4,7 @@
 //! write workspace storage and never decide queue policy; the supervisor does both
 //! through core workflows.
 
+mod antigravity;
 pub mod attention;
 mod claude;
 pub mod cli;

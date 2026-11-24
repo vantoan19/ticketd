@@ -2,7 +2,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use ticketd_core::harnesses::{CLAUDE_CODE, CODEX, HarnessDescriptor};
+use ticketd_core::harnesses::{ANTIGRAVITY, CLAUDE_CODE, CODEX, HarnessDescriptor};
 
 use crate::codex::steps::read_codex_steps;
 use crate::{CodexAdapter, HarnessAdapter, Problem, StepReader, read_claude_steps};
@@ -28,6 +28,11 @@ pub static REGISTRATIONS: &[Registration] = &[
         descriptor: &CODEX,
         make_adapter: make_codex,
         read_steps: read_codex_steps,
+    },
+    Registration {
+        descriptor: &ANTIGRAVITY,
+        make_adapter: crate::antigravity::make_adapter,
+        read_steps: crate::antigravity::read_steps,
     },
 ];
 

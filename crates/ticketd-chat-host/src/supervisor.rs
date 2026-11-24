@@ -159,6 +159,7 @@ struct Runtime {
 struct Opening {
     generation: RuntimeGeneration,
     origin: ChatSessionOrigin,
+    permission_restart: bool,
     preamble: Option<String>,
     reply: Option<Reply<()>>,
 }
@@ -276,6 +277,7 @@ pub(crate) struct Supervisor {
     /// The person's picks for the next session, new or resumed: New Chat's, or a change
     /// made while no session ran. Kept until one opens.
     start_settings: StartSettings,
+    reopen_for_permission: Option<String>,
     /// What the Chat's sessions last reported in effect, as recorded with the Chat
     /// (`Chat::effective_settings`): what a session opened for it again starts with.
     recorded_settings: Option<String>,
@@ -361,6 +363,7 @@ impl Supervisor {
             unpublished: true,
             refreshing: None,
             start_settings: StartSettings::default(),
+            reopen_for_permission: None,
             recorded_settings: chat.effective_settings.clone(),
         };
         tokio::spawn(supervisor.run().instrument(span));
@@ -412,6 +415,9 @@ impl Supervisor {
                 if let Some(reason) = self.stop_runtime(StopReason::StorageFailed).await {
                     self.notice(format!("Stopping the harness was not confirmed: {reason}"));
                 }
+            }
+            if let Some(value) = self.reopen_for_permission.take() {
+                self.reopen_for_permission(value).await;
             }
             // Before the queue can start another turn, so held changes apply to it.
             self.send_held_settings();
@@ -609,7 +615,10 @@ impl Supervisor {
     /// Refuses a value the harness did not offer, holds a change while a turn runs and
     /// otherwise sends it now.
     fn change_setting(&mut self, setting: SettingKey, value: String) -> SettingChangeState {
-        let busy = self.active.is_some() || self.dispatching.is_some();
+        let busy = self.active.is_some()
+            || self.dispatching.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.setting_on_its_way();
         let Some(runtime) = &mut self.runtime else {
             return self.pick_for_next_session(setting, value);
         };
@@ -734,20 +743,22 @@ impl Supervisor {
 
     /// Sends the changes held during a turn once no turn runs or is starting.
     fn send_held_settings(&mut self) {
-        if self.active.is_some() || self.dispatching.is_some() {
+        if self.active.is_some()
+            || self.dispatching.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.setting_on_its_way()
+        {
             return;
         }
-        let Some(runtime) = &mut self.runtime else {
-            return;
-        };
-        let mut held = Vec::new();
-        for change in &mut runtime.setting_changes {
-            if change.state == SettingChangeState::Held {
-                change.state = SettingChangeState::Sent;
-                held.push((change.setting, change.value.clone()));
-            }
-        }
-        for (setting, value) in held {
+        let change = self.runtime.as_mut().and_then(|runtime| {
+            runtime
+                .setting_changes
+                .iter_mut()
+                .find(|change| change.state == SettingChangeState::Held)
+        });
+        if let Some(change) = change {
+            change.state = SettingChangeState::Sent;
+            let (setting, value) = (change.setting, change.value.clone());
             self.send_setting(setting, value);
         }
     }
@@ -980,6 +991,17 @@ impl Supervisor {
                 "allow for session".to_owned()
             }
             InteractionAnswer::Approval(ApprovalDecision::Deny) => "deny".to_owned(),
+            InteractionAnswer::NativeApproval(id) => {
+                let InteractionKind::NativeApproval { options, .. } = &live.kind else {
+                    let _ = reply.send(Err(HostError::InteractionExpired));
+                    return;
+                };
+                let Some(option) = options.iter().find(|option| option.id == *id) else {
+                    let _ = reply.send(Err(HostError::InteractionExpired));
+                    return;
+                };
+                format!("choice:{}", option.label)
+            }
             InteractionAnswer::Answers(answers) => answers
                 .iter()
                 .map(|answer| answer.values.join(", "))
@@ -1022,6 +1044,14 @@ impl Supervisor {
                 return;
             }
         };
+        if self.native_history_only()
+            && matches!(&mode, ResumeMode::FreshSession { history } if !history.trim().is_empty())
+        {
+            let _ = reply.send(Err(HostError::Core(Error::Chat(
+                "This harness can only resume its own history".to_owned(),
+            ))));
+            return;
+        }
         if self.runtime.is_some() {
             self.stop_runtime(StopReason::ExplicitResume).await;
         }
@@ -1034,6 +1064,61 @@ impl Supervisor {
             ResumeMode::Native => native_session(&chat),
         };
         self.open(&chat, session, origin, preamble, Some(reply));
+    }
+
+    fn native_history_only(&self) -> bool {
+        self.adapter.as_ref().is_some_and(|adapter| {
+            adapter.harness().resume == ticketd_core::harnesses::ResumePolicy::NativeOnly
+        })
+    }
+
+    async fn reopen_for_permission(&mut self, value: String) {
+        let Ok(chat) = self.core(|core| core.chat(&self.chat_id)) else {
+            self.hold_queue();
+            return;
+        };
+        let (session @ SessionStart::Resume(_), origin, _) = native_session(&chat) else {
+            self.hold_queue();
+            return;
+        };
+        // Carry over later picks made while the harness was answering the change.
+        if let Some(runtime) = &self.runtime {
+            for change in &runtime.setting_changes {
+                if change.state == SettingChangeState::Held {
+                    let target = match change.setting {
+                        SettingKey::Model => &mut self.start_settings.model,
+                        SettingKey::Effort => &mut self.start_settings.effort,
+                        SettingKey::Permission => &mut self.start_settings.permission,
+                    };
+                    *target = Some(change.value.clone());
+                }
+            }
+        }
+        let selected = self.start_settings.permission.clone().unwrap_or(value);
+        self.start_settings.permission = Some(selected.clone());
+        // Store the person's selection so a later recovery never uses a mode they left.
+        if !self.record_permission(&selected) {
+            self.hold_queue();
+            return;
+        }
+        let direct = std::mem::take(&mut self.direct);
+        let from_queue = std::mem::take(&mut self.direct_from_queue);
+        let resend = self.resend.take();
+        if self
+            .stop_runtime(StopReason::ExplicitResume)
+            .await
+            .is_some()
+        {
+            self.hold_queue();
+            return;
+        }
+        self.direct = direct;
+        self.direct_from_queue = from_queue;
+        self.resend = resend;
+        self.open(&chat, session, origin, None, None);
+        if let Some(opening) = &mut self.opening {
+            opening.permission_restart = true;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1092,6 +1177,7 @@ impl Supervisor {
         self.opening = Some(Opening {
             generation,
             origin,
+            permission_restart: false,
             preamble,
             reply,
         });
@@ -1558,7 +1644,9 @@ impl Supervisor {
                 };
                 change.state = SettingChangeState::Done(outcome.clone());
                 if setting == SettingKey::Permission {
-                    if outcome == SettingOutcome::Applied {
+                    if outcome == SettingOutcome::ReopenSession {
+                        self.reopen_for_permission = Some(value);
+                    } else if outcome == SettingOutcome::Applied {
                         // The harness already runs it: unsaved, this process still opens
                         // the next session with it.
                         if !self.record_permission(&value) {
@@ -1623,6 +1711,24 @@ impl Supervisor {
                 Ok(())
             }
             Err(problem) => {
+                if problem.kind == crate::ProblemKind::NativeHistoryUnavailable
+                    && opening.origin == ChatSessionOrigin::NativeResume
+                    && !opening.permission_restart
+                    && self.native_history_only()
+                    && let Ok(chat) = self.core(|core| core.chat(&self.chat_id))
+                {
+                    self.harness_notice(
+                        "The harness could not resume its history. The Chat will continue in a new session.".to_owned(),
+                    );
+                    self.open(
+                        &chat,
+                        SessionStart::New,
+                        ChatSessionOrigin::New,
+                        None,
+                        opening.reply,
+                    );
+                    return;
+                }
                 // A take-over: Codex records a thread id when it starts one but keeps nothing until
                 // the first turn runs, so a Chat whose session never completed a turn (a run
                 // taken over early) has nothing to resume: open a fresh session, with
@@ -2246,6 +2352,11 @@ impl Supervisor {
         let interaction_id = format!("{run}:request:{}", request.request.0);
         let (kind, prompt, reason) = match &request.kind {
             InteractionKind::Approval {
+                description,
+                reason,
+                ..
+            }
+            | InteractionKind::NativeApproval {
                 description,
                 reason,
                 ..

@@ -103,6 +103,13 @@ Still to confirm before distributing a build: that this use (a monochrome mark
 naming the tool beside its name, never altered or recolored) is within each
 publisher's brand guidelines.
 
+## Agent Client Protocol schema
+
+`ticketd-chat-host` uses the official
+[Agent Client Protocol schema crate](https://crates.io/crates/agent-client-protocol-schema),
+licensed under Apache-2.0. Its exact version is pinned in `Cargo.lock`. The
+desktop starts the Antigravity CLI installed by the person.
+
 ## Package dependencies and distribution
 
 Rust dependencies are recorded in `Cargo.lock`; JavaScript dependencies are

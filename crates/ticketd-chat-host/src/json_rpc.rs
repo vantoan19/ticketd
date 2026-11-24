@@ -363,16 +363,7 @@ impl<P: Peer> Connection<P> {
         method: &str,
         prepare: impl FnOnce(&mut P) -> Result<(Value, P::Call), Refusal>,
     ) -> CallOutcome {
-        let written = self
-            .write_checked(|state| {
-                let (params, call) = prepare(&mut state.peer)?;
-                let id = state.next_id;
-                state.next_id += 1;
-                let receiver = state.pending.register(id, call);
-                let frame = json!({"id": id, "method": method, "params": params});
-                Ok((frame, (id, receiver)))
-            })
-            .await;
+        let written = self.send_request(method, prepare).await;
         let (id, mut receiver) = match written {
             Ok(registered) => registered,
             Err(WriteFailure::Refused(refusal)) => return CallOutcome::Refused(refusal),
@@ -389,6 +380,23 @@ impl<P: Peer> Connection<P> {
             Some(Err(error)) => CallOutcome::Error(error),
             None => CallOutcome::Lost,
         }
+    }
+
+    /// Writes a request whose eventual reply is handled by the reader.
+    pub(crate) async fn send_request(
+        &self,
+        method: &str,
+        prepare: impl FnOnce(&mut P) -> Result<(Value, P::Call), Refusal>,
+    ) -> Result<(u64, oneshot::Receiver<Reply>), WriteFailure> {
+        self.write_checked(|state| {
+            let (params, call) = prepare(&mut state.peer)?;
+            let id = state.next_id;
+            state.next_id += 1;
+            let receiver = state.pending.register(id, call);
+            let frame = json!({"id": id, "method": method, "params": params});
+            Ok((frame, (id, receiver)))
+        })
+        .await
     }
 
     pub(crate) async fn close(&self, bound: Duration, who: &str, may_run: &str) -> CloseOutcome {

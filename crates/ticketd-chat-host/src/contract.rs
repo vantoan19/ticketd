@@ -221,6 +221,7 @@ pub struct InteractionResponse {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InteractionAnswer {
     Approval(ApprovalDecision),
+    NativeApproval(String),
     Answers(Vec<QuestionAnswer>),
 }
 
@@ -336,6 +337,8 @@ pub enum SettingOutcome {
     Refused { reason: String },
     /// Written without an answer in time: the harness may still use the old value.
     Unconfirmed,
+    /// A permission change requires replacing the process and resuming the session.
+    ReopenSession,
     /// This harness cannot change this setting from ticketd.
     Unsupported,
 }
@@ -726,9 +729,20 @@ pub enum InteractionKind {
         /// The decisions this harness accepts for this request.
         decisions: Vec<ApprovalDecision>,
     },
+    NativeApproval {
+        description: String,
+        reason: Option<String>,
+        options: Vec<ApprovalOption>,
+    },
     Question {
         questions: Vec<Question>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalOption {
+    pub id: String,
+    pub label: String,
 }
 
 impl InteractionKind {

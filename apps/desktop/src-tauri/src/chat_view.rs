@@ -776,7 +776,11 @@ fn approval_outcome(interaction: &ChatInteraction) -> Option<String> {
         match interaction.response.as_deref()? {
             "allow" => "You allowed this once",
             "allow for session" => "You allowed this for this session",
-            _ => "You declined this",
+            "deny" => "You declined this",
+            choice if let Some(label) = choice.strip_prefix("choice:") => {
+                return Some(format!("You chose {label}"));
+            }
+            _ => "You answered this",
         }
         .to_owned(),
     )
@@ -892,6 +896,16 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps:
     let (options, free_text) = match asked.map(|request| &request.kind) {
         Some(InteractionKind::Approval { decisions, .. }) => (
             decisions.iter().copied().map(approval_option).collect(),
+            false,
+        ),
+        Some(InteractionKind::NativeApproval { options, .. }) => (
+            options
+                .iter()
+                .map(|option| RequestOption {
+                    id: option.id.clone(),
+                    label: option.label.clone(),
+                })
+                .collect(),
             false,
         ),
         Some(InteractionKind::Question { questions }) => match questions.as_slice() {

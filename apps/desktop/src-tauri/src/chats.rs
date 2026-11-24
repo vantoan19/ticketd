@@ -1967,7 +1967,16 @@ impl Chats {
                     .ok_or_else(|| failed("that choice was not offered for this request"))?;
                 InteractionAnswer::Approval(decision)
             }
-            (InteractionKind::Approval { .. }, Answer::Text { .. }) => {
+            (InteractionKind::NativeApproval { options, .. }, Answer::Choice { option_id }) => {
+                if !options.iter().any(|option| option.id == option_id) {
+                    return Err(failed("that choice was not offered for this request"));
+                }
+                InteractionAnswer::NativeApproval(option_id)
+            }
+            (
+                InteractionKind::Approval { .. } | InteractionKind::NativeApproval { .. },
+                Answer::Text { .. },
+            ) => {
                 return Err(failed("an approval request takes one of its choices"));
             }
             (InteractionKind::Question { questions }, Answer::Choice { option_id }) => {
