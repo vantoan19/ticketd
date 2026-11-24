@@ -142,6 +142,8 @@ An externally sourced ticket carries `source_provider`, `source_external_id`, `s
 
 Public GitHub issue IDs are numeric. Format 2 carries GitHub Enterprise issue IDs as `@<host>:<id>` and unverified GitHub issue IDs as `@:<id>`. A desktop that reads only format 1 skips these files and leaves them in Drive until it is updated. When reading a legacy numeric ID, ticketd verifies the host from the saved issue URL and locator. Missing or ambiguous host evidence leaves the ID unverified.
 
+When two desktops concurrently link the same ticket to different GitHub issues, the latest issue update timestamp determines which issue the ticket keeps. The issue ID, location, and associated source data travel together. Equal timestamps are ordered by the field values.
+
 ### Activity section
 
 Starts with the line `<!-- ticketd:activity -->`, then its own header and the brief as Markdown.

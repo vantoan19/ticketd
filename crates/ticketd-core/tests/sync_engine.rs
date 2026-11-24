@@ -1548,6 +1548,81 @@ fn legacy_numeric_github_ids_round_trip_in_a_format_compatible_with_their_host()
     }
 }
 
+#[test]
+fn concurrent_github_host_verifications_keep_the_winning_issue_identity_and_url_together() {
+    const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    let mut devices = devices();
+    let issue = |id: &str, url: &str, state: &str, updated: &str| {
+        sourced(state, updated)
+            .replace("\"I_42\"", &format!("\"{id}\""))
+            .replace("https://example.test/acme/site/issues/42", url)
+    };
+    let apply = |workspace: &mut Workspace, text: &str| {
+        let record = ticketd_core::SyncRecord::parse(text).unwrap();
+        workspace.apply_sync_record(&record).unwrap();
+    };
+    apply(
+        &mut devices.workspaces[0],
+        &issue("@:5", "", "open", "2026-01-03T00:00:00Z"),
+    );
+    devices.settle([0, 1, 2]);
+
+    let public = issue(
+        "5",
+        "https://github.com/acme/site/issues/42",
+        "open",
+        "2026-01-03T00:00:00Z",
+    )
+    .replace(
+        "source_authority: \"external\"",
+        "source_authority: \"local\"",
+    )
+    .replace(
+        "source_authority_changed_at: \"2026-01-02T03:04:05.000Z\"",
+        "source_authority_changed_at: \"2026-01-04T00:00:00.000Z\"",
+    );
+    apply(&mut devices.workspaces[0], &public);
+
+    let enterprise_url = "https://example.test/acme/site/issues/42";
+    apply(
+        &mut devices.workspaces[1],
+        &issue(
+            "@example.test:5",
+            enterprise_url,
+            "closed",
+            "2026-01-05T00:00:00Z",
+        ),
+    );
+    devices.sync(1);
+    devices.sync(0);
+
+    let written = devices.remote_text(RemoteKind::Ticket, ID).1;
+    assert!(written.contains("\nformat: 2\n"), "{written}");
+    assert!(
+        written.contains("\nsource_external_id: \"@example.test:5\"\n"),
+        "{written}"
+    );
+
+    devices.settle([0, 1, 2]);
+    for workspace in &devices.workspaces {
+        assert_eq!(workspace.sync_conflicts().unwrap(), []);
+        let source = workspace.show_ticket("T-ZZ7").unwrap().source.unwrap();
+        assert_eq!(source.id, "@example.test:5");
+        assert_eq!(source.url, enterprise_url);
+        assert_eq!(
+            source.state,
+            ticketd_core::source::ExternalState::Closed {
+                reason: ticketd_core::source::ClosureReason::Completed,
+            }
+        );
+        assert_eq!(source.ownership, ticketd_core::source::Ownership::Local);
+        assert_eq!(
+            workspace.export().unwrap()["external_identities"][0]["repository"],
+            "example.test/acme/site"
+        );
+    }
+}
+
 /// F38: what two desktops each refreshed from the tracker is not a decision for
 /// a person: the later refresh wins for the source fields as a whole.
 #[test]
