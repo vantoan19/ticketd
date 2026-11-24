@@ -6,10 +6,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_core::{ChatItem, ChatMessage, ChatObservation, ChatSnapshot, Error, WorkspaceGuard};
+use ticketd_core::{ChatMessage, ChatSnapshot, Error, WorkspaceGuard};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
+use crate::unattended::set_aside_first_message;
 use crate::{
     ContextUsage, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessSettings, Inspection,
     InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey, SettingOutcome,
@@ -883,10 +884,12 @@ impl ChatHost {
         self.unattended().contains_key(chat_id)
     }
 
-    /// Whether the Chat has a supervisor in this host, including one kept while
-    /// Chat is off to finish a permission restart.
+    /// Whether the Chat has a live supervisor, including one kept while Chat is
+    /// off for recovery. Shutdown may close its sender before the host removes it.
     pub(crate) fn supervised(&self, chat_id: &str) -> bool {
-        self.chats().contains_key(chat_id)
+        self.chats()
+            .get(chat_id)
+            .is_some_and(|commands| !commands.is_closed())
     }
 
     /// Ends the Chat's unattended running, if it is running so: forgets the agent's
@@ -897,75 +900,14 @@ impl ChatHost {
     pub(crate) async fn end_unattended(&self, chat_id: &str, why: StopReason) -> Option<Closed> {
         self.unattended().remove(chat_id)?;
         let cleanup = self.close(chat_id, why).await;
-        // While a Chat is unattended, whatever is still queued in it is the agent's first
-        // message, which the agent never took: the person did not write it, and it must
-        // not wait to be sent for them (a reply starts the queue). What the agent did
-        // take is history, not queue, and stays. Neither is withdrawn: the run's
-        // instructions stay in the Chat as set aside (#406), and with no turn to carry
-        // the reason, a note says why the agent stopped.
-        let queued = self.set_aside_queued_first_message(chat_id);
-        let unconfirmed = self.set_aside_unconfirmed_first_message(chat_id);
-        if queued || unconfirmed {
-            self.note_stopped(chat_id, why);
+        if let Ok(mut workspace) = self.workspace() {
+            set_aside_first_message(&mut workspace, chat_id, why);
         }
         // Wakes the wait in `run_unattended`, also when no supervisor had started.
         self.inner.board.notify(chat_id);
         Some(Closed {
             unconfirmed: cleanup,
         })
-    }
-
-    /// Sets the Chat's queued input aside, never to be sent. Best effort: when the
-    /// Workspace cannot be read the run's own failure handling reports the problem.
-    /// Returns whether it set anything aside.
-    fn set_aside_queued_first_message(&self, chat_id: &str) -> bool {
-        let Ok(mut workspace) = self.workspace() else {
-            return false;
-        };
-        let mut any = false;
-        for message in workspace.chat_queue(chat_id).unwrap_or_default() {
-            any |= workspace
-                .set_aside_queued_chat_input(chat_id, &message.id)
-                .is_ok();
-        }
-        any
-    }
-
-    /// Says in the Chat why its agent stopped, when it stopped before any turn could.
-    fn note_stopped(&self, chat_id: &str, why: StopReason) {
-        let Ok(mut workspace) = self.workspace() else {
-            return;
-        };
-        let notice = ChatObservation::Notice {
-            notice_id: uuid::Uuid::new_v4().to_string(),
-            text: format!("{}.", why.words()),
-            from_harness: false,
-        };
-        let _ = workspace.record_chat_observations(chat_id, vec![notice]);
-    }
-
-    /// The same message when it was already handed to the harness but never confirmed
-    /// (#387 5A2): closing the harness recorded its delivery as uncertain, which would
-    /// ask the person whether to send the agent's instructions as their own. The run
-    /// stays in history as it is; the person is not asked, and it is never sent again.
-    fn set_aside_unconfirmed_first_message(&self, chat_id: &str) -> bool {
-        let Ok(mut workspace) = self.workspace() else {
-            return false;
-        };
-        let Ok(snapshot) = workspace.chat_snapshot(chat_id, UNCONFIRMED_SCAN) else {
-            return false;
-        };
-        let mut any = false;
-        for item in snapshot.items {
-            if let ChatItem::Message(message) = item
-                && message.awaits_decision()
-            {
-                any |= workspace
-                    .discard_uncertain_chat_submission(chat_id, &message.id)
-                    .is_ok();
-            }
-        }
-        any
     }
 
     /// Takes the Chat's supervisor out of the host, for the caller to shut down.
@@ -984,10 +926,6 @@ impl ChatHost {
             .unwrap_or_else(PoisonError::into_inner)
     }
 }
-
-/// How many of a Chat's latest history items are looked through for the run's first
-/// message when its run ends: an unattended Chat has hardly any.
-const UNCONFIRMED_SCAN: usize = 50;
 
 /// The name a failed turn's problem kind is stored under.
 pub fn problem_key(kind: ProblemKind) -> &'static str {

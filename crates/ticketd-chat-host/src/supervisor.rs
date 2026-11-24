@@ -47,6 +47,7 @@ fn now_millis() -> i64 {
 }
 use crate::outcome::{settle, tool_state};
 use crate::subscription::{self, ChatUpdate, Publisher};
+use crate::unattended::set_aside_first_message;
 use crate::{
     ApprovalDecision, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
     HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind, InteractionRequest,
@@ -412,6 +413,15 @@ impl Supervisor {
                             && self.runtime.is_none()
                             && self.opening.is_none();
                         let unconfirmed = self.stop_runtime(why).await;
+                        if why == StopReason::TurnedOff && self.unattended.is_some() {
+                            // On can open a replacement as soon as Off returns. Set the
+                            // run's input aside before acknowledging shutdown.
+                            let chat_id = self.chat_id.clone();
+                            let _ = self.write(|workspace| {
+                                set_aside_first_message(workspace, &chat_id, why);
+                                Ok(())
+                            });
+                        }
                         self.publish();
                         if why == StopReason::TurnedOff
                             && (keep_permission_recovery || self.pending_runtime_loss.is_some())
@@ -422,8 +432,9 @@ impl Supervisor {
                             let _ = reply.send(unconfirmed);
                             continue;
                         }
-                        self.board.report(&self.chat_id, self.number, None);
+                        // Wake the unattended waiter after the sender reports closed.
                         self.commands.close();
+                        self.board.report(&self.chat_id, self.number, None);
                         let _ = reply.send(unconfirmed);
                         return;
                     }

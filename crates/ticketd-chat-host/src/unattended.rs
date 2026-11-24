@@ -5,7 +5,7 @@
 
 use std::time::Duration;
 
-use ticketd_core::{AutomationRunStatus, ChatTurn};
+use ticketd_core::{AutomationRunStatus, ChatItem, ChatObservation, ChatTurn, Workspace};
 use tokio::sync::oneshot;
 use tokio::time::timeout;
 
@@ -149,6 +149,41 @@ impl ChatHost {
             return done.await.ok().flatten();
         }
         None
+    }
+}
+
+/// An unattended Chat's only queued input is the agent's first message. Keep its
+/// instructions in history after the run ends (including when delivery was uncertain),
+/// and prevent a later reply from sending them as the person's own input.
+/// Best effort: if the Workspace fails, the runner reports the storage failure.
+pub(crate) fn set_aside_first_message(workspace: &mut Workspace, chat_id: &str, why: StopReason) {
+    let mut set_aside = false;
+    for message in workspace.chat_queue(chat_id).unwrap_or_default() {
+        set_aside |= workspace
+            .set_aside_queued_chat_input(chat_id, &message.id)
+            .is_ok();
+    }
+    // The agent has only one turn, so look through its recent history for the first
+    // message if closing the runtime left its delivery uncertain.
+    const UNCONFIRMED_SCAN: usize = 50;
+    if let Ok(snapshot) = workspace.chat_snapshot(chat_id, UNCONFIRMED_SCAN) {
+        for item in snapshot.items {
+            if let ChatItem::Message(message) = item
+                && message.awaits_decision()
+            {
+                set_aside |= workspace
+                    .discard_uncertain_chat_submission(chat_id, &message.id)
+                    .is_ok();
+            }
+        }
+    }
+    if set_aside {
+        let notice = ChatObservation::Notice {
+            notice_id: uuid::Uuid::new_v4().to_string(),
+            text: format!("{}.", why.words()),
+            from_harness: false,
+        };
+        let _ = workspace.record_chat_observations(chat_id, vec![notice]);
     }
 }
 
