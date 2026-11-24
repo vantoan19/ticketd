@@ -654,27 +654,41 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(button("Folder emails").textContent).toBe("emails");
 });
 
-test("a native-only Chat starts fresh without importing past messages", async () => {
+const nativeHistoryLost = {
+  id: "c1",
+  title: "Limiter",
+  harness: { id: "antigravity", name: "Antigravity" },
+  activity: "failed",
+  problem: { kind: "history_lost", history_recovery: "start_fresh" },
+} as const;
+
+test("starting a native-only Chat fresh focuses its composer when it opens without importing past messages", async () => {
+  const user = userEvent.setup();
   const client = await open(
-    one(
-      {
-        id: "c1",
-        title: "Limiter",
-        harness: { id: "antigravity", name: "Antigravity" },
-        activity: "failed",
-        problem: { kind: "history_lost", history_recovery: "start_fresh" },
-      },
-      [reply("r1", "Added the limiter.")],
-    ),
+    one(nativeHistoryLost, [reply("r1", "Added the limiter.")]),
   );
   const notice = screen.getByRole("alert");
   expect(notice.textContent).toContain("without importing earlier messages");
   expect(screen.queryByLabelText("Message Antigravity")).toBeNull();
   noButton("Resume in a fresh session…");
-  const resume = vi.spyOn(client, "resume");
-  fireEvent.click(within(notice).getByRole("button", { name: "Start fresh" }));
-  expect(await screen.findByLabelText("Message Antigravity")).toBeTruthy();
+  const publishFreshSession = client.resume.bind(client);
+  let confirmResume!: () => void;
+  const pendingResume = new Promise<void>((resolve) => {
+    confirmResume = resolve;
+  });
+  const resume = vi.spyOn(client, "resume").mockReturnValueOnce(pendingResume);
+  const start = within(notice).getByRole("button", { name: "Start fresh" });
+  act(() => start.focus());
+  await user.keyboard("{Enter}");
   expect(resume).toHaveBeenCalledWith("c1", { kind: "none" });
+
+  await act(async () => confirmResume());
+  expect(document.activeElement).toBe(start);
+  expect(screen.queryByLabelText("Message Antigravity")).toBeNull();
+
+  await act(() => publishFreshSession("c1", { kind: "none" }));
+  const message = await screen.findByLabelText("Message Antigravity");
+  expect(document.activeElement).toBe(message);
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(conversation().getByText("Added the limiter.")).toBeTruthy();
   expect(
@@ -683,6 +697,68 @@ test("a native-only Chat starts fresh without importing past messages", async ()
   expect(
     (await client.openChat("c1")).items.some((item) => item.kind === "user"),
   ).toBe(false);
+});
+
+test("a fresh session preserves focus moved elsewhere while recovery is pending", async () => {
+  const user = userEvent.setup();
+  const client = await open(
+    one({
+      ...nativeHistoryLost,
+      activity: "idle",
+      problem: null,
+      queue_paused: true,
+      queue: [{ id: "q1", text: "Add a regression test." }],
+    }),
+  );
+  fireEvent.click(button("Edit in the message box"));
+  await waitFor(() =>
+    expect(composer("Message Antigravity")).toHaveProperty(
+      "value",
+      "Add a regression test.",
+    ),
+  );
+  act(() =>
+    client.patch("c1", {
+      activity: nativeHistoryLost.activity,
+      problem: nativeHistoryLost.problem,
+    }),
+  );
+
+  const publishFreshSession = client.resume.bind(client);
+  let confirmResume!: () => void;
+  const pendingResume = new Promise<void>((resolve) => {
+    confirmResume = resolve;
+  });
+  vi.spyOn(client, "resume").mockReturnValueOnce(pendingResume);
+  act(() => button("Start fresh").focus());
+  await user.keyboard("{Enter}");
+  const other = button("Expand Chat");
+  act(() => other.focus());
+
+  await act(() => publishFreshSession("c1", { kind: "none" }));
+  expect(composer("Message Antigravity")).toHaveProperty(
+    "value",
+    "Add a regression test.",
+  );
+  expect(document.activeElement).toBe(other);
+  await act(async () => confirmResume());
+  expect(document.activeElement).toBe(other);
+});
+
+test("a failed fresh session keeps the recovery action focused and shows the failure", async () => {
+  const user = userEvent.setup();
+  const client = await open(one(nativeHistoryLost));
+  vi.spyOn(client, "resume").mockRejectedValueOnce(
+    new Error("Session refused"),
+  );
+  const start = button("Start fresh");
+  act(() => start.focus());
+  await user.keyboard("{Enter}");
+
+  const failure = await screen.findByText("Couldn't start a fresh session.");
+  expect(failure.closest('[role="alert"]')).toBeTruthy();
+  expect(document.activeElement).toBe(start);
+  expect(screen.queryByLabelText("Message Antigravity")).toBeNull();
 });
 
 test.each([
