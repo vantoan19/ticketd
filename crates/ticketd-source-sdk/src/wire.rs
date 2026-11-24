@@ -252,7 +252,7 @@ enum Contract2 {
 }
 
 pub fn schema() -> Schema {
-    schemars::generate::SchemaSettings::draft2020_12()
+    let mut schema = schemars::generate::SchemaSettings::draft2020_12()
         .for_deserialize()
         .with_transform(RecursiveTransform(|schema: &mut Schema| {
             // Formats are advisory. These constraints match the wire decoder.
@@ -266,7 +266,13 @@ pub fn schema() -> Schema {
             schema.insert("maximum".to_owned(), maximum);
         }))
         .into_generator()
-        .into_root_schema_for::<Contract2>()
+        .into_root_schema_for::<Contract2>();
+    // Keep the published schema byte-identical when another crate enables ordered JSON maps.
+    if let Some(fields) = schema.as_object_mut() {
+        fields.sort_keys();
+        fields.values_mut().for_each(Value::sort_all_objects);
+    }
+    schema
 }
 
 #[cfg(test)]
