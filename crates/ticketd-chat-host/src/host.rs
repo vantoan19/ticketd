@@ -10,11 +10,11 @@ use ticketd_core::{ChatMessage, ChatSnapshot, Error, WorkspaceGuard};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor};
-use crate::unattended::set_aside_first_message;
+use crate::unattended::{UnattendedChat, set_aside_first_message};
 use crate::{
     ContextUsage, HarnessAdapter, HarnessCommand, HarnessOptions, HarnessSettings, Inspection,
     InteractionAnswer, InteractionKind, Problem, ProblemKind, SettingKey, SettingOutcome,
-    StartSettings, SteeringBehavior, Subscription, Unattended,
+    StartSettings, SteeringBehavior, Subscription,
 };
 use crate::{StopReason, TurnEnding};
 
@@ -359,7 +359,7 @@ struct Inner {
     chats: Mutex<HashMap<String, mpsc::Sender<Command>>>,
     /// The settings of each Chat that is running unattended, read when its
     /// supervisor starts.
-    unattended: Mutex<HashMap<String, Unattended>>,
+    unattended: Mutex<HashMap<String, Arc<UnattendedChat>>>,
     quitting: AtomicBool,
     /// Set while the workspace is being replaced by a backup. Checked where `quitting`
     /// is, so every clone of the host refuses to start or reach a supervisor.
@@ -845,7 +845,7 @@ impl ChatHost {
         &self,
         chat: &ticketd_core::Chat,
         adapter: Option<Arc<dyn HarnessAdapter>>,
-        unattended: Option<Unattended>,
+        unattended: Option<Arc<UnattendedChat>>,
     ) -> mpsc::Sender<Command> {
         Supervisor::spawn(
             chat,
@@ -858,38 +858,28 @@ impl ChatHost {
         )
     }
 
-    /// The agent's settings while the Chat is registered as unattended.
-    fn settings(&self, chat_id: &str) -> Option<Unattended> {
-        self.unattended().get(chat_id).cloned()
+    /// The registration for a run that can still work in this Chat.
+    fn settings(&self, chat_id: &str) -> Option<Arc<UnattendedChat>> {
+        self.unattended()
+            .get(chat_id)
+            .filter(|unattended| !*unattended.turned_off.borrow())
+            .cloned()
     }
 
-    fn unattended(&self) -> MutexGuard<'_, HashMap<String, Unattended>> {
+    fn unattended(&self) -> MutexGuard<'_, HashMap<String, Arc<UnattendedChat>>> {
         self.inner
             .unattended
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// Sets or clears how the Chat's next supervisor opens its harness.
-    pub(crate) fn set_unattended(&self, chat_id: &str, unattended: Option<Unattended>) {
-        match unattended {
-            Some(unattended) => self.unattended().insert(chat_id.to_owned(), unattended),
-            None => self.unattended().remove(chat_id),
-        };
+    pub(crate) fn register_unattended(&self, chat_id: &str, unattended: Arc<UnattendedChat>) {
+        self.unattended().insert(chat_id.to_owned(), unattended);
     }
 
-    /// Whether the Chat is running unattended: an Automation run's agent is working
-    /// in it and nobody has taken it over.
+    /// Whether an Automation run's agent can still work in this Chat.
     pub(crate) fn is_unattended(&self, chat_id: &str) -> bool {
-        self.unattended().contains_key(chat_id)
-    }
-
-    /// Whether the Chat has a live supervisor, including one kept while Chat is
-    /// off for recovery. Shutdown may close its sender before the host removes it.
-    pub(crate) fn supervised(&self, chat_id: &str) -> bool {
-        self.chats()
-            .get(chat_id)
-            .is_some_and(|commands| !commands.is_closed())
+        self.settings(chat_id).is_some()
     }
 
     /// Ends the Chat's unattended running, if it is running so: forgets the agent's
@@ -898,21 +888,30 @@ impl ChatHost {
     /// takes it over at the same moment never close the person's new session.
     /// Returns `None` when it was not running unattended.
     pub(crate) async fn end_unattended(&self, chat_id: &str, why: StopReason) -> Option<Closed> {
-        self.unattended().remove(chat_id)?;
-        let cleanup = self.close(chat_id, why).await;
-        if let Ok(mut workspace) = self.workspace() {
-            set_aside_first_message(&mut workspace, chat_id, why);
+        let (unattended, commands) = {
+            let mut chats = self.chats();
+            let unattended = self.unattended().remove(chat_id)?;
+            // Chat Off already shut down this run's supervisor. The entry now
+            // may hold a person-driven supervisor or pending storage recovery.
+            if *unattended.turned_off.borrow() {
+                return Some(Closed { unconfirmed: None });
+            }
+            (unattended, chats.remove(chat_id))
+        };
+        let cleanup = match commands {
+            Some(commands) => Self::close_unattended(commands, why).await,
+            None => None,
+        };
+        if let Some(message_id) = unattended.first_message.get()
+            && let Ok(mut workspace) = self.workspace()
+        {
+            set_aside_first_message(&mut workspace, chat_id, message_id, why);
         }
         // Wakes the wait in `run_unattended`, also when no supervisor had started.
         self.inner.board.notify(chat_id);
         Some(Closed {
             unconfirmed: cleanup,
         })
-    }
-
-    /// Takes the Chat's supervisor out of the host, for the caller to shut down.
-    pub(crate) fn forget(&self, chat_id: &str) -> Option<mpsc::Sender<Command>> {
-        self.chats().remove(chat_id)
     }
 
     pub(crate) fn workspace(&self) -> Result<WorkspaceGuard, HostError> {
