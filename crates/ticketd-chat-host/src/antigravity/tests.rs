@@ -299,6 +299,101 @@ async fn large_tool_updates_keep_bounded_output_and_file_changes_until_completio
 }
 
 #[tokio::test]
+async fn bounded_file_previews_preserve_the_whole_edit_through_completion() {
+    use ticketd_core::{ChatToolState, harnesses::ANTIGRAVITY};
+
+    use crate::{
+        FileTargets, LineCounts, MAX_PROVIDER_DETAIL_BYTES, StepAction, ToolEvidence, ToolStatus,
+        read_tool_steps,
+    };
+
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("mixed-edit")).await,
+        DispatchOutcome::Written
+    );
+    let outgoing = peer.written().await;
+    let update = |update| {
+        json!({
+            "jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": "session-1", "update": update}
+        })
+    };
+
+    let mut diffs: Vec<_> = (0..32)
+        .map(|index| {
+            json!({"type": "diff", "path": format!("/workspace/new-{index}"), "newText": "new\n"})
+        })
+        .collect();
+    let modified = "/workspace/existing";
+    diffs.push(json!({"type": "diff", "path": modified, "oldText": "old\n", "newText": "new\n"}));
+    send(
+        &mut peer,
+        &update(json!({
+            "sessionUpdate": "tool_call", "toolCallId": "mixed", "title": "Edit files",
+            "kind": "edit", "status": "in_progress", "rawInput": {"TargetFile": modified},
+            "content": diffs
+        })),
+    )
+    .await;
+    send(
+        &mut peer,
+        &update(json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "mixed", "status": "completed"
+        })),
+    )
+    .await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": outgoing["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+
+    let mut states = Vec::new();
+    loop {
+        match opened.events.recv().await.unwrap().kind {
+            EventKind::ToolUpdated {
+                title,
+                status,
+                detail: Some(detail),
+                ..
+            } => {
+                assert!(detail.payload().len() <= MAX_PROVIDER_DETAIL_BYTES);
+                states.push(status);
+                let steps = read_tool_steps(
+                    ANTIGRAVITY.key.as_str(),
+                    ToolEvidence {
+                        name: &title,
+                        input: detail.payload(),
+                        state: if status == ToolStatus::Succeeded {
+                            ChatToolState::Completed
+                        } else {
+                            ChatToolState::Running
+                        },
+                        output: None,
+                        working_directory: "/workspace",
+                    },
+                );
+                assert_eq!(
+                    steps[0].action,
+                    StepAction::Edit {
+                        targets: FileTargets::Paths(vec![modified.to_owned()]),
+                        counts: LineCounts::default(),
+                    }
+                );
+            }
+            EventKind::TurnEnded {
+                outcome: TurnOutcome::Completed,
+                ..
+            } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(states, [ToolStatus::Running, ToolStatus::Succeeded]);
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
 async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
     let (mut peer, mut opened) = open(
         RESUME,
@@ -365,6 +460,83 @@ async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
 
 #[tokio::test]
 async fn large_approval_input_keeps_the_exact_command() {
+    let command = "printf '%s' 'fixture command'";
+    let path = format!("/workspace/{}", "a".repeat(3500));
+    let (step, _) = compacted_command_approval(
+        json!({
+            "CommandLine": command,
+            "AbsolutePath": path,
+            "TargetFile": path,
+            "SourcePath": path,
+            "DestinationPath": path,
+            "WorkingDirectory": path
+        }),
+        Some(json!({"exit_code": 7})),
+        None,
+    )
+    .await;
+    let shell = step.command.expect("missing exact command");
+    assert_eq!(shell.exact, command);
+    assert_eq!(shell.working_directory.as_deref(), Some(path.as_str()));
+    assert_eq!(shell.exit_code, Some(7));
+}
+
+#[tokio::test]
+async fn approval_keeps_the_exact_command_at_the_detail_limit() {
+    let command = format!("echo {}x", "é".repeat(8188));
+    let (step, approval) =
+        compacted_command_approval(json!({"command": command}), None, None).await;
+    let shell = step.command.expect("missing exact command");
+    assert!(shell.exact == command, "exact command text changed");
+    assert!(matches!(
+        approval.kind,
+        InteractionKind::NativeApproval { reason: None, .. }
+    ));
+}
+
+#[tokio::test]
+async fn approval_explains_when_the_command_cannot_fit_and_keeps_execute_facts() {
+    let commands = [
+        format!("printf '%s' '{}'", "\\".repeat(8192)),
+        format!("echo {}", "z".repeat(16384)),
+    ];
+    for command in commands {
+        let (step, approval) = compacted_command_approval(
+            json!({"CommandLine": command, "Cwd": "/workspace/fixtures"}),
+            Some(json!({"exit_code": 7})),
+            Some("Review the command before approving."),
+        )
+        .await;
+        assert_eq!(
+            step.action,
+            crate::StepAction::Run(crate::RunAction::CommandUnavailable {
+                working_directory: Some("/workspace/fixtures".to_owned()),
+                exit_code: Some(7),
+            })
+        );
+        assert!(step.command.is_none());
+        let InteractionKind::NativeApproval {
+            options, reason, ..
+        } = approval.kind
+        else {
+            panic!("expected provider approval");
+        };
+        assert_eq!(options[0].id, "native-allow");
+        assert_eq!(
+            reason.as_deref().unwrap().lines().collect::<Vec<_>>(),
+            [
+                "The command is too large for ticketd to show in full.",
+                "Review the command before approving.",
+            ]
+        );
+    }
+}
+
+async fn compacted_command_approval(
+    raw_input: Value,
+    raw_output: Option<Value>,
+    warning: Option<&str>,
+) -> (crate::ToolStep, crate::InteractionRequest) {
     let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
     assert_eq!(
         opened.runtime.submit(start_turn("tool")).await,
@@ -372,8 +544,6 @@ async fn large_approval_input_keeps_the_exact_command() {
     );
     assert_eq!(peer.written().await["method"], "session/prompt");
 
-    let command = "printf '%s' 'fixture command'";
-    let path = format!("/workspace/{}", "a".repeat(3500));
     send(
         &mut peer,
         &json!({
@@ -382,20 +552,15 @@ async fn large_approval_input_keeps_the_exact_command() {
             "method": "session/request_permission",
             "params": {
                 "sessionId": "session-1",
+                "warning": warning,
                 "toolCall": {
                     "toolCallId": "tool-1",
                     "title": "Print a marker",
                     "kind": "execute",
-                    "rawInput": {
-                        "CommandLine": command,
-                        "AbsolutePath": path,
-                        "TargetFile": path,
-                        "SourcePath": path,
-                        "DestinationPath": path,
-                        "WorkingDirectory": path
-                    }
+                    "rawInput": raw_input,
+                    "rawOutput": raw_output
                 },
-                "options": [{"optionId": "allow", "name": "Allow", "kind": "allow_once"}]
+                "options": [{"optionId": "native-allow", "name": "Allow", "kind": "allow_once"}]
             }
         }),
     )
@@ -406,30 +571,30 @@ async fn large_approval_input_keeps_the_exact_command() {
         ..,
         EventKind::ToolUpdated {
             title,
+            output,
             detail: Some(detail),
             ..
         },
-        EventKind::InteractionRequested(_),
+        EventKind::InteractionRequested(approval),
     ] = events.as_slice()
     else {
         panic!("expected tool evidence followed by approval");
     };
     assert!(detail.payload().len() <= crate::MAX_PROVIDER_DETAIL_BYTES);
-    let steps = crate::read_tool_steps(
+    let mut steps = crate::read_tool_steps(
         ticketd_core::harnesses::ANTIGRAVITY.key.as_str(),
         crate::ToolEvidence {
             name: title,
             input: detail.payload(),
-            output: None,
+            output: output.as_deref(),
             state: ticketd_core::ChatToolState::Running,
             working_directory: "/workspace",
         },
     );
-    assert_eq!(
-        steps[0].command.as_ref().map(|shell| shell.exact.as_str()),
-        Some(command)
-    );
+    assert_eq!(steps.len(), 1);
+    assert!(detail.truncated());
     opened.runtime.close().await;
+    (steps.remove(0), approval.clone())
 }
 
 #[tokio::test]
@@ -682,9 +847,17 @@ async fn resume_refuses_to_open_if_confirming_effort_changes_the_selected_model(
         )
         .await;
     }
-    peer.exit(0);
-
-    let problem = opening.await.unwrap().unwrap_err();
+    // Keep the connection alive until startup checks the final settings and closes it.
+    let exit_after_close = async {
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), peer.stdin_closed())
+                .await
+                .unwrap()
+        );
+        peer.exit(0);
+    };
+    let (result, ()) = tokio::join!(opening, exit_after_close);
+    let problem = result.unwrap().unwrap_err();
     assert_eq!(problem.kind, ProblemKind::Other);
     assert_eq!(
         problem.message,

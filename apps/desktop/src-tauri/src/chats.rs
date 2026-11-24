@@ -1485,6 +1485,7 @@ impl Chats {
             model: input.model.clone(),
             effort: input.effort.clone(),
             permission: input.permission.clone(),
+            ..StartSettings::default()
         };
         if !picks.is_empty() {
             // Only what the harness offered and allows.

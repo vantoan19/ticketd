@@ -1096,6 +1096,16 @@ fn word_tool_step(action: ToolStep, base: &Step, folder: &str, home: Option<&str
             step.kind = "run";
             match run {
                 RunAction::Command => Vec::new(),
+                RunAction::CommandUnavailable {
+                    working_directory,
+                    exit_code,
+                } => {
+                    step.folder = working_directory
+                        .map(|folder| path(&folder))
+                        .filter(|folder| folder != ".");
+                    step.exit_code = exit_code;
+                    Vec::new()
+                }
                 RunAction::Script { interpreters } => {
                     step.variant = Some("script");
                     interpreters.iter().map(|program| target(program)).collect()

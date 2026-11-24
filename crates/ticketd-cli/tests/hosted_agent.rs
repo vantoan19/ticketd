@@ -356,12 +356,8 @@ fn writes_made_with_a_chat_id_are_credited_to_that_chat() {
     workspace
         .add_activity(&ticket.reference, "Before either Turn", Some("codex"))
         .unwrap();
-    // SQLite records wall-clock time at millisecond precision.
-    let tick = || std::thread::sleep(std::time::Duration::from_millis(5));
-    tick();
     start(&mut workspace, &chats[1], "turn-b");
     run_as_a(&["change", "T-KQ1", "--status", "In progress"]);
-    tick();
     start(&mut workspace, &chats[0], "turn-a");
     run_as_a(&["activity", "add", "T-KQ1", "--brief", "From A"]);
     workspace
@@ -380,9 +376,7 @@ fn writes_made_with_a_chat_id_are_credited_to_that_chat() {
             }],
         )
         .unwrap();
-    tick();
     run_as_a(&["activity", "add", "T-KQ1", "--brief", "After A ended"]);
-    tick();
     let next = workspace
         .save_chat_input(None, &chats[0].id, "next")
         .unwrap();
@@ -396,6 +390,19 @@ fn writes_made_with_a_chat_id_are_credited_to_that_chat() {
         .unwrap();
     start(&mut workspace, &chats[0], "turn-a-next");
 
+    // All adjacent CLI writes and Turn boundaries share one stored millisecond.
+    rusqlite::Connection::open(workspace_path(path))
+        .unwrap()
+        .execute_batch(
+            "UPDATE ticket_history SET timestamp = '2026-01-01T00:00:00.001Z';
+             UPDATE activities SET reported_at = CASE brief
+                 WHEN 'Before either Turn' THEN '2026-01-01T00:00:00.000Z'
+                 ELSE '2026-01-01T00:00:00.001Z' END;
+             UPDATE chat_submission_attempts SET recorded_at = '2026-01-01T00:00:00.001Z';
+             UPDATE chat_turns SET started_at = '2026-01-01T00:00:00.001Z',
+                 ended_at = CASE WHEN ended_at IS NOT NULL THEN '2026-01-01T00:00:00.001Z' END;",
+        )
+        .unwrap();
     let credited = |chat: &ticketd_core::Chat, turn: &str| {
         workspace.chat_turn_agent_changes(&chat.id, turn).unwrap()
     };

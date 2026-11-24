@@ -22,6 +22,8 @@ const FILE_PATH: &[&str] = &[
 const QUERY: &[&str] = &["Query", "Pattern", "query"];
 const SEARCH_PATH: &[&str] = &["SearchPath", "path"];
 const URL: &[&str] = &["Url", "URL", "url"];
+const ALL_FILES_ADDED: &str = "_ticketdAllFilesAdded";
+const ADDED_LINES: &str = "_ticketdAddedLines";
 const INPUT_FIELDS: &[&[&str]] = &[
     COMMAND,
     WORKING_DIRECTORY,
@@ -32,6 +34,13 @@ const INPUT_FIELDS: &[&[&str]] = &[
 ];
 
 pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
+    // The ACP schema can also deserialize positional arrays as structs.
+    // Recognize our compact sequence before trying the native object reader.
+    if evidence.input.trim_start().starts_with(['"', '['])
+        && let Some(step) = read_compact_execute(evidence)
+    {
+        return vec![step];
+    }
     let Ok(tool) = serde_json::from_str::<acp::ToolCall>(evidence.input) else {
         return vec![
             StepAction::Other {
@@ -41,7 +50,7 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
         ];
     };
     let input = tool.raw_input.as_ref().unwrap_or(&Value::Null);
-    let text = |keys: &[&str]| keys.iter().find_map(|key| input[*key].as_str());
+    let text = |keys: &[&str]| input_text(input, keys);
     let locations = || {
         if tool.locations.is_empty() {
             FILE_PATH
@@ -63,10 +72,7 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     command,
                     CommandFacts {
                         working_directory: text(WORKING_DIRECTORY),
-                        exit_code: tool
-                            .raw_output
-                            .as_ref()
-                            .and_then(|output| output["exit_code"].as_i64()),
+                        exit_code: exit_code(&tool),
                         ..CommandFacts::default()
                     },
                 )];
@@ -107,25 +113,20 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     .is_none_or(|output| output.trim().is_empty()),
         },
         acp::ToolKind::Edit | acp::ToolKind::Move => {
-            let created: Vec<_> = diffs(&tool)
-                .filter(|diff| diff.old_text.is_none())
-                .collect();
-            if tool.kind == acp::ToolKind::Edit
-                && !created.is_empty()
-                && created.len() == diffs(&tool).count()
-            {
+            let all_files_added = input[ALL_FILES_ADDED].as_bool().unwrap_or_else(|| {
+                let mut diffs = diffs(&tool).peekable();
+                diffs.peek().is_some() && diffs.all(|diff| diff.old_text.is_none())
+            });
+            if tool.kind == acp::ToolKind::Edit && all_files_added {
                 StepAction::Create {
                     targets: FileTargets::Paths(
-                        created
-                            .iter()
+                        diffs(&tool)
                             .map(|diff| diff.path.to_string_lossy().into_owned())
                             .collect(),
                     ),
                     counts: LineCounts {
-                        added: tool
-                            .raw_input
-                            .as_ref()
-                            .and_then(|value| value["_ticketdAddedLines"].as_u64())
+                        added: input[ADDED_LINES]
+                            .as_u64()
                             .and_then(|lines| u32::try_from(lines).ok()),
                         removed: None,
                     },
@@ -155,6 +156,78 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
         },
     };
     vec![action.into()]
+}
+
+fn input_text<'a>(input: &'a Value, keys: &[&str]) -> Option<&'a str> {
+    keys.iter().find_map(|key| input[*key].as_str())
+}
+
+fn exit_code(tool: &acp::ToolCall) -> Option<i64> {
+    tool.raw_output.as_ref()?.get("exit_code")?.as_i64()
+}
+
+// An oversized native ToolCall can keep execution evidence in either of these
+// shapes. A bare string leaves the most space for exact command text.
+#[derive(serde::Deserialize)]
+#[serde(untagged)]
+enum CompactExecute {
+    Command(String),
+    WithFacts(Option<String>, Option<String>, Option<i64>),
+}
+
+fn read_compact_execute(evidence: ToolEvidence<'_>) -> Option<ToolStep> {
+    let (command, working_directory, exit_code) = match serde_json::from_str(evidence.input).ok()? {
+        CompactExecute::Command(command) => (Some(command), None, None),
+        CompactExecute::WithFacts(command, working_directory, exit_code) => {
+            (command, working_directory, exit_code)
+        }
+    };
+    Some(match command {
+        Some(command) => shell_step(
+            evidence,
+            &command,
+            CommandFacts {
+                working_directory: working_directory.as_deref(),
+                exit_code,
+                ..CommandFacts::default()
+            },
+        ),
+        None => StepAction::Run(RunAction::CommandUnavailable {
+            working_directory,
+            exit_code,
+        })
+        .into(),
+    })
+}
+
+fn bounded_json(value: &(impl serde::Serialize + ?Sized)) -> Option<String> {
+    serde_json::to_string(value)
+        .ok()
+        .filter(|json| json.len() <= MAX_PROVIDER_DETAIL_BYTES)
+}
+
+fn compact_execute(
+    command: Option<&str>,
+    working_directory: Option<&str>,
+    exit_code: Option<i64>,
+) -> (String, bool) {
+    let exact = command.and_then(bounded_json);
+    let retained_command = exact.as_ref().and(command);
+    let detail = [
+        (working_directory, exit_code),
+        (None, exit_code),
+        (working_directory, None),
+    ]
+    .into_iter()
+    .filter(|(directory, code)| directory.is_some() || code.is_some())
+    .find_map(|(directory, code)| bounded_json(&(retained_command, directory, code)));
+    let command_unavailable = exact.is_none();
+    (
+        detail
+            .or(exact)
+            .unwrap_or_else(|| "[null,null,null]".to_owned()),
+        command_unavailable,
+    )
 }
 
 pub(super) struct Tool {
@@ -233,19 +306,30 @@ impl Tool {
     }
 
     fn merge_input(&mut self, input: Value) {
-        let Value::Object(mut fields) = input else {
+        let Value::Object(fields) = input else {
             self.native.raw_input = None;
             return;
         };
-        fields.retain(|key, _| INPUT_FIELDS.iter().any(|keys| keys.contains(&key.as_str())));
         let known = self.native.raw_input.get_or_insert_with(|| json!({}));
         if let Value::Object(known) = known {
-            known.extend(fields);
-            known.retain(|_, value| {
-                value
-                    .as_str()
-                    .is_some_and(|text| text.len() <= MAX_PROVIDER_DETAIL_BYTES)
-            });
+            for (key, value) in fields
+                .into_iter()
+                .filter(|(key, _)| INPUT_FIELDS.iter().any(|keys| keys.contains(&key.as_str())))
+            {
+                match value {
+                    Value::String(text) if text.len() <= MAX_PROVIDER_DETAIL_BYTES => {
+                        known.insert(key, Value::String(text));
+                    }
+                    Value::String(text) if COMMAND.contains(&key.as_str()) => {
+                        // Track that the command was supplied even when the text
+                        // is too large to keep between partial tool updates.
+                        known.insert(key, json!(text.len()));
+                    }
+                    _ => {
+                        known.remove(&key);
+                    }
+                }
+            }
         }
     }
 
@@ -256,28 +340,32 @@ impl Tool {
         })
     }
 
-    pub(super) fn observed(&self, turn: NativeTurnId, declined: bool) -> EventKind {
+    pub(super) fn observed(&self, turn: NativeTurnId, declined: bool) -> (EventKind, bool) {
         let status = match self.status() {
             _ if declined => ToolStatus::Declined,
             acp::ToolCallStatus::Completed => ToolStatus::Succeeded,
             acp::ToolCallStatus::Failed => ToolStatus::Failed,
             _ => ToolStatus::Running,
         };
-        EventKind::ToolUpdated {
-            turn,
-            item: NativeItemId::new(self.native.tool_call_id.0.as_ref()),
-            title: self.title().to_owned(),
-            status,
-            output: self
-                .raw_output
-                .as_ref()
-                .or(self.content_output.as_ref())
-                .cloned(),
-            detail: Some(self.detail()),
-        }
+        let (detail, command_unavailable) = self.detail();
+        (
+            EventKind::ToolUpdated {
+                turn,
+                item: NativeItemId::new(self.native.tool_call_id.0.as_ref()),
+                title: self.title().to_owned(),
+                status,
+                output: self
+                    .raw_output
+                    .as_ref()
+                    .or(self.content_output.as_ref())
+                    .cloned(),
+                detail: Some(detail),
+            },
+            command_unavailable,
+        )
     }
 
-    fn detail(&self) -> ProviderDetail {
+    fn detail(&self) -> (ProviderDetail, bool) {
         let mut native = self.native.clone();
         native.content = self
             .files
@@ -290,22 +378,36 @@ impl Tool {
             })
             .collect();
 
-        if !self.files.is_empty()
-            && self
-                .files
-                .iter()
-                .all(|file| file.kind == FileChangeKind::Added)
-        {
-            let added = self
-                .files
-                .iter()
-                .filter_map(|file| file.added_lines)
-                .fold(0, u32::saturating_add);
-            native.raw_input.get_or_insert_with(|| json!({}))["_ticketdAddedLines"] = json!(added);
+        if native.kind == acp::ToolKind::Edit {
+            // The diff preview can omit modifications or be cleared to fit the budget.
+            let all_files_added = !self.files.is_empty()
+                && self
+                    .files
+                    .iter()
+                    .all(|file| file.kind == FileChangeKind::Added);
+            let input = native.raw_input.get_or_insert_with(|| json!({}));
+            input[ALL_FILES_ADDED] = json!(all_files_added);
+            if all_files_added {
+                let added = self
+                    .files
+                    .iter()
+                    .filter_map(|file| file.added_lines)
+                    .fold(0, u32::saturating_add);
+                input[ADDED_LINES] = json!(added);
+            }
         }
 
+        let input = native.raw_input.as_ref().unwrap_or(&Value::Null);
+        let command = (native.kind == acp::ToolKind::Execute)
+            .then(|| COMMAND.iter().find_map(|key| input.get(*key)))
+            .flatten();
+        let oversized_command_bytes = command
+            .and_then(Value::as_u64)
+            .and_then(|bytes| usize::try_from(bytes).ok());
         let mut detail = serde_json::to_string(&native).unwrap_or_default();
-        let size = detail.len();
+        let size = detail
+            .len()
+            .max(oversized_command_bytes.unwrap_or_default());
         if detail.len() > MAX_PROVIDER_DETAIL_BYTES {
             // The event has the title already. Give the reader's evidence this space.
             native.title.clear();
@@ -320,21 +422,29 @@ impl Tool {
             native.content.clear();
             detail = serde_json::to_string(&native).unwrap_or_default();
         }
-        if detail.len() > MAX_PROVIDER_DETAIL_BYTES && native.kind == acp::ToolKind::Execute {
-            // An approval needs the exact command even when ancillary fields won't fit.
-            let input = native.raw_input.as_ref().unwrap_or(&Value::Null);
-            let command = COMMAND
-                .iter()
-                .find_map(|key| input[*key].as_str())
-                .unwrap_or(self.title());
-            native.raw_input = Some(json!({"CommandLine": command}));
-            native.name = None;
-            detail = serde_json::to_string(&native).unwrap_or_default();
+        let mut command_unavailable = false;
+        if native.kind == acp::ToolKind::Execute
+            && (detail.len() > MAX_PROVIDER_DETAIL_BYTES || oversized_command_bytes.is_some())
+        {
+            if let Some(command) = command {
+                (detail, command_unavailable) = compact_execute(
+                    command.as_str(),
+                    input_text(input, WORKING_DIRECTORY),
+                    exit_code(&native),
+                );
+            } else {
+                detail =
+                    serde_json::to_string(&acp::ToolCall::new("", "").kind(acp::ToolKind::Execute))
+                        .unwrap_or_default();
+            }
         }
         if detail.len() > MAX_PROVIDER_DETAIL_BYTES {
             detail.clear();
         }
-        ProviderDetail::from_compacted_tool_input("tool_call", detail, size)
+        (
+            ProviderDetail::from_compacted_tool_input("tool_call", detail, size),
+            command_unavailable,
+        )
     }
 }
 
