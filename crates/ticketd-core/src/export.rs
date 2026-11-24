@@ -203,7 +203,7 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     ),
     (
         "chat_record_writes",
-        "bookkeeping that makes a repeated Chat write harmless",
+        "bookkeeping for crediting CLI writes to Chat Turns",
     ),
     ("device", "this installation's device code and counter"),
     ("document_fts", "a search index derived from Documents"),
@@ -298,6 +298,16 @@ const OMITTED_COLUMNS: &[(&str, &str, &str)] = &[
         "chats",
         "seen_through",
         "what this device's person has read",
+    ),
+    (
+        "chat_submission_attempts",
+        "recorded_position",
+        "bookkeeping for crediting CLI writes to Chat Turns",
+    ),
+    (
+        "chat_turns",
+        "ended_position",
+        "bookkeeping for crediting CLI writes to Chat Turns",
     ),
     ("documents", "body_heading", "derived from the body"),
     ("documents", "kind", "always 'document'"),
