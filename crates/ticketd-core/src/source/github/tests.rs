@@ -1197,79 +1197,112 @@ fn tracked_fetch_requires_permanent_redirect_to_the_corroborated_issue_path() {
 }
 
 #[test]
-fn stale_discovery_cannot_reimport_an_issue_after_an_overlapping_transfer() {
+fn stale_discovery_cannot_reimport_or_overwrite_an_issue_after_an_overlapping_transfer() {
     use crate::{Workspace, source::RefreshOptions};
 
-    let dir = tempfile::tempdir().unwrap();
-    let path = dir.path().join("workspace.sqlite3");
-    let mut workspace = Workspace::open(&path).unwrap();
-    let (fixture, engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
-    let discovery = format!("{DEFAULT_API_URL}/repos/o/one/issues?state=open&per_page=100");
-    let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
-    let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
-    fixture.respond(
-        &format!("{DEFAULT_API_URL}/user"),
-        ok(json!({"login": "alice"})),
-    );
-    for _ in 0..3 {
-        fixture.respond(&discovery, ok(json!([public_issue(77, 7, "o/one")])));
-    }
-    for part in ["comments", "events"] {
+    let initial_at = "2026-02-01T00:00:00Z";
+    let stale_at = "2026-02-02T00:00:00Z";
+    let fresh_at = "2026-02-03T00:00:00Z";
+    for stale_destination in [false, true] {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let mut workspace = Workspace::open(&path).unwrap();
+        let (fixture, engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+        let discovery = |repository: &str| {
+            format!("{DEFAULT_API_URL}/repos/o/{repository}/issues?state=open&per_page=100")
+        };
+        let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
+        let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
+        let original = public_issue(77, 7, "o/one");
+        let mut latest = public_issue(99, 12, "o/two");
+        latest["title"] = json!("Fresh observation");
+        fixture.respond(
+            &format!("{DEFAULT_API_URL}/user"),
+            ok(json!({"login": "alice"})),
+        );
         for _ in 0..2 {
-            fixture.respond(&format!("{old}/{part}?per_page=100"), ok(json!([])));
+            fixture.respond(&discovery("one"), ok(json!([original])));
+            fixture.respond(&discovery("two"), ok(json!([])));
+            for part in ["comments", "events"] {
+                fixture.respond(&format!("{old}/{part}?per_page=100"), ok(json!([])));
+            }
         }
-    }
-    workspace
-        .save_source(
-            &engine,
-            PROVIDER,
-            &config(json!({"repositories": ["o/one"]})),
-        )
-        .unwrap();
-    let initial = workspace
-        .refresh_sources(&engine, &RefreshOptions::default())
-        .unwrap();
-    let reference = initial.imported[0].clone();
-
-    let (transfer, transfer_engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
-    transfer.respond(&old, status(301, json!({}), &[("location", &new)]));
-    transfer.respond(&new, ok(public_issue(99, 12, "o/two")));
-    for part in ["comments", "events"] {
-        transfer.respond(&format!("{new}/{part}?per_page=100"), ok(json!([])));
-    }
-    let tracked = reference.clone();
-    *fixture.on_request.lock().unwrap() = Some(RequestHook {
-        url: discovery,
-        run: Box::new(move || {
-            let mut overlapping = Workspace::open(path).unwrap();
-            let report = overlapping
-                .refresh_sources(
-                    &transfer_engine,
-                    &RefreshOptions {
-                        ticket: Some(tracked.clone()),
-                        ..Default::default()
-                    },
-                )
-                .unwrap();
-            assert!(report.failures.is_empty());
-            assert_eq!(report.updated, [tracked]);
-        }),
-    });
-    let stale = workspace
-        .refresh_sources(&engine, &RefreshOptions::default())
-        .unwrap();
-    assert!(stale.failures.is_empty());
-    assert!(stale.imported.is_empty(), "{:#?}", stale.imported);
-    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
-    assert_eq!(
         workspace
-            .show_ticket(&reference)
-            .unwrap()
-            .source
-            .unwrap()
-            .id,
-        "99"
-    );
+            .save_source(
+                &engine,
+                PROVIDER,
+                &config(json!({"repositories": ["o/one", "o/two"]})),
+            )
+            .unwrap();
+        let initial = workspace
+            .refresh_sources(
+                &engine,
+                &RefreshOptions {
+                    now: Some(initial_at.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let reference = initial.imported[0].clone();
+
+        let (transfer, transfer_engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+        transfer.respond(&old, status(301, json!({}), &[("location", &new)]));
+        transfer.respond(&new, ok(latest.clone()));
+        for part in ["comments", "events"] {
+            transfer.respond(&format!("{new}/{part}?per_page=100"), ok(json!([])));
+        }
+
+        let overlap_at = if stale_destination {
+            let mut older = latest.clone();
+            older["title"] = json!("Stale observation");
+            fixture.respond(&discovery("one"), ok(json!([])));
+            fixture.respond(&discovery("two"), ok(json!([older])));
+            fixture.respond(&old, status(301, json!({}), &[("location", &new)]));
+            fixture.respond(&new, ok(older));
+            new
+        } else {
+            fixture.respond(&discovery("one"), ok(json!([original])));
+            fixture.respond(&discovery("two"), ok(json!([])));
+            discovery("one")
+        };
+        let tracked = reference.clone();
+        *fixture.on_request.lock().unwrap() = Some(RequestHook {
+            url: overlap_at,
+            run: Box::new(move || {
+                let mut overlapping = Workspace::open(path).unwrap();
+                let report = overlapping
+                    .refresh_sources(
+                        &transfer_engine,
+                        &RefreshOptions {
+                            ticket: Some(tracked.clone()),
+                            now: Some(fresh_at.into()),
+                        },
+                    )
+                    .unwrap();
+                assert!(report.failures.is_empty());
+                assert_eq!(report.updated, [tracked]);
+            }),
+        });
+        let stale = workspace
+            .refresh_sources(
+                &engine,
+                &RefreshOptions {
+                    now: Some(stale_at.into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(stale.failures.is_empty());
+        assert!(stale.imported.is_empty(), "{:#?}", stale.imported);
+        assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+        let ticket = workspace.show_ticket(&reference).unwrap();
+        let source = ticket.source.unwrap();
+        assert_eq!(source.id, "99");
+        assert_eq!(source.last_refreshed_at.as_deref(), Some(fresh_at));
+        assert_eq!(source.last_attempt_at.as_deref(), Some(fresh_at));
+        assert_eq!(source.ownership, crate::source::Ownership::External);
+        assert_eq!(ticket.title, "Fresh observation");
+    }
 }
 
 #[test]
