@@ -7,7 +7,7 @@
 use std::fmt;
 use std::io::{self, Read};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::{Mutex, PoisonError, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -29,6 +29,9 @@ const MESSAGE_LIMIT: usize = 2000;
 /// The most output of either stream a run keeps. A longer one is an error: the answers
 /// ticketd reads (credentials, names, settings) are far smaller.
 const OUTPUT_LIMIT: usize = 4 * 1024 * 1024;
+/// How long [`run`] waits for the output readers once the program has ended or been stopped,
+/// because a helper the program started may still hold the pipes.
+const PIPE_GRACE: Duration = Duration::from_secs(2);
 /// `aws login` arrived in this version of the CLI.
 const LOGIN_VERSION: (u64, u64) = (2, 32);
 
@@ -623,15 +626,18 @@ struct Output {
 
 /// Runs `program` with `args` and no input, and stops it after `timeout`.
 fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Output, AwsCliError> {
-    let mut child = Command::new(program)
+    let mut command = Command::new(program);
+    command
         .args(args)
         // A pager would wait for a terminal.
         .env("AWS_PAGER", "")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(AwsCliError::Io)?;
+        .stderr(Stdio::piped());
+    // Its own process group, so a timeout can end the helpers the program started too.
+    #[cfg(unix)]
+    std::os::unix::process::CommandExt::process_group(&mut command, 0);
+    let mut child = command.spawn().map_err(AwsCliError::Io)?;
     let stdout = drain(child.stdout.take());
     let stderr = drain(child.stderr.take());
 
@@ -640,18 +646,20 @@ fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Output, AwsCl
         match child.try_wait().map_err(AwsCliError::Io)? {
             Some(status) => break status,
             None if started.elapsed() >= timeout => {
-                // The readers are left to end when the pipes close.
-                let _ = child.kill();
-                let _ = child.wait();
+                end_process_tree(&mut child);
+                // The tree's end closes the pipes, so the readers finish at once. A helper that
+                // left the group may still hold them; the readers are then left to end when it
+                // does.
+                let _ = stdout.recv_timeout(PIPE_GRACE);
+                let _ = stderr.recv_timeout(PIPE_GRACE);
                 return Err(AwsCliError::TimedOut);
             }
             None => thread::sleep(Duration::from_millis(10)),
         }
     };
     // A helper the program started may still hold the pipes; do not wait for it forever.
-    let grace = Duration::from_secs(2);
-    let stdout = stdout.recv_timeout(grace).unwrap_or_default();
-    let stderr = stderr.recv_timeout(grace).unwrap_or_default();
+    let stdout = stdout.recv_timeout(PIPE_GRACE).unwrap_or_default();
+    let stderr = stderr.recv_timeout(PIPE_GRACE).unwrap_or_default();
     if stdout.overflowed || stderr.overflowed {
         return Err(AwsCliError::OutputTooLarge);
     }
@@ -660,6 +668,44 @@ fn run(program: &Path, args: &[&str], timeout: Duration) -> Result<Output, AwsCl
         stdout: stdout.text,
         stderr: stderr.text,
     })
+}
+
+/// Ends the program and the helpers it started (a `credential_process` command, for one),
+/// which would otherwise keep the output pipes open and the readers blocked.
+///
+/// Unix: [`run`] put the program in its own process group, whose id is the program's pid, and
+/// `kill` signals the whole group. `std` has no call for that, and the workspace forbids
+/// `unsafe`, so the shell's `kill` does it. A helper that makes its own session or group
+/// escapes this.
+///
+/// Windows: `taskkill /T` ends the program and its descendants, found through their parent
+/// links. That has to run before the program itself ends, and a helper whose parent already
+/// exited escapes it. A job object would be exact, but `std` has none and it needs `unsafe`.
+fn end_process_tree(child: &mut Child) {
+    let pid = child.id().to_string();
+    #[cfg(unix)]
+    let _ = Command::new("/bin/sh")
+        .args(["-c", "kill -s KILL -- \"-$0\"", &pid])
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    #[cfg(windows)]
+    {
+        // CREATE_NO_WINDOW: the desktop app has no console to show.
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let _ = std::os::windows::process::CommandExt::creation_flags(
+            Command::new("taskkill").args(["/PID", &pid, "/T", "/F"]),
+            CREATE_NO_WINDOW,
+        )
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status();
+    }
+    // The program itself, in case the above could not run.
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 /// What one stream held, and whether it held more than [`OUTPUT_LIMIT`].
