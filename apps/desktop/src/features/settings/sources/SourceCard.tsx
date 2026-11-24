@@ -72,6 +72,7 @@ type Account =
   | { status: "checking" }
   | { status: "signed_in"; account: string }
   | { status: "signed_out"; failure: FailureDescription }
+  | { status: "settings"; key: string; failure: SourceFailure }
   | { status: "failed"; failure: FailureDescription };
 
 /** The core says these when the account itself is the problem. */
@@ -402,9 +403,13 @@ export function SourceCard({
     !working &&
     (dirty || saved === null) &&
     (!adding || name.trim().length > 0);
+  const settingsProblem =
+    account?.status === "settings" && account.key === key
+      ? account.failure
+      : null;
   const fieldErrors = new Map<string, string[]>();
   const formErrors: string[] = [];
-  for (const { field, message } of failure?.fields ?? []) {
+  for (const { field, message } of (failure ?? settingsProblem)?.fields ?? []) {
     const visibleField =
       field && visible.find((setting) => setting.key === field);
     if (visibleField && visibleField.type !== "link") {
@@ -466,13 +471,18 @@ export function SourceCard({
       );
       next = { status: "signed_in", account: info.account };
     } catch (reason) {
-      const failure = describeFailure(
-        toSourceFailure(reason),
-        `check your ${connector.name} account`,
-      );
-      next = SIGNED_OUT.includes(failure.code)
-        ? { status: "signed_out", failure }
-        : { status: "failed", failure };
+      const sourceFailure = toSourceFailure(reason);
+      if (sourceFailure.code === "invalid_configuration") {
+        next = { status: "settings", key, failure: sourceFailure };
+      } else {
+        const failure = describeFailure(
+          sourceFailure,
+          `check your ${connector.name} account`,
+        );
+        next = SIGNED_OUT.includes(failure.code)
+          ? { status: "signed_out", failure }
+          : { status: "failed", failure };
+      }
     }
     if (request === checks.current) setAccount(next);
   }
@@ -686,6 +696,10 @@ export function SourceCard({
     <StatusLabel tone="attention">
       Not signed in to {connector.name}
     </StatusLabel>
+  ) : account.status === "settings" ? (
+    <StatusLabel tone={settingsProblem ? "attention" : "neutral"}>
+      {settingsProblem ? "Connection settings need attention" : "Check needed"}
+    </StatusLabel>
   ) : (
     <StatusLabel tone="attention">
       Couldn't check your {connector.name} account
@@ -702,9 +716,13 @@ export function SourceCard({
     code === "unauthenticated" || code === "not_signed_in";
   const accountSentence = credentialRecovery
     ? "Re-enter the credentials for this connection."
-    : accountFailure && needsSignIn(accountFailure.code)
-      ? signInStep(connector)
-      : accountFailure?.sentence;
+    : account?.status === "settings"
+      ? settingsProblem
+        ? "Update the settings below, then check again."
+        : "Check the updated settings to verify the connection."
+      : accountFailure && needsSignIn(accountFailure.code)
+        ? signInStep(connector)
+        : accountFailure?.sentence;
   const healthSentence = health?.error
     ? needsSignIn(health.error.code)
       ? signInStep(connector)

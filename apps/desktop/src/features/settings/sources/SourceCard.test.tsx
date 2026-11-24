@@ -451,6 +451,29 @@ test("the account is checked once on opening, apart from the saved rules", async
   expect(screen.queryByText(/rejected the credential/)).toBeNull();
 });
 
+test("a connection check that needs required settings shows the field to complete", async () => {
+  vi.mocked(sourcesClient.checkConnection).mockRejectedValueOnce(
+    new SourceFailure(
+      "invalid_configuration",
+      "settings are incomplete",
+      null,
+      [{ field: "repositories", message: "are required for this check" }],
+    ),
+  );
+  render(<SourceCard entry={entry} />);
+  await screen.findByText("Connection settings need attention");
+  expect(
+    screen.getByText("Repositories are required for this check"),
+  ).toBeTruthy();
+
+  await addRepository("o/r");
+  expect(
+    screen.queryByText("Repositories are required for this check"),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
+  await screen.findByText("Signed in as octo");
+});
+
 test("a hidden source page does not check the account until it is shown", async () => {
   const { rerender } = render(<SourceCard entry={entry} hidden />);
   await act(async () => {});
