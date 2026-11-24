@@ -134,23 +134,32 @@ pub struct AwsCli {
 }
 
 impl AwsCli {
-    /// Finds the program: `chosen` when the person picked one, otherwise the usual install
-    /// locations. A macOS app opened from Finder has no shell `PATH`, so that is not searched.
+    /// Finds the program: `chosen` when the person picked one that is still there, otherwise
+    /// the usual install locations. A macOS app opened from Finder has no shell `PATH`, so
+    /// that is not searched.
     pub fn locate(chosen: Option<&Path>) -> Result<Self, AwsCliError> {
         Self::locate_in(chosen, &usual_locations())
     }
 
-    /// [`Self::locate`] with the locations to look in given, for tests.
+    /// Checks the program a person just picked, and nothing else: a file that is not there,
+    /// or is not a recent AWS CLI, is an error rather than a reason to use another program.
+    pub fn locate_chosen(path: &Path) -> Result<Self, AwsCliError> {
+        Self::locate_in(Some(path), &[])
+    }
+
+    /// [`Self::locate`] with the locations to look in given, for tests. A chosen program that
+    /// has since been moved or removed is passed over for the locations.
     pub fn locate_in(chosen: Option<&Path>, locations: &[PathBuf]) -> Result<Self, AwsCliError> {
-        let program = match chosen {
-            Some(path) if path.is_file() => path.to_path_buf(),
-            Some(_) => return Err(AwsCliError::NotFound),
-            None => locations
-                .iter()
-                .map(|dir| dir.join(PROGRAM_NAME))
-                .find(|path| path.is_file())
-                .ok_or(AwsCliError::NotFound)?,
-        };
+        let program = chosen
+            .filter(|path| path.is_file())
+            .map(Path::to_path_buf)
+            .or_else(|| {
+                locations
+                    .iter()
+                    .map(|dir| dir.join(PROGRAM_NAME))
+                    .find(|path| path.is_file())
+            })
+            .ok_or(AwsCliError::NotFound)?;
         let mut cli = Self {
             program,
             timeout: COMMAND_TIMEOUT,
@@ -511,10 +520,17 @@ fn usual_locations() -> Vec<PathBuf> {
     if cfg!(windows) {
         vec![PathBuf::from(r"C:\Program Files\Amazon\AWSCLIV2")]
     } else {
-        ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin"]
-            .into_iter()
-            .map(PathBuf::from)
-            .collect()
+        // The last is where AWS's own macOS and Linux installers put the program; they also
+        // link it into /usr/local/bin, which a custom install location does not.
+        [
+            "/opt/homebrew/bin",
+            "/usr/local/bin",
+            "/usr/bin",
+            "/usr/local/aws-cli",
+        ]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect()
     }
 }
 

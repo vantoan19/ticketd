@@ -1,3 +1,4 @@
+import { open } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 import { invoke as bridge, structured } from "@/lib/api/bridge-failure";
 
@@ -50,6 +51,23 @@ export const s3Api = {
   /** `s3_profiles`: the AWS CLI's state and the profile names in its configuration. */
   async profiles(): Promise<S3Profiles> {
     return profilesSchema.parse(await invoke("s3_profiles"));
+  },
+
+  /**
+   * Asks for the `aws` program in a native file picker, then `s3_choose_cli`
+   * checks it and remembers it for this desktop. Resolves to `false` when the
+   * picker is cancelled; rejects with the CLI's own message when the file is
+   * not a recent AWS CLI.
+   */
+  async chooseCli(): Promise<boolean> {
+    const chosen = await open({
+      title: "Choose the aws program",
+      multiple: false,
+      directory: false,
+    });
+    if (typeof chosen !== "string") return false;
+    await invoke("s3_choose_cli", { path: chosen });
+    return true;
   },
 
   /** `s3_identity`: who the profile is signed in as, or that it needs signing in. */

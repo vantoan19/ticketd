@@ -2261,6 +2261,45 @@ fn a_binding_to_s3_reports_its_provider_and_location_in_status_and_binding() {
 }
 
 #[test]
+fn the_aws_program_chosen_before_connecting_is_kept_for_this_desktop_and_recorded_on_connect() {
+    let desks = desks();
+    let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();
+    assert_eq!(desk.sync_aws_cli_path().unwrap(), None);
+
+    // Chosen while nothing is connected yet.
+    desk.set_sync_aws_cli_path(Some("/Users/mina/.local/bin/aws"))
+        .unwrap();
+    assert_eq!(
+        desk.sync_aws_cli_path().unwrap().as_deref(),
+        Some("/Users/mina/.local/bin/aws")
+    );
+
+    // Connecting records it as the binding's program.
+    let mut bucket = s3("notes-bucket", "ticketd/", "work");
+    bucket.aws_cli_path = Some("/Users/mina/.local/bin/aws".into());
+    let status = desk.sync_connect_s3(&bucket, IDENTITY).unwrap();
+    assert_eq!(status.s3, Some(bucket));
+
+    // Choosing another program while connected changes the one sync runs.
+    desk.set_sync_aws_cli_path(Some("/opt/pipx/bin/aws"))
+        .unwrap();
+    let status = desk.sync_status().unwrap();
+    assert_eq!(
+        status.s3.unwrap().aws_cli_path.as_deref(),
+        Some("/opt/pipx/bin/aws")
+    );
+
+    // It is this desktop's, not the binding's: disconnecting keeps it.
+    desk.sync_disconnect().unwrap();
+    assert_eq!(
+        desk.sync_aws_cli_path().unwrap().as_deref(),
+        Some("/opt/pipx/bin/aws")
+    );
+    desk.set_sync_aws_cli_path(None).unwrap();
+    assert_eq!(desk.sync_aws_cli_path().unwrap(), None);
+}
+
+#[test]
 fn a_bucket_or_prefix_the_s3_storage_would_refuse_is_not_recorded_as_a_binding() {
     let desks = desks();
     let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();

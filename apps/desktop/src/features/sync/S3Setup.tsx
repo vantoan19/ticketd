@@ -451,6 +451,20 @@ function CliNotice({
   const [linkFailure, setLinkFailure] = useState<FailureDescription | null>(
     null,
   );
+  const [chooseFailure, setChooseFailure] = useState<FailureDescription | null>(
+    null,
+  );
+  function chooseProgram() {
+    setChooseFailure(null);
+    s3Api
+      .chooseCli()
+      .then((chosen) => {
+        if (chosen) onCheckAgain();
+      })
+      .catch((reason: unknown) =>
+        setChooseFailure(describeFailure(reason, "use that program")),
+      );
+  }
   return (
     <div className="sync-block">
       <Alert role="status" tone="attention">
@@ -467,6 +481,9 @@ function CliNotice({
         <AlertActions>
           <Button size="sm" onClick={onCheckAgain}>
             Check again
+          </Button>
+          <Button size="sm" variant="outline" onClick={chooseProgram}>
+            Choose the aws program…
           </Button>
           <Button
             size="sm"
@@ -485,7 +502,7 @@ function CliNotice({
           </Button>
         </AlertActions>
       </Alert>
-      <Failure>{failure ?? linkFailure}</Failure>
+      <Failure>{failure ?? chooseFailure ?? linkFailure}</Failure>
     </div>
   );
 }

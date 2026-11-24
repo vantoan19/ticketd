@@ -164,6 +164,35 @@ fn a_chosen_program_wins_over_the_usual_locations() {
 }
 
 #[test]
+fn a_chosen_program_that_is_gone_falls_back_to_the_usual_locations() {
+    let usual = StandIn::new();
+    let usual_path = usual.install();
+    let usual_dir = usual_path.parent().unwrap().to_path_buf();
+    let gone = TempDir::new().unwrap().path().join("moved/aws");
+    let cli = AwsCli::locate_in(Some(&gone), &[usual_dir]).unwrap();
+    assert_eq!(cli.program(), usual_path);
+}
+
+#[test]
+fn choosing_a_program_checks_that_one_and_never_a_usual_location() {
+    // A file that is not there is refused, not replaced by another program.
+    let gone = TempDir::new().unwrap().path().join("moved/aws");
+    let error = AwsCli::locate_chosen(&gone).unwrap_err();
+    assert!(matches!(error, AwsCliError::NotFound), "{error:?}");
+
+    let old = StandIn::new().once("--version", ok("aws-cli/2.9.0 Python/3.9.11\n"));
+    let error = AwsCli::locate_chosen(&old.install()).unwrap_err();
+    assert!(
+        matches!(error, AwsCliError::UnsupportedVersion { .. }),
+        "{error:?}"
+    );
+
+    let current = StandIn::new();
+    let path = current.install();
+    assert_eq!(AwsCli::locate_chosen(&path).unwrap().program(), path);
+}
+
+#[test]
 fn a_cli_older_than_2_13_or_version_1_is_too_old() {
     for output in [
         "aws-cli/2.12.8 Python/3.11.4 Linux/6.1 exe/x86_64.ubuntu.22 prompt/off\n",
