@@ -91,8 +91,12 @@ with its `provider` and `repository`, then preview again.
 Start by previewing the publication to inspect its exact payload and destination.
 
 ```sh
-ticketd source publish T-KQ1 --preview
+ticketd source publish T-KQ1 --connection CONNECTION --preview
+ticketd source publish T-KQ1 --connection CONNECTION --expect FINGERPRINT
 ```
+
+Choose the connection's `saved.id` from `ticketd source list`. You can omit
+`--connection` when exactly one saved connection can publish.
 
 The preview defaults to the ticket's Project remote when the saved source lists
 that repository on the matching host. Without a match, it selects the sole listed
@@ -112,6 +116,8 @@ documented `--attach`, `--issue`, or `--not-created` action only when the observ
 outcome supports it. Inspect `source resolve --help`; `--accept-different` attaches
 different external content and has different consequences. An unknown outcome is
 not evidence that creation failed, and changing retry identity could duplicate work.
+For an unbound GitHub attempt, confirm the original host and explicitly attach
+the verified issue using `--issue ISSUE --using-connection ID`.
 
 An interactive refresh reports extension progress on stderr. Press Ctrl+C to
 cancel it. A canceled refresh exits 130.

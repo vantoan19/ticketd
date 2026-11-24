@@ -518,6 +518,7 @@ function AppContent() {
     revision,
     refresh,
     sourceHealth,
+    readSourceHealth,
     sourceEntries,
     sourceConnectionsChanged,
     sourceRefresh,
@@ -929,6 +930,7 @@ function AppContent() {
                       );
                     },
                     refreshAll: () => refreshSources(),
+                    readHealth: readSourceHealth,
                   }}
                 >
                   <SettingsStateProvider

@@ -76,6 +76,18 @@ fn saved_discovery_repositories_report_their_routed_project_on_the_source_host()
     assert_eq!(project.name, "Matching checkout");
     assert_eq!(routes[1].repository, "other/repo");
     assert!(routes[1].project.is_none());
+
+    let missing = f
+        .workspace
+        .source_repository_routes(&Engine::new(), "fake")
+        .unwrap();
+    assert_eq!(missing[0].repository, "o/r");
+    assert_eq!(missing[1].repository, "other/repo");
+    assert!(
+        missing
+            .iter()
+            .all(|route| route.project_remote.is_none() && route.project.is_none())
+    );
 }
 
 #[test]
@@ -1706,16 +1718,16 @@ fn comments_and_events_are_persisted_chronologically_and_repeated_refresh_adds_n
         Conversation {
             // Deliberately out of order and repeated: the source's paging is not trusted.
             comments: vec![
-                comment("c2", "bob", "second", "2026-01-03T00:00:00Z"),
-                comment("c1", "alice", "first", "2026-01-02T00:00:00Z"),
-                comment("c1", "alice", "first", "2026-01-02T00:00:00Z"),
+                comment("c2", "bob", "second", "2026-01-02T09:00:00-05:00"),
+                comment("c1", "alice", "first", "2026-01-02T13:30:00Z"),
+                comment("c1", "alice", "first", "2026-01-02T13:30:00Z"),
             ],
             events: vec![
                 event(
                     "e2",
                     ExternalEventKind::Closed(StateCategory::Completed),
                     "bob",
-                    "2026-01-03T00:00:00Z",
+                    "2026-01-02T10:00:00-05:00",
                 ),
                 event(
                     "e1",
@@ -2382,7 +2394,9 @@ fn only_the_latest_closure_borrows_the_current_issues_reason() {
     });
     f.refresh_at("2026-02-03T00:00:00Z");
     let events = f.workspace.source_conversation("T-KQ1").unwrap();
-    assert!(matches!(&events[0], ConversationEntry::Event {event, ..} if event == "closed"));
+    assert!(
+        matches!(&events[0], ConversationEntry::Event {event, state_category: Some(StateCategory::Unknown), ..} if event == "closed")
+    );
     assert!(
         matches!(&events[2], ConversationEntry::Event {event, state_category: Some(StateCategory::Completed), ..} if event == "closed")
     );

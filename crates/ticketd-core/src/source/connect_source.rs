@@ -211,8 +211,11 @@ impl Workspace {
         let scoped = scoped.with_workflow_credentials(&effect.provider, &saved.saved.config)?;
         let config = only_repository(saved.saved.config.clone(), effect.repository);
         let config = scoped.validate_configuration(&effect.provider, &config)?;
-        let (preview, _, verified) =
-            self.preview_source_with_config(&scoped, &effect.provider, &config)?;
+        let (preview, _, verified) = self.preview_source_with_config(
+            &scoped,
+            &effect.provider,
+            &saved.account_check_configuration(&config),
+        )?;
         saved.verify_account(&verified)?;
         Ok(Some(ConnectSourceMatchCount {
             matched: preview.matched,
@@ -254,14 +257,20 @@ impl Workspace {
                     ))?
                     .push(Value::String(initial.repository.clone()));
                 let config = scoped.validate_configuration(&initial.provider, &config)?;
-                let (preview, derived, verified) =
-                    self.preview_source_with_config(&scoped, &initial.provider, &config)?;
+                let (preview, derived, verified) = self.preview_source_with_config(
+                    &scoped,
+                    &initial.provider,
+                    &saved.account_check_configuration(&config),
+                )?;
                 saved.verify_account(&verified)?;
                 if !preview.complete {
                     // Earlier repositories can fill the bounded preview before it reads this one.
                     let additional = only_repository(config.clone(), initial.repository);
-                    let (_, _, checked) =
-                        self.preview_source_with_config(&scoped, &initial.provider, &additional)?;
+                    let (_, _, checked) = self.preview_source_with_config(
+                        &scoped,
+                        &initial.provider,
+                        &saved.account_check_configuration(&additional),
+                    )?;
                     saved.verify_account(&checked)?;
                 }
                 Some(DiscoveryUpdate {

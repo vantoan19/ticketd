@@ -295,4 +295,29 @@ mod tests {
         request["params"]["pid"] = json!(u64::from(u32::MAX) + 1);
         assert!(serde_json::from_value::<Request<'_>>(request).is_err());
     }
+
+    #[test]
+    fn the_future_event_schema_does_not_accept_malformed_known_events() {
+        use crate::ExternalEventKind;
+
+        let schema = serde_json::to_value(schema()).unwrap();
+        let choices = schema["$defs"]["ExternalEventKind"]["oneOf"]
+            .as_array()
+            .unwrap();
+        let unknown = choices.last().unwrap();
+        assert_eq!(unknown["required"], json!(["event"]));
+        let excluded = unknown["properties"]["event"]["not"]["enum"]
+            .as_array()
+            .unwrap();
+        for known in &choices[..choices.len() - 1] {
+            assert!(excluded.contains(&known["properties"]["event"]["const"]));
+        }
+        assert!(!excluded.contains(&json!("review_requested")));
+        assert!(serde_json::from_value::<ExternalEventKind>(json!({"event": "closed"})).is_err());
+        assert_eq!(
+            serde_json::from_value::<ExternalEventKind>(json!({"event": "review_requested"}))
+                .unwrap(),
+            ExternalEventKind::Unsupported
+        );
+    }
 }

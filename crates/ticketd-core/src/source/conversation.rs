@@ -123,8 +123,14 @@ fn entries_of(conversation: &Conversation) -> Vec<ConversationEntry> {
         }))
         .collect();
     // Stable: a comment stays ahead of an event written in the same second.
-    entries.sort_by(|a, b| created_at(a).cmp(created_at(b)));
+    entries.sort_by_cached_key(|entry| chronological_key(created_at(entry)));
     entries
+}
+
+pub(super) fn chronological_key(at: &str) -> (bool, Option<chrono::DateTime<chrono::FixedOffset>>) {
+    // Keep entries with unknown times visible after all dated entries.
+    let time = chrono::DateTime::parse_from_rfc3339(at).ok();
+    (time.is_none(), time)
 }
 
 fn created_at(entry: &ConversationEntry) -> &str {

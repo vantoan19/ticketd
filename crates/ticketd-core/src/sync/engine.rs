@@ -352,15 +352,99 @@ fn withdraw_oversized(connection: &Connection, kind: SyncKind, id: &str) -> Resu
     Ok(())
 }
 
-/// Detect a conflicting site for this external identity, or return its other
-/// holder if it can be treated as the same issue.
-fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<String>, Error> {
-    let field = |name: &str| match record.fields.get(name) {
+/// Private metadata on a notice holding a file back from upload.
+#[derive(Deserialize, Serialize)]
+struct CollisionHolder {
+    ticket_id: String,
+    provider: String,
+    external_id: String,
+    url: String,
+}
+
+impl CollisionHolder {
+    fn from_record(record: &SyncRecord) -> Option<Self> {
+        Some(Self {
+            ticket_id: record.id.clone(),
+            provider: source_field(record, "source_provider")?.to_owned(),
+            external_id: source_field(record, "source_external_id")?.to_owned(),
+            url: source_field(record, "source_url")?.to_owned(),
+        })
+    }
+
+    fn still_blocks(&self, connection: &Connection) -> Result<bool, Error> {
+        let current_url: Option<String> = connection
+            .query_row(
+                "SELECT url FROM external_identities WHERE ticket_id = ?1 AND provider = ?2 AND external_id = ?3",
+                params![self.ticket_id, self.provider, self.external_id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(current_url.is_some_and(|url| {
+            crate::source::legacy_issue_origin_matches(&self.provider, &self.url, &url)
+        }))
+    }
+}
+
+fn source_field<'a>(record: &'a SyncRecord, name: &str) -> Option<&'a str> {
+    match record.fields.get(name) {
         Some(SyncValue::Text(text)) => Some(text.as_str()),
         _ => None,
+    }
+}
+
+/// Read an unchanged collision-held file again when its local blocker changed.
+fn needs_download(
+    connection: &Connection,
+    kind: SyncKind,
+    file: &RemoteFile,
+) -> Result<bool, Error> {
+    let mut statement = connection.prepare_cached(
+        "SELECT f.version, n.cause IS NOT NULL, n.notice -> '$.collision_holder'
+         FROM sync_files f LEFT JOIN sync_notices n ON n.cause = ?3
+         WHERE f.kind = ?1 AND f.id = ?2",
+    )?;
+    let saved: Option<(Option<String>, bool, Option<String>)> = statement
+        .query_row(
+            params![
+                name(kind),
+                file.key.id,
+                identity_collision_cause(kind, &file.key.id)
+            ],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .optional()?;
+    let Some((Some(version), collision, holder)) = saved else {
+        return Ok(true);
     };
-    let (Some(provider), Some(external)) = (field("source_provider"), field("source_external_id"))
-    else {
+    if version != file.version {
+        return Ok(true);
+    }
+    if !collision {
+        return Ok(false);
+    }
+    // An old notice with no holder metadata gets one retry to record its holder.
+    let Some(holder) = holder else {
+        return Ok(true);
+    };
+    match serde_json::from_str::<Option<CollisionHolder>>(&holder) {
+        Ok(Some(holder)) => Ok(!holder.still_blocks(connection)?),
+        // A retry failed validation before it could check the identity.
+        Ok(None) => Ok(false),
+        Err(_) => Ok(true),
+    }
+}
+
+/// Detect a conflicting site for this external identity, or return its other
+/// holder if it can be treated as the same issue.
+fn source_holder(
+    connection: &Connection,
+    record: &SyncRecord,
+    collision: &mut Option<CollisionHolder>,
+) -> Result<Option<String>, Error> {
+    let (Some(provider), Some(external)) = (
+        source_field(record, "source_provider"),
+        source_field(record, "source_external_id"),
+    ) else {
         return Ok(None);
     };
     let holder: Option<(String, String)> = connection
@@ -373,9 +457,15 @@ fn source_holder(connection: &Connection, record: &SyncRecord) -> Result<Option<
     let Some((ticket, stored_url)) = holder else {
         return Ok(None);
     };
-    if let Some(incoming_url) = field("source_url")
+    if let Some(incoming_url) = source_field(record, "source_url")
         && !crate::source::legacy_issue_origin_matches(provider, &stored_url, incoming_url)
     {
+        *collision = Some(CollisionHolder {
+            ticket_id: ticket,
+            provider: provider.to_owned(),
+            external_id: external.to_owned(),
+            url: stored_url,
+        });
         return Err(Error::SyncFileIdentityCollision);
     }
     Ok((ticket != record.id).then_some(ticket))
@@ -621,7 +711,7 @@ pub(crate) fn migrate_source_state_conflicts(connection: &Connection) -> Result<
         {
             continue;
         }
-        match source_holder(connection, &remote) {
+        match source_holder(connection, &remote, &mut None) {
             Ok(_) => {}
             Err(Error::SyncFileIdentityCollision) => continue,
             Err(error) => return Err(error),
@@ -1086,16 +1176,7 @@ impl Workspace {
         files.sort_by(|a, b| (a.0, &a.1.key.id).cmp(&(b.0, &b.1.key.id)));
         for (kind, file) in files {
             let id = file.key.id.as_str();
-            let seen: Option<String> = self
-                .connection
-                .query_row(
-                    "SELECT version FROM sync_files WHERE kind = ?1 AND id = ?2",
-                    params![name(kind), id],
-                    |row| row.get(0),
-                )
-                .optional()?
-                .flatten();
-            if seen.as_deref() == Some(&file.version) {
+            if !needs_download(&self.connection, kind, &file)? {
                 continue;
             }
             if file.size > MAX_FILE_BYTES {
@@ -1103,7 +1184,7 @@ impl Workspace {
                     "the file is larger than {} MiB, the most a record's file may be",
                     MAX_FILE_BYTES / (1024 * 1024)
                 );
-                self.skip(kind, &file, &Error::SyncFile(reason), false)?;
+                self.skip(kind, &file, &Error::SyncFile(reason), false, None)?;
                 continue;
             }
             let mut bytes = Vec::new();
@@ -1114,8 +1195,11 @@ impl Workspace {
                 Err(error) => return Err(error.into()),
             }
             let text = String::from_utf8(bytes);
+            let mut collision = None;
             let merged = match &text {
-                Ok(text) => self.merge_incoming(kind, id, &file, text, &mut arrived),
+                Ok(text) => {
+                    self.merge_incoming(kind, id, &file, text, &mut arrived, &mut collision)
+                }
                 Err(_) => Err(Error::SyncFile("the file is not UTF-8 text".into())),
             };
             match merged {
@@ -1127,7 +1211,7 @@ impl Workspace {
                 Err(error) if is_file_fault(&error) => {
                     let newer = matches!(error, Error::SyncFile(_))
                         && text.as_deref().is_ok_and(from_newer_version);
-                    self.skip(kind, &file, &error, newer)?;
+                    self.skip(kind, &file, &error, newer, collision.as_ref())?;
                 }
                 Err(error) => return Err(error),
             }
@@ -1230,6 +1314,7 @@ impl Workspace {
         file: &RemoteFile,
         error: &Error,
         newer: bool,
+        collision: Option<&CollisionHolder>,
     ) -> Result<(), Error> {
         let id = file.key.id.as_str();
         let transaction = self.connection.savepoint()?;
@@ -1256,6 +1341,14 @@ impl Workspace {
                 reason,
             },
         )?;
+        // A collision hold lasts until the file can be merged. If the retry
+        // could not validate it, wait for a new remote version.
+        let holder = serde_json::to_string(&collision)
+            .map_err(|error| Error::SyncFile(error.to_string()))?;
+        transaction.execute(
+            "UPDATE sync_notices SET notice = json_set(notice, '$.collision_holder', json(?2)) WHERE cause = ?1",
+            params![identity_collision_cause(kind, id), holder],
+        )?;
         transaction.commit()?;
         Ok(())
     }
@@ -1269,6 +1362,7 @@ impl Workspace {
         from: &RemoteFile,
         file: &str,
         arrived: &mut BTreeSet<String>,
+        collision: &mut Option<CollisionHolder>,
     ) -> Result<usize, Error> {
         let (mut remote, legacy_github_id) = SyncRecord::parse_with_legacy_github_id(file)?;
         if remote.kind != kind || remote.id != id {
@@ -1282,7 +1376,7 @@ impl Workspace {
             resolve_ticket_references(&workspace.connection, &mut remote)?;
             // Check the incoming URL before merge can substitute the local
             // one or preserve the conflicting URL for later review.
-            source_holder(&workspace.connection, &remote)?;
+            source_holder(&workspace.connection, &remote, collision)?;
             let mut stored = stored(&workspace.connection, kind, id)?;
             stored.newer = false;
             if stored.file.as_deref().is_some_and(|known| known != from.file_id)
@@ -1295,6 +1389,7 @@ impl Workspace {
                     if legacy_github_id.as_deref().is_some_and(|number| {
                         !legacy_github_site_matches(&local, &remote, number)
                     }) {
+                        *collision = CollisionHolder::from_record(&local);
                         return Err(Error::SyncFileIdentityCollision);
                     }
                     merge_records(stored.base.as_ref(), &local, &remote)
@@ -1311,7 +1406,7 @@ impl Workspace {
             // of it without the source.
             let mut merged = merged;
             let mut demoted = None;
-            if let Some(holder) = source_holder(&workspace.connection, &merged)? {
+            if let Some(holder) = source_holder(&workspace.connection, &merged, collision)? {
                 let held: String = workspace.connection.query_row(
                     "SELECT origin FROM external_identities WHERE ticket_id = ?1",
                     [&holder],
@@ -1607,6 +1702,7 @@ impl Workspace {
                             &file,
                             &text,
                             &mut BTreeSet::new(),
+                            &mut None,
                         ) {
                             Ok(_) => {}
                             Err(error) if is_file_fault(&error) => {}

@@ -516,10 +516,15 @@ export function SourceCard({
     stopping: boolean;
     progress: string;
   } | null>(null);
-  const [syncCanceled, setSyncCanceled] = useState(false);
+  const [canceledSync, setCanceledSync] = useState<{
+    lastRefreshed: string | null;
+  } | null>(null);
+  const syncCanceled =
+    canceledSync !== null &&
+    canceledSync.lastRefreshed === (lastRefreshed ?? null);
   async function refreshConnection(connection: string) {
     const id = crypto.randomUUID();
-    setSyncCanceled(false);
+    setCanceledSync(null);
     setActiveSync({ id, ready: false, stopping: false, progress: "" });
     try {
       const report = await sourcesClient.refresh(undefined, connection, retry, {
@@ -539,7 +544,7 @@ export function SourceCard({
       if (report.failures.length > 0) throw report.failures[0];
     } catch (reason) {
       if (toSourceFailure(reason).code === "refresh_canceled") {
-        setSyncCanceled(true);
+        setCanceledSync({ lastRefreshed: lastRefreshed ?? null });
       } else {
         setNotice(describeFailure(reason, "sync this connection").sentence);
       }
@@ -939,7 +944,9 @@ export function SourceCard({
           onSaved={(updated) => {
             setSignIn(false);
             setSaved(updated);
+            checks.current += 1;
             setAccount({ status: "signed_in", account: updated.account });
+            void schedule.readHealth?.();
           }}
         />
       )}

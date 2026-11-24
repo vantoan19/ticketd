@@ -67,6 +67,7 @@ fn a_backup_saved_by_older_code_validates_restores_and_migrates_to_the_current_v
 fn restoring_older_source_workspaces_keeps_local_binding_and_credential_reference() {
     use ticketd_core::source::{ActionKind, AttemptState, Engine};
 
+    const DEVICE_REFERENCE: &str = "73f84c02-9d14-41d9-930f-bb8504b08a92";
     for version in [94, 95] {
         let directory = tempfile::tempdir().unwrap();
         let current = directory.path().join("workspace.sqlite3");
@@ -82,10 +83,12 @@ fn restoring_older_source_workspaces_keeps_local_binding_and_credential_referenc
                 VALUES ('github', 'Saved on this device', 'github', '', '{\"repositories\":[\"owner/repo\"]}',
                         'device-account', 'device-account', 2, '2026-01-01T00:00:00Z', 'old-revision');
              INSERT INTO publication_attempts
-                (id, ticket_id, provider, destination, destination_host, title, body, status, started_at, lease_expires_at, updated_at)
+                (id, ticket_id, provider, destination, destination_host, title, body, status, started_at, lease_expires_at, updated_at,
+                 external_id, locator, display, url)
                 VALUES ('legacy-attempt', 'legacy-publication', 'github', 'owner/repo', 'github.com',
                         'Legacy publication', 'Exact payload', 'unresolved',
-                        '2026-01-01T00:01:00Z', '2026-01-01T00:03:00Z', '2026-01-01T00:01:05Z');
+                        '2026-01-01T00:01:00Z', '2026-01-01T00:03:00Z', '2026-01-01T00:01:05Z',
+                        '42', 'owner/repo#7', 'owner/repo#7', 'https://github.com/owner/repo/issues/7');
              INSERT INTO publication_connections (attempt_id, connection_id)
                 VALUES ('legacy-attempt', 'github');",
         ).unwrap();
@@ -99,13 +102,40 @@ fn restoring_older_source_workspaces_keeps_local_binding_and_credential_referenc
         drop(database);
         std::fs::copy(&current, &backup).unwrap();
 
+        let database = Connection::open(&current).unwrap();
+        database
+            .execute("UPDATE tickets SET title = 'Title before restore'", [])
+            .unwrap();
+        if version == 95 {
+            database
+                .execute(
+                    "UPDATE source_secret_references SET reference = ?1 WHERE field = 'fixture_secret'",
+                    [DEVICE_REFERENCE],
+                )
+                .unwrap();
+        }
+        drop(database);
+
         Workspace::restore(&current, &backup).unwrap();
-        let restored = Workspace::open(current).unwrap();
+        let restored = Workspace::open(&current).unwrap();
+        assert_eq!(
+            restored.show_ticket("T-QZ92").unwrap().title,
+            "Legacy publication"
+        );
         let connection = restored.source_connection("github").unwrap();
         assert_eq!(connection.name, "Saved on this device");
         assert_eq!(connection.account, "device-account");
         if version == 95 {
             assert_eq!(connection.secret_fields, ["fixture_secret"]);
+            let reference: String = Connection::open(&current)
+                .unwrap()
+                .query_row(
+                    "SELECT reference FROM source_secret_references WHERE connection_id = 'github' AND field = 'fixture_secret'",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(reference, DEVICE_REFERENCE);
         }
         let review = restored
             .review_publication(&Engine::builtin(), "T-QZ92", false)
@@ -210,7 +240,7 @@ fn opening_a_legacy_workspace_identifies_github_repositories_without_refreshing(
             [],
         )
         .unwrap();
-    connection.execute("INSERT INTO external_duplicate_targets (ticket_id, provider, external_id, locator, display) VALUES ('legacy-1', 'github', '8', 'acme/site#43', 'acme/site#43')", []).unwrap();
+    connection.execute("INSERT INTO external_duplicate_targets (ticket_id, provider, external_id, locator, display, url) VALUES ('legacy-1', 'github', '8', 'acme/site#43', 'acme/site#43', 'https://git.example.test:8443/acme/site/issues/43')", []).unwrap();
     drop(connection);
 
     let workspace = Workspace::open(&path).unwrap();
@@ -230,13 +260,13 @@ fn opening_a_legacy_workspace_identifies_github_repositories_without_refreshing(
         ids,
         [
             "1",
-            "@git.example.test:2",
+            "@git.example.test:8443:2",
             "@:3",
             "@:4",
             "@:5",
             "@:6",
             "7",
-            "@git.example.test:8"
+            "@git.example.test:8443:8"
         ]
     );
     let duplicate = workspace.show_ticket("T-KQ2").unwrap();
@@ -293,7 +323,7 @@ const LEGACY_ISSUES: [(&str, &str, &str, Option<&str>); 8] = [
     (
         "github",
         "acme/site#43",
-        "https://git.example.test/acme/site/issues/43",
+        "https://git.example.test:8443/acme/site/issues/43",
         Some("git.example.test/acme/site"),
     ),
 ];

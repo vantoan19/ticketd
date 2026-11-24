@@ -445,8 +445,10 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   team name and key. On the CLI, pass the team UUID from `--preview` as
   `--destination` when more than one team is configured. The Linear key must
   allow issue creation.
-- Recovery of an unresolved GitHub publication uses the original connection
-  and host. [Recover an unresolved publication](cli.md#recover-an-unresolved-publication)
+- Recovery of an unresolved GitHub publication uses the original host. If the
+  original connection is unavailable, the CLI can attach a verified issue
+  through an explicitly selected connection on that host.
+  [Recover an unresolved publication](cli.md#recover-an-unresolved-publication)
 - If an issue disappears or becomes unavailable, ticketd keeps its status, content,
   and local work and shows a warning. **Take ownership** makes it local and stops
   synchronization.

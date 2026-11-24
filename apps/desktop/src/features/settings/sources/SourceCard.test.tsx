@@ -24,6 +24,7 @@ import {
   sourcesClient,
   type DiscoveryPreview,
   type SourceEntry,
+  type SourceStatus,
 } from "@/lib/api/sources";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -1058,42 +1059,81 @@ test("Needs sign-in opens only active credential fields and saves a replacement"
     saved_at: "2026-02-01T00:00:00Z",
     secret_fields: ["api_key"],
   };
-  vi.mocked(sourcesClient.checkConnection).mockRejectedValue(
-    new SourceFailure("unauthenticated", "The tracker rejected the key"),
+  let rejectCheck: (error: SourceFailure) => void = () => {};
+  vi.mocked(sourcesClient.checkConnection).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectCheck = reject;
+      }),
   );
   vi.mocked(sourcesClient.signIn).mockResolvedValue({
     ...saved,
     session_secret_fields: ["api_key"],
   });
-  render(
-    <SourceCard
-      entry={{
-        ...entry,
-        connector: {
-          ...entry.connector,
-          schema: {
-            fields: [
-              ...entry.connector.schema.fields,
-              {
-                key: "api_key",
-                label: "API key",
-                required: true,
-                type: "secret",
-              },
-              {
-                key: "conditional_key",
-                label: "Conditional credential",
-                required: false,
-                type: "secret",
-                show_if: "assignee",
-              },
-            ],
+  const failedHealth: SourceStatus = {
+    provider: saved.provider,
+    connection_id: saved.id,
+    health: "unavailable",
+    last_attempt_at: null,
+    last_refreshed_at: null,
+    error: {
+      code: "unauthenticated",
+      message: "The tracker rejected the key",
+    },
+    failing_since: null,
+    retry_after: null,
+    unavailable_tickets: 0,
+    partial_message: null,
+  };
+  const readHealth = vi.fn(async () => {});
+  function Fixture() {
+    const [health, setHealth] = useState(failedHealth);
+    return (
+      <SourceActivityContext.Provider
+        value={{
+          refreshing: false,
+          sources: [health],
+          entries: null,
+          intervalSecs: 300,
+          openSettings: () => {},
+          refreshAll: async () => {},
+          readHealth: async () => {
+            await readHealth();
+            setHealth({ ...failedHealth, health: "waiting", error: null });
           },
-        },
-        saved,
-      }}
-    />,
-  );
+        }}
+      >
+        <SourceCard
+          entry={{
+            ...entry,
+            connector: {
+              ...entry.connector,
+              schema: {
+                fields: [
+                  ...entry.connector.schema.fields,
+                  {
+                    key: "api_key",
+                    label: "API key",
+                    required: true,
+                    type: "secret",
+                  },
+                  {
+                    key: "conditional_key",
+                    label: "Conditional credential",
+                    required: false,
+                    type: "secret",
+                    show_if: "assignee",
+                  },
+                ],
+              },
+            },
+            saved,
+          }}
+        />
+      </SourceActivityContext.Provider>
+    );
+  }
+  render(<Fixture />);
   await screen.findByText("Needs sign-in");
   fireEvent.click(screen.getByRole("button", { name: "Re-enter credentials" }));
   const dialog = within(
@@ -1110,11 +1150,22 @@ test("Needs sign-in opens only active credential fields and saves a replacement"
   });
   fireEvent.click(dialog.getByRole("button", { name: "Save credentials" }));
   await screen.findByText(/credentials last until ticketd closes/);
+  expect(readHealth).toHaveBeenCalledOnce();
+  await screen.findByText("Signed in as octo");
+  await act(async () => {
+    rejectCheck(
+      new SourceFailure("unauthenticated", "The prior token expired"),
+    );
+  });
   expect(sourcesClient.signIn).toHaveBeenCalledWith("credential-example", {
     api_key: "synthetic replacing credential",
   });
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.queryByText("Needs sign-in")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Re-enter credentials" }),
+  ).toBeNull();
+  expect(screen.getByText("Signed in as octo")).toBeTruthy();
 });
 
 test("discovery uses the core's imported references and Discard restores saved rules", async () => {
@@ -1293,7 +1344,7 @@ test("the Sync section shows the saved connection's refresh command with a copy 
   expect(within(sync).getByRole("button", { name: "Sync now" })).toBeTruthy();
 });
 
-test("Sync now reports progress and cancels its own refresh", async () => {
+test("Sync now reports progress, cancels its run, and shows the next successful sync", async () => {
   let rejectRefresh: (error: SourceFailure) => void = () => {};
   vi.mocked(sourcesClient.refresh).mockImplementation(
     (_ticket, _connection, _retry, control) =>
@@ -1304,21 +1355,37 @@ test("Sync now reports progress and cancels its own refresh", async () => {
       }),
   );
   vi.mocked(sourcesClient.cancelRefresh).mockResolvedValue(true);
-  render(
-    <SourceCard
-      entry={{
-        ...entry,
-        connector: { ...entry.connector, provider: "example", name: "Example" },
-        saved: {
-          id: "example-2",
-          provider: "example",
-          config: { repositories: ["o/r"] },
-          account: "octo",
-          saved_at: "2026-02-01T00:00:00Z",
-        },
+  const sourceCard = (sources: SourceStatus[]) => (
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources,
+        entries: null,
+        intervalSecs: 300,
+        openSettings: () => {},
+        refreshAll: async () => {},
       }}
-    />,
+    >
+      <SourceCard
+        entry={{
+          ...entry,
+          connector: {
+            ...entry.connector,
+            provider: "example",
+            name: "Example",
+          },
+          saved: {
+            id: "example-2",
+            provider: "example",
+            config: { repositories: ["o/r"] },
+            account: "octo",
+            saved_at: "2026-02-01T00:00:00Z",
+          },
+        }}
+      />
+    </SourceActivityContext.Provider>
   );
+  const view = render(sourceCard([]));
   const sync = within(screen.getByRole("region", { name: "Sync" }));
   fireEvent.click(sync.getByRole("button", { name: "Sync now" }));
   expect(await sync.findByText(/12 of 30/)).toBeTruthy();
@@ -1333,6 +1400,24 @@ test("Sync now reports progress and cancels its own refresh", async () => {
   });
   expect(sync.getByText("Sync canceled")).toBeTruthy();
   expect(sync.getByRole("button", { name: "Sync now" })).toBeTruthy();
+  view.rerender(
+    sourceCard([
+      {
+        provider: "example",
+        connection_id: "example-2",
+        health: "synced",
+        last_attempt_at: new Date().toISOString(),
+        last_refreshed_at: new Date().toISOString(),
+        error: null,
+        failing_since: null,
+        retry_after: null,
+        unavailable_tickets: 0,
+        partial_message: null,
+      },
+    ]),
+  );
+  expect(sync.getByText(/^Synced/)).toBeTruthy();
+  expect(sync.queryByText("Sync canceled")).toBeNull();
 });
 
 test("a failed preview is said in the save bar, beside its actions, with no summary in the form", async () => {
@@ -1387,13 +1472,68 @@ test("Sources adds a named connection and renames it without changing its ID", a
     repositories: ["o/r"],
   });
   fireEvent.click(await screen.findByRole("button", { name: "Rename Work" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("textbox", { name: "Connection name" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  const rename = screen.getByRole("button", { name: "Rename Work" });
+  expect(document.activeElement).toBe(rename);
+  fireEvent.click(rename);
   fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
     target: { value: "Work issues" },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save name" }));
   await screen.findByText("Work issues");
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Rename Work issues" }),
+  );
   expect(sourcesClient.rename).toHaveBeenCalledWith("github-2", "Work issues");
   expect(screen.getByText(/github-2/)).toBeTruthy();
+});
+
+test("a pending rename preserves current availability and yields to the confirmed catalog", async () => {
+  const saved = {
+    id: "github-2",
+    name: "Work",
+    provider: "github",
+    account: "octo",
+    config: {},
+    saved_at: "2026-01-01T00:00:00Z",
+  };
+  const renamed = { ...saved, name: "Work issues" };
+  vi.mocked(sourcesClient.rename).mockResolvedValue(renamed);
+  const page = (source: SourceEntry) => (
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [],
+        entries: [source],
+        intervalSecs: null,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SourcesPage onOpen={vi.fn()} />
+    </SourceActivityContext.Provider>
+  );
+  const view = render(page({ ...entry, saved }));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Work" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: renamed.name },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  await screen.findByText("Work issues");
+  view.rerender(page({ ...entry, saved, unavailable: true }));
+  expect(screen.getByText("Work issues")).toBeTruthy();
+  expect(screen.getByText("Extension unavailable")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Configure" })).toBeNull();
+
+  view.rerender(page({ ...entry, saved: renamed, unavailable: true }));
+  view.rerender(
+    page({ ...entry, saved: { ...renamed, name: "Updated elsewhere" } }),
+  );
+  expect(screen.getByText("Updated elsewhere")).toBeTruthy();
+  expect(screen.queryByText("Work issues")).toBeNull();
 });
 
 test("removing a connection needs confirmation and removes only that connection", async () => {

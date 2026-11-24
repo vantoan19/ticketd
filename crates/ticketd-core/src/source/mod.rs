@@ -57,7 +57,10 @@ pub use extension::{
     ExtensionConsent, ExtensionRegistry, PreparedExtension, RegisteredExtension, contract_schema,
 };
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
-pub(crate) use github::legacy_issue_origin_matches;
+pub(crate) use github::{
+    issue_id_site as github_issue_id_site, issue_site_from_url as github_issue_site_from_url,
+    legacy_issue_origin_matches, unverified_issue_id as unverified_github_issue_id,
+};
 pub use presentation::{
     FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourceDescription,
     SourcePresentation, SummaryPart, TargetPresentation,
@@ -144,6 +147,11 @@ pub(crate) fn migrate_issue_opening(connection: &rusqlite::Connection) -> Result
 
 pub(crate) use tracking::{migrate_github_issue_hosts, migrate_issue_repository};
 
+pub(crate) fn migrate_github_issue_sites(connection: &Connection) -> Result<(), Error> {
+    tracking::migrate_github_issue_sites(connection)?;
+    publication::migrate_github_destination_sites(connection)
+}
+
 /// Derive a repository from existing external identity without a connector or network access.
 pub(crate) fn repository_from_saved_issue(
     provider: &str,
@@ -167,12 +175,10 @@ pub(crate) fn scope_saved_issue_identity(
     if provider != github::PROVIDER {
         return None;
     }
-    let repository = repository_from_saved_issue(provider, locator, url);
-    let host = repository
-        .as_deref()
-        .and_then(|remote| remote.split_once('/'))
-        .map(|(host, _)| host);
-    github::scope_legacy_issue_id(id, host).filter(|scoped| scoped != id)
+    let site = github::issue_site_from_url(locator, url);
+    github::scope_legacy_issue_id(id, site.as_deref())
+        .or_else(|| github::scope_host_only_issue_id(id, site.as_deref()?))
+        .filter(|scoped| scoped != id)
 }
 
 /// Format version 82: the parts of each source that have been read.
@@ -673,14 +679,26 @@ impl Workspace {
         connection: Option<&str>,
         raw: &ConfigValues,
     ) -> Result<ConnectionInfo, Error> {
-        if let Some(id) = connection
-            && let Some(saved) = configured_source(&self.connection, id)?
-            && saved.saved.provider == provider
+        let saved = connection
+            .map(|id| configured_source(&self.connection, id))
+            .transpose()?
+            .flatten()
+            .filter(|source| source.saved.provider == provider);
+        if let Some(saved) = &saved
             && &saved.saved.config == raw
         {
-            return self.test_saved_source(engine, &saved);
+            return self.test_saved_source(engine, saved);
         }
         let scoped = self.source_draft_engine(engine, provider, connection, raw)?;
+        if provider == github::PROVIDER
+            && let Some(saved) = &saved
+        {
+            saved.verify_effective_site(&scoped)?;
+            let actual =
+                scoped.check_connection(provider, &saved.account_check_configuration(raw))?;
+            saved.verify_account(&actual)?;
+            return Ok(actual);
+        }
         Ok(scoped.check_connection(provider, raw)?)
     }
 
@@ -691,7 +709,14 @@ impl Workspace {
     ) -> Result<ConnectionInfo, Error> {
         let started = clock(&self.connection, None)?;
         match saved.check(engine) {
-            Ok((_, checked)) => Ok(checked.connection),
+            Ok((_, checked)) => {
+                if saved.needs_account_upgrade(&checked.connection) {
+                    crate::write_scope::run(&self.connection, |tx| {
+                        record_verified_account(tx, saved, &checked.connection)
+                    })?;
+                }
+                Ok(checked.connection)
+            }
             Err(error) => {
                 if error.class() == ErrorClass::Auth
                     && engine
@@ -823,10 +848,29 @@ impl Workspace {
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, Error> {
         let scoped = self.source_draft_engine(engine, provider, connection, raw)?;
+        let saved = if provider == github::PROVIDER {
+            connection
+                .map(|id| configured_source(&self.connection, id))
+                .transpose()?
+                .flatten()
+                .filter(|source| source.saved.provider == provider)
+        } else {
+            None
+        };
+        if let Some(saved) = &saved {
+            saved.verify_effective_site(&scoped)?;
+        }
         let scoped = scoped.with_workflow_credentials(provider, raw)?;
         let config = scoped.validate_configuration(provider, raw)?;
-        self.preview_source_with_config(&scoped, provider, &config)
-            .map(|(preview, _, _)| preview)
+        let check_config = saved.as_ref().map_or(Cow::Borrowed(&config), |source| {
+            source.account_check_configuration(&config)
+        });
+        let (preview, _, verified) =
+            self.preview_source_with_config(&scoped, provider, &check_config)?;
+        if let Some(saved) = &saved {
+            saved.verify_account(&verified)?;
+        }
+        Ok(preview)
     }
 
     fn preview_source_with_config(
@@ -861,7 +905,7 @@ impl Workspace {
         }
         let default_name = engine.descriptor(provider)?.name;
         let name = connection_name(name.unwrap_or(&default_name))?;
-        self.write_source(engine, &id, Some((provider, name)), raw)
+        self.write_source(engine, &id, Some((provider, name)), None, raw)
     }
 
     pub fn update_source_connection(
@@ -870,7 +914,22 @@ impl Workspace {
         id: &str,
         raw: &ConfigValues,
     ) -> Result<SaveOutcome, Error> {
-        self.write_source(engine, id, None, raw)
+        let previous = configured_source(&self.connection, id)?;
+        self.write_source(engine, id, None, previous.as_ref(), raw)
+    }
+
+    /// Build an edit from the saved settings and reject it if the connection
+    /// changes before the edit can be saved.
+    pub fn edit_source_connection(
+        &mut self,
+        engine: &Engine,
+        id: &str,
+        edit: impl FnOnce(&SavedSource) -> Result<ConfigValues, SourceError>,
+    ) -> Result<SaveOutcome, Error> {
+        let previous =
+            configured_source(&self.connection, id)?.ok_or_else(|| unknown_connection(id))?;
+        let values = edit(&previous.saved)?;
+        self.write_source(engine, id, None, Some(&previous), &values)
     }
 
     /// Re-enter only credentials and keep discovery rules and account binding.
@@ -904,7 +963,8 @@ impl Workspace {
         previous.verify_effective_site(&scoped)?;
         let scoped = scoped.with_workflow_credentials(provider, &raw)?;
         let normalized = scoped.validate_configuration(provider, &raw)?;
-        let verified = scoped.check_connection(provider, &normalized)?;
+        let verified = scoped
+            .check_connection(provider, &previous.account_check_configuration(&normalized))?;
         previous.verify_account(&verified)?;
         let (_, staged) = stage_credentials(&schema, id, normalized)?;
         crate::write_scope::run(&self.connection, |transaction| {
@@ -916,6 +976,7 @@ impl Workspace {
             let names = check_credential_environment(transaction, engine, provider, id)?;
             reserve_credential_environment(transaction, id, &names)?;
             credentials::store_references(transaction, id, &staged.references)?;
+            record_verified_account(transaction, &current, &verified)?;
             transaction.execute(
                 "UPDATE source_connections SET revision = ?2 WHERE id = ?1",
                 params![id, uuid::Uuid::new_v4().to_string()],
@@ -946,29 +1007,29 @@ impl Workspace {
         engine: &Engine,
         id: &str,
         add: Option<(&str, &str)>,
+        previous: Option<&ConfiguredSource>,
         raw: &ConfigValues,
     ) -> Result<SaveOutcome, Error> {
-        let previous = configured_source(&self.connection, id)?;
         let provider = match add {
             Some((provider, _)) => provider,
             None => {
                 &previous
-                    .as_ref()
                     .ok_or_else(|| unknown_connection(id))?
                     .saved
                     .provider
             }
         };
         let scoped = self.source_draft_engine(engine, provider, Some(id), raw)?;
-        if add.is_none()
-            && let Some(previous) = &previous
-        {
+        if let Some(previous) = previous {
             previous.verify_effective_site(&scoped)?;
         }
         let scoped = scoped.with_workflow_credentials(provider, raw)?;
         let config = scoped.validate_configuration(provider, raw)?;
+        let check_config = previous.map_or(Cow::Borrowed(&config), |source| {
+            source.account_check_configuration(&config)
+        });
         let (preview, derived, verified) =
-            self.preview_source_with_config(&scoped, provider, &config)?;
+            self.preview_source_with_config(&scoped, provider, &check_config)?;
         let (config, staged) = stage_credentials(&scoped.descriptor(provider)?.schema, id, config)?;
         let description = serde_json::to_string(&engine.description(provider)?)?;
         let account_key = verified.account_key();
@@ -979,8 +1040,11 @@ impl Workspace {
                     return Err(connection_id_changed());
                 }
                 let duplicate: bool = transaction.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM source_connections WHERE provider = ?1 AND site = ?2 AND account_key = ?3)",
-                    params![provider, verified.site, account_key], |row| row.get(0),
+                    "SELECT EXISTS(SELECT 1 FROM source_connections
+                     WHERE provider = ?1 AND site = ?2
+                       AND (account_key = ?3 OR (?1 = 'github' AND account_key = lower(?4))))",
+                    params![provider, verified.site, account_key, verified.account],
+                    |row| row.get(0),
                 )?;
                 if duplicate {
                     return Err(SourceError::InvalidConfiguration(vec![FieldIssue::for_form(
@@ -998,10 +1062,7 @@ impl Workspace {
             } else {
                 let current =
                     configured_source(transaction, id)?.ok_or_else(|| unknown_connection(id))?;
-                if previous
-                    .as_ref()
-                    .is_none_or(|previous| previous.revision != current.revision)
-                {
+                if previous.is_none_or(|previous| previous.revision != current.revision) {
                     return Err(stale_source());
                 }
                 update_saved_configuration(transaction, &current, &config, &derived, &verified)?;
@@ -1019,7 +1080,7 @@ impl Workspace {
             Ok(SaveOutcome { source, preview })
         })?;
         let empty = credentials::References::new();
-        staged.committed(previous.as_ref().map_or(&empty, |old| &old.credentials));
+        staged.committed(previous.map_or(&empty, |old| &old.credentials));
         Ok(outcome)
     }
 }
@@ -1032,6 +1093,7 @@ fn update_saved_configuration(
     verified: &ConnectionInfo,
 ) -> Result<(), Error> {
     current.verify_account(verified)?;
+    record_verified_account(transaction, current, verified)?;
     if &current.saved.config != config || !same_discovery(&current.derived, derived) {
         clear_discovery_matches(transaction, current)?;
     }
@@ -1237,9 +1299,11 @@ fn next_connection_id(connection: &Connection, provider: &str) -> Result<String,
                     | "refresh"
                     | "sign-in"
                     | "take-ownership"
+                    | "reconcile-github"
                     | "publish"
                     | "resolve"
                     | "extension"
+                    | "conformance"
                     | "help"
             )
         {
@@ -1293,13 +1357,42 @@ impl ConfiguredSource {
         let scoped = self.bind(engine);
         self.verify_effective_site(&scoped)?;
         let scoped = scoped.with_workflow_credentials(&self.saved.provider, &self.saved.config)?;
-        let checked = scoped.check(&self.saved.provider, &self.saved.config)?;
+        let config = self.account_check_configuration(&self.saved.config);
+        let checked = scoped.check(&self.saved.provider, &config)?;
         self.verify_account(&checked.connection)?;
         Ok((scoped, checked))
     }
 
+    fn account_check_configuration<'a>(&self, config: &'a ConfigValues) -> Cow<'a, ConfigValues> {
+        // The saved selector still chooses the credential. For a bound ID, an
+        // unchanged selector may still contain the login the user used to have.
+        if self.saved.provider == github::PROVIDER
+            && github::account_database_id(&self.account_key).is_some()
+            && config.get("account").is_some()
+            && self.saved.config.get("account") == config.get("account")
+        {
+            let mut check = config.clone();
+            check.remove("account");
+            Cow::Owned(check)
+        } else {
+            Cow::Borrowed(config)
+        }
+    }
+
+    fn needs_account_upgrade(&self, actual: &ConnectionInfo) -> bool {
+        // Only the exact login on the saved site can establish the ID for an
+        // older connection. Once pinned, a matching login cannot replace it.
+        self.saved.provider == github::PROVIDER
+            && actual.site == self.site
+            && github::account_database_id(&self.account_key).is_none()
+            && self.account_key.eq_ignore_ascii_case(&actual.account)
+            && github::account_database_id(actual.account_key()).is_some()
+    }
+
     fn verify_account(&self, actual: &ConnectionInfo) -> Result<(), SourceError> {
-        if actual.site == self.site && actual.account_key() == self.account_key {
+        if actual.site == self.site
+            && (actual.account_key() == self.account_key || self.needs_account_upgrade(actual))
+        {
             return Ok(());
         }
         Err(SourceError::Unauthenticated(format!(
@@ -1307,6 +1400,48 @@ impl ConfiguredSource {
             self.saved.account, self.saved.name
         )))
     }
+}
+
+fn record_verified_account(
+    connection: &Connection,
+    source: &ConfiguredSource,
+    actual: &ConnectionInfo,
+) -> Result<(), Error> {
+    if actual.account_key() == source.account_key {
+        return Ok(());
+    }
+    let current = configured_source(connection, &source.saved.id)?
+        .filter(|current| current.revision == source.revision)
+        .ok_or_else(stale_source)?;
+    current.verify_account(actual)?;
+    if !current.needs_account_upgrade(actual) {
+        return Ok(());
+    }
+    let used: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM source_connections
+         WHERE provider = ?1 AND site = ?2 AND account_key = ?3 AND id <> ?4)",
+        params![
+            source.saved.provider,
+            source.site,
+            actual.account_key(),
+            source.saved.id
+        ],
+        |row| row.get(0),
+    )?;
+    if used {
+        return Err(
+            SourceError::InvalidConfiguration(vec![FieldIssue::for_form(format!(
+                "{} is already connected to this site",
+                actual.account
+            ))])
+            .into(),
+        );
+    }
+    connection.execute(
+        "UPDATE source_connections SET account_key = ?2 WHERE id = ?1",
+        params![source.saved.id, actual.account_key()],
+    )?;
+    Ok(())
 }
 
 const CONFIGURED_SOURCE: &str = "SELECT id, name, provider, configuration, account, saved_at, derived_configuration, revision, site, account_key

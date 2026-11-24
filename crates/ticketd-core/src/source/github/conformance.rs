@@ -18,7 +18,10 @@ struct GitHubDriver;
 impl Driver for GitHubDriver {
     fn discovery() -> Fixture<String> {
         let transport = Arc::new(TransportFixture::default());
-        transport.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+        transport.respond(
+            &format!("{API}/user"),
+            ok(json!({"login": "octo", "id": 1})),
+        );
         let first_url = format!("{API}/repos/o/r/issues?state=open&per_page=100");
         let empty_url = format!("{API}/repos/o/r/issues?page=2");
         let last_url = format!("{API}/repos/o/r/issues?page=3");

@@ -133,6 +133,7 @@ export function useTicketWorkspace(
     refreshing: false,
     sources: [],
   });
+  const healthRead = useRef(0);
   const [sourceRefresh, setSourceRefresh] = useState<{
     running: boolean;
     report: RefreshReport | null;
@@ -341,18 +342,21 @@ export function useTicketWorkspace(
       sourceRead.current += 1;
     };
   }, [pollTick, readSourceEntries]);
-  useEffect(() => {
-    let active = true;
-    void sourcesClient.health().then(
+  const readSourceHealth = useCallback(async () => {
+    const request = ++healthRead.current;
+    await sourcesClient.health().then(
       (health) => {
-        if (active) setSourceHealth(health);
+        if (request === healthRead.current) setSourceHealth(health);
       },
       () => {},
     );
+  }, []);
+  useEffect(() => {
+    void readSourceHealth();
     return () => {
-      active = false;
+      healthRead.current += 1;
     };
-  }, [pollTick]);
+  }, [pollTick, readSourceHealth]);
   useEffect(() => {
     const generationRef = generation;
     const timer = window.setTimeout(() => {
@@ -581,6 +585,7 @@ export function useTicketWorkspace(
     sourceConnectionsChanged,
     sourceRefresh,
     sourceHealth,
+    readSourceHealth,
     refreshSources,
     projects,
     plans,

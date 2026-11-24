@@ -1184,12 +1184,19 @@ fn has_source(fields: &Fields) -> bool {
 
 fn scope_source_identity(fields: &mut Fields) {
     let field = |key| text(fields, key).unwrap_or_default();
+    let provider = field("source_provider");
+    let locator = field("source_locator");
     if let Some(id) = source::scope_saved_issue_identity(
-        field("source_provider"),
+        provider,
         field("source_external_id"),
-        field("source_locator"),
+        locator,
         field("source_url"),
     ) {
+        if fields.contains_key("source_partition")
+            && let Some(partition) = source::legacy_reference_partition(provider, &id, locator)
+        {
+            fields.insert("source_partition".into(), SyncValue::Text(partition));
+        }
         fields.insert("source_external_id".into(), SyncValue::Text(id));
     }
 }
@@ -1541,6 +1548,44 @@ fn put(
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 
+enum GithubIdentityUpdate {
+    HostConfirmation,
+    RepositoryTransfer,
+}
+
+/// A confirmed GitHub ID agrees with the site established by the issue location.
+fn github_repository<'a>(fields: &'a Fields, id: &str) -> Option<&'a str> {
+    let locator = text(fields, "source_locator")?;
+    let url = text(fields, "source_url")?;
+    let site = source::github_issue_site_from_url(locator, url)?;
+    let (repository, _) = locator.rsplit_once('#')?;
+    (source::github_issue_id_site(id) == Some(site.as_str())).then_some(repository)
+}
+
+/// Confirming a host keeps the database ID. A transfer can change that ID,
+/// but the new location still belongs to the same GitHub host and original link.
+fn github_identity_update(before: &Fields, after: &Fields) -> Option<GithubIdentityUpdate> {
+    if text(before, "source_provider") != Some("github")
+        || text(after, "source_provider") != Some("github")
+        || ["source_origin", "source_linked_at"]
+            .into_iter()
+            .any(|field| before.get(field) != after.get(field))
+    {
+        return None;
+    }
+    let old_id = text(before, "source_external_id")?;
+    let new_id = text(after, "source_external_id")?;
+    let destination = github_repository(after, new_id)?;
+    if let Some(number) = source::unverified_github_issue_id(old_id) {
+        return (new_id.rsplit(':').next() == Some(number))
+            .then_some(GithubIdentityUpdate::HostConfirmation);
+    }
+    let origin = github_repository(before, old_id)?;
+    let same_site = source::github_issue_id_site(old_id) == source::github_issue_id_site(new_id);
+    (same_site && !origin.eq_ignore_ascii_case(destination))
+        .then_some(GithubIdentityUpdate::RepositoryTransfer)
+}
+
 /// Writes of one record. Relationships whose target is not here yet collect in `missing`.
 struct Apply<'a> {
     c: &'a Connection,
@@ -1890,16 +1935,31 @@ impl Apply<'_> {
                 .into_iter()
                 .any(|field| current.fields.get(field) != record.fields.get(field))
         {
-            // Sync can select a different identity after concurrent publications.
-            // The former issue's routing, freshness and conversation do not follow it.
-            for sql in [
-                "DELETE FROM source_connection_tickets WHERE ticket_id = ?1",
-                "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
-                "DELETE FROM source_conversation WHERE ticket_id = ?1",
-                "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
-                "DELETE FROM source_sync WHERE ticket_id = ?1",
-            ] {
-                c.execute(sql, [&record.id])?;
+            let update = github_identity_update(&current.fields, &record.fields);
+            if !matches!(update, Some(GithubIdentityUpdate::RepositoryTransfer)) {
+                // A newly confirmed host may differ from the device's old binding.
+                c.execute(
+                    "DELETE FROM source_connection_tickets WHERE ticket_id = ?1",
+                    [&record.id],
+                )?;
+            }
+            if update.is_some() {
+                // The cached conversation is still this issue's. Recheck it and
+                // discovery membership against the confirmed location next time.
+                c.execute(
+                    "UPDATE source_sync SET discovery_matches = NULL, conversation_updated_at = NULL WHERE ticket_id = ?1",
+                    [&record.id],
+                )?;
+            } else {
+                // Concurrent publications can select an unrelated issue.
+                for sql in [
+                    "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
+                    "DELETE FROM source_conversation WHERE ticket_id = ?1",
+                    "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
+                    "DELETE FROM source_sync WHERE ticket_id = ?1",
+                ] {
+                    c.execute(sql, [&record.id])?;
+                }
             }
         }
         let (schema, _) = shape(Block::Record(record.kind), LATEST_FILE_FORMAT);

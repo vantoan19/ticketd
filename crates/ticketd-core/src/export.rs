@@ -99,7 +99,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "publication_attempts",
-        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, partition, destination_host",
+        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, partition, destination_host, destination_site_unconfirmed",
     ),
     (
         "chats",
@@ -345,7 +345,7 @@ impl Workspace {
     pub fn export(&self) -> Result<Value, Error> {
         crate::read_scope::run(&self.connection, |tx| {
             let mut result = Map::new();
-            result.insert("format_version".into(), Value::from(2));
+            result.insert("format_version".into(), Value::from(3));
             for &(table, columns) in EXPORTED {
                 let mut statement =
                     tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;

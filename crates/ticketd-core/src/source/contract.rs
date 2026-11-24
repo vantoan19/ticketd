@@ -379,7 +379,7 @@ pub trait Connector: Send + Sync {
 
     /// Host for trackers that scope issue identities to a web host.
     #[doc(hidden)]
-    fn issue_host(&self) -> Option<&str> {
+    fn issue_site(&self) -> Option<&str> {
         None
     }
 

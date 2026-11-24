@@ -839,8 +839,12 @@ enum SourceCommand {
         #[arg(long)]
         no_search: bool,
         /// Record the independently verified host of a legacy attempt without looking up an issue
-        #[arg(long, conflicts_with_all = ["issue", "attach", "not_created", "no_search", "accept_different", "agent"])]
+        #[arg(long, conflicts_with_all = ["issue", "attach", "not_created", "no_search", "accept_different", "agent", "using_connection"])]
         confirm_host: Option<String>,
+        /// The saved GitHub connection to use with --issue when the original binding is
+        /// missing. The connection must use the verified original host
+        #[arg(long, requires = "issue", conflicts_with_all = ["not_created", "no_search"])]
+        using_connection: Option<String>,
         /// Attach an issue whose title or description differs from what was sent. Its text
         /// then replaces the ticket's, and the ticket's own text is kept as a note
         #[arg(long)]
@@ -2379,14 +2383,14 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             let registry = ExtensionRegistry::device()?;
             let engine = registry.engine()?;
             let connection = match connection {
-                Some(id) => workspace.source_connection(&id)?,
-                None => workspace.source_connection(&workspace.default_publication_provider(&engine)?)?,
+                Some(id) => id,
+                None => workspace.default_publication_provider(&engine)?,
             };
             if preview {
                 serde_json::to_string(&workspace.preview_publication(
                     &engine,
                     &ticket,
-                    &connection.id,
+                    &connection,
                     destination.as_deref(),
                 )?)?
             } else {
@@ -2394,7 +2398,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     &engine,
                     &ticket,
                     &ticketd_core::source::PublishOptions {
-                        provider: connection.id.clone(),
+                        provider: connection,
                         destination,
                         now: None,
                         expected_fingerprint: expect,
@@ -2443,6 +2447,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     not_created,
                     no_search,
                     confirm_host: None,
+                    using_connection,
                     accept_different,
                     agent,
                 },
@@ -2450,7 +2455,12 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             use ticketd_core::source::{PublicationError, Resolution, ResolveOptions};
             let registry = ExtensionRegistry::device()?;
             let engine = registry.engine()?;
-            let resolution = if not_created {
+            let resolution = if let (Some(connection), Some(issue)) = (using_connection, &issue) {
+                Some(Resolution::AttachUsingConnection {
+                    issue: issue.clone(),
+                    connection,
+                })
+            } else if not_created {
                 Some(Resolution::NotCreated)
             } else if attach || issue.is_some() {
                 Some(Resolution::Attach { issue })
@@ -2565,10 +2575,10 @@ fn source_command(
     command: SourceCommand,
 ) -> Result<String, Box<dyn std::error::Error>> {
     use ticketd_core::source::ConfigValues;
-    let registry = ExtensionRegistry::device()?;
-    let engine = registry.engine()?;
     Ok(match command {
         SourceCommand::List => {
+            let registry = ExtensionRegistry::device()?;
+            let engine = registry.engine()?;
             let saved = workspace.saved_sources()?;
             let mut sources = Vec::new();
             for description in engine.descriptions() {
@@ -2610,6 +2620,7 @@ fn source_command(
             preview,
             settings,
         } => {
+            let engine = ExtensionRegistry::device()?.engine()?;
             let values = source_settings(&engine, &provider, ConfigValues::new(), settings)?;
             if preview {
                 serde_json::to_string(
@@ -2651,21 +2662,20 @@ fn run_source_connection(
     output: &mut impl Write,
 ) -> Result<(), Box<dyn std::error::Error>> {
     use ticketd_core::source::RefreshOptions;
-    let registry = ExtensionRegistry::device()?;
-    let engine = registry.engine()?;
     let saved = workspace.source_connection(connection)?;
+    let engine =
+        || -> Result<_, Box<dyn std::error::Error>> { Ok(ExtensionRegistry::device()?.engine()?) };
     let text = match operation {
         SourceConnectionCommand::Show => serde_json::to_string(&saved)?,
         SourceConnectionCommand::Test => {
+            let engine = engine()?;
             match workspace.test_source_connection(&engine, connection) {
                 Err(ticketd_core::Error::Source(error))
                     if error.class() == ticketd_core::source::ErrorClass::Auth =>
                 {
-                    return Err(format!(
-                        "{error}{}",
-                        source_sign_in_guidance(&engine, &saved.provider, connection),
-                    )
-                    .into());
+                    return Err(
+                        format!("{error}{}", source_sign_in_guidance(&engine, &saved),).into(),
+                    );
                 }
                 result => serde_json::to_string(&result?)?,
             }
@@ -2675,6 +2685,7 @@ fn run_source_connection(
             query,
             settings,
         } => {
+            let engine = engine()?;
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
             serde_json::to_string(&workspace.source_options(
                 &engine,
@@ -2686,6 +2697,7 @@ fn run_source_connection(
             )?)?
         }
         SourceConnectionCommand::Preview { settings } => {
+            let engine = engine()?;
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
             serde_json::to_string(&workspace.preview_source(
                 &engine,
@@ -2695,12 +2707,15 @@ fn run_source_connection(
             )?)?
         }
         SourceConnectionCommand::Edit { settings } => {
-            let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
-            let outcome = workspace.update_source_connection(&engine, connection, &values)?;
+            let engine = engine()?;
+            let outcome = workspace.edit_source_connection(&engine, connection, |saved| {
+                source_settings(&engine, &saved.provider, saved.config.clone(), settings)
+            })?;
             source_credential_notice(&outcome.source);
             serde_json::to_string(&outcome)?
         }
         SourceConnectionCommand::SignIn { config_file } => {
+            let engine = engine()?;
             let values = source_settings(
                 &engine,
                 &saved.provider,
@@ -2728,6 +2743,7 @@ fn run_source_connection(
                 .find(|status| status.connection_id.as_deref() == Some(connection)),
         )?,
         SourceConnectionCommand::Refresh { ticket } => {
+            let engine = engine()?;
             let report = source_refresh::controlled(connection, |control| {
                 workspace.refresh_connection(
                     &engine.clone().with_refresh_control(control),
@@ -2739,7 +2755,7 @@ fn run_source_connection(
             writeln!(output, "{}", serde_json::to_string(&report)?)?;
             if let Some(failure) = report.failures.first() {
                 let guidance = if matches!(failure.code.as_str(), "unauthenticated" | "forbidden") {
-                    source_sign_in_guidance(&engine, &saved.provider, connection)
+                    source_sign_in_guidance(&engine, &saved)
                 } else {
                     String::new()
                 };
@@ -2767,11 +2783,11 @@ fn source_credential_notice(source: &ticketd_core::source::SavedSource) {
 
 fn source_sign_in_guidance(
     engine: &ticketd_core::source::Engine,
-    provider: &str,
-    connection: &str,
+    source: &ticketd_core::source::SavedSource,
 ) -> String {
     use ticketd_core::source::FieldKind;
-    let Ok(description) = engine.description(provider) else {
+    let scoped = engine.for_connection(&source.provider, &source.id, &source.config);
+    let Ok(description) = scoped.description(&source.provider) else {
         return String::new();
     };
     if description
@@ -2782,7 +2798,8 @@ fn source_sign_in_guidance(
         .any(|field| matches!(field.kind, FieldKind::Secret))
     {
         format!(
-            " To replace the credential, run `ticketd source {connection} sign-in --config-file -` and supply a JSON object of credential fields on stdin."
+            " To replace the credential, run `ticketd source {} sign-in --config-file -` and supply a JSON object of credential fields on stdin.",
+            source.id
         )
     } else {
         description
@@ -2798,8 +2815,8 @@ fn source_settings(
     provider: &str,
     saved: ticketd_core::source::ConfigValues,
     settings: SourceSettings,
-) -> Result<ticketd_core::source::ConfigValues, Box<dyn std::error::Error>> {
-    use ticketd_core::source::SourceError;
+) -> Result<ticketd_core::source::ConfigValues, ticketd_core::source::SourceError> {
+    use ticketd_core::source::{FieldIssue, SourceError};
     if settings.set.is_empty() && settings.config_file.is_none() {
         return Ok(saved);
     }
@@ -2809,19 +2826,21 @@ fn source_settings(
         None => "",
     }
     .to_owned();
+    let invalid = |message| SourceError::InvalidConfiguration(vec![FieldIssue::for_form(message)]);
     let mut values = match read_content(None, settings.config_file)
-        .map_err(|error| format!("could not read the --config-file {name}: {error}"))?
+        .map_err(|error| invalid(format!("could not read the --config-file {name}: {error}")))?
     {
         Some(text) => match serde_json::from_str(&text) {
             Ok(serde_json::Value::Object(values)) => values,
             Ok(_) => {
-                return Err(format!(
+                return Err(invalid(format!(
                     "the --config-file {name} must hold a JSON object of settings"
-                )
-                .into());
+                )));
             }
             Err(error) => {
-                return Err(format!("the --config-file {name} is not valid JSON: {error}").into());
+                return Err(invalid(format!(
+                    "the --config-file {name} is not valid JSON: {error}"
+                )));
             }
         },
         None => saved,

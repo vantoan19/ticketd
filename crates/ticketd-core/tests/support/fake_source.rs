@@ -534,13 +534,17 @@ fn hidden(remote: &Remote, config: &ConfigValues, id: u64) -> bool {
 
 fn issue_page(remote: &Remote, request: DiscoveryRequest<'_>, start: usize) -> DiscoveryPage {
     let repositories = strings(request.config, "repositories");
-    let matching = repositories
-        .first()
-        .and_then(|repository| remote.matching_by_repository.get(*repository))
-        .unwrap_or(&remote.matching);
+    let mut matching: Vec<_> = repositories
+        .iter()
+        .filter_map(|repository| remote.matching_by_repository.get(*repository))
+        .collect();
+    if matching.is_empty() {
+        matching.push(&remote.matching);
+    }
     let labels = strings(request.config, "labels");
     let issues: Vec<_> = matching
-        .iter()
+        .into_iter()
+        .flatten()
         .filter(|id| !hidden(remote, request.config, **id))
         .filter_map(|id| remote.issues.get(id))
         .filter(|issue| issue.state.category == StateCategory::Open)

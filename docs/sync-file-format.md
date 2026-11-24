@@ -150,7 +150,12 @@ Formats 1 and 2 use `source_state` (open or closed) and optional `source_closure
 
 Public GitHub issue IDs are numeric. Formats 2 and 3 carry GitHub Enterprise issue IDs as `@<host>:<id>` and unverified GitHub issue IDs as `@:<id>`. When reading a legacy numeric ID, ticketd verifies the host from the saved issue URL and locator. Missing or ambiguous host evidence leaves the ID unverified.
 
+Format 3 includes a nondefault Enterprise port in the ID as `@<host>:<port>:<id>`. When a saved issue URL and locator establish the port, ticketd also qualifies earlier hostname-only IDs on read.
+
 When two desktops observe different IDs for an already-linked GitHub issue, the latest issue update timestamp determines which identity the ticket keeps. This covers host verification and repository transfers. Equal timestamps are ordered by the field values. Concurrent links to different issues keep the lower provider and ID pair in text order. The winning issue ID, location, and associated observation travel together.
+
+Confirming the host or following a transfer preserves the receiving desktop's pause
+after a connection was removed and the issue conversation already cached there.
 
 ### Activity section
 

@@ -34,12 +34,19 @@ impl Workspace {
                 return Ok(Vec::new());
             };
             let scoped = source.bind(engine);
-            source.verify_effective_site(&scoped)?;
+            let available = match source.verify_effective_site(&scoped) {
+                Ok(()) => true,
+                Err(SourceError::UnknownProvider(_)) => false,
+                Err(error) => return Err(error.into()),
+            };
             saved_repositories(&source)
                 .into_iter()
                 .map(|repository| {
-                    let project_remote =
-                        scoped.repository_for_destination(&source.saved.provider, &repository)?;
+                    let project_remote = if available {
+                        scoped.repository_for_destination(&source.saved.provider, &repository)?
+                    } else {
+                        None
+                    };
                     let project = match &project_remote {
                         Some(remote) => projects::find_by_remote(connection, remote)?,
                         None => None,

@@ -224,7 +224,7 @@ pub struct ExternalIssue {
     pub created_at: String,
     /// When the issue was last updated at the source, as an RFC 3339 timestamp.
     pub updated_at: String,
-    /// The source identity that opened the issue, when known.
+    /// The displayed name or username of the account that opened the issue, when known.
     #[serde(default)]
     pub author: Option<String>,
     /// For an issue closed as a duplicate: the canonical issue, when the provider
@@ -258,6 +258,7 @@ pub struct ExternalComment {
 /// What happened in an external timeline event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "event", content = "category", rename_all = "snake_case")]
+#[schemars(transform = allow_future_event_kinds)]
 pub enum ExternalEventKind {
     Closed(StateCategory),
     Reopened,
@@ -276,6 +277,26 @@ pub enum ExternalEventKind {
     #[serde(other, deserialize_with = "ignore_event_content", skip_serializing)]
     #[schemars(skip)]
     Unsupported,
+}
+
+fn allow_future_event_kinds(schema: &mut schemars::Schema) {
+    let Some(kinds) = schema
+        .get_mut("oneOf")
+        .and_then(serde_json::Value::as_array_mut)
+    else {
+        return;
+    };
+    let known_kinds: Vec<_> = kinds
+        .iter()
+        .filter_map(|kind| kind.pointer("/properties/event/const").cloned())
+        .collect();
+    kinds.push(serde_json::json!({
+        "type": "object",
+        "required": ["event"],
+        "properties": {
+            "event": { "type": "string", "not": { "enum": known_kinds } }
+        }
+    }));
 }
 
 fn ignore_event_content<'de, D: Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {

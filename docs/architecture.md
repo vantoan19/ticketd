@@ -888,6 +888,8 @@ the account, site, discovery parts, filters, and publication destinations. The
 core caches successful answers for offline routing and previews. GitHub can
 use the active GitHub CLI account, a named account already signed in with it,
 or a connection-specific token override such as `TICKETD_SOURCE_GITHUB_2_TOKEN`.
+GitHub binds a checked connection to the authenticated account's numeric ID.
+A same-site authenticated check for the saved login upgrades an older binding.
 Each request that can change authority checks the saved account and site first.
 When upgrading a pre-connection Workspace that used GitHub Enterprise, keep its
 `TICKETD_GITHUB_API_URL` configured for the first open. The old format recorded
@@ -917,8 +919,9 @@ ownership; the core rejects title, description and
 closure-owned status edits to externally owned tickets. The same write re-reads
 the connection. If its rules changed during network work, a successful read
 can still update a ticket that remains assigned to it. The old rules cannot
-import tickets or change discovery membership, failures, or run health. Saving changed rules
-invalidates match membership until the next complete discovery walk.
+import tickets, transfer an identity, or change discovery membership, failures,
+or run health. Saving changed rules invalidates match membership until the next
+complete discovery walk.
 
 When a connector reports a repository, the import write matches its normalized
 `host/owner/name` against the Project remote. It saves the matching project link
@@ -931,17 +934,21 @@ This requires a permanent redirect from the saved issue path within the same API
 and a destination response that corroborates the new location and agrees with
 the saved issue's creation time. Missing or mismatched creation times leave the
 current link in place and report a refresh error. Matching creation times help discovery
-identify possible transfers between repository reads for a direct check. Refresh
+identify possible transfers between repository reads for a direct check. A destination
+connection can check a plausible same-site origin and defer import until a possible
+transfer can be established on the originating connection. Refresh
 updates provenance on the same ticket before discovery can import the destination.
 An identity already held by another ticket is reported as a conflict, and that
 ticket can still apply its own source observation. GitHub
 derives the web host from the API host. It maps `api.github.com` to `github.com` and
 `api.<tenant>.ghe.com` to `<tenant>.ghe.com`. GitHub Enterprise Server uses its
-configured host. Enterprise issue identities include the web host, so issues
-with the same numeric ID on different hosts stay separate after a source change.
+configured host. Enterprise issue identities and discovery parts include the web
+host and any nondefault port, so distinct sites can use the same numeric ID.
 [GitHub Enterprise Cloud data residency](https://docs.github.com/en/enterprise-cloud@latest/admin/data-residency/about-github-enterprise-cloud-with-data-residency#api-access)
 
-Public GitHub keeps its numeric IDs. Format version 87 populates the repository
+Public GitHub keeps its numeric IDs. Format version 97 adds the nondefault port
+to earlier host-only identities when a saved issue URL agrees with the locator.
+Format version 87 populates the repository
 when a legacy issue URL agrees with its locator. Format version 88 qualifies
 legacy IDs using stored host evidence. A legacy ID without host evidence remains
 unverified. Discovery holds a potential new import with the same numeric ID
@@ -1040,10 +1047,22 @@ the attempt's repository, issue locator and saved issue host. When the original
 host is unknown, it must be explicitly confirmed against the configured connector
 before recovery can proceed.
 
-GitHub discovery compares a matching issue's identity host and locator
+GitHub publication records the original site with any nondefault port. Format
+97 uses the original connection or a corroborated unresolved create response
+to recover older sites. An older attempt known only by hostname requires
+explicit confirmation of its full site before recovery can proceed.
+
+An unbound GitHub attempt can be settled by explicitly attaching a verified
+issue through a saved connection on the original site. The issue must be in the
+original repository. When no create response was recorded, the issue's creator
+and timestamp must support the attachment. The selected connection sets the
+ticket's future refresh affinity. Confirming that nothing was created requires
+the original connection and a complete search against the same dispatch lease.
+
+GitHub discovery compares a matching issue's identity site and locator
 repository to the open attempt's destination. This comparison is independent of
-Project remote validation. An attempt with an unknown host can still hold a
-match in the same owner and repository name until the original host is confirmed.
+Project remote validation. An attempt known only by hostname can still hold a
+match on that hostname until the original site's port is confirmed.
 
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,
 replayable as `WriteRequest::TakeOwnership`) is one atomic write allowed only

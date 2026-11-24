@@ -497,11 +497,13 @@ fn a_file_that_cannot_be_applied_leaves_the_workspace_unchanged() {
     assert_eq!(export_all(&workspace), before);
 }
 
+const GITHUB_ISSUE: &str = "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Done\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"7\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"closed\"\nsource_closure_reason: \"completed\"\nsource_updated_at: \"2026-01-03T00:00:00Z\"\n---\nFrom the tracker.\n";
+
 #[test]
 fn external_source_provenance_travels_with_the_ticket() {
     let directory = tempfile::tempdir().unwrap();
     let mut workspace = workspace(&directory, "a.sqlite3");
-    let text = "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Done\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"7\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"closed\"\nsource_closure_reason: \"completed\"\nsource_updated_at: \"2026-01-03T00:00:00Z\"\n---\nFrom the tracker.\n";
+    let text = GITHUB_ISSUE;
     let record = SyncRecord::parse(text).unwrap();
 
     workspace.apply_sync_record(&record).unwrap();
@@ -547,6 +549,17 @@ fn external_source_provenance_travels_with_the_ticket() {
         record
     );
     assert!(SyncRecord::parse(&markdown.replace("format: 3", "format: 2")).is_err());
+    let old_enterprise = markdown.replace("https://example.test/", "https://example.test:8443/");
+    let parsed = SyncRecord::parse(&old_enterprise).unwrap();
+    assert_eq!(
+        parsed.fields["source_external_id"],
+        SyncValue::Text("@example.test:8443:7".into())
+    );
+    assert_eq!(
+        parsed.fields["source_partition"],
+        SyncValue::Text("@example.test:8443/acme/site".into())
+    );
+
     // A transfer on another device replaces the stored repository as well as the locator.
     let transferred = text.replace("acme/site", "acme/moved");
     workspace
@@ -578,6 +591,64 @@ fn external_source_provenance_travels_with_the_ticket() {
             .ownership,
         ticketd_core::source::Ownership::Local
     );
+}
+
+#[test]
+fn syncing_the_same_github_issue_preserves_local_pause_and_conversation() {
+    use ticketd_core::source::ConversationEntry;
+
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let unverified = GITHUB_ISSUE.replace("https://example.test/acme/site/issues/42", "");
+    let record = SyncRecord::parse(&unverified).unwrap();
+    let reference = "T-ZZ7";
+    workspace.apply_sync_record(&record).unwrap();
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO source_connection_removals (ticket_id, removed_at)
+             SELECT id, '2026-01-04T00:00:00Z' FROM tickets;
+             INSERT INTO source_conversation (ticket_id, kind, entry_id, position, actor, body, created_at)
+             SELECT id, 'comment', 'comment-1', 0, 'octocat', 'Cached reply', '2026-01-04T00:00:00Z' FROM tickets;",
+        )
+        .unwrap();
+    let conversation = workspace.source_conversation(reference).unwrap();
+    assert!(
+        matches!(&conversation[..], [ConversationEntry::Comment { body, .. }] if body == "Cached reply")
+    );
+
+    // Confirm the host first, then follow a transfer on the same site.
+    let transferred = GITHUB_ISSUE
+        .replace("source_external_id: \"7\"", "source_external_id: \"9\"")
+        .replace("acme/site", "acme/moved");
+    for (text, expected_id) in [
+        (GITHUB_ISSUE, "@example.test:7"),
+        (&transferred, "@example.test:9"),
+    ] {
+        workspace
+            .apply_sync_record(&SyncRecord::parse(text).unwrap())
+            .unwrap();
+        let source = workspace.show_ticket(reference).unwrap().source.unwrap();
+        assert_eq!(source.id, expected_id);
+        assert_eq!(source.unavailable.unwrap().code, "connection_removed");
+        assert_eq!(
+            workspace.source_conversation(reference).unwrap(),
+            conversation
+        );
+    }
+
+    // A different site on the same host does not share its cached issue.
+    let other = transferred
+        .replace("example.test", "example.test:8443")
+        .replace("acme/moved", "acme/another");
+    workspace
+        .apply_sync_record(&SyncRecord::parse(&other).unwrap())
+        .unwrap();
+    let source = workspace.show_ticket(reference).unwrap().source.unwrap();
+    assert_eq!(source.id, "@example.test:8443:9");
+    assert_ne!(source.unavailable.unwrap().code, "connection_removed");
+    assert!(workspace.source_conversation(reference).unwrap().is_empty());
 }
 
 #[test]

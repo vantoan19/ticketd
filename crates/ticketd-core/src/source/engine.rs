@@ -521,8 +521,8 @@ impl Engine {
         Ok(fetched)
     }
 
-    pub(super) fn issue_host(&self, provider: &str) -> Result<Option<&str>, SourceError> {
-        Ok(self.connector(provider)?.issue_host())
+    pub(super) fn issue_site(&self, provider: &str) -> Result<Option<&str>, SourceError> {
+        Ok(self.connector(provider)?.issue_site())
     }
 
     /// Maps a configured repository or publication destination to a Project remote, offline.
@@ -651,12 +651,12 @@ impl Engine {
         conversation
             .events
             .retain(|event| events.insert(event.id.clone()));
-        conversation
-            .comments
-            .sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        conversation.comments.sort_by_cached_key(|comment| {
+            super::conversation::chronological_key(&comment.created_at)
+        });
         conversation
             .events
-            .sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            .sort_by_cached_key(|event| super::conversation::chronological_key(&event.created_at));
         Ok(Some(conversation))
     }
 

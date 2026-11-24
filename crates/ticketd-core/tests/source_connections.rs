@@ -240,6 +240,59 @@ fn a_provider_account_id_deduplicates_different_display_names() {
 }
 
 #[test]
+fn a_settings_edit_refuses_to_overwrite_a_newer_configuration() {
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(fake_source::FakeSource::default()))
+        .unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let original = values("octo", "owner/original");
+    workspace
+        .add_source_connection(&engine, "fake", None, None, &original)
+        .unwrap();
+    let concurrent = values("octo", "owner/concurrent");
+    let refusal = workspace
+        .edit_source_connection(&engine, "fake", |saved| {
+            assert_eq!(saved.config, original);
+            Workspace::open(&path)
+                .unwrap()
+                .update_source_connection(&engine, "fake", &concurrent)
+                .unwrap();
+            Ok(saved.config.clone())
+        })
+        .unwrap_err();
+    assert!(refusal.to_string().contains("changed"));
+    assert_eq!(
+        workspace.source_connection("fake").unwrap().config,
+        concurrent
+    );
+}
+
+#[test]
+fn connection_ids_do_not_collide_with_cli_commands() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    for command in [
+        "add",
+        "conformance",
+        "extension",
+        "help",
+        "list",
+        "publish",
+        "reconcile-github",
+        "resolve",
+        "take-ownership",
+    ] {
+        assert_eq!(
+            workspace.next_source_connection_id(command).unwrap(),
+            format!("{command}-2")
+        );
+    }
+}
+
+#[test]
 fn conversation_of_an_unbound_ticket_uses_the_live_discovery_parts() {
     let remote = fake_source::FakeSource::default();
     let mut engine = Engine::new();

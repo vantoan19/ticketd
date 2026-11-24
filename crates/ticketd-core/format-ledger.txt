@@ -1141,3 +1141,6 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column source_connection_id_reservations.id
 + column source_credential_env_reservations.connection_id
 + column source_credential_env_reservations.name
+
+## 97
++ column publication_attempts.destination_site_unconfirmed

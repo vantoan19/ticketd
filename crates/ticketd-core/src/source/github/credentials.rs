@@ -60,12 +60,7 @@ impl AmbientCredentials {
         account: Option<&str>,
     ) -> Self {
         let mut credentials = Self::with_environment(custom_host, |name| std::env::var(name).ok());
-        credentials.override_name = id.map(|id| {
-            format!(
-                "TICKETD_SOURCE_{}_TOKEN",
-                id.to_ascii_uppercase().replace('-', "_")
-            )
-        });
+        credentials.override_name = id.map(connection_token_variable);
         credentials.account = account.map(str::to_owned);
         credentials
     }
@@ -82,6 +77,13 @@ impl AmbientCredentials {
             cli: OnceLock::new(),
         }
     }
+}
+
+pub(super) fn connection_token_variable(id: &str) -> String {
+    format!(
+        "TICKETD_SOURCE_{}_TOKEN",
+        id.to_ascii_uppercase().replace('-', "_")
+    )
 }
 
 impl CredentialSource for AmbientCredentials {

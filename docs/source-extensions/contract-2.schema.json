@@ -528,6 +528,30 @@
           "required": [
             "event"
           ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "event": {
+              "type": "string",
+              "not": {
+                "enum": [
+                  "closed",
+                  "reopened",
+                  "state_changed",
+                  "marked_duplicate",
+                  "unmarked_duplicate",
+                  "duplicate_added",
+                  "duplicate_removed",
+                  "assigned",
+                  "unassigned"
+                ]
+              }
+            }
+          },
+          "required": [
+            "event"
+          ]
         }
       ]
     },
@@ -558,7 +582,7 @@
           }
         },
         "author": {
-          "description": "The source identity that opened the issue, when known.",
+          "description": "The displayed name or username of the account that opened the issue, when known.",
           "type": [
             "string",
             "null"

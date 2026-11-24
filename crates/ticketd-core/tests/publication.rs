@@ -1406,6 +1406,64 @@ fn a_version_25_workspace_gains_the_attempts_table_on_open() {
 
 // ---- Resolving an uncertain publication (#109) ----
 
+#[test]
+fn a_legacy_github_publication_site_requires_an_original_binding_or_create_response() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 96).unwrap();
+    let legacy = rusqlite::Connection::open(&path).unwrap();
+    legacy
+        .execute_batch(
+            "INSERT INTO tickets (id, reference, title, status) VALUES
+            ('bound', 'T-KQ1', 'Bound', 'Todo'),
+            ('known', 'T-KQ2', 'Known', 'Todo'),
+            ('unbound', 'T-KQ3', 'Unbound', 'Todo'),
+            ('inferred', 'T-KQ4', 'Inferred', 'Todo');
+         INSERT INTO publication_attempts (
+            id, ticket_id, provider, destination, destination_host, title, body, status,
+            started_at, lease_expires_at, updated_at
+         )
+         SELECT id, id, 'github', 'o/r', 'git.example.test', title, '', 'unresolved',
+             '2026-01-01T00:00:00Z', '2026-01-01T00:06:00Z', '2026-01-01T00:06:00Z'
+         FROM tickets;
+         INSERT INTO source_connections (
+             id, name, provider, site, configuration, account, account_key,
+             contract_version, saved_at, revision
+         ) VALUES
+           ('github', 'Work', 'github', 'git.example.test:8443', '{}', 'octo', 'octo',
+             2, '2025-12-01T00:00:00Z', 'original'),
+           ('github-2', 'Legacy', 'github', 'git.example.test:7443', '{}', 'alice', 'alice',
+             1, '2025-12-01T00:00:00Z', 'inferred');
+         INSERT INTO publication_connections (attempt_id, connection_id) VALUES
+           ('bound', 'github'), ('inferred', 'github-2');
+         UPDATE publication_attempts SET external_id = '@git.example.test:12',
+            locator = 'o/r#7', display = 'o/r#7', url = 'https://git.example.test:9443/o/r/issues/7'
+         WHERE id = 'known';",
+        )
+        .unwrap();
+    drop(legacy);
+    let workspace = Workspace::open(path).unwrap();
+    let attempt = |reference| {
+        serde_json::to_value(&workspace.publication_attempts(reference).unwrap()[0]).unwrap()
+    };
+    let bound = attempt("T-KQ1");
+    assert_eq!(bound["destination_host"], "git.example.test:8443");
+    assert!(bound.get("destination_site_unconfirmed").is_none());
+    let known = attempt("T-KQ2");
+    assert_eq!(known["destination_host"], "git.example.test:9443");
+    assert_eq!(
+        known["issue"]["identity"]["id"],
+        "@git.example.test:9443:12"
+    );
+    assert!(known.get("destination_site_unconfirmed").is_none());
+    let unbound = attempt("T-KQ3");
+    assert_eq!(unbound["destination_host"], "git.example.test");
+    assert_eq!(unbound["destination_site_unconfirmed"], true);
+    let inferred = attempt("T-KQ4");
+    assert_eq!(inferred["destination_host"], "git.example.test");
+    assert_eq!(inferred["destination_site_unconfirmed"], true);
+}
+
 fn attach(issue: Option<&str>) -> ResolveOptions {
     ResolveOptions {
         resolution: Resolution::Attach {
@@ -1829,6 +1887,19 @@ fn discovery_holds_matches_in_a_legacy_publications_repository_until_the_host_is
 fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
     let mut f = Fixture::new();
     let ticket = f.lost_response("Escalate");
+    f.fake.0.lock().unwrap().account_from_assignee = true;
+    let importer = f
+        .workspace
+        .add_source_connection(
+            &f.engine,
+            "fake",
+            None,
+            Some("Discovery account"),
+            &values(json!({"repositories": ["o/r"], "assignee": "other"})),
+        )
+        .unwrap()
+        .source
+        .id;
     f.workspace
         .add_activity(&ticket.reference, "local work", None)
         .unwrap();
@@ -1841,14 +1912,28 @@ fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
         issue.body = "Rewritten".into();
     }
     f.workspace
-        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .refresh_connection(&f.engine, &importer, &RefreshOptions::default())
         .unwrap();
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
+    assert_eq!(
+        f.workspace
+            .ticket_source_connection("T-KQ2")
+            .unwrap()
+            .as_deref(),
+        Some(importer.as_str())
+    );
 
     let done = f
         .resolve(&ticket.reference, &accept_different("101"))
         .unwrap();
     assert_eq!(done.attempt.state, AttemptState::Succeeded);
+    assert_eq!(
+        f.workspace
+            .ticket_source_connection(&ticket.reference)
+            .unwrap()
+            .as_deref(),
+        Some("fake")
+    );
     let source = done.ticket.source.unwrap();
     assert_eq!(
         (source.id.as_str(), source.origin),
@@ -2150,6 +2235,43 @@ fn a_not_created_verdict_that_loses_to_an_attach_does_not_discard_the_issue() {
         f.workspace.publication_attempts(&ticket.reference).unwrap()[0].state,
         AttemptState::Succeeded
     );
+}
+
+#[test]
+fn a_not_created_verdict_cannot_use_a_search_from_before_a_changed_dispatch_lease() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let attempt_id = f.ticket(&ticket.reference).publication.unwrap().id;
+    let path = f.path();
+    let lease = later();
+    let mut remote = f.fake.0.lock().unwrap();
+    remote.issues.clear();
+    remote.after_lookup = Some(Arc::new(move || {
+        // A competing dispatch may have extended the lease while this account's
+        // search was reading the old window.
+        rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE publication_attempts SET lease_expires_at = ?2 WHERE id = ?1",
+                rusqlite::params![attempt_id, lease],
+            )
+            .unwrap();
+    }));
+    drop(remote);
+
+    let error = publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err());
+    assert!(
+        matches!(error, PublicationError::Unverified { .. }),
+        "{error}"
+    );
+    f.still_unresolved(&ticket.reference);
+    assert!(matches!(
+        publication_error(f.publish(&ticket.reference).unwrap_err()),
+        PublicationError::Ineligible {
+            reason: IneligibleReason::AttemptOpen,
+            ..
+        }
+    ));
 }
 
 #[test]

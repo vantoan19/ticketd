@@ -56,6 +56,8 @@ and `linked_tickets`. If several connections match, pass `--connection ID` for
 preview and confirmation. If the effect changed, get a new preview. An
 unconfigured preview gives the `provider` and `repository` to use with
 `ticketd source add PROVIDER --set repositories=OWNER/NAME` before previewing again.
+For GitHub Enterprise Server, set `TICKETD_GITHUB_API_URL` to your API address
+(for example `https://git.example.com/api/v3`) before adding and using the connection.
 
 ## Recover a legacy GitHub issue link
 
@@ -77,21 +79,32 @@ host, refresh that host again after confirming the legacy ticket's link.
 ## Recover an unresolved publication
 
 Run `ticketd source resolve T-KQ12` to review the attempt. Recovery uses the
-original connection. For GitHub, that connection must still use the host
-that received the create request.
+original connection when available. For GitHub, the connection must use the
+same hostname and port that received the create request.
 
-For an older attempt with an unknown host, verify which host received the
-original request before confirming it. Connect the source to that host and
-supply its hostname, such as `github.com`, without a protocol or repository path.
+For an older attempt with an unknown host or port, verify which site received
+the original request. Connect the source to that site and supply its hostname,
+such as `github.com`. For a nondefault port use `hostname:port`, without a
+protocol or repository path.
 
 ```sh
 ticketd source resolve T-KQ12 --confirm-host github.com
 ticketd source resolve T-KQ12
 ```
 
-`--confirm-host` records the host locally. The attempt stays unresolved until
-you attach the verified issue or confirm that nothing was created. If you
-cannot verify the original host, leave the attempt unresolved.
+`--confirm-host` records the site locally. If the original GitHub connection
+is unavailable and you have verified the issue, explicitly choose a saved
+GitHub connection on the original site.
+
+```sh
+ticketd source resolve T-KQ12 --issue owner/repo#7 --using-connection github
+```
+
+GitHub verifies the issue in the original repository. When the create response
+didn't record an issue, the selected account must match the issue's creator and
+the issue's date must be consistent with the attempt. The usual review for
+different content still applies. Confirming that nothing was created requires
+the original connection.
 
 ## JSON output
 

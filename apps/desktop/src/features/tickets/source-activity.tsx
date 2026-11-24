@@ -26,6 +26,8 @@ export type SourceActivity = {
   openSettings: (connection?: string) => void;
   /** Refreshes every source now, as the Retry and Refresh actions do. */
   refreshAll: () => Promise<void>;
+  /** Reloads persisted health after a write that can change it. */
+  readHealth?: () => Promise<void>;
 };
 
 export const SourceActivityContext = createContext<SourceActivity>({

@@ -1575,6 +1575,52 @@ fn a_synced_ticket_cannot_change_sites_under_the_same_legacy_issue_id() {
 }
 
 #[test]
+fn a_collision_held_file_retries_when_its_source_holder_releases_the_identity() {
+    let mut devices = Devices::new(&["Desk A"]);
+    let holder = sourced("open", "2026-01-03T00:00:00Z");
+    let holder_id = "3f2c9a1e-0000-4000-8000-000000000001";
+    devices.hand_edit(RemoteKind::Ticket, holder_id, &holder);
+    devices.sync(0);
+
+    let held = devices.workspaces[0].create_ticket("Held ticket").unwrap();
+    devices.sync(0);
+    let incoming = holder
+        .replace(holder_id, &held.id)
+        .replace("T-ZZ7", &held.reference)
+        .replace("example.test", "other.example.test");
+    devices.hand_edit(RemoteKind::Ticket, &held.id, &incoming);
+    devices.workspaces[0]
+        .add_tag(&held.reference, "local-progress")
+        .unwrap();
+    let report = devices.sync(0);
+    assert_eq!((report.skipped, report.uploaded), (1, 0));
+
+    let seen = downloads(&devices);
+    assert_eq!(devices.sync(0).uploaded, 0);
+    assert_eq!(downloads(&devices), seen);
+    assert_eq!(devices.workspaces[0].sync_notices().unwrap().len(), 1);
+
+    let mut released = devices.workspaces[0]
+        .export_sync_record(SyncKind::Ticket, holder_id)
+        .unwrap();
+    released
+        .fields
+        .retain(|name, _| !name.starts_with("source_"));
+    devices.workspaces[0].apply_sync_record(&released).unwrap();
+
+    let report = devices.sync(0);
+    assert_eq!((report.skipped, report.uploaded), (0, 2));
+    assert_eq!(downloads(&devices), seen + 1);
+    assert!(devices.workspaces[0].sync_notices().unwrap().is_empty());
+    let ticket = devices.workspaces[0].show_ticket(&held.reference).unwrap();
+    assert_eq!(
+        ticket.source.unwrap().url,
+        "https://other.example.test/acme/site/issues/42"
+    );
+    assert_eq!(ticket.tags, ["local-progress"]);
+}
+
+#[test]
 fn a_format_two_cached_base_merges_a_format_three_observation_with_local_progress() {
     let mut devices = devices();
     let id = "3f2c9a1e-0000-4000-8000-000000000001";

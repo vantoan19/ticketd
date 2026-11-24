@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Pencil, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -41,7 +41,10 @@ export function SourcesPage({
 }) {
   const { entries, loading } = useSources();
   const [adding, setAdding] = useState<SourceEntry | null>(null);
-  const [changes, setChanges] = useState<SourceEntry[]>([]);
+  const [additions, setAdditions] = useState<SourceEntry[]>([]);
+  const [names, setNames] = useState<ReadonlyMap<string, string>>(
+    () => new Map(),
+  );
   const [removed, setRemoved] = useState<string[]>([]);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(
     null,
@@ -55,6 +58,18 @@ export function SourcesPage({
   const [rename, setRename] = useState<{ id: string; name: string } | null>(
     null,
   );
+  const renameInput = useRef<HTMLInputElement>(null);
+  const renameButtons = useRef(new Map<string, HTMLButtonElement>());
+  const returnRenameFocus = useRef<string | null>(null);
+  const renamingId = rename?.id;
+  useLayoutEffect(() => {
+    if (renamingId) {
+      renameInput.current?.focus();
+    } else if (returnRenameFocus.current) {
+      renameButtons.current.get(returnRenameFocus.current)?.focus();
+      returnRenameFocus.current = null;
+    }
+  }, [renamingId]);
   const [savingName, setSavingName] = useState(false);
   const [renameFailure, setRenameFailure] = useState<ReturnType<
     typeof describeFailure
@@ -69,28 +84,50 @@ export function SourcesPage({
       )
     : undefined;
   const connections = new Map<string, SourceEntry>();
-  for (const entry of [...entries, ...changes]) {
+  for (const entry of entries) {
     if (entry.saved)
       connections.set(entry.saved.id ?? entry.connector.provider, entry);
   }
+  const pendingAdditions = additions.filter(
+    ({ saved }) => saved?.id && !connections.has(saved.id),
+  );
+  if (pendingAdditions.length !== additions.length)
+    setAdditions(pendingAdditions);
+  for (const entry of pendingAdditions) {
+    if (entry.saved?.id) connections.set(entry.saved.id, entry);
+  }
   for (const id of removed) connections.delete(id);
+  const pendingNames = new Map(
+    [...names].filter(([id, name]) => {
+      const source = connections.get(id)?.saved;
+      return source && source.name !== name;
+    }),
+  );
+  if (pendingNames.size !== names.size) setNames(pendingNames);
 
-  function record(entry: SourceEntry, source: SavedSource) {
+  function recordAdded(entry: SourceEntry, source: SavedSource) {
     const updated = { ...entry, saved: source };
     setRemoved((current) => current.filter((id) => id !== source.id));
-    setChanges((current) => [
+    setAdditions((current) => [
       ...current.filter(({ saved }) => saved?.id !== source.id),
       updated,
     ]);
     return updated;
   }
 
-  async function saveName(entry: SourceEntry, id: string, name: string) {
+  function closeRename(id: string) {
+    returnRenameFocus.current = id;
+    setRename(null);
+  }
+
+  async function saveName(id: string, name: string) {
     setSavingName(true);
     setRenameFailure(null);
     try {
-      record(entry, await sourcesClient.rename(id, name));
-      setRename(null);
+      const savedName = (await sourcesClient.rename(id, name)).name;
+      if (savedName) setNames((current) => new Map(current).set(id, savedName));
+      closeRename(id);
+      void onChanged?.();
     } catch (reason) {
       setRenameFailure(describeFailure(reason, "rename this connection"));
     } finally {
@@ -104,7 +141,9 @@ export function SourcesPage({
     try {
       await sourcesClient.remove(id);
       setRemoved((current) => [...current, id]);
-      setChanges((current) => current.filter(({ saved }) => saved?.id !== id));
+      setAdditions((current) =>
+        current.filter(({ saved }) => saved?.id !== id),
+      );
       setRemoving(null);
       await onChanged?.();
     } catch (reason) {
@@ -124,7 +163,7 @@ export function SourcesPage({
           id: projectEntry.next_id,
           onCancel: projectSetup.onCancel,
           onAdded: (source) => {
-            void onChanged?.(record(projectEntry, source));
+            void onChanged?.(recordAdded(projectEntry, source));
             if (source.id) projectSetup.onSaved(source.id);
           },
         }}
@@ -139,7 +178,7 @@ export function SourcesPage({
           id: adding.next_id,
           onCancel: () => setAdding(null),
           onAdded: (source) => {
-            const added = record(adding, source);
+            const added = recordAdded(adding, source);
             setAdding(null);
             void onChanged?.(added);
           },
@@ -176,7 +215,8 @@ export function SourcesPage({
               )}
               {[...connections].map(([id, entry]) => {
                 const source = entry.saved;
-                const name = source?.name ?? entry.connector.name;
+                const name =
+                  pendingNames.get(id) ?? source?.name ?? entry.connector.name;
                 const editing = rename?.id === id ? rename : null;
                 return (
                   <SettingsRow
@@ -211,6 +251,10 @@ export function SourcesPage({
                             </Button>
                           )}
                           <Button
+                            ref={(button) => {
+                              if (button) renameButtons.current.set(id, button);
+                              else renameButtons.current.delete(id);
+                            }}
                             size="icon-sm"
                             variant="ghost"
                             aria-label={`Rename ${name}`}
@@ -243,7 +287,7 @@ export function SourcesPage({
                         className="flex flex-col gap-2"
                         onSubmit={(event) => {
                           event.preventDefault();
-                          void saveName(entry, id, editing.name);
+                          void saveName(id, editing.name);
                         }}
                       >
                         <Field>
@@ -251,6 +295,7 @@ export function SourcesPage({
                             Connection name
                           </FieldLabel>
                           <Input
+                            ref={renameInput}
                             id="connection-new-name"
                             value={editing.name}
                             maxLength={100}
@@ -279,7 +324,7 @@ export function SourcesPage({
                             variant="ghost"
                             size="sm"
                             disabled={savingName}
-                            onClick={() => setRename(null)}
+                            onClick={() => closeRename(id)}
                           >
                             Cancel
                           </Button>

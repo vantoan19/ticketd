@@ -219,6 +219,7 @@ fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
                     "200 OK",
                     json!({"id": 60, "number": 7, "title": "Escalate me", "body": "Why it matters", "state": "open",
                            "html_url": "https://github.example/o/flaky/issues/7", "assignees": [], "labels": [],
+                           "user": {"id": 1, "login": "octo"},
                            "created_at": "2999-01-01T00:00:00Z", "updated_at": "2999-01-01T00:00:00Z"}),
                 )
             } else if path.starts_with("/repos/o/flaky/issues?") {
@@ -539,6 +540,32 @@ fn test_names_the_account_and_a_bad_credential_is_explained_without_echoing_it()
         "{stderr}"
     );
     assert!(!stderr.contains("Settings"), "{stderr}");
+}
+
+#[test]
+fn a_named_github_account_gets_connection_specific_sign_in_guidance() {
+    let cli = Cli::new();
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    let named = cli.command_with_second(
+        &[
+            "source",
+            "add",
+            "github",
+            "--set",
+            "repositories=o/r",
+            "--set",
+            "account=other",
+        ],
+        Some(TOKEN),
+        Some(SECOND_TOKEN),
+    );
+    assert!(named.status.success(), "{:?}", named.stderr);
+    let failure = cli.fail(&["source", "github-2", "test"], Some(TOKEN));
+    assert!(
+        failure.contains("TICKETD_SOURCE_GITHUB_2_TOKEN"),
+        "{failure}"
+    );
+    assert!(!failure.contains("set TICKETD_GITHUB_TOKEN"), "{failure}");
 }
 
 #[test]
@@ -908,6 +935,23 @@ fn publish_previews_then_creates_one_issue_and_replays_without_another() {
 }
 
 #[test]
+fn publication_replays_when_the_named_connection_has_been_removed() {
+    let cli = Cli::new();
+    let add = ["source", "add", "github", "--set", "repositories=o/r"];
+    cli.run(&add);
+    cli.run(&["source", "github", "remove"]);
+    assert_eq!(cli.run(&add)["source"]["id"], "github-2");
+    let reference = local_ticket(&cli);
+    let args = ["source", "publish", &reference, "--connection", "github-2"];
+    let first = cli.run(&args);
+    assert_eq!(first["replayed"], false);
+    cli.run(&["source", "github-2", "remove"]);
+    let replay = cli.run(&args);
+    assert_eq!(replay["replayed"], true);
+    assert_eq!(replay["attempt"]["id"], first["attempt"]["id"]);
+}
+
+#[test]
 fn a_refused_publication_fails_with_the_reason_and_leaves_the_ticket_local() {
     let cli = Cli::new();
     cli.run(&[
@@ -994,11 +1038,11 @@ fn age_attempts(cli: &Cli) {
 #[test]
 fn legacy_publication_recovery_uses_only_verified_original_hosts() {
     let cli = Cli::new();
+    let site = cli.api.strip_prefix("http://").unwrap();
     let path = cli.dir.path().join("workspace.sqlite3");
     ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
-    rusqlite::Connection::open(path)
-        .unwrap()
-        .execute_batch(
+    let legacy = rusqlite::Connection::open(path).unwrap();
+    legacy.execute_batch(
             "INSERT INTO source_configurations
                 (provider, configuration, account, contract_version, saved_at)
              VALUES ('github', '{\"repositories\":[\"o/r\",\"o/flaky\"]}', 'octo', 1, '2025-12-01T00:00:00Z');
@@ -1019,6 +1063,13 @@ fn legacy_publication_recovery_uses_only_verified_original_hosts() {
                     'http://127.0.0.1/o/r/issues/7');",
         )
         .unwrap();
+    legacy
+        .execute(
+            "UPDATE publication_attempts SET url = ?1 WHERE id = 'known-attempt'",
+            [format!("{}/o/r/issues/7", cli.api)],
+        )
+        .unwrap();
+    drop(legacy);
 
     let reference = "T-KQ12";
     let review = cli.run(&["source", "resolve", reference, "--no-search"]);
@@ -1032,10 +1083,7 @@ fn legacy_publication_recovery_uses_only_verified_original_hosts() {
             .contains("--confirm-host")
     );
     let previously_recorded = cli.run(&["source", "resolve", "T-KQ13", "--no-search"]);
-    assert_eq!(
-        previously_recorded["attempt"]["destination_host"],
-        "127.0.0.1"
-    );
+    assert_eq!(previously_recorded["attempt"]["destination_host"], site);
     assert_eq!(previously_recorded["actions"][0]["available"], true);
     assert_eq!(previously_recorded["actions"][1]["available"], false);
 
@@ -1050,15 +1098,20 @@ fn legacy_publication_recovery_uses_only_verified_original_hosts() {
         None,
     );
     assert!(wrong.contains("uses 127.0.0.1"), "{wrong}");
-
-    let confirmed = cli.command(
+    let wrong_port = cli.fail(
         &[
             "source",
             "resolve",
             reference,
             "--confirm-host",
-            "127.0.0.1",
+            "127.0.0.1:1",
         ],
+        None,
+    );
+    assert!(wrong_port.contains(site), "{wrong_port}");
+
+    let confirmed = cli.command(
+        &["source", "resolve", reference, "--confirm-host", site],
         None,
     );
     assert!(
@@ -1067,7 +1120,7 @@ fn legacy_publication_recovery_uses_only_verified_original_hosts() {
         String::from_utf8_lossy(&confirmed.stderr)
     );
     let attempt: Value = serde_json::from_slice(&confirmed.stdout).unwrap();
-    assert_eq!(attempt["destination_host"], "127.0.0.1");
+    assert_eq!(attempt["destination_host"], site);
     assert_eq!(attempt["state"], "unresolved");
     assert_eq!(cli.run(&["show", reference])["source"], Value::Null);
 
@@ -1088,6 +1141,88 @@ fn legacy_publication_recovery_uses_only_verified_original_hosts() {
     cli.run(&["source", "github", "edit", "--set", "repositories=o/flaky"]);
     let outcome = cli.run(&["source", "resolve", reference, "--issue", "7"]);
     assert_eq!(outcome["attempt"]["state"], "succeeded");
+}
+
+#[test]
+fn a_legacy_publication_without_a_binding_can_only_attach_explicitly() {
+    let cli = Cli::new();
+    let site = cli.api.strip_prefix("http://").unwrap();
+    let path = cli.dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO source_configurations
+                (provider, configuration, account, contract_version, saved_at)
+             VALUES ('github', '{\"repositories\":[\"o/flaky\"]}', 'octo', 1, '2026-01-02T00:00:00Z');
+             INSERT INTO tickets (id, reference, title, body, status) VALUES
+                ('11111111-1111-4111-8111-111111111111', 'T-KQ12', 'Escalate me', 'Why it matters', 'Todo');
+             INSERT INTO publication_attempts
+                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at)
+                VALUES ('attempt', '11111111-1111-4111-8111-111111111111', 'github', 'o/flaky',
+                    'Escalate me', 'Why it matters', 'unresolved',
+                    '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z', '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+
+    let reference = "T-KQ12";
+    let explicit = [
+        "source",
+        "resolve",
+        reference,
+        "--issue",
+        "7",
+        "--using-connection",
+        "github",
+    ];
+    let unknown_host = cli.command(&explicit, Some(TOKEN));
+    assert_eq!(unknown_host.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&unknown_host.stderr).contains("--confirm-host"));
+    cli.run(&["source", "resolve", reference, "--confirm-host", site]);
+    let review = cli.run(&["source", "resolve", reference, "--no-search"]);
+    assert!(review.get("connection_id").is_none());
+    assert!(
+        review["actions"][0]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("--using-connection")
+    );
+
+    for flag in ["--issue", "--not-created"] {
+        let mut args = vec!["source", "resolve", reference, flag];
+        if flag == "--issue" {
+            args.push("7");
+        }
+        let rejected = cli.command(&args, Some(TOKEN));
+        assert_eq!(rejected.status.code(), Some(1));
+        assert!(String::from_utf8_lossy(&rejected.stderr).contains("originally used"));
+    }
+    let second = cli.command_with_second(
+        &["source", "add", "github", "--set", "repositories=o/flaky"],
+        Some(TOKEN),
+        Some(SECOND_TOKEN),
+    );
+    assert!(second.status.success(), "{:?}", second.stderr);
+    let mut incorrect = explicit;
+    incorrect[6] = "github-2";
+    let rejected = cli.command_with_second(&incorrect, Some(TOKEN), Some(SECOND_TOKEN));
+    assert_eq!(rejected.status.code(), Some(1));
+    assert!(String::from_utf8_lossy(&rejected.stderr).contains("selected account created"));
+    assert_eq!(
+        cli.run(&["show", reference])["publication"]["state"],
+        "unresolved"
+    );
+
+    let recovered = cli.run(&explicit);
+    assert_eq!(recovered["attempt"]["state"], "succeeded");
+    assert_eq!(recovered["ticket"]["source"]["display"], "o/flaky#7");
+    let historical_bindings: i64 = rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM publication_connections", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(historical_bindings, 0);
 }
 
 #[test]
@@ -1216,6 +1351,38 @@ fn take_ownership_makes_an_unavailable_ticket_local_and_stops_synchronizing_it()
         cli.run(&["history", "T-KQ1"])
             .to_string()
             .contains("ownership")
+    );
+}
+
+#[test]
+fn local_source_commands_work_when_the_extension_registry_cannot_be_opened() {
+    let cli = Cli::new();
+    cli.run(&["source", "add", "github", "--set", "repositories=o/r"]);
+    let imported = cli.run(&["source", "github", "refresh"]);
+    let reference = imported["imported"][0].as_str().unwrap();
+    let registry = cli.dir.path().join("broken-registry");
+    std::fs::write(&registry, "not a folder").unwrap();
+    let run = |args: &[&str]| {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                cli.dir.path().join("workspace.sqlite3"),
+            )
+            .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{:?}", output.stderr);
+        serde_json::from_slice::<Value>(&output.stdout).unwrap()
+    };
+
+    assert_eq!(run(&["source", "github", "show"])["id"], "github");
+    assert_eq!(run(&["source", "github", "status"])["provider"], "github");
+    assert_eq!(run(&["source", "github", "rename", "Work"])["name"], "Work");
+    assert_eq!(run(&["source", "github", "remove"])["ok"], true);
+    assert_eq!(
+        run(&["source", "take-ownership", reference])["source"]["ownership"],
+        "local"
     );
 }
 
