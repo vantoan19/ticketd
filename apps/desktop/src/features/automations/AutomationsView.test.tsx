@@ -597,7 +597,7 @@ test("an existing agent can turn commands off while its capability loads and exp
       id: "a1",
       name: "Triage",
       harness: "codex",
-      tools: { ...DEFAULTS.tools, run_commands: true },
+      tools: { ...DEFAULTS.tools, run_commands: true, allowed_commands: [] },
       used_by: [],
     },
   ]);
