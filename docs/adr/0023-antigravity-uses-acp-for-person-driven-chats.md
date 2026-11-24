@@ -22,13 +22,15 @@ Find `agy` on PATH or in its default user installation directory and require
 version 1.5.2 or newer. The process runs in the Chat's execution folder
 with the usual ticketd process environment, plus
 `AGY_CLI_DISABLE_AUTO_UPDATE=1`. The Chat credits CLI writes using the same
-environment variables as the other harnesses.
+environment variables as the other harnesses. The ticketd skill installs under
+`~/.gemini/config/skills/ticketd`.
 
 The adapter uses the official Rust ACP schema. It shares the JSON-RPC
 connection and runtime lifecycle with Codex. A Prompt's reply reports how
 its Turn ended. Session updates lack a Prompt ID, so messages sent during a
-Turn queue until it ends. Model and thinking-level controls use the
-Session's configuration choices. Quota errors show the harness's message.
+Turn queue until it ends. Before a Session, New Chat reads model choices from
+`agy models` and caches a successful list for the installed version. Model and
+thinking-level controls then use the Session's configuration choices. Quota errors show the harness's message.
 
 New Chats default to **Antigravity settings**. Ask for approval, Accept edits
 and Plan only are offered when the Session reports their native values. A

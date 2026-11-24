@@ -1,4 +1,5 @@
 //! A person's Chat on their installed Antigravity ACP server.
+mod models;
 mod runtime;
 mod settings;
 mod steps;
@@ -105,9 +106,13 @@ impl HarnessAdapter for Antigravity {
     }
 
     async fn options(&self) -> Result<HarnessOptions, String> {
+        let models = match self.inspect().await {
+            Inspection::Installed { executable, .. } => models::listed(&executable).await,
+            _ => Vec::new(),
+        };
         Ok(HarnessOptions {
+            models,
             permission: self.permission_before_session(None, None),
-            ..Default::default()
         })
     }
 

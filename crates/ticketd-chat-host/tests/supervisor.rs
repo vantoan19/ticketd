@@ -2523,3 +2523,45 @@ async fn a_permission_restart_resumes_the_same_session_before_releasing_the_queu
     assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
     assert_eq!(written_kinds(&f), ["submit", "setting", "submit"]);
 }
+
+#[tokio::test(start_paused = true)]
+async fn native_only_recovery_opens_an_empty_session_when_native_history_is_missing() {
+    let f = Fixture::new(FakeAdapter::new(
+        &ticketd_core::harnesses::ANTIGRAVITY,
+        Capabilities {
+            steering: Capability::Unsupported {
+                reason: String::new(),
+            },
+        },
+    ));
+    f.send("prior input").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let replay = f
+        .host
+        .resume(
+            &f.chat.id,
+            ResumeMode::FreshSession {
+                history: "prior input".to_owned(),
+            },
+        )
+        .await;
+    assert!(matches!(replay, Err(HostError::Core(Error::Chat(_)))));
+    f.fake.fail_next_open(Problem {
+        kind: ProblemKind::NativeHistoryUnavailable,
+        message: "the session is missing".to_owned(),
+        detail: None,
+        resets_at: None,
+    });
+    f.host.resume(&f.chat.id, ResumeMode::Native).await.unwrap();
+    let opened = f.fake.opens();
+    assert_eq!(opened.len(), 2);
+    assert_eq!(opened[1].session, SessionStart::New);
+
+    f.send("next input").await;
+    assert_eq!(f.submits().last().unwrap().text, "next input");
+}

@@ -1717,7 +1717,7 @@ impl Supervisor {
                     && self.native_history_only()
                     && let Ok(chat) = self.core(|core| core.chat(&self.chat_id))
                 {
-                    self.harness_notice(
+                    self.notice(
                         "The harness could not resume its history. The Chat will continue in a new session.".to_owned(),
                     );
                     self.open(
