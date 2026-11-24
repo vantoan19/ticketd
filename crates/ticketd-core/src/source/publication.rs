@@ -612,15 +612,24 @@ pub(crate) fn awaited_by_open_attempt(
     issue: &ExternalIssue,
 ) -> Result<bool, Error> {
     let provider = &issue.reference.identity.provider;
-    let issue_repository = issue
-        .repository
-        .as_deref()
-        .and_then(|remote| remote.split_once('/'));
-    // GitHub supplies canonical repository provenance. Other connectors can omit it.
-    let requires_repository = provider == super::github::PROVIDER;
-    if requires_repository && issue_repository.is_none() {
-        return Ok(false);
-    }
+    let is_github = provider == super::github::PROVIDER;
+    let (issue_host, issue_repository) = if is_github {
+        // GitHub's identity and locator also work on hosts that cannot be Project remotes.
+        (
+            super::github::issue_id_host(&issue.reference.identity.id),
+            super::github::split_locator(&issue.reference.locator)
+                .ok()
+                .map(|(repository, _)| repository),
+        )
+    } else {
+        issue
+            .repository
+            .as_deref()
+            .and_then(|remote| remote.split_once('/'))
+            .map_or((None, None), |(host, repository)| {
+                (Some(host), Some(repository))
+            })
+    };
     let mut statement = connection.prepare(
         "SELECT title, body, started_at, destination, destination_host FROM publication_attempts \
          WHERE provider = ?1 AND status IN ('in_flight', 'unresolved')",
@@ -636,21 +645,24 @@ pub(crate) fn awaited_by_open_attempt(
     })?;
     for attempt in attempts {
         let (title, body, started_at, destination, destination_host) = attempt?;
-        if let Some((issue_host, issue_repository)) = issue_repository {
-            // An unverified legacy attempt still protects its repository until its host is confirmed.
-            if destination_host
+        // An unknown host leaves the repository check in place for legacy attempts.
+        if issue_host
+            .zip(destination_host.as_deref())
+            .is_some_and(|(observed, recorded)| observed != recorded)
+        {
+            continue;
+        }
+        if let Some(issue_repository) = issue_repository {
+            let same_repository = if is_github {
+                engine.same_destination(provider, &destination, issue_repository)?
+            } else if let Some((_, repository)) = engine
+                .repository_for_destination(provider, &destination)?
                 .as_deref()
-                .is_some_and(|host| host != issue_host)
+                .and_then(|remote| remote.split_once('/'))
             {
-                continue;
-            }
-            let remote = engine.repository_for_destination(provider, &destination)?;
-            let same_repository = match remote.as_deref().and_then(|remote| remote.split_once('/'))
-            {
-                Some((_, repository)) => {
-                    engine.same_destination(provider, repository, issue_repository)?
-                }
-                None => !requires_repository,
+                engine.same_destination(provider, repository, issue_repository)?
+            } else {
+                true
             };
             if !same_repository {
                 continue;

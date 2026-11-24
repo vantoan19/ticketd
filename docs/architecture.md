@@ -966,8 +966,9 @@ the attempt's repository, issue locator and saved issue host. When the original
 host is unknown, it must be explicitly confirmed against the configured connector
 before recovery can proceed.
 
-GitHub discovery holds a matching issue for an open attempt only within its
-recorded repository and host. An attempt with an unknown host can still hold a
+GitHub discovery compares a matching issue's identity host and locator
+repository to the open attempt's destination. This comparison is independent of
+Project remote validation. An attempt with an unknown host can still hold a
 match in the same owner and repository name until the original host is confirmed.
 
 Taking ownership (`Workspace::take_ownership`, `ticketd source take-ownership`,

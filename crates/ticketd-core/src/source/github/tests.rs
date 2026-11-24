@@ -165,6 +165,81 @@ fn configured_repositories_use_the_github_web_host_without_network_access() {
 }
 
 #[test]
+fn a_legacy_publication_holds_matching_github_issues_without_project_remote_provenance() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("legacy.db");
+    crate::create_workspace_at_format_version(&path, 88).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO tickets (id, reference, title, body, status)
+             VALUES ('legacy', 'T-KQ5', 'Issue 7', 'Details', 'Todo');
+             INSERT INTO publication_attempts
+                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at)
+             VALUES ('attempt', 'legacy', 'github', 'O/ONE', 'Issue 7', 'Details', 'unresolved',
+                '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z', '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+    let mut workspace = crate::Workspace::open(&path).unwrap();
+
+    // The connector can identify this host even though Project remotes reject it.
+    let api = "https://git_hub.example.test";
+    let (fixture, engine) = setup_at(api, Some(TOKEN));
+    assert_eq!(
+        engine
+            .repository_for_destination("github", "o/one")
+            .unwrap(),
+        None
+    );
+    fixture.respond(&format!("{api}/user"), ok(json!({"login": "octo"})));
+    for (id, repository) in [(7, "o/one"), (8, "o/other")] {
+        let listed = format!("{api}/repos/{repository}/issues?state=open&per_page=100");
+        fixture.respond(&listed, ok(json!([])));
+        for _ in 0..2 {
+            fixture.respond(&listed, ok(json!([issue(id, 7, repository)])));
+            for suffix in ["comments", "events"] {
+                fixture.respond(
+                    &format!("{api}/repos/{repository}/issues/7/{suffix}?per_page=100"),
+                    ok(json!([])),
+                );
+            }
+        }
+    }
+    workspace
+        .save_source(
+            &engine,
+            "github",
+            &config(json!({"repositories": ["o/one", "o/other"]})),
+        )
+        .unwrap();
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+
+    assert_eq!(report.imported.len(), 1);
+    let imported = workspace.show_ticket(&report.imported[0]).unwrap();
+    assert_eq!(imported.source.unwrap().id, "@git_hub.example.test:8");
+    assert!(
+        workspace
+            .show_ticket("T-KQ5")
+            .unwrap()
+            .publication
+            .is_some()
+    );
+
+    let (_, original_engine) = setup(None);
+    workspace
+        .confirm_publication_host(&original_engine, "T-KQ5", "api.example.test")
+        .unwrap();
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert_eq!(report.imported.len(), 1);
+    let imported = workspace.show_ticket(&report.imported[0]).unwrap();
+    assert_eq!(imported.source.unwrap().id, "@git_hub.example.test:7");
+}
+
+#[test]
 fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
     let folder = tempfile::tempdir().unwrap();
     let mut workspace = crate::Workspace::open(folder.path().join("workspace.db")).unwrap();

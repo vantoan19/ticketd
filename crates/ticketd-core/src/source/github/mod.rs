@@ -970,7 +970,7 @@ fn credential_may_travel(api_url: &str) -> bool {
         )
 }
 
-fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {
+pub(super) fn split_locator(locator: &str) -> Result<(&str, &str), SourceError> {
     locator
         .rsplit_once('#')
         .filter(|(repository, number)| {
