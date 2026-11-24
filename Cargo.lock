@@ -5262,7 +5262,7 @@ dependencies = [
 
 [[package]]
 name = "ticketd-automation-runner"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "serde_json",
  "tempfile",
@@ -5275,7 +5275,7 @@ dependencies = [
 
 [[package]]
 name = "ticketd-chat-host"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "agent-client-protocol-schema",
  "async-trait",
@@ -5293,7 +5293,7 @@ dependencies = [
 
 [[package]]
 name = "ticketd-cli"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "clap",
@@ -5311,7 +5311,7 @@ dependencies = [
 
 [[package]]
 name = "ticketd-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "aho-corasick",
  "aws-credential-types",
@@ -5350,7 +5350,7 @@ dependencies = [
 
 [[package]]
 name = "ticketd-desktop"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "rusqlite",
  "semver",
@@ -5376,7 +5376,7 @@ dependencies = [
 
 [[package]]
 name = "ticketd-diagnostics"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "serde",
@@ -5390,7 +5390,7 @@ dependencies = [
 
 [[package]]
 name = "ticketd-source-linear"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "chrono",
  "httpdate",
@@ -5406,7 +5406,7 @@ dependencies = [
 
 [[package]]
 name = "ticketd-source-sdk"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "regex",
  "schemars 1.2.3",
