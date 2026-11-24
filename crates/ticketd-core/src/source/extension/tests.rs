@@ -545,10 +545,11 @@ fn an_installed_folder_is_checked_even_with_a_warm_process() {
 #[test]
 fn relinking_the_same_development_folder_restarts_its_warm_process() {
     let scratch = tempfile::tempdir().unwrap();
-    let registry = ExtensionRegistry::new(scratch.path().join("extensions"));
+    let folder = scratch.path().join("extensions");
+    let registry = ExtensionRegistry::new(folder.clone());
     let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension");
-    let package = scratch.path().join("package");
-    std::fs::create_dir(&package).unwrap();
+    let package = folder.join(".source-stage-development");
+    std::fs::create_dir_all(&package).unwrap();
     for name in ["driver.mjs", "ticketd-source.json"] {
         std::fs::copy(source.join(name), package.join(name)).unwrap();
     }

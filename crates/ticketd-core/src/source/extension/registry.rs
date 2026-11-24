@@ -26,6 +26,7 @@ const MANIFEST_LIMIT: u64 = 16 * 1024;
 const RECORD_LIMIT: u64 = 1024 * 1024;
 const PACKAGE_PREFIX: &str = ".source-package-";
 const STAGING_PREFIX: &str = ".source-stage-";
+const STAGING_MARKER: &str = ".ticketd-source-install";
 
 /// A device-local extension registration. Connections keep their own settings.
 #[derive(Serialize)]
@@ -623,6 +624,7 @@ impl ExtensionRegistry {
             .prefix(STAGING_PREFIX)
             .tempdir_in(&registry)
             .map_err(storage_error)?;
+        File::create_new(transaction.path().join(STAGING_MARKER)).map_err(storage_error)?;
         let package = transaction.path().join("package");
         copy_package(&staging.path().join("package"), &package).map_err(storage_error)?;
         fs::rename(&package, &destination).map_err(storage_error)?;
@@ -687,7 +689,15 @@ impl ExtensionRegistry {
                 continue;
             };
             if name.starts_with(STAGING_PREFIX) {
-                remove_package(&entry.path());
+                let path = entry.path();
+                // A development folder can have the same prefix.
+                if path
+                    .join(STAGING_MARKER)
+                    .symlink_metadata()
+                    .is_ok_and(|metadata| metadata.is_file())
+                {
+                    remove_package(&path);
+                }
                 continue;
             }
             let Some(id) = package_provider(name) else {
@@ -1074,6 +1084,7 @@ mod bundled_tests {
         ));
         let abandoned_copy = registry.folder.join(format!("{STAGING_PREFIX}interrupted"));
         fs::create_dir_all(&abandoned_copy).unwrap();
+        File::create_new(abandoned_copy.join(STAGING_MARKER)).unwrap();
         copy_package(&installed.path, &abandoned).unwrap();
 
         // Simulate exiting after the new package was copied, before committing
