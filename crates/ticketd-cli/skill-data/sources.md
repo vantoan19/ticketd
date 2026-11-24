@@ -35,8 +35,9 @@ locally. `source take-ownership` is an explicit authority change for an unavaila
 ticket, not a workaround for an ordinary edit rejection.
 
 If refresh asks for the original host of a legacy GitHub ticket, confirm its
-original issue URL with `source reconcile-github T-KQ1 --issue URL`. GitHub's
-reply must match the saved issue ID and location. The ticket keeps its current
+current issue URL on that host with `source reconcile-github T-KQ1 --issue URL`.
+Restore a trashed ticket before confirming its link. GitHub's reply must match
+the saved stable issue ID and the supplied URL. The ticket keeps its current
 ownership, even after takeover.
 
 ## Connect a project to its source

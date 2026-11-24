@@ -15,9 +15,6 @@ A ticket created with tags emits one `ticket.tag_added` per tag. The first
 import of a ticket source emits nothing, and that is decided per repository:
 an issue new to the Workspace logs nothing when it comes from a repository no
 successful read has covered yet under the source's current assignee and labels.
-A repository's first read stays incomplete when a possible legacy GitHub
-duplicate is held for host confirmation. Other issues in that repository can
-still import silently.
 A read that skips a repository it cannot see has not read it, and loosening a
 filter shows a backlog, so its issues log nothing either; an issue that arrives
 in the same refresh as a filter change cannot be told from that backlog and

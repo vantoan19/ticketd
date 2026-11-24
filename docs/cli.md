@@ -58,16 +58,20 @@ using the preview's `repository`, then preview again.
 
 ## Recover a legacy GitHub issue link
 
-If refresh asks you to confirm a legacy ticket's GitHub host, use the original
-issue URL with the GitHub source connected to that host.
+If refresh asks you to confirm a legacy ticket's GitHub host, connect the
+GitHub source to the host where that issue belongs. If the ticket is in Trash,
+run `ticketd restore T-KQ12` first. Use the issue's current full URL.
 
 ```sh
 ticketd source reconcile-github T-KQ12 --issue https://github.com/OWNER/NAME/issues/123
 ```
 
-GitHub must confirm the saved issue ID, repository, and issue number. The command
-repairs the existing ticket's source link and keeps its current ownership. Run
-`ticketd source refresh --ticket T-KQ12` afterward if GitHub still owns the ticket.
+GitHub must confirm the saved stable issue ID at the URL you supply. A new
+repository or issue number is accepted when that ID stays the same. The command
+repairs the existing ticket's source link and keeps its current ownership.
+Run `ticketd source refresh --ticket T-KQ12` afterward if GitHub still owns the
+ticket. If discovery held a separate issue with the same ID on another GitHub
+host, refresh that host again after confirming the legacy ticket's link.
 
 ## JSON output
 

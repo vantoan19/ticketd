@@ -887,14 +887,18 @@ with the same numeric ID on different hosts stay separate after a source change.
 Public GitHub keeps its numeric IDs. Format version 87 populates the repository
 when a legacy issue URL agrees with its locator. Format version 88 qualifies
 legacy IDs using stored host evidence. A legacy ID without host evidence remains
-unverified. Discovery holds a potential new import with the same ID and issue
-location as an unverified ticket. A person can confirm the original issue URL
-with `ticketd source reconcile-github`. Core checks the host, ID, and location
-through GitHub before atomically repairing provenance on the existing ticket.
+unverified. Discovery holds a potential new import with the same numeric ID
+as an unverified ticket, including candidates at a different location. A person
+can confirm the issue's current URL on its original host with
+`ticketd source reconcile-github`. Core verifies the configured host, saved
+stable ID, and current location through GitHub before atomically repairing
+provenance on the existing ticket. Discovery can then import a separate issue
+with the same numeric ID on a different host.
 Drive sync applies the same qualification to older incoming issue records and
 derives their repository when a ticket gains or changes its external location.
 Initial discovery history uses host-qualified repository keys on Enterprise and
-the existing bare repository keys on public GitHub.
+the existing bare repository keys on public GitHub. A complete refresh records
+discovery membership for the configured GitHub host.
 
 `Workspace::preview_connect_source` reads one local snapshot of the Project
 remote, the saved source, and the exact set of eligible ticket identities. It

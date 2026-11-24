@@ -230,6 +230,35 @@ fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
             .contains(&format!("{API}/repos/o/one/issues/7"))
     );
     assert!(workspace.workspace_events_after(0, 100).unwrap().is_empty());
+
+    let membership = |workspace: &crate::Workspace, reference: &str| {
+        workspace
+            .show_ticket(reference)
+            .unwrap()
+            .source
+            .unwrap()
+            .discovery_matches
+    };
+    let enterprise_ticket = tickets
+        .iter()
+        .find(|ticket| ticket.title == "Enterprise issue")
+        .unwrap();
+    assert_eq!(membership(&workspace, &public_ticket.reference), Some(true));
+    assert_eq!(
+        membership(&workspace, &enterprise_ticket.reference),
+        Some(true)
+    );
+
+    enterprise.respond(&listed(API), ok(json!([])));
+    enterprise.respond(&format!("{API}/repos/o/one/issues/7"), ok(enterprise_issue));
+    workspace
+        .refresh_sources(&enterprise_engine, &Default::default())
+        .unwrap();
+    assert_eq!(membership(&workspace, &public_ticket.reference), Some(true));
+    assert_eq!(
+        membership(&workspace, &enterprise_ticket.reference),
+        Some(false)
+    );
 }
 
 #[test]
@@ -361,7 +390,7 @@ fn discovery_withholds_a_possible_legacy_match_even_after_takeover() {
     let requests_before = fixture.urls().len();
     for wrong_url in [
         "https://elsewhere.example/o/one/issues/12",
-        "https://github.com/o/one/issues/13",
+        "https://github.com/o/one/pull/12",
     ] {
         assert!(
             workspace
@@ -372,14 +401,16 @@ fn discovery_withholds_a_possible_legacy_match_even_after_takeover() {
     assert_eq!(fixture.urls().len(), requests_before);
     let read = format!("{public_api}/repos/o/one/issues/12");
     let issue_url = "https://github.com/o/one/issues/12";
-    fixture.respond(&read, ok(issue(8, 12, "o/one")));
-    assert!(
-        workspace
-            .reconcile_github_issue(&engine, "T-KQ5", issue_url)
-            .unwrap_err()
-            .to_string()
-            .contains("saved issue ID")
-    );
+    for answer in [issue(8, 12, "o/one"), issue(5, 13, "o/one")] {
+        fixture.respond(&read, ok(answer));
+        assert!(
+            workspace
+                .reconcile_github_issue(&engine, "T-KQ5", issue_url)
+                .unwrap_err()
+                .to_string()
+                .contains("saved issue ID")
+        );
+    }
     let before = workspace.show_ticket("T-KQ5").unwrap();
     fixture.respond(&read, ok(candidate.clone()));
     let recovered = workspace
@@ -403,11 +434,23 @@ fn discovery_withholds_a_possible_legacy_match_even_after_takeover() {
 }
 
 #[test]
-fn discovery_can_import_the_same_numeric_id_with_a_different_locator() {
+fn a_legacy_issue_at_a_different_location_waits_for_explicit_confirmation() {
     let folder = tempfile::tempdir().unwrap();
     let mut workspace = unverified_github_workspace(&folder.path().join("legacy.db"));
+    let project = workspace
+        .create_project("Original project", folder.path().to_str().unwrap())
+        .unwrap();
+    workspace
+        .change_ticket(
+            "T-KQ5",
+            crate::TicketPatch {
+                project_id: Some(Some(project.id.clone())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
     let (fixture, engine) = setup(Some(TOKEN));
-    let candidate = issue(5, 12, "o/other");
+    let candidate = issue(5, 17, "o/other");
     let listed = format!("{API}/repos/o/other/issues?state=open&per_page=100");
     fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
     fixture.respond(&listed, ok(json!([candidate])));
@@ -419,32 +462,104 @@ fn discovery_can_import_the_same_numeric_id_with_a_different_locator() {
         )
         .unwrap();
     fixture.respond(&listed, ok(json!([candidate])));
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert!(report.imported.is_empty());
+    assert!(report.failures.iter().any(|failure| {
+        failure.reference.as_deref() == Some("T-KQ5")
+            && failure.message.contains("reconcile-github")
+    }));
+    assert_eq!(workspace.show_ticket("T-KQ5").unwrap().title, "Saved issue");
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+
+    fixture.respond(
+        &format!("{API}/repos/o/other/issues/17"),
+        ok(candidate.clone()),
+    );
+    let verified = workspace
+        .reconcile_github_issue(
+            &engine,
+            "T-KQ5",
+            "https://api.example.test/o/other/issues/17",
+        )
+        .unwrap();
+    assert_eq!(verified.title, "Saved issue");
+    assert_eq!(verified.project_id.as_deref(), Some(project.id.as_str()));
+    let source = verified.source.unwrap();
+    assert_eq!(source.id, "@api.example.test:5");
+    assert_eq!(source.locator, "o/other#17");
+    assert_eq!(source.display, "o/other#17");
+    assert_eq!(source.url, "https://api.example.test/o/other/issues/17");
+    assert_eq!(source.ownership, crate::source::Ownership::External);
+    assert_eq!(
+        workspace.export().unwrap()["external_identities"][0]["repository"],
+        "api.example.test/o/other"
+    );
+    fixture.respond(&listed, ok(json!([candidate])));
     for suffix in ["comments", "events"] {
         fixture.respond(
-            &format!("{API}/repos/o/other/issues/12/{suffix}?per_page=100"),
+            &format!("{API}/repos/o/other/issues/17/{suffix}?per_page=100"),
             ok(json!([])),
         );
     }
     let report = workspace
         .refresh_sources(&engine, &Default::default())
         .unwrap();
-    assert_eq!(report.imported.len(), 1);
-    assert_eq!(workspace.show_ticket("T-KQ5").unwrap().title, "Saved issue");
-    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    assert!(report.failures.is_empty());
+    assert!(report.imported.is_empty());
+    assert_eq!(workspace.show_ticket("T-KQ5").unwrap().title, "Issue 17");
+}
 
-    // A verification on this host can identify a relocated issue that is
-    // already linked. Both tickets must keep their own identities.
-    fixture.respond(
-        &format!("{API}/repos/o/one/issues/12"),
-        ok(issue(5, 12, "o/one")),
+#[test]
+fn a_confirmed_identity_keeps_its_ticket_when_an_unverified_id_also_matches() {
+    let folder = tempfile::tempdir().unwrap();
+    let path = folder.path().join("legacy.db");
+    let mut workspace = unverified_github_workspace(&path);
+    // An older workspace could already have imported the now-verified issue.
+    rusqlite::Connection::open(&path).unwrap().execute_batch(
+        "INSERT INTO tickets (id, reference, title, status) VALUES ('verified', 'T-KQ6', 'Verified issue', 'Todo');
+         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin)
+         VALUES ('verified', 'github', '@api.example.test:5', 'o/other#17', 'o/other#17', 'https://api.example.test/o/other/issues/17', 'imported');
+         INSERT INTO external_ownership (ticket_id, authority) VALUES ('verified', 'local');
+         INSERT INTO source_sync (ticket_id, external_state) VALUES ('verified', 'open');",
+    ).unwrap();
+    let (fixture, engine) = setup(Some(TOKEN));
+    let issue = issue(5, 17, "o/other");
+    let listed = format!("{API}/repos/o/other/issues?state=open&per_page=100");
+    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    fixture.respond(&listed, ok(json!([issue])));
+    workspace
+        .save_source(
+            &engine,
+            "github",
+            &config(json!({"repositories": ["o/other"]})),
+        )
+        .unwrap();
+    fixture.respond(&listed, ok(json!([issue])));
+    let refresh = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert!(refresh.imported.is_empty());
+    assert!(
+        refresh
+            .failures
+            .iter()
+            .all(|failure| failure.scope != crate::source::FailureScope::Partition)
     );
-    let error = workspace
-        .reconcile_github_issue(&engine, "T-KQ5", "https://api.example.test/o/one/issues/12")
+
+    fixture.respond(&format!("{API}/repos/o/other/issues/17"), ok(issue));
+    let failure = workspace
+        .reconcile_github_issue(
+            &engine,
+            "T-KQ5",
+            "https://api.example.test/o/other/issues/17",
+        )
         .unwrap_err();
-    assert!(error.to_string().contains(&report.imported[0]));
-    let source = workspace.show_ticket("T-KQ5").unwrap().source.unwrap();
-    assert_eq!(source.id, "@:5");
-    assert_eq!(source.ownership, crate::source::Ownership::External);
+    assert!(failure.to_string().contains("already linked to T-KQ6"));
+    let legacy = workspace.show_ticket("T-KQ5").unwrap().source.unwrap();
+    assert_eq!(legacy.id, "@:5");
+    assert_eq!(legacy.locator, "O/One#12");
 }
 
 #[test]
@@ -456,10 +571,10 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
     let head = workspace.workspace_event_head().unwrap();
     let public_api = "https://api.github.com";
     let (public, public_engine) = setup_at(public_api, Some(TOKEN));
-    let one = format!("{public_api}/repos/o/one/issues?state=open&per_page=100&labels=bug");
+    let one = format!("{public_api}/repos/o/other/issues?state=open&per_page=100&labels=bug");
     let two = format!("{public_api}/repos/o/two/issues?state=open&per_page=100&labels=bug");
-    let held = issue(5, 12, "o/one");
-    let first = issue(6, 13, "o/one");
+    let held = issue(5, 16, "o/other");
+    let first = issue(6, 13, "o/other");
     let new = issue(7, 14, "o/two");
 
     public.respond(&format!("{public_api}/user"), ok(json!({"login": "octo"})));
@@ -469,7 +584,7 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
         .save_source(
             &public_engine,
             "github",
-            &config(json!({"repositories": ["o/one", "o/two"], "labels": ["bug"]})),
+            &config(json!({"repositories": ["o/other", "o/two"], "labels": ["bug"]})),
         )
         .unwrap();
     let conversation = |locator: &str| {
@@ -482,7 +597,7 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
     };
     public.respond(&one, ok(json!([held, first])));
     public.respond(&two, ok(json!([])));
-    conversation("o/one/issues/13");
+    conversation("o/other/issues/13");
     let refresh = workspace
         .refresh_sources(&public_engine, &Default::default())
         .unwrap();
@@ -490,7 +605,10 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
     assert_eq!(workspace.workspace_events_after(head, 100).unwrap(), []);
 
     let (enterprise, enterprise_engine) = setup(Some(TOKEN));
-    enterprise.respond(&format!("{API}/repos/o/one/issues/12"), ok(held.clone()));
+    enterprise.respond(
+        &format!("{API}/repos/o/one/issues/12"),
+        ok(issue(5, 12, "o/one")),
+    );
     workspace
         .reconcile_github_issue(
             &enterprise_engine,
@@ -500,12 +618,17 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
         .unwrap();
     public.respond(&one, ok(json!([held, first])));
     public.respond(&two, ok(json!([new])));
-    conversation("o/one/issues/12");
+    conversation("o/other/issues/16");
     conversation("o/two/issues/14");
     let refresh = workspace
         .refresh_sources(&public_engine, &Default::default())
         .unwrap();
     assert_eq!(refresh.imported.len(), 2);
+    assert!(workspace.list_tickets().unwrap().into_iter().any(|ticket| {
+        ticket
+            .source
+            .is_some_and(|source| source.id == "5" && source.locator == "o/other#16")
+    }));
 
     let events = workspace.workspace_events_after(head, 100).unwrap();
     assert_eq!(events.len(), 1, "{events:?}");

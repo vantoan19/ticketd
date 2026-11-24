@@ -1035,10 +1035,15 @@ pub(super) fn unverified_issue_id(id: &str) -> Option<&str> {
 
 /// Recover a legacy issue's host only when the saved web URL corroborates its locator.
 pub(super) fn repository_from_issue_url(locator: &str, issue_url: &str) -> Option<String> {
-    let (repository, number) = split_locator(locator).ok()?;
-    if number.parse::<u64>().ok()? == 0
-        || issue_url.contains(|c: char| c.is_whitespace() || c.is_control() || c == '\\')
-    {
+    let (url_locator, repository) = issue_location_from_url(issue_url)?;
+    url_locator
+        .eq_ignore_ascii_case(locator)
+        .then_some(repository)
+}
+
+/// Parse a full issue URL as its issue locator and hosted repository.
+pub(super) fn issue_location_from_url(issue_url: &str) -> Option<(String, String)> {
+    if issue_url.contains(|c: char| c.is_whitespace() || c.is_control() || c == '\\') {
         return None;
     }
     let url = url::Url::parse(issue_url).ok()?;
@@ -1053,15 +1058,17 @@ pub(super) fn repository_from_issue_url(locator: &str, issue_url: &str) -> Optio
     let (url_repository, url_number) = path.rsplit_once("/issues/")?;
     if authority.is_empty()
         || authority.contains('@')
-        || !url_repository.eq_ignore_ascii_case(repository)
-        || url_number != number
+        || !ValueFormat::OwnerName.is_valid(url_repository)
+        || !url_number.bytes().all(|digit| digit.is_ascii_digit())
+        || url_number.parse::<u64>().ok()? == 0
     {
         return None;
     }
-    crate::project_remote::normalize_project_remote(&format!(
+    let repository = crate::project_remote::normalize_project_remote(&format!(
         "{}/{url_repository}",
         web_host_for_api(url.host_str()?)
-    ))
+    ))?;
+    Some((format!("{url_repository}#{url_number}"), repository))
 }
 
 fn translate_comment(item: &Value) -> Result<ExternalComment, SourceError> {

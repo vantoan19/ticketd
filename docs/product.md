@@ -417,8 +417,9 @@ and run through a shared extension interface.
 - If a source ticket becomes unavailable, ticketd keeps its content and local work and
   warns; **Take ownership** makes it local and stops synchronization.
 - A legacy GitHub ticket with an unverified host can hold a potential duplicate
-  import until you confirm its original issue URL. This repairs the source link
-  on the existing ticket and preserves its ownership, including after takeover.
+  import until you confirm the issue's current URL on its original host. This
+  repairs the source link on the existing ticket and preserves its ownership,
+  including after takeover.
   See [Recover a legacy GitHub issue link](cli.md#recover-a-legacy-github-issue-link).
 - CLI: the `source` command group (`save`, `refresh`, `take-ownership`,
   `publish --preview`, `resolve`, and more).

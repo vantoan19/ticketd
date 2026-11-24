@@ -851,11 +851,11 @@ fn ticket_for_identity(
 
 /// A legacy issue and a discovery result may describe the same issue. Hold
 /// imports until a person confirms the host, including for tickets now local.
+/// The issue may have moved while retaining its database ID.
 fn unverified_github_match(
     connection: &Connection,
-    reference: &ExternalRef,
+    identity: &ExternalIdentity,
 ) -> Result<Option<String>, Error> {
-    let identity = &reference.identity;
     if identity.provider != github::PROVIDER || github::issue_id_host(&identity.id).is_none() {
         return Ok(None);
     }
@@ -863,11 +863,11 @@ fn unverified_github_match(
     Ok(connection
         .prepare_cached(
             "SELECT t.reference FROM external_identities i JOIN tickets t ON t.id = i.ticket_id
-             WHERE i.provider = ?1 AND i.external_id = ?2 AND i.locator = ?3 COLLATE NOCASE
-             AND NOT EXISTS (SELECT 1 FROM external_identities WHERE provider = ?1 AND external_id = ?4)",
+             WHERE i.provider = ?1 AND i.external_id = ?2
+             AND NOT EXISTS (SELECT 1 FROM external_identities WHERE provider = ?1 AND external_id = ?3)",
         )?
         .query_row(
-            params![github::PROVIDER, format!("@:{database_id}"), reference.locator, identity.id],
+            params![github::PROVIDER, format!("@:{database_id}"), identity.id],
             |row| row.get(0),
         )
         .optional()?)
@@ -917,10 +917,16 @@ struct Found {
     failure: SourceFailure,
 }
 
+struct DiscoveryMembership {
+    provider: String,
+    github_host: Option<String>,
+    seen: HashSet<String>,
+}
+
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
     configurations: HashMap<String, super::ConfigValues>,
-    discovery: Vec<(String, HashSet<String>)>,
+    discovery: Vec<DiscoveryMembership>,
     issues: Vec<ExternalIssue>,
     /// Conversations read this time, by (provider, external id). An issue absent
     /// here keeps the conversation it already has.
@@ -965,8 +971,8 @@ struct Applied {
 }
 
 impl Workspace {
-    /// Verifies the host of a legacy GitHub issue using a person-supplied issue
-    /// URL and the saved locator and ID. Only provenance is repaired.
+    /// Verifies a legacy GitHub issue's host and current location with its saved
+    /// stable ID and a person-supplied URL. Only provenance is repaired.
     pub fn reconcile_github_issue(
         &mut self,
         engine: &Engine,
@@ -994,11 +1000,10 @@ impl Workspace {
                 ))
             })?;
         let issue_url = issue_url.trim();
-        let repository =
-            github::repository_from_issue_url(&source.locator, issue_url).ok_or_else(|| {
+        let (locator, repository) =
+            github::issue_location_from_url(issue_url).ok_or_else(|| {
                 invalid(format!(
-                    "use the full GitHub issue URL for {}",
-                    source.locator
+                    "use the full current GitHub issue URL for {reference}"
                 ))
             })?;
         let (host, destination) = repository
@@ -1011,13 +1016,10 @@ impl Workspace {
         })?;
         let issue = engine.locate(github::PROVIDER, &saved.config, destination, issue_url)?;
         if issue.reference.identity.id != expected
-            || !issue
-                .reference
-                .locator
-                .eq_ignore_ascii_case(&source.locator)
+            || !issue.reference.locator.eq_ignore_ascii_case(&locator)
         {
             return Err(invalid(format!(
-                "GitHub did not confirm the saved issue ID and location for {reference}"
+                "GitHub did not confirm the saved issue ID at the supplied URL for {reference}"
             ))
             .into());
         }
@@ -1038,11 +1040,13 @@ impl Workspace {
             }
             if id != ticket.id
                 || transaction.execute(
-                    "UPDATE external_identities SET external_id = ?2, url = ?3, repository = ?4
-                     WHERE ticket_id = ?1 AND provider = ?5 AND external_id = ?6 AND locator = ?7",
+                    "UPDATE external_identities SET external_id = ?2, locator = ?3, display = ?4, url = ?5, repository = ?6
+                     WHERE ticket_id = ?1 AND provider = ?7 AND external_id = ?8 AND locator = ?9",
                     params![
                         id,
                         expected,
+                        issue.reference.locator,
+                        issue.display,
                         issue_url,
                         repository,
                         github::PROVIDER,
@@ -1178,7 +1182,33 @@ impl Workspace {
                 match result {
                     Ok(summary) => {
                         if summary.complete && summary.skipped.is_empty() {
-                            gathered.discovery.push((provider.clone(), seen.clone()));
+                            // A complete walk can return no issues. Use the configured
+                            // repositories to identify its host even in that case.
+                            let github_host = if provider == github::PROVIDER {
+                                source
+                                    .config
+                                    .get(super::REPOSITORIES)
+                                    .and_then(serde_json::Value::as_array)
+                                    .into_iter()
+                                    .flatten()
+                                    .filter_map(serde_json::Value::as_str)
+                                    .find_map(|repository| {
+                                        engine
+                                            .repository_for_destination(&provider, repository)
+                                            .ok()
+                                            .flatten()
+                                    })
+                                    .and_then(|remote| {
+                                        remote.split_once('/').map(|(host, _)| host.to_owned())
+                                    })
+                            } else {
+                                None
+                            };
+                            gathered.discovery.push(DiscoveryMembership {
+                                provider: provider.clone(),
+                                github_host,
+                                seen: seen.clone(),
+                            });
                         }
                         skipped_partitions = summary
                             .skipped
@@ -1336,7 +1366,7 @@ impl Workspace {
         let due: Vec<ExternalIssue> = gathered.issues[first_issue..].to_vec();
         for issue in due {
             let identity = &issue.reference.identity;
-            if unverified_github_match(&self.connection, &issue.reference)?.is_some()
+            if unverified_github_match(&self.connection, identity)?.is_some()
                 || !conversation::needs_reading(
                     &self.connection,
                     &identity.provider,
@@ -1518,7 +1548,9 @@ impl Workspace {
                     issue.reference.identity.provider.clone(),
                     issue.reference.identity.id.clone(),
                 );
-                if let Some(reference) = unverified_github_match(transaction, &issue.reference)? {
+                if let Some(reference) =
+                    unverified_github_match(transaction, &issue.reference.identity)?
+                {
                     let message = github_host_confirmation(&reference);
                     if let Some(run) = gathered
                         .runs
@@ -1574,7 +1606,12 @@ impl Workspace {
                 )?;
             }
             crate::events::set_actor(transaction, own_actor)?;
-            for (provider, seen) in &gathered.discovery {
+            for DiscoveryMembership {
+                provider,
+                github_host,
+                seen,
+            } in &gathered.discovery
+            {
                 if replaced.contains(provider) {
                     continue;
                 }
@@ -1586,7 +1623,9 @@ impl Workspace {
                     .collect::<Result<Vec<_>, _>>()?;
                 for (id, external_id) in identities {
                     if provider == github::PROVIDER
-                        && github::unverified_issue_id(&external_id).is_some()
+                        && github_host
+                            .as_deref()
+                            .is_none_or(|host| github::issue_id_host(&external_id) != Some(host))
                     {
                         continue;
                     }

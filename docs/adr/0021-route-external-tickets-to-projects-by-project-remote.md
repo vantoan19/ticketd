@@ -21,6 +21,11 @@ a moved issue or when a Project remote changes. The external identity keeps the
 latest observed repository so a later workflow can match it offline without
 changing membership during refresh.
 
+A repository's first read stays incomplete while a possible legacy GitHub
+duplicate is held for host confirmation. Other issues in that repository can
+still import silently under the first-read rule in
+[ADR 0012](0012-automations-on-a-workspace-event-log.md).
+
 ## Trade-off
 
 One remote per project gives discovery an unambiguous destination. A Plan can

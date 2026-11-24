@@ -779,7 +779,7 @@ enum SourceCommand {
     ReconcileGithub {
         /// The legacy ticket, for example T-KQ12
         reference: String,
-        /// The original issue URL on the GitHub host configured for this command
+        /// The current issue URL on its original GitHub host
         #[arg(long)]
         issue: String,
     },
