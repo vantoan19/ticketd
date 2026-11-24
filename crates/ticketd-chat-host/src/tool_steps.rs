@@ -92,7 +92,13 @@ pub struct LineCounts {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RunAction {
     Command,
-    Script { interpreters: Vec<String> },
+    CommandUnavailable {
+        working_directory: Option<String>,
+        exit_code: Option<i64>,
+    },
+    Script {
+        interpreters: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
