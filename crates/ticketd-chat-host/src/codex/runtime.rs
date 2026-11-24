@@ -74,7 +74,9 @@ impl Peer for CodexPeer {
                 if method == ticket_tool::CALL_METHOD
                     && let Some(tool) = &self.ticket_tool
                 {
-                    let ours = self.session.thread() == params["threadId"].as_str();
+                    let ours = self.session.thread().is_some_and(|thread| {
+                        !thread.trim().is_empty() && params["threadId"].as_str() == Some(thread)
+                    });
                     let called = params["tool"].as_str() == Some(ticket_tool::NAME)
                         && params["namespace"].is_null();
                     let response = if ours && called {

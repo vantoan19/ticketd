@@ -1706,6 +1706,48 @@ fn turn_number(turn: &str) -> usize {
 }
 
 #[tokio::test(start_paused = true)]
+async fn antigravity_sign_in_problem_supplies_the_command_and_only_additional_detail() {
+    let antigravity = &ticketd_core::harnesses::ANTIGRAVITY;
+    let f = Fixture::with_adapter(FakeAdapter::new(
+        antigravity,
+        Capabilities {
+            steering: Capability::Unsupported {
+                reason: "Antigravity queues messages".to_owned(),
+            },
+        },
+    ))
+    .await;
+    for (message, expected_detail) in [
+        (antigravity.sign_in_guidance, None),
+        (
+            "The credentials for this profile expired",
+            Some("The credentials for this profile expired"),
+        ),
+    ] {
+        f.fake.fail_next_open(Problem {
+            message: message.to_owned(),
+            ..failure(ProblemKind::LoginRequired)
+        });
+        let id = f
+            .chats
+            .create(f.input("First message"))
+            .await
+            .unwrap()
+            .chat_id;
+        settle().await;
+        let (opened, _) = f.open(&id).await;
+        let chat = opened.snapshot.chat;
+        let problem = chat.problem.unwrap();
+        assert_eq!(problem.kind, ChatProblemKind::NotSignedIn);
+        assert_eq!(problem.title, "Antigravity isn't signed in");
+        assert_eq!(problem.command.as_deref(), Some("agy"));
+        assert_eq!(problem.message.as_deref(), expected_detail);
+        assert!(chat.queue_paused);
+        assert_eq!(chat.queue[0].text, "First message");
+    }
+}
+
+#[tokio::test(start_paused = true)]
 async fn checking_again_after_a_past_sign_in_failure_reports_what_the_probe_finds() {
     let f = Fixture::new().await;
     let id = f.chat().await;

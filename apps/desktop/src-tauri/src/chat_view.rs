@@ -29,11 +29,6 @@ pub fn harness_name(id: &str) -> &str {
     ticketd_core::harnesses::descriptor(id).map_or(id, |descriptor| descriptor.name)
 }
 
-/// The harness's own sign-in, as a command the person runs in a terminal.
-pub fn login_command(harness: &str) -> Option<&'static str> {
-    ticketd_core::harnesses::descriptor(harness).map(|descriptor| descriptor.sign_in_command)
-}
-
 /// Where the harness's publisher explains installing and updating it.
 pub fn help_url(harness: &str) -> Option<&'static str> {
     ticketd_core::harnesses::descriptor(harness).map(|descriptor| descriptor.help_url)
@@ -1496,7 +1491,15 @@ fn harness_problem(harness: &str, kind: ProblemKind, message: Option<String>) ->
             | ProblemKind::IncompatibleVersion
             | ProblemKind::PermissionUnavailable
     );
-    let command = login_command(harness).filter(|_| kind == ProblemKind::LoginRequired);
+    let sign_in = if kind == ProblemKind::LoginRequired {
+        descriptor(harness)
+    } else {
+        None
+    };
+    // The notice already gives the sign-in instructions from the problem kind
+    // and command. Keep any message that adds something to those instructions.
+    let message =
+        message.filter(|text| sign_in.is_none_or(|descriptor| text != descriptor.sign_in_guidance));
     let help = help_url(harness).filter(|_| setup);
     Problem {
         kind: kind.into(),
@@ -1506,7 +1509,7 @@ fn harness_problem(harness: &str, kind: ProblemKind, message: Option<String>) ->
         } else {
             None
         },
-        command: command.map(str::to_owned),
+        command: sign_in.map(|descriptor| descriptor.sign_in_command.to_owned()),
         help_url: help.map(str::to_owned),
         ..Problem::default()
     }

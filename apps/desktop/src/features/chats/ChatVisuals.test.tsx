@@ -17,6 +17,7 @@ import {
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { drafts } from "@/features/chats/drafts";
+import { HarnessMark } from "@/features/chats/HarnessMark";
 import {
   chatState,
   createMockChatClient,
@@ -39,6 +40,29 @@ afterEach(() => {
   cleanup();
   drafts.clear();
   watching.clear();
+});
+
+test("a newly mounted harness mark can retry a failed catalog load", async () => {
+  const client = createMockChatClient();
+  client.harnessCatalog = vi
+    .fn(client.harnessCatalog)
+    .mockRejectedValueOnce(new Error("test catalog request failed"));
+  const view = (second = false) => (
+    <ChatClientContext value={client}>
+      <HarnessMark harness="codex" name="Codex" />
+      {second && <HarnessMark harness="claude-code" name="Claude Code" />}
+    </ChatClientContext>
+  );
+
+  const { rerender } = render(view());
+  await act(async () => {});
+  const mark = screen.getByRole("img", { name: "Codex" });
+  expect(mark.hasAttribute("data-dim")).toBe(true);
+  expect(client.harnessCatalog).toHaveBeenCalledTimes(1);
+
+  await act(async () => rerender(view(true)));
+  expect(mark.hasAttribute("data-dim")).toBe(false);
+  expect(client.harnessCatalog).toHaveBeenCalledTimes(2);
 });
 
 const at = "2026-11-10T10:00:00Z";

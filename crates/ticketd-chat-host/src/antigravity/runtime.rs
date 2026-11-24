@@ -44,6 +44,7 @@ struct Prompt {
     tools: HashMap<acp::ToolCallId, steps::Tool>,
     files: BTreeMap<String, FileChange>,
     denied: HashSet<acp::ToolCallId>,
+    cancelled_approvals: HashSet<acp::ToolCallId>,
 }
 
 impl Prompt {
@@ -57,6 +58,7 @@ impl Prompt {
             tools: HashMap::new(),
             files: BTreeMap::new(),
             denied: HashSet::new(),
+            cancelled_approvals: HashSet::new(),
         }
     }
     fn message_item(&self) -> NativeItemId {
@@ -92,12 +94,27 @@ impl Prompt {
         tool.merge(update.fields);
         self.report_tool(&id, events)
     }
+    fn cancel_approval(&mut self, id: &acp::ToolCallId) {
+        // An output-only update can repeat a failure the harness already reported.
+        if self.tools.get(id).is_none_or(|tool| {
+            matches!(
+                tool.status(),
+                acp::ToolCallStatus::Pending | acp::ToolCallStatus::InProgress
+            )
+        }) {
+            self.cancelled_approvals.insert(id.clone());
+        }
+    }
     fn report_tool(&mut self, id: &acp::ToolCallId, events: &mut Vec<EventKind>) -> bool {
         let Some(tool) = self.tools.get(id) else {
             return false;
         };
         let declined = self.denied.contains(id);
-        let (event, command_unavailable) = tool.observed(self.turn.clone(), declined);
+        let (event, command_unavailable) = tool.observed(
+            self.turn.clone(),
+            declined,
+            self.cancelled_approvals.contains(id),
+        );
         events.push(event);
         if !declined && tool.status() == acp::ToolCallStatus::Completed {
             for file in tool.changes() {
@@ -324,6 +341,7 @@ impl Session {
             );
         };
         if self.runtime.interrupted(&prompt.turn) {
+            prompt.cancel_approval(&request.tool_call.tool_call_id);
             return (
                 Vec::new(),
                 Some(Response::Immediate(cancelled_permission(id))),
@@ -469,8 +487,14 @@ fn prompt_outcome(reply: &Reply) -> TurnOutcome {
 
 fn rpc_problem(error: &json_rpc::RpcError, fallback: ProblemKind) -> Problem {
     let lower = error.message.to_ascii_lowercase();
-    if error.code == -32000 && lower.contains("authentication required") {
-        return problem(ProblemKind::LoginRequired, ANTIGRAVITY.sign_in_guidance);
+    let authentication_required = "authentication required";
+    if error.code == -32000 && lower.contains(authentication_required) {
+        let message = if lower.trim().trim_end_matches('.') == authentication_required {
+            ANTIGRAVITY.sign_in_guidance
+        } else {
+            &error.message
+        };
+        return problem(ProblemKind::LoginRequired, message);
     }
     let kind = if ["quota", "rate limit", "resource_exhausted"]
         .iter()
@@ -881,6 +905,12 @@ impl HarnessRuntime for AcpRuntime {
                 let id = session.id.clone().ok_or(Refusal::RuntimeClosed)?;
                 let payload =
                     params(acp::CancelNotification::new(id)).map_err(|_| Refusal::Unsupported)?;
+                if let Some(prompt) = &mut session.prompt {
+                    // agy can fail these tools as soon as it receives session/cancel.
+                    for (_, request) in session.runtime.unanswered() {
+                        prompt.cancel_approval(&request.tool);
+                    }
+                }
                 Ok(json!({"method": "session/cancel", "params": payload}))
             })
             .await;

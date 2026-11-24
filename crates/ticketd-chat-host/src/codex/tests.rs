@@ -1245,7 +1245,8 @@ async fn open_unattended(fixture: &str) -> Result<OpenedRuntime, Problem> {
 
 /// An unattended thread with the ticketd CLI opts into the experimental API, declares
 /// ticketd's own tool and tells the agent to use it. The tool refuses what could leave
-/// the run's Workspace or the step, and any other tool or thread.
+/// the run's Workspace or the step. Calls require the opened thread's ID and the
+/// ticketd tool name. The early call uses invalid arguments so it can never spawn a CLI.
 #[tokio::test(start_paused = true)]
 async fn an_unattended_thread_declares_ticketds_own_tool_and_answers_only_it() {
     let (mut peer, _opened) =

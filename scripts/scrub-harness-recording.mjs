@@ -101,6 +101,9 @@ function readChunk(bytes, stream, frames) {
 
 const sessionFields =
   /^(?:(?:parent|resume|forkedfrom|source|native)?(?:session|thread)(?:id|ids|uuid)|chatid)$/;
+const ambiguousSessionId = /^[\p{L}\p{M}\p{N}]+$/u;
+const sessionReferencePrefix =
+  /(?<![\p{L}\p{M}\p{N}_-])(?:(?:[Ss]ession|[Tt]hread|[Cc]hat)(?:[ _-]?[Ii][Dd])?[ \t]*[:=][ \t]*|--(?:session|thread|chat)(?:-id)?(?:=|[ \t]+))["'\x60]?/u;
 const accountFields =
   /^(?:accounts?|account(?:id|name|info|number)|organizations?|organization(?:id|name|uuid)|org(?:id|name|uuid)|email(?:address)?|user(?:id|name)|(?:access|refresh|auth|oauth|api)token|apikey|authorization|password|secret|credentials)$/;
 const unixHome =
@@ -225,6 +228,7 @@ function visit(value, scope, parent, scalar, key, wireFields = null) {
 function scrub(frames, input) {
   const aliases = new Map();
   const accountAliases = new Map();
+  const ambiguousSessionAliases = new Set();
   let accountCount = 0;
   let sessionCount = 0;
   let homeCount = 0;
@@ -253,6 +257,9 @@ function scrub(frames, input) {
               : "fixture-account-" + ++accountCount,
           );
     if (scope === "account") accountAliases.set(value, replacement);
+    if (scope === "session" && ambiguousSessionId.test(value)) {
+      ambiguousSessionAliases.add(value);
+    }
     return replacement;
   };
 
@@ -276,26 +283,41 @@ function scrub(frames, input) {
       (key) => key,
     );
   }
-  const aliasPattern = [...aliases.keys()]
-    .sort((left, right) => right.length - left.length)
-    .map((value) => value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&"))
-    .join("|");
+  const textAliases = [];
+  const sessionReferences = [];
+  for (const value of [...aliases.keys()].sort(
+    (left, right) => right.length - left.length,
+  )) {
+    const literal = value.replace(/[\\^$.*+?()[\]{}|]/g, "\\$&");
+    // An ordinary word can also be a Session ID. Use a label or flag to
+    // identify its references. Known account values still need redaction.
+    if (ambiguousSessionAliases.has(value) && !accountAliases.has(value)) {
+      sessionReferences.push(literal);
+    } else {
+      textAliases.push(literal);
+    }
+  }
   const alternatives = [
-    ...(aliasPattern
+    ...(textAliases.length
       ? [
-          String.raw`(?<alias>(?<![\p{L}\p{N}_-])(?:${aliasPattern})(?![\p{L}\p{N}_-]))`,
+          String.raw`(?<alias>(?<![\p{L}\p{N}_-])(?:${textAliases.join("|")})(?![\p{L}\p{N}_-]))`,
         ]
       : []),
     "(?<windowsHome>" + windowsHome.source + ")",
     "(?<unixHome>" + unixHome.source + ")",
     "(?<email>" + email.source + ")",
     "(?<uuid>" + uuid.source + ")",
+    ...(sessionReferences.length
+      ? [
+          String.raw`(?<sessionReference>(?=[\p{L}\p{M}\p{N}])(?<=${sessionReferencePrefix.source})(?:${sessionReferences.join("|")})(?![\p{L}\p{M}\p{N}_-]))`,
+        ]
+      : []),
   ];
   const privateText = new RegExp(alternatives.join("|"), "gu");
   const replaceText = (value) =>
     value.replace(privateText, (matched, ...captures) => {
       const groups = captures.at(-1);
-      if (groups.alias) return aliases.get(matched);
+      if (groups.alias || groups.sessionReference) return aliases.get(matched);
       if (groups.windowsHome) {
         return remember(
           matched,
