@@ -585,7 +585,7 @@ fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
         );
         assert!(!output.status.success());
         let logs = String::from_utf8_lossy(&output.stderr);
-        assert!(logs.contains("error_kind=protocol"), "{mode}: {logs}");
+        assert!(logs.contains("error_kind=\"protocol\""), "{mode}: {logs}");
         assert!(!logs.contains("fixture_response_missing"));
         assert!(!logs.contains("error_detail="));
         assert!(!logs.contains(secret));
