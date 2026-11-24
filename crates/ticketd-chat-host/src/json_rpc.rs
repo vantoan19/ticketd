@@ -296,7 +296,7 @@ impl<P: Peer> Connection<P> {
         peer: P,
         generation: RuntimeGeneration,
         options: Options,
-    ) -> (Arc<Self>, EventStream) {
+    ) -> (Arc<Self>, EventStream, mpsc::Sender<RuntimeEvent>) {
         let stderr = StderrTail::default();
         if let Some(pipe) = io.stderr {
             stderr.clone().spawn_drain(pipe, options.harness);
@@ -315,8 +315,8 @@ impl<P: Peer> Connection<P> {
             generation,
         });
         let (sender, events) = mpsc::channel(EVENT_BUFFER);
-        tokio::spawn(Arc::clone(&connection).read(io.stdout, sender));
-        (connection, events)
+        tokio::spawn(Arc::clone(&connection).read(io.stdout, sender.clone()));
+        (connection, events, sender)
     }
 
     pub(crate) fn generation(&self) -> RuntimeGeneration {
@@ -558,7 +558,7 @@ mod tests {
     #[tokio::test]
     async fn a_versioned_peer_answers_incoming_requests_while_waiting_for_a_reply() {
         let (mut peer, io) = crate::scripted::pipes();
-        let (connection, _events) = Connection::start(
+        let (connection, _events, _) = Connection::start(
             io,
             EchoPeer,
             RuntimeGeneration(1),
@@ -599,7 +599,7 @@ mod tests {
     async fn a_full_event_stream_preserves_reply_evidence_and_reports_saturation() {
         let (mut peer, io) = crate::scripted::pipes();
         let generation = RuntimeGeneration(13);
-        let (connection, mut events) = Connection::start(
+        let (connection, mut events, _) = Connection::start(
             io,
             EchoPeer,
             generation,
