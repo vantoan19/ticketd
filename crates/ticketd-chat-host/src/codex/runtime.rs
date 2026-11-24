@@ -13,9 +13,9 @@ use tokio::time::timeout;
 use crate::{
     ADAPTER_CLOSE_TIMEOUT, Capabilities, CloseOutcome, DispatchOutcome, EventKind, EventStream,
     HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome, InterruptRequest,
-    LoginState, NativeTurnId, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail,
-    Refusal, RespondOutcome, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome,
-    Submission, SubmissionKind,
+    LoginState, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal,
+    RespondOutcome, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome, Submission,
+    SubmissionKind,
 };
 
 use crate::json_rpc::{
@@ -24,7 +24,7 @@ use crate::json_rpc::{
 use crate::stdio::Io;
 
 use super::discovery;
-use super::mapping::{Call, Session, rejection_reason, unknown};
+use super::mapping::{Call, Session, acknowledged_turn, rejection_reason, unknown};
 use super::report::{self, Overrides};
 use super::ticket_tool::{self, TicketTool};
 
@@ -627,19 +627,22 @@ impl HarnessRuntime for CodexRuntime {
                     if let Some(unattended) = session.turn_overrides.clone() {
                         merge(&mut params, unattended);
                     }
-                    (params, Call::StartTurn(id.clone()))
+                    session.runtime.start_written(&id);
+                    (params, Call::StartTurn(id))
                 }
-                SubmissionKind::Steer { expected_turn } => (
-                    json!({
-                        "threadId": thread,
-                        "expectedTurnId": expected_turn.0,
-                        "clientUserMessageId": id.0,
-                        "input": input,
-                    }),
-                    Call::Steer(id.clone()),
-                ),
+                SubmissionKind::Steer { expected_turn } => {
+                    session.runtime.submission_written(&id);
+                    (
+                        json!({
+                            "threadId": thread,
+                            "expectedTurnId": expected_turn.0,
+                            "clientUserMessageId": id.0,
+                            "input": input,
+                        }),
+                        Call::Steer(id),
+                    )
+                }
             };
-            session.runtime.submission_written(&id);
             Ok(prepared)
         };
         self.connection
@@ -648,13 +651,7 @@ impl HarnessRuntime for CodexRuntime {
                 generation,
                 method,
                 prepare,
-                |result| {
-                    result
-                        .pointer("/turn/id")
-                        .or_else(|| result.get("turnId"))
-                        .and_then(Value::as_str)
-                        .map(NativeTurnId::new)
-                },
+                acknowledged_turn,
                 rejection_reason,
             )
             .await

@@ -418,11 +418,15 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Hello")).await;
 
     assert_eq!(outcome, DispatchOutcome::Written);
+    assert_eq!(
+        runtime.submit(start_turn("sub-1b", "Hello again")).await,
+        DispatchOutcome::NotSent(Refusal::StartUnconfirmed)
+    );
+    peer.assert_nothing_written().await;
     peer.play().await;
     assert_eq!(
         seen(&mut events).await,
         [
-            "turn-started turn_1",
             "evidence sub-1 Acknowledged { turn: NativeTurnId(\"turn_1\") }",
             "unknown reply to an unknown request",
         ]
@@ -436,6 +440,79 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     assert_eq!(
         seen(&mut events).await,
         ["turn-ended turn_1 Interrupted [\"sub-1\"]"]
+    );
+    peer.assert_nothing_written().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_late_start_rejection_allows_another_turn() {
+    let mut peer = provider().await;
+    assert_eq!(
+        peer.submit_unanswered("sub-1").await,
+        DispatchOutcome::Written
+    );
+
+    peer.refuse_late("sub-1").await;
+    assert_eq!(
+        seen(peer.events()).await,
+        ["evidence sub-1 Rejected { reason: \"server is shutting down (code -32600)\" }"]
+    );
+    peer.assert_nothing_else_written().await;
+    assert_eq!(
+        peer.start_turn("sub-2").await,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_correlated_turn_can_finish_before_its_start_reply() {
+    let (mut peer, runtime, mut events) = open().await;
+    peer.load(fixture!("late_start_after_completion"));
+    assert_eq!(
+        submit(&mut peer, &runtime, start_turn("sub-1", "First")).await,
+        DispatchOutcome::Written,
+    );
+
+    peer.play().await;
+    assert_eq!(seen(&mut events).await, ["turn-ended older Completed []"]);
+    assert_eq!(
+        runtime.submit(start_turn("sub-2", "Second")).await,
+        DispatchOutcome::NotSent(Refusal::StartUnconfirmed),
+    );
+    peer.assert_nothing_written().await;
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["evidence sub-1 Processing { turn: NativeTurnId(\"turn_1\") }"],
+    );
+    assert_eq!(
+        runtime.submit(start_turn("sub-2", "Second")).await,
+        turn_mismatch("turn_1"),
+    );
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["turn-ended turn_1 Completed [\"sub-1\"]"],
+    );
+    assert_eq!(
+        submit(&mut peer, &runtime, start_turn("sub-2", "Second")).await,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_2")
+        },
+    );
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["evidence sub-1 Acknowledged { turn: NativeTurnId(\"turn_1\") }"],
+    );
+    assert_eq!(
+        runtime.submit(start_turn("sub-3", "Third")).await,
+        turn_mismatch("turn_2"),
     );
     peer.assert_nothing_written().await;
 }

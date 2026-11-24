@@ -50,6 +50,7 @@ import { groupTickets } from "./ticket-groups";
 import {
   readiness,
   readinessLabel,
+  readyForReview,
   rowContextItem,
   type RowContextKind,
   type RowScope,
@@ -682,7 +683,7 @@ function RowDetails({
             ? readinessLabel(state)
             : due
               ? "Reminder due"
-              : ticket.status === "In review" && update?.editing_agent
+              : readyForReview(ticket)
                 ? "Ready for review"
                 : duplicate?.kind === "duplicate"
                   ? duplicate.label

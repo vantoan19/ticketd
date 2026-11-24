@@ -861,7 +861,7 @@ impl HarnessRuntime for AcpRuntime {
                     acp::PromptRequest::new(id, vec![acp::ContentBlock::from(submission.text)]);
                 let params = params(request).map_err(|_| Refusal::Unsupported)?;
                 let turn = NativeTurnId::new(uuid::Uuid::new_v4().to_string());
-                session.runtime.turn_started(Some(&turn));
+                session.runtime.turn_started(&turn);
                 session.runtime.submission_written(&submission.submission);
                 session.prompt = Some(Prompt::new(turn.clone(), submission.submission));
                 Ok((params, Call::Prompt(turn)))
