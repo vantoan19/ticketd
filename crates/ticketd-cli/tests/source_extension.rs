@@ -175,7 +175,7 @@ fn installs_only_after_consent_and_refuses_a_changed_install() {
         package.join("tracker.ts"),
         format!(
             "if (!process.env.PATH || !(process.env.HOME || process.env.USERPROFILE) ||
-                process.env.EXTRA_TRACKER_SETTING !== 'declared' ||
+                process.env.EXTRA_TRACKER_SETTING !== 'docs' ||
                 process.env.UNRELATED_TRACKER_SETTING ||
                 process.env.TICKETD_EXTENSION_TEST) {{
                 throw new Error('unexpected environment');
@@ -203,7 +203,7 @@ fn installs_only_after_consent_and_refuses_a_changed_install() {
         command
             .env("TICKETD_TEST_WORKSPACE", &workspace)
             .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
-            .env("EXTRA_TRACKER_SETTING", "declared")
+            .env("EXTRA_TRACKER_SETTING", "docs")
             .env("UNRELATED_TRACKER_SETTING", "filtered")
             .env("TICKETD_EXTENSION_TEST", "filtered");
         command
@@ -300,7 +300,7 @@ fn installs_only_after_consent_and_refuses_a_changed_install() {
     for path in [&current, &previous] {
         let bytes = fs::read(path).unwrap();
         assert!(!bytes.is_empty() && bytes.len() <= 256 * 1024);
-        assert!(!String::from_utf8_lossy(&bytes).contains("declared"));
+        assert!(!String::from_utf8_lossy(&bytes).contains("docs"));
     }
     assert!(
         fs::read_to_string(current)

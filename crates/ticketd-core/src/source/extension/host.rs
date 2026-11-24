@@ -449,9 +449,10 @@ async fn session(
             biased;
             _ = wait_for_close(&mut closing) => break,
             fault = idle_stdout(&mut active), if active.is_some() => {
-                if matches!(fault, Fault::Crash) {
+                if fault.counts_as_crash() {
                     record_crash(&mut crashes);
-                } else {
+                }
+                if matches!(fault, Fault::Framing(_)) {
                     tracing::debug!(
                         source_id = key.id.as_deref().unwrap_or_default(),
                         error_kind = SourceError::from(fault).code(),
@@ -496,7 +497,7 @@ async fn session(
                     let result = match result {
                         Ok(result) => result,
                         Err(fault) => {
-                            if matches!(fault, Fault::Crash) {
+                            if fault.counts_as_crash() {
                                 record_crash(&mut crashes);
                             }
                             stop(&mut active).await;
@@ -541,7 +542,7 @@ async fn idle_stdout(active: &mut Option<(Arc<Launch>, Process)>) -> Fault {
         return std::future::pending().await;
     };
     match process.stdout.read().await {
-        Ok(_) => Fault::Protocol("unexpected source extension stdout".into()),
+        Ok(_) => Fault::Framing("unexpected source extension stdout".into()),
         Err(fault) => fault,
     }
 }

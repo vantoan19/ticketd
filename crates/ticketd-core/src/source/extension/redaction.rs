@@ -14,38 +14,60 @@ pub(super) struct Redactions(Arc<Mutex<Patterns>>);
 
 #[derive(Default)]
 struct Patterns {
-    raw: BTreeSet<Vec<u8>>,
+    raw_values: BTreeSet<Vec<u8>>,
+    raw_credentials: BTreeSet<Vec<u8>>,
     values: BTreeSet<Vec<u8>>,
+    credentials: BTreeSet<Vec<u8>>,
     matcher: Option<AhoCorasick>,
     longest: usize,
 }
 
 impl Redactions {
     pub(super) fn register<'a>(&self, secrets: impl IntoIterator<Item = &'a str>) {
+        self.register_values(secrets, true);
+    }
+
+    pub(super) fn register_for_logs<'a>(&self, values: impl IntoIterator<Item = &'a str>) {
+        self.register_values(values, false);
+    }
+
+    fn register_values<'a>(&self, values: impl IntoIterator<Item = &'a str>, credential: bool) {
         let mut patterns = self.0.lock().unwrap_or_else(|error| error.into_inner());
         let before = patterns.values.len();
         let lower_percent = regex::Regex::new("%[0-9A-F]{2}");
-        for secret in secrets {
-            if secret.is_empty() || !patterns.raw.insert(secret.as_bytes().to_vec()) {
+        for value in values {
+            if value.is_empty() {
                 continue;
             }
-            patterns.values.insert(secret.as_bytes().to_vec());
-            let quoted = Value::String(secret.to_owned()).to_string();
-            patterns
-                .values
-                .insert(quoted.as_bytes()[1..quoted.len() - 1].to_vec());
-            let url: String = url::form_urlencoded::byte_serialize(secret.as_bytes()).collect();
-            patterns.values.insert(url.as_bytes().to_vec());
-            patterns.values.insert(url.replace('+', "%20").into_bytes());
+            let expanded = if credential {
+                &mut patterns.raw_credentials
+            } else {
+                &mut patterns.raw_values
+            };
+            if !expanded.insert(value.as_bytes().to_vec()) {
+                continue;
+            }
+
+            let quoted = Value::String(value.to_owned()).to_string();
+            let url: String = url::form_urlencoded::byte_serialize(value.as_bytes()).collect();
+            let percent_space = url.replace('+', "%20");
+            let mut variants = vec![
+                value.as_bytes().to_vec(),
+                quoted.as_bytes()[1..quoted.len() - 1].to_vec(),
+                url.as_bytes().to_vec(),
+                percent_space.as_bytes().to_vec(),
+            ];
             if let Ok(lower_percent) = &lower_percent {
-                patterns.values.insert(
-                    lower_percent
-                        .replace_all(&url, |matched: &regex::Captures<'_>| {
-                            matched[0].to_ascii_lowercase()
-                        })
-                        .into_owned()
-                        .into_bytes(),
-                );
+                for encoded in [&url, &percent_space] {
+                    variants.push(
+                        lower_percent
+                            .replace_all(encoded, |matched: &regex::Captures<'_>| {
+                                matched[0].to_ascii_lowercase()
+                            })
+                            .into_owned()
+                            .into_bytes(),
+                    );
+                }
             }
             for engine in [
                 general_purpose::STANDARD,
@@ -53,7 +75,13 @@ impl Redactions {
                 general_purpose::URL_SAFE,
                 general_purpose::URL_SAFE_NO_PAD,
             ] {
-                patterns.values.insert(engine.encode(secret).into_bytes());
+                variants.push(engine.encode(value).into_bytes());
+            }
+            for variant in variants {
+                if credential {
+                    patterns.credentials.insert(variant.clone());
+                }
+                patterns.values.insert(variant);
             }
         }
         if patterns.values.len() != before {
@@ -113,10 +141,14 @@ impl Patterns {
 
     fn contains(&self, input: &str, embedded_raw: bool) -> bool {
         let Some(matcher) = &self.matcher else {
-            return !self.values.is_empty();
+            return !self.credentials.is_empty();
         };
         let bytes = input.as_bytes();
         matcher.find_overlapping_iter(bytes).any(|matched| {
+            let matched_bytes = &bytes[matched.start()..matched.end()];
+            if !self.credentials.contains(matched_bytes) {
+                return false;
+            }
             let word = |byte: Option<&u8>| byte.is_some_and(u8::is_ascii_alphanumeric);
             // Short encodings and single-byte credentials often occur inside
             // unrelated words. Longer raw credentials in values are checked
@@ -124,7 +156,7 @@ impl Patterns {
             matched.len() >= 6
                 || (embedded_raw
                     && matched.len() > 1
-                    && self.raw.contains(&bytes[matched.start()..matched.end()]))
+                    && self.raw_credentials.contains(matched_bytes))
                 || (!word(
                     matched
                         .start()
@@ -251,6 +283,17 @@ mod tests {
         assert!(secrets.contains_secret(&serde_json::json!({"title": "prefixmv3k2suffix"})));
         assert!(secrets.contains_secret(&serde_json::json!(["x"])));
         assert!(!secrets.contains_secret(&serde_json::json!({"title": "extra context"})));
+    }
+
+    #[test]
+    fn log_only_values_stay_out_of_the_result_guard() {
+        let secrets = Redactions::default();
+        secrets.register_for_logs(["docs"]);
+        let value = serde_json::json!({"labels": ["docs"]});
+        assert_eq!(secrets.text("declared docs"), "declared [redacted]");
+        assert!(!secrets.contains_secret(&value));
+        secrets.register(["docs"]);
+        assert!(secrets.contains_secret(&value));
     }
 
     #[test]

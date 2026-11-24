@@ -136,7 +136,7 @@ fn malformed_and_oversized_stdout_fail_without_poisoning_the_next_call() {
     let malformed = connector
         .check_connection(&configuration("broken"))
         .unwrap_err();
-    assert!(matches!(malformed, SourceError::Protocol(_)));
+    assert!(matches!(malformed, SourceError::Unavailable(_)));
     assert!(
         malformed
             .to_string()
@@ -146,10 +146,26 @@ fn malformed_and_oversized_stdout_fail_without_poisoning_the_next_call() {
     let large = connector
         .check_connection(&configuration("oversized"))
         .unwrap_err();
-    assert!(matches!(large, SourceError::Protocol(_)));
+    assert!(matches!(large, SourceError::Unavailable(_)));
     assert!(large.to_string().contains("line exceeds"));
     let checked = connector.check_connection(&configuration("noisy")).unwrap();
     assert_eq!(checked.connection.account, "octo");
+}
+
+#[test]
+fn framing_faults_interrupt_the_source_and_count_toward_its_crash_latch() {
+    let connector = fixture_connector(Arc::new(Host::default()), "first");
+    for _ in 0..5 {
+        let error = connector
+            .check_connection(&configuration("broken"))
+            .unwrap_err();
+        assert!(error.failure_code().interrupts_source());
+        assert_eq!(error.code(), "unavailable");
+    }
+    let error = connector
+        .check_connection(&configuration("valid"))
+        .unwrap_err();
+    assert!(matches!(error, SourceError::ExtensionCrashLimit));
 }
 
 #[test]
@@ -415,6 +431,37 @@ fn an_installed_folder_is_checked_even_with_a_warm_process() {
     std::fs::write(installed.path.join("extra-file"), "changed").unwrap();
     let error = engine.check_connection("scripted", &config).unwrap_err();
     assert!(error.to_string().contains("add it again"), "{error}");
+}
+
+#[test]
+fn relinking_the_same_development_folder_restarts_its_warm_process() {
+    let scratch = tempfile::tempdir().unwrap();
+    let registry = ExtensionRegistry::new(scratch.path().join("extensions"));
+    let source = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension");
+    let package = scratch.path().join("package");
+    std::fs::create_dir(&package).unwrap();
+    for name in ["driver.mjs", "ticketd-source.json"] {
+        std::fs::copy(source.join(name), package.join(name)).unwrap();
+    }
+    let config = configuration("valid");
+    let account = || {
+        registry
+            .engine()
+            .unwrap()
+            .for_connection("scripted", "scripted", &config)
+            .check_connection("scripted", &config)
+            .unwrap()
+            .account
+    };
+    registry.link(&package).unwrap();
+    assert_eq!(account(), "octo");
+    let driver = package.join("driver.mjs");
+    let updated = std::fs::read_to_string(&driver)
+        .unwrap()
+        .replace("\"octo\"", "\"relinked\"");
+    std::fs::write(driver, updated).unwrap();
+    registry.link(&package).unwrap();
+    assert_eq!(account(), "relinked");
 }
 
 #[cfg(unix)]

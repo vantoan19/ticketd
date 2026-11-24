@@ -42,16 +42,24 @@ pub(super) const EXIT_POLL: Duration = Duration::from_millis(100);
 
 pub(super) enum Fault {
     Crash,
+    Framing(String),
     Protocol(String),
     Timeout,
     NotSent,
     Canceled,
 }
 
+impl Fault {
+    pub(super) fn counts_as_crash(&self) -> bool {
+        matches!(self, Self::Crash | Self::Framing(_))
+    }
+}
+
 impl From<Fault> for SourceError {
     fn from(fault: Fault) -> Self {
         match fault {
             Fault::Crash => Self::Unavailable("the source extension process exited".into()),
+            Fault::Framing(message) => Self::Unavailable(message),
             Fault::Protocol(message) => Self::Protocol(message),
             Fault::Timeout => Self::Unavailable("the source extension request timed out".into()),
             Fault::NotSent => {
@@ -287,7 +295,7 @@ impl Process {
                 let _ = reply.jsonrpc;
                 Ok(Inbound::Reply(Response::Failure(reply)))
             }
-            _ => Err(Fault::Protocol("unexpected source extension stdout".into())),
+            _ => Err(Fault::Framing("unexpected source extension stdout".into())),
         }
     }
 
@@ -392,13 +400,13 @@ impl Lines {
                 return Err(if self.frame.is_empty() {
                     Fault::Crash
                 } else {
-                    Fault::Protocol("incomplete source extension stdout frame".into())
+                    Fault::Framing("incomplete source extension stdout frame".into())
                 });
             }
             let newline = bytes.iter().position(|byte| *byte == b'\n');
             let length = newline.unwrap_or(bytes.len());
             if self.frame.len() + length > LINE_LIMIT {
-                return Err(Fault::Protocol(format!(
+                return Err(Fault::Framing(format!(
                     "stdout line exceeds the {LINE_LIMIT}-byte limit"
                 )));
             }

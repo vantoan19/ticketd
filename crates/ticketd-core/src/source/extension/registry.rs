@@ -155,6 +155,8 @@ impl Manifest {
 pub(super) struct Launch {
     pub manifest: Manifest,
     folder: PathBuf,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    development_generation: Option<uuid::Uuid>,
     #[serde(default)]
     mode: LaunchMode,
 }
@@ -177,6 +179,7 @@ impl Launch {
         Ok(Self {
             manifest: Manifest::read(&folder)?,
             folder,
+            development_generation: Some(uuid::Uuid::new_v4()),
             mode: LaunchMode::Development,
         })
     }
@@ -247,7 +250,7 @@ impl Launch {
                 continue;
             };
             if declared_env(key, &self.manifest.env) {
-                redactions.register([value]);
+                redactions.register_for_logs([value]);
             }
             if proxy_env(&key.to_ascii_uppercase())
                 && let Ok(url) = url::Url::parse(value)
@@ -493,6 +496,7 @@ impl ExtensionRegistry {
         let launch = Launch {
             manifest,
             folder,
+            development_generation: None,
             mode: LaunchMode::Installed {
                 hash: folder_digest(&package).map_err(storage_error)?,
                 executable: executable.clone(),

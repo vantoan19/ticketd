@@ -29,7 +29,10 @@ const schema = {
       label: "Fixture key",
       type: "secret",
       show_if: "mode",
-      pattern: { regex: "^private-", message: "must start with private-" },
+      pattern: {
+        regex: "^(private-|mv3k2$)",
+        message: "must start with private-",
+      },
     },
   ],
 };
