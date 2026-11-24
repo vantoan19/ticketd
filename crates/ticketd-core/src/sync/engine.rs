@@ -805,7 +805,8 @@ pub(crate) fn migrate_source_state_conflicts(connection: &Connection) -> Result<
             .collect::<Result<Vec<_>, _>>()?;
         let mut matches_remote = true;
         for (field, value) in reviews {
-            matches_remote &= value_at(&remote, &field) == from_json(value)?.as_ref();
+            matches_remote &=
+                conflict_value(&remote, &field).as_deref() == from_json(value)?.as_ref();
         }
         if !matches_remote {
             continue;
