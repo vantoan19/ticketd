@@ -467,10 +467,15 @@ export function AgentForm({
                       <Switch
                         aria-label={tool}
                         checked={draft.tools[key]}
+                        disabled={
+                          key === "run_commands" &&
+                          !draft.tools.run_commands &&
+                          !reach
+                        }
                         onCheckedChange={(on) =>
                           changeTools({
                             [key]: on,
-                            // Workspace sync may only see the final settings.
+                            // Persist the grant for devices that only see this save.
                             ...(key === "run_commands" &&
                               on &&
                               commandsAreOffOrAny && { any_command: true }),

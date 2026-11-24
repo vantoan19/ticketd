@@ -582,6 +582,45 @@ test("switching from a command list to Codex turns commands off until the person
   );
 });
 
+test("an existing agent can turn commands off while its capability loads and explicitly enable them once it is known", async () => {
+  const client = createMockChatClient();
+  const catalog = await client.harnessCatalog();
+  let answer = () => {};
+  const pending = new Promise<void>((resolve) => (answer = resolve));
+  client.harnessCatalog = async () => {
+    await pending;
+    return catalog;
+  };
+  await open(client, [
+    {
+      ...DEFAULTS,
+      id: "a1",
+      name: "Triage",
+      harness: "codex",
+      tools: { ...DEFAULTS.tools, run_commands: true },
+      used_by: [],
+    },
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const form = await screen.findByRole("region", { name: "Triage" });
+  const commands = within(form).getByRole("switch", { name: "Run commands" });
+  expect(commands).toHaveProperty("disabled", false);
+
+  fireEvent.click(commands);
+  await waitFor(() => expect(stored[0]?.tools.run_commands).toBe(false));
+  expect(commands).toHaveProperty("disabled", true);
+
+  await act(async () => answer());
+  expect(commands).toHaveProperty("disabled", false);
+  fireEvent.click(commands);
+  await waitFor(() =>
+    expect(stored[0]?.tools).toMatchObject({
+      run_commands: true,
+      any_command: true,
+    }),
+  );
+});
+
 test("the Runs view lists every run under Now, Needs you and Earlier, naming its Automation, and opens the one chosen", async () => {
   automations = [TRIAGE];
   runs = [
