@@ -77,9 +77,9 @@ pub fn prepare_harness_recording(
         return Err(invalid_run());
     }
 
-    let actual = open_workspace()
-        .and_then(|path| path.canonicalize().map_err(Into::into))
-        .map_err(|_| invalid_run())?;
+    // A failed opener may have initialized the reserved file or written sidecars.
+    let opened = open_workspace().map_err(|error| io::Error::other(WorkspaceOpenError(error)))?;
+    let actual = opened.canonicalize().map_err(|_| invalid_run())?;
     if actual != workspace || !FileIdentity::of(&database).matches_file(&actual) {
         return Err(invalid_run());
     }
@@ -95,6 +95,12 @@ pub fn prepare_harness_recording(
     };
     RUN.set(run).map_err(|_| invalid_run())
 }
+
+#[derive(Debug, thiserror::Error)]
+#[error(
+    "Could not open the disposable Workspace for harness recording ({0}). Fix the error and retry in a new private capture folder under /tmp."
+)]
+struct WorkspaceOpenError(#[source] ticketd_core::Error);
 
 fn invalid_run() -> io::Error {
     io::Error::other(
