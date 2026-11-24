@@ -229,7 +229,7 @@ fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
             } else if path == "/user" {
                 (
                     "200 OK",
-                    json!({"login": if second { "other" } else { "octo" }}),
+                    json!({"id": if second { 2 } else { 1 }, "login": if second { "other" } else { "octo" }}),
                 )
             } else if path.starts_with("/user/repos") {
                 (
@@ -284,7 +284,7 @@ fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
                 .to_string()
                 .replace("https://github.example", issue_origin);
             let response = format!(
-                "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                "HTTP/1.1 {status}\r\nDate: Thu, 01 Jan 2026 00:00:00 GMT\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                 body.len()
             );
             let _ = stream.write_all(response.as_bytes());
