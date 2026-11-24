@@ -47,13 +47,14 @@ fn now_millis() -> i64 {
 }
 use crate::outcome::{settle, tool_state};
 use crate::subscription::{self, ChatUpdate, Publisher};
+use crate::unattended::{UnattendedChat, set_aside_first_message};
 use crate::{
     ApprovalDecision, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
     HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind, InteractionRequest,
     InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
     NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
     Problem, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
-    SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome, Unattended,
+    SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
 };
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
@@ -64,6 +65,10 @@ pub(crate) enum Command {
         command_id: Option<String>,
         text: String,
         mode: SendMode,
+        reply: Reply<ChatMessage>,
+    },
+    SendUnattended {
+        text: String,
         reply: Reply<ChatMessage>,
     },
     Stop(Reply<()>),
@@ -221,7 +226,7 @@ pub(crate) struct Supervisor {
     adapter: Option<Arc<dyn HarnessAdapter>>,
     context: Option<ContextSource>,
     /// Set for the Chat of an Automation run: every session opens with these settings.
-    unattended: Option<Unattended>,
+    unattended: Option<Arc<UnattendedChat>>,
     board: Arc<Board>,
     commands: mpsc::Receiver<Command>,
     done: mpsc::UnboundedSender<Done>,
@@ -323,7 +328,7 @@ impl Supervisor {
         adapter: Option<Arc<dyn HarnessAdapter>>,
         context: Option<ContextSource>,
         board: Arc<Board>,
-        unattended: Option<Unattended>,
+        unattended: Option<Arc<UnattendedChat>>,
         feature_off: Arc<AtomicBool>,
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
@@ -335,7 +340,7 @@ impl Supervisor {
             chat_id = chat.id.as_str(),
             automation_run_id = unattended
                 .as_ref()
-                .map(|unattended| unattended.run_id.as_str()),
+                .map(|unattended| unattended.settings.run_id.as_str()),
         );
         let supervisor = Self {
             span: span.clone(),
@@ -412,6 +417,9 @@ impl Supervisor {
                             && self.runtime.is_none()
                             && self.opening.is_none();
                         let unconfirmed = self.stop_runtime(why).await;
+                        if why == StopReason::TurnedOff && self.unattended.is_some() {
+                            self.finish_unattended_shutdown(why);
+                        }
                         self.publish();
                         if why == StopReason::TurnedOff
                             && (keep_permission_recovery || self.pending_runtime_loss.is_some())
@@ -597,6 +605,18 @@ impl Supervisor {
         match command {
             Command::Attach(reply) => {
                 let _ = reply.send(self.attach());
+            }
+            Command::SendUnattended { text, reply } => {
+                let Some(unattended) = self.unattended.clone() else {
+                    let _ = reply.send(Err(HostError::Quitting));
+                    return;
+                };
+                let command_id = format!("{}:first", self.chat_id);
+                let result = self.send(Some(&command_id), &text, SendMode::Auto);
+                if let Ok(message) = &result {
+                    let _ = unattended.first_message.set(message.id.clone());
+                }
+                let _ = reply.send(result);
             }
             Command::Send {
                 command_id,
@@ -1312,7 +1332,7 @@ impl Supervisor {
             settings: self.start_settings.clone(),
             session,
             recorded_settings: chat.effective_settings.clone(),
-            unattended: self.unattended.clone(),
+            unattended: self.unattended.as_ref().map(|run| run.settings.clone()),
             ticketd_cli: None,
             taken_over,
         };
@@ -1346,6 +1366,22 @@ impl Supervisor {
             }
             .instrument(chat_span),
         );
+    }
+
+    fn finish_unattended_shutdown(&mut self, why: StopReason) {
+        let Some(unattended) = self.unattended.take() else {
+            return;
+        };
+        // On can open a replacement as soon as Off returns. Set the run's input
+        // aside before handing the Chat back, and tell the waiter why it stopped.
+        if let Some(message_id) = unattended.first_message.get() {
+            let chat_id = self.chat_id.clone();
+            let _ = self.write(|workspace| {
+                set_aside_first_message(workspace, &chat_id, message_id, why);
+                Ok(())
+            });
+        }
+        unattended.turned_off.send_replace(true);
     }
 
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
