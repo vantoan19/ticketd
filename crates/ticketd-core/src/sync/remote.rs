@@ -132,6 +132,10 @@ pub enum RemoteError {
     /// The text names the bucket and what to check, written for people.
     #[error("{0}")]
     BucketMissing(String),
+    /// The profile now reaches another S3 service than the one the Workspace's bucket was
+    /// connected through. The text says which, and the way out, written for people.
+    #[error("{0}")]
+    ServiceChanged(String),
     #[error("storage: {0}")]
     Other(String),
 }

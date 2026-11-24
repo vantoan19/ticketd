@@ -38,3 +38,21 @@ test("a Google Drive binding keeps saying Google Drive", () => {
   );
   expect(drive("rate_limited")?.title).toBe("Google Drive is busy");
 });
+
+test("a changed S3 service says what stopped, shows the message as written and offers Disconnect", () => {
+  const copy = recoveryCopy(
+    syncStatus({
+      provider: "s3",
+      recovery: "service_changed",
+      recovery_message: "This profile now points to another S3 service.",
+    }),
+  );
+  expect(copy).toMatchObject({
+    label: "S3 sync stopped",
+    title: "Sync stopped",
+    action: "Disconnect",
+  });
+  expect(copy?.description).toBe(
+    "This profile now points to another S3 service. Your work is saved on this computer.",
+  );
+});

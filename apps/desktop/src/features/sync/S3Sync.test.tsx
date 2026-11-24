@@ -320,6 +320,48 @@ test("an ended AWS session is signed in again through the profile", async () => 
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 });
 
+const SAID =
+  "This profile now points to another S3 service: it reaches http://127.0.0.1:9001, and this Workspace's bucket was connected through http://127.0.0.1:9000. To move the bucket on purpose, disconnect sync, then connect again; otherwise point the profile back.";
+const stopped = () =>
+  connected({
+    state: "needs_attention",
+    recovery: "service_changed",
+    recovery_message: SAID,
+  });
+
+test("a profile that now reaches another service stops sync: not Connected, the message once, and Disconnect beside it", async () => {
+  api.status.mockResolvedValue(stopped());
+  api.disconnect.mockResolvedValue(
+    syncStatus({ connection: "not_connected", account: null, folder: null }),
+  );
+  show();
+  const notice = await screen.findByRole("alert");
+  expect(notice.textContent).toContain("Sync stopped");
+  // The sentence as the core wrote it, once, with no internal prefix.
+  expect(notice.textContent).toContain(SAID);
+  expect(notice.textContent).not.toMatch(/sync storage|storage:/i);
+  expect(document.body.textContent?.split(SAID).length).toBe(2);
+  // The page does not claim a working connection.
+  expect(screen.queryByText("Connected")).toBeNull();
+  expect(screen.getByText("Not syncing")).toBeTruthy();
+  // The way out the message names is next to it, behind the usual confirmation.
+  fireEvent.click(within(notice).getByRole("button", { name: "Disconnect…" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  await waitFor(() => expect(api.disconnect).toHaveBeenCalled());
+  expect(api.recover).not.toHaveBeenCalled();
+});
+
+test("a stopped service can still be retried once the profile points back", async () => {
+  api.status.mockResolvedValue(stopped());
+  api.recover.mockResolvedValue(connected());
+  show();
+  const notice = await screen.findByRole("alert");
+  fireEvent.click(within(notice).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(api.recover).toHaveBeenCalled());
+  expect(await screen.findByText("Connected")).toBeTruthy();
+});
+
 test("disconnecting from a bucket says what stays", async () => {
   api.status.mockResolvedValue(connected());
   api.disconnect.mockResolvedValue(

@@ -200,8 +200,15 @@ export function SyncStatusLine() {
   const line = describe(status, now);
   const recovery = recoveryCopy(status);
   // Offline mends itself, so it asks for nothing on the line; its popover still offers a retry.
+  const stopped = status.recovery === "service_changed";
+  // A changed S3 service is left by Disconnect, which is a Settings page choice; the line
+  // itself can only retry, for a person who pointed the profile back.
   const corrective =
-    status.state === "needs_attention" && recovery ? recovery.action : null;
+    status.state === "needs_attention" && recovery
+      ? stopped
+        ? "Retry"
+        : recovery.action
+      : null;
   const selfMending =
     status.recovery === "offline" || status.recovery === "rate_limited";
   // A waiting conflict is reviewed whatever else holds sync up, unless that needs the person first.
@@ -321,7 +328,7 @@ export function SyncStatusLine() {
                   openSettings();
                 }}
               >
-                Settings
+                {stopped ? "Disconnect in Settings" : "Settings"}
               </Button>
             </div>
           </div>

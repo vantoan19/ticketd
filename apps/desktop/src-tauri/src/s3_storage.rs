@@ -8,6 +8,7 @@
 use std::{
     path::Path,
     sync::{Arc, Mutex, PoisonError},
+    time::{Duration, Instant},
 };
 
 use ticketd_core::{
@@ -35,10 +36,26 @@ pub struct Built {
 
 type Build = dyn Fn(&S3Binding) -> Result<Built, RemoteError> + Send + Sync;
 
+/// Reads the S3 service the profile reaches now, as [`S3Binding::endpoint`] keeps it.
+type Reach = dyn Fn(&S3Binding) -> Result<String, RemoteError> + Send + Sync;
+
+/// How long a built storage is trusted to still reach what the profile says. The profile is
+/// the person's own file, edited while the app runs; reading it is a process of the AWS CLI,
+/// so it is read now and then, not per request.
+const RECHECK: Duration = Duration::from_secs(120);
+
+struct Kept {
+    built: Arc<Built>,
+    /// When the profile's service was last compared with the one this storage reached.
+    checked: Instant,
+}
+
 pub struct S3Storage {
     binding: S3Binding,
     build: Box<Build>,
-    built: Mutex<Option<Arc<Built>>>,
+    reach: Box<Reach>,
+    clock: Box<dyn Fn() -> Instant + Send + Sync>,
+    built: Mutex<Option<Kept>>,
 }
 
 impl S3Storage {
@@ -53,19 +70,50 @@ impl S3Storage {
         Self {
             binding,
             build: Box::new(build),
+            reach: Box::new(reach),
+            clock: Box::new(Instant::now),
             built: Mutex::new(None),
         }
     }
 
+    /// Reads the profile's service with `reach` and the time from `clock`, for tests.
+    #[cfg(test)]
+    fn with_reach(
+        mut self,
+        reach: impl Fn(&S3Binding) -> Result<String, RemoteError> + Send + Sync + 'static,
+        clock: impl Fn() -> Instant + Send + Sync + 'static,
+    ) -> Self {
+        self.reach = Box::new(reach);
+        self.clock = Box::new(clock);
+        self
+    }
+
     /// The storage ready to use. A failure keeps nothing, so the next call tries again.
+    ///
+    /// A kept storage is trusted for [`RECHECK`]; after that the profile's service is read
+    /// again, and a storage that reached another one is dropped, so the build refuses it (the
+    /// profile was edited while the app ran).
     pub fn built(&self) -> Result<Arc<Built>, RemoteError> {
-        let mut built = self.built.lock().unwrap_or_else(PoisonError::into_inner);
-        if let Some(built) = built.as_ref() {
-            return Ok(Arc::clone(built));
+        let mut kept = self.built.lock().unwrap_or_else(PoisonError::into_inner);
+        let now = (self.clock)();
+        if let Some(held) = kept.as_mut() {
+            if now.saturating_duration_since(held.checked) < RECHECK {
+                return Ok(Arc::clone(&held.built));
+            }
+            // Counted from this read, whether or not it worked: a profile that cannot be read
+            // says nothing against the storage, and is not read again for every request.
+            held.checked = now;
+            match (self.reach)(&self.binding) {
+                Ok(reached) if reached != service(&held.built.target) => *kept = None,
+                _ => return Ok(Arc::clone(&held.built)),
+            }
         }
-        let made = Arc::new((self.build)(&self.binding)?);
-        *built = Some(Arc::clone(&made));
-        Ok(made)
+        let built = Arc::new((self.build)(&self.binding)?);
+        *kept = Some(Kept {
+            built: Arc::clone(&built),
+            checked: now,
+        });
+        Ok(built)
     }
 
     fn storage(&self) -> Result<Arc<dyn RemoteStorage>, RemoteError> {
@@ -79,8 +127,8 @@ impl S3Storage {
     /// The S3 service the profile reached when the storage was put together, as
     /// [`S3Binding::endpoint`] keeps it; `None` while it has not been built.
     pub fn reached(&self) -> Option<String> {
-        let built = self.built.lock().unwrap_or_else(PoisonError::into_inner);
-        Some(service(&built.as_ref()?.target).to_owned())
+        let kept = self.built.lock().unwrap_or_else(PoisonError::into_inner);
+        Some(service(&kept.as_ref()?.built.target).to_owned())
     }
 
     /// The `s3://` address of a Workspace folder, for a person to open in another tool.
@@ -110,9 +158,9 @@ pub fn service(target: &S3Target) -> &str {
 /// through. A binding with none recorded takes whatever the profile reaches.
 fn check_service(binding: &S3Binding, reached: &str) -> Result<(), RemoteError> {
     match binding.endpoint.as_deref() {
-        Some(recorded) if recorded != reached => {
-            Err(RemoteError::Other(s3_service_changed(recorded, reached)))
-        }
+        Some(recorded) if recorded != reached => Err(RemoteError::ServiceChanged(
+            s3_service_changed(recorded, reached),
+        )),
         _ => Ok(()),
     }
 }
@@ -202,6 +250,20 @@ impl CredentialSource for Shared {
     fn can_sign_in(&self) -> bool {
         self.0.can_sign_in()
     }
+}
+
+/// The S3 service the profile reaches now, read from the AWS CLI's configuration.
+fn reach(binding: &S3Binding) -> Result<String, RemoteError> {
+    let cli = AwsCli::locate(binding.aws_cli_path.as_deref().map(Path::new)).map_err(cli_error)?;
+    let settings = cli.settings(&binding.profile).map_err(cli_error)?;
+    // The region is not asked of the target: it only normalizes the endpoint.
+    let target = S3Target::new(
+        &binding.bucket,
+        "us-east-1",
+        settings.endpoint_url.as_deref(),
+    )
+    .map_err(|error| RemoteError::Other(error.to_string()))?;
+    Ok(service(&target).to_owned())
 }
 
 fn build(binding: &S3Binding) -> Result<Built, RemoteError> {
@@ -468,7 +530,7 @@ mod tests {
             ..binding()
         });
 
-        let Err(RemoteError::Other(message)) = storage.folders() else {
+        let Err(RemoteError::ServiceChanged(message)) = storage.folders() else {
             panic!("a profile that reaches another service was used");
         };
         assert!(message.contains("This profile now points to another S3 service"));
@@ -477,6 +539,141 @@ mod tests {
         assert!(message.contains("disconnect sync, then connect again"));
         // Nothing was kept: the profile pointing back works again at the next call.
         assert_eq!(storage.reached(), None);
+    }
+
+    /// A profile whose endpoint a test edits, and a clock it moves, behind a storage that
+    /// builds like the real one: it refuses a profile that reaches another service.
+    struct Session {
+        storage: S3Storage,
+        profile: Arc<Mutex<String>>,
+        clock: Arc<Mutex<Duration>>,
+        builds: Arc<AtomicUsize>,
+        reads: Arc<AtomicUsize>,
+    }
+
+    fn session(recorded: &str, profile: &str) -> Session {
+        let profile = Arc::new(Mutex::new(profile.to_owned()));
+        let clock = Arc::new(Mutex::new(Duration::ZERO));
+        let builds = Arc::new(AtomicUsize::new(0));
+        let reads = Arc::new(AtomicUsize::new(0));
+        let fake = FakeRemote::new();
+        let (edited, counted) = (Arc::clone(&profile), Arc::clone(&builds));
+        let (read, counting) = (Arc::clone(&profile), Arc::clone(&reads));
+        let (base, moved) = (Instant::now(), Arc::clone(&clock));
+        let storage = S3Storage::with_build(
+            S3Binding {
+                endpoint: Some(recorded.to_owned()),
+                ..binding()
+            },
+            move |binding| {
+                counted.fetch_add(1, Ordering::SeqCst);
+                let reached = edited.lock().unwrap().clone();
+                check_service(binding, &reached)?;
+                Ok(built(&fake, "us-east-1", Some(&reached)))
+            },
+        )
+        .with_reach(
+            move |_| {
+                counting.fetch_add(1, Ordering::SeqCst);
+                Ok(read.lock().unwrap().clone())
+            },
+            move || base + *moved.lock().unwrap(),
+        );
+        Session {
+            storage,
+            profile,
+            clock,
+            builds,
+            reads,
+        }
+    }
+
+    impl Session {
+        fn edit_profile(&self, endpoint: &str) {
+            *self.profile.lock().unwrap() = endpoint.to_owned();
+        }
+        fn wait(&self, time: Duration) {
+            *self.clock.lock().unwrap() += time;
+        }
+    }
+
+    #[test]
+    fn a_profile_edited_while_the_app_runs_is_noticed_within_the_recheck_time() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let at = |port: u16| format!("http://127.0.0.1:{port}");
+        let session = session(&at(9000), &at(9000));
+        session.storage.folders().unwrap();
+
+        // The profile now reaches another service. Until the recheck time passes, the
+        // storage is used as built, and the profile is not read per request.
+        session.edit_profile(&at(9001));
+        session.wait(RECHECK / 2);
+        for _ in 0..5 {
+            session.storage.folders().unwrap();
+        }
+        assert_eq!(session.reads.load(Ordering::SeqCst), 0);
+
+        // Then the next call reads the profile, drops the storage and refuses.
+        session.wait(RECHECK);
+        let Err(RemoteError::ServiceChanged(said)) = session.storage.folders() else {
+            panic!("a profile that reaches another service was still used");
+        };
+        assert!(said.contains("http://127.0.0.1:9001"), "{said}");
+        assert!(said.contains("http://127.0.0.1:9000"), "{said}");
+        assert_eq!(session.reads.load(Ordering::SeqCst), 1);
+        assert_eq!(session.storage.reached(), None);
+        // It keeps refusing, and a profile pointing back works again.
+        assert!(matches!(
+            session.storage.folders(),
+            Err(RemoteError::ServiceChanged(_))
+        ));
+        session.edit_profile(&at(9000));
+        session.storage.folders().unwrap();
+    }
+
+    #[test]
+    fn a_profile_that_did_not_change_keeps_its_storage_and_is_read_once_per_recheck() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let session = session("https://minio.example.com", "https://minio.example.com");
+        for _ in 0..3 {
+            session.storage.folders().unwrap();
+            session.wait(RECHECK + Duration::from_secs(1));
+        }
+        // Read at the second and the third call, never rebuilt.
+        assert_eq!(session.reads.load(Ordering::SeqCst), 2);
+        assert_eq!(session.builds.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn a_profile_that_cannot_be_read_for_the_recheck_keeps_the_storage_until_the_next_one() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let fake = FakeRemote::new();
+        let now = Arc::new(Mutex::new(Duration::ZERO));
+        let (base, moved) = (Instant::now(), Arc::clone(&now));
+        let reads = Arc::new(AtomicUsize::new(0));
+        let counting = Arc::clone(&reads);
+        let storage =
+            S3Storage::with_build(binding(), move |_| Ok(built(&fake, "us-east-1", None)))
+                .with_reach(
+                    move |_| {
+                        counting.fetch_add(1, Ordering::SeqCst);
+                        Err(RemoteError::Other("the CLI is busy".into()))
+                    },
+                    move || base + *moved.lock().unwrap(),
+                );
+        storage.folders().unwrap();
+        *now.lock().unwrap() += RECHECK + Duration::from_secs(1);
+        // A failed read says nothing against the storage, and is not repeated per request.
+        for _ in 0..4 {
+            storage.folders().unwrap();
+        }
+        assert_eq!(reads.load(Ordering::SeqCst), 1);
     }
 
     #[test]

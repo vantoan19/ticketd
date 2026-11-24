@@ -62,6 +62,12 @@ export const syncRecoveries = [
   "offline",
   /** Google Drive asked for fewer requests; sync tries again by itself. */
   "rate_limited",
+  /**
+   * The S3 profile now reaches another service than the Workspace's bucket was connected
+   * through; `recovery_message` says which. Disconnect (then connect again) moves the bucket
+   * on purpose; pointing the profile back, then Retry, undoes the edit.
+   */
+  "service_changed",
   /** Any other failed run; `recovery_message` says what went wrong. */
   "error",
 ] as const;
@@ -105,7 +111,7 @@ const statusSchema = z.object({
   }),
   needs_review: z.array(reviewItemSchema),
   recovery: z.enum(syncRecoveries).nullable(),
-  /** What went wrong, while `recovery` is `error`. */
+  /** What went wrong, while `recovery` is `error` or `service_changed`. */
   recovery_message: z.string().nullable().optional(),
   /** Progress of the first upload or download after setup; `null` once it finished. */
   first_sync: z

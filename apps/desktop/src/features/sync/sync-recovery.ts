@@ -67,6 +67,15 @@ export function recoveryCopy(status: SyncStatus): RecoveryCopy | null {
         action: "Retry",
         working: null,
       };
+    case "service_changed":
+      return {
+        label: `${storage.short} sync stopped`,
+        title: "Sync stopped",
+        // The core's sentence names both services and both ways out.
+        description: `${status.recovery_message ?? "This profile now reaches another service than this Workspace's bucket was connected through."} Your work is saved on this computer.`,
+        action: "Disconnect",
+        working: null,
+      };
     case "error":
       return {
         label: "Sync needs attention",

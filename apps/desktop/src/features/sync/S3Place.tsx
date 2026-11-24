@@ -60,7 +60,14 @@ export function S3Place({ status }: { status: SyncStatus }) {
               <Cloud size={20} />
             </SettingsRowTile>
           }
-          title={<StatusLabel tone="positive">Connected</StatusLabel>}
+          title={
+            // A profile that reaches another service stopped sync; the notice above says so.
+            status.recovery === "service_changed" ? (
+              <StatusLabel tone="attention">Not syncing</StatusLabel>
+            ) : (
+              <StatusLabel tone="positive">Connected</StatusLabel>
+            )
+          }
           description={
             <>
               {status.account && (

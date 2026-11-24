@@ -200,6 +200,10 @@ pub enum SyncRecovery {
     StorageFull,
     Offline,
     RateLimited,
+    /// The S3 profile now reaches another service than the Workspace's bucket was connected
+    /// through; the status carries the message. The way out is Disconnect (to move the bucket
+    /// on purpose) or pointing the profile back.
+    ServiceChanged,
     /// Any other failure of a run; the status carries its message.
     Error,
 }
@@ -213,6 +217,9 @@ pub enum SyncRecoveryAction {
     /// Sign in to the storage again, then run [`Workspace::sync_recover`].
     Reconnect,
     Retry,
+    /// Stop syncing here, then connect again; a retry only works once the profile is changed
+    /// back.
+    Disconnect,
 }
 
 impl SyncRecovery {
@@ -220,6 +227,7 @@ impl SyncRecovery {
         match self {
             Self::FolderMissing => SyncRecoveryAction::Reupload,
             Self::AuthorizationExpired => SyncRecoveryAction::Reconnect,
+            Self::ServiceChanged => SyncRecoveryAction::Disconnect,
             Self::StorageFull | Self::Offline | Self::RateLimited | Self::Error => {
                 SyncRecoveryAction::Retry
             }
@@ -233,6 +241,7 @@ impl SyncRecovery {
             RemoteError::StorageFull => Some(Self::StorageFull),
             RemoteError::Offline => Some(Self::Offline),
             RemoteError::RateLimited { .. } => Some(Self::RateLimited),
+            RemoteError::ServiceChanged(_) => Some(Self::ServiceChanged),
             RemoteError::PreconditionFailed { .. }
             | RemoteError::NotFound
             | RemoteError::BucketMissing(_)
@@ -979,6 +988,7 @@ impl Workspace {
                 SyncRecovery::FolderMissing
                     | SyncRecovery::AuthorizationExpired
                     | SyncRecovery::StorageFull
+                    | SyncRecovery::ServiceChanged
                     | SyncRecovery::Error
             )
         );
@@ -1036,9 +1046,12 @@ impl Workspace {
             pending_total,
             attachment_downloads,
             needs_review,
-            recovery_message: state
-                .recovery_message
-                .filter(|_| state.recovery == Some(SyncRecovery::Error)),
+            recovery_message: state.recovery_message.filter(|_| {
+                matches!(
+                    state.recovery,
+                    Some(SyncRecovery::Error | SyncRecovery::ServiceChanged)
+                )
+            }),
             recovery: state.recovery,
             first_sync,
             retry_after: None,
@@ -1305,6 +1318,10 @@ impl Workspace {
             // Nothing ran, so there is nothing to recover from.
             Err(error) if before.folder.is_none() => return Err(error),
             Err(error) => match &error {
+                // Its sentence is the whole message, and is kept to be shown.
+                Error::Remote(RemoteError::ServiceChanged(said)) => {
+                    (Some(SyncRecovery::ServiceChanged), Some(said.clone()))
+                }
                 Error::Remote(remote) if SyncRecovery::of(remote).is_some() => {
                     (SyncRecovery::of(remote), None)
                 }

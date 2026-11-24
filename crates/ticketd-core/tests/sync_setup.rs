@@ -811,6 +811,41 @@ fn a_failure_with_no_state_of_its_own_needs_attention_until_a_run_succeeds() {
 }
 
 #[test]
+fn a_service_that_changed_stops_sync_with_its_own_state_and_the_way_out_is_disconnect() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    a.create_ticket("Saved meanwhile").unwrap();
+    let said = "This profile now points to another S3 service: it reaches http://127.0.0.1:9001, and this Workspace's bucket was connected through http://127.0.0.1:9000.";
+    desks
+        .remote
+        .fail(RemoteOp::List, 1, RemoteError::ServiceChanged(said.into()));
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(
+        recovered(&status),
+        (
+            Some(SyncRecovery::ServiceChanged),
+            SyncState::NeedsAttention
+        )
+    );
+    // The sentence as it was written: no "sync storage: storage:" in front of it.
+    assert_eq!(status.recovery_message.as_deref(), Some(said));
+    assert_eq!(
+        SyncRecovery::ServiceChanged.action(),
+        SyncRecoveryAction::Disconnect
+    );
+    assert_eq!(status.pending_uploads.len(), 1);
+    let json = serde_json::to_value(&status).unwrap();
+    assert_eq!(json["recovery"], "service_changed");
+    // A later launch finds it too, and a run that works clears it.
+    assert_eq!(a.sync_status().unwrap(), status);
+    let status = a.sync_recover(&desks.remote).unwrap();
+    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
+    assert_eq!(status.recovery_message, None);
+}
+
+#[test]
 fn an_attachment_whose_bytes_are_gone_here_is_reported_and_holds_nothing_up() {
     let desks = desks();
     let (mut a, reference, _) = desks.uploaded("Desk A");
