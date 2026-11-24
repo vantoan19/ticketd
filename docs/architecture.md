@@ -265,12 +265,16 @@ Agents change records only by running the CLI. At the end of a Turn, the core ke
 the status moves and Activities attributed to it with the transcript. The host
 starts each harness process with the Chat's ID in `TICKETD_CHAT_ID` (only the ID);
 the CLI the harness runs inherits it and records which Chat each status move and
-Activity was written for (`chat_record_writes`). Writes with that ID count from
-the earliest submission correlated to the Turn, or its observed start if that comes
-first. A write with no Chat ID (an older CLI, or a harness that strips the variable)
-counts only within the observed Turn, with the matching agent name, and while no
-other Chat of that harness had an observed Turn running. Save as Document is the
-ordinary Document-creation workflow applied to a stored response.
+Activity was written for (`chat_record_writes`). Tagged writes count from the
+earliest submission correlated to the Turn, or its observed start if that comes
+first, until its first recorded end. The core stores the Chat change sequence of
+these boundaries and the latest sequence seen by each write. The sequence stays
+monotonic as the feed is trimmed and resolves writes whose timestamps tie with
+the boundaries. Tagged writes recorded before the sequence was kept use
+timestamps. A write with no Chat ID (an older CLI, or a harness that strips the
+variable) counts only within the observed Turn, with the matching agent name,
+and while no other Chat of that harness had an observed Turn running. Save as
+Document is the ordinary Document-creation workflow applied to a stored response.
 
 A harness process started for an Automation run also gets the run's ID in
 `TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket
