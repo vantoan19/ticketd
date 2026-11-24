@@ -7,6 +7,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 
 use serde_json::{Map, Value, json};
 
+use crate::runtime::RuntimeState;
 use crate::{
     ApprovalDecision, DeliveryEvidence, EventKind, HarnessCommand, InteractionAnswer,
     InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
@@ -22,34 +23,24 @@ use super::report::{PLAN_TOOLS, Reports};
 pub(super) const REOPEN_WITH: &str = "reopen_with";
 
 #[derive(Debug)]
-struct Turn {
-    id: NativeTurnId,
-    /// An interrupt was written for this turn.
-    interrupt_written: bool,
-    /// The last error Claude Code attached to assistant content in this turn.
-    error: Option<String>,
-}
-
-#[derive(Debug)]
-struct LiveRequest {
+struct Request {
     /// For a question: whether each question takes several answers, by question id.
     /// `None` for a permission request.
     questions: Option<HashMap<String, bool>>,
     /// For a permission request: the tool use it asks about.
     tool_use: Option<String>,
-    answered: bool,
 }
 
 #[derive(Debug, Default)]
 pub(super) struct Session {
     turns_started: u64,
     items_started: u64,
-    turn: Option<Turn>,
+    runtime: RuntimeState<Request>,
+    turn_error: Option<String>,
     native_session: Option<String>,
     /// The settings last reported in effect. The Chat keeps them: a resumed session
     /// is opened with them, as Claude Code's own resume does not keep them (#408).
     reported_settings: Option<Value>,
-    requests: HashMap<NativeRequestId, LiveRequest>,
     /// Name and input of each tool the open turn started, by tool-use id.
     tools: HashMap<String, (String, ProviderDetail)>,
     /// Tool uses the person declined: their error result is the refusal, not a failure.
@@ -92,12 +83,12 @@ pub(super) fn tool_output(text: &str, truncated: bool) -> String {
 
 impl Session {
     pub fn active_turn(&self) -> Option<&NativeTurnId> {
-        self.turn.as_ref().map(|turn| &turn.id)
+        self.runtime.active_turn_id()
     }
 
     pub fn interrupt_written(&mut self) {
-        if let Some(turn) = &mut self.turn {
-            turn.interrupt_written = true;
+        if let Some(turn) = self.active_turn().cloned() {
+            let _ = self.runtime.mark_interrupt(&turn);
         }
     }
 
@@ -109,8 +100,8 @@ impl Session {
 
     /// The runtime is gone: nothing is live any more.
     pub fn clear_live(&mut self) {
-        self.turn = None;
-        self.requests.clear();
+        self.runtime.disconnected();
+        self.turn_error = None;
         self.tools.clear();
         self.declined.clear();
         self.streams.clear();
@@ -119,16 +110,12 @@ impl Session {
     /// The open turn, opening one when Claude Code shows activity outside a turn.
     /// Claude Code has no turn identity, so the id is local to this runtime.
     fn turn(&mut self, events: &mut Vec<EventKind>) -> NativeTurnId {
-        if let Some(turn) = &self.turn {
-            return turn.id.clone();
+        if let Some(turn) = self.active_turn() {
+            return turn.clone();
         }
         self.turns_started += 1;
         let id = NativeTurnId(format!("local-turn-{}", self.turns_started));
-        self.turn = Some(Turn {
-            id: id.clone(),
-            interrupt_written: false,
-            error: None,
-        });
+        self.runtime.turn_started(&id);
         events.push(EventKind::TurnStarted { turn: id.clone() });
         id
     }
@@ -310,9 +297,7 @@ impl Session {
     fn assistant_content(&mut self, event: &Value, events: &mut Vec<EventKind>) {
         let turn = self.turn(events);
         if let Some(error) = text(event, "error") {
-            if let Some(open) = &mut self.turn {
-                open.error = Some(error.to_owned());
-            }
+            self.turn_error = Some(error.to_owned());
             events.push(EventKind::Notice {
                 turn: Some(turn.clone()),
                 kind: NoticeKind::Warning,
@@ -439,10 +424,7 @@ impl Session {
         // Claude Code answers the tool a Stop cuts off with an error result. That the
         // interrupt was written is reported; what it means for the tool is not decided
         // here (#387 3B3).
-        let after_interrupt = self
-            .turn
-            .as_ref()
-            .is_some_and(|turn| turn.interrupt_written);
+        let after_interrupt = self.runtime.interrupted(turn);
         events.push(EventKind::ToolUpdated {
             turn: turn.clone(),
             item: NativeItemId::new(id),
@@ -498,14 +480,16 @@ impl Session {
         {
             self.observe_tool_input(&turn, id, name, input, events);
         }
-        self.requests.insert(
+        if !self.runtime.register_request(
             request.clone(),
-            LiveRequest {
+            Some(&turn),
+            Request {
                 questions: None,
                 tool_use: text(event, "tool_use_id").map(str::to_owned),
-                answered: false,
             },
-        );
+        ) {
+            return;
+        }
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
@@ -566,9 +550,10 @@ impl Session {
             }));
         }
         let turn = self.turn(events);
-        self.requests.insert(
+        if !self.runtime.register_request(
             request.clone(),
-            LiveRequest {
+            Some(&turn),
+            Request {
                 questions: Some(
                     questions
                         .iter()
@@ -576,9 +561,10 @@ impl Session {
                         .collect(),
                 ),
                 tool_use: None,
-                answered: false,
             },
-        );
+        ) {
+            return None;
+        }
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request,
             turn: Some(turn),
@@ -597,7 +583,7 @@ impl Session {
         events: &mut Vec<EventKind>,
     ) {
         let request = NativeRequestId::new(text(event, "request_id").unwrap_or_default());
-        if self.requests.remove(&request).is_some() {
+        if self.runtime.remove_request(&request).is_some() {
             events.push(EventKind::InteractionResolved {
                 request,
                 resolution,
@@ -609,15 +595,14 @@ impl Session {
     /// is withdrawn; any other refusal leaves the request live and answerable.
     pub fn answer_refused(&mut self, request: &NativeRequestId, gone: bool) -> Option<EventKind> {
         if !gone {
-            if let Some(live) = self.requests.get_mut(request) {
-                live.answered = false;
-                if let Some(tool_use) = &live.tool_use {
-                    self.declined.remove(tool_use);
-                }
+            if let Some(live) = self.runtime.reopen_request(request)
+                && let Some(tool_use) = &live.tool_use
+            {
+                self.declined.remove(tool_use);
             }
             return None;
         }
-        let live = self.requests.remove(request)?;
+        let live = self.runtime.remove_request(request)?;
         if let Some(tool_use) = &live.tool_use {
             self.declined.remove(tool_use);
         }
@@ -634,38 +619,36 @@ impl Session {
         request: &NativeRequestId,
         answer: &InteractionAnswer,
     ) -> Result<Value, Refusal> {
-        let live = self
-            .requests
-            .get_mut(request)
-            .filter(|live| !live.answered)
-            .ok_or(Refusal::UnknownRequest)?;
-        let decision = match (answer, &live.questions) {
-            (InteractionAnswer::Approval(ApprovalDecision::Deny), _) => json!({"kind": "deny"}),
-            (InteractionAnswer::Approval(ApprovalDecision::Allow), None) => {
-                json!({"kind": "allow"})
-            }
-            (InteractionAnswer::Answers(answers), Some(questions)) => {
-                let mut by_question = Map::new();
-                for answer in answers {
-                    let multi_select = questions
-                        .get(&answer.question_id)
-                        .ok_or(Refusal::Unsupported)?;
-                    let value = match (multi_select, answer.values.as_slice()) {
-                        (false, [value]) => json!(value),
-                        (true, values) => json!(values),
-                        (false, _) => return Err(Refusal::Unsupported),
-                    };
-                    by_question.insert(answer.question_id.clone(), value);
+        let (decision, declined) = self.runtime.answer_and_retain(request, |live| {
+            let decision = match (answer, &live.questions) {
+                (InteractionAnswer::Approval(ApprovalDecision::Deny), _) => json!({"kind": "deny"}),
+                (InteractionAnswer::Approval(ApprovalDecision::Allow), None) => {
+                    json!({"kind": "allow"})
                 }
-                json!({"kind": "answer", "answers": by_question})
-            }
-            _ => return Err(Refusal::Unsupported),
-        };
-        live.answered = true;
-        if answer == &InteractionAnswer::Approval(ApprovalDecision::Deny)
-            && let Some(tool_use) = &live.tool_use
-        {
-            self.declined.insert(tool_use.clone());
+                (InteractionAnswer::Answers(answers), Some(questions)) => {
+                    let mut by_question = Map::new();
+                    for answer in answers {
+                        let multi_select = questions
+                            .get(&answer.question_id)
+                            .ok_or(Refusal::Unsupported)?;
+                        let value = match (multi_select, answer.values.as_slice()) {
+                            (false, [value]) => json!(value),
+                            (true, values) => json!(values),
+                            (false, _) => return Err(Refusal::Unsupported),
+                        };
+                        by_question.insert(answer.question_id.clone(), value);
+                    }
+                    json!({"kind": "answer", "answers": by_question})
+                }
+                _ => return Err(Refusal::Unsupported),
+            };
+            let declined = (answer == &InteractionAnswer::Approval(ApprovalDecision::Deny))
+                .then(|| live.tool_use.clone())
+                .flatten();
+            Ok((decision, declined))
+        })?;
+        if let Some(tool_use) = declined {
+            self.declined.insert(tool_use);
         }
         Ok(decision)
     }
@@ -673,7 +656,7 @@ impl Session {
     fn turn_result(&mut self, event: &Value, events: &mut Vec<EventKind>) {
         self.identify(text(event, "session_id"), events);
         let id = self.turn(events);
-        let turn = self.turn.take();
+        let last_error = self.turn_error.take();
         self.tools.clear();
         self.declined.clear();
         self.streams.clear();
@@ -691,14 +674,12 @@ impl Session {
         };
         // What the harness said happened. Whether an interrupt or a denial changes how
         // the turn reads is the supervisor's to decide; the evidence is reported below.
-        let evidence = TurnEvidence {
-            interrupt_written: turn.as_ref().is_some_and(|turn| turn.interrupt_written),
-            // The agent may have gone on after a denial and ended its turn normally, but
-            // it did not do what it set out to do with that tool.
-            denied: (self.unattended && !denied.is_empty())
-                .then(|| format!("Claude Code was denied: {}.", denied.join("; "))),
-            not_started: None,
-        };
+        // The bridge reports the complete list for the turn, even if some of
+        // its processing messages were delayed or absent.
+        for submission in strings(event, "submission_ids") {
+            self.runtime
+                .acknowledged(&SubmissionId(submission), &id, false);
+        }
         let outcome = if subtype == "error_max_turns" {
             ended_by(
                 ProblemKind::TurnLimitReached,
@@ -715,7 +696,7 @@ impl Session {
                 "terminal_reason": event.get("terminal_reason"),
                 "denials": event.get("denials"),
             });
-            let kind = match turn.and_then(|turn| turn.error).as_deref() {
+            let kind = match last_error.as_deref() {
                 Some("authentication_failed") => ProblemKind::LoginRequired,
                 Some("rate_limit" | "billing_error") => ProblemKind::QuotaExhausted,
                 _ => ProblemKind::Other,
@@ -733,20 +714,14 @@ impl Session {
                     .filter(|_| kind == ProblemKind::QuotaExhausted),
             })
         };
-        if !evidence.is_empty() {
-            events.push(EventKind::TurnEvidence {
-                turn: id.clone(),
-                evidence,
-            });
-        }
-        events.push(EventKind::TurnEnded {
-            turn: id,
-            outcome,
-            submissions: strings(event, "submission_ids")
-                .into_iter()
-                .map(SubmissionId)
-                .collect(),
-        });
+        events.extend(self.runtime.end_turn(id, outcome, |marks| {
+            TurnEvidence {
+                interrupt_written: marks.interrupted,
+                denied: (self.unattended && !denied.is_empty())
+                    .then(|| format!("Claude Code was denied: {}.", denied.join("; "))),
+                not_started: None,
+            }
+        }));
     }
 }
 
