@@ -274,7 +274,7 @@ impl FakeAdapter {
                 return false;
             };
             match &kind {
-                EventKind::TurnStarted { turn } => live.runtime.turn_started(Some(turn)),
+                EventKind::TurnStarted { turn } => live.runtime.turn_started(turn),
                 EventKind::TurnEnded { turn, outcome, .. } => {
                     // The script provides the actual events. Update only the
                     // lifecycle checked when the next command arrives.
@@ -454,7 +454,7 @@ impl HarnessRuntime for FakeRuntime {
                     state.turns_started += 1;
                     let turn = NativeTurnId(format!("turn-{}", state.turns_started));
                     if let Some(live) = state.live.as_mut() {
-                        live.runtime.turn_started(Some(&turn));
+                        live.runtime.turn_started(&turn);
                     }
                     DispatchOutcome::Acknowledged { turn }
                 }
