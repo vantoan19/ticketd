@@ -21,6 +21,7 @@ use tracing::Instrument;
 use crate::{CloseOutcome, EventKind, Harness};
 
 pub(crate) const MAX_STDERR_TAIL_BYTES: usize = 8 * 1024;
+const MAX_VERSION_OUTPUT_BYTES: usize = 64 * 1024;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) type Reader = Box<dyn AsyncRead + Send + Unpin>;
@@ -387,21 +388,62 @@ pub(crate) async fn version_output(
     command
         .arg("--version")
         .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .envs(environment.iter().copied())
         .kill_on_drop(true);
     hide_console(&mut command);
-    let output = timeout(VERSION_PROBE_TIMEOUT, command.output())
-        .await
-        .map_err(|_| format!("`{} --version` did not finish", executable.display()))?
-        .map_err(|error| format!("Could not run {}: {error}", executable.display()))?;
-    if !output.status.success() {
+    let run_error = |error| format!("Could not run {}: {error}", executable.display());
+    let mut child = command.spawn().map_err(run_error)?;
+    let output = timeout(VERSION_PROBE_TIMEOUT, async {
+        let missing = || io::Error::other("the process has no standard streams");
+        let stdout = child.stdout.take().ok_or_else(missing)?;
+        let stderr = child.stderr.take().ok_or_else(missing)?;
+        tokio::try_join!(
+            read_probe_output(stdout, "stdout", MAX_VERSION_OUTPUT_BYTES),
+            read_probe_output(stderr, "stderr", MAX_VERSION_OUTPUT_BYTES),
+            child.wait(),
+        )
+    })
+    .await;
+    let output = match output {
+        Ok(result) => result.map_err(run_error),
+        Err(_) => Err(format!(
+            "`{} --version` did not finish",
+            executable.display()
+        )),
+    };
+    if output.is_err() {
+        let _ = timeout(EXIT_OBSERVATION, child.kill()).await;
+    }
+    let (stdout, _, status) = output?;
+    if !status.success() {
         return Err(format!(
-            "`{} --version` exited with {}",
-            executable.display(),
-            output.status
+            "`{} --version` exited with {status}",
+            executable.display()
         ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+pub(crate) async fn read_probe_output(
+    reader: impl AsyncRead + Unpin,
+    stream: &str,
+    max_bytes: usize,
+) -> io::Result<Vec<u8>> {
+    // One extra byte distinguishes overflow from a complete response at the limit.
+    let mut output = Vec::new();
+    reader
+        .take(max_bytes as u64 + 1)
+        .read_to_end(&mut output)
+        .await?;
+    if output.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{stream} exceeded {max_bytes} bytes"),
+        ));
+    }
+    Ok(output)
 }
 
 /// A windowed application must not flash a console for each child it starts.

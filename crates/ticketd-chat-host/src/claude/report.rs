@@ -639,6 +639,7 @@ fn model_name(id: &str) -> Option<String> {
 /// pick, the session keeps whatever Claude Code's own settings choose.
 pub(super) fn listed_options(models: &[Value]) -> HarnessOptions {
     HarnessOptions {
+        model_list_error: None,
         models: models
             .iter()
             .filter_map(|entry| {
