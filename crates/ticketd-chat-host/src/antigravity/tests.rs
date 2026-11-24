@@ -140,6 +140,72 @@ async fn inspection_rejects_oversized_version_output_on_either_stream() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn inspection_skips_non_executable_candidates_and_probes_first_executable() {
+    use std::fs::{self, Permissions};
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    use crate::{HarnessAdapter, Inspection};
+
+    const CHILD: &str = "TICKETD_TEST_ANTIGRAVITY_DISCOVERY_DIRECTORY";
+    const TEST: &str = "antigravity::tests::inspection_skips_non_executable_candidates_and_probes_first_executable";
+    let write_version = |path: &std::path::Path, version, mode| {
+        fs::write(path, format!("#!/bin/sh\nprintf 'agy {version}\\n'\n")).unwrap();
+        fs::set_permissions(path, Permissions::from_mode(mode)).unwrap();
+    };
+    if let Some(directory) = std::env::var_os(CHILD) {
+        let directory = PathBuf::from(directory);
+        let first = directory.join("first/agy");
+        let second = directory.join("second/agy");
+        let fallback = directory.join(".local/bin/agy");
+        let inspection = super::Antigravity.inspect().await;
+        assert!(
+            matches!(&inspection, Inspection::Installed { executable, .. } if executable == &second),
+            "{inspection:?}"
+        );
+        write_version(&first, "1.5.1", 0o700);
+        let inspection = super::Antigravity.inspect().await;
+        assert!(
+            matches!(&inspection, Inspection::Incompatible { executable, .. } if executable == &first),
+            "{inspection:?}"
+        );
+        fs::set_permissions(&first, Permissions::from_mode(0o600)).unwrap();
+        fs::remove_file(second).unwrap();
+        let inspection = super::Antigravity.inspect().await;
+        assert!(
+            matches!(&inspection, Inspection::Installed { executable, .. } if executable == &fallback),
+            "{inspection:?}"
+        );
+        return;
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    let fallback = directory.path().join(".local/bin");
+    for path in [&first, &second, &fallback] {
+        fs::create_dir_all(path).unwrap();
+    }
+    write_version(&first.join("agy"), "1.5.15", 0o600);
+    write_version(&second.join("agy"), "1.5.15", 0o700);
+    write_version(&fallback.join("agy"), "1.5.15", 0o700);
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", TEST])
+        .env("PATH", std::env::join_paths([first, second]).unwrap())
+        .env("HOME", directory.path())
+        .env(CHILD, directory.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 fn recorded(fixture: &str) -> Vec<Value> {
     fixture
         .lines()
@@ -601,6 +667,77 @@ async fn large_tool_updates_keep_bounded_output_and_file_changes_until_completio
 }
 
 #[tokio::test]
+async fn file_reports_change_only_when_tools_report_new_file_facts() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("file-facts")).await,
+        DispatchOutcome::Written
+    );
+    let prompt = peer.written().await;
+    let update = |update| {
+        json!({"jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": "session-1", "update": update}})
+    };
+    let diff = |new_text| json!([{"type": "diff", "path": "/workspace/file", "newText": new_text}]);
+    for frame in [
+        json!({"sessionUpdate": "tool_call", "toolCallId": "edit", "kind": "edit",
+            "title": "Edit file", "status": "completed", "content": diff("line one\n")}),
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "edit",
+            "content": diff("same line count\n")}),
+        json!({"sessionUpdate": "tool_call", "toolCallId": "command", "kind": "execute",
+            "title": "Run command", "status": "in_progress"}),
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "command",
+            "rawOutput": {"output": "command output"}}),
+        json!({"sessionUpdate": "tool_call", "toolCallId": "second-edit", "kind": "edit",
+            "title": "Edit file again", "status": "completed", "content": diff("line one\nline two\n")}),
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "edit",
+            "rawOutput": {"output": "late output from the first edit"}}),
+    ] {
+        send(&mut peer, &update(frame)).await;
+    }
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+
+    let mut updates = Vec::new();
+    let mut reports = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match opened.events.recv().await.expect("Prompt event").kind {
+                EventKind::ToolUpdated { item, output, .. } => updates.push((item.0, output)),
+                EventKind::FilesChanged { files, .. } => {
+                    assert_eq!(files.len(), 1);
+                    assert_eq!(files[0].path, "/workspace/file");
+                    reports.push(files[0].added_lines);
+                }
+                EventKind::TurnEnded { outcome, .. } => {
+                    assert_eq!(outcome, TurnOutcome::Completed);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("file facts Prompt must end");
+    assert_eq!(
+        updates
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        ["edit", "edit", "command", "command", "second-edit", "edit"]
+    );
+    assert_eq!(updates[3].1.as_deref(), Some("command output"));
+    assert_eq!(
+        updates[5].1.as_deref(),
+        Some("late output from the first edit")
+    );
+    assert_eq!(reports, [Some(1), Some(2)]);
+}
+
+#[tokio::test]
 async fn bounded_file_previews_preserve_the_whole_edit_through_completion() {
     use ticketd_core::{ChatToolState, harnesses::ANTIGRAVITY};
 
@@ -958,8 +1095,9 @@ async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
         &json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}),
     )
     .await;
-    let mut withdrawn: Vec<_> = drain(&mut opened.events)
-        .await
+    let (outcome, events) = prompt_end(&mut opened.events, "saturation").await;
+    assert_eq!(outcome, TurnOutcome::Completed, "approval-cap Prompt");
+    let mut withdrawn: Vec<_> = events
         .into_iter()
         .filter_map(|kind| match kind {
             EventKind::InteractionResolved {
@@ -976,7 +1114,8 @@ async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
         opened.runtime.submit(start_turn("recovery")).await,
         DispatchOutcome::Written
     );
-    assert_eq!(peer.written().await["method"], "session/prompt");
+    let recovery = peer.written().await;
+    assert_eq!(recovery["method"], "session/prompt");
     permission["id"] = json!("approval-1");
     send(&mut peer, &permission).await;
     let next = next_approval(&mut opened.events).await;
@@ -994,6 +1133,13 @@ async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
             "outcome": {"outcome": "selected", "optionId": "allow"}
         }})
     );
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": recovery["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+    let (outcome, _) = prompt_end(&mut opened.events, "recovery").await;
+    assert_eq!(outcome, TurnOutcome::Completed, "recovery Prompt");
     peer.assert_nothing_written().await;
 }
 
@@ -1549,12 +1695,14 @@ async fn next_settings(events: &mut EventStream) -> HarnessSettings {
     .expect("Antigravity runtime reports settings")
 }
 
-#[tokio::test]
-async fn recorded_resume_error_reports_missing_history_for_the_requested_session() {
-    for (fixture, expected) in [
+#[tokio::test(start_paused = true)]
+async fn resume_errors_distinguish_missing_history_from_other_native_failures() {
+    let missing = "Failed to read session session-missing; retry, or load it with session/load";
+    for (fixture, expected, message) in [
         (
             MISSING_RESUME.to_owned(),
             ProblemKind::NativeHistoryUnavailable,
+            missing,
         ),
         (
             MISSING_RESUME.replace(
@@ -1562,6 +1710,19 @@ async fn recorded_resume_error_reports_missing_history_for_the_requested_session
                 "Failed to read session another-session",
             ),
             ProblemKind::Other,
+            "Failed to read session another-session; retry, or load it with session/load",
+        ),
+        (
+            MISSING_RESUME.replace(missing, "Configured model not found"),
+            ProblemKind::Other,
+            "Configured model not found",
+        ),
+        (
+            MISSING_RESUME
+                .replace(missing, "Method not found")
+                .replace("-32603", "-32601"),
+            ProblemKind::NativeHistoryUnavailable,
+            "Method not found",
         ),
     ] {
         let (mut peer, io) = pipes();
@@ -1569,7 +1730,9 @@ async fn recorded_resume_error_reports_missing_history_for_the_requested_session
         let resume = request(SessionStart::Resume(native_session));
         let opening = tokio::spawn(runtime::open(io, resume, settings::OWN.to_owned()));
         startup(&mut peer, &fixture).await;
-        assert_eq!(opening.await.unwrap().unwrap_err().kind, expected);
+        let problem = opening.await.unwrap().unwrap_err();
+        assert_eq!(problem.message, message);
+        assert_eq!(problem.kind, expected, "native error: {message}");
     }
 }
 
@@ -1767,6 +1930,209 @@ async fn a_native_question_reaches_the_person_as_an_antigravity_message() {
     );
     assert_eq!(peer.written().await["method"], "session/prompt");
     opened.runtime.close().await;
+}
+
+async fn prompt_end(events: &mut EventStream, submission: &str) -> (TurnOutcome, Vec<EventKind>) {
+    let mut preceding = Vec::new();
+    let outcome = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let event = events
+                .recv()
+                .await
+                .unwrap_or_else(|| panic!("event stream closed before Prompt {submission} ended"));
+            match event.kind {
+                EventKind::TurnEnded {
+                    outcome,
+                    submissions,
+                    ..
+                } if submissions.iter().any(|id| id.0 == submission) => {
+                    return outcome;
+                }
+                kind => preceding.push(kind),
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("Prompt {submission} did not end within five seconds"));
+    (outcome, preceding)
+}
+
+// The cancel notification cannot fit in this pipe without the peer reading.
+async fn interruption_peer() -> (Peer, OpenedRuntime, Value, NativeTurnId, NativeRequestId) {
+    let (mut peer, io) = crate::scripted::pipes_with_input_capacity(32);
+    let opening = tokio::spawn(runtime::open(
+        io,
+        request(SessionStart::New),
+        settings::OWN.to_owned(),
+    ));
+    startup(&mut peer, PROMPT).await;
+    let mut opened = opening.await.unwrap().unwrap();
+    let (write, prompt) = tokio::join!(
+        opened.runtime.submit(start_turn("old-prompt")),
+        peer.written()
+    );
+    assert_eq!(write, DispatchOutcome::Written);
+    let mut permission = recorded_permission();
+    permission["id"] = json!("already-answered");
+    send(&mut peer, &permission).await;
+    let answered = next_approval(&mut opened.events).await;
+    let (outcome, reply) = tokio::join!(
+        opened.runtime.respond(allow_approval(answered)),
+        peer.written(),
+    );
+    assert_eq!(outcome, RespondOutcome::Sent);
+    assert_eq!(reply["id"], "already-answered");
+    assert_eq!(reply["result"]["outcome"]["outcome"], "selected");
+    permission["id"] = json!("old-first");
+    send(&mut peer, &permission).await;
+    let first = next_approval(&mut opened.events).await;
+    permission["id"] = json!("old-second");
+    send(&mut peer, &permission).await;
+    let turn = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let EventKind::InteractionRequested(approval) =
+                opened.events.recv().await.expect("permission event").kind
+            {
+                return approval.turn.expect("approval's Turn");
+            }
+        }
+    })
+    .await
+    .expect("the second unanswered approval must be shown");
+    (peer, opened, prompt, turn, first)
+}
+
+fn allow_approval(request: NativeRequestId) -> InteractionResponse {
+    InteractionResponse {
+        generation: GENERATION,
+        request,
+        answer: InteractionAnswer::NativeApproval("allow".to_owned()),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupt_answers_the_original_permissions_after_its_prompt_ends() {
+    use std::{
+        future::{Future, poll_fn},
+        pin::pin,
+        task::Poll,
+    };
+
+    use crate::{InteractionResolution, InterruptOutcome, InterruptRequest};
+
+    let (mut peer, mut opened, original, turn, pending) = interruption_peer().await;
+    let stop = InterruptRequest {
+        generation: GENERATION,
+        expected_turn: turn,
+    };
+    let mut interrupt = pin!(opened.runtime.interrupt(stop.clone()));
+    poll_fn(|cx| {
+        assert!(interrupt.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    let mut duplicate = recorded_permission();
+    duplicate["id"] = json!("already-answered");
+    send(&mut peer, &duplicate).await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": original["id"], "result": {"stopReason": "cancelled"}}),
+    )
+    .await;
+    let (outcome, events) = prompt_end(&mut opened.events, "old-prompt").await;
+    assert_eq!(outcome, TurnOutcome::Interrupted);
+    assert_eq!(
+        events
+            .iter()
+            .filter(|event| matches!(
+                event,
+                EventKind::InteractionResolved {
+                    resolution: InteractionResolution::Withdrawn,
+                    ..
+                }
+            ))
+            .count(),
+        2
+    );
+
+    let read = async {
+        assert_eq!(peer.written().await["method"], "session/cancel");
+        let mut cancelled = Vec::new();
+        for _ in 0..2 {
+            let reply = peer.written().await;
+            assert_eq!(
+                reply["result"]["outcome"]["outcome"], "cancelled",
+                "{reply}"
+            );
+            cancelled.push(reply["id"].as_str().unwrap().to_owned());
+        }
+        cancelled.sort_unstable();
+        assert_eq!(cancelled, ["old-first", "old-second"]);
+        assert_eq!(peer.written().await["method"], "session/prompt");
+    };
+    let (outcome, wrote, stale, ()) = tokio::join!(
+        interrupt,
+        opened.runtime.submit(start_turn("next-prompt")),
+        opened.runtime.respond(allow_approval(pending)),
+        read,
+    );
+    assert_eq!(outcome, InterruptOutcome::Acknowledged);
+    assert_eq!(wrote, DispatchOutcome::Written);
+    assert_eq!(stale, RespondOutcome::NotSent(Refusal::UnknownRequest));
+    assert!(matches!(
+        opened.runtime.interrupt(stop).await,
+        InterruptOutcome::NotSent(Refusal::TurnMismatch { active: Some(_) })
+    ));
+
+    let mut permission = recorded_permission();
+    permission["id"] = json!("old-first");
+    send(&mut peer, &permission).await;
+    let selected = next_approval(&mut opened.events).await;
+    let (outcome, reply) = tokio::join!(
+        opened.runtime.respond(allow_approval(selected)),
+        peer.written(),
+    );
+    assert_eq!(outcome, RespondOutcome::Sent);
+    assert_eq!(reply["id"], "old-first");
+    assert_eq!(reply["result"]["outcome"]["outcome"], "selected");
+    peer.assert_nothing_written().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn interrupt_is_unconfirmed_if_a_captured_permission_reply_cannot_be_written() {
+    use std::{
+        future::{Future, poll_fn},
+        pin::pin,
+        task::Poll,
+    };
+
+    use crate::{InterruptOutcome, InterruptRequest};
+
+    let (mut peer, mut opened, original, turn, _) = interruption_peer().await;
+    let mut interrupt = pin!(opened.runtime.interrupt(InterruptRequest {
+        generation: GENERATION,
+        expected_turn: turn,
+    }));
+    poll_fn(|cx| {
+        assert!(interrupt.as_mut().poll(cx).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": original["id"], "result": {"stopReason": "cancelled"}}),
+    )
+    .await;
+    assert_eq!(
+        prompt_end(&mut opened.events, "old-prompt").await.0,
+        TurnOutcome::Interrupted
+    );
+    let read_cancel = async {
+        assert_eq!(peer.written().await["method"], "session/cancel");
+        drop(peer);
+    };
+    let (outcome, ()) = tokio::join!(interrupt, read_cancel);
+    assert_eq!(outcome, InterruptOutcome::Unconfirmed);
 }
 
 #[tokio::test]

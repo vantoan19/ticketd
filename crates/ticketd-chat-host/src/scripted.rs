@@ -43,7 +43,11 @@ impl ChildProcess for ScriptedChild {
 }
 
 pub(crate) fn pipes() -> (Peer, Io) {
-    let (stdin, from_adapter) = duplex(64 * 1024);
+    pipes_with_input_capacity(64 * 1024)
+}
+
+pub(crate) fn pipes_with_input_capacity(capacity: usize) -> (Peer, Io) {
+    let (stdin, from_adapter) = duplex(capacity);
     let (to_adapter, stdout) = duplex(64 * 1024);
     let (stderr_writer, stderr) = duplex(64 * 1024);
     let exit = Arc::new(watch::Sender::new(None));
