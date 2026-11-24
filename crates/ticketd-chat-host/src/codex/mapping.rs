@@ -70,6 +70,14 @@ pub(super) enum Call {
     ListPermissionProfiles,
 }
 
+pub(super) fn acknowledged_turn(result: &Value) -> Option<NativeTurnId> {
+    result
+        .pointer("/turn/id")
+        .or_else(|| result.get("turnId"))
+        .and_then(Value::as_str)
+        .map(NativeTurnId::new)
+}
+
 #[derive(Debug)]
 pub(super) struct Request {
     id: Value,
@@ -142,12 +150,16 @@ impl Session {
             }
             (Call::OpenThread, Ok(result)) => self.thread_opened(result),
             (Call::StartTurn(submission), Ok(result)) => {
-                let Some(turn) = text(result, &["turn", "id"]) else {
+                let Some(turn) = acknowledged_turn(result) else {
                     return vec![unknown("turn/start reply without a turn", result)];
                 };
-                let turn = NativeTurnId::new(turn);
-                if text(result, &["turn", "status"]) == Some("inProgress") {
-                    self.runtime.turn_started(Some(&turn));
+                if self.runtime.resolve_start(submission)
+                    && !matches!(
+                        text(result, &["turn", "status"]),
+                        Some("completed" | "interrupted" | "failed")
+                    )
+                {
+                    self.runtime.turn_started(&turn);
                 }
                 let mut events: Vec<_> = self
                     .runtime
@@ -158,23 +170,27 @@ impl Session {
                 events.extend(self.record_choice());
                 events
             }
-            (Call::Steer(submission), Ok(result)) => match text(result, &["turnId"]) {
+            (Call::Steer(submission), Ok(result)) => match acknowledged_turn(result) {
                 Some(turn) => self
                     .runtime
-                    .acknowledged(submission, &NativeTurnId::new(turn), late)
+                    .acknowledged(submission, &turn, late)
                     .into_iter()
                     .collect(),
                 None => vec![unknown("turn/steer reply without a turn", result)],
             },
-            (Call::StartTurn(submission) | Call::Steer(submission), Err(error)) if late => {
-                vec![EventKind::SubmissionEvidence {
+            (Call::StartTurn(submission) | Call::Steer(submission), Err(error)) => {
+                if matches!(call, Call::StartTurn(_)) {
+                    self.runtime.resolve_start(submission);
+                }
+                late.then(|| EventKind::SubmissionEvidence {
                     submission: submission.clone(),
                     evidence: DeliveryEvidence::Rejected {
                         reason: rejection_reason(error),
                     },
-                }]
+                })
+                .into_iter()
+                .collect()
             }
-            (Call::StartTurn(_) | Call::Steer(_), Err(_)) => Vec::new(),
         }
     }
 
@@ -248,7 +264,7 @@ impl Session {
         let events = match method {
             "turn/started" => text(params, &["turn", "id"]).map(|turn| {
                 let turn = NativeTurnId::new(turn);
-                self.runtime.turn_started(Some(&turn));
+                self.runtime.turn_started(&turn);
                 self.reports.turn_started();
                 vec![EventKind::TurnStarted { turn }]
             }),
