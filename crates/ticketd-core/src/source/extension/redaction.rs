@@ -150,12 +150,12 @@ impl Patterns {
                 return false;
             }
             let word = |byte: Option<&u8>| byte.is_some_and(u8::is_ascii_alphanumeric);
-            // Short encodings and single-byte credentials often occur inside
-            // unrelated words. Longer raw credentials in values are checked
-            // even when embedded. Keep protocol keys on the boundary rule.
+            // Short encodings and one- or two-byte credentials can occur
+            // inside ordinary words. Longer raw credentials in values are
+            // checked even when embedded.
             matched.len() >= 6
                 || (embedded_raw
-                    && matched.len() > 1
+                    && matched.len() >= 3
                     && self.raw_credentials.contains(matched_bytes))
                 || (!word(
                     matched
@@ -277,12 +277,16 @@ mod tests {
     }
 
     #[test]
-    fn detects_short_raw_values_inside_a_result_and_keeps_single_byte_boundaries() {
+    fn very_short_credentials_require_token_boundaries_in_results() {
         let secrets = Redactions::default();
-        secrets.register(["mv3k2", "x"]);
+        secrets.register(["mv3k2", "x", "ab"]);
         assert!(secrets.contains_secret(&serde_json::json!({"title": "prefixmv3k2suffix"})));
         assert!(secrets.contains_secret(&serde_json::json!(["x"])));
+        assert!(secrets.contains_secret(&serde_json::json!(["ab"])));
+        assert!(secrets.contains_secret(&serde_json::json!({"title": "Credential: ab."})));
         assert!(!secrets.contains_secret(&serde_json::json!({"title": "extra context"})));
+        assert!(!secrets.contains_secret(&serde_json::json!({"title": "Replace cable"})));
+        assert_eq!(secrets.text("Replace cable"), "Replace c[redacted]le");
     }
 
     #[test]
