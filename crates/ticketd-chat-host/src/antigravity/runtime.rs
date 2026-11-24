@@ -311,6 +311,18 @@ impl Session {
                 label: option.name.clone(),
             })
             .collect();
+        let reason = [
+            raw["reason"].as_str(),
+            raw["warning"].as_str(),
+            raw["toolCall"]["rawInput"]["toolSummary"].as_str(),
+        ]
+        .into_iter()
+        .flatten()
+        .chain(options.iter().filter_map(|option| {
+            option.meta.as_ref()?.get("agy.security.warning")?.as_str()
+        }))
+        .collect::<Vec<_>>()
+        .join("\n");
         if !self.runtime.register_request(
             native.clone(),
             Some(&prompt.turn),
@@ -329,15 +341,6 @@ impl Session {
             .collect();
         prompt.flush_message(&mut events);
         prompt.tool_update(request.tool_call, &mut events);
-        let reason = [
-            raw["reason"].as_str(),
-            raw["warning"].as_str(),
-            raw["toolCall"]["rawInput"]["toolSummary"].as_str(),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<_>>()
-        .join("\n");
         events.push(EventKind::InteractionRequested(InteractionRequest {
             request: native,
             turn: Some(prompt.turn.clone()),

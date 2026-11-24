@@ -187,6 +187,94 @@ async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
 }
 
 #[tokio::test]
+async fn forwards_the_native_warning_and_choice_for_allow_always() {
+    let (mut peer, mut opened) = open(
+        RESUME,
+        SessionStart::Resume(NativeSessionId::new("session-1")),
+        settings::OWN,
+    )
+    .await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("tool")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+    let warning = "Allowing this command always adds an Antigravity permission rule.";
+    send(
+        &mut peer,
+        &json!({
+            "jsonrpc": "2.0",
+            "id": "permission-1",
+            "method": "session/request_permission",
+            "params": {
+                "sessionId": "session-1",
+                "reason": "Permission needed to run this command",
+                "warning": "Review the command before approving",
+                "toolCall": {
+                    "toolCallId": "tool-1",
+                    "title": "echo fixture",
+                    "kind": "execute",
+                    "rawInput": { "toolSummary": "Print a fixture marker" }
+                },
+                "options": [
+                    { "optionId": "allow", "name": "Allow", "kind": "allow_once" },
+                    {
+                        "optionId": "provider-option-7",
+                        "name": "Allow always",
+                        "kind": "allow_always",
+                        "_meta": { "agy.security.warning": warning }
+                    }
+                ]
+            }
+        }),
+    )
+    .await;
+    let approval = drain(&mut opened.events)
+        .await
+        .into_iter()
+        .find_map(|kind| match kind {
+            EventKind::InteractionRequested(request) => Some(request),
+            _ => None,
+        })
+        .unwrap();
+    let InteractionKind::NativeApproval {
+        options, reason, ..
+    } = approval.kind
+    else {
+        panic!("expected provider approval");
+    };
+    assert_eq!(
+        reason.unwrap().lines().collect::<Vec<_>>(),
+        [
+            "Permission needed to run this command",
+            "Review the command before approving",
+            "Print a fixture marker",
+            warning,
+        ]
+    );
+    let always = options
+        .iter()
+        .find(|option| option.label == "Allow always")
+        .unwrap();
+    assert_eq!(always.id, "provider-option-7");
+    let reply = || InteractionResponse {
+        generation: GENERATION,
+        request: approval.request.clone(),
+        answer: InteractionAnswer::NativeApproval(always.id.clone()),
+    };
+    assert_eq!(opened.runtime.respond(reply()).await, RespondOutcome::Sent);
+    assert_eq!(
+        peer.written().await,
+        json!({"jsonrpc":"2.0","id":"permission-1","result":{"outcome":{"outcome":"selected","optionId":"provider-option-7"}}}),
+    );
+    assert!(matches!(
+        opened.runtime.respond(reply()).await,
+        RespondOutcome::NotSent(_)
+    ));
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
 async fn mode_selection_requires_the_recorded_confirmation_and_full_access_requires_reopen() {
     let (mut peer, mut opened) = open(MODES, SessionStart::New, settings::OWN).await;
     let settings = drain(&mut opened.events)
