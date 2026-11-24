@@ -51,9 +51,35 @@ pub(super) fn options(select: &acp::SessionConfigSelect) -> Vec<&acp::SessionCon
     }
 }
 
-fn setting(current: String, options: Vec<SettingOption>) -> Setting {
+pub(super) fn update_mode(
+    configs: &mut [acp::SessionConfigOption],
+    mode: acp::SessionModeId,
+) -> bool {
+    let select = configs.iter_mut().find_map(|config| {
+        if config.category == Some(acp::SessionConfigOptionCategory::Mode)
+            && let acp::SessionConfigKind::Select(select) = &mut config.kind
+        {
+            Some(select)
+        } else {
+            None
+        }
+    });
+    if let Some(select) = select
+        && options(select)
+            .iter()
+            .any(|option| option.value.0 == mode.0)
+    {
+        // This legacy notification can update an existing ACP config choice.
+        // A later configuration snapshot replaces the value again.
+        select.current_value = acp::SessionConfigValueId::new(mode.0);
+        return true;
+    }
+    false
+}
+
+fn setting(current: Option<&str>, options: Vec<SettingOption>) -> Setting {
     Setting {
-        current: Some(current),
+        current: current.map(str::to_owned),
         options,
         unchangeable: None,
         applies_from: AppliesFrom::NextTurn,
@@ -61,7 +87,7 @@ fn setting(current: String, options: Vec<SettingOption>) -> Setting {
     }
 }
 
-pub(super) fn permission(configs: &[acp::SessionConfigOption], current: &str) -> Setting {
+pub(super) fn permission(configs: &[acp::SessionConfigOption], current: Option<&str>) -> Setting {
     let native = select(configs, SettingKey::Permission)
         .map(|(_, select)| options(select))
         .unwrap_or_default();
@@ -74,7 +100,7 @@ pub(super) fn permission(configs: &[acp::SessionConfigOption], current: &str) ->
                 .find(|option| option.value.0.as_ref() == choice.id);
             if choice.availability == PermissionAvailability::Native
                 && option.is_none()
-                && current != choice.id
+                && current != Some(choice.id)
             {
                 return None;
             }
@@ -88,14 +114,17 @@ pub(super) fn permission(configs: &[acp::SessionConfigOption], current: &str) ->
             Some(shown)
         })
         .collect();
-    setting(current.to_owned(), offered)
+    setting(current, offered)
 }
 
-pub(super) fn reported(configs: &[acp::SessionConfigOption], mode: &str) -> HarnessSettings {
+pub(super) fn reported(
+    configs: &[acp::SessionConfigOption],
+    current_permission: Option<&str>,
+) -> HarnessSettings {
     let choice = |key| {
         let (_, select) = select(configs, key)?;
         Some(setting(
-            select.current_value.0.to_string(),
+            Some(select.current_value.0.as_ref()),
             options(select)
                 .into_iter()
                 .map(|option| SettingOption {
@@ -112,6 +141,6 @@ pub(super) fn reported(configs: &[acp::SessionConfigOption], mode: &str) -> Harn
     HarnessSettings {
         model: choice(SettingKey::Model),
         effort: choice(SettingKey::Effort),
-        permission: Some(permission(configs, mode)),
+        permission: Some(permission(configs, current_permission)),
     }
 }

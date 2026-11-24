@@ -3,9 +3,9 @@
 #![allow(clippy::unwrap_used)] // Setup and sync runs that fail must fail the test.
 
 use ticketd_core::{
-    AgentHarness, Automation, AutomationAgentSettings, AutomationDefinition, AutomationRunStatus,
-    Error, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind, SyncRecord, SyncValue,
-    Trigger, Workspace,
+    AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
+    AutomationRunStatus, Error, RunAction, RunEnd, Step, StepAction, StepOutcome, SyncKind,
+    SyncRecord, SyncValue, Trigger, Workspace,
     sync::{AttachmentDownload, RecordKind, SyncChoice, SyncResolution, remote::RemoteKind},
 };
 
@@ -639,6 +639,52 @@ fn a_synced_harness_change_cannot_implicitly_widen_a_command_list() {
     let widened = SyncRecord::parse(&content.replace("claude-code", "codex")).unwrap();
     assert!(workspace.apply_sync_record(&widened).is_err());
     assert_eq!(workspace.automation_agent(&agent).unwrap(), before);
+}
+
+#[test]
+fn a_final_snapshot_syncs_an_explicitly_enabled_wider_command_policy() {
+    let mut devices = devices();
+    let listed = devices.workspaces[0]
+        .create_automation_agent(AutomationAgentSettings {
+            name: "Triage".into(),
+            harness: AgentHarness::ClaudeCode,
+            tools: AutomationAgentTools {
+                run_commands: true,
+                allowed_commands: vec!["npm test".into()],
+                ..Default::default()
+            },
+            ..Default::default()
+        })
+        .unwrap();
+    devices.settle();
+    assert_eq!(
+        devices.workspaces[1].automation_agent(&listed.id).unwrap(),
+        listed
+    );
+
+    // The editor saves the harness change with commands off, then saves the
+    // person's decision to enable any command. Only the latter is uploaded.
+    let mut settings = listed.settings.clone();
+    settings.harness = AgentHarness::Codex;
+    settings.tools.run_commands = false;
+    let source = &mut devices.workspaces[0];
+    let switched = source
+        .update_automation_agent(&listed.id, settings)
+        .unwrap();
+    let mut settings = switched.settings;
+    settings.tools.run_commands = true;
+    settings.tools.any_command = true;
+    let enabled = source
+        .update_automation_agent(&listed.id, settings)
+        .unwrap();
+
+    assert_eq!(devices.sync(0).uploaded, 1);
+    let received = devices.sync(1);
+    assert_eq!((received.skipped, received.conflicts), (0, 0));
+    assert_eq!(
+        devices.workspaces[1].automation_agent(&listed.id).unwrap(),
+        enabled
+    );
 }
 
 #[test]

@@ -252,9 +252,10 @@ impl<P: Peer> State<P> {
     /// Disconnects the peer and returns whether the runtime was still open.
     fn disconnect(&mut self) -> bool {
         let was_open = !self.closed;
+        // Retire any peer work before releasing callers waiting on the connection.
+        self.peer.disconnected();
         self.closed = true;
         self.pending.fail_all();
-        self.peer.disconnected();
         was_open
     }
 
@@ -409,7 +410,7 @@ impl<P: Peer> Connection<P> {
 
     /// Releases the input pipe if a runtime is dropped without an explicit close.
     pub(crate) fn close_on_drop(&self) {
-        self.state().closed = true;
+        self.state().disconnect();
         if let Ok(mut stdin) = self.stdin.try_lock() {
             *stdin = None;
         }

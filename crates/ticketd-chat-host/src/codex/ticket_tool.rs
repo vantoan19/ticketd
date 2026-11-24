@@ -11,12 +11,15 @@
 //! refused here.
 
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::AsyncWriteExt;
+use tokio::sync::{Semaphore, TryAcquireError};
 use tokio::time::timeout;
 
+use crate::json_rpc::Response;
 use crate::stdio::{Serving, command};
 
 /// The request Codex sends to run a tool the client declared on `thread/start`.
@@ -27,7 +30,9 @@ const MAX_ARGUMENTS: usize = 64;
 const MAX_ARGUMENT_BYTES: usize = 64 * 1024;
 const MAX_STDIN_BYTES: usize = 1024 * 1024;
 const MAX_OUTPUT_BYTES: usize = 256 * 1024;
+const MAX_IN_FLIGHT: usize = 4;
 const RUN_TIMEOUT: Duration = Duration::from_secs(120);
+const CLOSED: &str = "the Codex runtime is closed";
 
 /// What the agent is told in the thread's developer instructions.
 pub(super) const INSTRUCTIONS: &str = "ticketd tool for this run: you have no shell command \
@@ -70,12 +75,15 @@ pub(super) fn spec() -> Value {
 /// Everything the tool needs to run the CLI for one run.
 #[derive(Debug)]
 pub(super) struct TicketTool {
-    pub cli: PathBuf,
+    cli: PathBuf,
     /// The step's folder.
-    pub working_directory: PathBuf,
-    pub chat_id: String,
+    working_directory: PathBuf,
+    chat_id: String,
     /// `None` for a Chat the person took over from a run.
-    pub run_id: Option<String>,
+    run_id: Option<String>,
+    slots: Arc<Semaphore>,
+    /// Orders closing the slots with creating a child process.
+    spawning: Mutex<()>,
 }
 
 struct Call {
@@ -149,10 +157,54 @@ fn bounded(text: &str) -> String {
 }
 
 impl TicketTool {
+    pub(super) fn new(
+        cli: PathBuf,
+        working_directory: PathBuf,
+        chat_id: String,
+        run_id: Option<String>,
+    ) -> Self {
+        Self {
+            cli,
+            working_directory,
+            chat_id,
+            run_id,
+            slots: Arc::new(Semaphore::new(MAX_IN_FLIGHT)),
+            spawning: Mutex::new(()),
+        }
+    }
+
+    /// Reserves capacity before the reader hands the answer to a task.
+    pub(super) fn answer(self: &Arc<Self>, id: Value, input: Value) -> Response {
+        match Arc::clone(&self.slots).try_acquire_owned() {
+            Ok(slot) => {
+                let tool = Arc::clone(self);
+                Response::Deferred(Box::pin(async move {
+                    let _slot = slot;
+                    json!({"id": id, "result": tool.run(&input).await})
+                }))
+            }
+            Err(error) => {
+                let reason = match error {
+                    TryAcquireError::Closed => CLOSED,
+                    TryAcquireError::NoPermits => {
+                        "the ticketd tool is busy. Wait for a call to finish and try again."
+                    }
+                };
+                let result = response(false, format!("ticketd tool: {reason}"));
+                Response::Immediate(json!({"id": id, "result": result}))
+            }
+        }
+    }
+
+    pub(super) fn close(&self) {
+        let _spawning = self.spawning.lock().unwrap_or_else(PoisonError::into_inner);
+        self.slots.close();
+    }
+
     /// Runs the CLI for one tool call and returns the `DynamicToolCallResponse`.
     /// Anything wrong with the input or the process is the agent's answer, not an
     /// error of the protocol.
-    pub async fn run(&self, input: &Value) -> Value {
+    async fn run(&self, input: &Value) -> Value {
         let call = match parse(input) {
             Ok(call) => call,
             Err(reason) => return response(false, format!("ticketd tool: {reason}")),
@@ -172,9 +224,14 @@ impl TicketTool {
         };
         let mut process = command(&self.cli, &arguments, serving);
         process.current_dir(&self.working_directory);
-        let mut child = process
-            .spawn()
-            .map_err(|error| format!("could not start the ticketd command line: {error}"))?;
+        let mut child = {
+            let _spawning = self.spawning.lock().unwrap_or_else(PoisonError::into_inner);
+            if self.slots.is_closed() {
+                return Err(CLOSED.to_owned());
+            }
+            process.spawn()
+        }
+        .map_err(|error| format!("could not start the ticketd command line: {error}"))?;
         let mut stdin = child.stdin.take();
         // Written from its own task: a command that prints before it reads cannot
         // stall on a full pipe. Dropping the pipe ends the command's input.
@@ -261,12 +318,12 @@ mod tests {
     /// Runs this test program as the "CLI": its arguments are real, and so are its
     /// exit status and output streams.
     fn tool() -> TicketTool {
-        TicketTool {
-            cli: std::env::current_exe().unwrap(),
-            working_directory: std::env::temp_dir(),
-            chat_id: "chat-1".into(),
-            run_id: Some("run-1".into()),
-        }
+        TicketTool::new(
+            std::env::current_exe().unwrap(),
+            std::env::temp_dir(),
+            "chat-1".into(),
+            Some("run-1".into()),
+        )
     }
 
     #[tokio::test]
