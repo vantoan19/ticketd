@@ -987,6 +987,47 @@ test("publication notices show the saved destination label instead of its UUID",
   expect(panel.textContent).not.toContain(destination);
 });
 
+test("publishing again previews the original connection and destination without creating an issue", async () => {
+  const original = attempt({ destination: "acme/platform" });
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_sources")
+      return [
+        githubEntry,
+        {
+          ...githubEntry,
+          saved: { ...githubEntry.saved, id: "github-2", account: "work" },
+        },
+      ];
+    if (command === "review_publication")
+      return review({ attempt: original, connection_id: "github-2" });
+    if (command === "resolve_publication")
+      return { attempt: { ...original, state: "failed" }, replayed: false };
+    if (command === "preview_publication")
+      return {
+        ...eligible,
+        destination: original.destination,
+        destinations: ["acme/api", original.destination],
+      };
+    return [];
+  });
+  render(
+    <PublicationNotice
+      ticket={ticket({ publication: original })}
+      refresh={vi.fn(async () => {})}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Publish again" }));
+  await screen.findByRole("dialog", { name: "Publish T-KQ1 to GitHub" });
+  expect(bridge.invoke).toHaveBeenCalledWith("preview_publication", {
+    reference: original.reference,
+    provider: "github-2",
+    destination: original.destination,
+  });
+  expect(bridge.invoke.mock.calls.map(([command]) => command)).not.toContain(
+    "publish_ticket",
+  );
+});
+
 test("the inline unresolved panel keeps retry disabled after dismissing a candidate and can check again", async () => {
   const candidate = {
     identity: { provider: "github", id: "99" },

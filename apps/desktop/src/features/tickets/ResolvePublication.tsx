@@ -69,6 +69,11 @@ type Load =
   | { kind: "ready"; review: PublicationReview }
   | { kind: "failed"; failure: FailureDescription };
 
+export type PublicationRetryTarget = {
+  connectionId: string;
+  destination: string;
+};
+
 export function ReviewBody({
   attempt,
   close,
@@ -77,7 +82,7 @@ export function ReviewBody({
 }: {
   inline?: boolean;
   attempt: PublicationAttempt;
-  close: (kind?: PublicationResolution["kind"]) => void;
+  close: (retry?: PublicationRetryTarget) => void;
   refresh: () => Promise<void>;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -126,11 +131,21 @@ export function ReviewBody({
     setError(null);
     setDifferent(null);
     try {
-      await sourcesClient.resolvePublication(attempt.reference, resolution, {
-        acceptDifferentContent,
-      });
+      const { attempt: settled } = await sourcesClient.resolvePublication(
+        attempt.reference,
+        resolution,
+        { acceptDifferentContent },
+      );
       await refresh();
-      close(resolution.kind);
+      const connectionId =
+        load.kind === "ready" ? load.review.connection_id : undefined;
+      close(
+        resolution.kind === "not_created" &&
+          settled.id === attempt.id &&
+          connectionId
+          ? { connectionId, destination: settled.destination }
+          : undefined,
+      );
     } catch (reason) {
       // The attempt is unchanged: show why, keep the review open.
       const failure = toFailure(reason);

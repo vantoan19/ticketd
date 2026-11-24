@@ -52,6 +52,7 @@ export type PublicationAttempt = z.infer<typeof publicationAttemptSchema>;
 export const publicationReviewSchema = lazySchema(() =>
   z.object({
     attempt: publicationAttemptSchema,
+    connection_id: z.string().optional(),
     provider_name: z.string(),
     known: z.array(z.string()),
     unknown: z.string(),

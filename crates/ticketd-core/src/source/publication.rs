@@ -420,6 +420,9 @@ pub struct ResolutionAction {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicationReview {
     pub attempt: PublicationAttempt,
+    /// The original connection on this device, when its binding still exists.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connection_id: Option<String>,
     pub provider_name: String,
     pub known: Vec<String>,
     pub unknown: String,
@@ -1741,6 +1744,7 @@ impl Workspace {
             },
         ];
         Ok(PublicationReview {
+            connection_id: source.map(|source| source.saved.id),
             provider_name: name,
             known,
             unknown,

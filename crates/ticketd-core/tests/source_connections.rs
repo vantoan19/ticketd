@@ -4,7 +4,10 @@ mod fake_source;
 use std::path::Path;
 
 use rusqlite::Connection;
-use ticketd_core::source::{Clock, Engine, RefreshCoordinator, RefreshOptions, RefreshPolicy, Run};
+use ticketd_core::source::{
+    Clock, Engine, PublicationError, PublishOptions, RefreshCoordinator, RefreshOptions,
+    RefreshPolicy, Resolution, ResolveOptions, Run,
+};
 use ticketd_core::{self, Status, SyncKind, SyncRecord, TicketPatch, Workspace};
 
 const LOCAL_NAME: &str = "connection-backup-sentinel-5d53837c";
@@ -155,6 +158,7 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
         .review_publication(&Engine::builtin(), "T-QZ2", true)
         .unwrap();
     assert_eq!(review.attempt.id, "pending-attempt");
+    assert!(review.connection_id.is_none());
     assert!(review.actions.iter().all(|action| !action.available));
     let failure = restored
         .refresh_sources(
@@ -207,6 +211,70 @@ fn a_provider_account_id_deduplicates_different_display_names() {
         .unwrap();
     assert_eq!(updated.source.account, "alice-renamed");
     assert_eq!(workspace.saved_sources().unwrap().len(), 1);
+}
+
+#[test]
+fn publication_review_uses_the_bound_connection_until_it_is_removed() {
+    let source = fake_source::FakeSource::default();
+    {
+        let mut remote = source.0.lock().unwrap();
+        remote.account_from_assignee = true;
+        remote.publish_mode = fake_source::PublishMode::LoseResponse;
+    }
+    let mut engine = Engine::new();
+    engine.register(Box::new(source)).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(folder.path().join("workspace.sqlite3")).unwrap();
+    let destination = "owner/shared";
+    for account in ["alice", "bob"] {
+        workspace
+            .add_source_connection(&engine, "fake", None, None, &values(account, destination))
+            .unwrap();
+    }
+    let reference = workspace.create_ticket("Publish this").unwrap().reference;
+    let result = workspace.publish_ticket(
+        &engine,
+        &reference,
+        &PublishOptions {
+            provider: "fake-2".into(),
+            destination: Some(destination.into()),
+            ..PublishOptions::default()
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(ticketd_core::Error::Publication(
+            PublicationError::Unresolved { .. }
+        ))
+    ));
+    let review = workspace
+        .review_publication(&engine, &reference, true)
+        .unwrap();
+    assert_eq!(review.connection_id.as_deref(), Some("fake-2"));
+    assert_eq!(review.attempt.destination, destination);
+
+    workspace.remove_source_connection("fake-2").unwrap();
+    let review = workspace
+        .review_publication(&engine, &reference, true)
+        .unwrap();
+    assert!(review.connection_id.is_none());
+    assert!(review.actions.iter().all(|action| !action.available));
+    let result = workspace.resolve_publication(
+        &engine,
+        &reference,
+        &ResolveOptions {
+            resolution: Resolution::NotCreated,
+            now: None,
+            agent: None,
+            accept_different_content: false,
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(ticketd_core::Error::Publication(
+            PublicationError::Unverified { .. }
+        ))
+    ));
 }
 
 #[test]

@@ -30,7 +30,11 @@ import {
   usePublicationPreview,
   publicationReason,
 } from "./use-publication-preview";
-import { AttemptReview, ReviewBody } from "./ResolvePublication";
+import {
+  AttemptReview,
+  ReviewBody,
+  type PublicationRetryTarget,
+} from "./ResolvePublication";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { useSourceActivity } from "./source-activity";
 import { formatDateTime } from "@/lib/format";
@@ -123,13 +127,16 @@ export function PublicationNotice({
   refresh: () => Promise<void>;
 }) {
   const { entries } = useSources();
-  const [publishing, setPublishing] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState<PublicationRetryTarget | null>(
+    null,
+  );
   const attempt = ticket.publication;
   if (publishing)
     return (
       <PublishDialog
         ticket={ticket}
-        provider={publishing}
+        provider={publishing.connectionId}
+        initialDestination={publishing.destination}
         onOpenChange={(open) => {
           if (!open) setPublishing(null);
         }}
@@ -158,8 +165,8 @@ export function PublicationNotice({
       <ReviewBody
         inline
         attempt={attempt}
-        close={(kind) => {
-          if (kind === "not_created") setPublishing(attempt.provider);
+        close={(retry) => {
+          if (retry) setPublishing(retry);
         }}
         refresh={refresh}
       />
@@ -201,11 +208,13 @@ type Phase =
 export function PublishDialog({
   ticket,
   provider: defaultConnection,
+  initialDestination,
   onOpenChange,
   refresh,
 }: {
   ticket: Ticket;
   provider: string;
+  initialDestination?: string;
   onOpenChange: (open: boolean) => void;
   refresh: () => Promise<void>;
 }) {
@@ -216,7 +225,7 @@ export function PublishDialog({
       saved && connector.capabilities.includes("publish"),
   );
   const [phase, setPhase] = useState<Phase>({ kind: "loading" });
-  const [destination, setDestination] = useState<string | undefined>();
+  const [destination, setDestination] = useState(initialDestination);
   const [error, setError] = useState<FailureDescription | null>(null);
   const [checking, setChecking] = useState(false);
   const [reloads, setReloads] = useState(0);
