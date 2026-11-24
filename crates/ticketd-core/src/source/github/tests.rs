@@ -171,6 +171,10 @@ fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
     let values = config(json!({"repositories": ["o/one"]}));
     let public_api = "https://api.github.com";
     let (public, public_engine) = setup_at(public_api, Some(TOKEN));
+    assert_eq!(
+        public_engine.partitions("github", &values).unwrap(),
+        ["o/one"]
+    );
     let mut public_issue = issue(7, 7, "o/one");
     public_issue["title"] = json!("Public issue");
     public_issue["html_url"] = json!("https://github.com/o/one/issues/7");
@@ -225,6 +229,7 @@ fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
             .urls()
             .contains(&format!("{API}/repos/o/one/issues/7"))
     );
+    assert!(workspace.workspace_events_after(0, 100).unwrap().is_empty());
 }
 
 #[test]
@@ -291,6 +296,155 @@ fn data_residency_discovery_reuses_legacy_tickets_and_routes_by_their_web_host()
         .unwrap();
     assert!(refresh.imported.is_empty());
     assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+}
+
+fn unverified_github_workspace(path: &std::path::Path) -> crate::Workspace {
+    crate::create_workspace_at_format_version(path, 87).unwrap();
+    let old = rusqlite::Connection::open(path).unwrap();
+    old.execute_batch(
+        "INSERT INTO tickets (id, reference, title, body, status) VALUES ('legacy', 'T-KQ5', 'Saved issue', 'Saved details', 'Todo');
+         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin)
+         VALUES ('legacy', 'github', '5', 'O/One#12', 'O/One#12', '', 'imported');
+         INSERT INTO external_ownership (ticket_id, authority) VALUES ('legacy', 'external');
+         INSERT INTO source_sync (ticket_id, external_state) VALUES ('legacy', 'open');",
+    )
+    .unwrap();
+    drop(old);
+    crate::Workspace::open(path).unwrap()
+}
+
+#[test]
+fn discovery_withholds_a_possible_legacy_match_even_after_takeover() {
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = unverified_github_workspace(&folder.path().join("legacy.db"));
+    let public_api = "https://api.github.com";
+    let (fixture, engine) = setup_at(public_api, Some(TOKEN));
+    let listed = format!("{public_api}/repos/o/one/issues?state=open&per_page=100");
+    let mut candidate = issue(5, 12, "o/one");
+    candidate["html_url"] = json!("https://github.com/o/one/issues/12");
+    fixture.respond(&format!("{public_api}/user"), ok(json!({"login": "octo"})));
+    fixture.respond(&listed, ok(json!([candidate])));
+    workspace
+        .save_source(
+            &engine,
+            "github",
+            &config(json!({"repositories": ["o/one"]})),
+        )
+        .unwrap();
+
+    fixture.respond(&listed, ok(json!([candidate])));
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert!(report.imported.is_empty());
+    assert!(report.failures.iter().any(|failure| {
+        failure.reference.as_deref() == Some("T-KQ5")
+            && failure.message.contains("reconcile-github")
+    }));
+    workspace.take_ownership("T-KQ5", None).unwrap();
+    fixture.respond(&listed, ok(json!([candidate])));
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert!(report.imported.is_empty());
+    assert!(report.failures.iter().any(|failure| {
+        failure.reference.as_deref() == Some("T-KQ5")
+            && failure.message.contains("reconcile-github")
+    }));
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+    assert_eq!(workspace.show_ticket("T-KQ5").unwrap().title, "Saved issue");
+    assert_eq!(
+        workspace.export().unwrap()["external_identities"][0]["external_id"],
+        "@:5"
+    );
+
+    let requests_before = fixture.urls().len();
+    for wrong_url in [
+        "https://elsewhere.example/o/one/issues/12",
+        "https://github.com/o/one/issues/13",
+    ] {
+        assert!(
+            workspace
+                .reconcile_github_issue(&engine, "T-KQ5", wrong_url)
+                .is_err()
+        );
+    }
+    assert_eq!(fixture.urls().len(), requests_before);
+    let read = format!("{public_api}/repos/o/one/issues/12");
+    let issue_url = "https://github.com/o/one/issues/12";
+    fixture.respond(&read, ok(issue(8, 12, "o/one")));
+    assert!(
+        workspace
+            .reconcile_github_issue(&engine, "T-KQ5", issue_url)
+            .unwrap_err()
+            .to_string()
+            .contains("saved issue ID")
+    );
+    let before = workspace.show_ticket("T-KQ5").unwrap();
+    fixture.respond(&read, ok(candidate.clone()));
+    let recovered = workspace
+        .reconcile_github_issue(&engine, "T-KQ5", issue_url)
+        .unwrap();
+    assert_eq!(recovered.id, before.id);
+    assert_eq!(recovered.title, before.title);
+    assert_eq!(recovered.body, before.body);
+    assert_eq!(recovered.status, before.status);
+    let source = recovered.source.unwrap();
+    assert_eq!(source.id, "5");
+    assert_eq!(source.url, issue_url);
+    assert_eq!(source.ownership, crate::source::Ownership::Local);
+    fixture.respond(&listed, ok(json!([candidate])));
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert!(report.failures.is_empty());
+    assert!(report.imported.is_empty());
+    assert_eq!(workspace.show_ticket("T-KQ5").unwrap().title, "Saved issue");
+}
+
+#[test]
+fn discovery_can_import_the_same_numeric_id_with_a_different_locator() {
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = unverified_github_workspace(&folder.path().join("legacy.db"));
+    let (fixture, engine) = setup(Some(TOKEN));
+    let candidate = issue(5, 12, "o/other");
+    let listed = format!("{API}/repos/o/other/issues?state=open&per_page=100");
+    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    fixture.respond(&listed, ok(json!([candidate])));
+    workspace
+        .save_source(
+            &engine,
+            "github",
+            &config(json!({"repositories": ["o/other"]})),
+        )
+        .unwrap();
+    fixture.respond(&listed, ok(json!([candidate])));
+    for suffix in ["comments", "events"] {
+        fixture.respond(
+            &format!("{API}/repos/o/other/issues/12/{suffix}?per_page=100"),
+            ok(json!([])),
+        );
+    }
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert_eq!(report.imported.len(), 1);
+    assert_eq!(workspace.show_ticket("T-KQ5").unwrap().title, "Saved issue");
+    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+
+    // A verification on this host can identify a relocated issue that is
+    // already linked. Both tickets must keep their own identities.
+    fixture.respond(
+        &format!("{API}/repos/o/one/issues/12"),
+        ok(issue(5, 12, "o/one")),
+    );
+    let error = workspace
+        .reconcile_github_issue(&engine, "T-KQ5", "https://api.example.test/o/one/issues/12")
+        .unwrap_err();
+    assert!(error.to_string().contains(&report.imported[0]));
+    let source = workspace.show_ticket("T-KQ5").unwrap().source.unwrap();
+    assert_eq!(source.id, "@:5");
+    assert_eq!(source.ownership, crate::source::Ownership::External);
 }
 
 #[test]
@@ -705,10 +859,10 @@ fn a_repository_has_one_name_as_a_part_of_the_source() {
         .unwrap();
     assert_eq!(
         engine.partitions("github", &values).unwrap(),
-        ["o/gone", "o/live"]
+        ["@api.example.test/o/gone", "@api.example.test/o/live"]
     );
-    assert_eq!(found, ["o/live"]);
-    assert_eq!(summary.skipped[0].partition, "o/gone");
+    assert_eq!(found, ["@api.example.test/o/live"]);
+    assert_eq!(summary.skipped[0].partition, "@api.example.test/o/gone");
 }
 
 /// A repository is read under its assignee and labels, named alike whatever their
@@ -1466,6 +1620,7 @@ fn locating_reads_an_issue_only_inside_the_destination() {
         "other/repo#12",
         "https://github.example/other/repo/issues/12",
         "https://github.com/o/r/issues/12",
+        "https://[:::1]/o/r/issues/12",
         "abc",
         "0",
         "",
