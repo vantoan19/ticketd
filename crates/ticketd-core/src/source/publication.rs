@@ -659,14 +659,19 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
 
 /// Format 89: preserve the host that received a publication request.
 pub(crate) fn migrate_destination_host(connection: &Connection) -> Result<(), Error> {
-    connection
-        .execute_batch("ALTER TABLE publication_attempts ADD COLUMN destination_host TEXT")?;
+    crate::format::add_column_if_missing(
+        connection,
+        "publication_attempts",
+        "destination_host",
+        "TEXT",
+    )?;
     // An unresolved attempt with a recorded issue has the response from its
     // original create call. A succeeded attempt may instead reflect an attachment
     // made during recovery, so its issue URL does not establish the original host.
     let mut statement = connection.prepare(
         "SELECT id, destination, external_id, locator, url FROM publication_attempts \
-         WHERE provider = ?1 AND status = 'unresolved' AND external_id IS NOT NULL AND url IS NOT NULL",
+         WHERE provider = ?1 AND status = 'unresolved' AND destination_host IS NULL \
+               AND external_id IS NOT NULL AND url IS NOT NULL",
     )?;
     let attempts = statement
         .query_map([super::github::PROVIDER], |row| {

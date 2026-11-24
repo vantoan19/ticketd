@@ -368,7 +368,7 @@ fn has_column(tx: &Connection, table: &str, column: &str) -> Result<bool, Error>
     )?)
 }
 
-fn add_column_if_missing(
+pub(crate) fn add_column_if_missing(
     tx: &Connection,
     table: &str,
     column: &str,
