@@ -632,6 +632,40 @@ impl AcpRuntime {
         }
     }
 
+    async fn start(&self, request: OpenRequest, permission: String) -> Result<(), Problem> {
+        let initial = request.settings.clone();
+        self.open_session(request).await?;
+        let native_permission =
+            (permission != settings::OWN && permission != settings::FULL).then_some(permission);
+        let requested = [
+            (SettingKey::Permission, native_permission),
+            (SettingKey::Model, initial.model),
+            (SettingKey::Effort, initial.effort),
+        ];
+        for (setting, value) in &requested {
+            if let Some(value) = value {
+                let outcome = self.configure(*setting, value.clone()).await;
+                if outcome != SettingOutcome::Applied {
+                    return Err(opening_setting_problem(*setting, outcome));
+                }
+            }
+        }
+        // A later configuration reply can change an earlier choice. All requested
+        // values must be in effect together before the host can send a Prompt.
+        let configs = &self.connection.state().peer.configs;
+        for (setting, value) in requested {
+            if let Some(value) = value
+                && !confirmed(configs, setting, &value)
+            {
+                return Err(opening_setting_problem(
+                    setting,
+                    SettingOutcome::Unconfirmed,
+                ));
+            }
+        }
+        Ok(())
+    }
+
     async fn configure(&self, setting: SettingKey, wanted: String) -> SettingOutcome {
         let result = self
             .connection
@@ -680,6 +714,24 @@ fn confirmed(configs: &[acp::SessionConfigOption], setting: SettingKey, value: &
         .is_some_and(|(_, select)| select.current_value.0.as_ref() == value)
 }
 
+fn opening_setting_problem(setting: SettingKey, outcome: SettingOutcome) -> Problem {
+    let (kind, fallback) = match setting {
+        SettingKey::Permission => (
+            ProblemKind::PermissionUnavailable,
+            "Antigravity did not confirm the requested approval mode",
+        ),
+        SettingKey::Model | SettingKey::Effort => (
+            ProblemKind::Other,
+            "Antigravity did not confirm the requested setting",
+        ),
+    };
+    let reason = match outcome {
+        SettingOutcome::Refused { reason } => reason,
+        _ => fallback.to_owned(),
+    };
+    problem(kind, reason)
+}
+
 pub(super) async fn open(
     io: Io,
     request: OpenRequest,
@@ -703,39 +755,9 @@ pub(super) async fn open(
         },
     );
     let runtime = AcpRuntime { connection };
-    let initial = request.settings.clone();
-    if let Err(problem) = runtime.open_session(request).await {
+    if let Err(problem) = runtime.start(request, permission).await {
         runtime.close().await;
         return Err(problem);
-    }
-    let native_permission =
-        (permission != settings::OWN && permission != settings::FULL).then_some(permission);
-    for (setting, value) in [
-        (SettingKey::Permission, native_permission),
-        (SettingKey::Model, initial.model),
-        (SettingKey::Effort, initial.effort),
-    ] {
-        if let Some(value) = value {
-            let outcome = runtime.configure(setting, value).await;
-            if outcome != SettingOutcome::Applied {
-                runtime.close().await;
-                let (kind, fallback) = match setting {
-                    SettingKey::Permission => (
-                        ProblemKind::PermissionUnavailable,
-                        "Antigravity did not confirm the requested approval mode",
-                    ),
-                    _ => (
-                        ProblemKind::Other,
-                        "Antigravity did not confirm the requested setting",
-                    ),
-                };
-                let reason = match outcome {
-                    SettingOutcome::Refused { reason } => reason,
-                    _ => fallback.to_owned(),
-                };
-                return Err(problem(kind, reason));
-            }
-        }
     }
     Ok(OpenedRuntime {
         runtime: Arc::new(runtime),
