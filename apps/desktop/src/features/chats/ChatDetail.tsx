@@ -88,7 +88,9 @@ import {
   isLive,
   problemNotice,
   requestLabel,
+  turns,
   turnStatus,
+  visibleChatProblem,
   type NoticeAction,
   type PendingRequest,
 } from "@/features/chats/model";
@@ -400,6 +402,8 @@ function Conversation({
   );
   // A message just sent shows its turn starting at once (LIVE-6).
   const chat = asStarting(reported, items);
+  const parts = turns(items, chat);
+  const problem = visibleChatProblem(chat.problem, parts);
   /** Running only in this view so far: Stop waits for the host to know of the turn. */
   const unconfirmedStart = chat !== reported;
   const plan = runningPlan(items);
@@ -667,6 +671,7 @@ function Conversation({
               <Transcript
                 chat={chat}
                 items={items}
+                parts={parts}
                 actions={actions}
                 newFrom={newFrom}
                 markerRef={marker}
@@ -754,9 +759,9 @@ function Conversation({
               </span>
             </p>
           ) : !chat.has_composer ? (
-            chat.problem && (
+            problem && (
               <ProblemNotice
-                problem={chat.problem}
+                problem={problem}
                 harness={harness}
                 onAction={onNotice}
               />
@@ -768,10 +773,10 @@ function Conversation({
             // glides as one block when something arrives or leaves.
             <div className="chat-tray">
               <DockSlot className="chat-tray-top">
-                {chat.problem && (
+                {problem && (
                   <ProblemNotice
                     flat
-                    problem={chat.problem}
+                    problem={problem}
                     harness={harness}
                     onAction={onNotice}
                   />
