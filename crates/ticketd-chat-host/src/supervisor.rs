@@ -21,11 +21,11 @@ use tracing::Instrument;
 use uuid::Uuid;
 
 use crate::host::{
-    AGENT_CHANGES_RECORD_NAME, Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive,
-    ChatProblem, ChatView, ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError,
-    INTERRUPT_TIMEOUT, LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode,
-    SNAPSHOT_ITEMS, SendMode, SettingChangeState, StopState, TEXT_CHECKPOINT_INTERVAL,
-    TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal,
+    Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, ChatView,
+    ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError, INTERRUPT_TIMEOUT,
+    LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode, SNAPSHOT_ITEMS, SendMode,
+    SettingChangeState, StopState, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener,
+    is_refusal,
 };
 use crate::records::{
     FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
@@ -174,9 +174,6 @@ struct Dispatch {
 struct ActiveTurn {
     turn_id: String,
     native: NativeTurnId,
-    /// The workspace change token when the turn started; unchanged means nothing in
-    /// the workspace changed, so the agent changed no record.
-    token: Option<i64>,
     /// Open for as long as the Turn is, so every line about it is correlated and its close
     /// records how long it took.
     span: tracing::Span,
@@ -1350,17 +1347,21 @@ impl Supervisor {
     /// Nothing more will be observed from the runtime: settle what it left open.
     fn runtime_gone(&mut self, ending: &TurnEnding) {
         let chat = self.chat_id.clone();
-        if let Some(changes) = self.agent_changes() {
-            let _ = self.write(|core| core.record_chat_observations(&chat, vec![changes]));
-        }
-        let _ = self.write(|core| {
+        let ended = self.write(|core| {
             core.mark_chat_contact_lost(
                 Some(&chat),
                 &ending.detail().unwrap_or_default(),
                 &ending.key(),
             )
         });
-        self.active = None;
+        if let Some(active) = self.active.take()
+            && ended.is_ok()
+        {
+            let changes = ChatObservation::CaptureAgentChanges {
+                turn_id: active.turn_id,
+            };
+            let _ = self.write(|core| core.record_chat_observations(&chat, vec![changes]));
+        }
         self.unconfirmed_start = None;
         self.turn_evidence = None;
         self.unconfirmed_deadline = None;
@@ -1942,11 +1943,9 @@ impl Supervisor {
                 output: None,
             });
         }
-        let token = self.core(|core| core.change_token()).ok();
         self.active = Some(ActiveTurn {
             turn_id: turn_id.clone(),
             native: native.clone(),
-            token,
             span: tracing::info_span!("chat_turn"),
         });
         self.unconfirmed_start = None;
@@ -2165,13 +2164,10 @@ impl Supervisor {
                         complete: true,
                     }
                 }));
-                if self.active.as_ref().is_some_and(|a| a.turn_id == turn_id) {
-                    observations.extend(self.agent_changes());
-                }
+                let is_active = self.active.as_ref().is_some_and(|a| a.turn_id == turn_id);
                 // A turn the person stopped is theirs to have stopped, even when the
                 // harness ends it as completed (Codex can, once interrupted).
-                let stopped = self.stop.is_some()
-                    && self.active.as_ref().is_some_and(|a| a.turn_id == turn_id);
+                let stopped = self.stop.is_some() && is_active;
                 let ending = match outcome {
                     TurnOutcome::Completed if stopped => TurnEnding::StoppedByPerson,
                     TurnOutcome::Completed => TurnEnding::Completed,
@@ -2181,10 +2177,15 @@ impl Supervisor {
                     TurnOutcome::Failed(problem) => TurnEnding::failed(&problem),
                 };
                 observations.push(ending.observation(turn_id.clone()));
+                if is_active {
+                    observations.push(ChatObservation::CaptureAgentChanges {
+                        turn_id: turn_id.clone(),
+                    });
+                }
                 self.record(observations);
                 self.text.retain(|buffer| buffer.turn_id != turn_id);
                 self.interactions.retain(|_, live| live.turn_id != turn_id);
-                if self.active.as_ref().is_some_and(|a| a.turn_id == turn_id) {
+                if is_active {
                     self.active = None;
                     self.stop = None;
                     self.stop_deadline = None;
@@ -2341,38 +2342,6 @@ impl Supervisor {
             output: None,
         });
         self.record(observations);
-    }
-
-    /// What the agent changed in ticketd during the active turn, as the record that keeps
-    /// it for the transcript; `None` when nothing in the workspace moved or none of it
-    /// was the agent's.
-    fn agent_changes(&mut self) -> Option<ChatObservation> {
-        let active = self.active.as_ref()?;
-        let (turn_id, started) = (active.turn_id.clone(), active.token);
-        let now = self.core(|core| core.change_token()).ok();
-        if now.is_some() && now == started {
-            return None;
-        }
-        let chat = self.chat_id.clone();
-        let changes = match self.core(|core| core.chat_turn_agent_changes(&chat, &turn_id)) {
-            Ok(changes) if changes.is_empty() => return None,
-            Ok(changes) => changes,
-            Err(error) => {
-                // The changes are in the workspace either way; only their row is missing.
-                self.notice(format!(
-                    "ticketd could not list what the agent changed in this turn: {error}"
-                ));
-                return None;
-            }
-        };
-        Some(ChatObservation::Tool {
-            tool_id: format!("{turn_id}:ticketd-changes"),
-            turn_id,
-            name: AGENT_CHANGES_RECORD_NAME.to_owned(),
-            input: serde_json::to_string(&changes).ok()?,
-            state: ChatToolState::Completed,
-            output: None,
-        })
     }
 
     fn record_if_any(&mut self, observations: Vec<ChatObservation>) {
