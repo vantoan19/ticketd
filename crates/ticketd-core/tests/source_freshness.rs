@@ -689,6 +689,31 @@ fn failures_back_off_without_a_tight_retry_loop_and_recovery_resets() {
 }
 
 #[test]
+fn a_rate_limit_hold_starts_when_the_tracker_replies() {
+    let f = Fixture::new();
+    let clock = ManualClock::at(DAY);
+    let coordinator = coordinator(&clock);
+    let open = || {
+        assert!(
+            coordinator.is_refreshing(),
+            "take the refresh slot before reading the schedule"
+        );
+        f.open_workspace()
+    };
+    let remote_clock = clock.clone();
+    f.remote(|r| {
+        r.before_discovery = Some(Arc::new(move || remote_clock.advance(120)));
+        r.outage = Some(Failure::RateLimited(Some(1800)));
+    });
+    ran(coordinator.tick(&f.engine, &open).unwrap());
+    assert_eq!(
+        f.workspace.source_hold_until().unwrap(),
+        Some(DAY + 120 + 1800)
+    );
+    assert!(!coordinator.is_refreshing());
+}
+
+#[test]
 fn a_rate_limit_delays_the_next_run_by_what_the_source_asked() {
     let f = Fixture::new();
     f.publish(issue(1, T0));

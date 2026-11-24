@@ -821,7 +821,7 @@ struct Found {
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
     conversation_engine: Option<Engine>,
-    retry_limit: Option<u64>,
+    retry_limit: Option<(String, u64)>,
     configurations: HashMap<String, Option<CheckedConfiguration>>,
     discovery: Vec<(String, HashSet<String>)>,
     issues: Vec<ExternalIssue>,
@@ -879,13 +879,19 @@ pub(crate) fn failure_of(error: &SourceError) -> SourceFailure {
     }
 }
 
-fn rate_limit_hold(error: &SourceError) -> Option<u64> {
-    match error {
-        SourceError::RateLimited { retry_after_secs } => {
-            Some(retry_after_secs.unwrap_or(freshness::DEFAULT_RATE_LIMIT_SECS))
-        }
-        _ => None,
-    }
+fn rate_limit_hold(
+    error: &SourceError,
+    received_at: &dyn Fn() -> Option<String>,
+) -> Option<(String, u64)> {
+    let SourceError::RateLimited { retry_after_secs } = error else {
+        return None;
+    };
+    let now = received_at()
+        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+    Some((
+        now,
+        retry_after_secs.unwrap_or(freshness::DEFAULT_RATE_LIMIT_SECS),
+    ))
 }
 
 #[derive(Default)]
@@ -947,6 +953,16 @@ impl Workspace {
         options: &RefreshOptions,
         selected: Option<&[String]>,
     ) -> Result<RefreshReport, Error> {
+        self.refresh_selected_with_clock(engine, options, selected, &|| options.now.clone())
+    }
+
+    pub(super) fn refresh_selected_with_clock(
+        &mut self,
+        engine: &Engine,
+        options: &RefreshOptions,
+        selected: Option<&[String]>,
+        received_at: &(dyn Fn() -> Option<String> + Sync),
+    ) -> Result<RefreshReport, Error> {
         engine.check_refresh_canceled()?;
         let started = super::clock(&self.connection, options.now.as_deref())?;
         let tracked = tracked(&self.connection, options.ticket.as_deref())?;
@@ -1006,6 +1022,7 @@ impl Workspace {
                 &sources,
                 &source.saved.provider,
                 Some(source),
+                received_at,
             )
         };
         let mut gathered = Vec::new();
@@ -1025,19 +1042,7 @@ impl Workspace {
                 })?
             } else {
                 pair.iter()
-                    .map(|source| {
-                        Ok((
-                            *source,
-                            gather_connection(
-                                engine,
-                                options,
-                                &tracked,
-                                &sources,
-                                &source.saved.provider,
-                                Some(source),
-                            )?,
-                        ))
-                    })
+                    .map(|source| Ok((*source, gather(source)?)))
                     .collect::<Result<Vec<_>, Error>>()?
             };
             for (source, mut batch) in batches {
@@ -1050,6 +1055,7 @@ impl Workspace {
                         &tracked,
                         &mut conversations,
                         &mut batch,
+                        received_at,
                     )?;
                 }
                 gathered.push((Some(source.saved.id.as_str()), batch));
@@ -1063,7 +1069,15 @@ impl Workspace {
                 .collect();
             for provider in missing {
                 engine.check_refresh_canceled()?;
-                let batch = gather_connection(engine, options, &tracked, &sources, provider, None)?;
+                let batch = gather_connection(
+                    engine,
+                    options,
+                    &tracked,
+                    &sources,
+                    provider,
+                    None,
+                    received_at,
+                )?;
                 gathered.push((None, batch));
             }
         }
@@ -1097,6 +1111,7 @@ fn gather_connection(
     sources: &[super::ConfiguredSource],
     provider: &str,
     configured: Option<&super::ConfiguredSource>,
+    received_at: &dyn Fn() -> Option<String>,
 ) -> Result<Gathered, Error> {
     engine.check_refresh_canceled()?;
     let source_id = configured.map(|source| source.saved.id.as_str());
@@ -1127,7 +1142,6 @@ fn gather_connection(
     // Set when the source as a whole cannot be read, so asking for more
     // tickets would only repeat the failure.
     let mut blocked: Option<SourceFailure> = None;
-    let mut retry_after_secs: Option<u64> = None;
     let mut discovery_failed: Option<SourceFailure> = None;
     let mut skipped: Vec<String> = Vec::new();
     let mut read_partitions: Vec<String> = Vec::new();
@@ -1140,7 +1154,7 @@ fn gather_connection(
                 Some(checked.derived)
             }
             Err(error) => {
-                retry_after_secs = rate_limit_hold(&error);
+                gathered.retry_limit = rate_limit_hold(&error, received_at);
                 let failure = failure_of(&error);
                 gathered.failures.push(Found {
                     scope: FailureScope::Source,
@@ -1243,7 +1257,7 @@ fn gather_connection(
                     provider: provider.clone(),
                     failure: failure.clone(),
                 });
-                retry_after_secs = rate_limit_hold(&error);
+                gathered.retry_limit = rate_limit_hold(&error, received_at);
                 discovery_failed = Some(failure.clone());
                 if error.failure_code().interrupts_source() {
                     blocked = Some(failure);
@@ -1306,7 +1320,7 @@ fn gather_connection(
             Err(error) => {
                 let failure = failure_of(&error);
                 if error.failure_code().interrupts_source() {
-                    retry_after_secs = rate_limit_hold(&error);
+                    gathered.retry_limit = rate_limit_hold(&error, received_at);
                     blocked = Some(failure.clone());
                 }
                 gathered.failures.push(Found {
@@ -1321,14 +1335,12 @@ fn gather_connection(
     if blocked.is_none() {
         gathered.conversation_engine = scoped;
     }
-    gathered.retry_limit = retry_after_secs;
     gathered.configurations.insert(provider.clone(), checked);
     if options.ticket.is_none() && config.is_some() {
         gathered.runs.push(ProviderRun {
             provider: provider.clone(),
             connection_id: source_id.unwrap_or(&provider).to_owned(),
             failure: discovery_failed.or(blocked),
-            retry_after_secs,
             skipped,
             read_partitions,
             skipped_partitions,
@@ -1351,6 +1363,7 @@ fn gather_conversations(
     tracked: &[Tracked],
     conversations: &mut HashSet<(String, String)>,
     gathered: &mut Gathered,
+    received_at: &dyn Fn() -> Option<String>,
 ) -> Result<(), Error> {
     let due: Vec<ExternalIssue> = gathered.issues.clone();
     for issue in due {
@@ -1441,7 +1454,7 @@ fn gather_conversations(
                     },
                 });
                 if error.failure_code() == FailureCode::RateLimited {
-                    gathered.retry_limit = rate_limit_hold(&error);
+                    gathered.retry_limit = rate_limit_hold(&error, received_at);
                 }
                 if error.failure_code().interrupts_source() {
                     break;
@@ -1770,7 +1783,7 @@ impl Workspace {
                     code: found.failure.code.clone(),
                     message: found.failure.message.clone(),
                     retry_after_secs: (found.failure.code == FailureCode::RateLimited.as_str())
-                        .then_some(gathered.retry_limit)
+                        .then(|| gathered.retry_limit.as_ref().map(|(_, seconds)| *seconds))
                         .flatten(),
                     scope: found.scope,
                 });
@@ -1783,10 +1796,10 @@ impl Workspace {
                 let read = read_before.get(run.provider.as_str()).unwrap_or(&none);
                 freshness::record_run(transaction, run, read, now)?;
             }
-            if let (Some(id), Some(seconds)) = (source_id, gathered.retry_limit)
+            if let (Some(id), Some((received, seconds))) = (source_id, gathered.retry_limit)
                 && replaced.is_empty()
             {
-                freshness::record_hold(transaction, id, now, seconds)?;
+                freshness::record_hold(transaction, id, &received, seconds)?;
             }
             Ok(RefreshReport {
                 imported: applied.imported,

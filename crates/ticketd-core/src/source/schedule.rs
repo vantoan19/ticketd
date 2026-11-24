@@ -250,18 +250,20 @@ impl RefreshCoordinator {
         engine: &Engine,
         open: &dyn Fn() -> Result<W, Error>,
     ) -> Result<Run<RefreshReport>, Error> {
-        if self.is_refreshing() {
-            return Ok(Run::Skipped(Skip::Running));
+        {
+            let mut state = self.lock();
+            if state.running {
+                return Ok(Run::Skipped(Skip::Running));
+            }
+            state.running = true;
         }
+        let _running = Running(self);
         let mut workspace = open()?;
         let workspace = workspace.borrow_mut();
         let now = self.clock.now_secs();
         let sources = workspace.source_schedule()?;
         let due = {
             let mut state = self.lock();
-            if state.running {
-                return Ok(Run::Skipped(Skip::Running));
-            }
             let mut due = Vec::new();
             let mut wait = u64::MAX;
             for (index, (id, hold)) in sources.into_iter().enumerate() {
@@ -291,15 +293,15 @@ impl RefreshCoordinator {
                     },
                 }));
             }
-            state.running = true;
             due
         };
-        let _running = Running(self);
         let options = RefreshOptions {
             ticket: None,
             now: timestamp(now),
         };
-        let result = workspace.refresh_selected(engine, &options, Some(&due));
+        let result = workspace.refresh_selected_with_clock(engine, &options, Some(&due), &|| {
+            timestamp(self.clock.now_secs())
+        });
         self.feed_connections(&due, &result);
         result.map(Run::Ran)
     }
@@ -337,11 +339,15 @@ impl RefreshCoordinator {
                     .map(|source| source.id)
                     .collect()
             };
-            let result = if let Some(id) = connection {
-                workspace.refresh_connection(engine, id, &options)
-            } else {
-                workspace.refresh_sources(engine, &options)
-            };
+            if let Some(id) = connection {
+                workspace.source_connection(id)?;
+            }
+            let result = workspace.refresh_selected_with_clock(
+                engine,
+                &options,
+                connection.map(|_| due.as_slice()),
+                &|| timestamp(self.clock.now_secs()),
+            );
             if ticket.is_none() {
                 self.feed_connections(&due, &result);
             }

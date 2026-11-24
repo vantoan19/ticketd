@@ -166,7 +166,6 @@ pub(crate) struct ProviderRun {
     pub provider: String,
     pub connection_id: String,
     pub failure: Option<SourceFailure>,
-    pub retry_after_secs: Option<u64>,
     /// Discovery rules the run skipped because they could not be read.
     pub skipped: Vec<String>,
     /// The parts of the source the run read in full, and the ones it skipped.
@@ -210,16 +209,13 @@ pub(crate) fn record_run(
             )?;
         }
         Some(failure) => {
-            let retry = (FailureCode::parse(&failure.code) == Some(FailureCode::RateLimited))
-                .then(|| run.retry_after_secs.unwrap_or(DEFAULT_RATE_LIMIT_SECS));
             connection.execute(
-                "INSERT INTO source_connection_status (connection_id, last_attempt_at, error_code, error_message, failing_since, retry_after) \
-                 VALUES (?1, ?2, ?3, ?4, ?2, CASE WHEN ?5 IS NULL THEN NULL ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ?2, '+' || ?5 || ' seconds') END) \
+                "INSERT INTO source_connection_status (connection_id, last_attempt_at, error_code, error_message, failing_since) \
+                 VALUES (?1, ?2, ?3, ?4, ?2) \
                  ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, error_code = ?3, error_message = ?4, \
-                 failing_since = COALESCE(failing_since, ?2), partial_message = NULL, \
-                 retry_after = CASE WHEN ?5 IS NULL THEN NULL ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ?2, '+' || ?5 || ' seconds') END \
+                 failing_since = COALESCE(failing_since, ?2), partial_message = NULL \
                  WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
-                params![run.connection_id, now, failure.code, failure.message, retry],
+                params![run.connection_id, now, failure.code, failure.message],
             )?;
         }
     }
