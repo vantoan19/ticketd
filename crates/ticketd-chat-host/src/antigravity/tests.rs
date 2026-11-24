@@ -1016,7 +1016,7 @@ async fn compacted_command_approval(
 }
 
 #[tokio::test]
-async fn forwards_the_native_warning_and_choice_for_allow_always() {
+async fn keeps_native_warnings_with_their_choices_and_sends_the_chosen_id() {
     let (mut peer, mut opened) = open(
         RESUME,
         SessionStart::Resume(NativeSessionId::new("session-1")),
@@ -1028,7 +1028,6 @@ async fn forwards_the_native_warning_and_choice_for_allow_always() {
         DispatchOutcome::Written
     );
     assert_eq!(peer.written().await["method"], "session/prompt");
-    let warning = "Allowing this command always adds an Antigravity permission rule.";
     let command = "echo 'fixture command'";
     send(
         &mut peer,
@@ -1070,7 +1069,13 @@ async fn forwards_the_native_warning_and_choice_for_allow_always() {
                         "optionId": "provider-option-7",
                         "name": "Allow always",
                         "kind": "allow_always",
-                        "_meta": { "agy.security.warning": warning }
+                        "_meta": { "agy.security.warning": "Allowing this command always adds an Antigravity permission rule." }
+                    },
+                    {
+                        "optionId": "provider-option-9",
+                        "name": "Deny always",
+                        "kind": "reject_always",
+                        "_meta": { "agy.security.warning": "Denying this command always adds an Antigravity permission rule." }
                     }
                 ]
             }
@@ -1118,19 +1123,37 @@ async fn forwards_the_native_warning_and_choice_for_allow_always() {
             "Permission needed to run this command",
             "Review the command before approving",
             "Print a fixture marker",
-            warning,
         ]
     );
-    let always = options
-        .iter()
-        .find(|option| option.label == "Allow always")
-        .unwrap();
-    assert_eq!(always.id, "provider-option-7");
+    assert_eq!(
+        options
+            .iter()
+            .map(|option| (
+                option.id.as_str(),
+                option.label.as_str(),
+                option.warning.as_deref()
+            ))
+            .collect::<Vec<_>>(),
+        [
+            ("allow", "Allow", None),
+            (
+                "provider-option-7",
+                "Allow always",
+                Some("Allowing this command always adds an Antigravity permission rule."),
+            ),
+            (
+                "provider-option-9",
+                "Deny always",
+                Some("Denying this command always adds an Antigravity permission rule."),
+            ),
+        ],
+    );
     let reply = || InteractionResponse {
         generation: GENERATION,
         request: approval.request.clone(),
-        answer: InteractionAnswer::NativeApproval(always.id.clone()),
+        answer: InteractionAnswer::NativeApproval(options[1].id.clone()),
     };
+    peer.assert_nothing_written().await;
     assert_eq!(opened.runtime.respond(reply()).await, RespondOutcome::Sent);
     assert_eq!(
         peer.written().await,

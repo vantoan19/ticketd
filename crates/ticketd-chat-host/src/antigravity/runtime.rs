@@ -408,6 +408,12 @@ impl Session {
             .map(|option| ApprovalOption {
                 id: option.option_id.0.to_string(),
                 label: option.name.clone(),
+                warning: option
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.get("agy.security.warning"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             })
             .collect();
         let mut reason = [
@@ -417,11 +423,6 @@ impl Session {
         ]
         .into_iter()
         .flatten()
-        .chain(
-            options
-                .iter()
-                .filter_map(|option| option.meta.as_ref()?.get("agy.security.warning")?.as_str()),
-        )
         .collect::<Vec<_>>()
         .join("\n");
         self.runtime.register_request(
