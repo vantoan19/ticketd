@@ -12,7 +12,7 @@ use std::{
 use serde::Serialize;
 use ticketd_core::{
     Workspace,
-    s3::{AwsCli, AwsCliError, ProfileCredentials, S3Target, checked_prefix},
+    s3::{AwsCli, AwsCliError, ProfileCredentials, S3Target, checked_prefix, too_old_message},
     sync::{S3Binding, SyncStatus},
 };
 
@@ -35,9 +35,10 @@ pub enum CliState {
     Ready,
     /// No `aws` program in the usual places.
     Missing,
-    /// Older than ticketd needs; `found` is what its `--version` printed.
+    /// Older than ticketd needs; `found` is the version it reported, such as `2.9.0`, or
+    /// `None` when its answer held none.
     TooOld {
-        found: String,
+        found: Option<String>,
     },
 }
 
@@ -97,9 +98,7 @@ fn cli_at(path: Option<&Path>) -> Outcome<AwsCli> {
     match locate(AwsCli::locate(path))? {
         Ok(cli) => Ok(cli),
         Err(CliState::Missing) => rejected("The AWS CLI was not found."),
-        Err(CliState::TooOld { found }) => rejected(&format!(
-            "ticketd needs AWS CLI version 2.13 or later; this one reports \"{found}\"."
-        )),
+        Err(CliState::TooOld { found }) => rejected(&too_old_message(found.as_deref())),
         Err(CliState::Ready) => rejected("The AWS CLI could not be used."),
     }
 }
@@ -315,13 +314,13 @@ mod tests {
         assert!(missing.profiles.is_empty());
 
         let old = profiles_of(Err(AwsCliError::UnsupportedVersion {
-            found: "aws-cli/1.27.0".into(),
+            found: Some("1.27.0".into()),
         }))
         .unwrap();
         assert_eq!(
             old.cli,
             CliState::TooOld {
-                found: "aws-cli/1.27.0".into()
+                found: Some("1.27.0".into())
             }
         );
     }

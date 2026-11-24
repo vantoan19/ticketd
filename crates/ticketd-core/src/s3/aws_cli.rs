@@ -81,8 +81,10 @@ pub enum AwsCliError {
         "The AWS CLI was not found. Install AWS CLI version 2, or choose where the aws program is."
     )]
     NotFound,
-    #[error("ticketd needs AWS CLI version 2.13 or later; this one reports \"{found}\".")]
-    UnsupportedVersion { found: String },
+    /// `found` is the version the program reported (`2.9.0`), or `None` when its answer held
+    /// no version. What it printed is not repeated.
+    #[error("{}", too_old_message(found.as_deref()))]
+    UnsupportedVersion { found: Option<String> },
     /// The profile's session ended, or it never signed in. Signing in again fixes it.
     #[error("Sign in to AWS again: {message}")]
     SignInNeeded { message: String },
@@ -111,6 +113,18 @@ pub enum AwsCliError {
     ServicesNeedNewerCli { found: String },
     #[error("Could not run the AWS CLI: {0}")]
     Io(#[source] io::Error),
+}
+
+/// The sentence for an AWS CLI that ticketd cannot use for its version: the version found, if
+/// it could be read, and the one needed.
+#[must_use]
+pub fn too_old_message(found: Option<&str>) -> String {
+    match found {
+        Some(version) => format!("AWS CLI {version} is too old. ticketd needs 2.13 or later."),
+        None => {
+            "ticketd could not read the AWS CLI's version. ticketd needs 2.13 or later.".to_owned()
+        }
+    }
 }
 
 fn exit_suffix(code: Option<i32>) -> String {
@@ -185,19 +199,17 @@ impl AwsCli {
         let output = run(&self.program, &["--version"], self.timeout)?;
         // CLI v1 printed its version on stderr.
         let text = format!("{}\n{}", output.stdout, output.stderr);
-        let first_line = text.trim().lines().next().unwrap_or_default().trim();
-        let found = || AwsCliError::UnsupportedVersion {
-            found: clip(first_line, 200),
-        };
-        let version = text
+        let word = text
             .split_whitespace()
-            .find_map(|word| word.strip_prefix("aws-cli/"))
-            .and_then(parse_version)
-            .ok_or_else(found)?;
+            .find_map(|word| word.strip_prefix("aws-cli/"));
+        let found = |word: Option<&str>| AwsCliError::UnsupportedVersion {
+            found: word.and_then(version_text),
+        };
+        let version = word.and_then(parse_version).ok_or_else(|| found(None))?;
         if version >= MINIMUM_VERSION {
             Ok(version)
         } else {
-            Err(found())
+            Err(found(word))
         }
     }
 
@@ -535,6 +547,15 @@ fn usual_locations() -> Vec<PathBuf> {
 }
 
 /// `2.19.5` -> `(2, 19)`.
+/// The dotted version in `aws-cli/2.9.0`'s `2.9.0`, as the CLI wrote it.
+fn version_text(text: &str) -> Option<String> {
+    let end = text
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(text.len());
+    let version = text[..end].trim_end_matches('.');
+    (!version.is_empty()).then(|| version.to_owned())
+}
+
 fn parse_version(text: &str) -> Option<(u64, u64)> {
     let mut parts = text.split(|c: char| !c.is_ascii_digit());
     let major = parts.next()?.parse().ok()?;

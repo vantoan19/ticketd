@@ -490,7 +490,7 @@ fn a_missing_or_old_aws_program_is_its_own_failure_that_says_so_once() {
     for error in [
         AwsCliError::NotFound,
         AwsCliError::UnsupportedVersion {
-            found: "aws-cli/2.9.0".into(),
+            found: Some("2.9.0".into()),
         },
     ] {
         let said = error.to_string();

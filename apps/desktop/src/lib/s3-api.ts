@@ -9,11 +9,11 @@ import { invoke as bridge, structured } from "@/lib/api/bridge-failure";
  */
 
 const profilesSchema = z.object({
-  /** `missing`: no `aws` program found. `too_old`: older than ticketd needs. */
+  /** `missing`: no `aws` program found. `too_old`: older than ticketd needs; `found` is its version, `null` when unreadable. */
   cli: z.discriminatedUnion("state", [
     z.object({ state: z.literal("ready") }),
     z.object({ state: z.literal("missing") }),
-    z.object({ state: z.literal("too_old"), found: z.string() }),
+    z.object({ state: z.literal("too_old"), found: z.string().nullable() }),
   ]),
   /** Empty unless the CLI is ready. */
   profiles: z.array(z.string()),

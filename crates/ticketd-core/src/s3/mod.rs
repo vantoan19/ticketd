@@ -9,7 +9,7 @@ mod remote;
 mod xml;
 pub use aws_cli::{
     AwsCli, AwsCliError, Credentials, ProfileAccess, ProfileCredentials, ProfileSettings,
-    SignInCommand,
+    SignInCommand, too_old_message,
 };
 pub use bucket_check::{BucketCheckError, discover_bucket_region};
 pub use client::{S3Call, S3Client, cli_failure, refusal};

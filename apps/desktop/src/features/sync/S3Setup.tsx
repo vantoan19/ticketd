@@ -40,6 +40,13 @@ const INSTALL_URL =
   "https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html";
 const DEFAULT_PREFIX = "ticketd/";
 
+/** Says which version the AWS CLI is and which ticketd needs; the core words it the same. */
+function tooOldMessage(found: string | null): string {
+  return found
+    ? `AWS CLI ${found} is too old. ticketd needs 2.13 or later.`
+    : "ticketd could not read the AWS CLI's version. ticketd needs 2.13 or later.";
+}
+
 /** What the AWS CLI said about itself and its profiles; `null` while it is read. */
 type Cli = S3Profiles | null;
 
@@ -428,11 +435,23 @@ function BucketField({
         </SelectContent>
       </Select>
     );
+  // The way back to the list sits beside the field, not under it: the row stays as tall as
+  // the list's trigger (both 40px), so nothing below moves when the field replaces the list.
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="flex items-center gap-2">
+      {typing && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="shrink-0 whitespace-nowrap"
+          onClick={onList}
+        >
+          Choose from the list
+        </Button>
+      )}
       <Input
         id="s3-bucket"
-        className="w-60"
+        className="w-60 shrink-0"
         value={value}
         disabled={!signedIn}
         placeholder="my-bucket"
@@ -441,11 +460,6 @@ function BucketField({
         autoFocus={typing}
         onChange={(event) => onChange(event.target.value)}
       />
-      {typing && (
-        <Button variant="ghost" size="sm" onClick={onList}>
-          Choose from the list
-        </Button>
-      )}
     </div>
   );
 }
@@ -502,7 +516,7 @@ function CliNotice({
         <AlertDescription>
           {state.state === "missing"
             ? "ticketd signs in to AWS through the AWS CLI, version 2.13 or later. Install it, then check again."
-            : `ticketd needs AWS CLI version 2.13 or later. This one reports “${state.found}”. Update it, then check again.`}
+            : `${tooOldMessage(state.found)} Update it, then check again.`}
         </AlertDescription>
         <AlertActions>
           <Button size="sm" onClick={onCheckAgain}>

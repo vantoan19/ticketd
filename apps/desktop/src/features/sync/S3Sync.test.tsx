@@ -406,6 +406,21 @@ test("sync stopped for want of the aws program offers to choose it, then tries a
   expect(await screen.findByText("Connected")).toBeTruthy();
 });
 
+test("sync stopped by an old aws program names its version and the one needed", async () => {
+  const said = "AWS CLI 2.9.0 is too old. ticketd needs 2.13 or later.";
+  api.status.mockResolvedValue(
+    connected({
+      state: "needs_attention",
+      recovery: "cli_unavailable",
+      recovery_message: said,
+    }),
+  );
+  show();
+  const notice = await screen.findByRole("alert");
+  expect(notice.textContent).toContain(said);
+  expect(notice.textContent).not.toMatch(/aws-cli\//);
+});
+
 test("a cancelled picker changes nothing, and a refused program says why", async () => {
   api.status.mockResolvedValue(noCli());
   s3.chooseCli.mockResolvedValueOnce(false);
