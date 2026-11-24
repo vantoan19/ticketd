@@ -3431,7 +3431,7 @@ async fn a_restore_keeps_only_the_unconfirmed_permission_cleanup() {
         chat_id: f.chat.id.clone(),
         reason,
     };
-    assert_eq!(unconfirmed, [warning.clone()]);
+    assert_eq!(unconfirmed.as_slice(), std::slice::from_ref(&warning));
     assert!(f.host.live().is_empty());
 
     // A failed replacement also releases the restore gate.
