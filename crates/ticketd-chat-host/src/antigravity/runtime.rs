@@ -677,17 +677,25 @@ impl AcpRuntime {
         self.open_session(request).await?;
         let native_permission = (permission != settings::OWN && permission != settings::FULL)
             .then(|| permission.clone());
-        let requested = [
+        let mut requested = [
             (SettingKey::Permission, native_permission),
             (SettingKey::Model, initial.model),
             (SettingKey::Effort, initial.effort),
         ];
-        for (setting, value) in &requested {
-            if let Some(value) = value {
-                let outcome = self.configure(*setting, value.clone()).await;
-                if outcome != SettingOutcome::Applied {
-                    return Err(opening_setting_problem(*setting, outcome));
-                }
+        for (setting, value) in &mut requested {
+            let Some(wanted) = value else { continue };
+            // The model's configuration reply reports the effort choices it supports.
+            if *setting == SettingKey::Effort
+                && initial.retain_effort_if_supported
+                && !settings::select(&self.connection.state().peer.configs, *setting)
+                    .is_some_and(|(_, select)| settings::offers(select, wanted))
+            {
+                *value = None;
+                continue;
+            }
+            let outcome = self.configure(*setting, wanted.clone()).await;
+            if outcome != SettingOutcome::Applied {
+                return Err(opening_setting_problem(*setting, outcome));
             }
         }
         // A later configuration reply can change an earlier choice. All requested
@@ -742,10 +750,7 @@ impl AcpRuntime {
                 let id = session.id.clone().ok_or(Refusal::RuntimeClosed)?;
                 let (config, select) =
                     settings::select(&session.configs, setting).ok_or(Refusal::Unsupported)?;
-                if !settings::options(select)
-                    .iter()
-                    .any(|option| option.value.0.as_ref() == wanted)
-                {
+                if !settings::offers(select, &wanted) {
                     return Err(Refusal::Unsupported);
                 }
                 let request = acp::SetSessionConfigOptionRequest::new(

@@ -255,7 +255,7 @@ async fn new_chats_picks_open_the_first_session() {
     let picks = StartSettings {
         model: Some("gpt-b".to_owned()),
         effort: Some("high".to_owned()),
-        permission: None,
+        ..StartSettings::default()
     };
     f.host.start_with(&f.chat.id, picks.clone()).await.unwrap();
 

@@ -9,9 +9,14 @@ printf 'launch %s\n' "$*" >> agy.calls
 
 id=0
 permission=default
+model=initial
 effort=low
 configs() {
-    printf '[{"id":"permission","name":"Permission","category":"mode","type":"select","currentValue":"%s","options":[{"value":"default","name":"Ask"},{"value":"accept-edits","name":"Accept edits"}]},{"id":"effort","name":"Thinking","category":"thought_level","type":"select","currentValue":"%s","options":[{"value":"low","name":"Low"},{"value":"high","name":"High"}]}]' "$permission" "$effort"
+    case "$model" in
+        quick) options='[{"value":"minimal","name":"Minimal"}]' ;;
+        *) options='[{"value":"low","name":"Low"},{"value":"high","name":"High"}]' ;;
+    esac
+    printf '[{"id":"permission","name":"Permission","category":"mode","type":"select","currentValue":"%s","options":[{"value":"default","name":"Ask"},{"value":"accept-edits","name":"Accept edits"}]},{"id":"model","name":"Model","category":"model","type":"select","currentValue":"%s","options":[{"value":"initial","name":"Initial"},{"value":"quick","name":"Quick"},{"value":"balanced","name":"Balanced"}]},{"id":"effort","name":"Thinking","category":"thought_level","type":"select","currentValue":"%s","options":%s}]' "$permission" "$model" "$effort" "$options"
 }
 while IFS= read -r request; do
     id=$((id + 1))
@@ -28,14 +33,37 @@ while IFS= read -r request; do
             printf 'configure accept-edits\n' >> agy.calls
             permission=accept-edits
             result='{"configOptions":'"$(configs)"'}' ;;
+        *'"method":"session/set_config_option"'*'"configId":"model"'*'"value":"quick"'*)
+            printf 'configure quick\n' >> agy.calls
+            model=quick
+            effort=minimal
+            result='{"configOptions":'"$(configs)"'}' ;;
+        *'"method":"session/set_config_option"'*'"configId":"model"'*'"value":"balanced"'*)
+            printf 'configure balanced\n' >> agy.calls
+            model=balanced
+            effort=low
+            result='{"configOptions":'"$(configs)"'}' ;;
         *'"method":"session/set_config_option"'*'"configId":"effort"'*'"value":"high"'*)
             printf 'configure high\n' >> agy.calls
             effort=high
-            # This reply accepts the effort but resets the earlier permission.
-            permission=default
+            if [ "${PWD##*/}" = refused ]; then
+                # This reply accepts the effort but resets the earlier permission.
+                permission=default
+            fi
             result='{"configOptions":'"$(configs)"'}' ;;
         *'"method":"session/prompt"'*)
-            printf 'prompt\n' >> agy.calls
+            case "${PWD##*/}" in
+                held-*)
+                    printf 'prompt %s %s\n' "$model" "$effort" >> agy.calls
+                    printf '%s\n' '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"fixture-session","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Working"}}}}'
+                    remaining=1000
+                    while [ ! -f agy.release ] && [ "$remaining" -gt 0 ]; do
+                        /bin/sleep 0.01
+                        remaining=$((remaining - 1))
+                    done
+                    [ -f agy.release ] || exit 1 ;;
+                *) printf 'prompt\n' >> agy.calls ;;
+            esac
             result='{"stopReason":"end_turn"}' ;;
         *) exit 1 ;;
     esac
