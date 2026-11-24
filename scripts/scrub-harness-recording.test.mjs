@@ -219,6 +219,80 @@ test("replaces a known account alias used as an identifier-shaped dictionary key
   });
 });
 
+test("keeps the wire method and redacts the same field name in a nested dictionary", (t) => {
+  const { output, scrub } = capture(t);
+  const result = scrub([
+    [
+      1,
+      line({
+        id: 1,
+        method: "thread/resume",
+        params: { threadId: "private-thread" },
+      }),
+    ],
+    [
+      2,
+      line({
+        id: 1,
+        result: {
+          account: { displayName: "method" },
+          organization: { name: "server" },
+          entries: { method: 42, server: 7 },
+        },
+      }),
+    ],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const [request, reply] = readFileSync(output, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map(JSON.parse);
+  assert.deepEqual(request.client, {
+    id: 1,
+    method: "thread/resume",
+    params: { threadId: "fixture-session-1" },
+  });
+  assert.deepEqual(reply.server, {
+    id: 1,
+    result: {
+      account: { displayName: "fixture-account-1" },
+      organization: { name: "fixture-account-2" },
+      entries: { "fixture-account-1": 42, "fixture-account-2": 7 },
+    },
+  });
+});
+
+test("rejects an account alias that matches the wire method value", (t) => {
+  const { output, scrub } = capture(t);
+  const result = scrub([
+    [1, line({ id: 1, method: "thread/resume" })],
+    [2, line({ id: 1, result: { account: { displayName: "thread/resume" } } })],
+  ]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "Cannot safely scrub an account alias in a protocol label.\n",
+  );
+  assert.equal(existsSync(output), false);
+});
+
+test("rejects an account alias in an unrecognized field of a protocol envelope", (t) => {
+  const { output, scrub } = capture(t);
+  const alias = "syntheticExtension";
+  const result = scrub([
+    [1, line({ method: "thread/resume", [alias]: true })],
+    [2, line({ account: { displayName: alias } })],
+  ]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "Cannot safely scrub an account alias in a protocol field name.\n",
+  );
+  assert.equal(existsSync(output), false);
+});
+
 test("rejects a dictionary when account alias redaction would duplicate a key", (t) => {
   const { output, scrub } = capture(t);
   const alias = "syntheticAccountAlias";

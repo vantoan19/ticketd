@@ -82,7 +82,7 @@ function readChunk(bytes, stream, frames) {
         ) {
           throw new Error();
         }
-        frames.push({ [stream.direction]: frame });
+        frames.push({ direction: stream.direction, frame });
       }
     } catch {
       throw new CaptureError(
@@ -137,6 +137,38 @@ const protocolLabels = new Set([
   "name",
   "type",
 ]);
+const rpcCallFields = new Set([
+  "jsonrpc",
+  "id",
+  "method",
+  "params",
+  "emittedAtMs",
+]);
+const rpcReplyFields = new Set(["jsonrpc", "id", "result", "error"]);
+const claudeCommandFields = new Set(["cmd", "id", "protocol", "generation"]);
+const claudeEventFields = new Set([
+  "event",
+  "id",
+  "v",
+  "protocol",
+  "generation",
+  "error",
+]);
+const envelopeLabels = new Set(["cmd", "event", "jsonrpc", "method"]);
+
+function envelopeFields(frame, direction) {
+  if (typeof frame.method === "string") return rpcCallFields;
+  if (direction === "client" && typeof frame.cmd === "string") {
+    return claudeCommandFields;
+  }
+  if (direction === "server" && typeof frame.event === "string") {
+    return claudeEventFields;
+  }
+  return Object.hasOwn(frame, "id") &&
+    (Object.hasOwn(frame, "result") || Object.hasOwn(frame, "error"))
+    ? rpcReplyFields
+    : null;
+}
 
 function scopeFor(scope, key, parent, value) {
   const field = key.toLowerCase().replace(/[_-]/g, "");
@@ -166,13 +198,13 @@ function scopeFor(scope, key, parent, value) {
   return null;
 }
 
-function visit(value, scope, parent, scalar, key) {
+function visit(value, scope, parent, scalar, key, wireFields = null) {
   if (Array.isArray(value)) {
     return value.map((entry) => visit(entry, scope, parent, scalar, key));
   }
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value).map(([field, entry]) => [
-      key(field),
+      key(field, entry, wireFields),
       visit(
         entry,
         scopeFor(scope, field, parent, entry),
@@ -234,7 +266,7 @@ function scrub(frames, input) {
   }
   // Collect aliases first so a reference before its structured definition, or
   // in a command, message, or path, can use the same replacement.
-  for (const frame of frames) {
+  for (const { frame } of frames) {
     visit(
       frame,
       null,
@@ -276,8 +308,8 @@ function scrub(frames, input) {
         return remember(matched, () => "fixture-email-" + ++emailCount);
       return replaceUuid(matched);
     });
-  return frames.map((frame) =>
-    visit(
+  return frames.map(({ direction, frame }) => ({
+    [direction]: visit(
       frame,
       null,
       "",
@@ -289,13 +321,31 @@ function scrub(frames, input) {
             : typeof value === "string"
               ? replaceText(value)
               : value,
-      // Dictionary keys can repeat an account alias or contain paths, email
-      // addresses and punctuated identifiers. Keep ordinary protocol keys.
-      (key) =>
-        accountAliases.get(key) ??
-        (/^[A-Za-z_$][\w$]*$/.test(key) ? key : replaceText(key)),
+      (key, value, wireFields) => {
+        // Wire fields have fixed names. A dictionary can use the same spelling
+        // as a key, so this exception applies only to the frame envelope.
+        if (wireFields?.has(key)) {
+          if (envelopeLabels.has(key) && accountAliases.has(value)) {
+            throw new CaptureError(
+              "Cannot safely scrub an account alias in a protocol label.",
+            );
+          }
+          return key;
+        }
+        const alias = accountAliases.get(key);
+        if (alias !== undefined) {
+          if (wireFields) {
+            throw new CaptureError(
+              "Cannot safely scrub an account alias in a protocol field name.",
+            );
+          }
+          return alias;
+        }
+        return /^[A-Za-z_$][\w$]*$/.test(key) ? key : replaceText(key);
+      },
+      envelopeFields(frame, direction),
     ),
-  );
+  }));
 }
 
 try {
