@@ -138,7 +138,8 @@ pub struct OpenRequest {
     /// Set for the Chat of an Automation run. `None` leaves the model, permissions and
     /// tools to the harness's own configuration, with the person there to approve.
     pub unattended: Option<Unattended>,
-    /// The person's picks for a new session; empty for the harness's own settings.
+    /// The settings to apply before opening the session for dispatch. A permission
+    /// restart carries over the session's confirmed values and any later picks.
     /// An unattended run leaves it empty: its model comes from `unattended`.
     pub settings: StartSettings,
     /// What the harness last reported in effect for this Chat, as recorded
@@ -173,8 +174,8 @@ pub struct Unattended {
     pub turn_limit: u32,
 }
 
-/// Settings a new session opens with, as chosen in New Chat. `None` leaves the
-/// harness's own setting. Values are option ids the harness listed.
+/// Settings a session opens with. `None` leaves the harness's own setting.
+/// Values are option ids the harness listed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StartSettings {
     pub model: Option<String>,
@@ -338,6 +339,7 @@ pub enum SettingOutcome {
     /// Written without an answer in time: the harness may still use the old value.
     Unconfirmed,
     /// A permission change requires replacing the process and resuming the session.
+    /// The adapter confirms the requested settings before returning the replacement.
     ReopenSession,
     /// This harness cannot change this setting from ticketd.
     Unsupported,

@@ -1885,7 +1885,13 @@ fn settings(permission: &str) -> HarnessSettings {
             applies_from: AppliesFrom::NextTurn,
             answered_by: None,
         }),
-        effort: None,
+        effort: Some(Setting {
+            current: Some("low".to_owned()),
+            options: vec![option("low", None), option("high", None)],
+            unchangeable: None,
+            applies_from: AppliesFrom::NextTurn,
+            answered_by: None,
+        }),
         permission: Some(Setting {
             current: Some(permission.to_owned()),
             options: vec![
@@ -2545,7 +2551,10 @@ async fn a_permission_restart_resumes_the_same_session_before_releasing_the_queu
     })
     .await;
     f.emit(recorded("full")).await;
-    f.emit(EventKind::SettingsState(settings("full"))).await;
+    let mut current = settings("full");
+    current.model.as_mut().unwrap().current = Some("gpt-b".to_owned());
+    current.effort.as_mut().unwrap().current = Some("high".to_owned());
+    f.emit(EventKind::SettingsState(current)).await;
 
     f.host
         .change_setting(&f.chat.id, SettingKey::Permission, "ask")
@@ -2569,6 +2578,8 @@ async fn a_permission_restart_resumes_the_same_session_before_releasing_the_queu
     assert_eq!(opens[1].session, SessionStart::Resume(native_session));
     assert_ne!(opens[1].generation, opens[0].generation);
     assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
+    assert_eq!(opens[1].settings.model.as_deref(), Some("gpt-b"));
+    assert_eq!(opens[1].settings.effort.as_deref(), Some("high"));
     assert_eq!(written_kinds(&f), ["submit", "setting", "submit"]);
 }
 
@@ -2709,6 +2720,20 @@ async fn a_permission_restart_retry_keeps_waiting_for_the_same_native_session() 
         .change_setting(&f.chat.id, SettingKey::Permission, "ask")
         .await
         .unwrap();
+    assert_eq!(
+        f.host
+            .change_setting(&f.chat.id, SettingKey::Model, "gpt-b")
+            .await
+            .unwrap(),
+        SettingChangeState::Held
+    );
+    assert_eq!(
+        f.host
+            .change_setting(&f.chat.id, SettingKey::Effort, "high")
+            .await
+            .unwrap(),
+        SettingChangeState::Held
+    );
     f.queue("next").await;
     let missing_history = Problem {
         kind: ProblemKind::NativeHistoryUnavailable,
@@ -2738,6 +2763,8 @@ async fn a_permission_restart_retry_keeps_waiting_for_the_same_native_session() 
     let opens = f.fake.opens();
     assert_eq!(opens[1].session, SessionStart::Resume(native_session));
     assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
+    assert_eq!(opens[1].settings.model.as_deref(), Some("gpt-b"));
+    assert_eq!(opens[1].settings.effort.as_deref(), Some("high"));
     let submits = f.submits();
     assert_eq!(submits[1].text, "next");
     assert_eq!(submits[1].generation, opens[1].generation);
