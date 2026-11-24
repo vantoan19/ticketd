@@ -82,6 +82,15 @@ async fn send(peer: &mut Peer, frame: &Value) {
     peer.send(&format!("{frame}\n")).await;
 }
 
+fn text_update(kind: &str, text: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0", "method": "session/update",
+        "params": {"sessionId": "session-1", "update": {
+            "sessionUpdate": kind, "content": {"type": "text", "text": text}
+        }}
+    })
+}
+
 fn request(session: SessionStart) -> OpenRequest {
     OpenRequest {
         working_directory: PathBuf::from("/workspace"),
@@ -172,6 +181,123 @@ async fn recorded_acp_turn_uses_a_plain_prompt_and_finishes_on_its_reply() {
         }
     )));
     opened.runtime.close().await;
+}
+
+#[tokio::test]
+async fn many_thought_chunks_keep_bounded_checkpoints_and_exact_final_reasoning() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("thinking")).await,
+        DispatchOutcome::Written
+    );
+    let outgoing = peer.written().await;
+    send(&mut peer, &text_update("agent_thought_chunk", "α\n")).await;
+    for _ in 0..192 {
+        send(&mut peer, &text_update("agent_thought_chunk", "β ")).await;
+    }
+    send(
+        &mut peer,
+        &text_update("agent_message_chunk", "I have an answer."),
+    )
+    .await;
+    send(
+        &mut peer,
+        &text_update("agent_thought_chunk", "\nFinal detail 🧩"),
+    )
+    .await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": outgoing["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+
+    let events = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut events = Vec::new();
+        while let Some(event) = opened.events.recv().await {
+            let ended = matches!(event.kind, EventKind::TurnEnded { .. });
+            events.push(event.kind);
+            if ended {
+                break;
+            }
+        }
+        events
+    })
+    .await
+    .expect("the prompt reply ends the turn");
+    let checkpoints = events
+        .iter()
+        .filter_map(|event| match event {
+            EventKind::ReasoningUpdated {
+                running: true,
+                text: Some(text),
+                ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let before_answer = format!("α\n{}", "β ".repeat(192));
+    assert!(
+        (2..=12).contains(&checkpoints.len()),
+        "expected periodic checkpoints for 193 chunks, got {}",
+        checkpoints.len()
+    );
+    assert_eq!(checkpoints[0], "α\n");
+    assert!(
+        checkpoints
+            .windows(2)
+            .all(|pair| { pair[0].len() < pair[1].len() && pair[1].starts_with(pair[0]) })
+    );
+    let answer_at = events
+        .iter()
+        .position(|event| matches!(event, EventKind::TextDelta { text, .. } if text == "I have an answer."))
+        .expect("the answer is streamed");
+    assert!(matches!(
+        &events[answer_at - 1],
+        EventKind::ReasoningUpdated { running: true, text: Some(text), .. } if text == &before_answer
+    ));
+    assert!(matches!(
+        &events[events.len() - 2..],
+        [EventKind::ReasoningUpdated { running: false, text: Some(text), .. },
+         EventKind::TurnEnded { outcome: TurnOutcome::Completed, .. }]
+            if text == &format!("{before_answer}\nFinal detail 🧩")
+    ));
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
+async fn losing_the_acp_process_preserves_thoughts_observed_before_contact_ended() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("loss")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+    send(&mut peer, &text_update("agent_thought_chunk", "First")).await;
+    send(
+        &mut peer,
+        &text_update("agent_thought_chunk", " still thinking…"),
+    )
+    .await;
+    peer.exit(19);
+
+    let events = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut events = Vec::new();
+        while let Some(event) = opened.events.recv().await {
+            events.push(event.kind);
+        }
+        events
+    })
+    .await
+    .expect("the event stream closes after the process exits");
+    assert!(
+        matches!(
+            &events[events.len() - 2..],
+            [EventKind::ReasoningUpdated { running: true, text: Some(text), .. },
+             EventKind::RuntimeLost { exit_code: Some(19), .. }]
+                if text == "First still thinking…"
+        ),
+        "missing the full observed reasoning before loss: {events:?}"
+    );
 }
 
 #[tokio::test]
