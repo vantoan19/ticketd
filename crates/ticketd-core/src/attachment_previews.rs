@@ -249,22 +249,21 @@ impl Workspace {
         let (_, mut file) = open_snapshot(&self.connection, attachment)?;
         let length = file.metadata().map_err(snapshot_io)?.len();
         if length > MAX_PREVIEW_BYTES {
-            return Err(SnapshotFailure {
-                status: PreviewStatus::TooLarge,
-                message:
-                    "This file exceeds the 100 MiB preview limit. Export it or open it explicitly."
-                        .into(),
-            });
+            return Err(SnapshotFailure::new(
+                PreviewStatus::TooLarge,
+                "This file exceeds the 100 MiB preview limit. Export it or open it explicitly.",
+            ));
         }
         let mut header = Vec::new();
         file.by_ref()
             .take(64 * 1024)
             .read_to_end(&mut header)
             .map_err(snapshot_io)?;
-        let media_type = classify(&header).ok_or_else(|| SnapshotFailure {
-            status: PreviewStatus::Unsupported,
-            message: "Preview unavailable for this format. Export the file or open it explicitly."
-                .into(),
+        let media_type = classify(&header).ok_or_else(|| {
+            SnapshotFailure::new(
+                PreviewStatus::Unsupported,
+                "Preview unavailable for this format. Export the file or open it explicitly.",
+            )
         })?;
         if media_type.starts_with("image/") {
             let dimensions = image_dimensions(&header, media_type);
@@ -275,7 +274,10 @@ impl Workspace {
                     || height > 16_384
                     || u64::from(width) * u64::from(height) > 40_000_000
             }) {
-                return Err(SnapshotFailure { status: PreviewStatus::TooLarge, message: "Image dimensions exceed preview limits or could not be checked safely. Export it or open it explicitly.".into() });
+                return Err(SnapshotFailure::new(
+                    PreviewStatus::TooLarge,
+                    "Image dimensions exceed preview limits or could not be checked safely. Export it or open it explicitly.",
+                ));
             }
         }
         Ok(AttachmentMedia {
@@ -456,22 +458,36 @@ fn image_dimensions(header: &[u8], mime: &str) -> Option<(u32, u32)> {
 pub(crate) struct SnapshotFailure {
     pub status: PreviewStatus,
     pub message: String,
+    windows_access_denied: bool,
 }
 
+impl SnapshotFailure {
+    fn new(status: PreviewStatus, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+            windows_access_denied: false,
+        }
+    }
+}
+
+const WINDOWS_ACCESS_DENIED: i32 = 5;
+
 fn snapshot_io(error: std::io::Error) -> SnapshotFailure {
+    if error.kind() == std::io::ErrorKind::NotFound {
+        return SnapshotFailure::new(
+            PreviewStatus::Missing,
+            "Stored bytes are missing. Restore the snapshot and retry, or choose a replacement for this reference.",
+        );
+    }
     SnapshotFailure {
-        status: if error.kind() == std::io::ErrorKind::NotFound {
-            PreviewStatus::Missing
-        } else {
-            PreviewStatus::Unavailable
-        },
-        message: if error.kind() == std::io::ErrorKind::NotFound {
-            "Stored bytes are missing. Restore the snapshot and retry, or choose a replacement for this reference.".into()
-        } else {
+        windows_access_denied: cfg!(windows) && error.raw_os_error() == Some(WINDOWS_ACCESS_DENIED),
+        ..SnapshotFailure::new(
+            PreviewStatus::Unavailable,
             format!(
                 "Cannot read stored bytes: {error}. Restore the snapshot and retry, or choose a replacement for this reference."
-            )
-        },
+            ),
+        )
     }
 }
 
@@ -479,30 +495,26 @@ pub(crate) fn open_snapshot(
     connection: &rusqlite::Connection,
     attachment: &Attachment,
 ) -> Result<(PathBuf, File), SnapshotFailure> {
-    let current =
-        crate::attachments::read_attachment(connection, &attachment.id).map_err(|error| {
-            SnapshotFailure {
-                status: PreviewStatus::Unavailable,
-                message: error.to_string(),
-            }
-        })?;
+    let current = crate::attachments::read_attachment(connection, &attachment.id)
+        .map_err(|error| SnapshotFailure::new(PreviewStatus::Unavailable, error.to_string()))?;
     if current.purge_state != crate::AttachmentPurgeState::Retained {
-        return Err(SnapshotFailure {
-            status: PreviewStatus::Unavailable,
-            message: crate::attachment_cleanup::purge_unavailable(&current),
-        });
+        return Err(SnapshotFailure::new(
+            PreviewStatus::Unavailable,
+            crate::attachment_cleanup::purge_unavailable(&current),
+        ));
     }
     if attachment.kind != AttachmentKind::LocalSnapshot {
-        return Err(SnapshotFailure {
-            status: PreviewStatus::Unsupported,
-            message:
-                "Current source content · No local snapshot. Open this external reference in Drive."
-                    .into(),
-        });
+        return Err(SnapshotFailure::new(
+            PreviewStatus::Unsupported,
+            "Current source content · No local snapshot. Open this external reference in Drive.",
+        ));
     }
 
     let invalid = || {
-        SnapshotFailure { status: PreviewStatus::Unavailable, message: "Invalid managed snapshot locator or filesystem link; preserve the file and repair its metadata.".into() }
+        SnapshotFailure::new(
+            PreviewStatus::Unavailable,
+            "Invalid managed snapshot locator or filesystem link; preserve the file and repair its metadata.",
+        )
     };
     if Uuid::parse_str(&attachment.id).is_err()
         || attachment
@@ -513,11 +525,8 @@ pub(crate) fn open_snapshot(
     {
         return Err(invalid());
     }
-    let root =
-        crate::attachments::attachment_directory(connection).map_err(|error| SnapshotFailure {
-            status: PreviewStatus::Unavailable,
-            message: error.to_string(),
-        })?;
+    let root = crate::attachments::attachment_directory(connection)
+        .map_err(|error| SnapshotFailure::new(PreviewStatus::Unavailable, error.to_string()))?;
     // Reject links/reparse points in every managed component, including the root.
     let mut path = root.clone();
     reject_link(&path)?;
@@ -539,22 +548,39 @@ pub(crate) fn open_snapshot(
             .map_err(snapshot_io)?
             .is_file()
         {
-            return Err(SnapshotFailure { status: PreviewStatus::Incomplete, message: "Stored bytes are not a regular file. Restore the snapshot and retry, or choose a replacement for this reference.".into() });
+            return Err(SnapshotFailure::new(
+                PreviewStatus::Incomplete,
+                "Stored bytes are not a regular file. Restore the snapshot and retry, or choose a replacement for this reference.",
+            ));
         }
         let file = File::open(&canonical_path).map_err(snapshot_io)?;
         let metadata = file.metadata().map_err(snapshot_io)?;
         if !metadata.is_file() || Some(metadata.len()) != attachment.size_bytes {
-            return Err(SnapshotFailure { status: PreviewStatus::Incomplete, message: "Stored bytes are incomplete. Restore the snapshot and retry, or choose a replacement for this reference.".into() });
+            return Err(SnapshotFailure::new(
+                PreviewStatus::Incomplete,
+                "Stored bytes are incomplete. Restore the snapshot and retry, or choose a replacement for this reference.",
+            ));
         }
         Ok((canonical_path, file))
     };
-    // Undo can move quarantine -> bytes while a reader holds the upload lock.
-    // Retry only missing paths, and retain the checked handle rather than reopening it.
+    open_retained_location(open_at)
+}
+
+fn open_retained_location<T>(
+    mut open_at: impl FnMut(&str) -> Result<T, SnapshotFailure>,
+) -> Result<T, SnapshotFailure> {
+    // Undo can move quarantine to bytes while a reader holds the upload lock.
+    // Windows can deny an open during the move. Keep that error if no path resolves.
+    let mut access_denied = None;
+    for directory in ["bytes", "quarantine"] {
+        match open_at(directory) {
+            Err(error) if error.status == PreviewStatus::Missing => {}
+            Err(error) if error.windows_access_denied => access_denied = Some(error),
+            result => return result,
+        }
+    }
     match open_at("bytes") {
-        Err(error) if error.status == PreviewStatus::Missing => match open_at("quarantine") {
-            Err(error) if error.status == PreviewStatus::Missing => open_at("bytes"),
-            result => result,
-        },
+        Err(error) if error.status == PreviewStatus::Missing => Err(access_denied.unwrap_or(error)),
         result => result,
     }
 }
@@ -569,7 +595,48 @@ pub(crate) fn reject_link(path: &Path) -> Result<(), SnapshotFailure> {
     #[cfg(not(windows))]
     let reparse = false;
     if metadata.file_type().is_symlink() || reparse {
-        return Err(SnapshotFailure { status: PreviewStatus::Unavailable, message: "Managed snapshot uses a filesystem link; restore it inside this workspace before retrying.".into() });
+        return Err(SnapshotFailure::new(
+            PreviewStatus::Unavailable,
+            "Managed snapshot uses a filesystem link; restore it inside this workspace before retrying.",
+        ));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Error, ErrorKind};
+
+    #[test]
+    fn a_windows_denial_can_resolve_at_the_restored_location() {
+        let mut attempts = Vec::new();
+        let result = open_retained_location(|directory| {
+            attempts.push(directory.to_owned());
+            match attempts.len() {
+                1 => Err(snapshot_io(Error::from(ErrorKind::NotFound))),
+                2 => Err(snapshot_io(Error::from_raw_os_error(WINDOWS_ACCESS_DENIED))),
+                _ => Ok(()),
+            }
+        });
+        if cfg!(windows) {
+            assert!(result.is_ok());
+            assert_eq!(attempts, ["bytes", "quarantine", "bytes"]);
+        } else {
+            assert!(result.is_err());
+            assert_eq!(attempts, ["bytes", "quarantine"]);
+        }
+    }
+
+    #[test]
+    fn a_windows_denial_is_preserved_when_the_other_location_is_missing() {
+        let result = open_retained_location(|directory| {
+            if directory == "quarantine" {
+                Err::<(), _>(snapshot_io(Error::from_raw_os_error(WINDOWS_ACCESS_DENIED)))
+            } else {
+                Err(snapshot_io(Error::from(ErrorKind::NotFound)))
+            }
+        });
+        assert!(matches!(result, Err(error) if error.status == PreviewStatus::Unavailable));
+    }
 }
