@@ -1514,6 +1514,10 @@ impl Workspace {
                 {
                     continue;
                 }
+                let key = (
+                    issue.reference.identity.provider.clone(),
+                    issue.reference.identity.id.clone(),
+                );
                 if let Some(reference) = unverified_github_match(transaction, &issue.reference)? {
                     let message = github_host_confirmation(&reference);
                     if let Some(run) = gathered
@@ -1522,6 +1526,13 @@ impl Workspace {
                         .find(|run| run.provider == issue.reference.identity.provider)
                     {
                         run.skipped.push(message.clone());
+                        // A held issue leaves the repository's first read incomplete.
+                        if let Some(part) = gathered.partitions.get(&key)
+                            && run.read_partitions.contains(part)
+                        {
+                            run.read_partitions.retain(|read| read != part);
+                            run.skipped_partitions.push(part.clone());
+                        }
                     }
                     if !gathered.failures.iter().any(|found| {
                         found.reference.as_deref() == Some(&reference)
@@ -1539,10 +1550,6 @@ impl Workspace {
                     }
                     continue;
                 }
-                let key = (
-                    issue.reference.identity.provider.clone(),
-                    issue.reference.identity.id.clone(),
-                );
                 // Only discovery brings in an issue that is not here yet.
                 let first_import =
                     gathered.partitions.get(&key).is_some_and(|part| {

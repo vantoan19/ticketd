@@ -448,6 +448,73 @@ fn discovery_can_import_the_same_numeric_id_with_a_different_locator() {
 }
 
 #[test]
+fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
+    use crate::{WorkspaceActor, WorkspaceEventType};
+
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = unverified_github_workspace(&folder.path().join("legacy.db"));
+    let head = workspace.workspace_event_head().unwrap();
+    let public_api = "https://api.github.com";
+    let (public, public_engine) = setup_at(public_api, Some(TOKEN));
+    let one = format!("{public_api}/repos/o/one/issues?state=open&per_page=100&labels=bug");
+    let two = format!("{public_api}/repos/o/two/issues?state=open&per_page=100&labels=bug");
+    let held = issue(5, 12, "o/one");
+    let first = issue(6, 13, "o/one");
+    let new = issue(7, 14, "o/two");
+
+    public.respond(&format!("{public_api}/user"), ok(json!({"login": "octo"})));
+    public.respond(&one, ok(json!([held, first])));
+    public.respond(&two, ok(json!([])));
+    workspace
+        .save_source(
+            &public_engine,
+            "github",
+            &config(json!({"repositories": ["o/one", "o/two"], "labels": ["bug"]})),
+        )
+        .unwrap();
+    let conversation = |locator: &str| {
+        for suffix in ["comments", "events"] {
+            public.respond(
+                &format!("{public_api}/repos/{locator}/{suffix}?per_page=100"),
+                ok(json!([])),
+            );
+        }
+    };
+    public.respond(&one, ok(json!([held, first])));
+    public.respond(&two, ok(json!([])));
+    conversation("o/one/issues/13");
+    let refresh = workspace
+        .refresh_sources(&public_engine, &Default::default())
+        .unwrap();
+    assert_eq!(refresh.imported.len(), 1);
+    assert_eq!(workspace.workspace_events_after(head, 100).unwrap(), []);
+
+    let (enterprise, enterprise_engine) = setup(Some(TOKEN));
+    enterprise.respond(&format!("{API}/repos/o/one/issues/12"), ok(held.clone()));
+    workspace
+        .reconcile_github_issue(
+            &enterprise_engine,
+            "T-KQ5",
+            "https://api.example.test/o/one/issues/12",
+        )
+        .unwrap();
+    public.respond(&one, ok(json!([held, first])));
+    public.respond(&two, ok(json!([new])));
+    conversation("o/one/issues/12");
+    conversation("o/two/issues/14");
+    let refresh = workspace
+        .refresh_sources(&public_engine, &Default::default())
+        .unwrap();
+    assert_eq!(refresh.imported.len(), 2);
+
+    let events = workspace.workspace_events_after(head, 100).unwrap();
+    assert_eq!(events.len(), 1, "{events:?}");
+    assert_eq!(events[0].current.as_ref().unwrap()["title"], "Issue 14");
+    assert_eq!(events[0].actor, WorkspaceActor::Sync);
+    assert_eq!(events[0].kind, WorkspaceEventType::TicketCreated);
+}
+
+#[test]
 fn adding_a_repository_checks_it_even_when_the_first_repository_fills_the_preview() {
     let folder = tempfile::tempdir().unwrap();
     let mut workspace = crate::Workspace::open(folder.path().join("workspace.db")).unwrap();
