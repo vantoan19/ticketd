@@ -16,6 +16,8 @@ const PROMPT: &str = include_str!("../../tests/fixtures/antigravity/prompt.jsonl
 const QUESTION: &str = include_str!("../../tests/fixtures/antigravity/question.jsonl");
 const MODES: &str = include_str!("../../tests/fixtures/antigravity/session-modes.jsonl");
 const RESUME: &str = include_str!("../../tests/fixtures/antigravity/resume-own-settings.jsonl");
+const MISSING_RESUME: &str =
+    include_str!("../../tests/fixtures/antigravity/resume-missing-session.jsonl");
 const SIGNED_OUT: &str = include_str!("../../tests/fixtures/antigravity/signed-out.jsonl");
 
 fn recorded(fixture: &str) -> Vec<Value> {
@@ -649,6 +651,29 @@ async fn next_settings(events: &mut EventStream) -> HarnessSettings {
     })
     .await
     .expect("Antigravity runtime reports settings")
+}
+
+#[tokio::test]
+async fn recorded_resume_error_reports_missing_history_for_the_requested_session() {
+    for (fixture, expected) in [
+        (
+            MISSING_RESUME.to_owned(),
+            ProblemKind::NativeHistoryUnavailable,
+        ),
+        (
+            MISSING_RESUME.replace(
+                "Failed to read session session-missing",
+                "Failed to read session another-session",
+            ),
+            ProblemKind::Other,
+        ),
+    ] {
+        let (mut peer, io) = pipes();
+        let resume = request(SessionStart::Resume(NativeSessionId::new("session-missing")));
+        let opening = tokio::spawn(runtime::open(io, resume, settings::OWN.to_owned()));
+        startup(&mut peer, &fixture).await;
+        assert_eq!(opening.await.unwrap().unwrap_err().kind, expected);
+    }
 }
 
 #[tokio::test]

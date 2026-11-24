@@ -532,16 +532,28 @@ fn params(request: impl Serialize) -> Result<Value, Problem> {
 
 impl AcpRuntime {
     async fn request(&self, method: &str, value: Value, call: Call) -> Result<Value, Problem> {
+        let resumed_session = match &call {
+            Call::Open(SessionStart::Resume(session)) => Some(session.clone()),
+            _ => None,
+        };
         match self.connection.call(method, |_| Ok((value, call))).await {
             CallOutcome::Reply(value) => Ok(value),
             CallOutcome::Error(error) => {
-                let lower = error.message.to_ascii_lowercase();
-                let kind = if method == "session/resume"
-                    && (error.code == -32601
+                let kind = if resumed_session.is_some_and(|session| {
+                    let lower = error.message.to_ascii_lowercase();
+                    // agy uses the generic internal error code for this missing-history reply.
+                    let missing = error.code == -32603
+                        && error.message
+                            == format!(
+                                "Failed to read session {}; retry, or load it with session/load",
+                                session.0
+                            );
+                    error.code == -32601
+                        || missing
                         || ["not found", "does not exist", "no conversation"]
                             .iter()
-                            .any(|phrase| lower.contains(phrase)))
-                {
+                            .any(|phrase| lower.contains(phrase))
+                }) {
                     ProblemKind::NativeHistoryUnavailable
                 } else {
                     ProblemKind::Other
