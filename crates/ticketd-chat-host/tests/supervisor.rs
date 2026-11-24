@@ -1721,6 +1721,111 @@ async fn a_lost_turn_keeps_only_the_writes_committed_before_its_end() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn storage_recovery_keeps_the_lost_turns_receipt_at_its_first_end_boundary() {
+    use ticketd_core::ChatAgentChange;
+
+    let f = Fixture::new(FakeAdapter::codex());
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    let peer = new_chat(&mut f.core(), "codex");
+    let peer_message = f
+        .host
+        .send(&peer.id, None, "Peer input", SendMode::Queue)
+        .await
+        .unwrap();
+    f.send("Update the ticket").await;
+    f.queue("Queued before loss").await;
+    let turn_id = f.turns()[0].id.clone();
+
+    let mut writer = f.core();
+    writer.act_for_chat(&f.chat.id).unwrap();
+    writer
+        .add_activity(&ticket.reference, "Before the loss", Some("codex"))
+        .unwrap();
+
+    // Fail the actual settlement transaction after it can see the receipt boundary.
+    // The rest of the Workspace remains readable and other writes can still commit.
+    let db = rusqlite::Connection::open(&f.path).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER reject_turn_settlement BEFORE UPDATE OF ended_at ON chat_turns
+         WHEN OLD.ended_at IS NULL AND NEW.ended_at IS NOT NULL BEGIN
+             SELECT RAISE(ABORT, 'temporary failure settling turn');
+         END;",
+    )
+    .unwrap();
+    f.fake.lose_process().await;
+    settle().await;
+    assert_eq!(f.turns()[0].state, ChatTurnState::Active);
+    assert!(matches!(
+        f.live().await.problem,
+        Some(ChatProblem::StorageFailed { .. })
+    ));
+    assert!(matches!(
+        f.host
+            .send(&f.chat.id, None, "Refused during failure", SendMode::Queue)
+            .await,
+        Err(HostError::StorageFailed(_))
+    ));
+    assert!(
+        f.core()
+            .chat_latest_tool_input(&f.chat.id, AGENT_CHANGES_RECORD_NAME)
+            .unwrap()
+            .is_none()
+    );
+
+    writer
+        .add_activity(&ticket.reference, "After the loss", Some("codex"))
+        .unwrap();
+    db.execute_batch("DROP TRIGGER reject_turn_settlement")
+        .unwrap();
+    f.queue("Queued after recovery").await;
+    f.queue("Queued after another send").await;
+
+    let receipts: Vec<_> = f
+        .items()
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool) if tool.name == AGENT_CHANGES_RECORD_NAME => Some(tool),
+            _ => None,
+        })
+        .collect();
+    let [receipt] = receipts.as_slice() else {
+        panic!("expected one Turn receipt, got {receipts:?}");
+    };
+    assert_eq!(receipt.turn_id, turn_id);
+    assert_eq!(
+        serde_json::from_str::<Vec<ChatAgentChange>>(&receipt.input).unwrap(),
+        [ChatAgentChange::Update {
+            reference: ticket.reference,
+            excerpt: "Before the loss".into(),
+        },]
+    );
+    assert_eq!(f.turns()[0].state, ChatTurnState::Unknown);
+    assert_eq!(
+        f.first_ending(),
+        Some(TurnEnding::ContactLost(Some(
+            "the harness process ended: fake process lost".into()
+        )))
+    );
+    assert_eq!(f.live().await.problem, None);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(
+        f.queued(),
+        [
+            "Queued before loss",
+            "Queued after recovery",
+            "Queued after another send"
+        ]
+    );
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.core().chat_queue(&peer.id).unwrap(), [peer_message]);
+    assert!(!f.core().chat(&peer.id).unwrap().queue_paused);
+
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(f.submits()[1].text, "Queued before loss");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_chat_write_before_the_first_turn_event_is_kept_in_its_transcript() {
     let f = Fixture::new(FakeAdapter::claude());
     let ticket = f.core().create_ticket("Reset email").unwrap();
