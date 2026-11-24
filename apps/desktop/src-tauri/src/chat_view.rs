@@ -9,9 +9,9 @@ use ticketd_chat_host::attention::{self, Facts, Status};
 use ticketd_chat_host::conditions::ChatProblemKind;
 use ticketd_chat_host::{
     AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, ChatLive,
-    ChatProblem, FileTargets, InteractionKind, ProblemKind, ReadAction, RunAction, SearchScope,
-    StepAction, StepOutcomeOverride, StopState, ToolEvidence, ToolStep, TurnEnding, WebAction,
-    read_tool_steps,
+    ChatProblem, FileTargets, InteractionKind, OmittedFiles, ProblemKind, ReadAction, RunAction,
+    SearchScope, StepAction, StepOutcomeOverride, StopState, ToolEvidence, ToolStep, TurnEnding,
+    WebAction, read_tool_steps,
 };
 use ticketd_core::harnesses::{ResumePolicy, descriptor};
 use ticketd_core::{
@@ -160,6 +160,8 @@ pub struct Step {
     /// ticketd did.
     pub target: String,
     pub targets: Vec<StepTarget>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub omitted_files: Option<OmittedFilesView>,
     /// The command without its shell wrappers, for a command step.
     pub command: Option<String>,
     pub exit_code: Option<i64>,
@@ -192,6 +194,12 @@ pub struct Step {
     /// The harness waits for the person to approve this step: the request card says it,
     /// so the step has no row of its own until it is decided.
     pub awaiting: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct OmittedFilesView {
+    /// Older compact patches can reveal missing paths without their count.
+    pub count: Option<u32>,
 }
 
 /// Where a step's whole output is read when its row opens (`chat_step_output`).
@@ -833,11 +841,31 @@ fn asked_to_step(step: &Step) -> Option<(&'static str, &'static str, String)> {
         ));
     }
     let targets = || {
-        step.targets
+        let included = step
+            .targets
             .iter()
             .map(|target| target.text.as_str())
             .collect::<Vec<_>>()
-            .join(", ")
+            .join(", ");
+        match &step.omitted_files {
+            Some(omitted) => {
+                let summary = match omitted.count {
+                    Some(count) => {
+                        let files = step.targets.len() as u64 + u64::from(count);
+                        let file_word = if files == 1 { "file" } else { "files" };
+                        let paths = if count == 1 { "path" } else { "paths" };
+                        format!("{files} {file_word} ({count} {paths} omitted)")
+                    }
+                    None => "files (partial list)".to_owned(),
+                };
+                if included.is_empty() {
+                    summary
+                } else {
+                    format!("{summary} including {included}")
+                }
+            }
+            None => included,
+        }
     };
     match step.kind {
         "read" if step.variant == Some("list") => {
@@ -846,6 +874,9 @@ fn asked_to_step(step: &Step) -> Option<(&'static str, &'static str, String)> {
         "read" => Some(("wants to read", "asked to read", targets())),
         "search" => Some(("wants to search for", "asked to search for", targets())),
         "run" => Some(("wants to run", "asked to run", step.target.clone())),
+        "create" if step.omitted_files.is_some() => {
+            Some(("wants to create", "asked to create", targets()))
+        }
         "edit" | "create" => Some(("wants to edit", "asked to edit", targets())),
         "delete" => Some(("wants to delete", "asked to delete", targets())),
         "web" if step.variant == Some("fetch") => {
@@ -1028,6 +1059,12 @@ fn page(url: &str) -> String {
 
 fn word_tool_step(action: ToolStep, base: &Step, folder: &str, home: Option<&str>) -> Step {
     let mut step = base.clone();
+    step.omitted_files = action.omitted_files.map(|omitted| OmittedFilesView {
+        count: match omitted {
+            OmittedFiles::Count(count) => Some(count.get()),
+            OmittedFiles::Unknown => None,
+        },
+    });
     let path = |text: &str| shown_path(text, folder, home);
     let paths = |paths: Vec<String>| paths.into_iter().map(|file| target(&path(&file))).collect();
     let create = matches!(action.action, StepAction::Create { .. });
@@ -1164,6 +1201,7 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         variant: None,
         target: tool.name.clone(),
         targets: vec![target(&tool.name)],
+        omitted_files: None,
         command: None,
         exit_code: None,
         folder: None,
@@ -2081,6 +2119,59 @@ mod tests {
                 ("create", vec!["src/b.ts"]),
                 ("delete", vec!["old.ts"]),
             ]
+        );
+    }
+
+    #[test]
+    fn a_patch_approval_discloses_omitted_targets_including_unlisted_deletions() {
+        use ticketd_chat_host::{ApprovalDecision, InteractionKind, LiveInteraction};
+
+        let input = json!({"type": "fileChange", "changes": [
+            {"path": "/work/limiter/src/a.ts", "kind": {"type": "update"},
+             "ticketd_lines": {"added": 4, "removed": 1}},
+        ], "ticketd_omitted_files": {"update": 2, "delete": 1}});
+        let patch = ChatItem::Tool(tool(
+            "Edit /work/limiter/src/a.ts, /work/limiter/b.ts, /work/limiter/c.ts, /work/limiter/old.ts",
+            &input.to_string(),
+            ChatToolState::Running,
+            None,
+        ));
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 1,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Apply file changes".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Pending,
+            response: None,
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let mut live = ChatLive::idle();
+        live.interactions.push(LiveInteraction {
+            interaction_id: "ask".to_owned(),
+            kind: InteractionKind::approval(
+                None,
+                None,
+                "Apply file changes",
+                vec![ApprovalDecision::Deny],
+            ),
+        });
+        let tracker = Tracker::from_items(&[patch, approval.clone()]);
+        let Some(Item::Request { title, subject, .. }) =
+            super::item(&approval, &chat(Some("turn")), &live, None, &tracker)
+        else {
+            panic!("expected an approval card");
+        };
+        assert_eq!(title, "Codex wants to");
+        assert_eq!(
+            subject.as_deref(),
+            Some(
+                "edit 3 files (2 paths omitted) including src/a.ts, delete 1 file (1 path omitted)"
+            )
         );
     }
 
