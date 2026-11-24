@@ -1639,6 +1639,54 @@ async fn what_the_agent_changed_in_ticketd_is_kept_with_its_turn() {
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_chat_write_before_the_first_turn_event_is_kept_in_its_transcript() {
+    let f = Fixture::new(FakeAdapter::claude());
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    f.send("Update the ticket").await;
+    assert!(f.turns().is_empty());
+    let submission = f.submits()[0].submission.clone();
+
+    let mut cli = f.core();
+    cli.act_for_chat(&f.chat.id).unwrap();
+    cli.change_ticket(
+        &ticket.reference,
+        ticketd_core::TicketPatch {
+            status: Some(ticketd_core::Status::InProgress),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    // SQLite records wall-clock time at millisecond precision, independent of Tokio.
+    std::thread::sleep(Duration::from_millis(5));
+
+    f.emit(EventKind::TurnEnded {
+        turn: turn_1(),
+        outcome: TurnOutcome::Completed,
+        submissions: vec![submission],
+    })
+    .await;
+
+    let turn = &f.turns()[0];
+    let changes = f.items().into_iter().find_map(|item| match item {
+        ChatItem::Tool(tool)
+            if tool.name == AGENT_CHANGES_RECORD_NAME && tool.turn_id == turn.id =>
+        {
+            Some(serde_json::from_str::<Vec<ticketd_core::ChatAgentChange>>(&tool.input).unwrap())
+        }
+        _ => None,
+    });
+    assert_eq!(
+        changes,
+        Some(vec![ticketd_core::ChatAgentChange::Status {
+            reference: ticket.reference,
+            title: ticket.title,
+            from: "Todo".to_owned(),
+            to: "In progress".to_owned(),
+        }])
+    );
+}
+
 /// N1: input sent from the queue enters the conversation when it is sent, which is
 /// where a live view shows it; read again later it sits before its own reply, not
 /// where it was typed.

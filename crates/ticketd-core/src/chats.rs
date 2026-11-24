@@ -577,6 +577,10 @@ pub struct ChatInteraction {
 
 /// Changes listed for one turn at most; a turn that made more shows the first ones.
 pub const CHAT_AGENT_CHANGES_LIMIT: usize = 50;
+
+/// The name of the tool record that keeps a Turn's `ChatAgentChange` values as JSON.
+pub const AGENT_CHANGES_RECORD_NAME: &str = "ticketd changes";
+
 /// Characters of an Activity shown as its excerpt.
 const CHAT_AGENT_EXCERPT_LIMIT: usize = 140;
 
@@ -665,6 +669,10 @@ pub enum ChatObservation {
         /// How the turn ended, as the host names it; kept as given.
         #[serde(default)]
         ending: Option<String>,
+    },
+    /// Keep the record changes credited to an ended Turn with its transcript.
+    CaptureAgentChanges {
+        turn_id: String,
     },
     /// A checkpoint of an assistant message: `text` replaces what was stored.
     AssistantText {
@@ -1254,6 +1262,80 @@ fn expire_interactions(
     Ok(())
 }
 
+fn read_turn_agent_changes(
+    connection: &Connection,
+    chat_id: &str,
+    turn_id: &str,
+    require_ended: bool,
+) -> Result<Vec<ChatAgentChange>, Error> {
+    let (agent, observed_start, ended, attributed_start): (String, String, Option<String>, String) =
+        connection
+            .query_row(
+                "SELECT c.harness, t.started_at, t.ended_at,
+                        MIN(t.started_at, COALESCE((
+                            SELECT MIN(a.recorded_at)
+                            FROM chat_messages m JOIN chat_submission_attempts a ON a.message_id = m.id
+                            WHERE m.chat_id = t.chat_id AND a.chat_id = t.chat_id AND a.turn_id = t.id
+                              AND a.delivery NOT IN ('not_delivered', 'rejected')
+                        ), t.started_at))
+                 FROM chat_turns t JOIN chats c ON c.id = t.chat_id WHERE t.id = ?1 AND t.chat_id = ?2",
+                params![turn_id, chat_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .optional()?
+            .ok_or_else(|| invalid(format!("turn '{turn_id}' was not recorded for this Chat")))?;
+    if require_ended && ended.is_none() {
+        return Ok(Vec::new());
+    }
+    // Join from tickets so the feed indexes can seek to the time window for each one.
+    let mut statement = connection.prepare(
+        "SELECT kind, reference, title, from_value, to_value FROM (
+             SELECT 'status' AS kind, t.reference AS reference, t.title, h.from_value, h.to_value, h.timestamp AS at, 0 AS source, h.number AS seq, h.editing_agent AS agent,
+                    (SELECT chat_id FROM chat_record_writes WHERE history_number = h.number) AS writer
+             FROM tickets t CROSS JOIN ticket_history h ON h.ticket_id = t.id
+             WHERE h.kind = 'status' AND h.timestamp >= ?2 AND (?3 IS NULL OR h.timestamp <= ?3)
+             UNION ALL
+             SELECT 'update', t.reference, t.title, '', a.brief, a.reported_at, 1, a.number, a.editing_agent,
+                    (SELECT chat_id FROM chat_record_writes WHERE activity_id = a.id)
+             FROM tickets t CROSS JOIN activities a ON a.ticket_id = t.id
+             WHERE a.reported_at >= ?2 AND (?3 IS NULL OR a.reported_at <= ?3))
+         WHERE writer = ?5 OR (writer IS NULL AND agent = ?1 AND at >= ?6 AND NOT EXISTS (
+             SELECT 1 FROM chat_turns o JOIN chats oc ON oc.id = o.chat_id
+             WHERE oc.harness = ?1 AND o.chat_id <> ?5 AND o.started_at <= at AND (o.ended_at IS NULL OR o.ended_at >= at)))
+         ORDER BY at, source, seq LIMIT ?4",
+    )?;
+    let changes = statement
+        .query_map(
+            params![
+                agent,
+                attributed_start,
+                ended,
+                CHAT_AGENT_CHANGES_LIMIT as i64,
+                chat_id,
+                observed_start,
+            ],
+            |row| {
+                let (kind, reference): (String, String) = (row.get(0)?, row.get(1)?);
+                Ok(if kind == "status" {
+                    ChatAgentChange::Status {
+                        reference,
+                        title: row.get(2)?,
+                        from: row.get(3)?,
+                        to: row.get(4)?,
+                    }
+                } else {
+                    let brief: String = row.get(4)?;
+                    ChatAgentChange::Update {
+                        reference,
+                        excerpt: brief.chars().take(CHAT_AGENT_EXCERPT_LIMIT).collect(),
+                    }
+                })
+            },
+        )?
+        .collect::<Result<_, _>>()?;
+    Ok(changes)
+}
+
 fn observe(
     connection: &Connection,
     chat_id: &str,
@@ -1368,6 +1450,24 @@ fn observe(
             )?;
             log(connection, chat_id, "turn", &turn_id)?;
             expire_interactions(connection, chat_id, Some(&turn_id))
+        }
+        ChatObservation::CaptureAgentChanges { turn_id } => {
+            let changes = read_turn_agent_changes(connection, chat_id, &turn_id, true)?;
+            if changes.is_empty() {
+                return Ok(());
+            }
+            observe(
+                connection,
+                chat_id,
+                ChatObservation::Tool {
+                    tool_id: format!("{turn_id}:ticketd-changes"),
+                    turn_id,
+                    name: AGENT_CHANGES_RECORD_NAME.to_owned(),
+                    input: serde_json::to_string(&changes)?,
+                    state: ChatToolState::Completed,
+                    output: None,
+                },
+            )
         }
         ChatObservation::AssistantText {
             message_id,
@@ -2304,73 +2404,20 @@ impl Workspace {
         Ok(())
     }
 
-    /// What the Chat's agent changed in tickets while `turn_id` ran, oldest first: status
-    /// moves and Activities. A change written for this Chat (`act_for_chat`) is listed;
-    /// one written for another Chat never is. A change with no Chat identity (an older
-    /// CLI, or the variable stripped) is listed only when it carries the Chat's harness
-    /// as agent name and no other Chat of that harness had a turn running at that
-    /// moment: when one did, either could have made it, and showing nothing is better
-    /// than crediting the wrong Chat.
+    /// What the Chat's agent changed in tickets during the Turn, oldest first.
+    /// Writes with this Chat's identity count from its first correlated submission.
+    /// Writes without a Chat identity count from the observed Turn start and only
+    /// when the agent name matches the harness and no other Chat of that harness
+    /// had a Turn running at the time.
     // Documents carry no agent name yet, so a created Document is not listed.
     pub fn chat_turn_agent_changes(
         &self,
         chat_id: &str,
         turn_id: &str,
     ) -> Result<Vec<ChatAgentChange>, Error> {
-        let (agent, started, ended): (String, String, Option<String>) = self
-            .connection
-            .query_row(
-                "SELECT c.harness, t.started_at, t.ended_at FROM chat_turns t JOIN chats c ON c.id = t.chat_id WHERE t.id = ?1 AND t.chat_id = ?2",
-                params![turn_id, chat_id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?
-            .ok_or_else(|| invalid(format!("turn '{turn_id}' was not recorded for this Chat")))?;
-        let mut statement = self.connection.prepare(
-            "SELECT kind, reference, title, from_value, to_value FROM (
-                 SELECT 'status' AS kind, t.reference AS reference, t.title, h.from_value, h.to_value, h.timestamp AS at, 0 AS source, h.number AS seq, h.editing_agent AS agent,
-                        (SELECT chat_id FROM chat_record_writes WHERE history_number = h.number) AS writer
-                 FROM ticket_history h JOIN tickets t ON t.id = h.ticket_id
-                 WHERE h.kind = 'status' AND h.timestamp >= ?2 AND (?3 IS NULL OR h.timestamp <= ?3)
-                 UNION ALL
-                 SELECT 'update', t.reference, t.title, '', a.brief, a.reported_at, 1, a.number, a.editing_agent,
-                        (SELECT chat_id FROM chat_record_writes WHERE activity_id = a.id)
-                 FROM activities a JOIN tickets t ON t.id = a.ticket_id
-                 WHERE a.reported_at >= ?2 AND (?3 IS NULL OR a.reported_at <= ?3))
-             WHERE writer = ?5 OR (writer IS NULL AND agent = ?1 AND NOT EXISTS (
-                 SELECT 1 FROM chat_turns o JOIN chats oc ON oc.id = o.chat_id
-                 WHERE oc.harness = ?1 AND o.chat_id <> ?5 AND o.started_at <= at AND (o.ended_at IS NULL OR o.ended_at >= at)))
-             ORDER BY at, source, seq LIMIT ?4",
-        )?;
-        let changes = statement
-            .query_map(
-                params![
-                    agent,
-                    started,
-                    ended,
-                    CHAT_AGENT_CHANGES_LIMIT as i64,
-                    chat_id
-                ],
-                |row| {
-                    let (kind, reference): (String, String) = (row.get(0)?, row.get(1)?);
-                    Ok(if kind == "status" {
-                        ChatAgentChange::Status {
-                            reference,
-                            title: row.get(2)?,
-                            from: row.get(3)?,
-                            to: row.get(4)?,
-                        }
-                    } else {
-                        let brief: String = row.get(4)?;
-                        ChatAgentChange::Update {
-                            reference,
-                            excerpt: brief.chars().take(CHAT_AGENT_EXCERPT_LIMIT).collect(),
-                        }
-                    })
-                },
-            )?
-            .collect::<Result<_, _>>()?;
-        Ok(changes)
+        crate::read_scope::run(&self.connection, |connection| {
+            read_turn_agent_changes(connection, chat_id, turn_id, false)
+        })
     }
 
     /// The input of the Chat's latest tool record named `name`, such as the context a
