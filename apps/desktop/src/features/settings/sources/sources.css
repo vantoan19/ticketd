@@ -274,6 +274,9 @@
   line-height: var(--text-caption-line);
   color: var(--muted-foreground);
 }
+p.source-save-message {
+  flex-wrap: nowrap;
+}
 @media (max-width: 767px) {
   .source-save-bar {
     flex-wrap: wrap;
