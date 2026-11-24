@@ -113,17 +113,23 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     .is_none_or(|output| output.trim().is_empty()),
         },
         acp::ToolKind::Edit | acp::ToolKind::Move => {
+            let diff_paths = || {
+                diffs(&tool)
+                    .map(|diff| diff.path.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>()
+            };
             let all_files_added = input[ALL_FILES_ADDED].as_bool().unwrap_or_else(|| {
                 let mut diffs = diffs(&tool).peekable();
                 diffs.peek().is_some() && diffs.all(|diff| diff.old_text.is_none())
             });
             if tool.kind == acp::ToolKind::Edit && all_files_added {
+                let targets = diff_paths();
                 StepAction::Create {
-                    targets: FileTargets::Paths(
-                        diffs(&tool)
-                            .map(|diff| diff.path.to_string_lossy().into_owned())
-                            .collect(),
-                    ),
+                    targets: FileTargets::Paths(if targets.is_empty() {
+                        locations()
+                    } else {
+                        targets
+                    }),
                     counts: LineCounts {
                         added: input[ADDED_LINES]
                             .as_u64()
@@ -132,8 +138,15 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     },
                 }
             } else {
+                let targets = locations();
                 StepAction::Edit {
-                    targets: FileTargets::Paths(locations()),
+                    targets: FileTargets::Paths(
+                        if tool.kind == acp::ToolKind::Edit && targets.is_empty() {
+                            diff_paths()
+                        } else {
+                            targets
+                        },
+                    ),
                     counts: LineCounts::default(),
                 }
             }
@@ -384,13 +397,14 @@ impl Tool {
             })
             .collect();
 
+        // The diff preview can omit modifications or be cleared to fit the budget.
+        let all_files_added = native.kind == acp::ToolKind::Edit
+            && !self.files.is_empty()
+            && self
+                .files
+                .iter()
+                .all(|file| file.kind == FileChangeKind::Added);
         if native.kind == acp::ToolKind::Edit {
-            // The diff preview can omit modifications or be cleared to fit the budget.
-            let all_files_added = !self.files.is_empty()
-                && self
-                    .files
-                    .iter()
-                    .all(|file| file.kind == FileChangeKind::Added);
             let input = native.raw_input.get_or_insert_with(|| json!({}));
             input[ALL_FILES_ADDED] = json!(all_files_added);
             if all_files_added {
@@ -421,6 +435,11 @@ impl Tool {
                 .name
                 .filter(|name| name.len() <= MAX_PROVIDER_DETAIL_BYTES);
             native.locations.truncate(32);
+            detail = serde_json::to_string(&native).unwrap_or_default();
+        }
+        if all_files_added && detail.len() > MAX_PROVIDER_DETAIL_BYTES {
+            // Locations can identify created files without the diff preview.
+            native.content.clear();
             detail = serde_json::to_string(&native).unwrap_or_default();
         }
         if detail.len() > MAX_PROVIDER_DETAIL_BYTES {

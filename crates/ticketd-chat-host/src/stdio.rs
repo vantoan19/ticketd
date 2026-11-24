@@ -682,6 +682,38 @@ mod tests {
                         .map(|info| info.path.into())
                 })
             };
+            if mode == "workspace-open-fails" {
+                let sidecar = directory.join("workspace.sqlite3-wal");
+                let error = crate::prepare_harness_recording(|| {
+                    let mut database = std::fs::OpenOptions::new()
+                        .write(true)
+                        .open(&workspace)
+                        .expect("reserved Workspace");
+                    std::io::Write::write_all(&mut database, STIMULUS)
+                        .expect("synthetic partial database");
+                    std::fs::write(&sidecar, STIMULUS).expect("synthetic sidecar");
+                    Err(ticketd_core::Error::Path("synthetic open failure".into()))
+                })
+                .expect_err("failed to open the disposable Workspace");
+                let message = error.to_string();
+                assert!(
+                    message.contains("Could not open the disposable Workspace"),
+                    "{message}"
+                );
+                assert!(
+                    message.contains("retry in a new private capture folder"),
+                    "{message}"
+                );
+                assert!(message.contains("synthetic open failure"), "{message}");
+                assert_eq!(
+                    std::fs::read(&workspace).expect("partial database"),
+                    STIMULUS
+                );
+                assert_eq!(std::fs::read(&sidecar).expect("sidecar"), STIMULUS);
+                let retried = crate::prepare_harness_recording(|| panic!("capture folder reused"));
+                assert!(retried.is_err());
+                return;
+            }
             if mode == "wrong-workspace" {
                 let prepared =
                     crate::prepare_harness_recording(|| Ok(directory.join("another.sqlite3")));
@@ -805,6 +837,7 @@ mod tests {
             "inside-git",
             "existing-workspace",
             "linked-work",
+            "workspace-open-fails",
             "wrong-workspace",
         ] {
             let directory = private_run();

@@ -201,6 +201,8 @@ pub(crate) trait Peer: Send + 'static {
 
     fn replied(&mut self, call: Self::Call, reply: &Reply, late: bool) -> Vec<EventKind>;
     fn received(&mut self, incoming: Incoming) -> (Vec<EventKind>, Option<Response>);
+    /// Retains buffered observations before the reader announces a loss.
+    fn retain_on_loss(&mut self, _events: &mut Vec<EventKind>) {}
     fn disconnected(&mut self);
 }
 
@@ -257,6 +259,13 @@ impl<P: Peer> State<P> {
         self.closed = true;
         self.pending.fail_all();
         was_open
+    }
+
+    fn lose_connection(&mut self, events: &mut Vec<EventKind>) -> bool {
+        if !self.closed {
+            self.peer.retain_on_loss(events);
+        }
+        self.disconnect()
     }
 
     fn apply(&mut self, frame: Frame) -> (Vec<EventKind>, Option<Response>) {
@@ -419,12 +428,13 @@ impl<P: Peer> Connection<P> {
     async fn read(self: Arc<Self>, stdout: Reader, events: mpsc::Sender<RuntimeEvent>) {
         let generation = self.generation;
         let mut stdout = BufReader::new(stdout);
-        let (was_open, overflow) = loop {
+        let (was_open, tail, saturated) = loop {
             let frame = read_frame(&mut stdout, MAX_FRAME_BYTES).await;
             let response = {
                 let mut state = self.state();
                 let Ok(Some(frame)) = frame else {
-                    break (state.disconnect(), Vec::new());
+                    let mut tail = Vec::new();
+                    break (state.lose_connection(&mut tail), tail, false);
                 };
                 let (kinds, response) = state.apply(frame);
                 // Reserve the entire batch without waiting. On saturation the
@@ -436,7 +446,8 @@ impl<P: Peer> Connection<P> {
                         }
                     }
                     Err(mpsc::error::TrySendError::Full(())) if !events.is_closed() => {
-                        break (state.disconnect(), kinds);
+                        let mut tail = kinds;
+                        break (state.lose_connection(&mut tail), tail, true);
                     }
                     // Some callers intentionally discard events while using RPC.
                     Err(_) => {}
@@ -458,9 +469,7 @@ impl<P: Peer> Connection<P> {
         drop(stdout);
         let loss = if was_open {
             let mut loss = runtime_lost(&self.stdin, &self.child, &self.stderr).await;
-            if !overflow.is_empty()
-                && let EventKind::RuntimeLost { diagnostics, .. } = &mut loss
-            {
+            if saturated && let EventKind::RuntimeLost { diagnostics, .. } = &mut loss {
                 if !diagnostics.is_empty() {
                     diagnostics.insert(0, '\n');
                 }
@@ -471,9 +480,9 @@ impl<P: Peer> Connection<P> {
             None
         };
         drop(self);
-        // No further RPC can succeed. Finish delivering the overflow batch and
-        // the terminal event after the observations already in the channel.
-        for kind in overflow.into_iter().chain(loss) {
+        // No further RPC can succeed. Deliver remaining observations before the
+        // terminal event, after the observations already in the channel.
+        for kind in tail.into_iter().chain(loss) {
             if events
                 .send(RuntimeEvent { generation, kind })
                 .await

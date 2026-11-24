@@ -82,6 +82,15 @@ async fn send(peer: &mut Peer, frame: &Value) {
     peer.send(&format!("{frame}\n")).await;
 }
 
+fn text_update(kind: &str, text: &str) -> Value {
+    json!({
+        "jsonrpc": "2.0", "method": "session/update",
+        "params": {"sessionId": "session-1", "update": {
+            "sessionUpdate": kind, "content": {"type": "text", "text": text}
+        }}
+    })
+}
+
 fn request(session: SessionStart) -> OpenRequest {
     OpenRequest {
         working_directory: PathBuf::from("/workspace"),
@@ -172,6 +181,123 @@ async fn recorded_acp_turn_uses_a_plain_prompt_and_finishes_on_its_reply() {
         }
     )));
     opened.runtime.close().await;
+}
+
+#[tokio::test]
+async fn many_thought_chunks_keep_bounded_checkpoints_and_exact_final_reasoning() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("thinking")).await,
+        DispatchOutcome::Written
+    );
+    let outgoing = peer.written().await;
+    send(&mut peer, &text_update("agent_thought_chunk", "α\n")).await;
+    for _ in 0..192 {
+        send(&mut peer, &text_update("agent_thought_chunk", "β ")).await;
+    }
+    send(
+        &mut peer,
+        &text_update("agent_message_chunk", "I have an answer."),
+    )
+    .await;
+    send(
+        &mut peer,
+        &text_update("agent_thought_chunk", "\nFinal detail 🧩"),
+    )
+    .await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": outgoing["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+
+    let events = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut events = Vec::new();
+        while let Some(event) = opened.events.recv().await {
+            let ended = matches!(event.kind, EventKind::TurnEnded { .. });
+            events.push(event.kind);
+            if ended {
+                break;
+            }
+        }
+        events
+    })
+    .await
+    .expect("the prompt reply ends the turn");
+    let checkpoints = events
+        .iter()
+        .filter_map(|event| match event {
+            EventKind::ReasoningUpdated {
+                running: true,
+                text: Some(text),
+                ..
+            } => Some(text.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let before_answer = format!("α\n{}", "β ".repeat(192));
+    assert!(
+        (2..=12).contains(&checkpoints.len()),
+        "expected periodic checkpoints for 193 chunks, got {}",
+        checkpoints.len()
+    );
+    assert_eq!(checkpoints[0], "α\n");
+    assert!(
+        checkpoints
+            .windows(2)
+            .all(|pair| { pair[0].len() < pair[1].len() && pair[1].starts_with(pair[0]) })
+    );
+    let answer_at = events
+        .iter()
+        .position(|event| matches!(event, EventKind::TextDelta { text, .. } if text == "I have an answer."))
+        .expect("the answer is streamed");
+    assert!(matches!(
+        &events[answer_at - 1],
+        EventKind::ReasoningUpdated { running: true, text: Some(text), .. } if text == &before_answer
+    ));
+    assert!(matches!(
+        &events[events.len() - 2..],
+        [EventKind::ReasoningUpdated { running: false, text: Some(text), .. },
+         EventKind::TurnEnded { outcome: TurnOutcome::Completed, .. }]
+            if text == &format!("{before_answer}\nFinal detail 🧩")
+    ));
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
+async fn losing_the_acp_process_preserves_thoughts_observed_before_contact_ended() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("loss")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+    send(&mut peer, &text_update("agent_thought_chunk", "First")).await;
+    send(
+        &mut peer,
+        &text_update("agent_thought_chunk", " still thinking…"),
+    )
+    .await;
+    peer.exit(19);
+
+    let events = tokio::time::timeout(Duration::from_secs(5), async {
+        let mut events = Vec::new();
+        while let Some(event) = opened.events.recv().await {
+            events.push(event.kind);
+        }
+        events
+    })
+    .await
+    .expect("the event stream closes after the process exits");
+    assert!(
+        matches!(
+            &events[events.len() - 2..],
+            [EventKind::ReasoningUpdated { running: true, text: Some(text), .. },
+             EventKind::RuntimeLost { exit_code: Some(19), .. }]
+                if text == "First still thinking…"
+        ),
+        "missing the full observed reasoning before loss: {events:?}"
+    );
 }
 
 #[tokio::test]
@@ -390,6 +516,114 @@ async fn bounded_file_previews_preserve_the_whole_edit_through_completion() {
         }
     }
     assert_eq!(states, [ToolStatus::Running, ToolStatus::Succeeded]);
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
+async fn create_keeps_targets_and_line_counts_when_the_diff_preview_cannot_fit() {
+    use ticketd_core::{ChatToolState, harnesses::ANTIGRAVITY};
+
+    use crate::{
+        FileTargets, LineCounts, MAX_PROVIDER_DETAIL_BYTES, StepAction, ToolEvidence,
+        read_tool_steps,
+    };
+
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("create-files")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+
+    let component = format!("/{}", "nested".repeat(30));
+    let directory = format!("/workspace{}", component.repeat(3));
+    let long_paths: Vec<_> = (0..32)
+        .map(|index| format!("{directory}/file-{index}.rs"))
+        .collect();
+    let input = "/workspace/input.rs";
+    let location = "/workspace/location.rs";
+    let diff = "/workspace/diff.rs".to_owned();
+    for (id, paths, native_location, expected, added) in [
+        ("input", long_paths.as_slice(), None, input, 64),
+        (
+            "location",
+            long_paths.as_slice(),
+            Some(location),
+            location,
+            64,
+        ),
+        (
+            "intact",
+            std::slice::from_ref(&diff),
+            Some(location),
+            diff.as_str(),
+            2,
+        ),
+    ] {
+        let content: Vec<_> = paths
+            .iter()
+            .map(|path| json!({"type": "diff", "path": path, "newText": "first\nsecond\n"}))
+            .collect();
+        let locations: Vec<_> = native_location
+            .into_iter()
+            .map(|path| json!({"path": path}))
+            .collect();
+        send(
+            &mut peer,
+            &json!({
+                "jsonrpc": "2.0", "method": "session/update",
+                "params": {
+                    "sessionId": "session-1",
+                    "update": {
+                        "sessionUpdate": "tool_call", "toolCallId": id, "title": "Write files",
+                        "kind": "edit", "status": "completed", "rawInput": {"TargetFile": input},
+                        "content": content, "locations": locations
+                    }
+                }
+            }),
+        )
+        .await;
+
+        let (title, detail) = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let EventKind::ToolUpdated {
+                    item,
+                    title,
+                    detail: Some(detail),
+                    ..
+                } = opened.events.recv().await.unwrap().kind
+                    && item.0 == id
+                {
+                    break (title, detail);
+                }
+            }
+        })
+        .await
+        .expect("saved tool detail");
+        assert!(detail.payload().len() <= MAX_PROVIDER_DETAIL_BYTES);
+        assert_eq!(detail.truncated(), paths.len() > 1);
+        let steps = read_tool_steps(
+            ANTIGRAVITY.key.as_str(),
+            ToolEvidence {
+                name: &title,
+                input: detail.payload(),
+                state: ChatToolState::Completed,
+                output: None,
+                working_directory: "/workspace",
+            },
+        );
+        assert_eq!(
+            steps[0].action,
+            StepAction::Create {
+                targets: FileTargets::Paths(vec![expected.to_owned()]),
+                counts: LineCounts {
+                    added: Some(added),
+                    removed: None,
+                },
+            },
+            "tool {id}"
+        );
+    }
     opened.runtime.close().await;
 }
 
