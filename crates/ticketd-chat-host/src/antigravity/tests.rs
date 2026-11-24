@@ -299,6 +299,101 @@ async fn large_tool_updates_keep_bounded_output_and_file_changes_until_completio
 }
 
 #[tokio::test]
+async fn bounded_file_previews_preserve_the_whole_edit_through_completion() {
+    use ticketd_core::{ChatToolState, harnesses::ANTIGRAVITY};
+
+    use crate::{
+        FileTargets, LineCounts, MAX_PROVIDER_DETAIL_BYTES, StepAction, ToolEvidence, ToolStatus,
+        read_tool_steps,
+    };
+
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("mixed-edit")).await,
+        DispatchOutcome::Written
+    );
+    let outgoing = peer.written().await;
+    let update = |update| {
+        json!({
+            "jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": "session-1", "update": update}
+        })
+    };
+
+    let mut diffs: Vec<_> = (0..32)
+        .map(|index| {
+            json!({"type": "diff", "path": format!("/workspace/new-{index}"), "newText": "new\n"})
+        })
+        .collect();
+    let modified = "/workspace/existing";
+    diffs.push(json!({"type": "diff", "path": modified, "oldText": "old\n", "newText": "new\n"}));
+    send(
+        &mut peer,
+        &update(json!({
+            "sessionUpdate": "tool_call", "toolCallId": "mixed", "title": "Edit files",
+            "kind": "edit", "status": "in_progress", "rawInput": {"TargetFile": modified},
+            "content": diffs
+        })),
+    )
+    .await;
+    send(
+        &mut peer,
+        &update(json!({
+            "sessionUpdate": "tool_call_update", "toolCallId": "mixed", "status": "completed"
+        })),
+    )
+    .await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": outgoing["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+
+    let mut states = Vec::new();
+    loop {
+        match opened.events.recv().await.unwrap().kind {
+            EventKind::ToolUpdated {
+                title,
+                status,
+                detail: Some(detail),
+                ..
+            } => {
+                assert!(detail.payload().len() <= MAX_PROVIDER_DETAIL_BYTES);
+                states.push(status);
+                let steps = read_tool_steps(
+                    ANTIGRAVITY.key.as_str(),
+                    ToolEvidence {
+                        name: &title,
+                        input: detail.payload(),
+                        state: if status == ToolStatus::Succeeded {
+                            ChatToolState::Completed
+                        } else {
+                            ChatToolState::Running
+                        },
+                        output: None,
+                        working_directory: "/workspace",
+                    },
+                );
+                assert_eq!(
+                    steps[0].action,
+                    StepAction::Edit {
+                        targets: FileTargets::Paths(vec![modified.to_owned()]),
+                        counts: LineCounts::default(),
+                    }
+                );
+            }
+            EventKind::TurnEnded {
+                outcome: TurnOutcome::Completed,
+                ..
+            } => break,
+            _ => {}
+        }
+    }
+    assert_eq!(states, [ToolStatus::Running, ToolStatus::Succeeded]);
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
 async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
     let (mut peer, mut opened) = open(
         RESUME,

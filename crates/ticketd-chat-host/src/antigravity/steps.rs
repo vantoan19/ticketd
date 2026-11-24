@@ -22,6 +22,8 @@ const FILE_PATH: &[&str] = &[
 const QUERY: &[&str] = &["Query", "Pattern", "query"];
 const SEARCH_PATH: &[&str] = &["SearchPath", "path"];
 const URL: &[&str] = &["Url", "URL", "url"];
+const ALL_FILES_ADDED: &str = "_ticketdAllFilesAdded";
+const ADDED_LINES: &str = "_ticketdAddedLines";
 const INPUT_FIELDS: &[&[&str]] = &[
     COMMAND,
     WORKING_DIRECTORY,
@@ -107,25 +109,20 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     .is_none_or(|output| output.trim().is_empty()),
         },
         acp::ToolKind::Edit | acp::ToolKind::Move => {
-            let created: Vec<_> = diffs(&tool)
-                .filter(|diff| diff.old_text.is_none())
-                .collect();
-            if tool.kind == acp::ToolKind::Edit
-                && !created.is_empty()
-                && created.len() == diffs(&tool).count()
-            {
+            let all_files_added = input[ALL_FILES_ADDED].as_bool().unwrap_or_else(|| {
+                let mut diffs = diffs(&tool).peekable();
+                diffs.peek().is_some() && diffs.all(|diff| diff.old_text.is_none())
+            });
+            if tool.kind == acp::ToolKind::Edit && all_files_added {
                 StepAction::Create {
                     targets: FileTargets::Paths(
-                        created
-                            .iter()
+                        diffs(&tool)
                             .map(|diff| diff.path.to_string_lossy().into_owned())
                             .collect(),
                     ),
                     counts: LineCounts {
-                        added: tool
-                            .raw_input
-                            .as_ref()
-                            .and_then(|value| value["_ticketdAddedLines"].as_u64())
+                        added: input[ADDED_LINES]
+                            .as_u64()
                             .and_then(|lines| u32::try_from(lines).ok()),
                         removed: None,
                     },
@@ -290,18 +287,23 @@ impl Tool {
             })
             .collect();
 
-        if !self.files.is_empty()
-            && self
-                .files
-                .iter()
-                .all(|file| file.kind == FileChangeKind::Added)
-        {
-            let added = self
-                .files
-                .iter()
-                .filter_map(|file| file.added_lines)
-                .fold(0, u32::saturating_add);
-            native.raw_input.get_or_insert_with(|| json!({}))["_ticketdAddedLines"] = json!(added);
+        if native.kind == acp::ToolKind::Edit {
+            // The diff preview can omit modifications or be cleared to fit the budget.
+            let all_files_added = !self.files.is_empty()
+                && self
+                    .files
+                    .iter()
+                    .all(|file| file.kind == FileChangeKind::Added);
+            let input = native.raw_input.get_or_insert_with(|| json!({}));
+            input[ALL_FILES_ADDED] = json!(all_files_added);
+            if all_files_added {
+                let added = self
+                    .files
+                    .iter()
+                    .filter_map(|file| file.added_lines)
+                    .fold(0, u32::saturating_add);
+                input[ADDED_LINES] = json!(added);
+            }
         }
 
         let mut detail = serde_json::to_string(&native).unwrap_or_default();
