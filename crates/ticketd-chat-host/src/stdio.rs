@@ -743,6 +743,63 @@ mod tests {
                         Some(cwd),
                     )
                 };
+                if mode == "worker-rename-fails" {
+                    let log_dir = directory.join("logs");
+                    let logs = ticketd_diagnostics::DesktopLogs::open(
+                        &log_dir,
+                        ticketd_diagnostics::Config::default(),
+                    );
+                    assert!(logs.install());
+                    let mut io = {
+                        let span = tracing::info_span!("chat", chat_id = "chat-1");
+                        span.in_scope(|| selected(&work)).expect("spawn recorder")
+                    };
+                    let pending = std::fs::read_dir(directory)
+                        .expect("capture directory")
+                        .map(|entry| entry.expect("entry").path())
+                        .find(|path| path.extension().is_some_and(|ext| ext == "partial"))
+                        .expect("pending recording");
+                    // Block the final rename before closing the pipes that keep the worker alive.
+                    std::fs::create_dir(pending.with_extension("")).expect("block rename");
+                    let prompt = b"private synthetic prompt\n";
+                    io.stdin.write_all(prompt).await.expect("send");
+                    drop(io.stdin);
+                    let mut echoed = Vec::new();
+                    io.stdout.read_to_end(&mut echoed).await.expect("receive");
+                    assert_eq!(echoed, prompt);
+                    drop(io.stdout);
+                    assert_eq!(io.child.wait().await, Some(0));
+
+                    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                    while pending.exists() && std::time::Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    assert!(
+                        !pending.exists(),
+                        "worker should discard the failed recording"
+                    );
+                    let path = std::fs::read_dir(&log_dir)
+                        .expect("log directory")
+                        .map(|entry| entry.expect("entry").path())
+                        .find(|path| path.extension().is_some_and(|ext| ext == "log"))
+                        .expect("log file");
+                    let text = std::fs::read_to_string(path).expect("read log");
+                    let warning = text
+                        .lines()
+                        .map(|line| {
+                            serde_json::from_str::<serde_json::Value>(line).expect("JSON line")
+                        })
+                        .find(|line| line["message"] == "could not finish harness recording")
+                        .expect("recording warning");
+                    assert_eq!(warning["level"], "WARN");
+                    assert_eq!(warning["harness"], "codex");
+                    assert_eq!(warning["error_kind"], "IsADirectory");
+                    assert_eq!(warning["spans"][0]["name"], "chat");
+                    assert_eq!(warning["spans"][0]["chat_id"], "chat-1");
+                    assert!(!text.contains("private synthetic prompt"));
+                    assert!(!text.contains(directory.to_str().expect("capture path")));
+                    return;
+                }
                 if mode == "enabled" {
                     assert!(selected(directory).is_err());
                     let outside = directory.join("synthetic-outside.txt");
@@ -883,6 +940,9 @@ mod tests {
                 0o600
             );
         }
+        let failure_run = private_run();
+        std::fs::create_dir(failure_run.path().join("work")).expect("work folder");
+        invoke("worker-rename-fails", failure_run.path());
     }
 
     #[test]
