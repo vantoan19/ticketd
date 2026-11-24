@@ -1006,6 +1006,13 @@ impl Supervisor {
             let _ = reply.send(Err(HostError::InteractionExpired));
             return;
         };
+        // The harness still holds the native request if it refuses a mismatched answer.
+        if matches!(live.kind, InteractionKind::NativeApproval { .. })
+            && !matches!(answer, InteractionAnswer::NativeApproval(_))
+        {
+            let _ = reply.send(Err(HostError::InteractionExpired));
+            return;
+        }
         let response = match &answer {
             InteractionAnswer::Approval(ApprovalDecision::Allow) => "allow".to_owned(),
             InteractionAnswer::Approval(ApprovalDecision::AllowForSession) => {

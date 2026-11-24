@@ -11,11 +11,12 @@ use std::time::Duration;
 use ticketd_chat_host::records::{FILES_RECORD_NAME, PLAN_RECORD_NAME, REASONING_RECORD_NAME};
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, CONTEXT_RECORD_NAME, Capabilities,
-    Capability, ChatHost, ChatProblem, ChatUpdate, CloseOutcome, DELIVERY_CONFIRMATION_TIMEOUT,
-    DeliveryEvidence, EventKind, HarnessAdapter, HostError, INTERRUPT_TIMEOUT, InteractionAnswer,
-    InteractionKind, InteractionRequest, InteractionResolution, NativeItemId, NativeRequestId,
-    NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind, ProviderDetail, ResumeMode,
+    AGENT_CHANGES_RECORD_NAME, Activity, ApprovalDecision, ApprovalOption, CONTEXT_RECORD_NAME,
+    Capabilities, Capability, ChatHost, ChatProblem, ChatUpdate, CloseOutcome,
+    DELIVERY_CONFIRMATION_TIMEOUT, DeliveryEvidence, EventKind, HarnessAdapter, HostError,
+    INTERRUPT_TIMEOUT, InteractionAnswer, InteractionKind, InteractionRequest,
+    InteractionResolution, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId,
+    NoticeKind, Problem, ProblemKind, ProviderDetail, QuestionAnswer, ResumeMode,
     RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopReason, StopState,
     Submission, SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL,
     TEXT_UPDATE_INTERVAL, ToolStatus, TurnEnding, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener,
@@ -579,6 +580,73 @@ async fn only_the_first_of_two_answers_reaches_the_harness() {
     assert_eq!(stored.state, ChatInteractionState::Answered);
     assert_eq!(stored.response.as_deref(), Some("deny"));
     assert_eq!(f.live().await.interactions, vec![]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn incompatible_answers_leave_a_native_approval_waiting_for_its_option() {
+    let f = Fixture::new(FakeAdapter::new(
+        &ticketd_core::harnesses::ANTIGRAVITY,
+        Capabilities {
+            steering: Capability::Unsupported {
+                reason: String::new(),
+            },
+        },
+    ));
+    f.send("first").await;
+    let request = NativeRequestId::new("permission-1");
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: request.clone(),
+        turn: None,
+        item: None,
+        kind: InteractionKind::NativeApproval {
+            description: "Read the fixtures".to_owned(),
+            reason: None,
+            options: vec![ApprovalOption {
+                id: "permission-option-7".to_owned(),
+                label: "Allow".to_owned(),
+                warning: None,
+            }],
+        },
+        detail: None,
+    }))
+    .await;
+    let live = f.live().await;
+    let id = &live.interactions[0].interaction_id;
+
+    for answer in [
+        approve(ApprovalDecision::Allow),
+        InteractionAnswer::Answers(vec![QuestionAnswer {
+            question_id: "question-1".to_owned(),
+            values: vec!["yes".to_owned()],
+        }]),
+    ] {
+        let result = f.host.respond(&f.chat.id, id, answer).await;
+        assert_eq!(
+            f.fake.respond_calls(),
+            0,
+            "an incompatible answer reached the harness"
+        );
+        assert!(matches!(result, Err(HostError::InteractionExpired)));
+    }
+    assert_eq!(f.live().await.interactions, live.interactions);
+    assert!(f.items().iter().any(|item| matches!(
+        item,
+        ChatItem::Interaction(stored) if stored.id == *id && stored.state == ChatInteractionState::Pending
+    )));
+
+    let answer = InteractionAnswer::NativeApproval("permission-option-7".to_owned());
+    f.host
+        .respond(&f.chat.id, id, answer.clone())
+        .await
+        .unwrap();
+    assert_eq!(f.fake.respond_calls(), 1);
+    assert!(f.fake.written().iter().any(|command| matches!(
+        command, Written::Respond(response) if response.request == request && response.answer == answer
+    )));
+    assert!(f.items().iter().any(|item| matches!(
+        item,
+        ChatItem::Interaction(stored) if stored.id == *id && stored.state == ChatInteractionState::Answered
+    )));
 }
 
 #[tokio::test(start_paused = true)]
