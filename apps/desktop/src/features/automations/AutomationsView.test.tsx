@@ -81,6 +81,8 @@ beforeEach(() => {
       return created;
     };
     switch (command) {
+      case "list_projects":
+        return [];
       case "automation_list":
         return automations;
       case "automation_run_list_all":
