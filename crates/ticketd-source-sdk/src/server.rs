@@ -230,7 +230,7 @@ pub fn serve_stdio(version: &str, extension: impl Extension) -> io::Result<()> {
 }
 
 /// Serve the same protocol over supplied streams, for author-side conformance
-/// fixtures. Closing the reader cancels active work and ends the session.
+/// fixtures. Ending the session signals cancellation to any active work.
 pub fn serve(
     mut reader: impl BufRead,
     writer: impl Write + Send + 'static,
@@ -242,6 +242,7 @@ pub fn serve(
         writer: Mutex::new(writer),
         active: Mutex::new(None),
     });
+    let _cancel_on_exit = CancelOnExit(&session);
     let mut negotiated = false;
     let mut line = Vec::new();
     loop {
@@ -252,11 +253,9 @@ pub fn serve(
             .read_until(b'\n', &mut line)?
             == 0
         {
-            session.cancel(None);
             return Ok(());
         }
         if line.len() > LINE_LIMIT + 1 || line.last() != Some(&b'\n') {
-            session.cancel(None);
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "invalid source request frame",
@@ -361,6 +360,14 @@ fn request_id<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u64>,
     u64::deserialize(deserializer).map(Some)
 }
 
+struct CancelOnExit<'a, W: Write + Send + 'static>(&'a Session<W>);
+
+impl<W: Write + Send + 'static> Drop for CancelOnExit<'_, W> {
+    fn drop(&mut self) {
+        self.0.cancel(None);
+    }
+}
+
 struct Active {
     id: u64,
     canceled: Arc<AtomicBool>,
@@ -450,7 +457,7 @@ impl<W: Write + Send + 'static> Session<W> {
 
     fn cancel(&self, id: Option<u64>) {
         let active = if id.is_none() {
-            // EOF must end the process even when the host stopped draining stdout.
+            // Session teardown must finish even if the host stopped draining stdout.
             self.active.try_lock().ok()
         } else {
             self.active.lock().ok()

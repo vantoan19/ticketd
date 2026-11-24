@@ -159,7 +159,24 @@ fn sdk_negotiates_reports_progress_cancels_and_handles_the_next_call() {
         failure["error"]["data"]["message"],
         "this source does not support fetch"
     );
-    input.shutdown(std::net::Shutdown::Write).unwrap();
-    session.join().unwrap().unwrap();
-    assert_eq!(*seen.lock().unwrap(), ["fixture-2"]);
+    send(
+        &mut input,
+        "discover",
+        Some(6),
+        json!({"connection_id":"fixture-2","config":{},"cursor":null,"page_size":1}),
+    );
+    assert_eq!(receive(&mut output)["params"]["id"], 6);
+    // Malformed known requests must fail without stranding active extension work.
+    send(&mut input, "publish", Some(7), json!({}));
+    let failure = session.join().unwrap().unwrap_err();
+    assert_eq!(failure.kind(), std::io::ErrorKind::InvalidData);
+    assert_eq!(
+        receive(&mut output),
+        json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "error": {"code": -32800, "message": "request canceled", "data": null}
+        })
+    );
+    assert_eq!(*seen.lock().unwrap(), ["fixture-2", "fixture-2"]);
 }
