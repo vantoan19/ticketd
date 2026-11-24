@@ -750,6 +750,7 @@ pub enum InteractionKind {
 pub struct ApprovalOption {
     pub id: String,
     pub label: String,
+    pub warning: Option<String>,
 }
 
 impl InteractionKind {
