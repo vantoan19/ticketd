@@ -3,6 +3,10 @@ name: Quality
 on:
   workflow_dispatch:
   pull_request:
+    # `labeled` and `unlabeled` make adding or removing the ci-full label start a run that plans
+    # accordingly. Any other label change restarts the run too: skipping the planned jobs on a label
+    # event could let CI result pass untested.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
   push:
     branches: [main]
   schedule:
@@ -12,6 +16,12 @@ on:
 permissions:
   contents: read
 
+env:
+  # Line tables keep file and line numbers in panic backtraces; full debug info only made the
+  # build, the cache and every link larger.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+  CARGO_INCREMENTAL: "0"
+
 # A new push to a PR cancels that PR's superseded run. Every main commit gets its own group, so a
 # later merge never replaces a queued run and each main commit keeps its own result.
 concurrency:
@@ -19,6 +29,28 @@ concurrency:
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
+  plan:
+    # Decides which jobs this change needs; see scripts/ci-plan.mjs and ADR 0023. A path that
+    # matches no rule, a git failure, a push to main, the nightly run, a manual run and the
+    # ci-full label all plan every job. CI result fails unless the jobs followed the plan.
+    name: Change plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      frontend: ${{ steps.plan.outputs.frontend }}
+      rust: ${{ steps.plan.outputs.rust }}
+      plan: ${{ steps.plan.outputs.plan }}
+    steps:
+      # A pull request checks out its merge commit; HEAD^1 is the base branch tip.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - id: plan
+        env:
+          PLAN_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+        run: ./scripts/check plan HEAD^1
+
   fast:
     # Everything that compiles nothing, so formatting, lint and type errors report in minutes.
     name: Fast checks
@@ -31,14 +63,9 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/prepare
         with:
-          node-version: "22.23.4"
-          cache: npm
-      - name: Install pinned Rust toolchain
-        run: rustup show active-toolchain
-      - run: npm install --global npm@10.9.2
-      - run: npm ci
+          rust: true
       - run: ./scripts/check fast
       - name: Lint workflows
         env:
@@ -51,11 +78,49 @@ jobs:
           tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" actionlint
           "$RUNNER_TEMP/actionlint" -color
 
-  quality:
-    # PR code runs on a fresh GitHub-hosted VM. Clippy, Rust tests and the desktop build.
-    name: Quality checks (Linux)
+  clippy:
+    # Clippy has its own job, so it never waits for the tests and the tests never wait for it.
+    name: Clippy
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
     runs-on: ubuntu-24.04
-    # About 20 minutes without a warm cache: Clippy, test build, then 13 minutes of tests.
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+        with:
+          rust: true
+          desktop: true
+          cache: clippy
+      # Tauri embeds ../dist at compile time, so the frontend must be built before cargo runs.
+      - run: npm run build
+      - run: ./scripts/check clippy
+
+  rust:
+    # The Rust tests on all three release platforms, split into shards that run side by side.
+    # Every shard compiles its own tests and runs its share of them; the shards of one OS share
+    # one build cache. Shard 1 of each OS also runs the doc-tests; the last shard also builds the
+    # desktop and CLI, so the extra work is not all in one shard.
+    name: Rust tests (${{ matrix.name }} ${{ matrix.shard }}/${{ matrix.shards }})
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: Linux, os: ubuntu-24.04, shard: 1, shards: 1 }
+          - { name: macOS, os: macos-latest, shard: 1, shards: 2 }
+          - { name: macOS, os: macos-latest, shard: 2, shards: 2 }
+          - { name: Windows, os: windows-latest, shard: 1, shards: 3 }
+          - { name: Windows, os: windows-latest, shard: 2, shards: 3 }
+          - { name: Windows, os: windows-latest, shard: 3, shards: 3 }
+    runs-on: ${{ matrix.os }}
+    # A shard takes under 20 minutes with a warm cache; a cold cache on a PR adds the compile.
     timeout-minutes: 45
     defaults:
       run:
@@ -64,32 +129,38 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/prepare
         with:
-          node-version: "22.23.4"
-          cache: npm
-      - name: Install Linux desktop dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
-      - name: Install pinned Rust toolchain
-        run: rustup show active-toolchain
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          # Only main writes the cache. PRs read it and never fill the shared storage.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: npm install --global npm@10.9.2
-      - run: npm ci
+          rust: true
+          desktop: ${{ runner.os == 'Linux' }}
+          nextest: true
+          cache: test
       # Tauri embeds ../dist at compile time, so the frontend must be built before cargo runs.
       - run: npm run build
-      - run: ./scripts/check rust
+      - name: Test Rust workspace
+        run: ./scripts/check rust --partition ${{ matrix.shard }}/${{ matrix.shards }}
+      - name: Upload test report
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: junit-${{ matrix.name }}-${{ matrix.shard }}
+          path: target/nextest/ci/junit.xml
+          if-no-files-found: ignore
+          retention-days: 7
+      # This replaces target/debug/ticketd, which the tests built with a fixed device code.
       - name: Build desktop and CLI
+        if: matrix.shard == matrix.shards
         run: cargo build --workspace --locked
 
   ui:
-    # The frontend tests need no Rust build, so they run beside the Rust job.
-    name: Frontend tests
+    # The frontend tests need no Rust build, so they run beside the Rust jobs, in three shards.
+    name: Frontend tests (${{ matrix.shard }}/3)
+    needs: plan
+    if: needs.plan.outputs.frontend == 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     defaults:
@@ -99,28 +170,27 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22.23.4"
-          cache: npm
-      - run: npm install --global npm@10.9.2
-      - run: npm ci
-      - run: ./scripts/check ui
+      - uses: ./.github/actions/prepare
+      - run: ./scripts/check ui --partition ${{ matrix.shard }}/3
+      # The tests never bundle the app, so a broken vite.config.ts or a module that typechecks but
+      # does not bundle would pass. The Rust jobs build it too, but a frontend-only change skips them.
+      - name: Build the desktop frontend
+        if: matrix.shard == 1
+        run: npm run build
       - name: Build and check the GitHub Pages site
+        if: matrix.shard == 1
         run: |
           npm run build:docs
           node apps/docs/check-pages.mjs
 
-  platform:
-    # Rust tests and builds on the other two release platforms, for every PR and main commit.
-    name: Platform checks (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
-    # Windows runs the Rust tests for more than 30 minutes.
-    timeout-minutes: 60
+  pages:
+    # The nested GitHub Pages URLs differ on Windows, so the site is built and checked there. It
+    # needs only Node, so it runs beside the frontend tests whenever the site or its inputs change.
+    name: Windows Pages check
+    needs: plan
+    if: needs.plan.outputs.frontend == 'true'
+    runs-on: windows-latest
+    timeout-minutes: 20
     defaults:
       run:
         shell: bash
@@ -128,41 +198,28 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with:
-          node-version: "22.23.4"
-          cache: npm
-      - name: Install pinned Rust toolchain
-        run: rustup show active-toolchain
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: npm install --global npm@10.9.2
-      - run: npm ci
-      - run: npm run build
-      - name: Check Pages URLs on Windows
-        if: runner.os == 'Windows'
+      - uses: ./.github/actions/prepare
+      - name: Build and check the GitHub Pages site
         run: |
           npm run build:docs
           node apps/docs/check-pages.mjs
-      # Report every failing test binary, not only the first, so one run shows them all.
-      - name: Test Rust workspace
-        run: cargo test --workspace --locked --no-fail-fast
-      - name: Build desktop and CLI
-        run: cargo build --workspace --locked
 
   result:
-    # The one required check. It always reports, and fails unless every job above succeeded,
-    # so a failed, canceled or skipped job can never look like a pass.
+    # The one required check. It always reports. It passes only when the plan job succeeded,
+    # every job the plan asked for succeeded and every other job was skipped, so a failed,
+    # canceled or wrongly skipped job can never look like a pass.
     name: CI result
     if: always()
-    needs: [fast, quality, ui, platform]
+    needs: [plan, fast, clippy, rust, ui, pages]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:
       actions: read
+      contents: read
     steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Summarize run times
         env:
           GH_TOKEN: ${{ github.token }}
@@ -179,13 +236,7 @@ jobs:
               ($jobs[] | select(.completed_at != null and .started_at != null)
                 | "| \(.name) | \(.conclusion) | \((.started_at | t) - (.created_at | t) | mins) | \((.completed_at | t) - (.started_at | t) | mins) | \((.completed_at | t) - $start | mins) |")
           ' >> "$GITHUB_STEP_SUMMARY" || echo "::warning::Could not read job timings for the summary."
-      - name: Require every job to succeed
+      - name: Require the planned jobs to succeed and the rest to be skipped
         env:
-          RESULTS: ${{ toJSON(needs) }}
-        run: |
-          failed=$(jq -r 'to_entries[] | select(.value.result != "success") | "\(.key): \(.value.result)"' <<<"$RESULTS")
-          if [[ -n "$failed" ]]; then
-            while IFS= read -r line; do echo "::error::Required job did not succeed: $line"; done <<<"$failed"
-            exit 1
-          fi
-          echo "All required jobs succeeded."
+          NEEDS_JSON: ${{ toJSON(needs) }}
+        run: node scripts/ci-plan.mjs result

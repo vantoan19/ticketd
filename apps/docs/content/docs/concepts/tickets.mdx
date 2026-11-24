@@ -10,11 +10,11 @@ Documents.
 ## References
 
 Every ticket has a short reference that is unique in the workspace, such as
-`T-LG12`. The two uppercase letters identify the device that issued the reference. Use the value returned when creating your ticket. The reference stays with the ticket when it moves to another
+`T-RL12`. The two uppercase letters identify the device that issued the reference. Use the value returned when creating your ticket. The reference stays with the ticket when it moves to another
 project or Plan. Use it wherever a command asks for a ticket:
 
 ```sh
-ticketd show T-LG12
+ticketd show T-RL12
 ```
 
 ## Status
@@ -29,7 +29,7 @@ ticketd show T-LG12
 | Duplicate   | Describes the same outcome as another ticket.     |
 
 ```sh
-ticketd change T-LG12 --status "In review" --agent coding-agent
+ticketd change T-RL12 --status "In review" --agent coding-agent
 ```
 
 Changing one ticket's status never changes another ticket's status.
@@ -42,7 +42,7 @@ subticket does not finish the parent. A subticket can belong to a different
 project or Plan than its parent.
 
 ```sh
-ticketd set-parent T-LG14 --parent T-LG12
+ticketd set-parent T-RL14 --parent T-RL12
 ```
 
 Omit `--parent` to remove the parent.
@@ -53,7 +53,7 @@ Tags come from one vocabulary shared across the workspace. They are trimmed and
 lowercased, and adding a tag twice has no effect.
 
 ```sh
-ticketd add-tag T-LG12 security
+ticketd add-tag T-RL12 security
 ticketd list --tag security
 ```
 
@@ -68,10 +68,10 @@ ticket from inside a registered checkout, ticketd links it to that project. See
 When two tickets describe the same outcome, the canonical ticket carries the work. The duplicate keeps its own reference and history.
 
 ```sh
-ticketd preview-duplicate T-LG15 T-LG12
+ticketd preview-duplicate T-RL15 T-RL12
 ```
 
-If the preview lists no blocking dependencies, run `ticketd mark-duplicate T-LG15 T-LG12`. When it lists dependencies, review each one. You can move the edge to the canonical ticket, remove it, or keep it on the duplicate. Apply those decisions together in the desktop app or through a [reviewed CLI request](https://github.com/vantoan19/ticketd/blob/main/docs/cli.md#duplicates). A retained Duplicate blocker keeps its dependent waiting.
+If the preview lists no blocking dependencies, run `ticketd mark-duplicate T-RL15 T-RL12`. When it lists dependencies, review each one. You can move the edge to the canonical ticket, remove it, or keep it on the duplicate. Apply those decisions together in the desktop app or through a [reviewed CLI request](https://github.com/vantoan19/ticketd/blob/main/docs/cli.md#duplicates). A retained Duplicate blocker keeps its dependent waiting.
 
 ## Trash
 
@@ -79,9 +79,9 @@ Trashing removes a ticket from ordinary lists and from work selection. Nothing i
 deleted permanently: a trashed ticket keeps its relationships and can be restored.
 
 ```sh
-ticketd trash T-LG15
+ticketd trash T-RL15
 ticketd trash-list
-ticketd restore T-LG15
+ticketd restore T-RL15
 ```
 
 A trashed ticket must be restored before it can be edited.

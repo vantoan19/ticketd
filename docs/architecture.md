@@ -156,7 +156,7 @@ evidence, saved Chats benefit from reader improvements without a format change.
 ### Antigravity over ACP
 
 The Antigravity registration starts one `agy acp` process for a person's Chat
-([ADR 0023](adr/0023-antigravity-uses-acp-for-person-driven-chats.md)). Its
+([ADR 0024](adr/0024-antigravity-uses-acp-for-person-driven-chats.md)). Its
 dialogue uses the official ACP schema over the same JSON-RPC connection as
 Codex. The shared runtime tracks checked submissions, interruptions and
 live requests. ACP updates name a session, so the adapter accepts one
