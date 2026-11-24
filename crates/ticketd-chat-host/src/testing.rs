@@ -535,8 +535,8 @@ impl HarnessRuntime for FakeRuntime {
                 .is_some_and(|live| live.generation == self.generation)
             {
                 state.live = None;
-                state.written.push(Written::Close(self.generation));
             }
+            state.written.push(Written::Close(self.generation));
             state.close_outcome.clone()
         };
         // As with a real process: its event stream has ended before `close` returns.
