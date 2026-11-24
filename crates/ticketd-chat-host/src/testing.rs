@@ -4,19 +4,20 @@
 //! request, capability) itself. Tests script what the "harness" then does: reply,
 //! reject, stay silent, die, or reply late, and emit events at any point.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
 use tokio::sync::{mpsc, oneshot};
 
+use crate::runtime::RuntimeState;
 use crate::{
     Capabilities, Capability, CloseOutcome, DispatchOutcome, EVENT_BUFFER, EventKind, Harness,
     HarnessAdapter, HarnessOptions, HarnessRuntime, Inspection, InteractionResponse,
-    InterruptOutcome, InterruptRequest, LoginState, NativeRequestId, NativeTurnId, OpenRequest,
-    OpenedRuntime, Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration,
-    SettingChange, SettingOutcome, SteeringBehavior, Submission, SubmissionKind,
+    InterruptOutcome, InterruptRequest, LoginState, NativeTurnId, OpenRequest, OpenedRuntime,
+    Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SettingChange,
+    SettingOutcome, SteeringBehavior, Submission, SubmissionKind,
 };
 
 /// What the fake harness does with a submission after it was written.
@@ -83,8 +84,7 @@ enum ScriptedReply {
 struct Live {
     generation: RuntimeGeneration,
     events: mpsc::Sender<RuntimeEvent>,
-    active_turn: Option<NativeTurnId>,
-    pending_requests: HashSet<NativeRequestId>,
+    runtime: RuntimeState<()>,
 }
 
 impl State {
@@ -274,15 +274,22 @@ impl FakeAdapter {
                 return false;
             };
             match &kind {
-                EventKind::TurnStarted { turn } => live.active_turn = Some(turn.clone()),
-                EventKind::TurnEnded { turn, .. } if live.active_turn.as_ref() == Some(turn) => {
-                    live.active_turn = None;
+                EventKind::TurnStarted { turn } => live.runtime.turn_started(Some(turn)),
+                EventKind::TurnEnded { turn, outcome, .. } => {
+                    // The script provides the actual events. Update only the
+                    // lifecycle checked when the next command arrives.
+                    live.runtime
+                        .end_turn(turn.clone(), outcome.clone(), |_| Default::default());
                 }
                 EventKind::InteractionRequested(request) => {
-                    live.pending_requests.insert(request.request.clone());
+                    live.runtime.register_request(
+                        request.request.clone(),
+                        request.turn.as_ref(),
+                        (),
+                    );
                 }
                 EventKind::InteractionResolved { request, .. } => {
-                    live.pending_requests.remove(request);
+                    live.runtime.resolve_request(request);
                 }
                 _ => {}
             }
@@ -384,8 +391,7 @@ impl HarnessAdapter for FakeAdapter {
         state.live = Some(Live {
             generation: request.generation,
             events: sender,
-            active_turn: None,
-            pending_requests: HashSet::new(),
+            runtime: RuntimeState::default(),
         });
         let generation = request.generation;
         state.opens.push(request);
@@ -416,18 +422,8 @@ impl HarnessRuntime for FakeRuntime {
                 Ok(live) => live,
                 Err(refusal) => return DispatchOutcome::NotSent(refusal),
             };
-            match (&submission.kind, &live.active_turn) {
-                (SubmissionKind::Steer { .. }, _) if !steering => {
-                    return DispatchOutcome::NotSent(Refusal::Unsupported);
-                }
-                (SubmissionKind::StartTurn, None) => {}
-                (SubmissionKind::Steer { expected_turn }, Some(active))
-                    if expected_turn == active => {}
-                (_, active) => {
-                    return DispatchOutcome::NotSent(Refusal::TurnMismatch {
-                        active: active.clone(),
-                    });
-                }
+            if let Err(refusal) = live.runtime.check_submission(&submission.kind, steering) {
+                return DispatchOutcome::NotSent(refusal);
             }
             state.written.push(Written::Submit(submission.clone()));
             state.submit_replies.pop_front()
@@ -458,7 +454,7 @@ impl HarnessRuntime for FakeRuntime {
                     state.turns_started += 1;
                     let turn = NativeTurnId(format!("turn-{}", state.turns_started));
                     if let Some(live) = state.live.as_mut() {
-                        live.active_turn = Some(turn.clone());
+                        live.runtime.turn_started(Some(&turn));
                     }
                     DispatchOutcome::Acknowledged { turn }
                 }
@@ -477,8 +473,8 @@ impl HarnessRuntime for FakeRuntime {
                 Ok(live) => live,
                 Err(refusal) => return RespondOutcome::NotSent(refusal),
             };
-            if !live.pending_requests.remove(&response.request) {
-                return RespondOutcome::NotSent(Refusal::UnknownRequest);
+            if let Err(refusal) = live.runtime.answer(&response.request, |()| Ok(())) {
+                return RespondOutcome::NotSent(refusal);
             }
             state.written.push(Written::Respond(response));
             state.respond_holds.pop_front()
@@ -495,10 +491,8 @@ impl HarnessRuntime for FakeRuntime {
             Ok(live) => live,
             Err(refusal) => return InterruptOutcome::NotSent(refusal),
         };
-        if live.active_turn.as_ref() != Some(&request.expected_turn) {
-            return InterruptOutcome::NotSent(Refusal::TurnMismatch {
-                active: live.active_turn.clone(),
-            });
+        if let Err(refusal) = live.runtime.mark_interrupt(&request.expected_turn) {
+            return InterruptOutcome::NotSent(refusal);
         }
         state.written.push(Written::Interrupt(request));
         state
