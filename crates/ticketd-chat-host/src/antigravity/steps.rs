@@ -340,10 +340,16 @@ impl Tool {
         })
     }
 
-    pub(super) fn observed(&self, turn: NativeTurnId, declined: bool) -> (EventKind, bool) {
+    pub(super) fn observed(
+        &self,
+        turn: NativeTurnId,
+        declined: bool,
+        approval_cancelled: bool,
+    ) -> (EventKind, bool) {
         let status = match self.status() {
             _ if declined => ToolStatus::Declined,
             acp::ToolCallStatus::Completed => ToolStatus::Succeeded,
+            acp::ToolCallStatus::Failed if approval_cancelled => ToolStatus::FailedAfterInterrupt,
             acp::ToolCallStatus::Failed => ToolStatus::Failed,
             _ => ToolStatus::Running,
         };
