@@ -408,15 +408,15 @@ impl Supervisor {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(why, reply)) => {
                         self.shutting_down = true;
-                        let keep_recovery = why == StopReason::TurnedOff
-                            && self.permission_restart_pending
+                        let keep_permission_recovery = self.permission_restart_pending
                             && self.runtime.is_none()
                             && self.opening.is_none();
                         let unconfirmed = self.stop_runtime(why).await;
                         self.publish();
-                        if keep_recovery {
-                            // Leave the restart plan and any close handle in place.
-                            // Views reattach after Chat is enabled again.
+                        if why == StopReason::TurnedOff
+                            && (keep_permission_recovery || self.pending_runtime_loss.is_some())
+                        {
+                            // Keep recovery state for when Chat is enabled again.
                             self.subscribers.clear();
                             self.queue_started = false;
                             let _ = reply.send(unconfirmed);
