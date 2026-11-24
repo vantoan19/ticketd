@@ -32,7 +32,7 @@ Choose a workspace backup when you want to restore tickets and their history.
 ## Sync two desktops with Google Drive
 
 1. On the computer with the workspace you want to keep, open **Settings →
-   Google Drive** and choose **Connect Google Drive**. Sign in to the account
+   Workspace sync**, choose **Google Drive**, then **Connect Google Drive**. Sign in to the account
    you will use on both computers. Sync writes readable, unencrypted files to
    that Drive, so check who can access the folder.
 2. For a workspace you're syncing for the first time, select **Upload this
@@ -44,5 +44,7 @@ Choose a workspace backup when you want to restore tickets and their history.
 4. Open a ticket on the second computer and compare its reference with the
    first. Changes sync while the desktop app is open. If both computers edit
    the same field, open **Needs review** to choose the content to keep.
+
+To sync through an S3 bucket instead, see [S3 sync setup](install.md#s3-sync-setup).
 
 [What syncs and what stays local](../PRIVACY.md#workspace-sync) · [How Workspace sync handles changes](product.md#workspace-sync)

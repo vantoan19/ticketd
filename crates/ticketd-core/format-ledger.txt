@@ -1144,3 +1144,16 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 
 ## 97
 + column publication_attempts.destination_site_unconfirmed
+
+## 98
++ column sync_state.aws_cli_path
++ column sync_state.aws_profile
++ column sync_state.last_bucket
++ column sync_state.last_prefix
++ column sync_state.last_provider
++ column sync_state.provider
++ column sync_state.s3_bucket
++ column sync_state.s3_prefix
+
+## 99
++ column sync_state.s3_endpoint

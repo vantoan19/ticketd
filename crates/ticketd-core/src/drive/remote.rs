@@ -16,8 +16,8 @@ use super::{
     CredentialStore, DriveError, DriveErrorKind, DriveResponse, DriveTransport, valid_file_id,
 };
 use crate::sync::remote::{
-    RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey, RemoteKind, RemoteRevision,
-    RemoteStorage, digest, invalid_identifier, valid_identifier,
+    RemoteCapabilities, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
+    RemoteKind, RemoteRevision, RemoteStorage, digest, invalid_identifier, valid_identifier,
 };
 
 const API: &str = "https://www.googleapis.com/drive/v3";
@@ -580,6 +580,14 @@ impl<'a> DriveRemote<'a> {
 }
 
 impl RemoteStorage for DriveRemote<'_> {
+    fn capabilities(&self) -> RemoteCapabilities {
+        // The update checks `headRevisionId` and then uploads: not atomic.
+        RemoteCapabilities {
+            conditional_writes: false,
+            keeps_revisions: true,
+        }
+    }
+
     fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError> {
         let entries = self.query(&format!(
             "mimeType='{FOLDER}' and {} and trashed=false",

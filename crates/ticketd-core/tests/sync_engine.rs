@@ -10,7 +10,7 @@ use ticketd_core::{
     ActivityFeedEntry, Error, RecordKind, Status, SyncKind, SyncValue, TicketPatch, Workspace,
     sync::{
         SyncChoice, SyncNoticeKind, SyncRecovery, SyncResolution, SyncState,
-        remote::{RemoteError, RemoteKey, RemoteKind, RemoteOp, RemoteStorage},
+        remote::{RemoteCapabilities, RemoteError, RemoteKey, RemoteKind, RemoteOp, RemoteStorage},
     },
 };
 
@@ -663,6 +663,30 @@ fn an_upload_that_replaced_an_unseen_change_from_another_device_merges_it_back()
         assert_eq!(ticket.title, "Sign in");
         assert_eq!(ticket.tags, ["urgent"]);
         assert_eq!(workspace.sync_conflicts().unwrap(), []);
+    }
+}
+
+#[test]
+fn an_update_reads_revisions_only_when_the_storage_can_let_a_write_slip_in() {
+    for (conditional, revisions_reads) in [(false, 1), (true, 0)] {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("Login");
+        devices.remote.set_capabilities(RemoteCapabilities {
+            conditional_writes: conditional,
+            keeps_revisions: true,
+        });
+        let before = devices.remote.calls().len();
+        devices.workspaces[0]
+            .change_ticket(&reference, title("Sign in"))
+            .unwrap();
+
+        assert_eq!(devices.sync(0).uploaded, 1);
+
+        let reads = devices.remote.calls()[before..]
+            .iter()
+            .filter(|op| **op == RemoteOp::Revisions)
+            .count();
+        assert_eq!(reads, revisions_reads, "conditional_writes: {conditional}");
     }
 }
 

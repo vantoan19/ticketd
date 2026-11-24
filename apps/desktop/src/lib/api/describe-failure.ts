@@ -65,7 +65,11 @@ export function sentence(text: string): string {
   return /[.!?…]$/.test(result) ? result : `${result}.`;
 }
 
-function plainCause(code: FailureCode, message: string): string {
+function plainCause(
+  code: FailureCode,
+  message: string,
+  readable: boolean,
+): string {
   switch (code) {
     case "workspace_read_only":
       return "The workspace is read-only, so nothing changed.";
@@ -76,7 +80,10 @@ function plainCause(code: FailureCode, message: string): string {
     case "workspace_unreadable":
       return "ticketd can't read the workspace file. Nothing changed.";
     case "not_found":
-      return "It was deleted or moved.";
+      // The S3 bucket check says which bucket is missing, in words for people.
+      return readable && sentence(message)
+        ? sentence(message)
+        : "It was deleted or moved.";
     case "conflict":
       return "It changed elsewhere since it was loaded. Nothing was overwritten.";
     case "project_source_host_mismatch":
@@ -126,6 +133,10 @@ function plainCause(code: FailureCode, message: string): string {
     case "publication_still_running":
       return "Publication is still running. Wait and check again.";
     default:
+      // A caller whose host messages are worded for people (the S3 setup says
+      // what to fix: a bad bucket name, a missing bucket) shows its own text.
+      if (readable && code === "failed" && sentence(message))
+        return sentence(message);
       // An unclassified host message can contain paths, diagnostics or secrets.
       // The write may have committed before its reply failed, so make no
       // claim that nothing changed; the action-specific title names the request.
@@ -171,17 +182,20 @@ function nextStep(code: FailureCode): FailureDescription["action"] {
 /**
  * Describes a failure for people. `action` is what did not happen, as a verb
  * phrase: "archive Docs launch", "save the title", "load Documents".
+ * `readable` says the host worded an unclassified (`failed`) message for people
+ * and names what to fix, so it is the sentence instead of the generic one.
  */
 export function describeFailure(
   reason: unknown,
   action: string,
+  { readable = false }: { readable?: boolean } = {},
 ): FailureDescription {
   const failure = toFailure(reason);
   const code = failure.kind;
   return {
     code,
     title: `Couldn't ${action}`,
-    sentence: plainCause(code, failure.message),
+    sentence: plainCause(code, failure.message, readable),
     action: nextStep(code),
     details: failure.message,
   };

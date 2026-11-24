@@ -81,6 +81,8 @@ export function bridgeDefault(
       return {
         connection: "not_connected",
         account: null,
+        provider: "google_drive",
+        s3: null,
         folder: null,
         state: "saved_locally",
         last_synced_at: null,

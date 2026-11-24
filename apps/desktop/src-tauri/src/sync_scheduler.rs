@@ -85,13 +85,24 @@ fn failure(tick: &Result<Option<SyncStatus>, Error>) -> Option<Failure> {
             kind: error.kind().code(),
             message: error.to_string(),
         }),
-        Ok(Some(status)) if status.recovery == Some(SyncRecovery::Error) => Some(Failure {
-            kind: "sync_recovery",
-            message: status
-                .recovery_message
-                .clone()
-                .unwrap_or_else(|| "unknown failure".into()),
-        }),
+        Ok(Some(status))
+            if matches!(
+                status.recovery,
+                Some(
+                    SyncRecovery::Error
+                        | SyncRecovery::ServiceChanged
+                        | SyncRecovery::CliUnavailable
+                )
+            ) =>
+        {
+            Some(Failure {
+                kind: "sync_recovery",
+                message: status
+                    .recovery_message
+                    .clone()
+                    .unwrap_or_else(|| "unknown failure".into()),
+            })
+        }
         Ok(_) => None,
     }
 }
@@ -267,7 +278,9 @@ impl Scheduler {
     /// One last run before quitting, given `limit` to finish. Returns what is
     /// still waiting to upload, as the first of them and how many there are:
     /// none when everything reached the storage or the Workspace does not
-    /// sync. A failed upload is reported the same way.
+    /// sync. A failed upload is reported the same way. A session that already
+    /// ended is not tried: nothing uploads before the person signs in again, so
+    /// quitting does not wait for it.
     pub fn flush(
         self: &Arc<Self>,
         now: Duration,
@@ -276,6 +289,13 @@ impl Scheduler {
         let Some(binding) = self.binding()? else {
             return Ok((Vec::new(), 0));
         };
+        let pending = || {
+            let status = (self.open)()?.sync_status()?;
+            Ok((status.pending_uploads, status.pending_total))
+        };
+        if (self.open)()?.sync_status()?.recovery == Some(SyncRecovery::AuthorizationExpired) {
+            return pending();
+        }
         let (done, finished) = mpsc::channel();
         let scheduler = Arc::clone(self);
         let spawned = std::thread::Builder::new()
@@ -288,8 +308,7 @@ impl Scheduler {
         if spawned.is_ok() {
             let _ = finished.recv_timeout(limit);
         }
-        let status = (self.open)()?.sync_status()?;
-        Ok((status.pending_uploads, status.pending_total))
+        pending()
     }
 
     /// Starts sync for as long as the app runs: `at_launch` once, then a tick
@@ -347,8 +366,8 @@ mod tests {
         sync::{
             SyncRecovery,
             remote::{
-                FakeRemote, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
-                RemoteOp, RemoteRevision,
+                FakeRemote, RemoteCapabilities, RemoteContent, RemoteError, RemoteFile,
+                RemoteFolder, RemoteKey, RemoteOp, RemoteRevision,
             },
         },
     };
@@ -364,6 +383,12 @@ mod tests {
     }
 
     impl RemoteStorage for Gated {
+        fn capabilities(&self) -> RemoteCapabilities {
+            self.inner.capabilities()
+        }
+        fn check_usable(&self) -> Result<(), RemoteError> {
+            self.inner.check_usable()
+        }
         fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError> {
             self.inner.folders()
         }
@@ -737,6 +762,53 @@ mod tests {
             desk.scheduler.flush(Duration::ZERO, EXIT_LIMIT).unwrap(),
             (vec![], 0)
         );
+    }
+
+    #[test]
+    fn a_session_that_ends_asks_for_sign_in_keeps_saving_and_uploads_after_signing_in() {
+        let desk = desk();
+        desk.scheduler.tick(Duration::ZERO).unwrap();
+        let stored = desk.remote.list(&desk.folder).unwrap().len();
+        desk.workspace().create_ticket("Second").unwrap();
+        // The session ended since the last run: the storage cannot be reached.
+        desk.remote
+            .fail(RemoteOp::List, 1, RemoteError::Unauthorized);
+        let status = desk.scheduler.sync_now(SECOND).unwrap().unwrap();
+        assert_eq!(status.recovery, Some(SyncRecovery::AuthorizationExpired));
+        let titles: Vec<_> = status
+            .pending_uploads
+            .iter()
+            .map(|i| i.title.as_str())
+            .collect();
+        assert_eq!(titles, ["Second"]);
+
+        // Local saving carries on, and nothing here asked the person anything.
+        desk.workspace().create_ticket("Third").unwrap();
+        assert_eq!(desk.pending(), 2);
+
+        // Signing in again: the recovery run uploads what waited.
+        let status = desk.scheduler.recover(2 * SECOND).unwrap().unwrap();
+        assert_eq!((status.recovery, status.pending_uploads.len()), (None, 0));
+        assert_eq!(desk.remote.list(&desk.folder).unwrap().len(), stored + 2);
+    }
+
+    #[test]
+    fn quitting_does_not_try_a_session_that_already_ended() {
+        let desk = desk();
+        desk.scheduler.tick(Duration::ZERO).unwrap();
+        desk.workspace().create_ticket("Second").unwrap();
+        desk.remote
+            .fail(RemoteOp::List, 1, RemoteError::Unauthorized);
+        desk.scheduler.sync_now(SECOND).unwrap();
+
+        // A storage that would hold the flush until its limit, were it asked.
+        let (open, reached) = gate(&desk);
+        let started = Instant::now();
+        let (pending, total) = desk.scheduler.flush(2 * SECOND, EXIT_LIMIT).unwrap();
+        assert!(started.elapsed() < EXIT_LIMIT / 2);
+        assert_eq!((pending.len(), total), (1, 1));
+        assert!(reached.try_recv().is_err(), "the storage was asked");
+        drop(open);
     }
 
     #[test]

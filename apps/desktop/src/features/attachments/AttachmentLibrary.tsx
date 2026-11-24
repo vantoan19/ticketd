@@ -652,7 +652,7 @@ function FileRow({
 }: {
   row: AttachmentSearchResult;
   availability: Availability | undefined;
-  /** Until the desktop's copies are known, a file in Drive is not called missing. */
+  /** Until the desktop's copies are known, a file in the sync storage is not called missing. */
   availabilityKnown: boolean;
   open: boolean;
   tabbable: boolean;

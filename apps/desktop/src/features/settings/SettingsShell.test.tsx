@@ -150,7 +150,10 @@ test("the nav lists the groups and sections in order with Experimental on the Ch
     ]);
   expect(groups).toEqual([
     ["Preferences", ["Appearance", "Attention"]],
-    ["Workspace", ["Location", "Attachments", "Backups", "Export"]],
+    [
+      "Workspace",
+      ["Location", "Workspace sync", "Attachments", "Backups", "Export"],
+    ],
     ["Agents", ["Command line", "Agent skills", "Chat"]],
     ["Connections", ["Google Drive", "Sources"]],
     ["Help", ["Keyboard shortcuts", "Diagnostics", "About"]],

@@ -69,7 +69,7 @@ Restoring a backup disconnects the Workspace from its sync folder: the folder is
 
 ## History
 
-Each device keeps earlier versions of tickets and Documents in its own database: whenever a local edit or an incoming sync replaces one, the previous version is saved. Versions are kept for 30 days and the current version always. Restoring a version is an ordinary edit, which then syncs. Versions themselves do not sync; a newly added desktop reads a record's earlier versions from Drive's own file revisions on request.
+Each device keeps earlier versions of tickets and Documents in its own database: whenever a local edit or an incoming sync replaces one, the previous version is saved. Versions are kept for 30 days and the current version always. Restoring a version is an ordinary edit, which then syncs. Versions themselves do not sync; a newly added desktop reads a record's earlier versions from Drive's own file revisions on request. A revision whose content equals a version the desktop keeps is that version as uploaded, so History lists it once, as the desktop's own.
 
 This history is also what makes keeping the local value on a same-field conflict, and accepting hand edits from Drive, safe: an overwritten value can be recovered for 30 days.
 
@@ -88,5 +88,5 @@ This ADR governs only what happens between devices. The last-synced copy is a sy
 - A desktop writes its run token to the device list once per app session, on its first run after launch. A run with nothing to send writes nothing to Drive.
 - Change discovery lists the whole folder and compares file versions. This is adequate for one person's Workspace and is the first thing to revisit if a Workspace outgrows it.
 - Personal state stays on each device: Attention inbox read state, checkout paths, credentials, window layout, unfinished drafts and upload queues.
-- The remote side sits behind a narrow file-storage interface with a Google Drive adapter. Other storage providers are not planned.
+- The remote side sits behind a narrow file-storage interface with a Google Drive adapter. [ADR 0018](0018-s3-sync-storage-signed-in-through-the-aws-cli.md) adds an S3 adapter.
 - A later paid ticketd cloud may use a stronger protocol with server-side ordering, accounts and encryption. Nothing here builds it; GUID identity and device-scoped references are the parts intended to carry over.

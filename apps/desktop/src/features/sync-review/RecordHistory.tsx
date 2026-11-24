@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Skeleton } from "@/components/ui/skeleton";
+import { storageName } from "@/features/sync/storage-name";
 import { useSyncStatus } from "@/features/sync/sync-status";
 import { formatTime } from "@/lib/format";
 import {
@@ -35,20 +36,24 @@ const same = (a: Chosen | null, b: Chosen | null) =>
 
 /**
  * Where a version came from, then the fields in which it differs from the
- * current one: what selecting it shows. Drive does not say which desktop wrote
- * a revision, and nothing records where the oldest kept version came from.
+ * current one: what selecting it shows. The storage does not say which desktop
+ * wrote a version, and nothing records where the oldest kept version came from.
  */
-function versionLabel(kind: VersionedKind, entry: Entry): string {
-  const drive = entry.source === "drive";
+function versionLabel(
+  kind: VersionedKind,
+  entry: Entry,
+  storage: string,
+): string {
+  const remote = entry.source !== "local";
   const fields = entry.changed.map((field) => fieldLabel(kind, field));
   return [
-    drive
-      ? "Google Drive"
+    remote
+      ? `Kept in ${storage}`
       : entry.oldest
         ? "Earliest version kept"
         : (entry.device ?? "This desktop"),
-    // Drive's versions are not read for the list, so theirs are not known.
-    ...(fields.length || drive ? fields : ["Same as now"]),
+    // The storage's versions are not read for the list, so theirs are not known.
+    ...(fields.length || remote ? fields : ["Same as now"]),
   ].join(" · ");
 }
 
@@ -66,9 +71,9 @@ function byDay(versions: Entry[], now: Date) {
 /**
  * History of a ticket or Document: earlier versions on the left, the selected
  * one beside the current one on the right, Restore as the one action, newest
- * first. Google Drive's revisions of the file are read when asked for, or at
- * once on a desktop that has no versions yet, and listed among this desktop's
- * own by time.
+ * first. The storage's versions of the file (Google Drive revisions, S3 object
+ * versions) are read when asked for, or at once on a desktop that has no
+ * versions yet, and listed among this desktop's own by time.
  */
 export function RecordHistory({
   kind,
@@ -85,11 +90,18 @@ export function RecordHistory({
   onRestored?: () => void;
 }) {
   const presence = useDialogPresence(onClose);
-  const connected = useSyncStatus().status?.connection === "connected";
+  const { status } = useSyncStatus();
+  const connected = status?.connection === "connected";
+  const storage = storageName(status?.provider);
+  /** Where the older versions are read from, named after the Workspace's storage. */
+  const remote: VersionSource = status?.provider === "s3" ? "s3" : "drive";
   const [local, setLocal] = useState<Entry[] | null>(null);
-  /** `null` until Drive was asked and answered. */
-  const [drive, setDrive] = useState<Entry[] | null>(null);
+  /** `null` until the storage was asked and answered. */
+  const [older, setOlder] = useState<Entry[] | null>(null);
   const [asking, setAsking] = useState(false);
+  const list = useRef<HTMLElement>(null);
+  // Set while older versions are asked for: the button goes away with the answer.
+  const moveFocus = useRef(false);
   const [selected, setSelected] = useState<Chosen | null>(null);
   const [detail, setDetail] = useState<{
     version: Chosen;
@@ -99,6 +111,13 @@ export function RecordHistory({
     failure: FailureDescription;
     retry: () => void;
   } | null>(null);
+  // Each source starts without the failure of a read of the one before it. Adjusted while
+  // rendering, which React does before it shows anything.
+  const [errorOf, setErrorOf] = useState(remote);
+  if (errorOf !== remote) {
+    setErrorOf(remote);
+    setError(null);
+  }
   const [readAttempt, setReadAttempt] = useState(0);
   const reload = useCallback(() => {
     setError(null);
@@ -129,17 +148,17 @@ export function RecordHistory({
       setLocal(found);
       setSelected(found[0] ?? null);
       if (found.length > 0) return;
-      // Nothing kept here yet: Drive is asked without waiting to be. Without
+      // Nothing kept here yet: the storage is asked without waiting to be. Without
       // sync it answers with nothing earlier. When it cannot be asked, saying
       // so beats claiming there are no versions.
       try {
-        const older = from(
-          "drive",
-          await syncReview.versions({ kind, id, source: "drive" }),
+        const found = from(
+          remote,
+          await syncReview.versions({ kind, id, source: remote }),
         );
         if (!active) return;
-        setDrive(older);
-        setSelected(older[0] ?? null);
+        setOlder(found);
+        setSelected(found[0] ?? null);
       } catch (reason) {
         if (active)
           setError({
@@ -151,18 +170,38 @@ export function RecordHistory({
     return () => {
       active = false;
     };
-  }, [kind, id, readAttempt, reload]);
-  async function older() {
+  }, [kind, id, remote, readAttempt, reload]);
+  // The button that asked goes away with the answer, which would drop focus on the
+  // page: it goes to the first version that loaded, or else to the list. Focus the
+  // person moved to another control meanwhile stays there.
+  useEffect(() => {
+    if (older === null || !moveFocus.current) return;
+    moveFocus.current = false;
+    const active = document.activeElement;
+    // The button leaving drops focus on the body or the dialog; a field it moved to stays.
+    if (
+      active?.matches(
+        "button, a, input, textarea, select, [contenteditable]",
+      ) &&
+      !list.current?.contains(active)
+    )
+      return;
+    const first = list.current?.querySelector<HTMLElement>("[data-older]");
+    (first ?? list.current)?.focus();
+  }, [older]);
+  async function askOlder() {
+    moveFocus.current = true;
     setAsking(true);
     setError(null);
     try {
-      setDrive(
-        from("drive", await syncReview.versions({ kind, id, source: "drive" })),
+      setOlder(
+        from(remote, await syncReview.versions({ kind, id, source: remote })),
       );
     } catch (reason) {
+      moveFocus.current = false;
       setError({
         failure: describeFailure(reason, "load older versions"),
-        retry: () => void older(),
+        retry: () => void askOlder(),
       });
     }
     setAsking(false);
@@ -211,11 +250,11 @@ export function RecordHistory({
     }
   }
   const now = new Date();
-  // Shown once this desktop answered and, where it keeps nothing, Drive did too.
-  const loaded = local !== null && (local.length > 0 || drive !== null);
-  const fromDrive = local !== null && !loaded;
+  // Shown once this desktop answered and, where it keeps nothing, the storage did too.
+  const loaded = local !== null && (local.length > 0 || older !== null);
+  const fromStorage = local !== null && !loaded;
   // The two sources overlap in time, and a day gets one heading.
-  const versions = [...(local ?? []), ...(drive ?? [])].sort(
+  const versions = [...(local ?? []), ...(older ?? [])].sort(
     (a, b) => Date.parse(b.timestamp) - Date.parse(a.timestamp),
   );
   const chosen = versions.find((entry) => same(entry, selected));
@@ -223,8 +262,8 @@ export function RecordHistory({
   const blockedReason = !loaded
     ? error
       ? ""
-      : fromDrive
-        ? "Loading versions from Google Drive…"
+      : fromStorage
+        ? `Loading versions from ${storage.full}…`
         : "Loading versions…"
     : versions.length === 0
       ? "Nothing to restore yet"
@@ -240,24 +279,24 @@ export function RecordHistory({
       cancelLabel="Close"
       blockedReason={blockedReason}
       footerNote={
-        (chosen ?? versions[0])?.source === "drive"
-          ? "From Google Drive. Restoring adds a new version; nothing is lost."
+        (chosen ?? versions[0])?.source !== "local"
+          ? `From ${storage.full}. Restoring adds a new version; nothing is lost.`
           : "Kept for 30 days. Restoring adds a new version; nothing is lost."
       }
-      onSubmit={() => void restore()}
-      size="lg"
-      busy={busy}
-    >
-      <div className="sync-history-feedback">
-        {error && (
+      error={
+        error && (
           <FailureState
             failure={error.failure}
             onRetry={error.retry}
             size="inline"
             detailsVariant="popover"
           />
-        )}
-      </div>
+        )
+      }
+      onSubmit={() => void restore()}
+      size="lg"
+      busy={busy}
+    >
       <div className="sync-history">
         {!loaded ? (
           !error && (
@@ -266,8 +305,8 @@ export function RecordHistory({
                 className="sync-history-list"
                 role="status"
                 aria-label={
-                  fromDrive
-                    ? "Loading versions from Google Drive"
+                  fromStorage
+                    ? `Loading versions from ${storage.full}`
                     : "Loading versions"
                 }
               >
@@ -293,7 +332,12 @@ export function RecordHistory({
           </div>
         ) : (
           <>
-            <nav className="sync-history-list" aria-label="Versions">
+            <nav
+              className="sync-history-list"
+              aria-label="Versions"
+              ref={list}
+              tabIndex={-1}
+            >
               <ul>
                 <li>
                   <button
@@ -316,34 +360,37 @@ export function RecordHistory({
                         <button
                           type="button"
                           className="sync-version"
+                          data-older={entry.source !== "local" || undefined}
                           aria-current={same(entry, selected) || undefined}
                           onClick={() =>
                             setSelected({ source: entry.source, id: entry.id })
                           }
                         >
                           <span>{formatTime(new Date(entry.timestamp))}</span>
-                          <small>{versionLabel(kind, entry)}</small>
+                          <small>
+                            {versionLabel(kind, entry, storage.full)}
+                          </small>
                         </button>
                       </li>
                     ))}
                   </ul>
                 </Fragment>
               ))}
-              {drive === null && connected && (
+              {older === null && connected && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   disabled={asking}
-                  onClick={() => void older()}
+                  onClick={() => void askOlder()}
                 >
                   {asking
-                    ? "Loading from Google Drive…"
-                    : "Older versions from Drive"}
+                    ? `Loading from ${storage.full}…`
+                    : `Older versions from ${storage.short}`}
                 </Button>
               )}
-              {drive?.length === 0 && (
-                <p role="status">No older versions in Google Drive</p>
+              {older?.length === 0 && (
+                <p role="status">No older versions in {storage.full}</p>
               )}
             </nav>
             <div className="sync-history-detail">

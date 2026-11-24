@@ -350,7 +350,7 @@ function AppContent() {
   useSyncNavigation({
     openSettings: () => {
       openView("settings");
-      setSettingsSection("google-drive");
+      setSettingsSection("workspace-sync");
     },
     // A record that needs review has an Inbox entry that opens its comparison.
     openReview: () => openView("inbox"),

@@ -273,7 +273,7 @@ fn known_values_are_replaced_wherever_they_appear_and_ids_are_not() {
     let mut line = event(
         &day,
         "WARN",
-        "could not open /Users/jdoe/Drive/Work for jdoe@example.com",
+        "could not open /Users/jdoe/Drive/Work for jdoe@example.com; User: arn:aws:sts::123456789012:assumed-role/Admin/jdoe is not authorized on arn:aws:iam::123456789012:role/Sync",
     );
     line["target"] = "ticketd_core::sync".into();
     line["chat_id"] = "chat-jdoe-1".into();
@@ -285,6 +285,7 @@ fn known_values_are_replaced_wherever_they_appear_and_ids_are_not() {
         os_username: Some("jdoe".into()),
         workspace_path: Some("/Users/jdoe/Drive/Work".into()),
         drive_email: Some("jdoe@example.com".into()),
+        aws_identity: Some("arn:aws:sts::123456789012:assumed-role/Admin/jdoe".into()),
     };
     facts.workspace.quick_check = "failed at /Users/jdoe/Drive/Work/ticketd.db".into();
 
@@ -293,14 +294,19 @@ fn known_values_are_replaced_wherever_they_appear_and_ids_are_not() {
     let files = read_zip(&exported.path);
     let log = file(&files, &format!("logs/ticketd.{day}.log"));
     assert!(
-        log.contains("could not open <workspace> for <drive-account>"),
+        log.contains("could not open <workspace> for <drive-account>; User: <aws-identity> is not authorized on arn:aws:iam::<aws-account>:role/Sync"),
         "{log}"
     );
     // An ID is kept as it is, even where it contains the username.
     assert!(log.contains("chat-jdoe-1"), "{log}");
     assert!(file(&files, "workspace.json").contains("<workspace>/ticketd.db"));
     for (name, text) in &files {
-        for secret in ["/Users/jdoe", "jdoe@example.com"] {
+        for secret in [
+            "/Users/jdoe",
+            "jdoe@example.com",
+            "123456789012",
+            "assumed-role/Admin",
+        ] {
             assert!(!text.contains(secret), "{secret} in {name}");
         }
     }

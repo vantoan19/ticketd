@@ -1106,7 +1106,8 @@ fn made_no_earlier(created: &str, known: Option<&str>) -> bool {
 /// The text of a version another device wrote between this device's last sync
 /// and its update, when the storage accepted the update anyway. Drive checks
 /// the expected version just before it uploads, so a write landing in between
-/// is replaced as the current version and only its revision remains.
+/// is replaced as the current version and only its revision remains. Not
+/// needed when the storage's writes are conditional.
 fn replaced_revision(
     remote: &dyn RemoteStorage,
     folder: &str,
@@ -1688,7 +1689,11 @@ impl Workspace {
                     note_replaced(&self.connection, kind, &dirty.id)?;
                     withdraw_oversized(&self.connection, kind, &dirty.id)?;
                     let replaced = match stored.version.as_deref() {
-                        Some(expected) if expected != file.version => {
+                        // A conditional write was refused if anything had slipped in.
+                        Some(expected)
+                            if expected != file.version
+                                && !remote.capabilities().conditional_writes =>
+                        {
                             replaced_revision(remote, folder, &key, expected, &file.version)?
                         }
                         _ => None,

@@ -231,6 +231,7 @@ export const JOBS = {
   rust: { name: "Rust tests", lane: "rust" },
   ui: { name: "Frontend tests", lane: "frontend" },
   pages: { name: "Windows Pages check", lane: "frontend" },
+  minio: { name: "S3 storage (MinIO)", lane: "rust" },
 };
 
 function readPlan(needs) {

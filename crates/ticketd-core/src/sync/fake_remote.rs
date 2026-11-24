@@ -6,8 +6,8 @@ use std::io::{SeekFrom, Write};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use super::remote::{
-    RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey, RemoteRevision, RemoteStorage,
-    invalid_identifier, valid_identifier,
+    RemoteCapabilities, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
+    RemoteRevision, RemoteStorage, invalid_identifier, valid_identifier,
 };
 
 /// The operations of [`RemoteStorage`], for failure injection.
@@ -60,6 +60,7 @@ struct FakeState {
     omitted: Vec<RemoteKey>,
     unseen: Vec<(RemoteKey, Vec<u8>)>,
     removed: Vec<(String, RemoteKey, FakeFile)>,
+    capabilities: RemoteCapabilities,
 }
 
 /// In-memory [`RemoteStorage`] for engine tests: one fake is one storage
@@ -79,6 +80,11 @@ impl Default for FakeRemote {
             omitted: Vec::new(),
             unseen: Vec::new(),
             removed: Vec::new(),
+            // Like Drive until a test says otherwise.
+            capabilities: RemoteCapabilities {
+                conditional_writes: false,
+                keeps_revisions: true,
+            },
         })))
     }
 }
@@ -170,6 +176,12 @@ impl FakeRemote {
         }
     }
 
+    /// What this storage declares from now on. The fake's writes are always
+    /// checked atomically; this changes only what the sync engine assumes of them.
+    pub fn set_capabilities(&self, capabilities: RemoteCapabilities) {
+        self.state().capabilities = capabilities;
+    }
+
     /// The time stamped on files made and revisions written from now on (RFC 3339).
     pub fn set_now(&self, now: &str) {
         self.state().now = now.into();
@@ -242,6 +254,10 @@ fn fake_file(key: &RemoteKey, file: &FakeFile) -> Option<RemoteFile> {
 }
 
 impl RemoteStorage for FakeRemote {
+    fn capabilities(&self) -> RemoteCapabilities {
+        self.state().capabilities
+    }
+
     fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError> {
         let (state, _) = self.begin(RemoteOp::Folders)?;
         Ok(state

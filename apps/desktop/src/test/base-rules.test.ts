@@ -81,3 +81,13 @@ it("gives unclassed text in the body and every overlay the working role", () => 
   expect(base?.body).toContain("font-size: var(--text-ui)");
   expect(base?.body).toContain("line-height: var(--text-ui-line)");
 });
+
+it("the settings page keeps its scrollbar gutter, so a longer page does not shift its column", () => {
+  // jsdom has no layout; a classic scrollbar appearing narrows the column by ~8px.
+  const layout = readFileSync(
+    join(__dirname, "..", "features/settings/layout/settings-layout.css"),
+    "utf8",
+  );
+  const page = /\.settings-page\s*\{([^}]*)\}/.exec(layout)?.[1] ?? "";
+  expect(page).toMatch(/scrollbar-gutter:\s*stable/);
+});

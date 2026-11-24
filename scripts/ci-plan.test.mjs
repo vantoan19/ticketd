@@ -375,6 +375,7 @@ const allSuccess = {
   fast: "success",
   clippy: "success",
   rust: "success",
+  minio: "success",
   ui: "success",
   pages: "success",
 };
@@ -391,6 +392,7 @@ test("verdict: a docs-only run passes when only the fast checks ran", () => {
     fast: "success",
     clippy: "skipped",
     rust: "skipped",
+    minio: "skipped",
     ui: "skipped",
     pages: "skipped",
   };
@@ -405,6 +407,7 @@ test("verdict: a frontend-only run passes with the Rust lane skipped", () => {
     fast: "success",
     clippy: "skipped",
     rust: "skipped",
+    minio: "skipped",
     ui: "success",
     pages: "success",
   };
@@ -426,6 +429,7 @@ test("verdict: an unplanned job that ran fails, because the plan and the workflo
     fast: "success",
     clippy: "skipped",
     rust: "skipped",
+    minio: "skipped",
     ui: "success",
     pages: "skipped",
   };
@@ -437,6 +441,7 @@ test("verdict: the Windows Pages check is planned with the frontend lane, so a s
     fast: "success",
     clippy: "skipped",
     rust: "skipped",
+    minio: "skipped",
     ui: "success",
     pages: "skipped",
   };
@@ -450,6 +455,7 @@ test("verdict: the Windows Pages check is planned with the frontend lane, so a s
         fast: "success",
         clippy: "skipped",
         rust: "skipped",
+        minio: "skipped",
         ui: "skipped",
         pages: "success",
       }),
@@ -469,6 +475,7 @@ test("verdict: a failed or cancelled job always fails, planned or not", () => {
       fast: "success",
       clippy: "skipped",
       rust: "skipped",
+      minio: "skipped",
       ui: result,
       pages: "skipped",
     };
@@ -571,6 +578,7 @@ test("cli result: exits 0 when the plan was followed", () => {
     fast: "success",
     clippy: "skipped",
     rust: "skipped",
+    minio: "skipped",
     ui: "skipped",
     pages: "skipped",
   });

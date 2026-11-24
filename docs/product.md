@@ -501,26 +501,33 @@ discovery leaves its Project remote on the project.
 ### Workspace sync
 
 A person using ticketd on several desktops gets the same Workspace content and
-managed Attachments on each through their own Google Drive. Every desktop keeps its
-own local Workspace and stays usable offline. There is no ticketd account, server, or
-subscription ([ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md);
-[sync file format](sync-file-format.md)).
+managed Attachments on each through their own Google Drive or their own S3 bucket.
+Every desktop keeps its own local Workspace and stays usable offline. There is no
+ticketd account, server, or subscription
+([ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md);
+[ADR 0018](adr/0018-s3-sync-storage-signed-in-through-the-aws-cli.md);
+[sync file format](sync-file-format.md)). A Workspace has one storage. Everything
+below applies to both unless it names one.
 
-- **Storage.** One visible Drive folder holds one Markdown file per ticket, Document,
-  Plan, and project; a ticket's Activities and evidence are sections of its file.
+- **Storage.** One visible folder, in Drive or under a prefix in the bucket, holds one
+  Markdown file per ticket, Document, Plan, and project; a ticket's Activities and evidence are sections of its file.
   Attachments are ordinary files. Content is stored unencrypted, and the live SQLite
   database is never synchronized. Inbox read state, checkout paths, credentials, source
   settings, window layout, drafts, and upload queues stay local.
-- **Setup.** After connecting Drive, the person uploads this Workspace or downloads an
-  existing one (after a safety backup). Independent Workspaces are never merged
+- **Setup.** Settings > Workspace sync starts with the choice of Google Drive or S3.
+  After connecting, the person uploads this Workspace or downloads an existing one
+  (after a safety backup). Independent Workspaces are never merged
   automatically. A joining desktop takes a fresh device code when needed so references
-  never clash. Disconnecting deletes nothing, and the same account can reconnect to
-  its folder. Restoring a backup disconnects the Workspace from Drive.
+  never clash. Disconnecting deletes nothing, and the same account (or, for S3, the
+  same bucket and prefix) can reconnect to its folder. Restoring a backup disconnects
+  the Workspace from its storage. To move from Drive to S3, disconnect Drive and
+  upload the Workspace to a bucket; there is no migration.
 - **When it runs.** While the desktop is open: at launch and reconnect, by polling
-  Drive (every minute by default), shortly after a save, and on Sync now. Exit makes a
-  bounded attempt to upload pending changes. The CLI never contacts Drive; its changes
-  upload when the desktop next runs. Local saving continues through outages and
-  expired authorization.
+  the storage (every minute by default), shortly after a save, and on Sync now. Exit
+  makes a bounded attempt to upload pending changes. The CLI never contacts the
+  storage; its changes upload when the desktop next runs. Local saving continues
+  through outages and expired authorization. The status line and its states work the
+  same for both storages and name the one in use.
 - **Conflicts.** Each desktop compares both sides with its last-synced copy. Different
   fields combine; tags and other sets combine additions and removals. If the same
   field changed on both, the local value is kept and the record is marked Needs
@@ -532,7 +539,79 @@ subscription ([ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md);
   skipped with a Needs attention notice.
 - **Version history.** Each desktop keeps the previous version of a ticket or Document
   whenever an edit or incoming sync replaces it, for 30 days. A History view compares
-  versions, and restoring one is an ordinary edit.
+  versions, and restoring one is an ordinary edit. A desktop that never had a version
+  reads earlier ones from Drive's revisions or the bucket's object versions.
+
+#### S3
+
+An S3 bucket is a second storage for Workspace sync. It is for people who keep their
+data in AWS, or in an S3-compatible service such as MinIO or Ceph, and would rather
+not use a Google account. Drive references and uploaded copies stay Google Drive only.
+Setup, IAM permissions and the lifecycle rule are in
+[S3 sync setup](install.md#s3-sync-setup).
+
+- **Sign-in.** ticketd uses the AWS CLI v2 (2.13 or later) the person already has and
+  one of its profiles, so IAM Identity Center (SSO), assumed roles, MFA and
+  credential helpers work as in a terminal. It runs the CLI for the profile list and
+  short-lived credentials, keeps those credentials in memory only, asks for fresh ones
+  before they expire, and stores no AWS secret: not in the operating system's secure
+  store, a backup or the Workspace. It sends the S3 requests itself, never through the
+  CLI. When the CLI is missing or too old, or the machine has no profile, setup says
+  what to install or create (`aws configure sso` or `aws configure`), and the person
+  can choose the `aws` program when it is not found.
+- **Setup.** In Settings > Workspace sync the person chooses S3, picks a profile,
+  chooses Sign in when the profile needs it (it runs `aws sso login`, or `aws login`
+  for a profile set up that way, and opens the browser), then chooses the bucket and a
+  key prefix (`ticketd/` by default). The bucket is picked from a list when the
+  profile may list buckets and typed otherwise. The bucket's region comes from the
+  bucket, and the endpoint of an S3-compatible service from the profile. Then Choose a
+  workspace (Upload, Download, Reconnect), First sync, and In sync follow, as with
+  Drive. A second desktop uses its own profile, under any name, that reaches the same
+  bucket.
+- **Bucket check.** Before the first Upload, Download or Reconnect, ticketd checks the
+  bucket and refuses one that cannot sync safely, with a message that says what to
+  fix: Versioning off or suspended, no conditional writes (a second create with
+  `If-None-Match: *` must be refused), a missing permission, a KMS key the profile
+  cannot use, a missing bucket, or an unsupported bucket type such as an S3 directory
+  bucket. It leaves one small `.ticketd-bucket-check` object under the prefix, because
+  sync never deletes. A failed check can be tried again after the fix.
+- **Which services.** AWS S3, MinIO and Ceph RGW 20.x are confirmed; the MinIO
+  contract tests run in CI. Cloudflare R2 (no Versioning), the Google Cloud Storage XML
+  API (it ignores conditional headers) and S3 directory buckets are refused. Because a
+  list of services goes out of date, every bucket is checked at setup. Reading an
+  endpoint of a profile that has a `services` section needs AWS CLI 2.34.22; an older
+  CLI asks the person to update it, and a profile without that section works with any
+  supported CLI.
+- **Folder layout.** The bucket holds the same record folders as Drive, one readable
+  Markdown file per record, but keyed by GUID, since an S3 key cannot be renamed
+  without deleting. The readable name is the object's download name in the console.
+  Attachments over 16 MiB upload in parts and resume after an interruption from the
+  last finished part. A Markdown file uploaded by hand with `aws s3 cp` counts as an
+  edit from another device once it validates.
+- **Conflicting writes.** A write to S3 fails instead of replacing a file another
+  desktop just changed, so that change goes through the normal merge. Versioning keeps
+  every version of a file, which History uses.
+- **One service per bucket.** ticketd remembers which S3 service (AWS or an
+  S3-compatible endpoint) the Workspace's bucket was connected through. If the
+  profile is edited to reach another one, sync stops with a message that the profile
+  now points to another service, and starts again when the profile points back. To
+  move a bucket on purpose, Disconnect, then connect again. A Workspace connected
+  before this was remembered takes the profile's service the next time sync works.
+- **Ended sign-in.** When the AWS session ends (an IAM Identity Center session lasts
+  8 hours by default), the status line and the Workspace sync page show Sign in to AWS
+  again, with a Sign in button, and no dialog interrupts the person. Changes keep
+  saving on this computer and upload after sign-in. Quitting does not wait on an ended
+  session. A profile with static access keys has no session to end.
+- **Connected view.** The page shows the AWS identity ticketd uses (from STS), the
+  bucket, prefix and profile, and either Open in AWS console (AWS buckets) or Copy
+  `s3://` address (any other endpoint), plus the desktop's own settings and
+  Disconnect. A missing bucket folder, throttling and no network show the same
+  recovery states as Drive, worded for S3.
+- **Cost and encryption.** The person pays their provider for requests, storage and
+  kept versions. Content is stored as ticketd wrote it, unencrypted by ticketd;
+  encryption at rest is the bucket's configuration. A lifecycle rule that expires
+  noncurrent versions after more than 30 days keeps storage and listing costs bounded
+  and leaves History intact; ticketd recommends it and never sets it.
 
 ### Backup, restore, and export
 

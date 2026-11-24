@@ -1643,7 +1643,7 @@ test("a Drive download that replaces the Workspace drops the old selection and a
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Google Drive" }),
+    ).getByRole("button", { name: "Workspace sync" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
   fireEvent.click(
@@ -9461,7 +9461,7 @@ test("first run reads completed steps and opens the exact existing Settings sect
     ).getByRole("button", { name: "Set up" }),
   );
   expect(
-    await screen.findByRole("heading", { level: 1, name: "Google Drive" }),
+    await screen.findByRole("heading", { level: 1, name: "Workspace sync" }),
   ).toBeTruthy();
   expect(
     bridge.invoke.mock.calls.some(([command]) =>
@@ -10031,7 +10031,7 @@ test("Capture keeps its editor open if the browser cannot verify a text draft", 
 
 test.each([
   ["Agent skills", "Agent skills"],
-  ["Google Drive sync", "Google Drive"],
+  ["Workspace sync", "Workspace sync"],
 ])(
   "first run's %s action is also reachable in the palette",
   async (command, heading) => {
@@ -10265,7 +10265,7 @@ test("Drive save Retry retains the unsaved interval and repeats its assignment",
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Google Drive" }),
+    ).getByRole("button", { name: "Workspace sync" }),
   );
   const interval = await screen.findByRole("textbox", {
     name: "Check for changes every",

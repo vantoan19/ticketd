@@ -18,6 +18,8 @@ import { TicketFiles } from "@/features/tickets/TicketFiles";
 import type { Ticket } from "@/lib/api/client";
 import { TestOpenTicket } from "@/features/tickets/open-ticket/testing";
 import { fakeChangeSignal } from "@/lib/workspace-reads/fake-signal";
+import { SyncStatusContext } from "@/features/sync/sync-status";
+import { syncStatus } from "@/features/sync/sync-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
@@ -154,6 +156,26 @@ test("the preview of a file that is not downloaded offers Download in place of t
     0,
   );
   expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+});
+
+test("the preview of a file waiting in S3 names S3, not Google Drive", async () => {
+  render(
+    <SyncStatusContext
+      value={{
+        status: syncStatus({ provider: "s3" }),
+        apply: () => {},
+        refresh: () => Promise.reject(new Error("unused")),
+        openSettings: () => {},
+        openReview: () => {},
+      }}
+    >
+      <AttachmentPreview target={{ id: "a" }} onClose={() => {}} />
+    </SyncStatusContext>,
+  );
+  expect(
+    await screen.findByText("This file is in your S3 bucket."),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Google Drive/)).toBeNull();
 });
 
 test("with Attachments downloaded when opened, opening one that is not here downloads it and shows progress", async () => {

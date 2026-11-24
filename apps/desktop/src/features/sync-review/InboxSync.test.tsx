@@ -11,7 +11,8 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { hostFailure } from "@/features/sync/sync-fixtures";
+import { hostFailure, syncStatus } from "@/features/sync/sync-fixtures";
+import { SyncStatusContext } from "@/features/sync/sync-status";
 import {
   syncReview,
   type ConflictSummary,
@@ -340,4 +341,46 @@ test("a failed mark as read says what the host reported", async () => {
   );
   await revealFailureDetails();
   expect(screen.getByText(/the Workspace is busy/)).toBeTruthy();
+});
+
+test("file notices of an S3 binding name the object and the bucket, not Drive", async () => {
+  vi.mocked(syncReview.conflicts).mockResolvedValue([]);
+  vi.mocked(syncReview.notices).mockResolvedValue([
+    {
+      kind: "unreadable_file",
+      id: "notice-5",
+      timestamp: hours(1),
+      read: false,
+      path: "tickets/T-MW21.md",
+      reason: "unknown field 'priority' in a ticket",
+    },
+    {
+      kind: "replaced_file",
+      id: "notice-6",
+      timestamp: hours(2),
+      read: false,
+      path: "tickets/T-MW22.md",
+      reason: "unknown field 'priority' in a ticket",
+    },
+  ]);
+  render(
+    <SyncStatusContext
+      value={{
+        status: syncStatus({ provider: "s3" }),
+        apply: () => {},
+        refresh: () => Promise.reject(new Error("unused")),
+        openSettings: () => {},
+        openReview: () => {},
+      }}
+    >
+      <Inbox revision={0} select={select} onBrowse={vi.fn()} />
+    </SyncStatusContext>,
+  );
+  await screen.findByText("An S3 object could not be read");
+  expect(
+    entryOf("An S3 object was replaced").getByText(
+      /the earlier object is in the bucket's version history/,
+    ),
+  ).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/drive/i);
 });

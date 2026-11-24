@@ -20,9 +20,10 @@ pub use engine::{
 };
 pub(crate) use engine::{migrate_source_state_conflicts, removed_by_sync};
 pub use setup::{
-    AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, SetupOptions,
-    SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem, SyncRecovery,
-    SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
+    AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, S3Binding,
+    SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem,
+    SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
+    s3_service_changed,
 };
 
 pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
@@ -40,6 +41,16 @@ pub(crate) fn migrate_unchanged_tickets(
     connection: &rusqlite::Connection,
 ) -> Result<(), crate::Error> {
     capture::migrate_unchanged_tickets(connection)
+}
+
+/// Format version 99: see `setup::migrate_endpoint`.
+pub(crate) fn migrate_endpoint(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_endpoint(connection)
+}
+
+/// Format version 98: see `setup::migrate_provider`.
+pub(crate) fn migrate_provider(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_provider(connection)
 }
 
 /// The sync destination and Attachment transfer state (format version 59).

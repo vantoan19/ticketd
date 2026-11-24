@@ -15,6 +15,8 @@ mod drive_commands;
 mod folder_probe;
 #[cfg(test)]
 mod runtime_trace;
+mod s3_commands;
+mod s3_storage;
 mod sync_commands;
 mod sync_scheduler;
 mod updates;
@@ -2581,6 +2583,13 @@ pub fn run() -> Result<(), tauri::Error> {
             diagnostics_commands::diagnostics_summary,
             diagnostics_commands::diagnostics_export,
             sync_commands::sync_connect,
+            s3_commands::s3_profiles,
+            s3_commands::s3_choose_cli,
+            s3_commands::s3_identity,
+            s3_commands::s3_sign_in,
+            s3_commands::s3_buckets,
+            s3_commands::sync_connect_s3,
+            s3_commands::s3_folder_links,
             sync_commands::sync_setup_options,
             sync_commands::sync_upload_workspace,
             sync_commands::sync_reconnect,
