@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -378,6 +379,44 @@ test("a long bucket name stays inside its field", async () => {
   // The field keeps its width; the text is cut with an ellipsis.
   expect(trigger.className).toContain("w-60");
   expect(trigger.textContent).toContain(long);
+  // Cut with an ellipsis (a truncating box of its own, since the trigger is a flex row),
+  // and the whole name on hover.
+  expect(trigger.getAttribute("title")).toBe(long);
+  const text = within(trigger).getByText(long);
+  expect(text.className).toContain("truncate");
+});
+
+test("a bucket typed in can go back to the list when the profile lists buckets", async () => {
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(["alpha"]);
+  show();
+  await choose(
+    await screen.findByRole("combobox", { name: "Bucket" }),
+    "Another bucket…",
+  );
+  expect(
+    ((await screen.findByLabelText("Bucket")) as HTMLElement).tagName,
+  ).toBe("INPUT");
+  fireEvent.click(screen.getByRole("button", { name: "Choose from the list" }));
+  await choose(
+    await screen.findByRole("combobox", { name: "Bucket" }),
+    "alpha",
+  );
+  expect(
+    screen.queryByRole("button", { name: "Choose from the list" }),
+  ).toBeNull();
+});
+
+test("a profile that may not list buckets has no list to go back to", async () => {
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(null);
+  show();
+  await screen.findByLabelText("Bucket");
+  expect(
+    screen.queryByRole("button", { name: "Choose from the list" }),
+  ).toBeNull();
 });
 
 test("the sync commands go over the bridge with the host's names", async () => {

@@ -14,6 +14,30 @@ export type RecoveryCopy = {
   working: string | null;
 };
 
+/** The state of a connected Workspace in a word, with the tone of its dot. */
+export function connectionState(status: SyncStatus): {
+  tone: "positive" | "neutral" | "attention";
+  label: string;
+} {
+  switch (status.recovery) {
+    case null:
+      return { tone: "positive", label: "Connected" };
+    case "offline":
+      return { tone: "neutral", label: "Offline" };
+    case "rate_limited":
+      return { tone: "neutral", label: "Slowed down" };
+    case "authorization_expired":
+      return { tone: "attention", label: "Signed out" };
+    case "folder_missing":
+      return { tone: "attention", label: "Folder missing" };
+    case "storage_full":
+      return { tone: "attention", label: "Storage full" };
+    case "service_changed":
+    case "error":
+      return { tone: "attention", label: "Not syncing" };
+  }
+}
+
 /** Wording for what stopped sync; `null` while nothing did. */
 export function recoveryCopy(status: SyncStatus): RecoveryCopy | null {
   const waiting = pendingCount(status);

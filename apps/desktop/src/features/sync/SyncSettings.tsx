@@ -716,8 +716,9 @@ function Connected({ status }: { status: SyncStatus }) {
   if (status.provider === "s3")
     return (
       <>
-        {status.recovery && <RecoveryNotice status={status} />}
+        {/* After the card whose state it explains, so the card does not move when it comes. */}
         <S3Place status={status} />
+        {status.recovery && <RecoveryNotice status={status} />}
         <DesktopSettings />
         <Disconnect status={status} />
       </>

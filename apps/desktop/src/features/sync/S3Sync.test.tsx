@@ -362,6 +362,24 @@ test("a stopped service can still be retried once the profile points back", asyn
   expect(await screen.findByText("Connected")).toBeTruthy();
 });
 
+test("the state of the connection agrees with the notice, and the notice sits below it so nothing above it moves", async () => {
+  api.status.mockResolvedValue(
+    connected({ state: "saved_locally", recovery: "offline" }),
+  );
+  show();
+  const notice = await screen.findByRole("alert");
+  const label = document.querySelector('[data-slot="status-label"]')!;
+  // Not a green Connected beside an Offline card.
+  expect(label.textContent).toBe("Offline");
+  expect(label.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe(
+    "neutral",
+  );
+  // The card is where it was; the notice comes after it, not before.
+  expect(
+    label.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
 test("disconnecting from a bucket says what stays", async () => {
   api.status.mockResolvedValue(connected());
   api.disconnect.mockResolvedValue(

@@ -238,6 +238,10 @@ export function S3Setup() {
                 setBucket("");
                 setTyping(true);
               }}
+              onList={() => {
+                setBucket("");
+                setTyping(false);
+              }}
             />
           }
         />
@@ -376,6 +380,7 @@ function BucketField({
   typing,
   onChange,
   onOther,
+  onList,
 }: {
   buckets: string[] | null | undefined;
   signedIn: boolean;
@@ -383,6 +388,8 @@ function BucketField({
   typing: boolean;
   onChange: (value: string) => void;
   onOther: () => void;
+  /** Back to the list, when the profile lists buckets. */
+  onList: () => void;
 }) {
   if (signedIn && buckets === undefined)
     return <Skeleton className="h-10 w-60" />;
@@ -397,11 +404,12 @@ function BucketField({
         <SelectTrigger id="s3-bucket" className="w-60" title={value}>
           <SelectValue placeholder="Choose a bucket" />
         </SelectTrigger>
-        <SelectContent>
+        {/* A long name does not widen the list past the window; it is cut, whole on hover. */}
+        <SelectContent className="max-w-80">
           <SelectGroup>
             {buckets.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
+              <SelectItem key={name} value={name} title={name}>
+                <span className="min-w-0 truncate">{name}</span>
               </SelectItem>
             ))}
             <SelectItem value={OTHER_BUCKET}>Another bucket…</SelectItem>
@@ -410,17 +418,24 @@ function BucketField({
       </Select>
     );
   return (
-    <Input
-      id="s3-bucket"
-      className="w-60"
-      value={value}
-      disabled={!signedIn}
-      placeholder="my-bucket"
-      spellCheck={false}
-      autoComplete="off"
-      autoFocus={typing}
-      onChange={(event) => onChange(event.target.value)}
-    />
+    <div className="flex flex-col items-end gap-1">
+      <Input
+        id="s3-bucket"
+        className="w-60"
+        value={value}
+        disabled={!signedIn}
+        placeholder="my-bucket"
+        spellCheck={false}
+        autoComplete="off"
+        autoFocus={typing}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {typing && (
+        <Button variant="ghost" size="sm" onClick={onList}>
+          Choose from the list
+        </Button>
+      )}
+    </div>
   );
 }
 
