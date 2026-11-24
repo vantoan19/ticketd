@@ -389,8 +389,10 @@ function scrub(frames, input) {
     checkDiscriminator(update.sessionUpdate);
   }
 
-  return frames.map(({ direction, frame }) => ({
-    [direction]: visit(
+  const originalIds = new Map();
+  return frames.map(({ direction, frame }) => {
+    const wireFields = envelopeFields(frame, direction);
+    const scrubbed = visit(
       frame,
       null,
       "",
@@ -418,9 +420,17 @@ function scrub(frames, input) {
         }
         return /^[A-Za-z_$][\w$]*$/.test(key) ? key : replaceText(key);
       },
-      envelopeFields(frame, direction),
-    ),
-  }));
+      wireFields,
+    );
+    if (wireFields?.has("id") && typeof frame.id === "string") {
+      const previous = originalIds.get(scrubbed.id);
+      if (previous !== undefined && previous !== frame.id) {
+        throw new CaptureError("Scrubbing would produce duplicate RPC IDs.");
+      }
+      originalIds.set(scrubbed.id, frame.id);
+    }
+    return { [direction]: scrubbed };
+  });
 }
 
 try {

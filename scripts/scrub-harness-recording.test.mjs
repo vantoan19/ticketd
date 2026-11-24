@@ -515,6 +515,43 @@ test("rejects a dictionary when account alias redaction would duplicate a key", 
   assert.equal(existsSync(output), false);
 });
 
+test("rejects a scrubbed RPC ID that would collide with another request", (t) => {
+  const { output, scrub } = capture(t);
+  const alias = "syntheticRpcOwner";
+  const result = scrub([
+    [1, line({ id: alias, method: "initialize" })],
+    [1, line({ id: "fixture-account-1", method: "session/new" })],
+    [2, line({ id: alias, result: { account: { displayName: alias } } })],
+    [2, line({ id: "fixture-account-1", result: {} })],
+  ]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "Scrubbing would produce duplicate RPC IDs.\n");
+  assert.equal(existsSync(output), false);
+});
+
+test("preserves RPC correlation in both directions and keeps string and numeric IDs distinct", (t) => {
+  const { output, scrub } = capture(t);
+  const alias = "syntheticRpcOwner";
+  const result = scrub([
+    [1, line({ id: alias, method: "initialize" })],
+    [2, line({ id: "7", method: "session/request_permission" })],
+    [1, line({ id: 7, method: "session/new" })],
+    [2, line({ id: alias, result: { account: { displayName: alias } } })],
+    [1, line({ id: "7", result: {} })],
+    [2, line({ id: 7, result: {} })],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const frames = readFileSync(output, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map(JSON.parse);
+  assert.deepEqual(
+    frames.map(({ client, server }) => (client ?? server).id),
+    ["fixture-account-1", "7", 7, "fixture-account-1", "7", 7],
+  );
+});
+
 test("rejects frames with integers the scrubber cannot preserve", (t) => {
   const { output, scrub } = capture(t);
   const result = scrub([
