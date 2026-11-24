@@ -305,7 +305,7 @@ impl Workspace {
                     s.failing_since, s.retry_after, s.partial_message, s.last_checked_tickets, NULL
              FROM (SELECT provider FROM source_status UNION SELECT provider FROM external_identities) p
              LEFT JOIN source_status s ON s.provider = p.provider
-             WHERE NOT EXISTS (SELECT 1 FROM source_connections c WHERE c.provider = p.provider)
+               AND NOT EXISTS (SELECT 1 FROM source_connections c WHERE c.provider = p.provider)
              ORDER BY 1, 10",
         )?;
         let sources = super::configured_sources(&self.connection)?;
@@ -326,7 +326,7 @@ impl Workspace {
                 count.1 += 1;
             }
         }
-        let rows = statement
+        let mut rows = statement
             .query_map([], |row| {
                 let code: Option<String> = row.get(3)?;
                 let message: Option<String> = row.get(4)?;
@@ -363,7 +363,30 @@ impl Workspace {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        rows.retain(|status| {
+            status.connection_id.is_some()
+                || status.tracked_tickets > 0
+                || !sources
+                    .iter()
+                    .any(|source| source.saved.provider == status.provider)
+        });
         Ok(rows)
+    }
+
+    pub(super) fn source_schedule(&self) -> Result<Vec<(String, u64)>, Error> {
+        self.read(|workspace| {
+            let mut statement = workspace.connection.prepare(
+                "SELECT c.id, CAST(strftime('%s', s.retry_after) AS INTEGER)
+                 FROM source_connections c LEFT JOIN source_connection_status s ON s.connection_id = c.id
+                 ORDER BY c.rowid",
+            )?;
+            Ok(statement
+                .query_map([], |row| {
+                    let hold: Option<i64> = row.get(1)?;
+                    Ok((row.get(0)?, hold.and_then(|time| u64::try_from(time).ok()).unwrap_or(0)))
+                })?
+                .collect::<Result<Vec<_>, _>>()?)
+        })
     }
 
     /// The latest time, in seconds since the Unix epoch, before which any source

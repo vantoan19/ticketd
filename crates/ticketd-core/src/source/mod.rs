@@ -1363,20 +1363,18 @@ pub(crate) fn forget_connections(connection: &Connection) -> Result<(), Error> {
     } else if crate::backup::table_exists(connection, "source_configurations")? {
         connection.execute_batch("DELETE FROM source_configurations")?;
     }
-    for (table, column) in [
-        ("source_sync", "discovery_matches"),
-        ("source_status", "read_partitions"),
-    ] {
-        let has_column: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
-            [table, column],
-            |row| row.get(0),
+    if crate::backup::table_exists(connection, "source_status")? {
+        connection.execute_batch("DELETE FROM source_status")?;
+    }
+    let has_discovery_matches: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('source_sync') WHERE name = 'discovery_matches')",
+        [],
+        |row| row.get(0),
+    )?;
+    if has_discovery_matches {
+        connection.execute_batch(
+            "UPDATE source_sync SET discovery_matches = NULL WHERE discovery_matches IS NOT NULL",
         )?;
-        if has_column {
-            connection.execute_batch(&format!(
-                "UPDATE {table} SET {column} = NULL WHERE {column} IS NOT NULL"
-            ))?;
-        }
     }
     connection.execute_batch("VACUUM")?;
     Ok(())
@@ -1503,6 +1501,36 @@ pub(crate) fn retain_connections(
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params_from_iter(values),
         )?;
+    }
+    let mut ticket_bindings = current.prepare(
+        "SELECT a.ticket_id, a.connection_id, i.provider, i.external_id, i.url
+         FROM source_connection_tickets a
+         JOIN source_connections c ON c.id = a.connection_id
+         JOIN external_identities i ON i.ticket_id = a.ticket_id AND i.provider = c.provider
+         JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external'
+         WHERE NOT EXISTS (SELECT 1 FROM source_connection_removals r WHERE r.ticket_id = a.ticket_id)",
+    )?;
+    let mut rows = ticket_bindings.query([])?;
+    while let Some(row) = rows.next()? {
+        let ticket: String = row.get(0)?;
+        let source: String = row.get(1)?;
+        let provider: String = row.get(2)?;
+        let external: String = row.get(3)?;
+        let current_url: String = row.get(4)?;
+        let restored_url: Option<String> = restored
+            .query_row(
+                "SELECT i.url FROM external_identities i
+                 JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external'
+                 WHERE i.ticket_id = ?1 AND i.provider = ?2 AND i.external_id = ?3",
+                params![ticket, provider, external],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if restored_url
+            .is_some_and(|url| legacy_issue_origin_matches(&provider, &current_url, &url))
+        {
+            bind_ticket(restored, &ticket, &source)?;
+        }
     }
     if has_secret_references {
         let mut statement = current

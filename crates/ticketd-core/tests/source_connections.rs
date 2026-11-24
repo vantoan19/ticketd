@@ -138,7 +138,19 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
         })
         .unwrap();
     assert_eq!(bound, 0);
+    let legacy_statuses: u32 = raw
+        .query_row("SELECT COUNT(*) FROM source_status", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(legacy_statuses, 0);
     drop(raw);
+    assert_eq!(
+        workspace.source_statuses().unwrap()[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .code,
+        "unauthenticated"
+    );
     assert_eq!(
         workspace.source_connection("github").unwrap().name,
         LOCAL_NAME
@@ -149,6 +161,7 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
     Workspace::restore(&other, &backup).unwrap();
     let mut restored = Workspace::open(&other).unwrap();
     assert!(restored.saved_sources().unwrap().is_empty());
+    assert!(restored.source_statuses().unwrap()[0].error.is_none());
     let ticket = restored.show_ticket("T-QZ1").unwrap();
     assert_eq!(
         ticket.source.unwrap().unavailable.unwrap().code,
@@ -333,6 +346,17 @@ fn refresh_prefers_discovery_then_the_first_local_connection_covering_the_part()
 
     let backup = folder.path().join("portable.sqlite3");
     workspace.backup(&backup).unwrap();
+    drop(workspace);
+    Workspace::restore(&path, &backup).unwrap();
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .ticket_source_connection(&reference)
+            .unwrap()
+            .as_deref(),
+        Some("fake-2")
+    );
+
     let other = folder.path().join("other.sqlite3");
     Workspace::restore(&other, &backup).unwrap();
     let mut restored = Workspace::open(&other).unwrap();
@@ -363,6 +387,33 @@ fn refresh_prefers_discovery_then_the_first_local_connection_covering_the_part()
             .unavailable
             .is_none()
     );
+
+    remote
+        .0
+        .lock()
+        .unwrap()
+        .hidden_from_account
+        .insert("alice".into(), vec![1]);
+    restored
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(
+        restored
+            .ticket_source_connection(&reference)
+            .unwrap()
+            .as_deref(),
+        Some("fake-2")
+    );
+    assert!(
+        restored
+            .show_ticket(&reference)
+            .unwrap()
+            .source
+            .unwrap()
+            .unavailable
+            .is_none()
+    );
+    assert_eq!(restored.list_tickets().unwrap().len(), 1);
 }
 
 #[test]
@@ -617,6 +668,27 @@ fn a_synced_ticket_without_a_connection_uses_its_cached_provider_and_allows_take
     assert_eq!(source.provider_icon_svg.as_deref(), Some(ICON));
     assert!(source.content_locked);
     assert_eq!(source.unavailable.unwrap().code, "not_configured");
+    remote
+        .add_source_connection(&engine, "fake", None, None, &values("alice", "owner/other"))
+        .unwrap();
+    let statuses = remote.source_statuses().unwrap();
+    let unrelated = statuses
+        .iter()
+        .find(|status| status.connection_id.as_deref() == Some("fake"))
+        .unwrap();
+    assert_eq!(
+        (unrelated.tracked_tickets, unrelated.unavailable_tickets),
+        (0, 0)
+    );
+    let unbound = statuses
+        .iter()
+        .find(|status| status.connection_id.is_none())
+        .unwrap();
+    assert_eq!(
+        (unbound.tracked_tickets, unbound.unavailable_tickets),
+        (1, 1)
+    );
+
     assert_eq!(
         remote
             .take_ownership(reference, None)

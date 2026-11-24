@@ -159,8 +159,9 @@ an empty array. This is a minimal `check_connection` result.
 ```
 
 The empty site and partition identify a single-site tracker read as one
-whole. For a real tracker, use canonical site and partition keys, and set
-`account_id` when the display label can change or is shared. The
+whole. Use canonical site and partition keys. Partition keys must identify
+the same part across all accounts and sites of the provider. Set `account_id`
+when the display label can change or is shared. The
 `discovery_scope` key is stable for a particular set of filters and empty
 when discovery reads the whole partition.
 During setup, `check_connection` may receive credentials before discovery

@@ -256,8 +256,7 @@ impl RefreshCoordinator {
         let mut workspace = open()?;
         let workspace = workspace.borrow_mut();
         let now = self.clock.now_secs();
-        let saved = workspace.saved_sources()?;
-        let statuses = workspace.source_statuses()?;
+        let sources = workspace.source_schedule()?;
         let due = {
             let mut state = self.lock();
             if state.running {
@@ -265,26 +264,20 @@ impl RefreshCoordinator {
             }
             let mut due = Vec::new();
             let mut wait = u64::MAX;
-            for (index, source) in saved.into_iter().enumerate() {
-                let hold = statuses
-                    .iter()
-                    .find(|status| status.connection_id.as_deref() == Some(&source.id))
-                    .and_then(|status| status.retry_after.as_deref())
-                    .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok())
-                    .and_then(|time| u64::try_from(time.timestamp()).ok())
-                    .unwrap_or(0);
-                let schedule = state
-                    .connections
-                    .entry(source.id.clone())
-                    .or_insert_with(|| ConnectionSchedule {
-                        next_due: now.saturating_add(
-                            u64::try_from(index).unwrap_or(u64::MAX).saturating_mul(2),
-                        ),
-                        failures: 0,
-                    });
+            for (index, (id, hold)) in sources.into_iter().enumerate() {
+                let schedule =
+                    state
+                        .connections
+                        .entry(id.clone())
+                        .or_insert_with(|| ConnectionSchedule {
+                            next_due: now.saturating_add(
+                                u64::try_from(index).unwrap_or(u64::MAX).saturating_mul(2),
+                            ),
+                            failures: 0,
+                        });
                 let next = schedule.next_due.max(hold);
                 if now >= next {
-                    due.push(source.id);
+                    due.push(id);
                 } else {
                     wait = wait.min(next - now);
                 }

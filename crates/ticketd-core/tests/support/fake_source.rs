@@ -55,6 +55,7 @@ pub struct Remote {
     /// Discovery lists these issue IDs if they are open and pass the filters.
     pub matching: Vec<u64>,
     pub matching_by_repository: BTreeMap<String, Vec<u64>>,
+    pub hidden_from_account: BTreeMap<String, Vec<u64>>,
     pub inaccessible: Vec<String>,
     pub page_size: Option<usize>,
     /// Explicit discovery pages override listing from the issue store. The
@@ -279,7 +280,7 @@ impl Connector for FakeSource {
 
     fn fetch(
         &self,
-        _: &ConfigValues,
+        config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError> {
         let mut remote = self.0.lock().unwrap();
@@ -291,7 +292,7 @@ impl Connector for FakeSource {
         if remote.broken.contains(&id) {
             return Err(SourceError::Protocol("answered with status 500".into()));
         }
-        if remote.deleted.contains(&id) {
+        if remote.deleted.contains(&id) || hidden(&remote, config, id) {
             return Err(SourceError::NotFound("the issue was deleted".into()));
         }
         remote
@@ -495,6 +496,14 @@ fn repository_of(reference: &ExternalRef) -> &str {
     reference.locator.split('#').next().unwrap()
 }
 
+fn hidden(remote: &Remote, config: &ConfigValues, id: u64) -> bool {
+    config
+        .get("assignee")
+        .and_then(serde_json::Value::as_str)
+        .and_then(|account| remote.hidden_from_account.get(account))
+        .is_some_and(|ids| ids.contains(&id))
+}
+
 fn issue_page(remote: &Remote, request: DiscoveryRequest<'_>, start: usize) -> DiscoveryPage {
     let repositories = strings(request.config, "repositories");
     let matching = repositories
@@ -504,6 +513,7 @@ fn issue_page(remote: &Remote, request: DiscoveryRequest<'_>, start: usize) -> D
     let labels = strings(request.config, "labels");
     let issues: Vec<_> = matching
         .iter()
+        .filter(|id| !hidden(remote, request.config, **id))
         .filter_map(|id| remote.issues.get(id))
         .filter(|issue| issue.state.category == StateCategory::Open)
         .filter(|issue| {
