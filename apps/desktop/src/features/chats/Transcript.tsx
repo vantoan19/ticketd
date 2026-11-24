@@ -399,7 +399,7 @@ function StepDetail({
           command={command}
           output={output}
         />
-      ) : targets.length > 2 ? (
+      ) : targets.length > 2 || (step.omitted_files && targets.length > 0) ? (
         <ul>
           {targets.map((target, index) => (
             <li key={index}>
@@ -510,6 +510,7 @@ export const StepRow = memo(function StepRow({
     (step.kind === "run" && Boolean(step.command)) ||
     Boolean(step.output) ||
     (step.targets?.length ?? 0) > 2 ||
+    Boolean(step.omitted_files && step.targets?.length) ||
     Boolean(words.detail || step.result || step.truncated);
   // A row that opens is a button already, so its names cannot be buttons too.
   const files = !detail && opensFiles(step) ? (step.targets ?? []) : [];

@@ -303,6 +303,10 @@ const stepSchema = z.object({
   /** Readable text for a step without targets: the command, tool or note. */
   target: z.string(),
   targets: z.array(stepTargetSchema).optional(),
+  /** Omitted file paths, with a count when the stored evidence includes it. */
+  omitted_files: z
+    .object({ count: z.number().int().positive().nullable() })
+    .optional(),
   /** The command without its shell wrappers. */
   command: z.string().nullish(),
   exit_code: z.number().int().nullish(),

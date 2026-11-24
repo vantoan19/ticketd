@@ -1,5 +1,7 @@
 //! The evidence a Step reader sees and the actions it returns for Chat views.
 
+use std::num::NonZeroU32;
+
 use ticketd_core::ChatToolState;
 
 use crate::step_kind::{self, Kind, Variant};
@@ -21,6 +23,15 @@ pub struct ToolStep {
     pub action: StepAction,
     pub command: Option<CommandEvidence>,
     pub outcome: Option<StepOutcomeOverride>,
+    pub omitted_files: Option<OmittedFiles>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OmittedFiles {
+    /// Count of file paths missing from this action. Its line counts cover the retained files.
+    Count(NonZeroU32),
+    /// Older patches can show an incomplete inventory without the missing files' kinds or count.
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -133,6 +144,7 @@ impl From<StepAction> for ToolStep {
             action,
             command: None,
             outcome: None,
+            omitted_files: None,
         }
     }
 }
@@ -264,5 +276,6 @@ pub(crate) fn shell_step(
             ticketd_calls,
         }),
         outcome,
+        omitted_files: None,
     }
 }
