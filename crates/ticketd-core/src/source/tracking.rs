@@ -2942,7 +2942,7 @@ fn apply_issue(
             }
             changed |= previous != Some(category) || state_name != issue.state.name;
             let same_location = locator == issue.reference.locator && url == issue.url;
-            let observed_repository = issue.repository.as_deref().or_else(|| {
+            let observed_repository = issue.repository.as_deref().or({
                 if same_location {
                     repository.as_deref()
                 } else {
