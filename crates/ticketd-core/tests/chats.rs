@@ -1904,7 +1904,7 @@ fn a_format_85_workspace_keeps_legacy_attribution_and_its_first_turn_end() {
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 85);
+    assert_eq!(version, ticketd_core::FORMAT_VERSION);
     // The first end predates the newer attribution rows, even if the timestamps tie.
     db.execute(
         "UPDATE activities SET reported_at = '2026-01-01T00:00:00.003Z' WHERE id = ?1",
