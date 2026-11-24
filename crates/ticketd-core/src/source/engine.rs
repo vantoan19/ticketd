@@ -636,11 +636,22 @@ impl Engine {
 
 fn verify_issue(provider: &str, issue: &ExternalIssue) -> Result<(), SourceError> {
     verify_identity(provider, &issue.reference.identity)?;
+    verify_issue_timestamps(issue, false)
+}
+
+pub(super) fn verify_issue_timestamps(
+    issue: &ExternalIssue,
+    creation_required: bool,
+) -> Result<(), SourceError> {
+    // Older in-process observations use an empty creation time for unknown
+    // provenance. Contract 2 process results require both timestamps.
+    let created_at =
+        (creation_required || !issue.created_at.is_empty()).then_some(issue.created_at.as_str());
     for (field, time) in [
-        ("created_at", &issue.created_at),
-        ("updated_at", &issue.updated_at),
+        ("created_at", created_at),
+        ("updated_at", Some(issue.updated_at.as_str())),
     ] {
-        if chrono::DateTime::parse_from_rfc3339(time).is_err() {
+        if time.is_some_and(|time| chrono::DateTime::parse_from_rfc3339(time).is_err()) {
             return Err(SourceError::Protocol(format!(
                 "an issue's {field} must be an RFC 3339 timestamp"
             )));

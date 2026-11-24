@@ -153,6 +153,8 @@ fn the_same_legacy_issue_id_from_another_site_never_reclaims_a_ticket() {
 
 const TOKEN: &str = "ghp_cli_test_secret";
 const SECOND_TOKEN: &str = "ghp_second_cli_test_secret";
+const ISSUE_CREATED_AT: &str = "2026-01-01T00:00:00Z";
+const ISSUE_CLOSED_AT: &str = "2026-01-03T00:00:00Z";
 
 /// Serves canned GitHub responses until the test process exits.
 fn serve() -> String {
@@ -201,7 +203,7 @@ fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
                     "201 Created",
                     json!({"id": published_id, "number": 7, "title": "Escalate me", "body": "Why it matters", "state": "open",
                            "html_url": "https://github.example/o/r/issues/7", "assignees": [], "labels": [],
-                           "created_at": "", "updated_at": ""}),
+                           "created_at": ISSUE_CREATED_AT, "updated_at": ISSUE_CREATED_AT}),
                 )
             } else if request.starts_with("POST ") && path == "/repos/o/flaky/issues" {
                 ("502 Bad Gateway", json!({"message": "upstream"}))
@@ -240,7 +242,7 @@ fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
                     "200 OK",
                     json!({"id": 1, "number": 1, "title": "Real issue, renamed", "body": "secret description", "state": "closed",
                            "state_reason": "completed", "html_url": "https://github.example/o/r/issues/1",
-                           "assignees": [], "labels": [], "created_at": "", "updated_at": ""}),
+                           "assignees": [], "labels": [], "created_at": ISSUE_CREATED_AT, "updated_at": ISSUE_CLOSED_AT}),
                 )
             } else if path.starts_with("/repos/o/r/issues/1/comments") {
                 (
@@ -262,7 +264,7 @@ fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
                         json!([])
                     } else {
                         json!([{"id": 8, "number": 1, "title": "Other account issue", "state": "open",
-                        "html_url": "https://github.example/o/beta/issues/1", "created_at": "", "updated_at": ""}])
+                        "html_url": "https://github.example/o/beta/issues/1", "created_at": ISSUE_CREATED_AT, "updated_at": ISSUE_CREATED_AT}])
                     },
                 )
             } else if path.starts_with("/repos/o/r/issues") {
@@ -271,7 +273,7 @@ fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
                     json!([
                         {"id": 1, "number": 1, "title": "Real issue", "body": "secret description", "state": "open",
                          "html_url": "https://github.example/o/r/issues/1", "assignees": [], "labels": [],
-                         "created_at": "", "updated_at": ""},
+                         "created_at": ISSUE_CREATED_AT, "updated_at": ISSUE_CREATED_AT},
                         {"id": 2, "number": 2, "title": "A pull request", "state": "open", "pull_request": {}}
                     ]),
                 )

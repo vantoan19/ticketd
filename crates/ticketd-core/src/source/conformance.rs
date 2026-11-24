@@ -11,7 +11,9 @@ use serde::{Deserialize, Serialize};
 use super::{
     Capability, ConfigValues, Connector, Conversation, DiscoveryRequest, Engine, ErrorClass,
     ExternalIssue, ExternalRef, FieldKind, OptionSource, PublicationSearch, PublishRequest,
-    SourceError, StateCategory, engine::verify_identity, publication::check_destination,
+    SourceError, StateCategory,
+    engine::{verify_identity, verify_issue_timestamps},
+    publication::check_destination,
 };
 
 #[cfg(test)]
@@ -512,6 +514,7 @@ fn verify_sample(
     for issue in first {
         let identity = &issue.reference.identity;
         verify_identity(provider, identity)?;
+        verify_issue_timestamps(issue, true)?;
         require(
             distinct.insert(identity),
             "discovery delivered the same identity twice",

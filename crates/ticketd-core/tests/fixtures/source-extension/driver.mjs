@@ -220,6 +220,15 @@ async function dispatch({ id, method, params }, signal) {
     case "options":
       return { result: [] };
     case "discover": {
+      if (mode === "missing_creation") {
+        return {
+          result: {
+            issues: [{ ...first, created_at: "" }],
+            next_cursor: null,
+            skipped: [],
+          },
+        };
+      }
       if (["slow_progress", "cooperative", "ignore_cancel"].includes(mode)) {
         const repeats = mode === "slow_progress" ? 6 : 100;
         for (let completed = 1; completed <= repeats; completed += 1) {
@@ -245,6 +254,9 @@ async function dispatch({ id, method, params }, signal) {
       const id = params.reference.identity.id;
       const found =
         mode === "closure" ? closure[id] : id === "1" ? first : last;
+      if (found && mode === "malformed_update") {
+        return { result: { ...found, updated_at: "unknown" } };
+      }
       return found
         ? { result: found }
         : problem(

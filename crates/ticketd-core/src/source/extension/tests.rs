@@ -155,6 +155,26 @@ fn registration_reports_that_a_future_field_kind_needs_a_newer_host() {
 }
 
 #[test]
+fn a_process_issue_requires_both_timestamps() {
+    let connector = fixture_connector(Arc::new(Host::default()), "first");
+    let disclosure = connector.discover(DiscoveryRequest {
+        config: &configuration("missing_creation"),
+        cursor: None,
+        page_size: 10,
+    });
+    assert!(matches!(
+        disclosure,
+        Err(SourceError::Protocol(message)) if message.contains("created_at")
+    ));
+
+    let issue = connector.fetch(&configuration("malformed_update"), &reference(1));
+    assert!(matches!(
+        issue,
+        Err(SourceError::Protocol(message)) if message.contains("updated_at")
+    ));
+}
+
+#[test]
 fn a_future_event_kind_does_not_hide_known_conversation_entries() {
     let connector = fixture_connector(Arc::new(Host::default()), "first");
     let conversation = connector

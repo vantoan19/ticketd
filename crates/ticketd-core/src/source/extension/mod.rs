@@ -19,6 +19,7 @@ use super::{
     ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalIssue, ExternalRef,
     FieldIssue, FieldKind, Publication, PublicationCandidates, PublicationSearch, PublishRequest,
     RefreshControl, SourceDescription, SourceError, SourcePresentation, credentials,
+    engine::verify_issue_timestamps,
 };
 use host::{Definition, Host};
 use registry::Launch;
@@ -79,6 +80,17 @@ impl ProcessConnector {
         }
         .map_err(SourceError::InvalidConfiguration)?;
         self.call(id, &resolved, call, deadline)
+    }
+
+    fn request_issue<'a>(
+        &'a self,
+        config: &'a ConfigValues,
+        call: impl FnOnce(ConnectionParams<'a>) -> Call<'a>,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<ExternalIssue, SourceError> {
+        let issue = self.request_before(config, call, deadline)?;
+        verify_issue_timestamps(&issue, true)?;
+        Ok(issue)
     }
 
     fn resolve_credentials(
@@ -277,11 +289,15 @@ impl Connector for ProcessConnector {
     }
 
     fn discover(&self, request: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-        self.request(request.config, |connection| Call::Discover {
+        let page: DiscoveryPage = self.request(request.config, |connection| Call::Discover {
             connection,
             cursor: request.cursor.map(Cow::Borrowed),
             page_size: request.page_size,
-        })
+        })?;
+        for issue in &page.issues {
+            verify_issue_timestamps(issue, true)?;
+        }
+        Ok(page)
     }
 
     fn fetch(
@@ -289,12 +305,16 @@ impl Connector for ProcessConnector {
         config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError> {
-        self.request(config, |connection| {
-            Call::Fetch(IssueParams {
-                connection,
-                reference: Cow::Borrowed(reference),
-            })
-        })
+        self.request_issue(
+            config,
+            |connection| {
+                Call::Fetch(IssueParams {
+                    connection,
+                    reference: Cow::Borrowed(reference),
+                })
+            },
+            None,
+        )
     }
 
     fn conversation(
@@ -325,10 +345,14 @@ impl Publication for ProcessConnector {
         config: &ConfigValues,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
-        self.request(config, |connection| Call::Publish {
-            connection,
-            request: Cow::Borrowed(request),
-        })
+        self.request_issue(
+            config,
+            |connection| Call::Publish {
+                connection,
+                request: Cow::Borrowed(request),
+            },
+            None,
+        )
     }
 
     fn publish_before(
@@ -337,7 +361,7 @@ impl Publication for ProcessConnector {
         request: &PublishRequest,
         deadline: std::time::Instant,
     ) -> Result<ExternalIssue, SourceError> {
-        self.request_before(
+        self.request_issue(
             config,
             |connection| Call::Publish {
                 connection,
@@ -353,11 +377,15 @@ impl Publication for ProcessConnector {
         destination: &str,
         text: &str,
     ) -> Result<ExternalIssue, SourceError> {
-        self.request(config, |connection| Call::Locate {
-            connection,
-            destination: destination.into(),
-            text: text.into(),
-        })
+        self.request_issue(
+            config,
+            |connection| Call::Locate {
+                connection,
+                destination: destination.into(),
+                text: text.into(),
+            },
+            None,
+        )
     }
 
     fn find_published(
@@ -365,9 +393,14 @@ impl Publication for ProcessConnector {
         config: &ConfigValues,
         search: &PublicationSearch,
     ) -> Result<PublicationCandidates, SourceError> {
-        self.request(config, |connection| Call::FindPublished {
-            connection,
-            search: Cow::Borrowed(search),
-        })
+        let candidates: PublicationCandidates =
+            self.request(config, |connection| Call::FindPublished {
+                connection,
+                search: Cow::Borrowed(search),
+            })?;
+        for issue in candidates.matches.iter().chain(&candidates.recent) {
+            verify_issue_timestamps(issue, true)?;
+        }
+        Ok(candidates)
     }
 }

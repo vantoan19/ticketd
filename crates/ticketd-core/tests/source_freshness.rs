@@ -414,7 +414,12 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     assert_eq!(ticket.title, "Issue 1");
 
     f.remote(|r| r.issues.get_mut(&1).unwrap().updated_at = "unknown".into());
-    f.refresh_at(T3);
+    let report = f.refresh_at(T3);
+    assert!(
+        report.failures.iter().any(|failure| {
+            failure.code == "protocol" && failure.message.contains("updated_at")
+        })
+    );
     let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(ticket.status, Status::Done);
     assert_eq!(ticket.title, "Issue 1");
@@ -423,8 +428,14 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
 #[test]
 fn a_dated_observation_repairs_an_undated_cached_issue() {
     let mut f = Fixture::new();
-    f.publish(issue(1, "unknown"));
+    f.publish(issue(1, T0));
     f.refresh_at(T0);
+    let cache = rusqlite::Connection::open(f.dir.path().join("workspace.sqlite3")).unwrap();
+    cache
+        .execute("UPDATE source_sync SET external_updated_at = 'unknown'", [])
+        .unwrap();
+    drop(cache);
+
     let mut closed = issue(1, T1);
     closed.state = ExternalState::named(StateCategory::Completed, "Closed");
     f.publish(closed);
