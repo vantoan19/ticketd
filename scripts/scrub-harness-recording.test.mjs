@@ -289,6 +289,41 @@ test("replaces a known account alias in a protocol label", (t) => {
   assert.equal(notice.server.text, "Report for fixture-account-1");
 });
 
+test("scrubs private paths in descriptive protocol labels", (t) => {
+  const { output, scrub } = capture(t);
+  const result = scrub([
+    [
+      1,
+      line({
+        method: "tools/call",
+        params: {
+          name: "/home/synthetic-label-owner/report.txt",
+          kind: "read",
+        },
+      }),
+    ],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const { client } = JSON.parse(readFileSync(output, "utf8"));
+  assert.deepEqual(client, {
+    method: "tools/call",
+    params: { name: "/fixture/home-1/report.txt", kind: "read" },
+  });
+});
+
+test("rejects a private path in a wire method without printing it", (t) => {
+  const { output, scrub } = capture(t);
+  const privatePath = "/home/synthetic-method-owner/tool";
+  const result = scrub([[1, line({ id: 1, method: privatePath })]]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "Cannot safely scrub an alias in a protocol label.\n",
+  );
+  assert.equal(existsSync(output), false);
+});
+
 test("replaces a known account alias used as an identifier-shaped dictionary key", (t) => {
   const { output, scrub } = capture(t);
   const alias = "syntheticAccountAlias";
@@ -361,7 +396,7 @@ test("rejects an account alias that matches the wire method value", (t) => {
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "Cannot safely scrub an account alias in a protocol label.\n",
+    "Cannot safely scrub an alias in a protocol label.\n",
   );
   assert.equal(existsSync(output), false);
 });

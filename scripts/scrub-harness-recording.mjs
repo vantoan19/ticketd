@@ -333,6 +333,14 @@ function scrub(frames, input) {
       return replaceUuid(matched);
     });
 
+  const checkDiscriminator = (value) => {
+    if (typeof value === "string" && replaceText(value) !== value) {
+      throw new CaptureError(
+        "Cannot safely scrub an alias in a protocol label.",
+      );
+    }
+  };
+
   // ACP dispatches on the nested sessionUpdate tag. Check its protocol
   // position so the same spelling can still be scrubbed inside dictionaries.
   for (const { direction, frame } of frames) {
@@ -349,11 +357,7 @@ function scrub(frames, input) {
         "Cannot safely scrub an account alias in a protocol field name.",
       );
     }
-    if (replaceText(update.sessionUpdate) !== update.sessionUpdate) {
-      throw new CaptureError(
-        "Cannot safely scrub an alias in a protocol label.",
-      );
-    }
+    checkDiscriminator(update.sessionUpdate);
   }
 
   return frames.map(({ direction, frame }) => ({
@@ -362,22 +366,16 @@ function scrub(frames, input) {
       null,
       "",
       (value, scope) =>
-        scope === "label"
-          ? (accountAliases.get(value) ?? value)
-          : scope
-            ? replaceScoped(value, scope)
-            : typeof value === "string"
-              ? replaceText(value)
-              : value,
+        scope && scope !== "label"
+          ? replaceScoped(value, scope)
+          : typeof value === "string"
+            ? replaceText(value)
+            : value,
       (key, value, wireFields) => {
         // Wire fields have fixed names. A dictionary can use the same spelling
         // as a key, so this exception applies only to the frame envelope.
         if (wireFields?.has(key)) {
-          if (envelopeLabels.has(key) && accountAliases.has(value)) {
-            throw new CaptureError(
-              "Cannot safely scrub an account alias in a protocol label.",
-            );
-          }
+          if (envelopeLabels.has(key)) checkDiscriminator(value);
           return key;
         }
         const alias = accountAliases.get(key);
