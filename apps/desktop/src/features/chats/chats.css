@@ -917,6 +917,7 @@
 .chat-request-buttons {
   display: flex;
   flex-wrap: wrap;
+  align-items: flex-start;
   gap: 6px;
   margin-top: 12px;
 }
