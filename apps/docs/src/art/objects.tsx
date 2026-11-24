@@ -57,7 +57,7 @@ export function Spec({
   p = [0, 0, 0],
   w = 92,
   h = 49,
-  title = "Login hardening",
+  title = "API rate limits",
 }: {
   p?: Position;
   w?: number;
