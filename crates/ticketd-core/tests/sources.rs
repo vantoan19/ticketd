@@ -146,6 +146,7 @@ fn issue(id: u64) -> ExternalIssue {
         created_at: String::new(),
         updated_at: String::new(),
         author: None,
+        repository: None,
         duplicate_of: None,
         duplicate_of_url: None,
         duplicate_withdrawn: false,

@@ -174,7 +174,7 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
     expect(bridge.invoke).toHaveBeenCalledWith("publish_ticket", {
       reference: "T-KQ1",
       provider: "github",
-      destination: "acme/api",
+      destination: null,
       expectedFingerprint: "00000000000000a1",
     }),
   );
@@ -428,6 +428,62 @@ test("the publication dialog keeps a Close action and closes without sending", a
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(
     bridge.invoke.mock.calls.some(([command]) => command === "publish_ticket"),
+  ).toBe(false);
+});
+
+test("the dialog selects Core's default and refreshes it after a stale preview", async () => {
+  let changed = false;
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "preview_publication")
+      return {
+        ...eligible,
+        destinations: ["acme/api", "acme/web"],
+        destination: changed ? "acme/api" : "acme/web",
+        fingerprint: changed ? "fingerprint-api" : "fingerprint-web",
+      };
+    if (command === "publish_ticket") {
+      changed = true;
+      throw {
+        code: "publication_changed",
+        message: "The destination changed since it was previewed.",
+      };
+    }
+    return [];
+  });
+  render(
+    <PublishDialog
+      ticket={ticket({ project_id: "web-project" })}
+      provider="github"
+      onOpenChange={() => {}}
+      refresh={async () => {}}
+    />,
+  );
+
+  const repository = await screen.findByRole("combobox", {
+    name: "Repository",
+  });
+  expect(repository.textContent).toBe("acme/web");
+  expect(bridge.invoke).toHaveBeenCalledWith("preview_publication", {
+    reference: "T-KQ1",
+    provider: "github",
+    destination: null,
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Publish issue" }));
+  expect(bridge.invoke).toHaveBeenCalledWith("publish_ticket", {
+    reference: "T-KQ1",
+    provider: "github",
+    destination: null,
+    expectedFingerprint: "fingerprint-web",
+  });
+  await waitFor(() =>
+    expect(
+      screen.getByRole("combobox", { name: "Repository" }).textContent,
+    ).toBe("acme/api"),
+  );
+  expect(
+    (screen.getByRole("button", { name: "Publish issue" }) as HTMLButtonElement)
+      .disabled,
   ).toBe(false);
 });
 

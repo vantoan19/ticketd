@@ -57,6 +57,7 @@ export function bridgeDefault(
     case "safety_backups":
     case "search_tags":
     case "source_conversation":
+    case "source_repository_routes":
     case "sync_conflicts": // without sync: nothing to review, every file local
     case "sync_notices":
     case "attachment_availability":
@@ -113,6 +114,8 @@ export function bridgeDefault(
       return { unread_inbox: 0, ready: 0, in_progress: 0 };
     case "is_following":
       return false;
+    case "detect_project_remote":
+      return { suggested: null, candidates: [] };
     case "reminder":
     case "last_backup":
     case "project_icon": // no favicon: the letter tile

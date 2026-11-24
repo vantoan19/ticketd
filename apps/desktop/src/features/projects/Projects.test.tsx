@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -8,14 +9,19 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { invoke } from "@tauri-apps/api/core";
 import { client } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { Projects } from "./Projects";
 
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+Element.prototype.scrollIntoView = () => {};
+
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.mocked(invoke).mockReset();
 });
 
 const project = {
@@ -143,7 +149,7 @@ test("a new project waits for a folder, fills its name from it, then saves", asy
     "value",
     "Mobile App",
   );
-  expect(create_).toHaveProperty("disabled", false);
+  await waitFor(() => expect(create_).toHaveProperty("disabled", false));
   fireEvent.click(create_);
   await waitFor(() =>
     expect(create).toHaveBeenCalledWith(
@@ -153,6 +159,202 @@ test("a new project waits for a folder, fills its name from it, then saves", asy
   );
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(onChange).toHaveBeenCalled();
+});
+
+test("a new project can save the remote detected from its folder", async () => {
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue("/work/checkout");
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "detect_project_remote")
+      return { suggested: "github.com/team/app", candidates: [] };
+    if (command === "create_project")
+      return { ...project, remote: "github.com/team/app" };
+    return null;
+  });
+  render(<Projects {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  const dialog = within(screen.getByRole("dialog", { name: "New project" }));
+  fireEvent.click(dialog.getByRole("button", { name: "Choose…" }));
+  const remote = await dialog.findByRole("textbox", { name: "Project remote" });
+  await waitFor(() =>
+    expect(remote).toHaveProperty("value", "github.com/team/app"),
+  );
+  fireEvent.click(dialog.getByRole("button", { name: "Create project" }));
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("create_project", {
+      name: "Checkout",
+      path: "/work/checkout",
+      remote: "github.com/team/app",
+    }),
+  );
+});
+
+test.each(["reopening the dialog", "returning to a folder"])(
+  "a new project waits for a fresh checkout suggestion after %s",
+  async (action) => {
+    const checkout = "/work/checkout";
+    const chooseFolder = vi
+      .spyOn(workspaceClient, "chooseFolder")
+      .mockResolvedValue(checkout);
+    let finish!: (value: unknown) => void;
+    const refreshed = new Promise((resolve) => {
+      finish = resolve;
+    });
+    let checked = false;
+    vi.mocked(invoke).mockImplementation(async (command, args) => {
+      if (command === "detect_project_remote") {
+        if (!args || !("path" in args) || args.path !== checkout)
+          return new Promise(() => {});
+        if (checked) return refreshed;
+        checked = true;
+        return { suggested: "github.com/team/old", candidates: [] };
+      }
+      return null;
+    });
+    render(<Projects {...props} />);
+    const open = () =>
+      fireEvent.click(screen.getByRole("button", { name: "New project" }));
+    const name = () => screen.getByRole("textbox", { name: "Name" });
+    const remote = () =>
+      screen.getByRole("textbox", { name: "Project remote" });
+    open();
+    fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
+    await waitFor(() =>
+      expect(remote()).toHaveProperty("value", "github.com/team/old"),
+    );
+
+    if (action === "reopening the dialog") {
+      fireEvent.change(name(), { target: { value: "Draft name" } });
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      open();
+      expect(name()).toHaveProperty("value", "Draft name");
+    } else {
+      chooseFolder.mockResolvedValueOnce("/work/other");
+      const changeFolder = screen.getByRole("button", { name: "Change…" });
+      fireEvent.click(changeFolder);
+      await waitFor(() => expect(name()).toHaveProperty("value", "Other"));
+      fireEvent.click(changeFolder);
+      await waitFor(() => expect(name()).toHaveProperty("value", "Checkout"));
+    }
+
+    const create = screen.getByRole("button", { name: "Create project" });
+    expect(create).toHaveProperty("disabled", true);
+    expect(remote()).toHaveProperty("value", "");
+    await act(async () =>
+      finish({ suggested: "github.com/team/current", candidates: [] }),
+    );
+    expect(create).toHaveProperty("disabled", false);
+    expect(remote()).toHaveProperty("value", "github.com/team/current");
+  },
+);
+
+test("a late checkout suggestion preserves the typed remote", async () => {
+  let finish!: (value: unknown) => void;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "detect_project_remote")
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    return null;
+  });
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue("/work/checkout");
+  render(<Projects {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
+  await screen.findByRole("button", { name: "Change…" });
+  const field = screen.getByRole("textbox", { name: "Project remote" });
+  fireEvent.change(field, { target: { value: "github.com/me/fork" } });
+  expect(screen.getByRole("button", { name: "Create project" })).toHaveProperty(
+    "disabled",
+    false,
+  );
+  await act(async () =>
+    finish({ suggested: "github.com/team/app", candidates: [] }),
+  );
+  expect(field).toHaveProperty("value", "github.com/me/fork");
+});
+
+test("a checkout remote mismatch warns without replacing the saved remote or blocking Save", async () => {
+  const saved = { ...project, remote: "github.com/team/app" };
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "detect_project_remote")
+      return {
+        suggested: "github.com/team/fork",
+        candidates: [{ name: "mirror", remote: "github.com/team/mirror" }],
+      };
+    if (command === "edit_project") return saved;
+    return null;
+  });
+  render(<Projects {...props} projects={[saved]} />);
+  await chooseAction("Edit project…");
+  const dialog = within(screen.getByRole("dialog", { name: "Edit project" }));
+  const warning = await dialog.findByRole("status");
+  expect(warning.textContent).toMatch(/checkout remotes differ/i);
+  expect(warning.textContent).toContain("github.com/team/fork");
+  expect(
+    dialog.getByRole("combobox", { name: "Checkout remotes" }),
+  ).toBeTruthy();
+  expect(
+    dialog.getByRole("textbox", {
+      name: "Project remote",
+      description: /checkout remotes differ/i,
+    }),
+  ).toHaveProperty("value", saved.remote);
+  const save = dialog.getByRole("button", { name: "Save project" });
+  expect(save).toHaveProperty("disabled", false);
+  fireEvent.click(save);
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(invoke).toHaveBeenCalledWith("edit_project", {
+    id: saved.id,
+    name: saved.name,
+    path: saved.path,
+  });
+});
+
+test("the project remote can be changed to a checkout candidate or cleared after an inline refusal", async () => {
+  const saved = { ...project, remote: "github.com/team/app" };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "detect_project_remote")
+      return {
+        suggested: null,
+        candidates: [
+          { name: "archive", remote: "github.com/team/archive" },
+          { name: "mirror", remote: "github.com/team/mirror" },
+          { name: "team", remote: "github.com/TEAM/App" },
+        ],
+      };
+    if (command === "edit_project") {
+      if (args && "clearRemote" in args) return { ...saved, remote: null };
+      throw {
+        code: "project_remote_taken",
+        message: "Project remote github.com/team/archive belongs to Archive.",
+      };
+    }
+    return null;
+  });
+  render(<Projects {...props} projects={[saved]} />);
+  await chooseAction("Edit project…");
+  const field = await screen.findByRole("textbox", { name: "Project remote" });
+  expect(field).toHaveProperty("value", saved.remote);
+  const candidates = await screen.findByRole("combobox", {
+    name: "Checkout remotes",
+  });
+  expect(screen.queryByText(/checkout remotes differ/i)).toBeNull();
+  fireEvent.keyDown(candidates, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("option", { name: /archive/ }));
+  expect(field).toHaveProperty("value", "github.com/team/archive");
+  fireEvent.click(screen.getByRole("button", { name: "Save project" }));
+  await screen.findByText(/belongs to Archive/);
+  expect(field.getAttribute("aria-invalid")).toBe("true");
+  fireEvent.change(field, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Save project" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(invoke).toHaveBeenCalledWith("edit_project", {
+    id: saved.id,
+    name: saved.name,
+    path: saved.path,
+    clearRemote: true,
+  });
 });
 
 test("cancelling the folder picker keeps Create project disabled", async () => {
@@ -175,13 +377,12 @@ test("renames a project from its menu and shows a save failure in the dialog", a
     message: "workspace database error: attempt to write a readonly database",
   });
   render(<Projects {...props} />);
-  // One "…" holds Rename, Copy project ID and Register checkout (PR-04).
-  await chooseAction("Rename…");
-  const dialog = await screen.findByRole("dialog", { name: "Rename project" });
-  fireEvent.click(within(dialog).getByRole("button", { name: "Save name" }));
+  await chooseAction("Edit project…");
+  const dialog = await screen.findByRole("dialog", { name: "Edit project" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Save project" }));
   const alert = await within(dialog).findByRole("alert");
   expect(alert.textContent).toContain(
-    "Couldn't rename the project. The workspace is read-only, so nothing changed.",
+    "Couldn't save the project. The workspace is read-only, so nothing changed.",
   );
   // The raw text stays under Details, and the valid name is not marked invalid (PR-05).
   expect(alert.textContent).not.toContain("readonly database");

@@ -51,8 +51,9 @@ See [in-app updates](install.md#in-app-updates).
   prints its path and format versions.
 - A **Project** represents one repository, not a grouping of work. Its explicit
   identity survives repository moves and renames, and several local checkouts may
-  refer to it. Registered checkout paths locate projects without implying Git
-  integration. A ticket optionally links to one project ("No project" is valid).
+  refer to it. Registered checkout paths locate projects and can suggest a Project
+  remote from Git configuration. Git is optional. A ticket optionally links to
+  one project ("No project" is valid).
 - **Project context** is local to each UI or CLI interaction. An explicit selection
   takes precedence; the CLI otherwise infers the project from a registered checkout
   that contains the current directory. With neither, new tickets stay unlinked.
@@ -405,15 +406,53 @@ and run through a shared extension interface.
   issue stays open, people and agents manage Todo, In progress, and In review
   locally without writing to GitHub. A reopened issue returns to Todo.
 - A **locally owned** ticket in Todo, In progress, or In review can be published once
-  as a normal issue. Preview shows exactly what would be sent; ownership transfers
-  only after ticketd confirms the issue exists, and an uncertain result is resolved
-  before any retry so no second issue is created. Local Activities, Plan membership,
+  as a normal issue. The preview shows exactly what would be sent. When the saved
+  source lists the ticket's Project remote on the matching host, the preview selects
+  that repository. The person can choose a different allowed destination. Publishing
+  with the Project remote as the default requires the preview's fingerprint. Ownership
+  transfers only after ticketd confirms the issue exists, and an uncertain result is
+  resolved before any retry so no second issue is created. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
+- If publishing leaves an attempt unresolved, recovery uses the original GitHub
+  host. See [Recover an unresolved publication](cli.md#recover-an-unresolved-publication).
 - If a source ticket becomes unavailable, ticketd keeps its content and local work and
   warns; **Take ownership** makes it local and stops synchronization.
+- A legacy GitHub ticket with an unverified host can hold a potential duplicate
+  import until you confirm the issue's current URL on its original host. This
+  repairs the source link on the existing ticket and preserves its ownership,
+  including after takeover.
+  See [Recover a legacy GitHub issue link](cli.md#recover-a-legacy-github-issue-link).
 - CLI: the `source` command group (`save`, `refresh`, `take-ownership`,
   `publish --preview`, `resolve`, and more).
+
+#### Project remote routing
+
+A newly imported GitHub issue is linked to the project whose Project remote
+matches its repository, including the host. If no project claims the repository,
+the ticket arrives in No project. When import links a project, it records an
+ordinary project membership change in the ticket's history. Project links remain
+locally editable.
+When GitHub confirms a transfer to another repository, refresh follows the issue
+on the same ticket and keeps its existing project link and local work.
+Changing or clearing a Project remote affects future imports. Each device keeps
+its own Project remotes alongside checkout and source settings. Workspace export
+and backups include them.
+[ADR 0021](adr/0021-route-external-tickets-to-projects-by-project-remote.md)
+
+After setting a Project remote, you can review and confirm a connection to GitHub.
+It adds the repository to discovery when needed and links the existing non-trashed,
+unlinked tickets whose source still owns them and reports the same repository.
+Backfill includes tickets outside the current discovery filters and records an
+ordinary project membership change for each ticket. If the repository is already
+listed, backfill works offline. If the source needs setup, the preview identifies
+the repository to add. Confirming applies the reviewed changes together. If the
+effect changes before confirmation, review the updated preview.
+
+GitHub source settings show the project each saved discovery repository routes to.
+Link an unclaimed repository to a project with a local checkout and no Project
+remote, or create a project from a checkout folder, then review backfill. Removing a repository from
+discovery leaves its Project remote on the project.
 
 ### Workspace sync
 

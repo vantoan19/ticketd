@@ -471,7 +471,6 @@ test("opens a related ticket outside the filtered list and preserves drafts when
 });
 
 test("retains project drafts and clears filters when navigating scopes", async () => {
-  vi.useFakeTimers();
   bridge.invoke.mockImplementation(
     async (command: string, args?: { id?: string }) => {
       if (command === "list_plans")
@@ -483,12 +482,9 @@ test("retains project drafts and clears filters when navigating scopes", async (
     },
   );
   render(<App />);
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(0);
-  });
   expect(screen.queryByRole("button", { name: "Old plan" })).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Projects" }));
-  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Projects" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New project" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Name" }), {
     target: { value: "Draft" },
   });
@@ -499,10 +495,10 @@ test("retains project drafts and clears filters when navigating scopes", async (
     screen.queryByRole("navigation", { name: "Workspace views" }),
   ).toBeNull();
   expect(
-    screen.getByRole("navigation", { name: "Settings sections" }),
+    await screen.findByRole("navigation", { name: "Settings sections" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Back to Projects" }));
-  fireEvent.click(screen.getByRole("button", { name: "New project" }));
+  fireEvent.click(await screen.findByRole("button", { name: "New project" }));
   expect(screen.getByRole("textbox", { name: "Name" })).toHaveProperty(
     "value",
     "Draft",
@@ -522,7 +518,7 @@ test("retains project drafts and clears filters when navigating scopes", async (
       screen.getByRole("navigation", { name: "Workspace views" }),
     ).getByRole("button", { name: "All tickets" }),
   );
-  expect(screen.getByRole("button", { name: "Filters" })).toBeTruthy();
+  expect(await screen.findByRole("button", { name: "Filters" })).toBeTruthy();
 });
 
 test("an idle workspace costs one token poll per tick and refetches only when the token moves", async () => {
@@ -13060,6 +13056,114 @@ const reviewSourceEntry = {
     saved_at: "2026-02-01T00:00:00Z",
   },
 };
+
+const projectForRemote = {
+  id: "project-remote",
+  name: "API repo",
+  path: "/work/api",
+  paths: ["/work/api"],
+};
+
+test("a legacy project offers the detected remote in its header and lets you dismiss it", async () => {
+  await renderReviewApp({
+    list_projects: [projectForRemote],
+    detect_project_remote: { suggested: "github.com/acme/api", candidates: [] },
+  });
+  const sidebar = within(
+    screen.getByRole("navigation", { name: "Project scopes" }),
+  );
+  fireEvent.click(await sidebar.findByRole("button", { name: "API repo" }));
+  await screen.findByText("Detected github.com/acme/api.");
+  fireEvent.click(screen.getByRole("button", { name: "Set as remote?" }));
+  const dialog = within(
+    await screen.findByRole("dialog", { name: "Edit project" }),
+  );
+  expect(
+    dialog.getByRole("textbox", { name: "Project remote" }),
+  ).toHaveProperty("value", "github.com/acme/api");
+  fireEvent.click(dialog.getByRole("button", { name: "Cancel" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Dismiss Project remote note" }),
+  );
+  expect(screen.queryByRole("button", { name: "Set as remote?" })).toBeNull();
+});
+
+test("setting up the source from a project pre-fills discovery and resumes backfill review after save", async () => {
+  const project = { ...projectForRemote, remote: "github.com/acme/api" };
+  let saved = false;
+  const configured = {
+    ...reviewSourceEntry,
+    connector: {
+      ...reviewSourceEntry.connector,
+      schema: {
+        fields: [
+          {
+            key: "repositories",
+            label: "Repositories",
+            required: true,
+            type: "multi_select",
+            options: { source: "dynamic", depends_on: [] },
+            allow_custom: true,
+            min_items: 1,
+            max_items: 2,
+          },
+        ],
+      },
+    },
+  };
+  const discovery = {
+    provider: "github",
+    account: "octo",
+    matched: 1,
+    complete: true,
+    issues: [],
+  };
+  await renderReviewApp({
+    list_projects: [project],
+    list_sources: () => [
+      { ...configured, saved: saved ? configured.saved : null },
+    ],
+    preview_connect_source: () => ({
+      project_id: project.id,
+      project_remote: project.remote,
+      provider: "github",
+      repository: "acme/api",
+      source: saved ? "already_listed" : "not_connected",
+      tickets: ["T-ABCDE"],
+      fingerprint: saved ? "backfill" : "setup",
+    }),
+    source_check_connection: { account: "octo" },
+    source_options: [],
+    source_preview: discovery,
+    save_source: () => {
+      saved = true;
+      return { source: configured.saved, preview: discovery };
+    },
+  });
+  const sidebar = within(
+    screen.getByRole("navigation", { name: "Project scopes" }),
+  );
+  fireEvent.click(await sidebar.findByRole("button", { name: "API repo" }));
+  await screen.findByText("Issues from this repository aren't being imported.");
+  fireEvent.click(screen.getByRole("button", { name: "Set up" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Set up GitHub" }));
+  await screen.findByRole("button", { name: "Remove acme/api" });
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByRole("region", { name: "Preview" });
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  const review = within(
+    await screen.findByRole("dialog", { name: "Connect project to GitHub" }),
+  );
+  expect(await review.findByText("Link 1 existing ticket")).toBeTruthy();
+  expect(review.queryByText(/Import issues from/)).toBeNull();
+  expect(bridge.invoke).toHaveBeenCalledWith("save_source", {
+    provider: "github",
+    config: { repositories: ["acme/api"] },
+  });
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "connect_source"),
+  ).toBe(false);
+});
 
 test("a known ticket keeps its saved wrapped title and body while a fresh detail read is pending", async () => {
   const ticket = bulkTicket(1, {

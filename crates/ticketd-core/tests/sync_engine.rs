@@ -1176,9 +1176,9 @@ fn the_same_field_changed_on_two_devices_converges_in_every_order() {
 fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
     // A higher format number, with or without what else this version does not know.
     for (from, to) in [
-        ("format: 1\n", "format: 2\n"),
-        ("format: 1\n", "format: 2\nmood: \"happy\"\n"),
-        ("format: 1\n", "format: 2\n---\n<!-- ticketd:mood -->\n"),
+        ("format: 1\n", "format: 3\n"),
+        ("format: 1\n", "format: 3\nmood: \"happy\"\n"),
+        ("format: 1\n", "format: 3\n---\n<!-- ticketd:mood -->\n"),
     ] {
         let mut devices = devices();
         let reference = devices.shared_ticket("Login");
@@ -1505,6 +1505,122 @@ fn sourced(state: &str, updated: &str) -> String {
     format!(
         "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Todo\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"I_42\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42 at {updated}\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"{state}\"\n{closure}source_updated_at: \"{updated}\"\n---\nFrom the tracker.\n"
     )
+}
+
+#[test]
+fn legacy_numeric_github_ids_round_trip_in_a_format_compatible_with_their_host() {
+    const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    for (url, id, format) in [
+        (
+            "https://example.test/acme/site/issues/42",
+            "@example.test:7",
+            2,
+        ),
+        ("", "@:7", 2),
+        ("https://github.com/acme/site/issues/42", "7", 1),
+    ] {
+        let mut devices = devices();
+        let legacy = sourced("open", "2026-01-03T00:00:00Z")
+            .replace("source_external_id: \"I_42\"", "source_external_id: \"7\"")
+            .replace("https://example.test/acme/site/issues/42", url);
+        devices.hand_edit(RemoteKind::Ticket, ID, &legacy);
+        assert_eq!(devices.sync(0).skipped, 0, "{url}");
+        assert_eq!(devices.remote_text(RemoteKind::Ticket, ID).1, legacy);
+
+        devices.workspaces[0].add_tag("T-ZZ7", "synced").unwrap();
+        assert_eq!(devices.sync(0).uploaded, 1, "{url}");
+        let written = devices.remote_text(RemoteKind::Ticket, ID).1;
+        assert!(
+            written.contains(&format!("\nformat: {format}\n")),
+            "{written}"
+        );
+        assert!(written.contains(&format!("\nsource_external_id: \"{id}\"\n")));
+
+        assert_eq!(devices.sync(1).skipped, 0, "{url}");
+        let received = devices.workspaces[1]
+            .export_sync_record(SyncKind::Ticket, ID)
+            .unwrap();
+        assert_eq!(
+            received.fields["source_external_id"],
+            SyncValue::Text(id.into())
+        );
+        assert_eq!(devices.sync(1).uploaded, 0, "{url}");
+    }
+}
+
+#[test]
+fn concurrent_github_host_verifications_keep_the_winning_issue_identity_and_url_together() {
+    const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    let mut devices = devices();
+    let issue = |id: &str, url: &str, state: &str, updated: &str| {
+        sourced(state, updated)
+            .replace("\"I_42\"", &format!("\"{id}\""))
+            .replace("https://example.test/acme/site/issues/42", url)
+    };
+    let apply = |workspace: &mut Workspace, text: &str| {
+        let record = ticketd_core::SyncRecord::parse(text).unwrap();
+        workspace.apply_sync_record(&record).unwrap();
+    };
+    apply(
+        &mut devices.workspaces[0],
+        &issue("@:5", "", "open", "2026-01-03T00:00:00Z"),
+    );
+    devices.settle([0, 1, 2]);
+
+    let public = issue(
+        "5",
+        "https://github.com/acme/site/issues/42",
+        "open",
+        "2026-01-03T00:00:00Z",
+    )
+    .replace(
+        "source_authority: \"external\"",
+        "source_authority: \"local\"",
+    )
+    .replace(
+        "source_authority_changed_at: \"2026-01-02T03:04:05.000Z\"",
+        "source_authority_changed_at: \"2026-01-04T00:00:00.000Z\"",
+    );
+    apply(&mut devices.workspaces[0], &public);
+
+    let enterprise_url = "https://example.test/acme/site/issues/42";
+    apply(
+        &mut devices.workspaces[1],
+        &issue(
+            "@example.test:5",
+            enterprise_url,
+            "closed",
+            "2026-01-05T00:00:00Z",
+        ),
+    );
+    devices.sync(1);
+    devices.sync(0);
+
+    let written = devices.remote_text(RemoteKind::Ticket, ID).1;
+    assert!(written.contains("\nformat: 2\n"), "{written}");
+    assert!(
+        written.contains("\nsource_external_id: \"@example.test:5\"\n"),
+        "{written}"
+    );
+
+    devices.settle([0, 1, 2]);
+    for workspace in &devices.workspaces {
+        assert_eq!(workspace.sync_conflicts().unwrap(), []);
+        let source = workspace.show_ticket("T-ZZ7").unwrap().source.unwrap();
+        assert_eq!(source.id, "@example.test:5");
+        assert_eq!(source.url, enterprise_url);
+        assert_eq!(
+            source.state,
+            ticketd_core::source::ExternalState::Closed {
+                reason: ticketd_core::source::ClosureReason::Completed,
+            }
+        );
+        assert_eq!(source.ownership, ticketd_core::source::Ownership::Local);
+        assert_eq!(
+            workspace.export().unwrap()["external_identities"][0]["repository"],
+            "example.test/acme/site"
+        );
+    }
 }
 
 /// F38: what two desktops each refreshed from the tracker is not a decision for
