@@ -105,6 +105,14 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
             [CREDENTIAL_REF],
         )
         .unwrap();
+    const RETRY_AFTER: &str = "2099-01-01T00:00:00.000Z";
+    Connection::open(path)
+        .unwrap()
+        .execute(
+            "UPDATE source_connection_status SET retry_after = ?1",
+            [RETRY_AFTER],
+        )
+        .unwrap();
     let mut workspace = Workspace::open(path).unwrap();
     workspace.rename_source("github", LOCAL_NAME).unwrap();
     let export = workspace.export().unwrap().to_string();
@@ -162,6 +170,7 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
     let mut restored = Workspace::open(&other).unwrap();
     assert!(restored.saved_sources().unwrap().is_empty());
     assert!(restored.source_statuses().unwrap()[0].error.is_none());
+    assert_eq!(restored.source_hold_until().unwrap(), None);
     let ticket = restored.show_ticket("T-QZ1").unwrap();
     assert_eq!(
         ticket.source.unwrap().unavailable.unwrap().code,
@@ -187,6 +196,10 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
     Workspace::restore(path, &backup).unwrap();
     let same = Workspace::open(path).unwrap();
     assert_eq!(same.source_connection("github").unwrap().name, LOCAL_NAME);
+    assert_eq!(
+        same.source_statuses().unwrap()[0].retry_after.as_deref(),
+        Some(RETRY_AFTER)
+    );
     assert_eq!(
         same.source_connection("github").unwrap().secret_fields,
         ["test_credential"]

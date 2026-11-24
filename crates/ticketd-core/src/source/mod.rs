@@ -1554,6 +1554,19 @@ pub(crate) fn retain_connections(
             rusqlite::params_from_iter(values),
         )?;
     }
+    let mut holds = current.prepare(
+        "SELECT connection_id, retry_after FROM source_connection_status WHERE retry_after IS NOT NULL",
+    )?;
+    let holds = holds.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })?;
+    for hold in holds {
+        let (id, retry_after) = hold?;
+        restored.execute(
+            "INSERT INTO source_connection_status (connection_id, retry_after) VALUES (?1, ?2)",
+            params![id, retry_after],
+        )?;
+    }
     let mut ticket_bindings = current.prepare(
         "SELECT a.ticket_id, a.connection_id, i.provider, i.external_id, i.url
          FROM source_connection_tickets a
