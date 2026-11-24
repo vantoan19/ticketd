@@ -2590,6 +2590,87 @@ mod tests {
     }
 
     #[test]
+    fn a_saved_antigravity_move_shows_both_paths_in_history_and_approval() {
+        use super::{Tracker, item};
+
+        let chat = Chat {
+            harness: "antigravity".to_owned(),
+            ..chat(None)
+        };
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Permission to move files".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("allow".to_owned()),
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let live = ChatLive::idle();
+        let source = "/work/limiter/src/old.rs";
+        let destination = "/work/limiter/src/new.rs";
+        let both = ["src/old.rs", "src/new.rs"];
+
+        for (raw_input, locations, expected) in [
+            (
+                json!({"SourcePath": source, "DestinationPath": destination}),
+                json!([{"path": source}]),
+                both.as_slice(),
+            ),
+            (
+                json!({"SourcePath": source}),
+                json!([{"path": destination}]),
+                both.as_slice(),
+            ),
+            (
+                json!({"DestinationPath": destination}),
+                json!([]),
+                &["src/new.rs"],
+            ),
+            (
+                serde_json::Value::Null,
+                json!([{"path": source}, {"path": destination}, {"path": source}]),
+                both.as_slice(),
+            ),
+            (
+                json!({"TargetFile": destination}),
+                json!([]),
+                &["src/new.rs"],
+            ),
+        ] {
+            let evidence = json!({
+                "toolCallId": "t", "title": "Move file", "kind": "move",
+                "status": "completed", "rawInput": raw_input, "locations": locations,
+            });
+            let record = ChatItem::Tool(tool(
+                "Move file",
+                &evidence.to_string(),
+                ChatToolState::Completed,
+                None,
+            ));
+            let tracker = Tracker::from_items(&[record.clone(), approval.clone()]);
+            let Some(Item::Steps { steps, .. }) = item(&record, &chat, &live, None, &tracker)
+            else {
+                panic!("a step");
+            };
+            let Some(Item::Request { title, subject, .. }) =
+                item(&approval, &chat, &live, None, &tracker)
+            else {
+                panic!("an approval");
+            };
+            assert_eq!(steps[0].kind, "edit");
+            assert_eq!(title, "Antigravity asked to edit");
+            assert_eq!(texts(&steps[0]), expected, "{evidence}");
+            assert_eq!(subject, Some(expected.join(", ")), "{evidence}");
+        }
+    }
+
+    #[test]
     fn a_live_native_approval_serializes_each_choices_warning() {
         use super::item;
         use ticketd_chat_host::{ApprovalOption, InteractionKind, LiveInteraction};

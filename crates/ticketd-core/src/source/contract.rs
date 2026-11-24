@@ -47,8 +47,9 @@ pub struct ConnectionInfo {
     pub account: String,
 }
 
-/// An external issue's immutable identity. Titles, numbers and repository
-/// names can change; this cannot. Never match issues by display text.
+/// The immutable key of an issue record on its provider. If a transfer assigns
+/// the issue a new key, the connector must verify continuity separately. Never
+/// match issues by display text.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ExternalIdentity {
     pub provider: String,
@@ -61,6 +62,14 @@ pub struct ExternalIdentity {
 pub struct ExternalRef {
     pub identity: ExternalIdentity,
     pub locator: String,
+}
+
+/// The current issue and, when verified by a built-in connector, its identity
+/// and locator before a repository transfer changed the provider's ID.
+#[doc(hidden)]
+pub struct FetchedIssue {
+    pub(crate) issue: ExternalIssue,
+    pub(crate) transferred_from: Option<ExternalRef>,
 }
 
 impl ClosureReason {
@@ -112,6 +121,10 @@ pub struct ExternalIssue {
     /// Human-readable name such as `owner/name#12`. Display only.
     pub display: String,
     pub url: String,
+    /// The issue's normalized `host/owner/name`. Additive to contract 1;
+    /// connectors that cannot tell leave it `None`.
+    #[serde(default)]
+    pub repository: Option<String>,
     pub title: String,
     pub body: String,
     pub state: ExternalState,
@@ -531,6 +544,19 @@ pub trait Connector: Send + Sync {
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError>;
 
+    /// Refreshes a tracked issue, with optional verified transfer evidence.
+    #[doc(hidden)]
+    fn fetch_tracked(
+        &self,
+        config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<FetchedIssue, SourceError> {
+        Ok(FetchedIssue {
+            issue: self.fetch(config, reference)?,
+            transferred_from: None,
+        })
+    }
+
     /// The part of the source an issue belongs to: what discovery reads or skips
     /// as a whole (for GitHub, the repository). ticketd keeps which parts it has
     /// read, so the first read of one can be told from the reads that follow. A
@@ -569,6 +595,13 @@ pub trait Connector: Send + Sync {
     /// [`PublishRequest::destination`]. Empty when the connector cannot say.
     fn destinations(&self, _config: &ConfigValues) -> Vec<String> {
         Vec::new()
+    }
+
+    /// The normalized `host/owner/name` of a repository named by a configuration
+    /// or publication destination. Offline, and absent for connectors without
+    /// a repository mapping or for a destination they cannot map.
+    fn repository_for_destination(&self, _destination: &str) -> Option<String> {
+        None
     }
 
     /// Whether `destination` is a well-formed place to publish, judged without

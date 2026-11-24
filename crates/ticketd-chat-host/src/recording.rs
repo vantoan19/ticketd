@@ -262,6 +262,8 @@ fn start(directory: &Path, harness: &'static str) -> io::Result<Sender> {
         incomplete: Arc::clone(&incomplete),
     }));
     let pending_for_worker = pending.clone();
+    // The worker thread has no current span. Keep the Chat's span for its warnings.
+    let span = tracing::Span::current();
     if let Err(error) = thread::Builder::new()
         .name("ticketd-harness-recording".into())
         .spawn(move || {
@@ -272,6 +274,7 @@ fn start(directory: &Path, harness: &'static str) -> io::Result<Sender> {
                 &pending_for_worker,
                 &completed,
                 harness,
+                &span,
             )
         })
     {
@@ -288,19 +291,24 @@ fn finish(
     pending: &Path,
     completed: &Path,
     harness: &'static str,
+    span: &tracing::Span,
 ) {
     match save(file, receive) {
         Ok(()) if incomplete.load(Ordering::Acquire) => {
-            tracing::warn!(harness, "harness recording incomplete");
+            span.in_scope(|| tracing::warn!(harness, "harness recording incomplete"));
         }
         Ok(()) => match fs::rename(pending, completed) {
             Ok(()) => return,
             Err(error) => {
-                tracing::warn!(harness, error_kind = ?error.kind(), "could not finish harness recording");
+                span.in_scope(|| {
+                    tracing::warn!(harness, error_kind = ?error.kind(), "could not finish harness recording");
+                });
             }
         },
         Err(error) => {
-            tracing::warn!(harness, error_kind = ?error.kind(), "could not save harness recording");
+            span.in_scope(|| {
+                tracing::warn!(harness, error_kind = ?error.kind(), "could not save harness recording");
+            });
         }
     }
     let _ = fs::remove_file(pending);

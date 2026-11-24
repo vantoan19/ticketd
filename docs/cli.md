@@ -34,6 +34,64 @@ projects produce an error; an unmatched directory creates an unlinked ticket.
 Paths are interpreted by the native operating system; interoperability with WSL
 has not been validated.
 
+`ticketd project create NAME PATH` saves the checkout's detected Project remote,
+preferring a valid `upstream` over `origin`. Use `--remote host/owner/name` to
+choose it explicitly or `--no-remote` to skip detection. `project edit ID NAME
+PATH` accepts `--remote host/owner/name` or `--clear-remote`. `project show` and
+`project list` include the `remote` field. Registering a checkout with a different
+detected remote still succeeds and prints a warning to stderr.
+
+When project creation sets a Project remote, stderr includes a hint to preview
+connecting the project to GitHub.
+
+```sh
+ticketd project connect-source PROJECT_ID --preview
+ticketd project connect-source PROJECT_ID --expect FINGERPRINT
+```
+
+The offline preview returns the discovery action in `source` (`add_repository`,
+`already_listed`, or `not_connected`), ticket references in `tickets`, and the
+`fingerprint` to pass with `--expect`. Confirmation returns `repository_added`
+and `linked_tickets`. If the effect changed, get a new preview. If no GitHub source
+is saved, connect it first with `ticketd source save github --set repositories=OWNER/NAME`
+using the preview's `repository`, then preview again.
+
+## Recover a legacy GitHub issue link
+
+If refresh asks you to confirm a legacy ticket's GitHub host, connect the
+GitHub source to the host where that issue belongs. If the ticket is in Trash,
+run `ticketd restore T-KQ12` first. Use the issue's current full URL.
+
+```sh
+ticketd source reconcile-github T-KQ12 --issue https://github.com/OWNER/NAME/issues/123
+```
+
+GitHub must confirm the saved stable issue ID at the URL you supply. A new
+repository or issue number is accepted when that ID stays the same. The command
+repairs the existing ticket's source link and keeps its current ownership.
+Run `ticketd source refresh --ticket T-KQ12` afterward if GitHub still owns the
+ticket. If discovery held a separate issue with the same ID on another GitHub
+host, refresh that host again after confirming the legacy ticket's link.
+
+## Recover an unresolved publication
+
+Run `ticketd source resolve T-KQ12` to review the attempt. Recovery uses the
+GitHub host that received the create request. If the source uses a different
+host, connect it to the original host and review again.
+
+For an older attempt with an unknown host, verify which host received the
+original request before confirming it. Connect the source to that host and
+supply its hostname, such as `github.com`, without a protocol or repository path.
+
+```sh
+ticketd source resolve T-KQ12 --confirm-host github.com
+ticketd source resolve T-KQ12
+```
+
+`--confirm-host` records the host locally. The attempt stays unresolved until
+you attach the verified issue or confirm that nothing was created. If you
+cannot verify the original host, leave the attempt unresolved.
+
 ## JSON output
 
 Most data commands print JSON on stdout. Direct commands usually return an

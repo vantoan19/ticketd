@@ -53,7 +53,7 @@ Reproduced with an expired session cookie.
 
 The same record always produces the same bytes, so a file changes only when its record does.
 
-- `kind` comes first, then `format`, the number of the file format (1), then `id`.
+- `kind` comes first, then `format`, then `id`. A ticket with a host-qualified or unverified GitHub issue ID uses format 2. All other records use format 1.
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
 - Every text value is a double-quoted YAML string on one line. A whole number is written bare. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
@@ -139,6 +139,10 @@ The ticket that lost the relationship lists it in `blocked_by_removed` or `paren
 The text after the header is the description. Activities and Implementation evidence follow as sections, oldest first.
 
 An externally sourced ticket carries `source_provider`, `source_external_id`, `source_locator`, `source_display`, `source_url`, `source_origin` (imported or published), `source_linked_at`, `source_authority` (external or local), `source_authority_changed_at`, `source_state` (open or closed) and, when known, `source_closure_reason` and `source_updated_at`. They are present together or not at all.
+
+Public GitHub issue IDs are numeric. Format 2 carries GitHub Enterprise issue IDs as `@<host>:<id>` and unverified GitHub issue IDs as `@:<id>`. A desktop that reads only format 1 skips these files and leaves them in Drive until it is updated. When reading a legacy numeric ID, ticketd verifies the host from the saved issue URL and locator. Missing or ambiguous host evidence leaves the ID unverified.
+
+When two desktops concurrently link the same ticket to different GitHub issues, the latest issue update timestamp determines which issue the ticket keeps. The issue ID, location, and associated source data travel together. Equal timestamps are ordered by the field values.
 
 ### Activity section
 

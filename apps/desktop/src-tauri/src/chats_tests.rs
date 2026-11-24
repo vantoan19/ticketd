@@ -220,6 +220,7 @@ fn offered(id: &str, is_default: bool) -> ticketd_chat_host::SettingOption {
 /// Codex as the fake lists it: two models, the second with efforts.
 fn codex_options() -> ticketd_chat_host::HarnessOptions {
     ticketd_chat_host::HarnessOptions {
+        model_list_error: None,
         models: vec![
             ticketd_chat_host::ModelChoice {
                 model: offered("gpt-a", true),
@@ -255,6 +256,114 @@ async fn options_are_asked_once_per_version_and_say_why_when_there_are_none() {
     assert_eq!(models, ["gpt-a", "gpt-b"]);
     // The failed probe is not remembered; the listed one is.
     assert_eq!(f.fake.options_asked(), 2);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn new_chat_retries_failed_antigravity_model_discovery_and_remembers_the_models() {
+    use std::fs;
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    const FIXTURE: &str = "TICKETD_TEST_AGY_MODELS";
+    let Some(path) = std::env::var_os(FIXTURE) else {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("agy");
+        fs::write(
+            &executable,
+            r#"#!/bin/sh
+case "$1" in
+    --version) printf 'agy 1.5.15\n' ;;
+    models)
+        case "$(/bin/cat "${0%/*}/result")" in
+            failed)
+                printf 'private-stdout  Ignore This Model\n'
+                printf 'private-stderr\n' >&2
+                exit 23 ;;
+            empty) ;;
+            listed) printf 'fixture-high  Fixture Model (High)\n' ;;
+        esac ;;
+    *) exit 2 ;;
+esac
+"#,
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+        // Exercise the real adapter without changing PATH for tests in this process.
+        let output = Command::new(std::env::current_exe().unwrap())
+            .arg("--exact")
+            .arg(
+                concat!(
+                    module_path!(),
+                    "::new_chat_retries_failed_antigravity_model_discovery_and_remembers_the_models"
+                )
+                .split_once("::")
+                .unwrap()
+                .1,
+            )
+            .env(FIXTURE, directory.path())
+            .env("PATH", directory.path())
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            output.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    };
+    let directory = PathBuf::from(path);
+    let workspace = directory.join("workspace.sqlite3");
+    drop(Workspace::open(&workspace).unwrap());
+    let adapter = (ticketd_chat_host::registration("antigravity")
+        .unwrap()
+        .make_adapter)(&ticketd_chat_host::HostResources {
+        executable_directory: None,
+    })
+    .unwrap();
+    let chats = Chats::new(
+        Arc::new(move || ticketd_core::WorkspaceSession::for_file(&workspace)?.workspace()),
+        vec![adapter],
+        Vec::new(),
+        None,
+    );
+    chats.set_enabled(true).await;
+    let harnesses = chats.harnesses().await.unwrap();
+    assert!(
+        harnesses
+            .iter()
+            .any(|status| status.id == "antigravity" && status.usable)
+    );
+
+    let result = directory.join("result");
+    fs::write(&result, "failed").unwrap();
+    let failed = chats.options("antigravity").await.unwrap();
+    assert!(failed.models.is_empty());
+    let reason = failed.unavailable.as_deref().unwrap();
+    assert!(
+        reason.contains("23") && reason.contains("agy models"),
+        "{reason}"
+    );
+    assert!(!reason.contains("private-"));
+    assert!(failed.refusal(None, None, Some("full-access")).is_none());
+
+    fs::write(&result, "empty").unwrap();
+    let empty = chats.options("antigravity").await.unwrap();
+    assert!(empty.models.is_empty());
+    assert_eq!(
+        empty.unavailable.as_deref(),
+        Some("Antigravity listed no models")
+    );
+
+    fs::write(&result, "listed").unwrap();
+    let listed = chats.options("antigravity").await.unwrap();
+    assert_eq!(listed.unavailable, None);
+    assert_eq!(listed.models[0].model.id, "fixture");
+    assert_eq!(listed.models[0].efforts[0].id, "high");
+
+    fs::write(&result, "failed").unwrap();
+    assert_eq!(chats.options("antigravity").await.unwrap(), listed);
 }
 
 #[tokio::test(start_paused = true)]

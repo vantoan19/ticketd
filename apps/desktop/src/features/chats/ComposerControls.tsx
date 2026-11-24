@@ -234,7 +234,7 @@ export function HarnessPicker({
   changeable: boolean;
   /** Why model and effort cannot be changed, when they cannot. */
   reason?: string | null | undefined;
-  /** Why the harness listed no models: only its Default is offered. */
+  /** Why New Chat offers only the harness's default model. */
   empty?: string | null | undefined;
   /** The harness is being asked for its models: skeleton rows hold the space. */
   loading?: boolean;
@@ -884,7 +884,7 @@ export function NewChatControls({
         loading={loading}
         empty={
           options
-            ? `${name} didn't list its models${options.unavailable ? `: ${options.unavailable.replace(/\.$/, "")}` : ""}. It uses its default.`
+            ? `${options.unavailable?.replace(/\.$/, "") ?? `${name} listed no models`}. It will use its default model.`
             : `Asking ${name} for its models…`
         }
         notice={notice}
