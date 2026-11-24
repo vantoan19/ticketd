@@ -88,8 +88,8 @@ const MAX_REMEMBERED: usize = 64;
 #[derive(Debug)]
 struct LiveRequest<R> {
     turn: Option<NativeTurnId>,
-    payload: R,
-    answered: bool,
+    /// Once answered, keep the ID for correlation without retaining its payload.
+    payload: Option<R>,
 }
 
 /// State the codec updates while interpreting frames and preparing commands.
@@ -283,11 +283,14 @@ impl<R> RuntimeState<R> {
         self.requests.contains_key(request)
     }
 
+    pub(crate) fn request_count(&self) -> usize {
+        self.requests.len()
+    }
+
     pub(crate) fn unanswered(&self) -> impl Iterator<Item = (&NativeRequestId, &R)> {
         self.requests
             .iter()
-            .filter(|(_, live)| !live.answered)
-            .map(|(id, live)| (id, &live.payload))
+            .filter_map(|(id, live)| live.payload.as_ref().map(|payload| (id, payload)))
     }
 
     pub(crate) fn register_request(
@@ -301,8 +304,7 @@ impl<R> RuntimeState<R> {
             std::collections::hash_map::Entry::Vacant(entry) => {
                 entry.insert(LiveRequest {
                     turn: turn.cloned(),
-                    payload,
-                    answered: false,
+                    payload: Some(payload),
                 });
                 true
             }
@@ -319,10 +321,10 @@ impl<R> RuntimeState<R> {
         let live = self
             .requests
             .get_mut(request)
-            .filter(|live| !live.answered)
             .ok_or(Refusal::UnknownRequest)?;
-        let frame = encode(&live.payload)?;
-        live.answered = true;
+        let payload = live.payload.as_ref().ok_or(Refusal::UnknownRequest)?;
+        let frame = encode(payload)?;
+        live.payload = None;
         Ok(frame)
     }
 
@@ -338,7 +340,7 @@ impl<R> RuntimeState<R> {
 
     pub(crate) fn resolve_request(&mut self, request: &NativeRequestId) -> Option<EventKind> {
         let live = self.requests.remove(request)?;
-        let resolution = if live.answered {
+        let resolution = if live.payload.is_none() {
             InteractionResolution::Answered
         } else {
             InteractionResolution::Withdrawn
@@ -369,7 +371,7 @@ impl<R> RuntimeState<R> {
             if live.turn.as_ref() != Some(&turn) {
                 return true;
             }
-            if !live.answered {
+            if live.payload.is_some() {
                 events.push(EventKind::InteractionResolved {
                     request: request.clone(),
                     resolution: InteractionResolution::Withdrawn,

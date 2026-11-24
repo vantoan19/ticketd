@@ -702,6 +702,180 @@ async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
     opened.runtime.close().await;
 }
 
+fn recorded_permission() -> Value {
+    recorded(RESUME)
+        .into_iter()
+        .find_map(|line| {
+            let frame = &line["server"];
+            (frame["method"] == "session/request_permission").then(|| frame.clone())
+        })
+        .unwrap()
+}
+
+async fn next_approval(events: &mut EventStream) -> NativeRequestId {
+    drain(events)
+        .await
+        .into_iter()
+        .find_map(|kind| match kind {
+            EventKind::InteractionRequested(request) => Some(request.request),
+            _ => None,
+        })
+        .expect("the harness's approval is shown")
+}
+
+#[tokio::test(start_paused = true)]
+async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("saturation")).await,
+        DispatchOutcome::Written
+    );
+    let prompt = peer.written().await;
+    let mut permission = recorded_permission();
+    permission["id"] = json!("approval-0");
+    send(&mut peer, &permission).await;
+    let first = next_approval(&mut opened.events).await;
+    for number in 1..32 {
+        permission["id"] = json!(format!("approval-{number}"));
+        send(&mut peer, &permission).await;
+        next_approval(&mut opened.events).await;
+    }
+    permission["id"] = json!("approval-0");
+    send(&mut peer, &permission).await;
+    permission["id"] = json!("overflow");
+    send(&mut peer, &permission).await;
+    assert_eq!(
+        peer.written().await,
+        json!({"jsonrpc": "2.0", "id": "overflow", "error": {
+            "code": -32000, "message": "ticketd has reached the Antigravity approval limit for this turn"
+        }})
+    );
+    assert!(
+        !drain(&mut opened.events)
+            .await
+            .iter()
+            .any(|kind| matches!(kind, EventKind::InteractionRequested(_)))
+    );
+
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+    let finished = drain(&mut opened.events).await;
+    assert_eq!(
+        finished
+            .iter()
+            .filter(|kind| matches!(
+                kind,
+                EventKind::InteractionResolved {
+                    resolution: crate::InteractionResolution::Withdrawn,
+                    ..
+                }
+            ))
+            .count(),
+        32
+    );
+    assert_eq!(
+        opened.runtime.submit(start_turn("recovery")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+    permission["id"] = json!("approval-0");
+    send(&mut peer, &permission).await;
+    let next = next_approval(&mut opened.events).await;
+    assert_eq!(
+        opened
+            .runtime
+            .respond(InteractionResponse {
+                generation: GENERATION,
+                request: first,
+                answer: InteractionAnswer::NativeApproval("allow".into()),
+            })
+            .await,
+        RespondOutcome::NotSent(Refusal::UnknownRequest)
+    );
+    assert_eq!(
+        opened
+            .runtime
+            .respond(InteractionResponse {
+                generation: GENERATION,
+                request: next,
+                answer: InteractionAnswer::NativeApproval("allow".into()),
+            })
+            .await,
+        RespondOutcome::Sent
+    );
+    assert_eq!(
+        peer.written().await,
+        json!({"jsonrpc": "2.0", "id": "approval-0", "result": {
+            "outcome": {"outcome": "selected", "optionId": "allow"}
+        }})
+    );
+    peer.assert_nothing_written().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_saturated_reply_queue_ends_the_prompt_without_stalling_wire_reads() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("saturation")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+    send(&mut peer, &recorded_permission()).await;
+    let pending = next_approval(&mut opened.events).await;
+
+    // This reply cannot fit in the scripted stdin pipe until the peer reads it.
+    let blocked =
+        json!({"jsonrpc": "2.0", "method": "fixture/unsupported", "id": "x".repeat(128 * 1024)});
+    send(&mut peer, &blocked).await;
+    send(
+        &mut peer,
+        &text_update("agent_message_chunk", "still reading"),
+    )
+    .await;
+    assert!(drain(&mut opened.events).await.iter().any(|kind| matches!(
+        kind, EventKind::TextDelta { text, .. } if text == "still reading"
+    )));
+    let reply = peer.written().await;
+    assert_eq!(reply["id"], blocked["id"]);
+    assert_eq!(reply["error"]["code"], -32601);
+
+    send(&mut peer, &blocked).await;
+    let backlog = (0..32)
+        .map(|id| {
+            format!(
+                "{}\n",
+                json!({"jsonrpc": "2.0", "method": "fixture/unsupported", "id": id})
+            )
+        })
+        .collect::<String>();
+    peer.send(&backlog).await;
+    let loss = tokio::time::timeout(crate::WRITE_TIMEOUT + Duration::from_secs(3), async {
+        while let Some(event) = opened.events.recv().await {
+            if let EventKind::RuntimeLost { diagnostics, .. } = event.kind {
+                return diagnostics;
+            }
+        }
+        panic!("the runtime must report the loss");
+    })
+    .await
+    .expect("the queue overflow must close the runtime");
+    assert!(loss.contains("the harness response queue filled"), "{loss}");
+    assert_eq!(
+        opened
+            .runtime
+            .respond(InteractionResponse {
+                generation: GENERATION,
+                request: pending,
+                answer: InteractionAnswer::NativeApproval("allow".into()),
+            })
+            .await,
+        RespondOutcome::NotSent(Refusal::RuntimeClosed)
+    );
+}
+
 #[tokio::test]
 async fn large_approval_input_keeps_the_exact_command() {
     let command = "printf '%s' 'fixture command'";

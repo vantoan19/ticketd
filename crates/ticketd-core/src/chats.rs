@@ -8,13 +8,14 @@
 
 use std::collections::HashMap;
 
-use rusqlite::{Connection, OptionalExtension, Row, named_params, params, types::Type};
+use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use uuid::Uuid;
 
 use crate::{Error, Workspace};
 
+mod receipt;
 #[cfg(test)]
 mod tests;
 
@@ -199,35 +200,6 @@ pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> 
     if !has {
         connection.execute_batch("ALTER TABLE chat_turns ADD COLUMN ending TEXT;")?;
     }
-    Ok(())
-}
-
-/// Format 86: retain the submission and end positions and record the change head
-/// seen by each new Chat-tagged write. Rows from before this format keep no position.
-/// Index both legacy feeds by time so receipt capture only visits the Turn's window.
-pub(crate) fn migrate_write_attribution(connection: &Connection) -> Result<(), Error> {
-    for (table, column) in [
-        ("chat_submission_attempts", "recorded_position"),
-        ("chat_turns", "ended_position"),
-        ("chat_record_writes", "change_sequence"),
-    ] {
-        let has: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
-            params![table, column],
-            |row| row.get(0),
-        )?;
-        if !has {
-            connection
-                .execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} INTEGER;"))?;
-        }
-    }
-    connection.execute_batch(
-        "CREATE INDEX IF NOT EXISTS chat_record_writes_chat_sequence
-         ON chat_record_writes(chat_id, change_sequence) WHERE change_sequence IS NOT NULL;
-         CREATE INDEX IF NOT EXISTS ticket_history_chat_receipt
-         ON ticket_history(timestamp) WHERE kind = 'status';
-         CREATE INDEX IF NOT EXISTS activities_chat_receipt ON activities(reported_at);",
-    )?;
     Ok(())
 }
 
@@ -1292,127 +1264,6 @@ fn expire_interactions(
     Ok(())
 }
 
-struct TurnAgentChangeWindow {
-    harness: String,
-    observed_start: String,
-    ended_at: Option<String>,
-    attributed_start: String,
-    start_position: i64,
-    end_position: Option<i64>,
-}
-
-fn read_turn_agent_changes(
-    connection: &Connection,
-    chat_id: &str,
-    turn_id: &str,
-    require_ended: bool,
-) -> Result<Vec<ChatAgentChange>, Error> {
-    // A pre-format-86 submission or end preceded every ordered write. Use position
-    // zero for such boundaries. A NULL end position here means the Turn is still active.
-    let window = connection
-        .query_row(
-            "SELECT c.harness, t.started_at, t.ended_at,
-                    MIN(t.started_at, COALESCE(a.recorded_at, t.started_at)),
-                    MIN(t.position, COALESCE(a.position, t.position)),
-                    CASE WHEN t.ended_at IS NOT NULL THEN COALESCE(t.ended_position, 0) END
-             FROM chat_turns t JOIN chats c ON c.id = t.chat_id
-             CROSS JOIN (
-                 SELECT MIN(a.recorded_at) AS recorded_at, MIN(COALESCE(a.recorded_position, 0)) AS position
-                 FROM chat_messages m JOIN chat_submission_attempts a ON a.message_id = m.id
-                 WHERE m.chat_id = ?2 AND a.chat_id = ?2 AND a.turn_id = ?1
-                   AND a.delivery NOT IN ('not_delivered', 'rejected')
-             ) a
-             WHERE t.id = ?1 AND t.chat_id = ?2",
-            params![turn_id, chat_id],
-            |row| Ok(TurnAgentChangeWindow {
-                harness: row.get(0)?,
-                observed_start: row.get(1)?,
-                ended_at: row.get(2)?,
-                attributed_start: row.get(3)?,
-                start_position: row.get(4)?,
-                end_position: row.get(5)?,
-            }),
-        )
-        .optional()?
-        .ok_or_else(|| invalid(format!("turn '{turn_id}' was not recorded for this Chat")))?;
-    if require_ended && window.ended_at.is_none() {
-        return Ok(Vec::new());
-    }
-    // A write sees the submission or observed start at its lower bound, but cannot
-    // see the end yet. Legacy branches seek into the time window before looking up
-    // tickets. X'' sorts after all TEXT timestamps, leaving a live Turn's end open
-    // while letting SQLite use an upper index bound for ended Turns.
-    let mut statement = connection.prepare(
-        "WITH ordered_writes AS (
-             SELECT activity_id, history_number FROM chat_record_writes
-             WHERE chat_id = :chat_id AND change_sequence >= :start_position
-               AND (:end_position IS NULL OR change_sequence < :end_position)
-         ), legacy_changes AS (
-             SELECT 'status' AS kind, t.reference, t.title, h.from_value, h.to_value,
-                    h.timestamp AS at, 0 AS source, h.number AS seq, h.editing_agent AS agent, w.chat_id AS writer
-             FROM ticket_history h CROSS JOIN tickets t ON t.id = h.ticket_id
-             LEFT JOIN chat_record_writes w ON w.history_number = h.number
-             WHERE h.kind = 'status' AND w.change_sequence IS NULL
-               AND h.timestamp BETWEEN :attributed_start AND COALESCE(:ended_at, X'')
-             UNION ALL
-             SELECT 'update', t.reference, t.title, '', a.brief, a.reported_at, 1, a.number, a.editing_agent, w.chat_id
-             FROM activities a CROSS JOIN tickets t ON t.id = a.ticket_id
-             LEFT JOIN chat_record_writes w ON w.activity_id = a.id
-             WHERE w.change_sequence IS NULL
-               AND a.reported_at BETWEEN :attributed_start AND COALESCE(:ended_at, X'')
-         )
-         SELECT kind, reference, title, from_value, to_value FROM (
-             SELECT 'status' AS kind, t.reference, t.title, h.from_value, h.to_value,
-                    h.timestamp AS at, 0 AS source, h.number AS seq
-             FROM ordered_writes w JOIN ticket_history h ON h.number = w.history_number
-             JOIN tickets t ON t.id = h.ticket_id
-             UNION ALL
-             SELECT 'update', t.reference, t.title, '', a.brief, a.reported_at, 1, a.number
-             FROM ordered_writes w JOIN activities a ON a.id = w.activity_id
-             JOIN tickets t ON t.id = a.ticket_id
-             UNION ALL
-             SELECT kind, reference, title, from_value, to_value, at, source, seq FROM legacy_changes
-             WHERE writer = :chat_id OR (writer IS NULL AND agent = :harness AND at >= :observed_start AND NOT EXISTS (
-                 SELECT 1 FROM chat_turns o JOIN chats oc ON oc.id = o.chat_id
-                 WHERE oc.harness = :harness AND o.chat_id <> :chat_id AND o.started_at <= at
-                   AND (o.ended_at IS NULL OR o.ended_at >= at)))
-         )
-         ORDER BY at, source, seq LIMIT :limit",
-    )?;
-    let changes = statement
-        .query_map(
-            named_params! {
-                ":harness": window.harness,
-                ":attributed_start": window.attributed_start,
-                ":ended_at": window.ended_at,
-                ":limit": CHAT_AGENT_CHANGES_LIMIT as i64,
-                ":chat_id": chat_id,
-                ":observed_start": window.observed_start,
-                ":start_position": window.start_position,
-                ":end_position": window.end_position,
-            },
-            |row| {
-                let (kind, reference): (String, String) = (row.get(0)?, row.get(1)?);
-                Ok(if kind == "status" {
-                    ChatAgentChange::Status {
-                        reference,
-                        title: row.get(2)?,
-                        from: row.get(3)?,
-                        to: row.get(4)?,
-                    }
-                } else {
-                    let brief: String = row.get(4)?;
-                    ChatAgentChange::Update {
-                        reference,
-                        excerpt: brief.chars().take(CHAT_AGENT_EXCERPT_LIMIT).collect(),
-                    }
-                })
-            },
-        )?
-        .collect::<Result<_, _>>()?;
-    Ok(changes)
-}
-
 fn observe(
     connection: &Connection,
     chat_id: &str,
@@ -1491,7 +1342,7 @@ fn observe(
                 "INSERT INTO chat_turns (id, chat_id, position, native_turn_id, state) VALUES (?1, ?2, ?3, ?4, 'active')",
                 params![turn_id, chat_id, position, native_turn_id],
             )?;
-            Ok(())
+            receipt::record_boundary(connection, chat_id, receipt::Boundary::Start(&turn_id))
         }
         ChatObservation::TurnEnded {
             turn_id,
@@ -1506,10 +1357,10 @@ fn observe(
             if state == ChatTurnState::Active {
                 return Err(invalid("a turn cannot end as active"));
             }
-            let current: ChatTurnState = connection.query_row(
-                "SELECT state FROM chat_turns WHERE id = ?1",
+            let (current, has_ended): (ChatTurnState, bool) = connection.query_row(
+                "SELECT state, ended_at IS NOT NULL FROM chat_turns WHERE id = ?1",
                 [&turn_id],
-                |row| named(row, 0),
+                |row| Ok((named(row, 0)?, row.get(1)?)),
             )?;
             if current == state {
                 return Ok(());
@@ -1521,28 +1372,22 @@ fn observe(
                     name(current)?
                 )));
             }
-            let position = log(connection, chat_id, "turn", &turn_id)?;
+            log(connection, chat_id, "turn", &turn_id)?;
+            if !has_ended {
+                receipt::record_boundary(connection, chat_id, receipt::Boundary::End(&turn_id))?;
+            }
             connection.execute(
                 &format!(
                     "UPDATE chat_turns SET state = ?2, detail = ?3, problem = ?4,
                      problem_resets_at = ?5, ending = ?6,
-                     ended_position = CASE WHEN ended_at IS NULL THEN ?7 ELSE ended_position END,
                      ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"
                 ),
-                params![
-                    turn_id,
-                    name(state)?,
-                    detail,
-                    problem,
-                    resets_at,
-                    ending,
-                    position
-                ],
+                params![turn_id, name(state)?, detail, problem, resets_at, ending],
             )?;
             expire_interactions(connection, chat_id, Some(&turn_id))
         }
         ChatObservation::CaptureAgentChanges { turn_id } => {
-            let changes = read_turn_agent_changes(connection, chat_id, &turn_id, true)?;
+            let changes = receipt::read_changes(connection, chat_id, &turn_id, true)?;
             if changes.is_empty() {
                 return Ok(());
             }
@@ -1742,10 +1587,11 @@ fn lose_contact(
         Ok(ids)
     };
     for id in ids("SELECT id FROM chat_turns WHERE chat_id = ?1 AND state = 'active'")? {
-        let position = log(connection, chat_id, "turn", &id)?;
+        log(connection, chat_id, "turn", &id)?;
+        receipt::record_boundary(connection, chat_id, receipt::Boundary::End(&id))?;
         connection.execute(
-            &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ending = ?3, ended_at = {NOW}, ended_position = ?4 WHERE id = ?1"),
-            params![id, detail, ending, position],
+            &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ending = ?3, ended_at = {NOW} WHERE id = ?1"),
+            params![id, detail, ending],
         )?;
         if receipt_turn == Some(id.as_str()) {
             // Legacy writes can share the end's millisecond. Capture before another
@@ -2347,9 +2193,14 @@ impl Workspace {
             }
             let sequence = log(connection, chat_id, "message", message_id)?;
             connection.execute(
-                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, recorded_position)
-                 VALUES (?1, ?2, ?3, ?4, 'possible', ?5)",
-                params![attempt_id, chat_id, message_id, name(intent)?, sequence],
+                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery)
+                 VALUES (?1, ?2, ?3, ?4, 'possible')",
+                params![attempt_id, chat_id, message_id, name(intent)?],
+            )?;
+            receipt::record_boundary(
+                connection,
+                chat_id,
+                receipt::Boundary::Submission(attempt_id),
             )?;
             // Positions are change sequences, so this one is unused and the latest.
             if from_queue && message.attempts.is_empty() {
@@ -2383,11 +2234,21 @@ impl Workspace {
             if message.attempts.iter().any(|a| a.id == attempt_id) {
                 return Ok(message);
             }
-            let sequence = decide(connection, chat_id, &message, ChatDeliveryDecision::Resent)?;
+            decide(connection, chat_id, &message, ChatDeliveryDecision::Resent)?;
             connection.execute(
-                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, recorded_position)
-                 VALUES (?1, ?2, ?3, ?4, 'possible', ?5)",
-                params![attempt_id, chat_id, message_id, name(ChatSubmissionIntent::NewTurn)?, sequence],
+                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery)
+                 VALUES (?1, ?2, ?3, ?4, 'possible')",
+                params![
+                    attempt_id,
+                    chat_id,
+                    message_id,
+                    name(ChatSubmissionIntent::NewTurn)?
+                ],
+            )?;
+            receipt::record_boundary(
+                connection,
+                chat_id,
+                receipt::Boundary::Submission(attempt_id),
             )?;
             trim(connection, chat_id)?;
             read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
@@ -2511,29 +2372,13 @@ impl Workspace {
     /// records are credited to that Chat. Connection-scoped like `act_as_local_person`;
     /// TEMP triggers keep every write path unchanged.
     pub fn act_for_chat(&mut self, chat_id: &str) -> Result<(), Error> {
-        // SQLite serializes Chat and ticket writes. The head is
-        // observed inside this write transaction and stays monotonic after trimming.
-        self.connection.execute_batch(&format!(
-            "CREATE TEMP TABLE IF NOT EXISTS acting_chat (id TEXT NOT NULL);
-             DELETE FROM acting_chat;
-             CREATE TEMP TRIGGER IF NOT EXISTS acting_chat_status AFTER INSERT ON main.ticket_history WHEN NEW.kind = 'status' BEGIN
-                 INSERT INTO chat_record_writes (chat_id, history_number, change_sequence)
-                 SELECT id, NEW.number, ({CHANGE_HEAD}) FROM acting_chat;
-             END;
-             CREATE TEMP TRIGGER IF NOT EXISTS acting_chat_update AFTER INSERT ON main.activities BEGIN
-                 INSERT INTO chat_record_writes (chat_id, activity_id, change_sequence)
-                 SELECT id, NEW.id, ({CHANGE_HEAD}) FROM acting_chat;
-             END;",
-        ))?;
-        self.connection
-            .execute("INSERT INTO acting_chat (id) VALUES (?1)", [chat_id])?;
-        Ok(())
+        receipt::prepare_writer(&self.connection, chat_id)
     }
 
     /// What the Chat's agent changed in tickets during the Turn, oldest first.
     /// New writes with this Chat's identity count in durable commit order, from its
     /// first correlated submission or observed Turn start, whichever came first.
-    /// A tagged write recorded before positions were stored uses the timestamps.
+    /// A Turn with older boundaries falls back to the available timestamps.
     /// Writes without a Chat identity count from the observed Turn start and only
     /// when the agent name matches the harness and no other Chat of that harness
     /// had a Turn running at the time.
@@ -2544,7 +2389,7 @@ impl Workspace {
         turn_id: &str,
     ) -> Result<Vec<ChatAgentChange>, Error> {
         crate::read_scope::run(&self.connection, |connection| {
-            read_turn_agent_changes(connection, chat_id, turn_id, false)
+            receipt::read_changes(connection, chat_id, turn_id, false)
         })
     }
 
