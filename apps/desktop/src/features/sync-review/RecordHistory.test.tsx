@@ -57,7 +57,7 @@ const open = () =>
   );
 
 beforeEach(() => {
-  stored = { local: versions, drive: [] };
+  stored = { local: versions, drive: [], s3: [] };
   vi.mocked(syncReview.versions).mockImplementation(
     async ({ source }) => stored[source],
   );
@@ -106,6 +106,16 @@ test("lists versions, compares the newest earlier one with now, and restores it"
     expect.any(String),
   );
   expect(onClose).toHaveBeenCalled();
+});
+
+test("the list starts right under the header, with no band reserved for a failure", async () => {
+  open();
+  await screen.findByRole("navigation", { name: "Versions" });
+  const body = document.querySelector(".dialog-shell-body");
+  expect(body?.children).toHaveLength(1);
+  expect(body?.firstElementChild?.classList.contains("sync-history")).toBe(
+    true,
+  );
 });
 
 test("choosing a version shows what changed since; the current version cannot be restored", async () => {
@@ -190,10 +200,13 @@ test("a Drive listing that fails is reported, not shown as no versions", async (
   expect(screen.queryByText("No earlier versions")).toBeNull();
 });
 
-const connected = (view: ReactNode) => (
+const connected = (
+  view: ReactNode,
+  provider: "google_drive" | "s3" = "google_drive",
+) => (
   <SyncStatusContext
     value={{
-      status: syncStatus(),
+      status: syncStatus({ provider }),
       apply: () => {},
       refresh: () => Promise.reject(new Error("unused")),
       openSettings: () => {},
@@ -311,4 +324,128 @@ test("Restore cannot be submitted twice, and restoring the same version again is
   const [first, second] = vi.mocked(syncReview.restore).mock.calls;
   expect(first?.[2]).toBeTruthy();
   expect(second?.[2]).toBe(first?.[2]);
+});
+
+test("an S3 binding reads, names and restores the bucket's versions, and never says Drive", async () => {
+  stored.s3 = [
+    { id: "ver-9", timestamp: hours(24 * 40), device: null, changed: [] },
+  ];
+  render(connected(history, "s3"));
+  const list = within(
+    await screen.findByRole("navigation", { name: "Versions" }),
+  );
+  fireEvent.click(list.getByRole("button", { name: "Older versions from S3" }));
+  const older = await list.findByRole("button", { name: /S3$/ });
+  expect(syncReview.versions).toHaveBeenLastCalledWith({
+    kind: "ticket",
+    id: "guid-12",
+    source: "s3",
+  });
+  fireEvent.click(older);
+  expect(await screen.findByText(/From S3\./)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Restore" }));
+  await waitFor(() =>
+    expect(syncReview.restore).toHaveBeenCalledWith(
+      { kind: "ticket", id: "guid-12", source: "s3" },
+      "ver-9",
+      expect.any(String),
+    ),
+  );
+  expect(document.body.textContent).not.toMatch(/drive/i);
+});
+
+test("a version kept in a storage is captioned the same way for Drive and S3, not by the bare name", async () => {
+  stored.drive = [
+    { id: "r1", timestamp: hours(24 * 40), device: null, changed: [] },
+  ];
+  stored.s3 = [
+    { id: "ver-9", timestamp: hours(24 * 40), device: null, changed: [] },
+  ];
+  for (const [provider, caption] of [
+    ["google_drive", "Kept in Google Drive"],
+    ["s3", "Kept in S3"],
+  ] as const) {
+    render(connected(history, provider));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Older versions from (Drive|S3)/,
+      }),
+    );
+    const row = await screen.findByRole("button", {
+      name: new RegExp(`${caption}$`),
+    });
+    expect(row.querySelector("small")?.textContent).toBe(caption);
+    cleanup();
+  }
+});
+
+test("a failure reading one storage is gone when the History reads another", async () => {
+  stored.local = [];
+  vi.mocked(syncReview.versions).mockImplementation(({ source }) =>
+    source === "drive"
+      ? Promise.reject(new Error("offline"))
+      : Promise.resolve(source === "s3" ? [versions[1]!] : []),
+  );
+  const { rerender } = render(connected(history, "google_drive"));
+  expect(await screen.findByRole("alert")).toBeTruthy();
+  // The status turned out to say S3: the first source's failure is not this one's.
+  rerender(connected(history, "s3"));
+  await screen.findByRole("button", { name: /S3 · Description/ });
+  expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("an S3 listing that finds no older versions says so in S3's name", async () => {
+  render(connected(history, "s3"));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Older versions from S3" }),
+  );
+  expect(await screen.findByText("No older versions in S3")).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/drive/i);
+});
+
+test("a desktop without local versions loads them from S3 and says so", async () => {
+  stored.local = [];
+  stored.s3 = [versions[1]!];
+  render(connected(history, "s3"));
+  await screen.findByRole("button", { name: /S3 · Description/ });
+  expect(screen.getByText(/From S3\./)).toBeTruthy();
+  expect(syncReview.versions).toHaveBeenCalledWith({
+    kind: "ticket",
+    id: "guid-12",
+    source: "s3",
+  });
+  expect(document.body.textContent).not.toMatch(/drive/i);
+});
+
+test("when older versions load, focus moves to the first one that loaded", async () => {
+  stored.drive = [
+    { id: "r1", timestamp: hours(24 * 40), device: null, changed: [] },
+    { id: "r2", timestamp: hours(24 * 41), device: null, changed: [] },
+  ];
+  render(connected(history));
+  const ask = await screen.findByRole("button", {
+    name: "Older versions from Drive",
+  });
+  ask.focus();
+  fireEvent.click(ask);
+  const loaded = await screen.findAllByRole("button", {
+    name: /Google Drive$/,
+  });
+  await waitFor(() => expect(document.activeElement).toBe(loaded[0]));
+});
+
+test("when the storage has no older versions, focus moves to the list", async () => {
+  stored.drive = [];
+  render(connected(history));
+  const ask = await screen.findByRole("button", {
+    name: "Older versions from Drive",
+  });
+  ask.focus();
+  fireEvent.click(ask);
+  await screen.findByText("No older versions in Google Drive");
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("navigation", { name: "Versions" }),
+    ),
+  );
 });

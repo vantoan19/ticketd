@@ -1,4 +1,5 @@
 import { useHarnessCatalog } from "@/features/chats/harness-catalog";
+import { useSources } from "@/features/settings/sources/use-sources";
 import { useCallback, useEffect, useId, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -237,6 +238,7 @@ export function RunView({
   onRead: ReportRead;
 }) {
   const catalog = useHarnessCatalog();
+  const { entries: sources } = useSources();
   const headingId = useId();
   const [run, setRun] = useState<AutomationRunDetail | null>(null);
   /** The card whose panel is open; undefined until the run first loads. */
@@ -493,7 +495,7 @@ export function RunView({
           <RunCanvas
             run={run}
             agents={agents}
-            only={conditionsLine(run.definition.conditions, projects)}
+            only={conditionsLine(run.definition.conditions, projects, sources)}
             selected={(panel && selected) || null}
             onSelect={setSelected}
           />

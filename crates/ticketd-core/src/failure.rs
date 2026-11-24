@@ -102,9 +102,14 @@ impl Error {
                 RemoteError::Unauthorized => FailureKind::NotSignedIn,
                 RemoteError::Offline => FailureKind::Offline,
                 RemoteError::StorageFull => FailureKind::DiskFull,
-                RemoteError::FolderMissing | RemoteError::NotFound => FailureKind::NotFound,
+                RemoteError::FolderMissing
+                | RemoteError::NotFound
+                | RemoteError::BucketMissing(_) => FailureKind::NotFound,
                 RemoteError::PreconditionFailed { .. } => FailureKind::Conflict,
-                RemoteError::RateLimited { .. } | RemoteError::Other(_) => FailureKind::Failed,
+                RemoteError::RateLimited { .. }
+                | RemoteError::ServiceChanged(_)
+                | RemoteError::CliUnavailable(_)
+                | RemoteError::Other(_) => FailureKind::Failed,
             },
             Self::UploadLimit { .. } => FailureKind::TooLarge,
             Self::TicketChanged(_)
@@ -192,6 +197,7 @@ impl Error {
             | Self::NoCheckoutFolder(_)
             | Self::Path(_)
             | Self::SyncFile(_)
+            | Self::SyncFileIdentityCollision
             | Self::Sync(_)
             | Self::NewerSchema(_) => FailureKind::Failed,
         }

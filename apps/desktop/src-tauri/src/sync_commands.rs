@@ -18,15 +18,18 @@ use ticketd_core::{
         PickerSession, PlatformCredentialStore,
     },
     sync::{
-        AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, SetupOptions, SyncChoice,
-        SyncConflict, SyncConnection, SyncItem, SyncNotice, SyncRecovery, SyncResolution,
-        SyncSettings, SyncStatus,
-        remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage},
+        AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, S3Binding, SetupOptions,
+        SyncChoice, SyncConflict, SyncConnection, SyncItem, SyncNotice, SyncProvider, SyncRecovery,
+        SyncResolution, SyncSettings, SyncStatus,
+        remote::{RemoteError, RemoteKey, RemoteKind, RemoteRevision, RemoteStorage},
     },
 };
 
 use super::{BridgeFailure, open_workspace, workspace_session};
-use crate::sync_scheduler::{Binding, EXIT_LIMIT, Scheduler};
+use crate::{
+    s3_storage,
+    sync_scheduler::{Binding, EXIT_LIMIT, Scheduler},
+};
 
 /// The one scheduler of this process and the instant its time counts from.
 pub struct SyncHost {
@@ -64,25 +67,69 @@ fn drive(connection_id: &str) -> Arc<DriveRemote<'static>> {
 /// interval applies to the next thing that runs.
 fn binding_of(
     workspace: &Workspace,
-    remote: impl FnOnce(&str) -> Arc<dyn RemoteStorage>,
+    remote: impl FnOnce(&Storage) -> Arc<dyn RemoteStorage>,
 ) -> Result<Option<Binding>, Error> {
     // One small read: the scheduler asks each time it wakes.
     let Some(bound) = workspace.sync_binding()? else {
         return Ok(None);
     };
-    let Some(connection) = bound.connection_id else {
-        return Ok(None);
+    // A Drive binding names its sign-in; an S3 one, its bucket and profile.
+    let storage = match (bound.provider, bound.connection_id, bound.s3) {
+        (SyncProvider::GoogleDrive, Some(connection), _) => Storage::Drive(connection),
+        (SyncProvider::S3, _, Some(s3)) => Storage::S3(learn_service(workspace, s3)),
+        _ => return Ok(None),
     };
     Ok(Some(Binding {
         folder: bound.folder_id,
         device: bound.device_name,
         poll: Duration::from_secs(bound.poll_secs),
-        remote: remote(&connection),
+        remote: remote(&storage),
     }))
 }
 
+/// A binding made before the S3 service was recorded learns it once its storage has been
+/// built: the profile reached that service and the bucket answered. Until then (or when it
+/// cannot be written) the binding stays as it was and the next look tries again.
+fn learn_service(workspace: &Workspace, s3: S3Binding) -> S3Binding {
+    if s3.endpoint.is_some() {
+        return s3;
+    }
+    let Some(reached) = s3_storage::storage(&s3).reached() else {
+        return s3;
+    };
+    match workspace.sync_record_s3_endpoint(&reached) {
+        Ok(()) => S3Binding {
+            endpoint: Some(reached),
+            ..s3
+        },
+        Err(error) => {
+            tracing::warn!(
+                error_kind = error.kind().code(),
+                %error,
+                "could not record the S3 service of the sync binding"
+            );
+            s3
+        }
+    }
+}
+
+/// What a Workspace's sync reaches, as the core stores it.
+pub enum Storage {
+    Drive(String),
+    S3(S3Binding),
+}
+
+impl Storage {
+    fn remote(&self) -> Arc<dyn RemoteStorage> {
+        match self {
+            Self::Drive(connection) => drive(connection),
+            Self::S3(binding) => s3_storage::storage(binding),
+        }
+    }
+}
+
 pub fn binding(workspace: &Workspace) -> Result<Option<Binding>, Error> {
-    binding_of(workspace, |connection| drive(connection))
+    binding_of(workspace, Storage::remote)
 }
 
 /// The name macOS shows for this computer. Its apps get no host name in their
@@ -405,7 +452,22 @@ pub fn unread(workspace: &Workspace) -> Result<u32, Error> {
 #[serde(rename_all = "snake_case")]
 pub enum Source {
     Local,
+    /// The revisions of the file in Google Drive.
     Drive,
+    /// The versions of the object in the S3 bucket.
+    S3,
+}
+
+impl Source {
+    /// The storage a version is read from, as a person names it; `None` for
+    /// the versions this desktop keeps.
+    fn storage(self) -> Option<&'static str> {
+        match self {
+            Self::Local => None,
+            Self::Drive => Some("Google Drive"),
+            Self::S3 => Some("S3"),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, Eq, Serialize)]
@@ -506,22 +568,20 @@ fn versions(
 ) -> Outcome<Vec<VersionEntry>> {
     // Also what rejects an id that is not a record of this kind.
     let record = workspace.export_sync_record(sync_kind(kind), id)?;
-    if source == Source::Drive {
+    if let Some(storage) = source.storage() {
         // Without sync there is simply nothing earlier.
         let Some(bound) = bound else {
             return Ok(Vec::new());
         };
         let mut revisions = match bound.remote.revisions(&bound.folder, &remote_key(kind, id)) {
             Ok(revisions) => revisions,
-            // Never uploaded: Drive has no versions of it.
+            // Never uploaded: the storage has no versions of it.
             Err(RemoteError::NotFound) => return Ok(Vec::new()),
             Err(error) => {
-                return rejected(&format!(
-                    "Could not load versions from Google Drive: {error}"
-                ));
+                return rejected(&format!("Could not load versions from {storage}: {error}"));
             }
         };
-        // Drive lists oldest first. Its newest revision is left out only when
+        // The storage lists oldest first. Its newest version is left out only when
         // it is what this desktop holds now: a file changed elsewhere and not
         // yet downloaded here is a version to compare and restore like the rest.
         // ponytail: only the newest revision is read; an older one that equals
@@ -534,6 +594,10 @@ fn versions(
                 revisions.remove(0);
             }
         }
+        // A version this desktop holds is also what the storage got when it uploaded
+        // it: that revision is the same version, so it is listed once, as this desktop's.
+        let kept = kept_here(workspace, kind, id, &record)?;
+        let revisions = unheld(bound, kind, id, storage, revisions, kept);
         // ponytail: who wrote a revision and what it changed would cost a download
         // each; fetch them if the Drive list needs more than times.
         return Ok(revisions
@@ -589,6 +653,64 @@ fn versions(
         .collect()
 }
 
+/// The content of each version this desktop keeps of a record.
+fn kept_here(
+    workspace: &Workspace,
+    kind: RecordKind,
+    id: &str,
+    record: &SyncRecord,
+) -> Result<Vec<Content>, Error> {
+    let reference = match kind {
+        RecordKind::Ticket => text(record, "ref"),
+        RecordKind::Document => id.to_owned(),
+    };
+    workspace
+        .versions(kind, &reference)?
+        .iter()
+        .map(|version| Ok(Content::saved(workspace.version(version.id)?)))
+        .collect()
+}
+
+/// How many of the storage's revisions History reads to tell which are kept here.
+const MATCHED_REVISIONS: usize = 20;
+
+/// The storage's versions (newest first) that this desktop does not hold. No
+/// record says which storage version a kept one was uploaded as, so a revision
+/// that has the content of a kept version is taken to be it, once each.
+/// At most [`MATCHED_REVISIONS`] are read, newest first, and none once every kept
+/// version found its copy: each read is a paid request to the storage. Revisions
+/// beyond the cap are listed as they are, so one may repeat a kept version.
+fn unheld(
+    bound: &Binding,
+    kind: RecordKind,
+    id: &str,
+    storage: &str,
+    revisions: Vec<RemoteRevision>,
+    mut kept: Vec<Content>,
+) -> Vec<RemoteRevision> {
+    let mut read = 0;
+    revisions
+        .into_iter()
+        .filter(|revision| {
+            if kept.is_empty() || read >= MATCHED_REVISIONS {
+                return true;
+            }
+            read += 1;
+            // A revision that cannot be read is listed; opening it says why.
+            let Ok(content) = stored_content(bound, kind, id, storage, revision) else {
+                return true;
+            };
+            match kept.iter().position(|held| *held == content) {
+                Some(index) => {
+                    kept.swap_remove(index);
+                    false
+                }
+                None => true,
+            }
+        })
+        .collect()
+}
+
 /// The content of one earlier version, wherever it is kept.
 fn version_content(
     workspace: &Workspace,
@@ -610,20 +732,22 @@ fn version_content(
             }
             Ok(Content::saved(saved))
         }
-        Source::Drive => {
+        Source::Drive | Source::S3 => {
+            let storage = source.storage().unwrap_or_default();
             let Some(bound) = bound else {
                 return rejected("Sync is not connected");
             };
-            if version.is_empty() || version.len() > 256 {
+            // S3's VersionIds run to 1024 bytes; the storage says whether this one exists.
+            if version.is_empty() || version.len() > 1024 {
                 return missing();
             }
             let unloaded = |error: RemoteError| {
                 BridgeFailure::plain(&format!(
-                    "Could not load this version from Google Drive: {error}"
+                    "Could not load this version from {storage}: {error}"
                 ))
             };
             let key = remote_key(kind, id);
-            // Drive says how large a version is before any of it is read.
+            // The storage says how large a version is before any of it is read.
             let revisions = bound
                 .remote
                 .revisions(&bound.folder, &key)
@@ -631,26 +755,45 @@ fn version_content(
             let Some(revision) = revisions.iter().find(|known| known.version == version) else {
                 return missing();
             };
-            if revision.size > MAX_FILE_BYTES {
-                return rejected(&format!(
-                    "This version is larger than {} MiB, the most a record's file may be, and cannot be shown",
-                    MAX_FILE_BYTES / (1024 * 1024)
-                ));
-            }
-            let mut bytes = Vec::new();
-            bound
-                .remote
-                .download(&bound.folder, &key, version, &mut bytes)
-                .map_err(unloaded)?;
-            let record = String::from_utf8(bytes)
-                .map_err(|_| Error::SyncFile("the file is not UTF-8 text".into()))
-                .and_then(|file| SyncRecord::parse(&file))?;
-            if record.kind != sync_kind(kind) || record.id != id {
-                return missing();
-            }
-            Ok(Content::of(kind, &record))
+            stored_content(bound, kind, id, storage, revision)
         }
     }
+}
+
+/// The content of one version the storage keeps, read as a record file.
+fn stored_content(
+    bound: &Binding,
+    kind: RecordKind,
+    id: &str,
+    storage: &str,
+    revision: &RemoteRevision,
+) -> Outcome<Content> {
+    let missing = || rejected("This version is no longer available");
+    let version = revision.version.as_str();
+    let unloaded = |error: RemoteError| {
+        BridgeFailure::plain(&format!(
+            "Could not load this version from {storage}: {error}"
+        ))
+    };
+    let key = remote_key(kind, id);
+    if revision.size > MAX_FILE_BYTES {
+        return rejected(&format!(
+            "This version is larger than {} MiB, the most a record's file may be, and cannot be shown",
+            MAX_FILE_BYTES / (1024 * 1024)
+        ));
+    }
+    let mut bytes = Vec::new();
+    bound
+        .remote
+        .download(&bound.folder, &key, version, &mut bytes)
+        .map_err(unloaded)?;
+    let record = String::from_utf8(bytes)
+        .map_err(|_| Error::SyncFile("the file is not UTF-8 text".into()))
+        .and_then(|file| SyncRecord::parse(&file))?;
+    if record.kind != sync_kind(kind) || record.id != id {
+        return missing();
+    }
+    Ok(Content::of(kind, &record))
 }
 
 fn version_detail(
@@ -670,7 +813,7 @@ fn version_detail(
 
 /// Makes an earlier version's title, text and status current again as an
 /// ordinary edit, so what it replaces becomes a version too. Trash is left as
-/// it is. A version kept here is restored by the core; one read from Drive is
+/// it is. A version kept here is restored by the core; one read from the storage is
 /// written as the edit it amounts to.
 fn restore(
     workspace: &mut Workspace,
@@ -689,7 +832,7 @@ fn restore(
             Ok(id) => WriteRequest::RestoreVersion { id },
             Err(_) => return rejected("This version is no longer available"),
         },
-        (Source::Drive, RecordKind::Ticket) => WriteRequest::ChangeTicket {
+        (Source::Drive | Source::S3, RecordKind::Ticket) => WriteRequest::ChangeTicket {
             reference: text(&record, "ref"),
             patch: TicketPatch {
                 title: Some(earlier.title),
@@ -702,7 +845,7 @@ fn restore(
                 ..Default::default()
             },
         },
-        (Source::Drive, RecordKind::Document) => WriteRequest::ChangeDocument {
+        (Source::Drive | Source::S3, RecordKind::Document) => WriteRequest::ChangeDocument {
             id: id.to_owned(),
             patch: DocumentPatch {
                 title: Some(Some(earlier.title).filter(|title| !title.is_empty())),
@@ -760,7 +903,7 @@ pub fn set_sync_read(ids: Vec<String>, read: bool) -> Outcome<()> {
     Ok(open_workspace()?.set_sync_read(&ids, read)?)
 }
 
-// History reads Drive when asked to, so these run off the UI thread.
+// History reads the storage when asked to, so these run off the UI thread.
 #[tauri::command(async)]
 pub fn record_versions(
     host: tauri::State<'_, SyncHost>,
@@ -866,11 +1009,19 @@ fn sign_in(app: &tauri::AppHandle) -> Outcome<(String, String)> {
     ))
 }
 
-/// The storage of the signed-in account, before or after a folder is chosen.
-fn signed_in_drive(workspace: &Workspace) -> Outcome<Arc<DriveRemote<'static>>> {
-    match workspace.sync_status()?.connection_id {
-        Some(connection) => Ok(drive(&connection)),
-        None => rejected("Sign in to Google Drive first"),
+/// The storage this Workspace is connected to, before or after a folder is chosen: the
+/// signed-in Drive account, or the S3 bucket.
+fn signed_in(workspace: &Workspace) -> Outcome<Arc<dyn RemoteStorage>> {
+    let status = workspace.sync_status()?;
+    match (status.provider, status.connection_id, status.s3) {
+        (SyncProvider::GoogleDrive, Some(connection), _) => Ok(drive(&connection)),
+        (SyncProvider::GoogleDrive, None, _) => rejected("Sign in to Google Drive first"),
+        (SyncProvider::S3, _, Some(s3)) => {
+            // A choice about the storage reads the profile as it is now.
+            s3_storage::reset();
+            Ok(s3_storage::storage(&s3))
+        }
+        (SyncProvider::S3, _, None) => rejected("Connect S3 first"),
     }
 }
 
@@ -952,7 +1103,7 @@ pub fn sync_connect(app: tauri::AppHandle) -> Outcome<SyncStatus> {
 #[tauri::command(async)]
 pub fn sync_setup_options() -> Outcome<SetupOptions> {
     let workspace = open_workspace()?;
-    let remote = signed_in_drive(&workspace)?;
+    let remote = signed_in(&workspace)?;
     Ok(workspace.sync_setup_options(remote.as_ref())?)
 }
 
@@ -960,7 +1111,7 @@ pub fn sync_setup_options() -> Outcome<SetupOptions> {
 #[tauri::command(async)]
 pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
-    let remote = signed_in_drive(&workspace)?;
+    let remote = signed_in(&workspace)?;
     woken(Ok(workspace.sync_upload_workspace(
         remote.as_ref(),
         "ticketd Workspace",
@@ -972,7 +1123,7 @@ pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
 #[tauri::command(async)]
 pub fn sync_reconnect() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
-    let remote = signed_in_drive(&workspace)?;
+    let remote = signed_in(&workspace)?;
     woken(Ok(workspace.sync_reconnect(remote.as_ref())?))
 }
 
@@ -993,7 +1144,7 @@ pub fn sync_download_workspace(
     folder_id: String,
 ) -> Outcome<Downloaded> {
     check_folder_id(&folder_id)?;
-    let remote = signed_in_drive(&*open_workspace()?)?;
+    let remote = signed_in(&*open_workspace()?)?;
     let no_run = host.scheduler.hold();
     let (status, safety_backup) = workspace_session()?.exclusive(|path| {
         let (replaced, safety_backup) =
@@ -1021,9 +1172,16 @@ pub fn sync_recover(
     app: tauri::AppHandle,
     host: tauri::State<'_, SyncHost>,
 ) -> Outcome<SyncStatus> {
-    if open_workspace()?.sync_status()?.recovery == Some(SyncRecovery::AuthorizationExpired) {
-        let (connection, account) = sign_in(&app)?;
-        open_workspace()?.sync_connect(&connection, &account)?;
+    let status = open_workspace()?.sync_status()?;
+    if status.recovery == Some(SyncRecovery::AuthorizationExpired) {
+        match status.s3 {
+            // The profile's own sign-in; what it signs in as stays what the binding says.
+            Some(s3) => crate::s3_commands::sign_in_for_recovery(&s3)?,
+            None => {
+                let (connection, account) = sign_in(&app)?;
+                open_workspace()?.sync_connect(&connection, &account)?;
+            }
+        }
     }
     match host.scheduler.recover(host.started.elapsed())? {
         Some(status) => Ok(status),
@@ -1038,20 +1196,30 @@ pub fn sync_disconnect() -> Outcome<SyncStatus> {
 
 #[tauri::command(async)]
 pub fn sync_open_folder(app: tauri::AppHandle) -> Outcome<()> {
-    let workspace = open_workspace()?;
-    let Some(folder) = workspace.sync_status()?.folder else {
+    let status = open_workspace()?.sync_status()?;
+    let Some(folder) = status.folder else {
         return rejected("Sync is not connected");
     };
-    let url = signed_in_drive(&workspace)?
-        .folder_url(&folder.id)
-        .map_err(|error| {
-            failed(format!(
-                "Could not find the folder in Google Drive: {error}"
-            ))
-        })?;
+    let (url, place) = match (status.provider, status.connection_id, status.s3) {
+        (SyncProvider::S3, _, Some(s3)) => {
+            let Some(url) = s3_storage::storage(&s3).console_url(&folder.id) else {
+                return rejected("This bucket has no page in the AWS console");
+            };
+            (url, "the AWS console")
+        }
+        (SyncProvider::GoogleDrive, Some(connection), _) => {
+            let url = drive(&connection).folder_url(&folder.id).map_err(|error| {
+                failed(format!(
+                    "Could not find the folder in Google Drive: {error}"
+                ))
+            })?;
+            (url, "Google Drive")
+        }
+        _ => return rejected("Sign in to Google Drive first"),
+    };
     app.opener()
         .open_url(url, None::<&str>)
-        .map_err(|_| failed("Could not open the folder in Google Drive"))
+        .map_err(|_| failed(format!("Could not open the folder in {place}")))
 }
 
 #[tauri::command(async)]
@@ -1105,6 +1273,7 @@ pub fn download_attachment(host: tauri::State<'_, SyncHost>, id: String) -> Outc
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::sync::PoisonError;
     use ticketd_core::sync::{
         SyncNoticeKind,
         remote::{FakeRemote, RemoteOp},
@@ -1520,6 +1689,39 @@ mod tests {
     }
 
     #[test]
+    fn a_version_id_up_to_the_storages_own_limit_is_looked_up_not_refused_unseen() {
+        // S3's VersionIds can be 1024 bytes; the storage says whether one exists.
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("One").unwrap();
+        desks.sync_there();
+        desks.sync_here();
+        let calls = desks.remote.calls().len();
+        let refused = version_detail(
+            &desks.here,
+            Some(&desks.bound),
+            RecordKind::Ticket,
+            &ticket.id,
+            Source::Drive,
+            &"v".repeat(300),
+        )
+        .unwrap_err();
+        assert_eq!(refused.message, "This version is no longer available");
+        assert!(desks.remote.calls()[calls..].contains(&RemoteOp::Revisions));
+        // Past the limit, nothing is asked.
+        let calls = desks.remote.calls().len();
+        version_detail(
+            &desks.here,
+            Some(&desks.bound),
+            RecordKind::Ticket,
+            &ticket.id,
+            Source::Drive,
+            &"v".repeat(1025),
+        )
+        .unwrap_err();
+        assert!(!desks.remote.calls()[calls..].contains(&RemoteOp::Revisions));
+    }
+
+    #[test]
     fn drive_history_lists_a_newest_revision_this_desktop_has_not_downloaded() {
         let mut desks = desks();
         let ticket = desks.there.create_ticket("One").unwrap();
@@ -1545,6 +1747,84 @@ mod tests {
                 current: "One".into()
             }]
         );
+    }
+
+    #[test]
+    fn history_lists_an_edit_once_when_this_desktop_holds_it_and_the_storage_does() {
+        let mut desks = desks();
+        let ticket = desks.here.create_ticket("One").unwrap();
+        desks.remote.set_now("2026-03-01T09:00:00Z");
+        desks.sync_here();
+        retitle(&mut desks.here, &ticket.reference, "Two");
+        desks.remote.set_now("2026-03-02T09:00:00Z");
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+
+        // "One" is this desktop's own version and also the storage's first revision.
+        assert_eq!(
+            versions(&desks.here, None, kind, id, Source::Local)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            versions(&desks.here, bound, kind, id, Source::Drive)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn history_reads_at_most_a_capped_number_of_revisions_to_match_and_lists_the_rest() {
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("Edit 0").unwrap();
+        desks.sync_there();
+        desks.sync_here();
+        for edit in 1..=25 {
+            retitle(&mut desks.there, &ticket.reference, &format!("Edit {edit}"));
+            desks.sync_there();
+        }
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+        let calls = desks.remote.calls().len();
+
+        // 26 revisions, the newest held here. This desktop keeps "Edit 0", whose copy is the
+        // oldest revision: beyond the cap, so it stays listed.
+        let list = versions(&desks.here, bound, kind, id, Source::Drive).unwrap();
+        assert_eq!(list.len(), 25);
+        let downloads = desks.remote.calls()[calls..]
+            .iter()
+            .filter(|op| **op == RemoteOp::Download)
+            .count();
+        // One read tells whether the newest revision is held, then the cap for matching.
+        assert_eq!(downloads, 1 + MATCHED_REVISIONS);
+    }
+
+    #[test]
+    fn history_keeps_the_storage_versions_this_desktop_does_not_hold() {
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("One").unwrap();
+        desks.remote.set_now("2026-03-01T09:00:00Z");
+        desks.sync_there();
+        desks.sync_here();
+        retitle(&mut desks.there, &ticket.reference, "Two");
+        desks.remote.set_now("2026-03-02T09:00:00Z");
+        desks.sync_there();
+        retitle(&mut desks.there, &ticket.reference, "Three");
+        desks.remote.set_now("2026-03-03T09:00:00Z");
+        desks.sync_there();
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+
+        // This desktop kept "One", which the storage also has; "Two" only the storage has.
+        let list = versions(&desks.here, bound, kind, id, Source::S3).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].timestamp, "2026-03-02T09:00:00Z");
+        let detail = version_detail(&desks.here, bound, kind, id, Source::S3, &list[0].id).unwrap();
+        assert_eq!(detail.fields[0].value, "Two");
     }
 
     /// F49: a Drive version larger than a record may be is listed, and is not
@@ -1618,6 +1898,81 @@ mod tests {
         assert_eq!(
             failure.message,
             "Could not load versions from Google Drive: the storage cannot be reached"
+        );
+    }
+
+    #[test]
+    fn s3_history_lists_and_restores_the_objects_earlier_versions() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("One").unwrap();
+        desks.remote.set_now("2026-03-01T09:00:00Z");
+        desks.sync_there();
+        retitle(&mut desks.there, &ticket.reference, "Two");
+        desks.remote.set_now("2026-03-02T09:00:00Z");
+        desks.sync_there();
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+
+        let list = versions(&desks.here, bound, kind, id, Source::S3).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].timestamp, "2026-03-01T09:00:00Z");
+        let detail = version_detail(&desks.here, bound, kind, id, Source::S3, &list[0].id).unwrap();
+        assert_eq!(
+            detail.fields,
+            [VersionField {
+                field: "title",
+                value: "One".into(),
+                current: "Two".into()
+            }]
+        );
+
+        restore(
+            &mut desks.here,
+            bound,
+            kind,
+            id,
+            Source::S3,
+            &list[0].id,
+            "r",
+        )
+        .unwrap();
+        assert_eq!(
+            desks.here.show_ticket(&ticket.reference).unwrap().title,
+            "One"
+        );
+    }
+
+    #[test]
+    fn s3_history_names_s3_when_it_could_not_be_asked() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let mut desks = desks();
+        let ticket = desks.here.create_ticket("One").unwrap();
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+        desks.sync_here();
+        let binding = desks.bound.clone();
+        let bound = Some(&binding);
+
+        desks
+            .remote
+            .fail(RemoteOp::Revisions, 1, RemoteError::Offline);
+        let failure = versions(&desks.here, bound, kind, id, Source::S3).unwrap_err();
+        assert_eq!(
+            failure.message,
+            "Could not load versions from S3: the storage cannot be reached"
+        );
+        desks
+            .remote
+            .fail(RemoteOp::Revisions, 1, RemoteError::Offline);
+        let failure = version_detail(&desks.here, bound, kind, id, Source::S3, "1").unwrap_err();
+        assert_eq!(
+            failure.message,
+            "Could not load this version from S3: the storage cannot be reached"
         );
     }
 
@@ -1698,6 +2053,145 @@ mod tests {
 
         here.sync_disconnect().unwrap();
         assert!(bound(&here).is_none());
+    }
+
+    #[test]
+    fn an_s3_binding_syncs_through_its_bucket_and_goes_with_disconnect() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeRemote::new();
+        let mut here = Workspace::open(directory.path().join("here.sqlite3")).unwrap();
+        let s3 = S3Binding {
+            bucket: "team-bucket".into(),
+            prefix: "ticketd/".into(),
+            profile: "work".into(),
+            aws_cli_path: None,
+            endpoint: Some(String::new()),
+        };
+        let reached = |workspace: &Workspace| {
+            let fake = fake.clone();
+            let mut named = None;
+            let bound = binding_of(workspace, |storage| {
+                named = Some(match storage {
+                    Storage::S3(binding) => binding.clone(),
+                    Storage::Drive(_) => panic!("an S3 Workspace reached Drive"),
+                });
+                Arc::new(fake)
+            })
+            .unwrap();
+            (bound, named)
+        };
+        // Connected to a bucket, but no folder chosen: nothing to sync with yet.
+        here.sync_connect_s3(&s3, "arn:aws:iam::1:user/mina")
+            .unwrap();
+        assert!(reached(&here).0.is_none());
+
+        let status = here.sync_upload_workspace(&fake, "Test").unwrap();
+        let (bound, named) = reached(&here);
+        assert_eq!(bound.unwrap().folder, status.folder.unwrap().id);
+        assert_eq!(named, Some(s3));
+
+        here.sync_disconnect().unwrap();
+        assert!(reached(&here).0.is_none());
+    }
+
+    #[test]
+    fn an_s3_binding_made_before_the_service_was_recorded_learns_it_from_the_built_storage() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeRemote::new();
+        let mut here = Workspace::open(directory.path().join("here.sqlite3")).unwrap();
+        let s3 = S3Binding {
+            bucket: "team-bucket".into(),
+            prefix: "ticketd/".into(),
+            profile: "work".into(),
+            aws_cli_path: None,
+            endpoint: None,
+        };
+        here.sync_connect_s3(&s3, "arn:aws:iam::1:user/mina")
+            .unwrap();
+        here.sync_upload_workspace(&fake, "Test").unwrap();
+        let stored = |workspace: &Workspace| {
+            workspace
+                .sync_binding()
+                .unwrap()
+                .unwrap()
+                .s3
+                .unwrap()
+                .endpoint
+        };
+
+        // Nothing has been built for the binding yet, so there is nothing to record.
+        crate::s3_storage::reset();
+        assert_eq!(learn_service(&here, s3.clone()), s3);
+        assert_eq!(stored(&here), None);
+
+        // Once the profile has reached its service, the binding records it.
+        let target = ticketd_core::s3::S3Target::new(
+            "team-bucket",
+            "us-east-1",
+            Some("https://minio.example.com:9000"),
+        )
+        .unwrap();
+        crate::s3_storage::keep_built(&s3, Arc::new(fake.clone()), target);
+        let learned = learn_service(&here, s3);
+        assert_eq!(
+            learned.endpoint.as_deref(),
+            Some("https://minio.example.com:9000")
+        );
+        assert_eq!(stored(&here), learned.endpoint);
+        crate::s3_storage::reset();
+    }
+
+    #[test]
+    fn an_s3_workspace_uploads_downloads_and_reconnects_after_disconnect() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeRemote::new();
+        let s3 = S3Binding {
+            bucket: "team-bucket".into(),
+            prefix: "ticketd/".into(),
+            profile: "work".into(),
+            aws_cli_path: None,
+            endpoint: Some(String::new()),
+        };
+        let desk = |file: &str, identity: &str| {
+            let mut workspace = Workspace::open(directory.path().join(file)).unwrap();
+            workspace.sync_connect_s3(&s3, identity).unwrap();
+            workspace
+        };
+        let mut there = desk("there.sqlite3", "arn:aws:iam::1:user/a");
+        let ticket = there.create_ticket("Fix login").unwrap();
+        there.sync_upload_workspace(&fake, "Test").unwrap();
+        there.sync_now(&fake).unwrap();
+
+        // Another desktop, signed in as someone else, takes the Workspace.
+        let here = desk("here.sqlite3", "arn:aws:iam::1:user/b");
+        let folder = here.sync_setup_options(&fake).unwrap().existing[0]
+            .folder_id
+            .clone();
+        let (mut here, _) = here.sync_download_workspace(&fake, &folder).unwrap();
+        here.sync_now(&fake).unwrap();
+        assert_eq!(here.sync_status().unwrap().provider, SyncProvider::S3);
+        assert!(
+            here.export_sync_record(SyncKind::Ticket, &ticket.id)
+                .is_ok()
+        );
+
+        // Disconnected, then connected to the same bucket again: back to the same folder.
+        here.sync_disconnect().unwrap();
+        here.sync_connect_s3(&s3, "arn:aws:iam::1:user/b").unwrap();
+        let options = here.sync_setup_options(&fake).unwrap();
+        assert_eq!(options.reconnect.unwrap().id, folder);
+        let status = here.sync_reconnect(&fake).unwrap();
+        assert_eq!(status.folder.unwrap().id, folder);
+        assert!(here.sync_binding().unwrap().unwrap().s3.is_some());
     }
 
     #[test]

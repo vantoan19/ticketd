@@ -25,7 +25,6 @@ import {
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { ago } from "@/features/tickets/ticket-source";
-import { FailureAlert } from "@/components/ui/failure-alert";
 import { FieldError } from "@/components/ui/field";
 import {
   describeFailure,
@@ -43,10 +42,19 @@ import {
 import { syncReview } from "@/lib/sync-review-api";
 import { attachments } from "@/lib/api/attachments";
 import { useNow } from "@/lib/use-now";
+import { SyncFailure as Failure } from "./SyncFailure";
+import { useCommand } from "./use-sync-command";
+import { s3Api } from "@/lib/s3-api";
+import { storageName } from "./storage-name";
+import { S3Place } from "./S3Place";
 import { recoveryCopy } from "./sync-recovery";
 import { useSyncStatus } from "./sync-status";
 import "@/features/settings/settings.css";
 import "./sync.css";
+
+/** Where the Workspace's files are, as this page speaks of it. */
+const placeOf = (provider: SyncStatus["provider"]) =>
+  provider === "s3" ? "the bucket" : "Drive";
 
 const plural = (count: number, one: string) =>
   `${count} ${one}${count === 1 ? "" : "s"}`;
@@ -57,58 +65,6 @@ const contents = (counts: SyncCounts) =>
     plural(counts.documents, "Document"),
     plural(counts.attachments, "Attachment"),
   ].join(", ");
-
-/** Runs one sync command at a time and keeps what it failed with. */
-function useCommand() {
-  const { apply } = useSyncStatus();
-  const [busy, setBusy] = useState(false);
-  const [failure, setFailure] = useState<FailureDescription | null>(null);
-  // Set at once, where `busy` waits for a render: a confirmation that is
-  // still closing cannot start its command a second time.
-  const running = useRef(false);
-  /** `action` says what did not happen: "connect Google Drive". */
-  async function run(command: () => Promise<SyncStatus>, action: string) {
-    if (running.current) return false;
-    running.current = true;
-    setBusy(true);
-    setFailure(null);
-    try {
-      apply(await command());
-      return true;
-    } catch (reason) {
-      setFailure(describeFailure(reason, action));
-      return false;
-    } finally {
-      running.current = false;
-      setBusy(false);
-    }
-  }
-  return { busy, failure, run };
-}
-
-/**
- * A command that failed (compact error Alert with Details), or a value that
- * cannot be saved (a field message, nothing sent).
- */
-function Failure({
-  children,
-  onRetry,
-}: {
-  children: FailureDescription | string | null;
-  onRetry?: () => void;
-}) {
-  if (!children) return null;
-  return typeof children === "string" ? (
-    <FieldError className="mt-3">{children}</FieldError>
-  ) : (
-    <FailureAlert
-      size="compact"
-      failure={children}
-      className="mt-3"
-      {...(onRetry && { onRetry })}
-    />
-  );
-}
 
 function ConnectedAs({
   account,
@@ -131,7 +87,7 @@ const TRACK = ["Connect", "Choose a workspace", "First sync", "In sync"];
  * once done, the current one in primary. No status colour: the words say
  * where setup is (set ST-31).
  */
-function Track({ status }: { status: SyncStatus | null }) {
+export function Track({ status }: { status: SyncStatus | null }) {
   const at = !status
     ? -1
     : status.connection === "not_connected"
@@ -178,7 +134,7 @@ function StatusSkeleton() {
   );
 }
 
-/** Settings › Google Drive: setup until this Workspace syncs, then its settings. The page shell supplies the title. */
+/** Settings › Workspace sync, for Google Drive: setup until this Workspace syncs, then its settings. The page shell supplies the title. */
 export function SyncSettings({
   onReplaced,
 }: {
@@ -220,7 +176,8 @@ const plainPath = (path: string) =>
 function Replaced({ safetyBackup }: { safetyBackup: string }) {
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const { status } = useSyncStatus();
-  // The confirmation counted every file in Drive; one that turned out
+  const place = placeOf(status?.provider ?? "google_drive");
+  // The confirmation counted every file in the storage; one that turned out
   // unreadable did not arrive. The replaced Workspace started with no notices,
   // so its unread ones of that kind are this download's.
   const [skipped, setSkipped] = useState(0);
@@ -259,8 +216,8 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
           {skipped > 0 && (
             <span>
               {skipped === 1
-                ? "1 file in Drive could not be read and was skipped."
-                : `${skipped} files in Drive could not be read and were skipped.`}{" "}
+                ? `1 file in ${place} could not be read and was skipped.`
+                : `${skipped} files in ${place} could not be read and were skipped.`}{" "}
               See Inbox.
             </span>
           )}
@@ -391,6 +348,9 @@ function Choose({
   const [readFailure, setReadFailure] = useState<FailureDescription | null>(
     null,
   );
+  const provider = status.provider;
+  // Read again when the person asks, once what the failure said is fixed.
+  const [attempt, setAttempt] = useState(0);
   const [choice, setChoice] = useState(UPLOAD);
   const [confirming, setConfirming] = useState(false);
   const [switching, setSwitching] = useState(false);
@@ -413,16 +373,25 @@ function Choose({
           setChoice(first.folder_id);
       })
       .catch((reason: unknown) => {
-        if (current) setReadFailure(describeFailure(reason, "read your Drive"));
+        if (current)
+          // The bucket check words its refusals for people: say what to fix.
+          setReadFailure(
+            describeFailure(reason, `read ${placeOf(provider)}`, {
+              readable: provider === "s3",
+            }),
+          );
       });
     return () => {
       current = false;
     };
-  }, []);
+  }, [provider, attempt]);
   const download = options?.existing.find(
     (workspace) => workspace.folder_id === choice,
   );
   const account = status.account ?? "this account";
+  const s3 = status.provider === "s3";
+  const place = placeOf(status.provider);
+  const storage = storageName(status.provider);
   return (
     <SettingsSection
       title="This Workspace"
@@ -430,7 +399,9 @@ function Choose({
     >
       {!options && !readFailure && (
         <p role="status" className="settings-hint">
-          Looking for Workspaces in your Drive…
+          {s3
+            ? "Checking the bucket and looking for Workspaces…"
+            : "Looking for Workspaces in your Drive…"}
         </p>
       )}
       {options && (
@@ -444,7 +415,7 @@ function Choose({
             <ChoiceTile
               value={RECONNECT}
               title={<>Reconnect to “{options.reconnect.name}”</>}
-              description="Changes made here and in Drive are merged, and nothing is replaced"
+              description={`Changes made here and in ${place} are merged, and nothing is replaced`}
             />
           )}
           {/* Upload would land in the folder Reconnect names, minus the merge. */}
@@ -452,7 +423,7 @@ function Choose({
             <ChoiceTile
               value={UPLOAD}
               title="Upload this Workspace"
-              description={`${plural(options.local.tickets, "ticket")} and ${plural(options.local.documents, "Document")} go to a new folder in your Drive`}
+              description={`${plural(options.local.tickets, "ticket")} and ${plural(options.local.documents, "Document")} go to a new folder in ${s3 ? "the bucket" : "your Drive"}`}
             />
           )}
           {options.existing.map((workspace) => {
@@ -484,7 +455,7 @@ function Choose({
                   disabled={busy}
                   onClick={() => setSwitching(true)}
                 >
-                  Use another account…
+                  {s3 ? "Use another bucket…" : "Use another account…"}
                 </Button>
                 <Button
                   size="sm"
@@ -509,7 +480,9 @@ function Choose({
               </>
             }
           >
-            Files in Drive are not encrypted.
+            {s3
+              ? "ticketd does not encrypt the files it puts in the bucket."
+              : "Files in Drive are not encrypted."}
           </SettingsListFooter>
         </SettingsList>
       </div>
@@ -518,24 +491,49 @@ function Choose({
           Starting sync…
         </p>
       )}
-      <Failure>{readFailure ?? failure}</Failure>
+      <Failure
+        {...(readFailure && {
+          onRetry: () => {
+            setReadFailure(null);
+            setAttempt((count) => count + 1);
+          },
+        })}
+        {...(s3 &&
+          readFailure?.action === "choose_another" && {
+            actions: (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSwitching(true)}
+              >
+                Use another bucket…
+              </Button>
+            ),
+          })}
+      >
+        {readFailure ?? failure}
+      </Failure>
       <DialogShell
         open={switching}
         onOpenChange={setSwitching}
-        title="Use another Google account?"
-        description={`ticketd disconnects from ${account} so you can sign in with a different Google account. Nothing in Drive or on this computer is deleted.`}
-        primaryLabel="Use another account"
+        title={s3 ? "Use another bucket?" : "Use another Google account?"}
+        description={
+          s3
+            ? "ticketd disconnects from this bucket so you can choose another bucket or profile. Nothing in the bucket or on this computer is deleted."
+            : `ticketd disconnects from ${account} so you can sign in with a different Google account. Nothing in Drive or on this computer is deleted.`
+        }
+        primaryLabel={s3 ? "Use another bucket" : "Use another account"}
         blockedReason={null}
         size="sm"
         onSubmit={() => {
           setSwitching(false);
-          void run(syncApi.disconnect, "disconnect from Google Drive");
+          void run(syncApi.disconnect, `disconnect from ${storage.full}`);
         }}
       >
         <dl className="sync-summary">
           <dt>On this computer</dt>
           <dd>This Workspace stays as it is</dd>
-          <dt>In Google Drive</dt>
+          <dt>{s3 ? "In the bucket" : "In Google Drive"}</dt>
           <dd>Your files stay, for your other desktops</dd>
         </dl>
       </DialogShell>
@@ -547,7 +545,7 @@ function Choose({
           open={confirming}
           onOpenChange={setConfirming}
           title="Replace this Workspace?"
-          description={`Downloads “${download.folder_name}” from Drive.`}
+          description={`Downloads “${download.folder_name}” from ${place}.`}
           primaryLabel="Replace Workspace"
           primaryVariant="destructive"
           footerNote="A safety backup is saved first."
@@ -570,12 +568,12 @@ function Choose({
               This replaces everything in this Workspace on this computer
             </AlertTitle>
             <AlertDescription>
-              The Workspace from Drive takes its place. What is here now is kept
-              only in the safety backup.
+              The Workspace from {place} takes its place. What is here now is
+              kept only in the safety backup.
             </AlertDescription>
           </Alert>
           <dl className="sync-summary">
-            <dt>From Drive</dt>
+            <dt>From {place}</dt>
             <dd>{contents(download.counts)}</dd>
             <dt>Replaced here</dt>
             <dd>{contents(options.local)}</dd>
@@ -637,35 +635,94 @@ function FirstSync({
 /** The attention notice for what stopped sync, with its one action. */
 function RecoveryNotice({ status }: { status: SyncStatus }) {
   const { busy, failure, run } = useCommand();
+  const [disconnecting, setDisconnecting] = useState(false);
   const copy = recoveryCopy(status);
   if (!copy) return null;
+  // Retrying cannot help until the profile is changed back, so the way out the message
+  // names comes first, and Retry is for a person who did that.
+  const moved = status.recovery === "service_changed";
+  const noCli = status.recovery === "cli_unavailable";
+  // A picked program is remembered for this desktop, so sync tries again at once.
+  const chooseProgram = async () => {
+    const picked = await s3Api.chooseCli();
+    if (!picked) return syncApi.status();
+    return syncApi.recover();
+  };
+  const retry = (variant: "default" | "outline") => (
+    <Button
+      size="sm"
+      variant={variant}
+      disabled={busy}
+      onClick={() => void run(syncApi.recover, "sync")}
+    >
+      Retry
+    </Button>
+  );
   return (
     <div className="sync-block">
       <Alert tone="attention">
         <AlertTitle>{copy.title}</AlertTitle>
         <AlertDescription>{copy.description}</AlertDescription>
         <AlertActions>
-          <Button
-            size="sm"
-            variant={
-              status.recovery === "offline" ||
-              status.recovery === "rate_limited"
-                ? "outline"
-                : "default"
-            }
-            disabled={busy}
-            onClick={() =>
-              void run(
-                syncApi.recover,
-                copy.action === "Retry" ? "sync" : copy.action.toLowerCase(),
-              )
-            }
-          >
-            {copy.action}
-          </Button>
+          {moved ? (
+            <>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => setDisconnecting(true)}
+              >
+                Disconnect…
+              </Button>
+              {retry("outline")}
+            </>
+          ) : noCli ? (
+            <>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => void run(chooseProgram, "use that program")}
+              >
+                {copy.action}
+              </Button>
+              {retry("outline")}
+            </>
+          ) : (
+            <Button
+              size="sm"
+              variant={
+                status.recovery === "offline" ||
+                status.recovery === "rate_limited"
+                  ? "outline"
+                  : "default"
+              }
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  syncApi.recover,
+                  copy.action === "Retry" ? "sync" : copy.action.toLowerCase(),
+                )
+              }
+            >
+              {busy && copy.working ? copy.working : copy.action}
+            </Button>
+          )}
         </AlertActions>
       </Alert>
       <Failure>{failure}</Failure>
+      {moved && (
+        <DisconnectDialog
+          status={status}
+          open={disconnecting}
+          onOpenChange={setDisconnecting}
+          onConfirm={() => {
+            setDisconnecting(false);
+            void run(
+              syncApi.disconnect,
+              `disconnect from ${storageName(status.provider).full}`,
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -675,6 +732,16 @@ function Connected({ status }: { status: SyncStatus }) {
     null,
   );
   const folder = status.folder?.name;
+  if (status.provider === "s3")
+    return (
+      <>
+        {/* After the card whose state it explains, so the card does not move when it comes. */}
+        <S3Place status={status} />
+        {status.recovery && <RecoveryNotice status={status} />}
+        <DesktopSettings />
+        <Disconnect status={status} />
+      </>
+    );
   return (
     <>
       {status.recovery && <RecoveryNotice status={status} />}
@@ -715,12 +782,13 @@ function Connected({ status }: { status: SyncStatus }) {
         <Failure>{openFailure}</Failure>
       </div>
       <DesktopSettings />
-      <Disconnect folder={folder} />
+      <Disconnect status={status} />
     </>
   );
 }
 
-function Disconnect({ folder }: { folder: string | undefined }) {
+function Disconnect({ status }: { status: SyncStatus }) {
+  const s3 = status.provider === "s3";
   const { busy, failure, run } = useCommand();
   const [disconnecting, setDisconnecting] = useState(false);
   return (
@@ -728,7 +796,7 @@ function Disconnect({ folder }: { folder: string | undefined }) {
       <SettingsList>
         <SettingsRow
           title="Disconnect this desktop"
-          description="Stops syncing here. Your files stay in Drive and on this computer."
+          description={`Stops syncing here. Your files stay ${s3 ? "in the bucket" : "in Drive"} and on this computer.`}
           trailing={
             <Button
               variant="outline"
@@ -742,30 +810,57 @@ function Disconnect({ folder }: { folder: string | undefined }) {
         />
       </SettingsList>
       <Failure>{failure}</Failure>
-      <DialogShell
+      <DisconnectDialog
+        status={status}
         open={disconnecting}
         onOpenChange={setDisconnecting}
-        title="Disconnect this desktop?"
-        description="Sync stops on this desktop. Nothing is deleted."
-        primaryLabel="Disconnect"
-        blockedReason={null}
-        size="sm"
-        onSubmit={() => {
+        onConfirm={() => {
           setDisconnecting(false);
-          void run(syncApi.disconnect, "disconnect from Google Drive");
+          void run(
+            syncApi.disconnect,
+            `disconnect from ${storageName(status.provider).full}`,
+          );
         }}
-      >
-        <dl className="sync-summary">
-          <dt>On this computer</dt>
-          <dd>This Workspace stays as it is</dd>
-          <dt>In Google Drive</dt>
-          <dd>
-            {folder ? `“${folder}” stays` : "Your files stay"}, for your other
-            desktops
-          </dd>
-        </dl>
-      </DialogShell>
+      />
     </SettingsSection>
+  );
+}
+
+/** The confirmation of Disconnect, where the page offers it. */
+function DisconnectDialog({
+  status,
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  status: SyncStatus;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const folder = status.folder?.name;
+  const s3 = status.provider === "s3";
+  return (
+    <DialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Disconnect this desktop?"
+      description="Sync stops on this desktop. Nothing is deleted."
+      primaryLabel="Disconnect"
+      blockedReason={null}
+      size="sm"
+      onSubmit={onConfirm}
+    >
+      <dl className="sync-summary">
+        <dt>On this computer</dt>
+        <dd>This Workspace stays as it is</dd>
+        <dt>{s3 ? "In the bucket" : "In Google Drive"}</dt>
+        <dd>
+          {folder ? `“${folder}” stays` : "Your files stay"}, for your other
+          desktops
+        </dd>
+      </dl>
+    </DialogShell>
   );
 }
 

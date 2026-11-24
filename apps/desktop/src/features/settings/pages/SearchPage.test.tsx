@@ -12,15 +12,13 @@ import { SearchPage } from "@/features/settings/pages/SearchPage";
 import { SettingsStateContext } from "@/features/settings/use-settings-state";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import type { SourceEntry } from "@/lib/api/sources";
+import { githubSource } from "@/test/source-fixtures";
 
 vi.mock("@/features/settings/sources/use-sources", () => ({
   useSources: () => ({ entries: sourceList, loading: false }),
 }));
 
 let sourceList: SourceEntry[] = [];
-const github = {
-  connector: { provider: "github", name: "GitHub" },
-} as unknown as SourceEntry;
 
 afterEach(() => {
   cleanup();
@@ -79,7 +77,7 @@ test("the match is highlighted in the title", () => {
 });
 
 test("a query with no match says so and offers shortcuts to Appearance, Backups and the first source", () => {
-  sourceList = [github];
+  sourceList = [githubSource];
   const openPage = vi.fn();
   render(<Harness openPage={openPage} />);
   type("zzzzqqq");
@@ -94,7 +92,7 @@ test("a query with no match says so and offers shortcuts to Appearance, Backups 
 });
 
 test("an available source's settings are searchable and land on its page", () => {
-  sourceList = [github];
+  sourceList = [githubSource];
   const openPage = vi.fn();
   render(<Harness openPage={openPage} />);
   type("discovery");

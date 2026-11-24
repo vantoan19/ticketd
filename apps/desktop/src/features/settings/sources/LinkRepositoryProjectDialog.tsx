@@ -23,7 +23,7 @@ type Exit =
   | { action: "link"; projectId: string };
 
 export function LinkRepositoryProjectDialog({
-  provider,
+  connection,
   repository,
   onClose,
   onCreate,
@@ -31,7 +31,7 @@ export function LinkRepositoryProjectDialog({
   onLinked,
   resolveReturnFocus,
 }: {
-  provider: string;
+  connection: string;
   repository: string;
   onClose: () => void;
   onCreate: () => void;
@@ -79,7 +79,7 @@ export function LinkRepositoryProjectDialog({
     setFailure(null);
     try {
       const project = await client.linkSourceRepositoryProject(
-        provider,
+        connection,
         repository,
         projectId,
       );

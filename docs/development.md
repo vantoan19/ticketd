@@ -149,7 +149,9 @@ disabled without a registration. Local attachments remain available.
 For integration work, see [Google configuration](releasing.md#configure-google-drive-for-a-build),
 [Drive verification](testing-google-drive.md), and the opt-in
 [live runner](../tests/live/README.md). Live verification contacts real services
-and can create remote files. Use a dedicated test account and destination.
+and can create remote files. Use a dedicated test account and destination. The S3
+storage tests, including the opt-in run against a local MinIO, are in
+[Testing S3 sync storage](testing-s3.md).
 
 Keep local configuration in an ignored `.local/` directory if needed. ticketd
 does not automatically load a root `.env` file; set documented variables in the

@@ -6,16 +6,18 @@
 //! on [`crate::Workspace`] fetch through the engine first and then apply the
 //! result in a short transaction.
 
-use std::{collections::HashSet, ops::ControlFlow};
+use std::{collections::HashSet, ops::ControlFlow, sync::OnceLock};
 
 use serde::{Deserialize, Serialize};
 
 use super::{
+    SourceDescription, SummaryPart,
     contract::{
-        CONTRACT_VERSION, Capability, ConnectionInfo, Connector, ConnectorDescriptor, Conversation,
-        DiscoveryRequest, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FetchedIssue, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
-        SourceError,
+        CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector,
+        ConnectorDescriptor, Conversation, DerivedConfiguration, DiscoveryRequest,
+        ExternalIdentity, ExternalIssue, ExternalRef, ExternalState, FetchedIssue, Publication,
+        PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition, SourceError,
+        StateCategory,
     },
     github::GithubConnector,
     schema::{ChoiceOption, ConfigValues, FieldKind, OptionSource},
@@ -32,15 +34,14 @@ const PREVIEW_LIST_LIMIT: usize = 25;
 /// Most options returned for a selector.
 const OPTION_LIMIT: usize = 50;
 
-fn different_issue() -> SourceError {
-    SourceError::Protocol("the source returned a different issue than requested".into())
-}
-
 /// An issue as listed in a preview. It carries no description, so a preview
 /// never renders more of the external record than it needs to.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PreviewIssue {
     pub display: String,
+    /// Short name for the preview table, with the place omitted only as
+    /// directed by the connector.
+    pub label: String,
     pub url: String,
     pub title: String,
     /// Existing ticket with this external identity, including retained provenance.
@@ -78,12 +79,104 @@ pub struct DiscoverySummary {
     pub skipped: Vec<SkippedPartition>,
 }
 
-#[derive(Default)]
+#[derive(Clone, Default)]
 pub struct Engine {
-    connectors: Vec<Box<dyn Connector>>,
+    connectors: Vec<std::sync::Arc<dyn Connector>>,
+    refresh: Option<super::RefreshControl>,
 }
 
 impl Engine {
+    /// An engine using the credential associated with one local connection.
+    pub fn for_connection(&self, provider: &str, id: &str, config: &ConfigValues) -> Self {
+        self.for_connection_with_secret_refs(
+            provider,
+            id,
+            config,
+            &super::credentials::References::new(),
+            None,
+        )
+    }
+
+    pub(super) fn for_connection_with_secret_refs(
+        &self,
+        provider: &str,
+        id: &str,
+        config: &ConfigValues,
+        references: &super::credentials::References,
+        permitted_env: Option<&HashSet<String>>,
+    ) -> Self {
+        Self {
+            refresh: self.refresh.clone(),
+            connectors: self
+                .connectors
+                .iter()
+                .map(|connector| {
+                    if connector.descriptor().provider != provider {
+                        return connector.clone();
+                    }
+                    let bound = connector
+                        .for_connection_with_secret_refs(
+                            id,
+                            config,
+                            references.clone(),
+                            permitted_env.cloned(),
+                        )
+                        .map_or_else(|| connector.clone(), std::sync::Arc::from);
+                    self.refresh
+                        .as_ref()
+                        .and_then(|control| bound.for_refresh(control))
+                        .map_or(bound, std::sync::Arc::from)
+                })
+                .collect(),
+        }
+    }
+
+    pub(super) fn with_workflow_credentials(
+        &self,
+        provider: &str,
+        config: &ConfigValues,
+    ) -> Result<Self, SourceError> {
+        self.check_refresh_canceled()?;
+        let connector = self.connector(provider)?;
+        let prepared = with_guidance(connector, connector.with_workflow_credentials(config))?;
+        let mut scoped = self.clone();
+        if let Some(prepared) = prepared
+            && let Some(bound) = scoped
+                .connectors
+                .iter_mut()
+                .find(|candidate| candidate.descriptor().provider == provider)
+        {
+            *bound = prepared.into();
+        }
+        Ok(scoped)
+    }
+
+    /// Scopes progress and cancellation to this refresh and its connection calls.
+    pub fn with_refresh_control(mut self, control: super::RefreshControl) -> Self {
+        for connector in &mut self.connectors {
+            if let Some(scoped) = connector.for_refresh(&control) {
+                *connector = scoped.into();
+            }
+        }
+        self.refresh = Some(control);
+        self
+    }
+
+    pub(super) fn refresh_control(&self) -> Option<&super::RefreshControl> {
+        self.refresh.as_ref()
+    }
+
+    pub(super) fn check_refresh_canceled(&self) -> Result<(), SourceError> {
+        if let Some(refresh) = &self.refresh {
+            refresh.check()?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn effective_site(&self, provider: &str) -> Result<Option<String>, SourceError> {
+        Ok(self.connector(provider)?.effective_site())
+    }
+
     /// An engine with no connectors.
     pub fn new() -> Self {
         Self::default()
@@ -96,7 +189,8 @@ impl Engine {
         // test registers it through `register` to prove it), so it is added directly
         // rather than through a check whose failure could only be ignored.
         Self {
-            connectors: vec![Box::new(GithubConnector::ambient())],
+            connectors: vec![std::sync::Arc::new(GithubConnector::ambient())],
+            refresh: None,
         }
     }
 
@@ -110,18 +204,58 @@ impl Engine {
                 found: descriptor.contract_version,
             });
         }
+        descriptor
+            .schema
+            .check_definition()
+            .map_err(SourceError::InvalidConfiguration)?;
         if self.find(&descriptor.provider).is_some() {
             return Err(SourceError::Protocol(format!(
                 "source '{}' is registered twice",
                 descriptor.provider
             )));
         }
-        self.connectors.push(connector);
+        if descriptor.capabilities.contains(&Capability::Publish)
+            != connector.publication().is_some()
+        {
+            return Err(SourceError::Protocol(
+                "the source must declare and implement publication together".into(),
+            ));
+        }
+        self.connectors.push(connector.into());
         Ok(())
     }
 
     pub fn connectors(&self) -> Vec<ConnectorDescriptor> {
         self.connectors.iter().map(|c| c.descriptor()).collect()
+    }
+
+    pub fn descriptions(&self) -> Vec<SourceDescription> {
+        self.connectors
+            .iter()
+            .map(|connector| describe(connector.as_ref()))
+            .collect()
+    }
+
+    pub fn description(&self, provider: &str) -> Result<SourceDescription, SourceError> {
+        self.connector(provider).map(describe)
+    }
+
+    /// Metadata available for old workspaces and issues synced from another
+    /// device before there was any cached presentation data.
+    pub(crate) fn builtin_description(provider: &str) -> Option<&'static SourceDescription> {
+        static DESCRIPTIONS: OnceLock<Vec<SourceDescription>> = OnceLock::new();
+        DESCRIPTIONS
+            .get_or_init(|| Self::builtin().descriptions())
+            .iter()
+            .find(|description| description.descriptor.provider == provider)
+    }
+
+    pub fn configuration_summary(
+        &self,
+        provider: &str,
+        config: &ConfigValues,
+    ) -> Result<Vec<SummaryPart>, SourceError> {
+        Ok(self.connector(provider)?.configuration_summary(config))
     }
 
     pub fn descriptor(&self, provider: &str) -> Result<ConnectorDescriptor, SourceError> {
@@ -141,15 +275,33 @@ impl Engine {
             .map_err(SourceError::InvalidConfiguration)
     }
 
+    /// Checks both the schema and the provider's rules for a complete draft.
+    pub fn validate_configuration(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<ConfigValues, SourceError> {
+        let connector = self.connector(provider)?;
+        with_guidance(connector, connector.validate_draft(raw))
+    }
+
     /// Verifies credentials and permissions for validated or unvalidated values.
     pub fn check_connection(
         &self,
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<ConnectionInfo, SourceError> {
+        Ok(self.check(provider, raw)?.connection)
+    }
+
+    pub(crate) fn check(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<ConnectionCheck, SourceError> {
         let connector = self.connector(provider)?;
         // Connection setup is allowed before the discovery rules are complete.
-        connector.check_connection(raw)
+        with_guidance(connector, connector.check_connection(raw))
     }
 
     /// Dynamic options for a selector, narrowed by what the person typed.
@@ -170,14 +322,11 @@ impl Engine {
             }) => {}
             _ => {
                 return Err(SourceError::InvalidConfiguration(vec![
-                    super::schema::FieldIssue {
-                        field: field.to_owned(),
-                        message: "does not offer dynamic options".into(),
-                    },
+                    super::schema::FieldIssue::for_field(field, "does not offer dynamic options"),
                 ]));
             }
         }
-        let mut options = connector.options(field, query.trim(), raw)?;
+        let mut options = with_guidance(connector, connector.options(field, query.trim(), raw))?;
         options.truncate(OPTION_LIMIT);
         Ok(options)
     }
@@ -196,25 +345,25 @@ impl Engine {
         if !descriptor.capabilities.contains(&Capability::Discover) {
             return Err(SourceError::Unsupported("discovery"));
         }
-        let config = self.validate(provider, raw)?;
+        let config = connector.configuration_for_request(raw)?;
         let mut seen_identities = HashSet::new();
         let mut seen_cursors = HashSet::new();
         let mut cursor: Option<String> = None;
         let mut seen = 0;
         let mut skipped = Vec::new();
         for _ in 0..MAX_PAGES {
-            let page = connector.discover(DiscoveryRequest {
-                config: &config,
-                cursor: cursor.as_deref(),
-                page_size: PAGE_SIZE,
-            })?;
+            self.check_refresh_canceled()?;
+            let page = with_guidance(
+                connector,
+                connector.discover(DiscoveryRequest {
+                    config: &config,
+                    cursor: cursor.as_deref(),
+                    page_size: PAGE_SIZE,
+                }),
+            )?;
             skipped.extend(page.skipped);
             for issue in page.issues {
-                if issue.reference.identity.provider != descriptor.provider {
-                    return Err(SourceError::Protocol(
-                        "an issue named a different provider".into(),
-                    ));
-                }
+                verify_issue(provider, &issue)?;
                 if !seen_identities.insert(issue.reference.identity.clone()) {
                     continue;
                 }
@@ -255,27 +404,35 @@ impl Engine {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, SourceError> {
-        self.preview_with(provider, raw, |_| None)
+        let scoped = self.with_workflow_credentials(provider, raw)?;
+        let config = scoped.validate_configuration(provider, raw)?;
+        scoped
+            .preview_with(provider, &config, |_| None)
+            .map(|(preview, _, _)| preview)
     }
 
     pub(crate) fn preview_with(
         &self,
         provider: &str,
-        raw: &ConfigValues,
+        config: &ConfigValues,
         mut existing: impl FnMut(&ExternalIdentity) -> Option<String>,
-    ) -> Result<DiscoveryPreview, SourceError> {
-        let config = self.validate(provider, raw)?;
-        let account = self.check_connection(provider, &config)?.account;
+    ) -> Result<(DiscoveryPreview, DerivedConfiguration, ConnectionInfo), SourceError> {
+        let ConnectionCheck {
+            connection,
+            derived,
+        } = self.check(provider, config)?;
+        let issue_name = self.description(provider)?.presentation.issue_name;
         let mut issues = Vec::new();
         let mut matched = 0;
         let mut already_here = 0;
-        let summary = self.discover(provider, &config, |issue| {
+        let summary = self.discover(provider, config, |issue| {
             matched += 1;
             let ticket = existing(&issue.reference.identity);
             already_here += usize::from(ticket.is_some());
             if issues.len() < PREVIEW_LIST_LIMIT {
                 issues.push(PreviewIssue {
                     ticket,
+                    label: issue_name.preview_label(&issue.reference.locator, &issue.display),
                     display: issue.display,
                     url: issue.url,
                     title: issue.title,
@@ -297,10 +454,10 @@ impl Engine {
             // Name the setting, once, so the person is pointed at the field.
             if let Some(field) = &part.field {
                 return Err(SourceError::InvalidConfiguration(vec![
-                    super::schema::FieldIssue {
-                        field: field.clone(),
-                        message: format!("cannot be used: {}", part.message),
-                    },
+                    super::schema::FieldIssue::for_field(
+                        field,
+                        format!("cannot be used: {}", part.message),
+                    ),
                 ]));
             }
             return Err(if part.code == "forbidden" {
@@ -311,15 +468,16 @@ impl Engine {
         }
         // Stopping exactly at the limit still proves nothing about what follows.
         let complete = summary.complete;
-        Ok(DiscoveryPreview {
+        let preview = DiscoveryPreview {
             provider: provider.to_owned(),
-            account,
+            account: connection.account.clone(),
             issues,
             matched,
             new: matched - already_here,
             already_here,
             complete,
-        })
+        };
+        Ok((preview, derived, connection))
     }
 
     /// Re-reads one issue by reference.
@@ -336,13 +494,14 @@ impl Engine {
         Ok(fetched.issue)
     }
 
-    /// Only refresh can use a verified transfer to update a saved identity.
+    /// Refresh alone can adopt verified changes to the identity of a saved issue.
     pub(super) fn fetch_tracked(
         &self,
         provider: &str,
         raw: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<FetchedIssue, SourceError> {
+        verify_identity(provider, &reference.identity)?;
         let connector = self.connector(provider)?;
         if !connector
             .descriptor()
@@ -351,29 +510,19 @@ impl Engine {
         {
             return Err(SourceError::Unsupported("fetching"));
         }
-        let config = self.validate(provider, raw)?;
-        let fetched = connector.fetch_tracked(&config, reference)?;
+        let config = connector.configuration_for_request(raw)?;
+        let fetched = with_guidance(connector, connector.fetch_tracked(&config, reference))?;
+        verify_issue(provider, &fetched.issue)?;
         if fetched.issue.reference.identity != reference.identity
-            && (fetched.transferred_from.as_ref() != Some(reference)
-                || fetched.issue.reference.identity.provider != reference.identity.provider)
+            && fetched.transferred_from.as_ref() != Some(reference)
         {
             return Err(different_issue());
         }
         Ok(fetched)
     }
 
-    /// Where `provider` can publish, for the saved configuration.
-    pub fn publish_destinations(
-        &self,
-        provider: &str,
-        raw: &ConfigValues,
-    ) -> Result<Vec<String>, SourceError> {
-        let connector = self.connector(provider)?;
-        if !self.can_publish(provider) {
-            return Ok(Vec::new());
-        }
-        let config = self.validate(provider, raw)?;
-        Ok(connector.destinations(&config))
+    pub(super) fn issue_site(&self, provider: &str) -> Result<Option<&str>, SourceError> {
+        Ok(self.connector(provider)?.issue_site())
     }
 
     /// Maps a configured repository or publication destination to a Project remote, offline.
@@ -387,11 +536,6 @@ impl Engine {
             .repository_for_destination(destination))
     }
 
-    /// Whether `destination` is well formed for `provider`; no network call.
-    pub fn check_destination(&self, provider: &str, destination: &str) -> Result<(), SourceError> {
-        self.connector(provider)?.check_destination(destination)
-    }
-
     /// Whether both spellings name the same destination under the provider's rules.
     pub(super) fn same_destination(
         &self,
@@ -400,21 +544,6 @@ impl Engine {
         second: &str,
     ) -> Result<bool, SourceError> {
         Ok(self.connector(provider)?.same_destination(first, second))
-    }
-
-    /// Whether `destination` is one of `allowed` (the saved destinations) for
-    /// `provider`. An empty `allowed` list places no restriction.
-    pub fn destination_allowed(
-        &self,
-        provider: &str,
-        destination: &str,
-        allowed: &[String],
-    ) -> Result<bool, SourceError> {
-        let connector = self.connector(provider)?;
-        Ok(allowed.is_empty()
-            || allowed
-                .iter()
-                .any(|saved| connector.same_destination(saved, destination)))
     }
 
     /// Whether `provider` declares the optional publication capability.
@@ -432,18 +561,26 @@ impl Engine {
         raw: &ConfigValues,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
+        self.publish_before(provider, raw, request, None)
+    }
+
+    pub(super) fn publish_before(
+        &self,
+        provider: &str,
+        raw: &ConfigValues,
+        request: &PublishRequest,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<ExternalIssue, SourceError> {
         let connector = self.connector(provider)?;
-        if !self.can_publish(provider) {
-            return Err(SourceError::Unsupported("publishing"));
-        }
-        let config = self.validate(provider, raw)?;
-        let issue = connector.publish(&config, request)?;
-        if issue.reference.identity.provider != provider {
-            return Err(SourceError::Protocol(
-                "the created issue named a different provider".into(),
-            ));
-        }
-        if issue.state != ExternalState::Open {
+        let publication = publication(connector)?;
+        let config = connector.configuration_for_request(raw)?;
+        let result = match deadline {
+            Some(deadline) => publication.publish_before(&config, request, deadline),
+            None => publication.publish(&config, request),
+        };
+        let issue = with_guidance(connector, result)?;
+        verify_issue(provider, &issue)?;
+        if issue.state.category != StateCategory::Open {
             return Err(SourceError::Protocol(
                 "the created issue was not reported open".into(),
             ));
@@ -461,16 +598,10 @@ impl Engine {
         text: &str,
     ) -> Result<ExternalIssue, SourceError> {
         let connector = self.connector(provider)?;
-        if !self.can_publish(provider) {
-            return Err(SourceError::Unsupported("publishing"));
-        }
-        let config = self.validate(provider, raw)?;
-        let issue = connector.locate(&config, destination, text)?;
-        if issue.reference.identity.provider != provider {
-            return Err(SourceError::Protocol(
-                "the issue named a different provider".into(),
-            ));
-        }
+        let publication = publication(connector)?;
+        let config = connector.configuration_for_request(raw)?;
+        let issue = with_guidance(connector, publication.locate(&config, destination, text))?;
+        verify_issue(provider, &issue)?;
         Ok(issue)
     }
 
@@ -482,20 +613,11 @@ impl Engine {
         search: &PublicationSearch,
     ) -> Result<PublicationCandidates, SourceError> {
         let connector = self.connector(provider)?;
-        if !self.can_publish(provider) {
-            return Err(SourceError::Unsupported("publishing"));
-        }
-        let config = self.validate(provider, raw)?;
-        let found = connector.find_published(&config, search)?;
-        if found
-            .matches
-            .iter()
-            .chain(&found.recent)
-            .any(|issue| issue.reference.identity.provider != provider)
-        {
-            return Err(SourceError::Protocol(
-                "an issue named a different provider".into(),
-            ));
+        let publication = publication(connector)?;
+        let config = connector.configuration_for_request(raw)?;
+        let found = with_guidance(connector, publication.find_published(&config, search))?;
+        for issue in found.matches.iter().chain(&found.recent) {
+            verify_issue(provider, issue)?;
         }
         Ok(found)
     }
@@ -518,8 +640,9 @@ impl Engine {
         {
             return Ok(None);
         }
-        let config = self.validate(provider, raw)?;
-        let mut conversation = connector.conversation(&config, reference)?;
+        let config = connector.configuration_for_request(raw)?;
+        let mut conversation =
+            with_guidance(connector, connector.conversation(&config, reference))?;
         let mut comments = HashSet::new();
         conversation
             .comments
@@ -528,12 +651,12 @@ impl Engine {
         conversation
             .events
             .retain(|event| events.insert(event.id.clone()));
-        conversation
-            .comments
-            .sort_by(|a, b| a.created_at.cmp(&b.created_at));
+        conversation.comments.sort_by_cached_key(|comment| {
+            super::conversation::chronological_key(&comment.created_at)
+        });
         conversation
             .events
-            .sort_by(|a, b| a.created_at.cmp(&b.created_at));
+            .sort_by_cached_key(|event| super::conversation::chronological_key(&event.created_at));
         Ok(Some(conversation))
     }
 
@@ -544,41 +667,83 @@ impl Engine {
             .map(AsRef::as_ref)
     }
 
-    /// The part of its source an issue belongs to; see [`Connector::partition`].
-    pub(crate) fn partition(&self, provider: &str, reference: &ExternalRef) -> String {
-        self.find(provider)
-            .map(|connector| connector.partition(reference))
-            .unwrap_or_default()
-    }
-
-    /// The parts `raw` asks discovery to read; see [`Connector::partitions`].
-    pub(crate) fn partitions(
-        &self,
-        provider: &str,
-        raw: &ConfigValues,
-    ) -> Result<Vec<String>, SourceError> {
-        let config = self.validate(provider, raw)?;
-        Ok(self.connector(provider)?.partitions(&config))
-    }
-
-    /// What to append to the name of a part to name it as read under the
-    /// discovery rules of `raw` (see [`Connector::discovery_scope`]): empty when
-    /// no rule narrows discovery, so such a part keeps its bare name.
-    pub(crate) fn partition_scope(&self, provider: &str, raw: &ConfigValues) -> String {
-        let scope = self
-            .find(provider)
-            .zip(self.validate(provider, raw).ok())
-            .map(|(connector, config)| connector.discovery_scope(&config))
-            .unwrap_or_default();
-        if scope.is_empty() {
-            scope
-        } else {
-            format!("?{scope}")
-        }
-    }
-
-    fn connector(&self, provider: &str) -> Result<&dyn Connector, SourceError> {
+    pub(super) fn connector(&self, provider: &str) -> Result<&dyn Connector, SourceError> {
         self.find(provider)
             .ok_or_else(|| SourceError::UnknownProvider(provider.to_owned()))
     }
+}
+
+fn different_issue() -> SourceError {
+    SourceError::Protocol("the source returned a different issue than requested".into())
+}
+
+fn verify_issue(provider: &str, issue: &ExternalIssue) -> Result<(), SourceError> {
+    verify_identity(provider, &issue.reference.identity)?;
+    if let Some(repository) = &issue.repository
+        && crate::project_remote::normalize_project_remote(repository).as_ref() != Some(repository)
+    {
+        return Err(SourceError::Protocol(
+            "an issue's repository must be a normalized host/owner/name".into(),
+        ));
+    }
+    verify_issue_timestamps(issue, false)
+}
+
+pub(super) fn verify_issue_timestamps(
+    issue: &ExternalIssue,
+    creation_required: bool,
+) -> Result<(), SourceError> {
+    // Older in-process observations use an empty creation time for unknown
+    // provenance. Contract 2 process results require both timestamps.
+    let created_at =
+        (creation_required || !issue.created_at.is_empty()).then_some(issue.created_at.as_str());
+    for (field, time) in [
+        ("created_at", created_at),
+        ("updated_at", Some(issue.updated_at.as_str())),
+    ] {
+        if time.is_some_and(|time| chrono::DateTime::parse_from_rfc3339(time).is_err()) {
+            return Err(SourceError::Protocol(format!(
+                "an issue's {field} must be an RFC 3339 timestamp"
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Reject malformed identities before any source result can reach a Workspace write.
+pub(super) fn verify_identity(
+    provider: &str,
+    identity: &ExternalIdentity,
+) -> Result<(), SourceError> {
+    if identity.provider != provider {
+        return Err(SourceError::Protocol(
+            "an issue named a different provider".into(),
+        ));
+    }
+    if identity.id.trim().is_empty() {
+        return Err(SourceError::Protocol(
+            "an issue must have a stable ID".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn describe(connector: &dyn Connector) -> SourceDescription {
+    SourceDescription {
+        descriptor: connector.descriptor(),
+        presentation: connector.presentation(),
+    }
+}
+
+fn with_guidance<T>(
+    connector: &dyn Connector,
+    result: Result<T, SourceError>,
+) -> Result<T, SourceError> {
+    result.map_err(|error| error.with_sign_in(|| connector.presentation().sign_in))
+}
+
+fn publication(connector: &dyn Connector) -> Result<&dyn Publication, SourceError> {
+    connector
+        .publication()
+        .ok_or(SourceError::Unsupported("publishing"))
 }

@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::harnesses::{HARNESS_DESCRIPTORS, UnattendedSupport, descriptor};
-use crate::{Error, Status, Workspace, document_links, inbox::LOCAL_PERSON};
+use crate::{Error, Status, Workspace, document_links, inbox::LOCAL_PERSON, source};
 
 /// The record kinds that each have their own sync file, in an order that applies a
 /// relationship's target before its owner where the kinds allow it.
@@ -76,10 +76,10 @@ pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// YAML reader bounds `[`-style nesting itself. ticketd writes two columns.
 const MAX_HEADER_INDENT: usize = 64;
 
-const FILE_FORMAT_WITH_SCOPED_GITHUB_ID: i64 = 2;
+const FILE_FORMAT_WITH_TYPED_SOURCE: i64 = 3;
 /// The highest format this version reads. A file that says a higher number
 /// is left alone until this desktop runs a ticketd that reads it.
-const LATEST_FILE_FORMAT: i64 = FILE_FORMAT_WITH_SCOPED_GITHUB_ID;
+const LATEST_FILE_FORMAT: i64 = FILE_FORMAT_WITH_TYPED_SOURCE;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -217,6 +217,8 @@ const TICKET: &[Field] = &[
         false,
     ),
     ("source_authority_changed_at", Type::Time, false),
+];
+const SOURCE_STATE_V1: &[Field] = &[
     ("source_state", Type::Choice(&["open", "closed"]), false),
     (
         "source_closure_reason",
@@ -225,6 +227,22 @@ const TICKET: &[Field] = &[
     ),
     ("source_updated_at", Type::Text, false),
 ];
+const SOURCE_STATE_V3: &[Field] = &[
+    (
+        "source_state_category",
+        Type::Choice(&["open", "completed", "not_planned", "duplicate", "unknown"]),
+        false,
+    ),
+    ("source_state_name", Type::Text, false),
+    ("source_updated_at", Type::Text, false),
+    ("source_partition", Type::Text, false),
+];
+const SOURCE_PRESENTATION: &[Field] = &[
+    ("source_provider_name", Type::Text, false),
+    ("source_provider_icon_svg", Type::Text, false),
+];
+const SOURCE_PRESENTATION_NAMES: &[&str] = &["source_provider_name", "source_provider_icon_svg"];
+
 /// External-source provenance is stored and carried as a whole.
 const SOURCE_REQUIRED: &[&str] = &[
     "source_provider",
@@ -236,7 +254,6 @@ const SOURCE_REQUIRED: &[&str] = &[
     "source_linked_at",
     "source_authority",
     "source_authority_changed_at",
-    "source_state",
 ];
 const DOCUMENT: &[Field] = &[
     ("title", Type::Text, false),
@@ -317,8 +334,8 @@ impl Block {
 }
 
 /// The header fields of a block, and whether Markdown text follows its header.
-fn shape(block: Block) -> (&'static [Field], bool) {
-    match block {
+fn shape(block: Block, format: i64) -> (impl Iterator<Item = &'static Field> + Clone, bool) {
+    let (fields, has_body) = match block {
         Block::Record(SyncKind::Ticket) => (TICKET, true),
         Block::Record(SyncKind::Document) => (DOCUMENT, true),
         Block::Record(SyncKind::Plan) => (PLAN, true),
@@ -327,7 +344,24 @@ fn shape(block: Block) -> (&'static [Field], bool) {
         Block::Record(SyncKind::Automation) => (AUTOMATION, true),
         Block::Part(SyncPartKind::Activity) => (ACTIVITY, true),
         Block::Part(SyncPartKind::Evidence) => (EVIDENCE, false),
-    }
+    };
+    let state_fields = match block {
+        Block::Record(SyncKind::Ticket) if format < FILE_FORMAT_WITH_TYPED_SOURCE => {
+            SOURCE_STATE_V1
+        }
+        Block::Record(SyncKind::Ticket) => SOURCE_STATE_V3,
+        _ => &[],
+    };
+    let presentation = match block {
+        Block::Record(SyncKind::Ticket) if format >= FILE_FORMAT_WITH_TYPED_SOURCE => {
+            SOURCE_PRESENTATION
+        }
+        _ => &[],
+    };
+    (
+        fields.iter().chain(state_fields).chain(presentation),
+        has_body,
+    )
 }
 
 /// A set-valued field stored as rows of `table`: `owner` is the record whose file
@@ -586,8 +620,8 @@ fn check(name: &str, kind: Type, value: &SyncValue) -> Result<(), Error> {
     }
 }
 
-fn validate(block: Block, id: &str, fields: &Fields) -> Result<(), Error> {
-    let (schema, has_body) = shape(block);
+fn validate(block: Block, format: i64, id: &str, fields: &Fields) -> Result<(), Error> {
+    let (mut schema, has_body) = shape(block, format);
     let block = block.name();
     if !is_guid(id) {
         return Err(bad(format!(
@@ -600,17 +634,14 @@ fn validate(block: Block, id: &str, fields: &Fields) -> Result<(), Error> {
             Type::Text
         } else {
             schema
-                .iter()
+                .clone()
                 .find(|field| field.0 == name)
                 .ok_or_else(|| bad(format!("unknown field '{name}' in a {block}")))?
                 .1
         };
         check(name, kind, value)?;
     }
-    match schema
-        .iter()
-        .find(|field| field.2 && !fields.contains_key(field.0))
-    {
+    match schema.find(|field| field.2 && !fields.contains_key(field.0)) {
         Some(field) => Err(bad(format!(
             "a {block} is missing its required field '{}'",
             field.0
@@ -645,22 +676,18 @@ fn quote(text: &str) -> String {
 type Labels = BTreeMap<String, String>;
 
 fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels: &Labels) {
-    let (schema, has_body) = shape(block);
+    let format = if fields.contains_key("source_provider") {
+        FILE_FORMAT_WITH_TYPED_SOURCE
+    } else {
+        1
+    };
+    let (schema, has_body) = shape(block, format);
     let quote = |text: &str| match labels.get(text) {
         Some(label) => format!("{} # {label}", quote(text)),
         None => quote(text),
     };
     out.push_str("---\n");
     if let Block::Record(kind) = block {
-        // Format 1 readers need numeric GitHub IDs to match discovered issues.
-        let format = if kind == SyncKind::Ticket
-            && text(fields, "source_provider") == Some("github")
-            && text(fields, "source_external_id").is_some_and(|id| id.starts_with('@'))
-        {
-            FILE_FORMAT_WITH_SCOPED_GITHUB_ID
-        } else {
-            1
-        };
         out.push_str(&format!("kind: {}\nformat: {format}\n", kind.name()));
     }
     out.push_str(&format!("id: {}\n", quote(id)));
@@ -775,10 +802,11 @@ fn read_block(block: &str) -> Result<(Vec<(String, Raw)>, String), Error> {
 /// Give a block's header entries the types its fields have.
 fn typed(
     block: Block,
+    format: i64,
     entries: Vec<(String, Raw)>,
     body: String,
 ) -> Result<(String, Fields), Error> {
-    let (schema, has_body) = shape(block);
+    let (schema, has_body) = shape(block, format);
     let block = block.name();
     let mut id = None;
     let mut fields = Fields::new();
@@ -790,7 +818,7 @@ fn typed(
             continue;
         }
         let kind = schema
-            .iter()
+            .clone()
             .find(|field| field.0 == name)
             .ok_or_else(|| bad(format!("unknown field '{name}' in a {block}")))?
             .1;
@@ -1031,12 +1059,18 @@ impl SyncRecord {
 
     /// Read and validate a file's text. Nothing is read from or written to a Workspace.
     pub fn parse(file: &str) -> Result<Self, Error> {
+        Self::parse_with_legacy_github_id(file).map(|(record, _)| record)
+    }
+
+    /// Keep an old bare GitHub ID available to the sync engine while normalizing the record.
+    pub(crate) fn parse_with_legacy_github_id(file: &str) -> Result<(Self, Option<String>), Error> {
         let mut record = None;
+        let mut legacy_github_id = None;
         for (part, block) in blocks(file)? {
             let (mut entries, body) = read_block(&block)?;
             match (part, &mut record) {
                 (Some(kind), Some(SyncRecord { parts, .. })) => {
-                    let (id, fields) = typed(Block::Part(kind), entries, body)?;
+                    let (id, fields) = typed(Block::Part(kind), LATEST_FILE_FORMAT, entries, body)?;
                     parts.push(SyncPart { kind, id, fields });
                 }
                 _ => {
@@ -1053,19 +1087,39 @@ impl SyncRecord {
                     .ok_or_else(|| {
                         bad("field 'kind' must be one of project, document, plan, ticket, automation_agent, automation")
                     })?;
-                    match take("format") {
+                    let format = match take("format") {
                         // Files from before the marker are format 1.
-                        None | Some(Raw::Null) => {}
+                        None | Some(Raw::Null) => 1,
                         Some(Raw::Integer(format))
-                            if (1..=LATEST_FILE_FORMAT).contains(&format) => {}
+                            if (1..=LATEST_FILE_FORMAT).contains(&format) =>
+                        {
+                            format
+                        }
                         Some(Raw::Integer(format)) if format > LATEST_FILE_FORMAT => {
                             return Err(bad(format!(
                                 "the file is in format {format}, which a newer ticketd wrote; update ticketd on this desktop to read it"
                             )));
                         }
                         Some(_) => return Err(bad("field 'format' must be a whole number")),
+                    };
+                    let block = Block::Record(kind);
+                    let (id, mut fields) = typed(block, format, entries, body)?;
+                    let legacy_source = format < FILE_FORMAT_WITH_TYPED_SOURCE
+                        && kind == SyncKind::Ticket
+                        && has_source(&fields);
+                    if legacy_source {
+                        validate(block, format, &id, &fields)?;
+                        validate_source(&fields, "source_state")?;
+                        if text(&fields, "source_provider") == Some("github") {
+                            legacy_github_id = text(&fields, "source_external_id")
+                                .filter(|id| id.parse::<u64>().is_ok())
+                                .map(str::to_owned);
+                        }
                     }
-                    let (id, fields) = typed(Block::Record(kind), entries, body)?;
+                    scope_source_identity(&mut fields);
+                    if legacy_source {
+                        normalize_legacy_source(&mut fields);
+                    }
                     record = Some(SyncRecord {
                         kind,
                         id,
@@ -1078,21 +1132,7 @@ impl SyncRecord {
         let mut record = record.ok_or_else(|| bad("a sync file must start with a '---' line"))?;
         record.parts.sort_by(|a, b| a.order().cmp(&b.order()));
         record.validate()?;
-        record.scope_source_identity();
-        Ok(record)
-    }
-
-    fn scope_source_identity(&mut self) {
-        let field = |key| text(&self.fields, key).unwrap_or_default();
-        if let Some(id) = crate::source::scope_saved_issue_identity(
-            field("source_provider"),
-            field("source_external_id"),
-            field("source_locator"),
-            field("source_url"),
-        ) {
-            self.fields
-                .insert("source_external_id".into(), SyncValue::Text(id));
-        }
+        Ok((record, legacy_github_id))
     }
 
     /// Enforce current command policy before accepting or applying a snapshot.
@@ -1114,13 +1154,23 @@ impl SyncRecord {
 
     /// Check a record built or merged in code the way a parsed file is checked.
     pub fn validate(&self) -> Result<(), Error> {
-        validate(Block::Record(self.kind), &self.id, &self.fields)?;
+        validate(
+            Block::Record(self.kind),
+            LATEST_FILE_FORMAT,
+            &self.id,
+            &self.fields,
+        )?;
         let mut seen = BTreeSet::new();
         for part in &self.parts {
             if self.kind != SyncKind::Ticket {
                 return Err(bad("only a ticket has Activity and evidence sections"));
             }
-            validate(Block::Part(part.kind), &part.id, &part.fields)?;
+            validate(
+                Block::Part(part.kind),
+                LATEST_FILE_FORMAT,
+                &part.id,
+                &part.fields,
+            )?;
             if !seen.insert(&part.id) {
                 return Err(bad(format!("section id '{}' is used twice", part.id)));
             }
@@ -1156,16 +1206,84 @@ impl SyncRecord {
                 "field 'related' lists only tickets whose id sorts after this one; the other ticket's file carries the rest",
             ));
         }
-        let sourced = self.fields.keys().any(|name| name.starts_with("source_"));
-        match SOURCE_REQUIRED
-            .iter()
-            .find(|name| sourced && !self.fields.contains_key(**name))
+        validate_source(&self.fields, "source_state_category")
+    }
+}
+
+fn has_source(fields: &Fields) -> bool {
+    fields.keys().any(|name| name.starts_with("source_"))
+}
+
+fn scope_source_identity(fields: &mut Fields) {
+    let field = |key| text(fields, key).unwrap_or_default();
+    let provider = field("source_provider");
+    let locator = field("source_locator");
+    if let Some(id) = source::scope_saved_issue_identity(
+        provider,
+        field("source_external_id"),
+        locator,
+        field("source_url"),
+    ) {
+        if fields.contains_key("source_partition")
+            && let Some(partition) = source::legacy_reference_partition(provider, &id, locator)
         {
-            Some(name) => Err(bad(format!(
-                "the source_ fields go together; '{name}' is missing"
-            ))),
-            None => Ok(()),
+            fields.insert("source_partition".into(), SyncValue::Text(partition));
         }
+        fields.insert("source_external_id".into(), SyncValue::Text(id));
+    }
+}
+
+fn validate_source(fields: &Fields, category: &str) -> Result<(), Error> {
+    if has_source(fields)
+        && let Some(name) = SOURCE_REQUIRED
+            .iter()
+            .copied()
+            .chain([category])
+            .find(|name| !fields.contains_key(*name))
+    {
+        return Err(bad(format!(
+            "the source_ fields go together; '{name}' is missing"
+        )));
+    }
+    for (name, valid) in [
+        (
+            "source_provider_name",
+            source::ticket_provider_name as fn(Option<&str>) -> Option<&str>,
+        ),
+        ("source_provider_icon_svg", source::ticket_provider_icon),
+    ] {
+        if let Some(value) = text(fields, name)
+            && valid(Some(value)).is_none()
+        {
+            return Err(bad(format!("'{name}' has an invalid display value")));
+        }
+    }
+    Ok(())
+}
+
+fn normalize_legacy_source(fields: &mut Fields) {
+    let provider = text(fields, "source_provider").unwrap_or_default();
+    let state = source::legacy_state(
+        provider,
+        text(fields, "source_state").unwrap_or_default(),
+        text(fields, "source_closure_reason"),
+    );
+    let partition = source::legacy_reference_partition(
+        provider,
+        text(fields, "source_external_id").unwrap_or_default(),
+        text(fields, "source_locator").unwrap_or_default(),
+    );
+    fields.remove("source_state");
+    fields.remove("source_closure_reason");
+    fields.insert(
+        "source_state_category".into(),
+        SyncValue::Text(state.category.as_str().into()),
+    );
+    if let Some(name) = state.name {
+        fields.insert("source_state_name".into(), SyncValue::Text(name));
+    }
+    if let Some(partition) = partition {
+        fields.insert("source_partition".into(), SyncValue::Text(partition));
     }
 }
 
@@ -1190,7 +1308,7 @@ fn rows(c: &Connection, sql: &str, id: &str, names: &[&str]) -> Result<Vec<Field
     Ok(found)
 }
 
-const SOURCE_SQL: &str = "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, i.linked_at, o.authority, o.changed_at, s.external_state, s.closure_reason, s.external_updated_at FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1";
+const SOURCE_SQL: &str = "SELECT i.provider, i.external_id, i.locator, i.display, i.url, i.origin, i.linked_at, o.authority, o.changed_at, s.state_category, s.state_name, s.external_updated_at, i.partition FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id JOIN source_sync s ON s.ticket_id = i.ticket_id WHERE i.ticket_id = ?1";
 const SOURCE_NAMES: &[&str] = &[
     "source_provider",
     "source_external_id",
@@ -1201,12 +1319,76 @@ const SOURCE_NAMES: &[&str] = &[
     "source_linked_at",
     "source_authority",
     "source_authority_changed_at",
-    "source_state",
-    "source_closure_reason",
+    "source_state_category",
+    "source_state_name",
     "source_updated_at",
+    "source_partition",
 ];
 
+/// Provenance, authority and the external state last seen. When and how this
+/// device last refreshed from the source stays its own.
+pub(crate) fn write_source(c: &Connection, record: &SyncRecord) -> Result<(), Error> {
+    let id = &record.id;
+    let field = |name| text(&record.fields, name);
+    let Some(provider) = field("source_provider") else {
+        c.execute("DELETE FROM source_sync WHERE ticket_id = ?1", [id])?;
+        c.execute("DELETE FROM external_ownership WHERE ticket_id = ?1", [id])?;
+        c.execute("DELETE FROM external_identities WHERE ticket_id = ?1", [id])?;
+        return Ok(());
+    };
+    let repository = field("source_locator")
+        .zip(field("source_url"))
+        .and_then(|(locator, url)| source::repository_from_saved_issue(provider, locator, url));
+    // A changed location invalidates the connector's last repository observation.
+    c.execute(
+        "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition, repository)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+         ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id,
+         locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin,
+         linked_at = excluded.linked_at, partition = excluded.partition, repository = CASE
+             WHEN external_identities.provider = excluded.provider AND external_identities.external_id = excluded.external_id
+                  AND external_identities.locator = excluded.locator AND external_identities.url = excluded.url
+             THEN COALESCE(external_identities.repository, excluded.repository) ELSE excluded.repository END",
+        params![id, provider, field("source_external_id"), field("source_locator"), field("source_display"),
+            field("source_url"), field("source_origin"), field("source_linked_at"), field("source_partition"), repository],
+    )?;
+    c.execute(
+        "INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3)
+         ON CONFLICT(ticket_id) DO UPDATE SET authority = excluded.authority, changed_at = excluded.changed_at",
+        params![id, field("source_authority"), field("source_authority_changed_at")],
+    )?;
+    c.execute(
+        "INSERT INTO source_sync (ticket_id, state_category, state_name, external_updated_at) VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(ticket_id) DO UPDATE SET state_category = excluded.state_category,
+         state_name = excluded.state_name, external_updated_at = excluded.external_updated_at",
+        params![id, field("source_state_category"), field("source_state_name"), field("source_updated_at").unwrap_or("")],
+    )?;
+    Ok(())
+}
+
 fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRecord>, Error> {
+    let mut record = read_record_before_source_presentation(c, kind, id)?;
+    if let Some(record) = &mut record
+        && record.fields.contains_key("source_provider")
+    {
+        for values in rows(
+            c,
+            "SELECT provider_name, provider_icon_svg FROM external_identities WHERE ticket_id = ?1",
+            id,
+            SOURCE_PRESENTATION_NAMES,
+        )? {
+            record.fields.extend(values);
+        }
+    }
+    Ok(record)
+}
+
+/// Format 92 reads the earlier shape while it repairs source observations.
+pub(crate) fn read_record_before_source_presentation(
+    c: &Connection,
+    kind: SyncKind,
+    id: &str,
+) -> Result<Option<SyncRecord>, Error> {
     let follows = format!(
         "SELECT reference, title, status, body, project_id, plan_id, trashed, EXISTS(SELECT 1 FROM ticket_follows WHERE ticket_id = t.id AND person = '{LOCAL_PERSON}') FROM tickets t WHERE id = ?1"
     );
@@ -1288,7 +1470,7 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
             None => {}
         }
     }
-    for (name, _, _) in shape(Block::Record(kind)).0 {
+    for (name, _, _) in shape(Block::Record(kind), LATEST_FILE_FORMAT).0 {
         if let Some(relation) = relation(kind, name) {
             let members = relation.members(c, id)?;
             if !members.is_empty() {
@@ -1397,6 +1579,44 @@ fn put(
 }
 
 const NOW: &str = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
+
+enum GithubIdentityUpdate {
+    HostConfirmation,
+    RepositoryTransfer,
+}
+
+/// A confirmed GitHub ID agrees with the site established by the issue location.
+fn github_repository<'a>(fields: &'a Fields, id: &str) -> Option<&'a str> {
+    let locator = text(fields, "source_locator")?;
+    let url = text(fields, "source_url")?;
+    let site = source::github_issue_site_from_url(locator, url)?;
+    let (repository, _) = locator.rsplit_once('#')?;
+    (source::github_issue_id_site(id) == Some(site.as_str())).then_some(repository)
+}
+
+/// Confirming a host keeps the database ID. A transfer can change that ID,
+/// but the new location still belongs to the same GitHub host and original link.
+fn github_identity_update(before: &Fields, after: &Fields) -> Option<GithubIdentityUpdate> {
+    if text(before, "source_provider") != Some("github")
+        || text(after, "source_provider") != Some("github")
+        || ["source_origin", "source_linked_at"]
+            .into_iter()
+            .any(|field| before.get(field) != after.get(field))
+    {
+        return None;
+    }
+    let old_id = text(before, "source_external_id")?;
+    let new_id = text(after, "source_external_id")?;
+    let destination = github_repository(after, new_id)?;
+    if let Some(number) = source::unverified_github_issue_id(old_id) {
+        return (new_id.rsplit(':').next() == Some(number))
+            .then_some(GithubIdentityUpdate::HostConfirmation);
+    }
+    let origin = github_repository(before, old_id)?;
+    let same_site = source::github_issue_id_site(old_id) == source::github_issue_id_site(new_id);
+    (same_site && !origin.eq_ignore_ascii_case(destination))
+        .then_some(GithubIdentityUpdate::RepositoryTransfer)
+}
 
 /// Writes of one record. Relationships whose target is not here yet collect in `missing`.
 struct Apply<'a> {
@@ -1649,7 +1869,8 @@ impl Apply<'_> {
                     )?;
                 }
             },
-            (SyncKind::Ticket, _) if field.starts_with("source_") => self.write_source()?,
+            (SyncKind::Ticket, "source_provider_name" | "source_provider_icon_svg") => {}
+            (SyncKind::Ticket, _) if field.starts_with("source_") => write_source(c, self.record)?,
             _ => {}
         }
         if field == "body" && matches!(record.kind, SyncKind::Ticket | SyncKind::Document) {
@@ -1681,43 +1902,6 @@ impl Apply<'_> {
                 params![self.record.id, blocker, time],
             )?;
         }
-        Ok(())
-    }
-
-    /// Provenance, authority and the external state last seen. When and how this
-    /// device last refreshed from the source stays its own.
-    fn write_source(&self) -> Result<(), Error> {
-        let (c, id) = (self.c, &self.record.id);
-        let values: Vec<Option<&str>> = SOURCE_NAMES
-            .iter()
-            .map(|name| text(&self.record.fields, name))
-            .collect();
-        let Some(provider) = values[0] else {
-            c.execute("DELETE FROM source_sync WHERE ticket_id = ?1", [id])?;
-            c.execute("DELETE FROM external_ownership WHERE ticket_id = ?1", [id])?;
-            c.execute("DELETE FROM external_identities WHERE ticket_id = ?1", [id])?;
-            return Ok(());
-        };
-        let repository = values[2].zip(values[4]).and_then(|(locator, url)| {
-            crate::source::repository_from_saved_issue(provider, locator, url)
-        });
-        // Keep a repository confirmed by the connector while the location is unchanged.
-        // A synced move must invalidate that observation and use the new locator and URL.
-        c.execute(
-            "INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, linked_at, repository) \
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) \
-             ON CONFLICT(ticket_id) DO UPDATE SET provider = excluded.provider, external_id = excluded.external_id, \
-                locator = excluded.locator, display = excluded.display, url = excluded.url, origin = excluded.origin, \
-                linked_at = excluded.linked_at, repository = CASE \
-                    WHEN external_identities.provider = excluded.provider AND external_identities.external_id = excluded.external_id \
-                         AND external_identities.locator = excluded.locator AND external_identities.url = excluded.url \
-                    THEN COALESCE(external_identities.repository, excluded.repository) ELSE excluded.repository END",
-            params![id, provider, values[1], values[2], values[3], values[4], values[5], values[6], repository],
-        )?;
-        c.execute("INSERT INTO external_ownership (ticket_id, authority, changed_at) VALUES (?1, ?2, ?3) ON CONFLICT(ticket_id) DO UPDATE SET authority = excluded.authority, changed_at = excluded.changed_at",
-            params![id, values[7], values[8]])?;
-        c.execute("INSERT INTO source_sync (ticket_id, external_state, closure_reason, external_updated_at) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(ticket_id) DO UPDATE SET external_state = excluded.external_state, closure_reason = excluded.closure_reason, external_updated_at = excluded.external_updated_at",
-            params![id, values[9], values[10], values[11].unwrap_or("")])?;
         Ok(())
     }
 
@@ -1777,11 +1961,57 @@ impl Apply<'_> {
                 (created, true)
             }
         };
-        let (schema, _) = shape(Block::Record(record.kind));
-        for name in schema.iter().map(|field| field.0).chain(["body"]) {
+        if record.kind == SyncKind::Ticket
+            && current.fields.contains_key("source_provider")
+            && ["source_provider", "source_external_id"]
+                .into_iter()
+                .any(|field| current.fields.get(field) != record.fields.get(field))
+        {
+            let update = github_identity_update(&current.fields, &record.fields);
+            if !matches!(update, Some(GithubIdentityUpdate::RepositoryTransfer)) {
+                // A newly confirmed host may differ from the device's old binding.
+                c.execute(
+                    "DELETE FROM source_connection_tickets WHERE ticket_id = ?1",
+                    [&record.id],
+                )?;
+            }
+            if update.is_some() {
+                // The cached conversation is still this issue's. Recheck it and
+                // discovery membership against the confirmed location next time.
+                c.execute(
+                    "UPDATE source_sync SET discovery_matches = NULL, conversation_updated_at = NULL WHERE ticket_id = ?1",
+                    [&record.id],
+                )?;
+            } else {
+                // Concurrent publications can select an unrelated issue.
+                for sql in [
+                    "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
+                    "DELETE FROM source_conversation WHERE ticket_id = ?1",
+                    "DELETE FROM external_duplicate_targets WHERE ticket_id = ?1",
+                    "DELETE FROM source_sync WHERE ticket_id = ?1",
+                ] {
+                    c.execute(sql, [&record.id])?;
+                }
+            }
+        }
+        let (schema, _) = shape(Block::Record(record.kind), LATEST_FILE_FORMAT);
+        for name in schema.map(|field| field.0).chain(["body"]) {
             if present(&current.fields, name) != present(&record.fields, name) {
                 self.write(name)?;
             }
+        }
+        if record.kind == SyncKind::Ticket
+            && record.fields.contains_key("source_provider")
+            && SOURCE_PRESENTATION_NAMES
+                .iter()
+                .any(|name| text(&current.fields, name) != text(&record.fields, name))
+        {
+            source::store_ticket_presentation(
+                c,
+                &record.id,
+                text(&record.fields, "source_provider_name"),
+                text(&record.fields, "source_provider_icon_svg"),
+            )?;
         }
         for gone in &current.parts {
             if !record.parts.iter().any(|part| part.id == gone.id) {
@@ -1969,7 +2199,7 @@ mod tests {
     }
 
     /// Formats 1 and 2 share the same fields after `kind`, `format` and `id`.
-    const FORMAT_2: &str = "\
+    const FORMAT_1: &str = "\
 project: name
 document: title created_at tags origin_activity trashed kept pinned
 plan: name archived spec documents
@@ -1991,25 +2221,28 @@ automation: name trashed
         match SyncPartKind::Activity {
             SyncPartKind::Activity | SyncPartKind::Evidence => {}
         }
-        let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
-        let blocks = SyncKind::ALL
-            .into_iter()
-            .map(|kind| (kind.name().to_owned(), Block::Record(kind)))
-            .chain(parts.into_iter().map(|kind| {
-                (
-                    format!("<!-- ticketd:{} -->", kind.name()),
-                    Block::Part(kind),
-                )
-            }));
-        let mut written = String::new();
-        for (label, block) in blocks {
-            let names: Vec<_> = shape(block).0.iter().map(|field| field.0).collect();
-            written.push_str(&format!("{label}: {}\n", names.join(" ")));
-        }
-        assert_eq!(
-            (LATEST_FILE_FORMAT, written.as_str()),
-            (2, FORMAT_2),
-            "The header fields or section markers of sync files changed. A ticketd that does not know a field rejects the whole file, and only a higher `format` tells it the file is from a newer ticketd: raise the written format for affected files and LATEST_FILE_FORMAT in the same change, then pin the new list here under the new number."
+        let format_3 = FORMAT_1.replace(
+            "source_state source_closure_reason source_updated_at",
+            "source_state_category source_state_name source_updated_at source_partition source_provider_name source_provider_icon_svg",
         );
+        assert_eq!(LATEST_FILE_FORMAT, 3);
+        for (format, expected) in [(1, FORMAT_1), (2, FORMAT_1), (3, format_3.as_str())] {
+            let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
+            let blocks = SyncKind::ALL
+                .into_iter()
+                .map(|kind| (kind.name().to_owned(), Block::Record(kind)))
+                .chain(parts.into_iter().map(|kind| {
+                    (
+                        format!("<!-- ticketd:{} -->", kind.name()),
+                        Block::Part(kind),
+                    )
+                }));
+            let mut written = String::new();
+            for (label, block) in blocks {
+                let names: Vec<_> = shape(block, format).0.map(|field| field.0).collect();
+                written.push_str(&format!("{label}: {}\n", names.join(" ")));
+            }
+            assert_eq!(written, expected, "sync file format {format}");
+        }
     }
 }

@@ -224,37 +224,60 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "automations",
   },
   {
-    title: "Google Drive",
+    title: "Workspace sync",
     description:
-      "Keep this workspace in sync between your desktops through a folder in your own Google Drive.",
-    keywords: "sync cloud connect account desktops folder",
-    section: "google-drive",
+      "Keep this workspace in sync between your desktops, through a folder in your own Google Drive or an S3 bucket.",
+    keywords:
+      "sync cloud connect account desktops folder storage google drive s3 aws bucket profile prefix sso sign in",
+    section: "workspace-sync",
   },
   {
     title: "Name",
     description: "New tickets here are numbered",
     keywords: "this desktop device ticket code",
-    section: "google-drive",
+    section: "workspace-sync",
   },
   {
     title: "Check for changes every",
     description: "Your own changes upload right after each save.",
     keywords: "check interval seconds poll sync frequency options",
-    section: "google-drive",
+    section: "workspace-sync",
   },
   {
     title: "Attachments",
     description: "Download when opened",
     keywords:
       "download automatically every file works offline saves disk space files",
-    section: "google-drive",
+    section: "workspace-sync",
   },
   {
     title: "Disconnect this desktop",
     description:
       "Stops syncing here. Your files stay in Drive and on this computer.",
-    keywords: "disconnect google drive sign out account remove unlink",
+    keywords:
+      "disconnect google drive s3 sign out account remove unlink stop syncing",
+    section: "workspace-sync",
+  },
+  {
+    title: "Google Drive",
+    description:
+      "Attach files from your Google Drive, or keep new uploads there. ticketd only sees the files you choose.",
+    keywords: "drive account sign in google attach files",
     section: "google-drive",
+  },
+  {
+    title: "Attach from Drive",
+    description:
+      "Choose Google Drive in the attachment picker. You sign in with Google the first time.",
+    keywords: "picker reference link file google",
+    section: "google-drive",
+  },
+  {
+    title: "Sources",
+    description:
+      "Connect accounts on this desktop to discover and refresh tickets.",
+    keywords: "source connection provider account discovery refresh settings",
+    section: "sources",
   },
   {
     title: "Everywhere",
@@ -354,25 +377,29 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
 ];
 
 /** The rows every source page has, for a source the build offers. */
-export function sourceEntries(provider: string, name: string): SettingsEntry[] {
-  const section: SettingsPageId = `source-${provider}`;
+export function sourceEntries(
+  connection: string,
+  name: string,
+  fields: string[] = [],
+): SettingsEntry[] {
+  const section: SettingsPageId = `source-${connection}`;
   return [
     {
       title: "Connection",
       description: `ticketd uses your own ${name} permissions.`,
-      keywords: `${name} account sign in token permissions check connection ${provider}`,
+      keywords: `${name} account sign in token permissions check connection ${connection}`,
       section,
     },
     {
       title: "Discovery",
       description: `Matching issues are imported as tickets on the next sync. Nothing is changed in ${name}.`,
-      keywords: `${name} rules repositories labels assignee import issues preview save ${provider}`,
+      keywords: `${name} rules ${fields.join(" ")} import issues preview save ${connection}`,
       section,
     },
     {
       title: "Sync",
       description: "Agents can sync without the desktop open",
-      keywords: `${name} refresh schedule source refresh command sync now ${provider}`,
+      keywords: `${name} refresh schedule source refresh command sync now ${connection}`,
       section,
     },
   ];

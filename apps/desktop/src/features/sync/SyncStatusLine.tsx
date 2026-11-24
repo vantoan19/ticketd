@@ -27,6 +27,7 @@ import {
 } from "@/lib/api/describe-failure";
 import { syncApi, type SyncReviewItem, type SyncStatus } from "@/lib/sync-api";
 import { useNow } from "@/lib/use-now";
+import { storageName } from "./storage-name";
 import { recoveryCopy } from "./sync-recovery";
 import { changes, pendingCount, useSyncStatus } from "./sync-status";
 import "./sync.css";
@@ -76,13 +77,14 @@ function describe(status: SyncStatus, now: number): Line {
     : null;
   const lastSynced = synced ? `Last synced ${synced}` : "Not synced yet";
   const waiting = pendingCount(status);
+  const storage = storageName(status.provider).short;
   const safe = "Everything is saved on this computer";
   // Neither needs a decision: sync tries again by itself.
   const paused =
     status.recovery === "offline"
       ? "Offline"
       : status.recovery === "rate_limited"
-        ? "Drive is busy"
+        ? `${storage} is busy`
         : null;
   const recovery = recoveryCopy(status);
   // "Offline · 3 changes waiting": why nothing uploads, and how much waits.
@@ -96,9 +98,9 @@ function describe(status: SyncStatus, now: number): Line {
     case "uploaded":
       return {
         tone: "positive",
-        label: "Drive synced",
+        label: `${storage} synced`,
         detail: synced ?? "Not synced yet",
-        title: "Drive synced",
+        title: `${storage} synced`,
         description: lastSynced,
         items: [],
       };
@@ -107,7 +109,7 @@ function describe(status: SyncStatus, now: number): Line {
         tone: null,
         label: waiting ? `Uploading ${changes(waiting)}…` : "Uploading…",
         detail: "Saved on this computer",
-        title: "Uploading to Drive",
+        title: `Uploading to ${storage}`,
         description: safe,
         items: waiting
           ? [{ icon: <CloudUpload />, text: `${changes(waiting)} uploading` }]
@@ -128,7 +130,7 @@ function describe(status: SyncStatus, now: number): Line {
         tone: null,
         label: `Downloading ${count} ${count === 1 ? "file" : "files"}…`,
         detail: `${formatSize(bytes_left)} left`,
-        title: "Drive synced",
+        title: `${storage} synced`,
         description: lastSynced,
         items: [
           {
@@ -182,7 +184,7 @@ function describe(status: SyncStatus, now: number): Line {
 }
 
 /**
- * The Drive line in the sidebar footer: one target. It opens a popover with
+ * The storage line in the sidebar footer: one target. It opens a popover with
  * the state and its action (Review, Reconnect, Retry, Sync now); no second
  * button beside the line does a related thing (set SR-08).
  */
@@ -198,8 +200,17 @@ export function SyncStatusLine() {
   const line = describe(status, now);
   const recovery = recoveryCopy(status);
   // Offline mends itself, so it asks for nothing on the line; its popover still offers a retry.
+  const stopped =
+    status.recovery === "service_changed" ||
+    status.recovery === "cli_unavailable";
+  // A changed S3 service is left by Disconnect, and a missing aws program is chosen, both on
+  // the Settings page; the line itself can only retry, for a person who put it right.
   const corrective =
-    status.state === "needs_attention" && recovery ? recovery.action : null;
+    status.state === "needs_attention" && recovery
+      ? stopped
+        ? "Retry"
+        : recovery.action
+      : null;
   const selfMending =
     status.recovery === "offline" || status.recovery === "rate_limited";
   // A waiting conflict is reviewed whatever else holds sync up, unless that needs the person first.
@@ -255,7 +266,11 @@ export function SyncStatusLine() {
             <small className="sync-line-text">{line.detail}</small>
           </button>
         </PopoverTrigger>
-        <PopoverContent side="top" align="start" aria-label="Google Drive sync">
+        <PopoverContent
+          side="top"
+          align="start"
+          aria-label={`${storageName(status.provider).full} sync`}
+        >
           <div className="sync-popover">
             <PopoverHeader>
               <PopoverTitle>{line.title}</PopoverTitle>
@@ -287,13 +302,15 @@ export function SyncStatusLine() {
                       disabled={busy}
                       onClick={recover}
                     >
-                      {corrective}
+                      {busy && recovery?.working
+                        ? recovery.working
+                        : corrective}
                     </Button>
                   )}
                 </>
               ) : corrective ? (
                 <Button size="sm" disabled={busy} onClick={recover}>
-                  {corrective}
+                  {busy && recovery?.working ? recovery.working : corrective}
                 </Button>
               ) : (
                 <Button
@@ -313,7 +330,11 @@ export function SyncStatusLine() {
                   openSettings();
                 }}
               >
-                Settings
+                {status.recovery === "service_changed"
+                  ? "Disconnect in Settings"
+                  : stopped
+                    ? "Choose the aws program in Settings"
+                    : "Settings"}
               </Button>
             </div>
           </div>

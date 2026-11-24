@@ -1,3 +1,4 @@
+import { SourceIcon } from "../sources/SourceIcon";
 import { emptyCopy } from "@/lib/empty-copy";
 import { Fragment, useEffect, useId, useMemo, useRef } from "react";
 import { ChevronRight, Search, SearchX, type LucideIcon } from "lucide-react";
@@ -32,6 +33,7 @@ interface PageInfo {
   label: string;
   group: string;
   icon: LucideIcon;
+  iconSvg?: string | null | undefined;
 }
 
 const plural = (count: number, one: string, many: string) =>
@@ -64,10 +66,21 @@ export function SearchPage() {
       SETTINGS_SECTIONS.map((section) => [section.id, section]),
     );
     const entries: SettingsEntry[] = [...SETTINGS_ENTRIES];
-    for (const { connector } of sources) {
-      const section = sourceSection(connector.provider, connector.name);
+    for (const { connector, saved } of sources) {
+      const id = saved?.id ?? connector.provider;
+      const section = sourceSection(
+        id,
+        saved?.name ?? connector.name,
+        connector.presentation?.icon_svg,
+      );
       pages.set(section.id, section);
-      entries.push(...sourceEntries(connector.provider, connector.name));
+      entries.push(
+        ...sourceEntries(
+          id,
+          connector.name,
+          connector.schema.fields.map(({ label }) => label),
+        ),
+      );
     }
     return { pages, entries };
   }, [sources]);
@@ -98,15 +111,15 @@ export function SearchPage() {
           "section",
           "sections",
         )}. Choose one to open its page.`;
-  const firstSource = sources[0]?.connector;
+  const firstSource = sources[0];
   const shortcuts: { id: SettingsPageId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
     { id: "backups", label: "Backups" },
     ...(firstSource
       ? [
           {
-            id: `source-${firstSource.provider}` as const,
-            label: firstSource.name,
+            id: `source-${firstSource.saved?.id ?? firstSource.connector.provider}` as const,
+            label: firstSource.saved?.name ?? firstSource.connector.name,
           },
         ]
       : []),
@@ -150,7 +163,11 @@ export function SearchPage() {
               aria-labelledby={headingId}
             >
               <div className="settings-search-group-label">
-                <Icon size={16} aria-hidden="true" />
+                {page.iconSvg ? (
+                  <SourceIcon svg={page.iconSvg} size={16} />
+                ) : (
+                  <Icon size={16} aria-hidden="true" />
+                )}
                 <h2 id={headingId}>{page.label}</h2>
                 <span>
                   {page.group} · {plural(rows.length, "setting", "settings")}

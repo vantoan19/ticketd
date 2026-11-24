@@ -60,9 +60,8 @@ test("suggestions float in a portal, so no page bar clips them, and ArrowDown re
   fireEvent.focus(input("Repositories"));
   const panel = list("Repositories");
   expect(panel).not.toBeNull();
-  expect(input("Repositories").closest(".source-form")?.contains(panel)).toBe(
-    false,
-  );
+  const fields = input("Repositories").closest('[data-slot="field-group"]');
+  expect(fields?.contains(panel)).toBe(false);
   // Focus stays in the field until the person moves into the list.
   expect(document.activeElement).not.toBe(
     screen.getByRole("button", { name: "Add One" }),
@@ -79,6 +78,61 @@ test("choosing a value closes the list", () => {
   fireEvent.click(screen.getByRole("button", { name: "Add One" }));
   expect(onChange).toHaveBeenCalledWith("repositories", ["one"]);
   expect(list("Repositories")).toBeNull();
+});
+
+test("choosing a dynamic option shows its label and keeps its value in the draft", async () => {
+  const field: SchemaField = {
+    ...multi("teams", "Teams"),
+    options: { source: "dynamic", depends_on: [] },
+  };
+  const team = {
+    value: "10000000-0000-4000-8000-000000000001",
+    label: "Platform",
+  };
+  const onChange = vi.fn();
+  const loadOptions = vi.fn(async () => [team]);
+  const form = (teams: string[]) => (
+    <SchemaForm
+      fields={[field]}
+      draft={{ teams }}
+      errors={{}}
+      disabled={false}
+      loadOptions={loadOptions}
+      onChange={onChange}
+    />
+  );
+  const { rerender } = render(form([]));
+  fireEvent.focus(input("Teams"));
+  fireEvent.click(await screen.findByRole("button", { name: "Add Platform" }));
+  expect(onChange).toHaveBeenCalledWith("teams", [team.value]);
+  rerender(form([team.value]));
+  expect(screen.getByRole("button", { name: "Remove Platform" })).toBeTruthy();
+  expect(screen.queryByText(team.value)).toBeNull();
+});
+
+test("a previously saved fixed choice shows the label returned by the source", async () => {
+  const field: SchemaField = {
+    ...multi("teams", "Teams"),
+    options: { source: "dynamic", depends_on: [] },
+  };
+  const team = {
+    value: "10000000-0000-4000-8000-000000000001",
+    label: "Platform",
+  };
+  render(
+    <SchemaForm
+      fields={[field]}
+      draft={{ teams: [team.value] }}
+      errors={{}}
+      disabled={false}
+      loadOptions={async () => [team]}
+      onChange={vi.fn()}
+    />,
+  );
+  expect(
+    await screen.findByRole("button", { name: "Remove Platform" }),
+  ).toBeTruthy();
+  expect(screen.queryByText(team.value)).toBeNull();
 });
 
 test("only one list is open at a time", () => {

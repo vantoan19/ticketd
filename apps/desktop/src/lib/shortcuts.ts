@@ -427,7 +427,7 @@ export const SHORTCUTS = [
   ...(
     [
       ["go-agent-skills", "Open Agent skills"],
-      ["go-sync", "Open Google Drive sync"],
+      ["go-sync", "Open Workspace sync"],
     ] as const
   ).map(([id, label]) => ({
     id,

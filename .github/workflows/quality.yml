@@ -183,6 +183,40 @@ jobs:
           npm run build:docs
           node apps/docs/check-pages.mjs
 
+  minio:
+    # The S3 adapter against a real S3-compatible server, a pinned MinIO with Versioning on.
+    # The simulator tests run in the Rust jobs; these check what the simulator assumes. It is in
+    # the Rust lane: only a change the Rust jobs need can change what it tests.
+    name: S3 storage (MinIO)
+    needs: plan
+    if: needs.plan.outputs.rust == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/prepare
+        with:
+          rust: true
+          cache: s3
+      - name: Start MinIO
+        run: |
+          scripts/minio-test-server start
+          scripts/minio-test-server env | sed 's/^export //' >> "$GITHUB_ENV"
+      # Live tests are named live_*, in these two test files, and skip without an endpoint.
+      # TICKETD_S3_TEST_REQUIRED makes a missing endpoint a failure instead of a silent skip.
+      - name: Test the S3 adapter on MinIO
+        env:
+          TICKETD_S3_TEST_REQUIRED: "1"
+        run: cargo test -p ticketd-core --locked --no-fail-fast --test remote_contract --test s3_live -- live_
+      - name: MinIO log
+        if: failure()
+        run: docker logs ticketd-minio-test
+
   pages:
     # The nested GitHub Pages URLs differ on Windows, so the site is built and checked there. It
     # needs only Node, so it runs beside the frontend tests whenever the site or its inputs change.
@@ -210,7 +244,7 @@ jobs:
     # canceled or wrongly skipped job can never look like a pass.
     name: CI result
     if: always()
-    needs: [plan, fast, clippy, rust, ui, pages]
+    needs: [plan, fast, clippy, rust, ui, pages, minio]
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

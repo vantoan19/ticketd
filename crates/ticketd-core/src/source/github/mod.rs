@@ -13,15 +13,19 @@ use transport::{HttpRequest, HttpResponse, HttpTransport, Method, UreqTransport}
 use serde_json::Value;
 
 use super::{
+    FieldPresentation, IssueName, PullRequestLink, SignInGuidance, SourcePresentation, SummaryPart,
+    TargetPresentation,
     contract::{
-        CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
-        ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment,
-        ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, FetchedIssue, PublicationCandidates, PublicationSearch, PublishRequest,
-        SkippedPartition, SourceError,
+        CONTRACT_VERSION, Capability, ConnectionCheck, ConnectionInfo, Connector,
+        ConnectorDescriptor, Conversation, DerivedConfiguration, DestinationRules,
+        DestinationValidation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
+        ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
+        FetchedIssue, Publication, PublicationCandidates, PublicationSearch, PublishRequest,
+        SkippedPartition, SourceError, StateCategory, check_publication_deadline,
     },
     schema::{
-        ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
+        ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, FieldPattern,
+        OptionSource, SchemaField, ValueFormat,
     },
 };
 
@@ -41,26 +45,36 @@ const SEARCH_PAGES: usize = 5;
 
 pub(crate) struct GithubConnector {
     api_url: String,
-    web_host: Option<String>,
+    web_site: Option<String>,
+    pinned_token_variable: Option<String>,
     transport: Box<dyn HttpTransport>,
     credentials: Box<dyn CredentialSource>,
+    ambient: bool,
 }
 
 impl GithubConnector {
     /// The connector as the application uses it: real network, ambient
     /// credentials, and the API address from [`API_URL_VARIABLE`] if set.
     pub(crate) fn ambient() -> Self {
-        let custom = std::env::var(API_URL_VARIABLE)
-            .ok()
-            .map(|url| url.trim().trim_end_matches('/').to_owned())
-            .filter(|url| !url.is_empty());
+        Self::ambient_for(None, None)
+    }
+
+    fn ambient_for(id: Option<&str>, account: Option<&str>) -> Self {
+        let custom = configured_api_url();
         // github.com tokens are for github.com: another host gets its own.
-        let custom_host = custom.as_deref().map(host_of);
-        Self::new(
+        let custom_host = custom
+            .as_deref()
+            .map(|url| host_of(url).to_ascii_lowercase());
+        let mut connector = Self::new(
             custom.unwrap_or_else(|| DEFAULT_API_URL.to_owned()),
             Box::new(UreqTransport::new()),
-            Box::new(AmbientCredentials::new(custom_host)),
-        )
+            Box::new(AmbientCredentials::new(custom_host, id, account)),
+        );
+        connector.ambient = true;
+        connector.pinned_token_variable = account
+            .zip(id)
+            .map(|(_, id)| credentials::connection_token_variable(id));
+        connector
     }
 
     pub(crate) fn new(
@@ -69,20 +83,26 @@ impl GithubConnector {
         credentials: Box<dyn CredentialSource>,
     ) -> Self {
         let api_url = api_url.into().trim_end_matches('/').to_owned();
-        let web_host = url::Url::parse(&api_url)
+        let web_site = url::Url::parse(&api_url)
             .ok()
-            .and_then(|api| api.host_str().map(|host| web_host_for_api(host).to_owned()));
+            .and_then(|api| web_site(&api));
         Self {
             api_url,
-            web_host,
+            web_site,
+            pinned_token_variable: None,
             transport,
             credentials,
+            ambient: false,
         }
+    }
+
+    fn site(&self) -> String {
+        site_of(&self.api_url)
     }
 
     fn issue_identity(&self, id: u64) -> Result<ExternalIdentity, SourceError> {
         let host = self
-            .web_host
+            .web_site
             .as_deref()
             .ok_or_else(|| SourceError::Protocol("the GitHub API has no valid host".into()))?;
         Ok(ExternalIdentity {
@@ -92,8 +112,8 @@ impl GithubConnector {
     }
 
     fn check_issue_host(&self, reference: &ExternalRef) -> Result<(), SourceError> {
-        let host = issue_id_host(&reference.identity.id);
-        if let (Some(host), Some(configured)) = (host, self.web_host.as_deref()) {
+        let host = issue_id_site(&reference.identity.id);
+        if let (Some(host), Some(configured)) = (host, self.web_site.as_deref()) {
             if host == configured {
                 return Ok(());
             }
@@ -116,6 +136,10 @@ impl GithubConnector {
                     label: "Repositories".into(),
                     help: Some("Issues from these repositories are discovered, and tickets can be published only to them. Type owner/name, then press Enter.".into()),
                     required: true,
+                    placeholder: Some("e.g. acme/billing-api".into()),
+                    pattern: None,
+                    advanced: false,
+                    show_if: None,
                     kind: FieldKind::MultiSelect {
                         options: OptionSource::Dynamic { depends_on: vec![] },
                         allow_custom: true,
@@ -132,10 +156,14 @@ impl GithubConnector {
                             .into(),
                     ),
                     required: false,
-                    kind: FieldKind::Text {
-                        placeholder: Some("username".into()),
-                        format: Some(ValueFormat::Handle),
-                    },
+                    placeholder: Some("e.g. octocat".into()),
+                    pattern: Some(FieldPattern {
+                        regex: "^[A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?$".into(),
+                        message: "must be a username of letters, digits and hyphens".into(),
+                    }),
+                    advanced: false,
+                    show_if: None,
+                    kind: FieldKind::Text { format: None },
                 },
                 SchemaField {
                     key: "labels".into(),
@@ -145,6 +173,10 @@ impl GithubConnector {
                             .into(),
                     ),
                     required: false,
+                    placeholder: Some("e.g. bug, payments".into()),
+                    pattern: None,
+                    advanced: false,
+                    show_if: None,
                     kind: FieldKind::MultiSelect {
                         options: OptionSource::Dynamic {
                             depends_on: vec!["repositories".into()],
@@ -152,8 +184,19 @@ impl GithubConnector {
                         allow_custom: true,
                         min_items: 0,
                         max_items: 10,
-                        format: Some(ValueFormat::Label),
+                        format: None,
                     },
+                },
+                SchemaField {
+                    key: "account".into(),
+                    label: "GitHub CLI account".into(),
+                    help: Some("Choose a username already signed in with gh. Leave empty to use the active account.".into()),
+                    required: false,
+                    placeholder: Some("e.g. octocat".into()),
+                    pattern: None,
+                    advanced: true,
+                    show_if: None,
+                    kind: FieldKind::Text { format: Some(ValueFormat::Handle) },
                 },
             ],
         }
@@ -175,10 +218,10 @@ impl GithubConnector {
     ) -> Result<(HttpResponse, Option<String>), SourceError> {
         if !credential_may_travel(&self.api_url) {
             return Err(SourceError::InvalidConfiguration(vec![
-                super::schema::FieldIssue {
-                    field: API_URL_VARIABLE.into(),
-                    message: "must be an https address (plain http is allowed only for localhost), so a credential is never sent in the clear".into(),
-                },
+                super::schema::FieldIssue::for_field(
+                    API_URL_VARIABLE,
+                    "must be an https address (plain http is allowed only for localhost), so a credential is never sent in the clear",
+                ),
             ]));
         }
         let mut url = url.to_owned();
@@ -233,7 +276,9 @@ impl GithubConnector {
         &self,
         repository: &str,
         request: &PublishRequest,
+        deadline: Option<std::time::Instant>,
     ) -> Result<ExternalIssue, SourceError> {
+        require_repository(repository)?;
         let token = self.credentials.token().ok_or_else(missing_credential)?;
         let body = serde_json::json!({ "title": request.title, "body": request.body });
         let http = HttpRequest {
@@ -242,6 +287,7 @@ impl GithubConnector {
             headers: request_headers(&token, true),
             body: Some(body.to_string().into_bytes()),
         };
+        check_publication_deadline(deadline)?;
         let response = self.transport.send(&http).map_err(|error| {
             if error.before_send {
                 // The request never left: nothing can have been created.
@@ -266,12 +312,10 @@ impl GithubConnector {
         match response.status {
             // The request was understood and declined (validation, issues
             // disabled, gone): the shared classification would call these protocol errors.
-            400 | 405 | 410 | 422 => {
-                Err(SourceError::Rejected(match response_message(&response) {
-                    Some(message) => format!("GitHub refused {subject}: {message}"),
-                    None => format!("GitHub refused {subject} (status {})", response.status),
-                }))
-            }
+            status @ (400 | 405 | 410 | 422) => Err(SourceError::Rejected(format!(
+                "GitHub refused {subject}; check that issues are enabled and the ticket content is accepted"
+            ))
+            .with_detail(format_args!("HTTP {status}"))),
             // Redirects, other 2xx and server errors prove nothing.
             _ => match classify(response, &subject) {
                 Ok(_) => Err(SourceError::Protocol(
@@ -280,24 +324,6 @@ impl GithubConnector {
                 Err(error) => Err(error),
             },
         }
-    }
-
-    /// How far GitHub's clock is ahead of this machine's (negative when this
-    /// machine is ahead), from the `Date` header of a request that costs nothing.
-    /// Zero when it cannot be measured.
-    fn clock_skew(&self) -> chrono::Duration {
-        let measured = (|| {
-            let response = self
-                .get(&format!("{}/rate_limit", self.api_url), "the rate limit")
-                .ok()?;
-            let server = chrono::DateTime::parse_from_rfc2822(response.header("date")?).ok()?;
-            let local = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .ok()?;
-            let local = chrono::DateTime::from_timestamp(i64::try_from(local.as_secs()).ok()?, 0)?;
-            Some(server.with_timezone(&chrono::Utc) - local)
-        })();
-        measured.unwrap_or_else(chrono::Duration::zero)
     }
 
     /// GitHub Enterprise Server serves GraphQL beside, not under, its REST root.
@@ -398,9 +424,7 @@ impl GithubConnector {
     fn json(&self, url: &str, subject: &str) -> Result<(Value, Option<String>), SourceError> {
         let response = self.get(url, subject)?;
         let next = response.header("link").and_then(next_link);
-        let value = serde_json::from_slice(&response.body)
-            .map_err(|_| SourceError::Protocol("GitHub returned a body that is not JSON".into()))?;
-        Ok((value, next))
+        Ok((response_json(&response)?, next))
     }
 
     fn repositories(config: &ConfigValues) -> Vec<String> {
@@ -409,6 +433,24 @@ impl GithubConnector {
 }
 
 impl Connector for GithubConnector {
+    fn for_connection(&self, id: &str, config: &ConfigValues) -> Option<Box<dyn Connector>> {
+        let account = config
+            .get("account")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|name| ValueFormat::Handle.is_valid(name));
+        self.ambient
+            .then(|| Box::new(Self::ambient_for(Some(id), account)) as Box<dyn Connector>)
+    }
+
+    fn effective_site(&self) -> Option<String> {
+        Some(self.site())
+    }
+
+    fn issue_site(&self) -> Option<&str> {
+        self.web_site.as_deref()
+    }
+
     fn descriptor(&self) -> ConnectorDescriptor {
         ConnectorDescriptor {
             provider: PROVIDER.into(),
@@ -424,17 +466,165 @@ impl Connector for GithubConnector {
         }
     }
 
-    fn check_connection(&self, _config: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        let (user, _) = self.json(
+    fn presentation(&self) -> SourcePresentation {
+        SourcePresentation {
+            icon_svg: Some(r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="1"/></svg>"#.into()),
+            issue_name: IssueName {
+                separator: "#".into(),
+                separator_in_number: true,
+                place_separator: Some("/".into()),
+            },
+            sign_in: SignInGuidance {
+                terminal_hint: Some(match &self.pinned_token_variable {
+                    Some(variable) => format!("Sign in as the GitHub CLI account selected for this connection, or set {variable} to a token for that account."),
+                    None => "From a script, set TICKETD_GITHUB_TOKEN to a token that can read and create issues instead.".into(),
+                }),
+                desktop_hint: Some("Then choose Check connection in Settings.".into()),
+                desktop_instruction: Some("Run “gh auth login” in a terminal, then choose Check connection.".into()),
+            },
+            fields: [
+                ("repositories".into(), FieldPresentation {
+                    placeholder: Some("e.g. acme/billing-api".into()),
+                    additional_placeholder: Some("Add another repository".into()),
+                }),
+                ("assignee".into(), FieldPresentation {
+                    placeholder: Some("e.g. octocat".into()),
+                    additional_placeholder: None,
+                }),
+                ("labels".into(), FieldPresentation {
+                    placeholder: Some("e.g. bug, payments".into()),
+                    additional_placeholder: None,
+                }),
+            ].into(),
+            target: Some(TargetPresentation {
+                field: "repositories".into(),
+                label: "Repository".into(),
+                example: "owner/name".into(),
+                choose: "Choose a repository".into(),
+                add: "Add a repository".into(),
+            }),
+            discovery_note: Some("Pull requests are not included.".into()),
+            pull_request_link: Some(PullRequestLink {
+                host: "github.com".into(),
+                segment: "pull".into(),
+            }),
+            hosts: vec![host_of(&self.api_url)],
+        }
+    }
+
+    fn configuration_summary(&self, config: &ConfigValues) -> Vec<SummaryPart> {
+        let repositories = Self::repositories(config);
+        let labels = strings(config.get("labels"));
+        let assignee = config
+            .get("assignee")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim();
+        let plain = |text: &str| SummaryPart {
+            text: text.into(),
+            emphasis: false,
+        };
+        let emphasis = |text: String| SummaryPart {
+            text,
+            emphasis: true,
+        };
+        let mut summary = vec![
+            plain("Imports open issues from "),
+            emphasis(if repositories.is_empty() {
+                "no repository yet".into()
+            } else {
+                repositories.join(", ")
+            }),
+        ];
+        if let Some((last, rest)) = labels.split_last() {
+            summary.push(plain(if rest.is_empty() {
+                " that have the label "
+            } else {
+                " that have the labels "
+            }));
+            summary.push(emphasis(if rest.is_empty() {
+                last.clone()
+            } else {
+                format!("{} and {last}", rest.join(", "))
+            }));
+        }
+        summary.push(plain(", assigned to "));
+        summary.push(emphasis(
+            if assignee.is_empty() {
+                "anyone"
+            } else {
+                assignee
+            }
+            .into(),
+        ));
+        summary.push(plain("."));
+        summary
+    }
+
+    fn validate(&self, config: &ConfigValues) -> Result<Vec<FieldIssue>, SourceError> {
+        let mut issues = Vec::new();
+        if let Some(assignee) = config.get("assignee").and_then(Value::as_str)
+            && !ValueFormat::Handle.is_valid(assignee)
+        {
+            issues.push(FieldIssue::for_field(
+                "assignee",
+                "must be a username of letters, digits and hyphens",
+            ));
+        }
+        for label in strings(config.get("labels")) {
+            if !ValueFormat::Label.is_valid(&label) {
+                issues.push(FieldIssue::for_field(
+                    "labels",
+                    format!(
+                        "'{label}' must be at most 50 characters without commas or line breaks"
+                    ),
+                ));
+            }
+        }
+        Ok(issues)
+    }
+
+    fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionCheck, SourceError> {
+        let response = self.get(
             &format!("{}/user", self.api_url),
             "the signed-in GitHub user",
         )?;
+        let user = response_json(&response)?;
+        let tracker_time = response
+            .header("date")
+            .and_then(|value| chrono::DateTime::parse_from_rfc2822(value).ok())
+            .map(|time| {
+                time.to_utc()
+                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+            });
         let account = user
             .get("login")
             .and_then(Value::as_str)
             .ok_or_else(|| SourceError::Protocol("the user has no login".into()))?;
-        Ok(ConnectionInfo {
-            account: account.to_owned(),
+        if config
+            .get("account")
+            .and_then(Value::as_str)
+            .is_some_and(|expected| {
+                !expected.trim().is_empty() && !expected.trim().eq_ignore_ascii_case(account)
+            })
+        {
+            return Err(SourceError::Unauthenticated(
+                "the GitHub credential belongs to a different account".into(),
+            ));
+        }
+        Ok(ConnectionCheck {
+            connection: ConnectionInfo {
+                account: account.to_owned(),
+                account_id: Some(format!(
+                    "id:{}",
+                    user_database_id(&user)
+                        .ok_or_else(|| SourceError::Protocol("the user has no valid ID".into()))?
+                )),
+                site: self.site(),
+                tracker_time,
+                publication_requires_tracker_time: false,
+            },
+            derived: Self::derived_configuration(config, self.web_site.as_deref()),
         })
     }
 
@@ -565,6 +755,7 @@ impl Connector for GithubConnector {
                     next_cursor,
                     skipped: vec![SkippedPartition {
                         code: error.code().to_owned(),
+                        class: error.class(),
                         message: match error {
                             SourceError::NotFound(_) => {
                                 format!("{repository} was not found, or your account cannot see it")
@@ -572,7 +763,7 @@ impl Connector for GithubConnector {
                             other => other.to_string(),
                         },
                         field: Some("repositories".to_owned()),
-                        partition: partition_name(self.web_host.as_deref(), repository),
+                        partition: partition_name(self.web_site.as_deref(), repository),
                     }],
                 });
             }
@@ -608,168 +799,6 @@ impl Connector for GithubConnector {
             issues,
             next_cursor,
             skipped: Vec::new(),
-        })
-    }
-
-    fn destinations(&self, config: &ConfigValues) -> Vec<String> {
-        Self::repositories(config)
-    }
-
-    fn partition(&self, reference: &ExternalRef) -> String {
-        let repository = reference
-            .locator
-            .rsplit_once('#')
-            .map_or(reference.locator.as_str(), |(repository, _)| repository);
-        partition_name(issue_id_host(&reference.identity.id), repository)
-    }
-
-    fn partitions(&self, config: &ConfigValues) -> Vec<String> {
-        Self::repositories(config)
-            .iter()
-            .map(|repository| partition_name(self.web_host.as_deref(), repository))
-            .collect()
-    }
-
-    // GitHub matches logins and label names without regard to case.
-    fn discovery_scope(&self, config: &ConfigValues) -> String {
-        let mut scope = Vec::new();
-        if let Some(assignee) = config.get("assignee").and_then(Value::as_str) {
-            scope.push(format!("assignee={}", assignee.to_lowercase()));
-        }
-        let mut labels: Vec<String> = strings(config.get("labels"))
-            .iter()
-            .map(|label| label.to_lowercase())
-            .collect();
-        labels.sort();
-        labels.dedup();
-        if !labels.is_empty() {
-            scope.push(format!("labels={}", labels.join(",")));
-        }
-        scope.join("&")
-    }
-
-    fn repository_for_destination(&self, destination: &str) -> Option<String> {
-        let host = self.web_host.as_deref()?;
-        crate::project_remote::normalize_project_remote(&format!("{host}/{destination}"))
-    }
-
-    fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
-        require_repository(destination)
-    }
-
-    // GitHub does not tell `Owner/Name` from `owner/name`.
-    fn same_destination(&self, a: &str, b: &str) -> bool {
-        a.eq_ignore_ascii_case(b)
-    }
-
-    fn publish(
-        &self,
-        _config: &ConfigValues,
-        request: &PublishRequest,
-    ) -> Result<ExternalIssue, SourceError> {
-        require_repository(&request.destination)?;
-        self.create_issue(&request.destination, request)
-    }
-
-    fn locate(
-        &self,
-        _config: &ConfigValues,
-        destination: &str,
-        text: &str,
-    ) -> Result<ExternalIssue, SourceError> {
-        let number = issue_number_in(text, destination, self.web_host.as_deref())?;
-        let url = format!(
-            "{}/repos/{}/issues/{number}",
-            self.api_url,
-            encode_path(destination)
-        );
-        let (value, _) = self.json(&url, &format!("issue {destination}#{number}"))?;
-        let issue = translate_issue(self, &value, destination)?.ok_or_else(|| {
-            SourceError::NotFound(format!(
-                "{destination}#{number} is a pull request, not an issue"
-            ))
-        })?;
-        // An issue transferred elsewhere still answers here; it is not in the destination.
-        let repository = issue.display.rsplit_once('#').map_or("", |(repo, _)| repo);
-        if !repository.eq_ignore_ascii_case(destination) {
-            return Err(not_in_destination(destination));
-        }
-        Ok(issue)
-    }
-
-    fn find_published(
-        &self,
-        _config: &ConfigValues,
-        search: &PublicationSearch,
-    ) -> Result<PublicationCandidates, SourceError> {
-        let destination = &search.request.destination;
-        require_repository(destination)?;
-        // The window was written with this machine's clock. When that clock runs
-        // ahead of GitHub's, the window would start after the real creation and
-        // miss it, so it is moved back by the measured difference.
-        let since = chrono::DateTime::parse_from_rfc3339(&search.since)
-            .ok()
-            .map(|since| since + self.clock_skew().min(chrono::Duration::zero()));
-        let since_text = since.map_or_else(
-            || search.since.clone(),
-            |since| {
-                since
-                    .with_timezone(&chrono::Utc)
-                    .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-            },
-        );
-        let mut url = Some(format!(
-            "{}/repos/{}/issues?state=all&sort=created&direction=desc&per_page=100&since={}",
-            self.api_url,
-            encode_path(destination),
-            encode_component(&since_text)
-        ));
-        let subject = format!("repository {destination}");
-        let mut matches = Vec::new();
-        let mut recent = Vec::new();
-        for _ in 0..SEARCH_PAGES {
-            let Some(current) = url.take() else {
-                break;
-            };
-            let (page, next) = self.json(&current, &subject)?;
-            let items = page
-                .as_array()
-                .ok_or_else(|| SourceError::Protocol("expected a list of issues".into()))?;
-            for item in items {
-                let Some(issue) = translate_issue(self, item, destination)? else {
-                    continue;
-                };
-                // Newest first: the first issue older than the window ends the read.
-                let created = chrono::DateTime::parse_from_rfc3339(&issue.created_at).ok();
-                if let (Some(created), Some(since)) = (created, since)
-                    && created < since
-                {
-                    return Ok(PublicationCandidates {
-                        matches,
-                        recent,
-                        complete: true,
-                    });
-                }
-                // An issue the connected account created in the window may have been
-                // rewritten by a teammate or an automation, so it is listed and can be
-                // attached; only a text match blocks "not created".
-                let by_account = search.account.as_deref().is_some_and(|account| {
-                    item.pointer("/user/login")
-                        .and_then(Value::as_str)
-                        .is_some_and(|login| login.eq_ignore_ascii_case(account))
-                });
-                if could_be_published(&issue, &search.request) {
-                    matches.push(issue);
-                } else if by_account {
-                    recent.push(issue);
-                }
-            }
-            url = next;
-        }
-        Ok(PublicationCandidates {
-            matches,
-            recent,
-            complete: url.is_none(),
         })
     }
 
@@ -813,9 +842,194 @@ impl Connector for GithubConnector {
         }
         Ok(conversation)
     }
+
+    fn repository_for_destination(&self, destination: &str) -> Option<String> {
+        let host = site_host(self.web_site.as_deref()?);
+        crate::project_remote::normalize_project_remote(&format!("{host}/{destination}"))
+    }
+
+    // GitHub does not tell `Owner/Name` from `owner/name`.
+    fn same_destination(&self, a: &str, b: &str) -> bool {
+        a.eq_ignore_ascii_case(b)
+    }
+
+    fn publication(&self) -> Option<&dyn Publication> {
+        Some(self)
+    }
+}
+
+impl Publication for GithubConnector {
+    fn publish(
+        &self,
+        _config: &ConfigValues,
+        request: &PublishRequest,
+    ) -> Result<ExternalIssue, SourceError> {
+        self.create_issue(&request.destination, request, None)
+    }
+
+    fn publish_before(
+        &self,
+        _config: &ConfigValues,
+        request: &PublishRequest,
+        deadline: std::time::Instant,
+    ) -> Result<ExternalIssue, SourceError> {
+        check_publication_deadline(Some(deadline))?;
+        self.create_issue(&request.destination, request, Some(deadline))
+    }
+
+    fn locate(
+        &self,
+        _config: &ConfigValues,
+        destination: &str,
+        text: &str,
+    ) -> Result<ExternalIssue, SourceError> {
+        let number = issue_number_in(text, destination, self.web_site.as_deref())?;
+        let url = format!(
+            "{}/repos/{}/issues/{number}",
+            self.api_url,
+            encode_path(destination)
+        );
+        let (value, _) = self.json(&url, &format!("issue {destination}#{number}"))?;
+        let issue = translate_issue(self, &value, destination)?.ok_or_else(|| {
+            SourceError::NotFound(format!(
+                "{destination}#{number} is a pull request, not an issue"
+            ))
+        })?;
+        // An issue transferred elsewhere still answers here; it is not in the destination.
+        let repository = issue.display.rsplit_once('#').map_or("", |(repo, _)| repo);
+        if !repository.eq_ignore_ascii_case(destination) {
+            return Err(not_in_destination(destination));
+        }
+        Ok(issue)
+    }
+
+    fn find_published(
+        &self,
+        _config: &ConfigValues,
+        search: &PublicationSearch,
+    ) -> Result<PublicationCandidates, SourceError> {
+        let destination = &search.request.destination;
+        require_repository(destination)?;
+        // Only the tracker clock observed before creation establishes a
+        // lower bound. With no clock, read from the beginning of history
+        // and rule out a remaining issue only when the destination is empty.
+        let since = search
+            .tracker_since
+            .as_deref()
+            .and_then(|time| chrono::DateTime::parse_from_rfc3339(time).ok());
+        let mut request = format!(
+            "{}/repos/{}/issues?state=all&sort=created&direction=desc&per_page=100",
+            self.api_url,
+            encode_path(destination),
+        );
+        if let Some(since) = since {
+            let since_text = since
+                .to_utc()
+                .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);
+            request.push_str("&since=");
+            request.push_str(&encode_component(&since_text));
+        }
+        let mut url = Some(request);
+        let mut reliable = true;
+        let subject = format!("repository {destination}");
+        let mut matches = Vec::new();
+        let mut recent = Vec::new();
+        let account = search.account.as_deref();
+        let account_id = account.and_then(account_database_id);
+        for _ in 0..SEARCH_PAGES {
+            let Some(current) = url.take() else {
+                break;
+            };
+            let (page, next) = self.json(&current, &subject)?;
+            let items = page
+                .as_array()
+                .ok_or_else(|| SourceError::Protocol("expected a list of issues".into()))?;
+            for item in items {
+                let Some(issue) = translate_issue(self, item, destination)? else {
+                    continue;
+                };
+                // Newest first: the first issue older than the window ends the read.
+                let created = chrono::DateTime::parse_from_rfc3339(&issue.created_at).ok();
+                reliable &= since.is_some() && created.is_some();
+                if let (Some(created), Some(since)) = (created, since)
+                    && created < since
+                {
+                    return Ok(PublicationCandidates {
+                        matches,
+                        recent,
+                        complete: reliable,
+                    });
+                }
+                // An issue the connected account created in the window may have been
+                // rewritten by a teammate or an automation, so it is also a
+                // candidate and blocks "not created".
+                let creator = item.get("user");
+                let by_account = if let Some(account_id) = account_id {
+                    let creator_id = creator.and_then(user_database_id);
+                    reliable &= creator_id.is_some();
+                    creator_id == Some(account_id)
+                } else {
+                    account.is_some_and(|account| {
+                        creator
+                            .and_then(|user| user.get("login"))
+                            .and_then(Value::as_str)
+                            .is_some_and(|login| login.eq_ignore_ascii_case(account))
+                    })
+                };
+                if could_be_published(&issue, &search.request) {
+                    matches.push(issue);
+                } else if by_account {
+                    recent.push(issue);
+                }
+            }
+            url = next;
+        }
+        Ok(PublicationCandidates {
+            matches,
+            recent,
+            complete: reliable && url.is_none(),
+        })
+    }
 }
 
 impl GithubConnector {
+    /// Derived answers also keep older saved settings usable before the first
+    /// successful connection check under the new contract.
+    fn derived_configuration(config: &ConfigValues, host: Option<&str>) -> DerivedConfiguration {
+        let destinations = Self::repositories(config);
+        let partitions = destinations
+            .iter()
+            .map(|repository| partition_name(host, repository))
+            .collect();
+        // GitHub matches logins and label names without regard to case.
+        let mut scope = Vec::new();
+        if let Some(assignee) = config.get("assignee").and_then(Value::as_str) {
+            scope.push(format!("assignee={}", assignee.to_lowercase()));
+        }
+        let mut labels: Vec<String> = strings(config.get("labels"))
+            .iter()
+            .map(|label| label.to_lowercase())
+            .collect();
+        labels.sort();
+        labels.dedup();
+        if !labels.is_empty() {
+            scope.push(format!("labels={}", labels.join(",")));
+        }
+        DerivedConfiguration {
+            partitions,
+            discovery_scope: scope.join("&"),
+            publication: DestinationRules {
+                destinations,
+                case_insensitive: true,
+                validation: Some(DestinationValidation {
+                    format: ValueFormat::OwnerName,
+                    message: DESTINATION_FORMAT_MESSAGE.into(),
+                }),
+                ..DestinationRules::default()
+            },
+        }
+    }
+
     fn read_issue(&self, reference: &ExternalRef) -> Result<FetchedIssue, SourceError> {
         self.check_issue_host(reference)?;
         let (repository, number) = split_locator(&reference.locator)?;
@@ -847,7 +1061,6 @@ impl GithubConnector {
                     return false;
                 };
                 let api_repository = target.strip_suffix(&format!("/issues/{number}"));
-                let web_host = url::Url::parse(&issue.url).ok();
                 issue.reference.identity != reference.identity
                     && !repository.eq_ignore_ascii_case(destination)
                     && value
@@ -860,16 +1073,11 @@ impl GithubConnector {
                     && self.issue_api_locator(target).is_some_and(|locator| {
                         locator.eq_ignore_ascii_case(&issue.reference.locator)
                     })
-                    && web_host.as_ref().and_then(url::Url::host_str) == self.web_host.as_deref()
-                    && repository_from_issue_url(&issue.reference.locator, &issue.url)
-                        == issue.repository
+                    && issue_site_from_url(&issue.reference.locator, &issue.url).as_deref()
+                        == self.web_site.as_deref()
             })
             .map(|_| reference.clone());
-        if issue.state
-            == (ExternalState::Closed {
-                reason: ClosureReason::Duplicate,
-            })
-        {
+        if issue.state.category == StateCategory::Duplicate {
             let id = value
                 .get("id")
                 .and_then(Value::as_u64)
@@ -917,10 +1125,10 @@ impl GithubConnector {
 }
 
 fn not_in_destination(destination: &str) -> SourceError {
-    SourceError::InvalidConfiguration(vec![super::schema::FieldIssue {
-        field: "issue".into(),
-        message: format!("is not in {destination}"),
-    }])
+    SourceError::InvalidConfiguration(vec![super::schema::FieldIssue::for_field(
+        "issue",
+        format!("is not in {destination}"),
+    )])
 }
 
 /// The issue number in `text`, which may be `12`, `#12`, `owner/name#12` or an
@@ -928,10 +1136,10 @@ fn not_in_destination(destination: &str) -> SourceError {
 fn issue_number_in(text: &str, destination: &str, host: Option<&str>) -> Result<u64, SourceError> {
     let text = text.trim();
     let invalid = || {
-        SourceError::InvalidConfiguration(vec![super::schema::FieldIssue {
-            field: "issue".into(),
-            message: "must be an issue number, owner/name#number or an issue link".into(),
-        }])
+        SourceError::InvalidConfiguration(vec![super::schema::FieldIssue::for_field(
+            "issue",
+            "must be an issue number, owner/name#number or an issue link",
+        )])
     };
     let (repository, number) = if let Some(rest) = text
         .strip_prefix("https://")
@@ -945,12 +1153,9 @@ fn issue_number_in(text: &str, destination: &str, host: Option<&str>) -> Result<
             return Err(invalid());
         }
         let url = url::Url::parse(text).map_err(|_| invalid())?;
-        if url.host_str().is_none() || url.host_str() != host {
+        if web_site(&url).as_deref() != host {
             return Err(SourceError::InvalidConfiguration(vec![
-                super::schema::FieldIssue {
-                    field: "issue".into(),
-                    message: "use an issue link on the current GitHub host".into(),
-                },
+                FieldIssue::for_field("issue", "use an issue link on the current GitHub host"),
             ]));
         }
         let path = path.split(['?', '#']).next().unwrap_or_default();
@@ -987,16 +1192,103 @@ fn could_be_published(issue: &ExternalIssue, request: &PublishRequest) -> bool {
         || (!plain(&request.body).is_empty() && plain(&issue.body) == plain(&request.body))
 }
 
+pub(super) fn legacy_state_name(provider: &str, state: &str) -> Option<&'static str> {
+    match (provider, state) {
+        (PROVIDER, "open") => Some("Open"),
+        (PROVIDER, "closed") => Some("Closed"),
+        _ => None,
+    }
+}
+
+pub(super) fn legacy_reference_partition(
+    provider: &str,
+    id: &str,
+    locator: &str,
+) -> Option<String> {
+    (provider == PROVIDER).then(|| {
+        let repository = locator.rsplit_once('#').map_or(locator, |(part, _)| part);
+        partition_name(issue_id_site(id), repository)
+    })
+}
+
+fn configured_api_url() -> Option<String> {
+    std::env::var(API_URL_VARIABLE)
+        .ok()
+        .map(|url| url.trim().trim_end_matches('/').to_owned())
+        .filter(|url| !url.is_empty())
+}
+
+fn web_site(url: &url::Url) -> Option<String> {
+    let host = web_host_for_api(url.host_str()?);
+    Some(match url.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    })
+}
+
+fn site_of(url: &str) -> String {
+    url::Url::parse(url)
+        .ok()
+        .as_ref()
+        .and_then(web_site)
+        .filter(|site| site != "github.com")
+        .unwrap_or_default()
+}
+
+/// Historical GitHub IDs are numbers, so known different hosts cannot share one.
+pub(crate) fn legacy_issue_origin_matches(provider: &str, stored: &str, incoming: &str) -> bool {
+    if provider != PROVIDER || stored == incoming {
+        return true;
+    }
+    let site = |text: &str| {
+        let url = url::Url::parse(text).ok()?;
+        (matches!(url.scheme(), "https" | "http") && url.has_host()).then(|| site_of(url.as_str()))
+    };
+    match (site(stored), site(incoming)) {
+        (Some(stored), Some(incoming)) => stored == incoming,
+        (Some(_), None) => false,
+        (None, _) => true,
+    }
+}
+
+pub(super) fn legacy_site(issue_urls: &[String]) -> String {
+    // Prior settings did not store the API host. An explicit API gateway can
+    // differ from the hostname in a tracker’s human-readable issue links.
+    if let Some(api) = configured_api_url().filter(|api| credential_may_travel(api)) {
+        return site_of(&api);
+    }
+    let mut sites = issue_urls.iter().filter_map(|text| {
+        let url = url::Url::parse(text).ok()?;
+        (matches!(url.scheme(), "https" | "http") && url.has_host()).then(|| site_of(url.as_str()))
+    });
+    if let Some(site) = sites.next()
+        && sites.all(|observed| observed == site)
+    {
+        return site;
+    }
+    String::new()
+}
+
+pub(super) fn legacy_derived_configuration(
+    provider: &str,
+    site: &str,
+    config: &ConfigValues,
+) -> Option<DerivedConfiguration> {
+    (provider == PROVIDER).then(|| {
+        let host = if site.is_empty() { "github.com" } else { site };
+        GithubConnector::derived_configuration(config, Some(host))
+    })
+}
+
+const DESTINATION_FORMAT_MESSAGE: &str = "must be a repository in the form owner/name";
+
 /// A destination must be a repository in the form `owner/name`.
 fn require_repository(destination: &str) -> Result<(), SourceError> {
     if ValueFormat::OwnerName.is_valid(destination) {
         return Ok(());
     }
     Err(SourceError::InvalidConfiguration(vec![
-        super::schema::FieldIssue {
-            field: "destination".into(),
-            message: "must be a repository in the form owner/name".into(),
-        },
+        FieldIssue::for_field("destination", DESTINATION_FORMAT_MESSAGE),
     ]))
 }
 
@@ -1077,7 +1369,7 @@ fn issue_id(id: &str, host: &str) -> String {
     }
 }
 
-fn partition_name(host: Option<&str>, repository: &str) -> String {
+pub(super) fn partition_name(host: Option<&str>, repository: &str) -> String {
     let repository = repository.to_lowercase();
     match host {
         // Keep the bare keys that public GitHub workspaces have already saved.
@@ -1086,12 +1378,35 @@ fn partition_name(host: Option<&str>, repository: &str) -> String {
     }
 }
 
-pub(super) fn issue_id_host(id: &str) -> Option<&str> {
+pub(crate) fn issue_id_host(id: &str) -> Option<&str> {
+    issue_id_site(id).map(site_host)
+}
+
+pub(crate) fn issue_id_site(id: &str) -> Option<&str> {
     if id.parse::<u64>().is_ok() {
         return Some("github.com");
     }
     let (host, number) = id.strip_prefix('@')?.rsplit_once(':')?;
     (!host.is_empty() && number.parse::<u64>().is_ok()).then_some(host)
+}
+
+pub(super) fn site_host(site: &str) -> &str {
+    site.rsplit_once(':')
+        .filter(|(_, port)| port.parse::<u16>().is_ok())
+        .map_or(site, |(host, _)| host)
+}
+
+/// Older Enterprise issues qualified the ID with the hostname only. An exact
+/// saved issue URL can supply their nondefault port.
+pub(super) fn scope_host_only_issue_id(id: &str, site: &str) -> Option<String> {
+    let stored = issue_id_site(id)?;
+    let number = id.rsplit_once(':').map_or(id, |(_, number)| number);
+    (site != stored && site_host(site) == stored).then(|| issue_id(number, site))
+}
+
+pub(crate) fn issue_site_from_url(locator: &str, url: &str) -> Option<String> {
+    repository_from_issue_url(locator, url)?;
+    web_site(&url::Url::parse(url).ok()?)
 }
 
 /// Legacy GitHub IDs were numeric for every host. Keep unverified IDs away from
@@ -1101,7 +1416,7 @@ pub(super) fn scope_legacy_issue_id(id: &str, host: Option<&str>) -> Option<Stri
     Some(issue_id(id, host.unwrap_or_default()))
 }
 
-pub(super) fn unverified_issue_id(id: &str) -> Option<&str> {
+pub(crate) fn unverified_issue_id(id: &str) -> Option<&str> {
     let database_id = id.strip_prefix("@:")?;
     database_id.parse::<u64>().ok()?;
     Some(database_id)
@@ -1172,7 +1487,7 @@ fn translate_comment(item: &Value) -> Result<ExternalComment, SourceError> {
 /// rest are not part of the conversation.
 fn translate_event(item: &Value) -> Result<Option<ExternalEvent>, SourceError> {
     let kind = match item.get("event").and_then(Value::as_str) {
-        Some("closed") => ExternalEventKind::Closed(ClosureReason::parse(
+        Some("closed") => ExternalEventKind::Closed(StateCategory::from_closure(
             item.get("state_reason").and_then(Value::as_str),
         )),
         Some("reopened") => ExternalEventKind::Reopened,
@@ -1232,6 +1547,7 @@ fn canonical_reference(
         ExternalRef {
             identity: connector.issue_identity(id).ok()?,
             locator: format!("{repository}#{number}"),
+            partition: partition_name(connector.web_site.as_deref(), repository),
         },
         url,
     ))
@@ -1290,15 +1606,10 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
         return Ok(response);
     }
     let message = response_message(&response);
-    let detail = |text: &str| match &message {
-        Some(message) => format!("{text}: {message}"),
-        None => text.to_owned(),
-    };
-    match status {
-        401 => Err(SourceError::Unauthenticated(format!(
-            "{}. Run `gh auth login` to sign in again.",
-            detail("GitHub rejected the credential").trim_end_matches('.')
-        ))),
+    let error = match status {
+        401 => SourceError::Unauthenticated(
+            "GitHub rejected the credential. Run `gh auth login` to sign in again.".into(),
+        ),
         403 | 429 => {
             let limited = status == 429
                 || response.header("x-ratelimit-remaining") == Some("0")
@@ -1307,27 +1618,42 @@ fn classify(response: HttpResponse, subject: &str) -> Result<HttpResponse, Sourc
                     .as_deref()
                     .is_some_and(|m| m.to_lowercase().contains("rate limit"));
             if limited {
-                Err(SourceError::RateLimited {
+                SourceError::RateLimited {
                     retry_after_secs: retry_after(&response),
-                })
+                }
             } else {
-                Err(SourceError::Forbidden(detail(&format!(
+                SourceError::Forbidden(format!(
                     "GitHub denied access to {subject}; the credential needs permission to read issues there"
-                ))))
+                ))
             }
         }
-        // 410 Gone (a deleted issue, or a repository with issues disabled) is an
-        // answer about that one resource, the same as not found.
-        404 | 410 => Err(SourceError::NotFound(format!(
+        // A deleted issue, or a repository with issues disabled.
+        404 | 410 => SourceError::NotFound(format!(
             "{subject} was not found, or the credential cannot see it"
-        ))),
-        500..=599 => Err(SourceError::Unavailable(format!(
+        )),
+        500..=599 => SourceError::Unavailable(format!(
             "GitHub is unavailable (status {status}); retry later"
-        ))),
-        _ => Err(SourceError::Protocol(detail(&format!(
-            "GitHub answered {subject} with status {status}"
-        )))),
-    }
+        )),
+        _ => SourceError::Protocol(format!("GitHub answered {subject} with status {status}")),
+    };
+    // An arbitrary response message can echo credentials or submitted content.
+    Err(error.with_detail(format_args!("HTTP {status}")))
+}
+
+fn user_database_id(user: &Value) -> Option<u64> {
+    user.get("id").and_then(Value::as_u64).filter(|id| *id != 0)
+}
+
+pub(super) fn account_database_id(key: &str) -> Option<u64> {
+    key.strip_prefix("id:")?
+        .parse::<u64>()
+        .ok()
+        .filter(|id| *id != 0)
+}
+
+fn response_json(response: &HttpResponse) -> Result<Value, SourceError> {
+    serde_json::from_slice(&response.body)
+        .map_err(|_| SourceError::Protocol("GitHub returned a body that is not JSON".into()))
 }
 
 fn response_message(response: &HttpResponse) -> Option<String> {
@@ -1385,10 +1711,10 @@ fn translate_issue(
     let text = |key: &str| item.get(key).and_then(Value::as_str);
     let title = text("title").ok_or_else(|| missing("title"))?;
     let state = match text("state") {
-        Some("open") => ExternalState::Open,
-        Some("closed") => ExternalState::Closed {
-            reason: ClosureReason::parse(text("state_reason")),
-        },
+        Some("open") => ExternalState::named(StateCategory::Open, "Open"),
+        Some("closed") => {
+            ExternalState::named(StateCategory::from_closure(text("state_reason")), "Closed")
+        }
         _ => return Err(missing("recognized state")),
     };
     let repository = text("repository_url")
@@ -1399,6 +1725,7 @@ fn translate_issue(
         reference: ExternalRef {
             identity: connector.issue_identity(id)?,
             locator: display.clone(),
+            partition: partition_name(connector.web_site.as_deref(), repository),
         },
         display,
         url: text("html_url").unwrap_or_default().to_owned(),

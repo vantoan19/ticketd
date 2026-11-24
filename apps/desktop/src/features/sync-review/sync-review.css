@@ -63,22 +63,14 @@
   resize: vertical;
 }
 
-/* Reserve recovery feedback before any read or restore result arrives. */
-.sync-history-feedback {
-  flex: none;
-  height: 24px;
-  min-width: 0;
-}
-.sync-history-feedback .ui-failure-inline {
-  height: 100%;
-}
-
 /* History: versions on the left, the selected one compared with now on the right. */
 .sync-history {
   display: grid;
   grid-template-columns: 264px minmax(0, 1fr);
-  min-height: 420px;
-  max-height: 60vh;
+  /* A height of its own, not one that follows the list: older versions arriving
+     scroll the list and never move the footer below. */
+  grid-template-rows: minmax(0, 1fr);
+  height: clamp(420px, 60vh, 560px);
   margin: 0 -24px -24px;
 }
 .sync-history-list {
@@ -148,8 +140,7 @@
   .sync-history {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: 128px minmax(0, 1fr);
-    min-height: 320px;
-    max-height: none;
+    height: 360px;
   }
 }
 

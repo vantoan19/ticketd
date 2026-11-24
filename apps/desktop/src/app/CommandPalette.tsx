@@ -27,7 +27,7 @@ import { reminderPresets } from "@/features/tickets/reminder-presets";
 import { Button } from "@/components/ui/button";
 import {
   Bot,
-  Cloud,
+  RefreshCw,
   Check,
   Circle,
   Folder,
@@ -1016,9 +1016,9 @@ export function CommandPalette({
                       },
                       {
                         id: "go-sync",
-                        section: "google-drive",
-                        label: "Google Drive sync",
-                        icon: Cloud,
+                        section: "workspace-sync",
+                        label: "Workspace sync",
+                        icon: RefreshCw,
                       },
                     ] as const
                   )

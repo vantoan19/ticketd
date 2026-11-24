@@ -280,7 +280,12 @@ function AppContent() {
     useState<SettingsPageId>("appearance");
   const [projectSource, setProjectSource] = useState<
     | ({ mode: "setup" } & ProjectSourceSetup)
-    | { mode: "review"; projectId: string; resumed?: boolean }
+    | {
+        mode: "review";
+        projectId: string;
+        resumed?: boolean;
+        connection?: string;
+      }
     | { mode: "edit_remote"; projectId: string; exit?: "close" | "review" }
     | null
   >(null);
@@ -330,18 +335,22 @@ function AppContent() {
     }
     setView(next);
   };
-  function reviewProjectSource(projectId: string) {
-    setProjectSource({ mode: "review", projectId });
+  function reviewProjectSource(projectId: string, connection?: string) {
+    setProjectSource({
+      mode: "review",
+      projectId,
+      ...(connection && { connection }),
+    });
   }
   function setupProjectSource(setup: ProjectSourceSetup) {
     setProjectSource({ mode: "setup", ...setup });
     openView("settings");
-    setSettingsSection(`source-${setup.provider}`);
+    setSettingsSection("sources");
   }
   useSyncNavigation({
     openSettings: () => {
       openView("settings");
-      setSettingsSection("google-drive");
+      setSettingsSection("workspace-sync");
     },
     // A record that needs review has an Inbox entry that opens its comparison.
     openReview: () => openView("inbox"),
@@ -509,7 +518,13 @@ function AppContent() {
     revision,
     refresh,
     sourceHealth,
+    verifiedCredentials,
+    sourceHealthReadFailure,
+    readSourceHealth,
     sourceEntries,
+    sourceCatalogObservation,
+    readSourceEntries,
+    sourceConnectionsChanged,
     sourceRefresh,
     refreshSources,
     create,
@@ -727,10 +742,10 @@ function AppContent() {
   const sourceProject = projects.find(
     (item) => item.id === projectSource?.projectId,
   );
-  const githubSourceRevision =
-    sourceEntries.find((entry) => entry.connector.provider === "github")?.saved
-      ?.saved_at ?? "";
-  function finishProjectSourceSetup() {
+  const sourceRevision = JSON.stringify(
+    sourceEntries.map(({ saved }) => [saved?.id, saved?.saved_at]),
+  );
+  function finishProjectSourceSetup(connection: string) {
     if (!pendingSourceSetup) return;
     void reportChange();
     setView(viewBeforeSettings);
@@ -738,6 +753,7 @@ function AppContent() {
       mode: "review",
       projectId: pendingSourceSetup.projectId,
       resumed: true,
+      connection,
     });
   }
   const bulk = useBulkEdit(reportChange);
@@ -910,16 +926,19 @@ function AppContent() {
                       sourceHealth.refreshing || sourceRefresh.running,
                     sources: sourceHealth.sources,
                     entries: sourceEntries,
+                    catalogObservation: sourceCatalogObservation,
+                    readCatalog: () => readSourceEntries().generation,
                     intervalSecs: sourceHealth.interval_secs ?? null,
-                    openSettings: () => {
+                    openSettings: (connection) => {
                       openView("settings");
-                      setSettingsSection("source-github");
-                    },
-                    openSourceSettings: (provider) => {
-                      openView("settings");
-                      setSettingsSection(`source-${provider}`);
+                      setSettingsSection(
+                        connection ? `source-${connection}` : "sources",
+                      );
                     },
                     refreshAll: () => refreshSources(),
+                    verifiedCredentials,
+                    healthReadFailure: sourceHealthReadFailure,
+                    readHealth: readSourceHealth,
                   }}
                 >
                   <SettingsStateProvider
@@ -1292,6 +1311,12 @@ function AppContent() {
                                   {projectSource?.mode === "review" && (
                                     <ConnectProjectSource
                                       projectId={projectSource.projectId}
+                                      {...(sourceProject?.remote && {
+                                        projectRemote: sourceProject.remote,
+                                      })}
+                                      {...(projectSource.connection && {
+                                        connection: projectSource.connection,
+                                      })}
                                       resumeAfterSetup={
                                         projectSource.resumed ?? false
                                       }
@@ -1350,15 +1375,28 @@ function AppContent() {
                                             setView("inbox");
                                           }}
                                           onRestore={replaceWorkspace}
-                                          onProjectLinked={(projectId) => {
+                                          onSourcesChanged={
+                                            sourceConnectionsChanged
+                                          }
+                                          onProjectLinked={(
+                                            projectId,
+                                            connection,
+                                          ) => {
                                             void reportChange();
-                                            reviewProjectSource(projectId);
+                                            reviewProjectSource(
+                                              projectId,
+                                              connection,
+                                            );
                                           }}
                                           {...(pendingSourceSetup && {
                                             projectSourceSetup:
                                               pendingSourceSetup,
                                             onProjectSourceSaved:
                                               finishProjectSourceSetup,
+                                            onProjectSourceCancel: () => {
+                                              setProjectSource(null);
+                                              setView(viewBeforeSettings);
+                                            },
                                           })}
                                         />
                                       )}
@@ -1594,9 +1632,7 @@ function AppContent() {
                                             projectNotice={
                                               <ProjectRemoteNote
                                                 project={scopedProject}
-                                                sourceRevision={
-                                                  githubSourceRevision
-                                                }
+                                                sourceRevision={sourceRevision}
                                                 onConnectSource={
                                                   reviewProjectSource
                                                 }

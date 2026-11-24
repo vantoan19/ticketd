@@ -119,7 +119,7 @@ test("three tiles state what ticketd promises", () => {
   expect(tiles.map((tile) => tile.textContent)).toEqual([
     "No accountticketd has no account to sign up for.",
     "Works offlineEverything you do runs on this computer.",
-    "Stays on this computerNo analytics or crash uploads. Only update checks and the integrations you turn on, such as Google Drive and GitHub, go online.",
+    "Stays on this computerNo analytics or crash uploads. Only update checks and the integrations you turn on, such as Google Drive or a ticket source, go online.",
   ]);
 });
 

@@ -117,15 +117,15 @@ const noticeSchema = z.discriminatedUnion("kind", [
 ]);
 export type Notice = z.infer<typeof noticeSchema>;
 
-/** `drive` versions are Drive's own file revisions, fetched only when asked for. */
-export type VersionSource = "local" | "drive";
+/** `drive` and `s3` versions are the storage's own versions of the file, fetched only when asked for; the one named after the Workspace's storage. */
+export type VersionSource = "local" | "drive" | "s3";
 
 const versionSchema = z.object({
   id: z.string(),
   timestamp: z.string(),
-  /** Name of the other desktop that made the change; null for this desktop, Drive or `oldest`. */
+  /** Name of the other desktop that made the change; null for this desktop, the storage or `oldest`. */
   device: z.string().nullable(),
-  /** Keys of the fields in which this version differs from the current one; Drive's are not known. */
+  /** Keys of the fields in which this version differs from the current one; the storage's are not known. */
   changed: z.array(z.string()),
   /** The oldest version kept on this desktop: where it came from was not recorded. */
   oldest: z.boolean().optional(),

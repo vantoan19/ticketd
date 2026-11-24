@@ -43,7 +43,7 @@ const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   url: "https://github.com/acme/api/issues/98",
   origin: "imported",
   ownership: "external",
-  state: { state: "open" },
+  state: { category: "open", name: "Open" },
   closure_unrecognized: false,
   last_refreshed_at: new Date(Date.now() - 30 * 60_000).toISOString(),
   last_attempt_at: new Date(Date.now() - 2 * 60_000).toISOString(),
@@ -211,7 +211,52 @@ test("the rail never offers Take ownership (the unavailable notice does), and lo
 });
 
 test("history words the takeover", () => {
-  expect(describeChange("ownership", "github", "local")).toBe(
-    "Took ownership from GitHub; the ticket is now local",
+  expect(
+    describeChange("ownership", "github", "local", {
+      project: () => undefined,
+      plan: () => undefined,
+      source: () => "GitHub",
+    }),
+  ).toBe("Took ownership from GitHub; the ticket is now local");
+});
+
+test.each([
+  ["connection_removed", "Connection removed"],
+  ["not_configured", "Beacon isn't connected on this desktop"],
+])("shows the %s ticket notice and allows takeover", async (code, name) => {
+  bridge.invoke.mockResolvedValue(ticket());
+  const refresh = vi.fn(async () => {});
+  render(
+    <SourceUnavailableNotice
+      ticket={ticket({
+        source: source({
+          provider_name: "Beacon",
+          provider_icon_svg:
+            '<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>',
+          unavailable: { code, message: "", since: "2026-01-01T00:00:00Z" },
+        }),
+      })}
+      refresh={refresh}
+    />,
   );
+  const notice = screen.getByRole("region", { name });
+  expect(notice.querySelector("image")?.getAttribute("href")).toMatch(
+    /^data:image\/svg/,
+  );
+  expect(
+    within(notice).queryByRole("button", { name: "Retry now" }),
+  ).toBeNull();
+  fireEvent.click(
+    within(notice).getByRole("button", { name: "Take ownership…" }),
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Take ownership",
+    }),
+  );
+  await waitFor(() => expect(refresh).toHaveBeenCalledOnce());
+  expect(bridge.invoke).toHaveBeenCalledExactlyOnceWith("take_ownership", {
+    reference: "T-KQ1",
+    requestId: expect.any(String),
+  });
 });

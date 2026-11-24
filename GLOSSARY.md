@@ -59,7 +59,16 @@ A one-time outward transfer of a locally owned ticket to an external tracker, af
 The system that currently owns a ticket's authoritative record: ticketd or an external tracker.
 
 **Ticket source extension**:
-A connector to an external ticket source, run by ticketd through a shared extension interface.
+A separate program that connects ticketd to an external ticket source through a versioned contract.
+
+**Source connection**:
+A named, device-local configuration for an account and site at a ticket source, with its own settings and credentials.
+
+**Conformance suite**:
+The shared checks that verify whether a connector follows the ticket source contract.
+
+**Source state category**:
+ticketd's interpretation of a typed tracker state: open, completed, not planned, duplicate, or unknown. The source's state name is display text. Only completed, not planned, and duplicate imply a terminal ticket status.
 
 **External ticket identity**:
 The identity of a ticket's corresponding record in an external tracker, retained as provenance even when ticketd takes ownership. Its presence alone does not imply external ownership or active synchronization.
@@ -74,11 +83,11 @@ Two uppercase letters identifying one Workspace installation in the Ticket refer
 An earlier state of a ticket or Document (title, body, status, trash), saved locally on the device whenever a local edit or an incoming sync replaces it. Versions are kept 30 days; the record itself is the current version and is always kept. Restoring a version is an ordinary edit.
 
 **Workspace sync**:
-Keeping one person's Workspace the same on several desktops through that person's own Google Drive. Each device keeps its own local Workspace; every ticket, Document, Plan and project is also stored in Drive as one readable, unencrypted Markdown file. It is distinct from the inbound synchronization of an externally owned ticket and never publishes to a tracker.
+Keeping one person's Workspace the same on several desktops through storage that person owns: a folder in their Google Drive, or a prefix in their S3 bucket (reached through their AWS CLI profile, with no AWS secret kept by ticketd). A Workspace has one storage at a time. Each device keeps its own local Workspace; every ticket, Document, Plan and project is also stored there as one readable, unencrypted Markdown file. An S3 bucket must have Versioning on and honour conditional writes; setup checks this before the first sync. It is distinct from the inbound synchronization of an externally owned ticket and never publishes to a tracker.
 _Avoid_: Cloud sync, backup
 
 **Last-synced copy**:
-A device's own copy of a synced record as it was when that device last synchronized it. When a record changed both locally and in Drive, each side is compared with this copy to tell which fields each side changed. The copies are kept while a device is disconnected, so reconnecting to the same folder merges the same way.
+A device's own copy of a synced record as it was when that device last synchronized it. When a record changed both locally and in the sync storage, each side is compared with this copy to tell which fields each side changed. The copies are kept while a device is disconnected, so reconnecting to the same folder merges the same way.
 
 **Needs review**:
 The state of a synced record whose same field was changed on two devices. The local value is kept until the person chooses or edits the value in a comparison of the conflicting fields. Changes to different fields, and to tags and other sets, combine without review.

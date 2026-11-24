@@ -1,0 +1,294 @@
+query LinearConnection {
+  viewer {
+    id
+    displayName
+  }
+  organization {
+    id
+    name
+    urlKey
+  }
+}
+query LinearConfiguredTeams($teams: [ID!]!, $first: Int!, $after: String) {
+  teams(first: $first, after: $after, filter: { id: { in: $teams } }) {
+    nodes {
+      id
+      name
+      key
+    }
+    pageInfo {
+      ...LinearPage
+    }
+  }
+}
+
+query LinearMe {
+  viewer {
+    id
+  }
+}
+
+query LinearTeams($first: Int!, $after: String) {
+  teams(first: $first, after: $after) {
+    nodes {
+      id
+      key
+      name
+    }
+    pageInfo {
+      ...LinearPage
+    }
+  }
+}
+
+query LinearAssignees($team: String!, $first: Int!, $after: String) {
+  team(id: $team) {
+    members(first: $first, after: $after) {
+      nodes {
+        id
+        displayName
+      }
+      pageInfo {
+        ...LinearPage
+      }
+    }
+  }
+}
+
+query LinearLabels($teams: [ID!]!, $first: Int!, $after: String) {
+  issueLabels(
+    first: $first
+    after: $after
+    filter: {
+      or: [{ team: { id: { in: $teams } } }, { team: { null: true } }]
+      isGroup: { eq: false }
+    }
+  ) {
+    nodes {
+      id
+      name
+    }
+    pageInfo {
+      ...LinearPage
+    }
+  }
+}
+
+query LinearProjects($team: String!, $first: Int!, $after: String) {
+  team(id: $team) {
+    projects(first: $first, after: $after) {
+      nodes {
+        id
+        name
+      }
+      pageInfo {
+        ...LinearPage
+      }
+    }
+  }
+}
+
+query LinearDiscover($first: Int!, $after: String, $filter: IssueFilter!) {
+  issues(first: $first, after: $after, filter: $filter) {
+    nodes {
+      ...LinearIssue
+    }
+    pageInfo {
+      ...LinearPage
+    }
+  }
+}
+
+query LinearFetch($id: String!) {
+  issue(id: $id) {
+    ...LinearIssue
+  }
+}
+
+query LinearIssueLabels($id: String!, $first: Int!, $after: String) {
+  issue(id: $id) {
+    labels(first: $first, after: $after) {
+      nodes {
+        id
+        name
+      }
+      pageInfo {
+        ...LinearPage
+      }
+    }
+  }
+}
+
+query LinearRelations($id: String!, $first: Int!, $after: String) {
+  issue(id: $id) {
+    relations(first: $first, after: $after) {
+      nodes {
+        type
+        issue {
+          id
+        }
+        relatedIssue {
+          id
+          identifier
+          url
+          team {
+            id
+          }
+        }
+      }
+      pageInfo {
+        ...LinearPage
+      }
+    }
+  }
+}
+
+query LinearComments($id: String!, $first: Int!, $after: String) {
+  issue(id: $id) {
+    comments(first: $first, after: $after) {
+      nodes {
+        id
+        createdAt
+        updatedAt
+        url
+        body
+        user {
+          displayName
+        }
+        botActor {
+          name
+          userDisplayName
+        }
+      }
+      pageInfo {
+        ...LinearPage
+      }
+    }
+  }
+}
+
+query LinearHistory($id: String!, $first: Int!, $after: String) {
+  issue(id: $id) {
+    history(first: $first, after: $after) {
+      nodes {
+        id
+        createdAt
+        actor {
+          displayName
+        }
+        botActor {
+          name
+          userDisplayName
+        }
+        fromStateId
+        toStateId
+        fromState {
+          name
+          type
+        }
+        toState {
+          name
+          type
+        }
+        fromAssigneeId
+        toAssigneeId
+        fromAssignee {
+          displayName
+        }
+        toAssignee {
+          displayName
+        }
+        relationChanges {
+          type
+          identifier
+        }
+      }
+      pageInfo {
+        ...LinearPage
+      }
+    }
+  }
+}
+
+fragment LinearIssue on Issue {
+  id
+  identifier
+  url
+  title
+  description
+  createdAt
+  updatedAt
+  trashed
+  team {
+    id
+  }
+  state {
+    name
+    type
+  }
+  creator {
+    id
+    displayName
+  }
+  assignee {
+    displayName
+  }
+  labels(first: 50) {
+    nodes {
+      id
+      name
+    }
+    pageInfo {
+      ...LinearPage
+    }
+  }
+}
+
+fragment LinearPage on PageInfo {
+  hasNextPage
+  endCursor
+}
+
+mutation LinearPublish($input: IssueCreateInput!) {
+  issueCreate(input: $input) {
+    success
+    issue {
+      ...LinearIssue
+    }
+  }
+}
+
+query LinearLocate($id: String!) {
+  issue(id: $id) {
+    ...LinearIssue
+  }
+}
+
+query LinearDestinationTeam($team: String!) {
+  team(id: $team) {
+    id
+    key
+    name
+  }
+}
+
+query LinearPublicationSearch(
+  $filter: IssueFilter!
+  $first: Int!
+  $after: String
+) {
+  issues(
+    first: $first
+    after: $after
+    includeArchived: true
+    orderBy: createdAt
+    filter: $filter
+  ) {
+    nodes {
+      ...LinearIssue
+    }
+    pageInfo {
+      ...LinearPage
+    }
+  }
+}
