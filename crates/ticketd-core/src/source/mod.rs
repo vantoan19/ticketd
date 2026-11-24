@@ -1255,15 +1255,11 @@ fn clear_discovery_matches(
     connection: &Connection,
     source: &ConfiguredSource,
 ) -> Result<(), Error> {
+    let sources = configured_sources(connection)?;
     for ticket in tracking::tracked(connection, None)? {
-        if selected_connection(
-            connection,
-            &ticket.ticket_id,
-            &ticket.provider,
-            &ticket.partition,
-        )?
-        .as_deref()
-            == Some(&source.saved.id)
+        if ticket
+            .connection(&sources)
+            .is_some_and(|selected| selected.saved.id == source.saved.id)
         {
             connection.execute(
                 "UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id = ?1",

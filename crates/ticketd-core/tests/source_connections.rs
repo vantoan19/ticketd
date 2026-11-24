@@ -366,6 +366,65 @@ fn refresh_prefers_discovery_then_the_first_local_connection_covering_the_part()
 }
 
 #[test]
+fn canceling_during_the_second_connections_conversation_leaves_both_unapplied() {
+    use ticketd_core::source::{RefreshControl, SourceError};
+
+    let control = RefreshControl::default();
+    let remote = fake_source::FakeSource::default();
+    {
+        let mut remote = remote.0.lock().unwrap();
+        let first = "owner/first";
+        let second = "owner/second";
+        remote.account_from_assignee = true;
+        remote
+            .issues
+            .insert(1, fake_source::issue_in(first, 1, "First issue"));
+        remote
+            .issues
+            .insert(2, fake_source::issue_in(second, 2, "Second issue"));
+        remote.matching_by_repository.insert(first.into(), vec![1]);
+        remote.matching_by_repository.insert(second.into(), vec![2]);
+        let control = control.clone();
+        remote
+            .before_conversation
+            .insert(2, std::sync::Arc::new(move || control.cancel()));
+    }
+    let mut engine = Engine::new();
+    engine.register(Box::new(remote.clone())).unwrap();
+    let folder = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(folder.path().join("workspace.sqlite3")).unwrap();
+    for (account, part) in [("alice", "owner/first"), ("bob", "owner/second")] {
+        workspace
+            .add_source_connection(&engine, "fake", None, None, &values(account, part))
+            .unwrap();
+    }
+
+    let canceled = workspace.refresh_sources(
+        &engine.clone().with_refresh_control(control),
+        &RefreshOptions::default(),
+    );
+    assert!(matches!(
+        canceled,
+        Err(ticketd_core::Error::Source(SourceError::RefreshCanceled))
+    ));
+    assert_eq!(remote.0.lock().unwrap().conversation_calls, [1, 2]);
+    assert!(workspace.list_tickets().unwrap().is_empty());
+    assert!(
+        workspace
+            .source_statuses()
+            .unwrap()
+            .iter()
+            .all(|source| source.last_attempt_at.is_none())
+    );
+
+    let report = workspace
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(report.imported.len(), 2);
+    assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+}
+
+#[test]
 fn removing_a_connection_preserves_work_and_only_rediscovery_resumes_sync() {
     let remote = fake_source::FakeSource::default();
     {

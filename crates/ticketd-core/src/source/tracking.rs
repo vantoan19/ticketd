@@ -1008,19 +1008,8 @@ impl Workspace {
                 Some(source),
             )
         };
-        let mut report = RefreshReport {
-            imported: Vec::new(),
-            updated: Vec::new(),
-            unchanged: 0,
-            failures: Vec::new(),
-            refreshed_at: started.clone(),
-        };
-        let mut merge = |batch: RefreshReport| {
-            report.imported.extend(batch.imported);
-            report.updated.extend(batch.updated);
-            report.unchanged = report.unchanged.saturating_add(batch.unchanged);
-            report.failures.extend(batch.failures);
-        };
+        let mut gathered = Vec::new();
+        let mut conversations = HashSet::new();
         for pair in jobs.chunks(2) {
             engine.check_refresh_canceled()?;
             let batches = if let [first, second] = pair {
@@ -1054,31 +1043,16 @@ impl Workspace {
             for (source, mut batch) in batches {
                 engine.check_refresh_canceled()?;
                 if let Some(scoped) = batch.conversation_engine.take() {
-                    // The earlier connection may have imported a shared issue
-                    // already. Do not read its conversation a second time.
-                    let mut issues = Vec::with_capacity(batch.issues.len());
-                    for issue in std::mem::take(&mut batch.issues) {
-                        if issue_can_refresh(
-                            &self.connection,
-                            &issue,
-                            &batch.partitions,
-                            Some(&source.saved.id),
-                            false,
-                        )? {
-                            issues.push(issue);
-                        }
-                    }
-                    batch.issues = issues;
                     gather_conversations(
                         &self.connection,
                         &scoped,
-                        &source.saved.config,
+                        source,
                         &tracked,
+                        &mut conversations,
                         &mut batch,
                     )?;
                 }
-                engine.check_refresh_canceled()?;
-                merge(self.apply_refresh(batch, &started, &tracked, Some(&source.saved.id))?);
+                gathered.push((Some(source.saved.id.as_str()), batch));
             }
         }
         if selected.is_none() {
@@ -1090,10 +1064,29 @@ impl Workspace {
             for provider in missing {
                 engine.check_refresh_canceled()?;
                 let batch = gather_connection(engine, options, &tracked, &sources, provider, None)?;
-                merge(self.apply_refresh(batch, &started, &tracked, None)?);
+                gathered.push((None, batch));
             }
         }
-        Ok(report)
+        engine.check_refresh_canceled()?;
+        self.in_write_scope(|workspace| {
+            let mut report = RefreshReport {
+                imported: Vec::new(),
+                updated: Vec::new(),
+                unchanged: 0,
+                failures: Vec::new(),
+                refreshed_at: started.clone(),
+            };
+            for (source_id, batch) in gathered {
+                engine.check_refresh_canceled()?;
+                let batch = workspace.apply_refresh(batch, &started, &tracked, source_id)?;
+                report.imported.extend(batch.imported);
+                report.updated.extend(batch.updated);
+                report.unchanged = report.unchanged.saturating_add(batch.unchanged);
+                report.failures.extend(batch.failures);
+            }
+            engine.check_refresh_canceled()?;
+            Ok(report)
+        })
     }
 }
 
@@ -1354,14 +1347,27 @@ fn gather_connection(
 fn gather_conversations(
     connection: &Connection,
     engine: &Engine,
-    config: &super::ConfigValues,
+    source: &super::ConfiguredSource,
     tracked: &[Tracked],
+    conversations: &mut HashSet<(String, String)>,
     gathered: &mut Gathered,
 ) -> Result<(), Error> {
     let due: Vec<ExternalIssue> = gathered.issues.clone();
     for issue in due {
         engine.check_refresh_canceled()?;
         let identity = &issue.reference.identity;
+        // Overlapping discovery can return the same new issue before either
+        // batch is applied. The first eligible connection will take its route.
+        if !issue_can_refresh(
+            connection,
+            &issue,
+            &gathered.partitions,
+            Some(&source.saved.id),
+            false,
+        )? || !conversations.insert((identity.provider.clone(), identity.id.clone()))
+        {
+            continue;
+        }
         if !conversation::needs_reading(
             connection,
             &identity.provider,
@@ -1370,7 +1376,7 @@ fn gather_conversations(
         )? {
             continue;
         }
-        match engine.conversation(&identity.provider, config, &issue.reference) {
+        match engine.conversation(&identity.provider, &source.saved.config, &issue.reference) {
             Ok(Some(mut read)) => {
                 // REST timeline closes may omit a reason. Only the latest
                 // state event can borrow the issue's currently observed closure.

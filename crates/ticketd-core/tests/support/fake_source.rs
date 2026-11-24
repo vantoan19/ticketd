@@ -83,6 +83,7 @@ pub struct Remote {
     pub conversations: BTreeMap<u64, Conversation>,
     pub conversation_outage: Option<String>,
     pub conversation_calls: Vec<u64>,
+    pub before_conversation: BTreeMap<u64, Hook>,
     pub revision: u32,
     pub publish_mode: PublishMode,
     pub created: Vec<PublishRequest>,
@@ -305,8 +306,12 @@ impl Connector for FakeSource {
         _: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<Conversation, SourceError> {
-        let mut remote = self.0.lock().unwrap();
         let id = issue_id(reference)?;
+        let hook = self.0.lock().unwrap().before_conversation.remove(&id);
+        if let Some(hook) = hook {
+            hook();
+        }
+        let mut remote = self.0.lock().unwrap();
         remote.conversation_calls.push(id);
         if let Some(message) = remote.conversation_outage.clone() {
             return Err(SourceError::Unavailable(message));
