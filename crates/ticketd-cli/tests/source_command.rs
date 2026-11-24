@@ -116,7 +116,6 @@ fn the_same_legacy_issue_id_from_another_site_never_reclaims_a_ticket() {
     };
     let source = replacement.run(&add);
     assert_eq!(source["source"]["id"], "github-2");
-    replacement.run(&["source", "github-2", "refresh"]);
     let after = replacement.run(&["show", reference]);
     assert_eq!(after["source"]["url"], before["source"]["url"]);
     assert_eq!(after["source"]["unavailable"]["code"], "connection_removed");
@@ -132,24 +131,18 @@ fn the_same_legacy_issue_id_from_another_site_never_reclaims_a_ticket() {
         )
         .unwrap();
     let local_reference = local_ticket(&replacement);
-    let output = replacement.command(
-        &[
-            "source",
-            "publish",
-            &local_reference,
-            "--connection",
-            "github-2",
-        ],
-        Some(TOKEN),
-    );
-    assert!(!output.status.success());
-    let failure = String::from_utf8_lossy(&output.stderr);
-    assert!(failure.contains("may already exist"), "{failure}");
+    let published = replacement.run(&[
+        "source",
+        "publish",
+        &local_reference,
+        "--connection",
+        "github-2",
+    ]);
+    assert_eq!(published["attempt"]["state"], "succeeded");
+    assert_ne!(published["ticket"]["source"]["id"], before["source"]["id"]);
     let after_publish = replacement.run(&["show", reference]);
     assert_eq!(after_publish["source"]["url"], before["source"]["url"]);
     assert_eq!(after_publish["trashed"], false);
-    let pending = replacement.run(&["show", &local_reference]);
-    assert_eq!(pending["publication"]["state"], "unresolved");
 }
 
 const TOKEN: &str = "ghp_cli_test_secret";

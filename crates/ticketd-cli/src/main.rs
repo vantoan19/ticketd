@@ -2620,7 +2620,8 @@ fn source_command(
             preview,
             settings,
         } => {
-            let engine = ExtensionRegistry::device()?.engine()?;
+            let registry = ExtensionRegistry::device()?;
+            let engine = registry.engine()?;
             let values = source_settings(&engine, &provider, ConfigValues::new(), settings)?;
             if preview {
                 serde_json::to_string(
@@ -2663,12 +2664,16 @@ fn run_source_connection(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use ticketd_core::source::RefreshOptions;
     let saved = workspace.source_connection(connection)?;
-    let engine =
-        || -> Result<_, Box<dyn std::error::Error>> { Ok(ExtensionRegistry::device()?.engine()?) };
+    let open_engine = || -> Result<_, Box<dyn std::error::Error>> {
+        // The registry owns the process host used by the engine.
+        let registry = ExtensionRegistry::device()?;
+        let engine = registry.engine()?;
+        Ok((registry, engine))
+    };
     let text = match operation {
         SourceConnectionCommand::Show => serde_json::to_string(&saved)?,
         SourceConnectionCommand::Test => {
-            let engine = engine()?;
+            let (_registry, engine) = open_engine()?;
             match workspace.test_source_connection(&engine, connection) {
                 Err(ticketd_core::Error::Source(error))
                     if error.class() == ticketd_core::source::ErrorClass::Auth =>
@@ -2685,7 +2690,7 @@ fn run_source_connection(
             query,
             settings,
         } => {
-            let engine = engine()?;
+            let (_registry, engine) = open_engine()?;
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
             serde_json::to_string(&workspace.source_options(
                 &engine,
@@ -2697,7 +2702,7 @@ fn run_source_connection(
             )?)?
         }
         SourceConnectionCommand::Preview { settings } => {
-            let engine = engine()?;
+            let (_registry, engine) = open_engine()?;
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
             serde_json::to_string(&workspace.preview_source(
                 &engine,
@@ -2707,7 +2712,7 @@ fn run_source_connection(
             )?)?
         }
         SourceConnectionCommand::Edit { settings } => {
-            let engine = engine()?;
+            let (_registry, engine) = open_engine()?;
             let outcome = workspace.edit_source_connection(&engine, connection, |saved| {
                 source_settings(&engine, &saved.provider, saved.config.clone(), settings)
             })?;
@@ -2715,7 +2720,7 @@ fn run_source_connection(
             serde_json::to_string(&outcome)?
         }
         SourceConnectionCommand::SignIn { config_file } => {
-            let engine = engine()?;
+            let (_registry, engine) = open_engine()?;
             let values = source_settings(
                 &engine,
                 &saved.provider,
@@ -2743,7 +2748,7 @@ fn run_source_connection(
                 .find(|status| status.connection_id.as_deref() == Some(connection)),
         )?,
         SourceConnectionCommand::Refresh { ticket } => {
-            let engine = engine()?;
+            let (_registry, engine) = open_engine()?;
             let report = source_refresh::controlled(connection, |control| {
                 workspace.refresh_connection(
                     &engine.clone().with_refresh_control(control),
