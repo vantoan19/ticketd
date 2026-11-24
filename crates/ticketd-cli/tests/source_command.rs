@@ -1387,8 +1387,12 @@ fn a_legacy_publication_without_a_binding_can_only_attach_explicitly() {
     assert_eq!(recovered["ticket"]["source"]["display"], "o/flaky#7");
     let mut different_issue = explicit;
     different_issue[4] = "8";
-    let rejected = cli.fail(&different_issue, Some(TOKEN));
-    assert!(rejected.contains("could not be matched"), "{rejected}");
+    let rejected = cli.command(&different_issue, Some(TOKEN));
+    assert_eq!(rejected.status.code(), Some(1));
+    let error = String::from_utf8_lossy(&rejected.stderr);
+    assert!(error.contains("could not be matched"), "{error}");
+    let settled: Value = serde_json::from_slice(&rejected.stdout).unwrap();
+    assert_eq!(settled["issue"]["display"], "o/flaky#7");
     assert_eq!(
         cli.run(&["show", reference])["source"]["display"],
         "o/flaky#7"
