@@ -661,7 +661,6 @@ impl AcpRuntime {
             CallOutcome::Reply(value) => Ok(value),
             CallOutcome::Error(error) => {
                 let kind = if resumed_session.is_some_and(|session| {
-                    let lower = error.message.to_ascii_lowercase();
                     // agy uses the generic internal error code for this missing-history reply.
                     let missing = error.code == -32603
                         && error.message
@@ -669,11 +668,7 @@ impl AcpRuntime {
                                 "Failed to read session {}; retry, or load it with session/load",
                                 session.0
                             );
-                    error.code == -32601
-                        || missing
-                        || ["not found", "does not exist", "no conversation"]
-                            .iter()
-                            .any(|phrase| lower.contains(phrase))
+                    error.code == -32601 || missing
                 }) {
                     ProblemKind::NativeHistoryUnavailable
                 } else {

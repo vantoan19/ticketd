@@ -1686,12 +1686,14 @@ async fn next_settings(events: &mut EventStream) -> HarnessSettings {
     .expect("Antigravity runtime reports settings")
 }
 
-#[tokio::test]
-async fn recorded_resume_error_reports_missing_history_for_the_requested_session() {
-    for (fixture, expected) in [
+#[tokio::test(start_paused = true)]
+async fn resume_errors_distinguish_missing_history_from_other_native_failures() {
+    let missing = "Failed to read session session-missing; retry, or load it with session/load";
+    for (fixture, expected, message) in [
         (
             MISSING_RESUME.to_owned(),
             ProblemKind::NativeHistoryUnavailable,
+            missing,
         ),
         (
             MISSING_RESUME.replace(
@@ -1699,6 +1701,19 @@ async fn recorded_resume_error_reports_missing_history_for_the_requested_session
                 "Failed to read session another-session",
             ),
             ProblemKind::Other,
+            "Failed to read session another-session; retry, or load it with session/load",
+        ),
+        (
+            MISSING_RESUME.replace(missing, "Configured model not found"),
+            ProblemKind::Other,
+            "Configured model not found",
+        ),
+        (
+            MISSING_RESUME
+                .replace(missing, "Method not found")
+                .replace("-32603", "-32601"),
+            ProblemKind::NativeHistoryUnavailable,
+            "Method not found",
         ),
     ] {
         let (mut peer, io) = pipes();
@@ -1706,7 +1721,9 @@ async fn recorded_resume_error_reports_missing_history_for_the_requested_session
         let resume = request(SessionStart::Resume(native_session));
         let opening = tokio::spawn(runtime::open(io, resume, settings::OWN.to_owned()));
         startup(&mut peer, &fixture).await;
-        assert_eq!(opening.await.unwrap().unwrap_err().kind, expected);
+        let problem = opening.await.unwrap().unwrap_err();
+        assert_eq!(problem.message, message);
+        assert_eq!(problem.kind, expected, "native error: {message}");
     }
 }
 
