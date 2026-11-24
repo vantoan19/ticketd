@@ -777,9 +777,17 @@ async fn resume_refuses_to_open_if_confirming_effort_changes_the_selected_model(
         )
         .await;
     }
-    peer.exit(0);
-
-    let problem = opening.await.unwrap().unwrap_err();
+    // Keep the connection alive until startup checks the final settings and closes it.
+    let exit_after_close = async {
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), peer.stdin_closed())
+                .await
+                .unwrap()
+        );
+        peer.exit(0);
+    };
+    let (result, ()) = tokio::join!(opening, exit_after_close);
+    let problem = result.unwrap().unwrap_err();
     assert_eq!(problem.kind, ProblemKind::Other);
     assert_eq!(
         problem.message,
