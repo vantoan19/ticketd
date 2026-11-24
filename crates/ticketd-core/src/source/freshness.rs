@@ -205,8 +205,6 @@ pub(crate) struct ProviderRun {
     pub provider: String,
     pub connection_id: String,
     pub failure: Option<SourceFailure>,
-    /// The hold visible when the run took its configuration snapshot.
-    pub retry_after_at_start: Option<String>,
     /// Discovery rules the run skipped because they could not be read.
     pub skipped: Vec<String>,
     /// The parts of the source the run read in full, and the ones it skipped.
@@ -220,7 +218,8 @@ pub(crate) struct ProviderRun {
 /// A successful run leaves as read the parts it read, and the parts it skipped
 /// that `read_before` holds: a part that cannot be read for a while stays read,
 /// one that was never read stays unread, and one no longer asked for is
-/// forgotten, so adding it again is a first read again.
+/// forgotten, so adding it again is a first read again. A successful manual
+/// run still honors the tracker's active retry deadline.
 pub(crate) fn record_run(
     connection: &Connection,
     run: &ProviderRun,
@@ -244,11 +243,12 @@ pub(crate) fn record_run(
                 "INSERT INTO source_connection_status (connection_id, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, read_partitions) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
                  ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
                  error_code = NULL, error_message = NULL, failing_since = NULL, \
-                 retry_after = CASE WHEN source_connection_status.retry_after IS ?6 THEN NULL ELSE source_connection_status.retry_after END, \
+                 retry_after = CASE WHEN julianday(source_connection_status.retry_after) <= julianday(?2) \
+                             THEN NULL ELSE source_connection_status.retry_after END, \
                  partial_message = ?3, last_checked_tickets = ?4, \
                  read_partitions = ?5 \
                  WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
-                params![run.connection_id, now, partial, run.checked_tickets, read, run.retry_after_at_start],
+                params![run.connection_id, now, partial, run.checked_tickets, read],
             )?;
         }
         Some(failure) => {

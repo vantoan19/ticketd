@@ -950,8 +950,9 @@ overlapping run cannot move confirmed state backwards. The desktop starts
 refreshing on launch and periodically through one in-process
 `RefreshCoordinator`. Startup work is staggered. Up to two connections
 refresh at once, with serial calls within a connection. Failure backoff and
-persisted rate-limit holds apply to each connection. CLI refresh and status
-take a connection ID and work without the desktop.
+persisted rate-limit holds apply to each connection. A successful manual
+refresh still honors an active tracker deadline for the next automatic run.
+CLI refresh and status take a connection ID and work without the desktop.
 
 Publication cannot be atomic across a tracker and SQLite, so `Workspace::publish_ticket`
 is built on a durable attempt (`publication_attempts`). One short write checks

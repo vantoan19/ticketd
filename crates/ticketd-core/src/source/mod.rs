@@ -1187,7 +1187,6 @@ struct ConfiguredSource {
     credentials: credentials::References,
     permitted_env: std::collections::HashSet<String>,
     account_key: String,
-    retry_after: Option<String>,
 }
 
 impl ConfiguredSource {
@@ -1238,11 +1237,8 @@ impl ConfiguredSource {
     }
 }
 
-const CONFIGURED_SOURCE: &str =
-    "SELECT c.id, c.name, c.provider, c.configuration, c.account, c.saved_at,
-            c.derived_configuration, c.revision, c.site, c.account_key, s.retry_after
-     FROM source_connections c LEFT JOIN source_connection_status s ON s.connection_id = c.id
-     WHERE (?1 IS NULL OR c.id = ?1) ORDER BY c.rowid";
+const CONFIGURED_SOURCE: &str = "SELECT id, name, provider, configuration, account, saved_at, derived_configuration, revision, site, account_key
+     FROM source_connections WHERE (?1 IS NULL OR id = ?1) ORDER BY rowid";
 
 fn configured_source(connection: &Connection, id: &str) -> Result<Option<ConfiguredSource>, Error> {
     let mut statement = connection.prepare_cached(CONFIGURED_SOURCE)?;
@@ -1300,7 +1296,6 @@ fn configured_row(
         credentials,
         permitted_env,
         account_key: row.get(9)?,
-        retry_after: row.get(10)?,
     })
 }
 

@@ -476,10 +476,17 @@ fn a_rate_limit_persists_a_hold_that_survives_a_restart() {
 }
 
 #[test]
-fn full_refresh_success_keeps_a_hold_recorded_during_the_run() {
+fn a_successful_refresh_honors_an_active_hold_renewed_to_the_same_deadline() {
     let mut f = Fixture::new();
     f.publish(issue(1, T0));
     f.refresh_at(T0);
+    f.remote(|r| r.outage = Some(Failure::RateLimited(Some(1800))));
+    assert_eq!(f.refresh_at(T0).failures[0].code, "rate_limited");
+    assert_eq!(
+        f.workspace.source_hold_until().unwrap(),
+        Some(DAY + 30 * 60)
+    );
+    f.remote(|r| r.outage = None);
     let path = f.dir.path().join("workspace.sqlite3");
     let engine = f.engine.clone();
     let fake = f.fake.clone();
@@ -510,8 +517,13 @@ fn full_refresh_success_keeps_a_hold_recorded_during_the_run() {
         Some(DAY + 30 * 60)
     );
 
-    // An explicit successful run that observed the hold can still clear it.
+    // A successful manual read cannot shorten the tracker deadline.
     assert!(f.refresh_at(T2).failures.is_empty());
+    assert_eq!(
+        f.workspace.source_hold_until().unwrap(),
+        Some(DAY + 30 * 60)
+    );
+    assert!(f.refresh_at(T3).failures.is_empty());
     assert_eq!(f.workspace.source_hold_until().unwrap(), None);
 }
 

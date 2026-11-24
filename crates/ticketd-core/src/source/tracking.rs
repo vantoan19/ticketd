@@ -1352,7 +1352,6 @@ fn gather_connection(
             provider: provider.clone(),
             connection_id: configured.saved.id.clone(),
             failure: discovery_failed.or(blocked),
-            retry_after_at_start: configured.retry_after.clone(),
             skipped,
             read_partitions,
             skipped_partitions,

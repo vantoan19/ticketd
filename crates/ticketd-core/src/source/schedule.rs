@@ -7,8 +7,8 @@
 //! - **One refresh at a time per process.** A periodic tick that finds a refresh
 //!   running is skipped; a manual refresh waits for it and then runs.
 //! - **No tight retry loop.** A failed run doubles the wait up to a ceiling, and a
-//!   rate limit waits at least as long as the source asked. A success returns to
-//!   the normal interval.
+//!   rate limit waits at least as long as the source asked. A success resumes
+//!   the normal interval once any hold has elapsed.
 //! - **A rate limit survives a restart.** The first tick of a process honors the
 //!   hold persisted by earlier runs (including the CLI's).
 //!
