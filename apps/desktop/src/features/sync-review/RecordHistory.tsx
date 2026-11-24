@@ -99,6 +99,9 @@ export function RecordHistory({
   /** `null` until the storage was asked and answered. */
   const [older, setOlder] = useState<Entry[] | null>(null);
   const [asking, setAsking] = useState(false);
+  const list = useRef<HTMLElement>(null);
+  // Set while older versions are asked for: the button goes away with the answer.
+  const moveFocus = useRef(false);
   const [selected, setSelected] = useState<Chosen | null>(null);
   const [detail, setDetail] = useState<{
     version: Chosen;
@@ -168,7 +171,26 @@ export function RecordHistory({
       active = false;
     };
   }, [kind, id, remote, readAttempt, reload]);
+  // The button that asked goes away with the answer, which would drop focus on the
+  // page: it goes to the first version that loaded, or else to the list. Focus the
+  // person moved to another control meanwhile stays there.
+  useEffect(() => {
+    if (older === null || !moveFocus.current) return;
+    moveFocus.current = false;
+    const active = document.activeElement;
+    // The button leaving drops focus on the body or the dialog; a field it moved to stays.
+    if (
+      active?.matches(
+        "button, a, input, textarea, select, [contenteditable]",
+      ) &&
+      !list.current?.contains(active)
+    )
+      return;
+    const first = list.current?.querySelector<HTMLElement>("[data-older]");
+    (first ?? list.current)?.focus();
+  }, [older]);
   async function askOlder() {
+    moveFocus.current = true;
     setAsking(true);
     setError(null);
     try {
@@ -176,6 +198,7 @@ export function RecordHistory({
         from(remote, await syncReview.versions({ kind, id, source: remote })),
       );
     } catch (reason) {
+      moveFocus.current = false;
       setError({
         failure: describeFailure(reason, "load older versions"),
         retry: () => void askOlder(),
@@ -309,7 +332,12 @@ export function RecordHistory({
           </div>
         ) : (
           <>
-            <nav className="sync-history-list" aria-label="Versions">
+            <nav
+              className="sync-history-list"
+              aria-label="Versions"
+              ref={list}
+              tabIndex={-1}
+            >
               <ul>
                 <li>
                   <button
@@ -332,6 +360,7 @@ export function RecordHistory({
                         <button
                           type="button"
                           className="sync-version"
+                          data-older={entry.source !== "local" || undefined}
                           aria-current={same(entry, selected) || undefined}
                           onClick={() =>
                             setSelected({ source: entry.source, id: entry.id })
