@@ -15,6 +15,9 @@ use uuid::Uuid;
 
 use crate::{Error, Workspace};
 
+#[cfg(test)]
+mod tests;
+
 /// Stored tool output keeps its last this-many bytes; `ChatTool::output_truncated` marks
 /// that the start was dropped. The end is kept because it is where a command reports its
 /// outcome.
@@ -201,6 +204,7 @@ pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> 
 
 /// Format 86: retain the submission and end positions and record the change head
 /// seen by each new Chat-tagged write. Rows from before this format keep no position.
+/// Index both legacy feeds by time so receipt capture only visits the Turn's window.
 pub(crate) fn migrate_write_attribution(connection: &Connection) -> Result<(), Error> {
     for (table, column) in [
         ("chat_submission_attempts", "recorded_position"),
@@ -219,7 +223,10 @@ pub(crate) fn migrate_write_attribution(connection: &Connection) -> Result<(), E
     }
     connection.execute_batch(
         "CREATE INDEX IF NOT EXISTS chat_record_writes_chat_sequence
-         ON chat_record_writes(chat_id, change_sequence) WHERE change_sequence IS NOT NULL;",
+         ON chat_record_writes(chat_id, change_sequence) WHERE change_sequence IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS ticket_history_chat_receipt
+         ON ticket_history(timestamp) WHERE kind = 'status';
+         CREATE INDEX IF NOT EXISTS activities_chat_receipt ON activities(reported_at);",
     )?;
     Ok(())
 }
@@ -1332,8 +1339,9 @@ fn read_turn_agent_changes(
         return Ok(Vec::new());
     }
     // A write sees the submission or observed start at its lower bound, but cannot
-    // see the end yet. The legacy path can only use timestamps and joins from tickets
-    // so the feed indexes can seek to the time window for each one.
+    // see the end yet. Legacy branches seek into the time window before looking up
+    // tickets. X'' sorts after all TEXT timestamps, leaving a live Turn's end open
+    // while letting SQLite use an upper index bound for ended Turns.
     let mut statement = connection.prepare(
         "WITH ordered_writes AS (
              SELECT activity_id, history_number FROM chat_record_writes
@@ -1342,16 +1350,16 @@ fn read_turn_agent_changes(
          ), legacy_changes AS (
              SELECT 'status' AS kind, t.reference, t.title, h.from_value, h.to_value,
                     h.timestamp AS at, 0 AS source, h.number AS seq, h.editing_agent AS agent, w.chat_id AS writer
-             FROM tickets t CROSS JOIN ticket_history h ON h.ticket_id = t.id
+             FROM ticket_history h CROSS JOIN tickets t ON t.id = h.ticket_id
              LEFT JOIN chat_record_writes w ON w.history_number = h.number
              WHERE h.kind = 'status' AND w.change_sequence IS NULL
-               AND h.timestamp >= :attributed_start AND (:ended_at IS NULL OR h.timestamp <= :ended_at)
+               AND h.timestamp BETWEEN :attributed_start AND COALESCE(:ended_at, X'')
              UNION ALL
              SELECT 'update', t.reference, t.title, '', a.brief, a.reported_at, 1, a.number, a.editing_agent, w.chat_id
-             FROM tickets t CROSS JOIN activities a ON a.ticket_id = t.id
+             FROM activities a CROSS JOIN tickets t ON t.id = a.ticket_id
              LEFT JOIN chat_record_writes w ON w.activity_id = a.id
-             WHERE w.change_sequence IS NULL AND a.reported_at >= :attributed_start
-               AND (:ended_at IS NULL OR a.reported_at <= :ended_at)
+             WHERE w.change_sequence IS NULL
+               AND a.reported_at BETWEEN :attributed_start AND COALESCE(:ended_at, X'')
          )
          SELECT kind, reference, title, from_value, to_value FROM (
              SELECT 'status' AS kind, t.reference, t.title, h.from_value, h.to_value,
