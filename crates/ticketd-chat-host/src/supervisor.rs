@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::{Future, pending};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ticketd_core::{
     Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
@@ -98,7 +98,8 @@ pub(crate) enum Command {
     Changed,
     /// The Chat's links were changed; the session is given the new context.
     LinksChanged,
-    /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
+    /// Stop the runtime and report unconfirmed cleanup. An unresolved permission
+    /// restart keeps its supervisor when Chat is switched off.
     Shutdown(StopReason, oneshot::Sender<Option<String>>),
 }
 
@@ -323,6 +324,7 @@ impl Supervisor {
         context: Option<ContextSource>,
         board: Arc<Board>,
         unattended: Option<Unattended>,
+        feature_off: Arc<AtomicBool>,
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
@@ -387,11 +389,11 @@ impl Supervisor {
             retired_permission_runtime: None,
             recorded_settings: chat.effective_settings.clone(),
         };
-        tokio::spawn(supervisor.run().instrument(span));
+        tokio::spawn(supervisor.run(feature_off).instrument(span));
         sender
     }
 
-    async fn run(mut self) {
+    async fn run(mut self, feature_off: Arc<AtomicBool>) {
         loop {
             let timer = [
                 self.show_text_at,
@@ -406,13 +408,34 @@ impl Supervisor {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(why, reply)) => {
                         self.shutting_down = true;
+                        let keep_recovery = why == StopReason::TurnedOff
+                            && self.permission_restart_pending
+                            && self.runtime.is_none()
+                            && self.opening.is_none();
                         let unconfirmed = self.stop_runtime(why).await;
                         self.publish();
+                        if keep_recovery {
+                            // Leave the restart plan and any close handle in place.
+                            // Views reattach after Chat is enabled again.
+                            self.subscribers.clear();
+                            self.queue_started = false;
+                            let _ = reply.send(unconfirmed);
+                            continue;
+                        }
                         self.board.report(&self.chat_id, self.number, None);
+                        self.commands.close();
                         let _ = reply.send(unconfirmed);
                         return;
                     }
                     Some(command) => {
+                        if self.shutting_down {
+                            if feature_off.load(Ordering::SeqCst) {
+                                // A command may have taken a sender before Chat was switched off.
+                                continue;
+                            }
+                            self.shutting_down = false;
+                            self.shut_down_for = None;
+                        }
                         let turn = self.turn_span();
                         self.on_command(command).instrument(turn).await;
                     }
@@ -423,13 +446,15 @@ impl Supervisor {
                         return;
                     }
                 },
-                Some(done) = self.finished.recv() => {
+                Some(done) = self.finished.recv(), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_done(done));
                 }
-                event = next_event(&mut self.runtime) => {
+                event = next_event(&mut self.runtime), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_event(event));
                 }
-                () = sleep_until_some(timer) => self.turn_span().in_scope(|| self.on_timer()),
+                () = sleep_until_some(timer), if !self.shutting_down => {
+                    self.turn_span().in_scope(|| self.on_timer());
+                }
             }
             if self.storage_failed.is_some() && (self.runtime.is_some() || self.opening.is_some()) {
                 // Controlled shutdown: nothing more can be recorded, so nothing more runs.
