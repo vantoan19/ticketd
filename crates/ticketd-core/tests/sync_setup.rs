@@ -2083,6 +2083,8 @@ fn s3(bucket: &str, prefix: &str, profile: &str) -> S3Binding {
         prefix: prefix.into(),
         profile: profile.into(),
         aws_cli_path: Some("/opt/homebrew/bin/aws".into()),
+        // AWS's own S3, recorded as the empty endpoint.
+        endpoint: Some(String::new()),
     }
 }
 
@@ -2134,6 +2136,96 @@ fn a_format_85_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and
         other.show_ticket(&added).unwrap().title,
         "After the upgrade"
     );
+}
+
+/// Format 87 records which S3 service the bucket was reached through. A binding made before
+/// has none recorded, and the desktop records it from the profile on its next successful build.
+#[test]
+fn a_format_86_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one() {
+    let desks = desks();
+    let path = desks.directory.path().join("a");
+    let mut desk = Workspace::open(&path).unwrap();
+    desk.sync_connect_s3(&s3("notes-bucket", "ticketd/", "work"), IDENTITY)
+        .unwrap();
+    desk.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+    drop(desk);
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    fixture
+        .execute_batch("ALTER TABLE sync_state DROP COLUMN s3_endpoint; PRAGMA user_version = 86;")
+        .unwrap();
+    drop(fixture);
+
+    let desk = Workspace::open(&path).unwrap();
+    let bound = desk.sync_binding().unwrap().unwrap().s3.unwrap();
+    assert_eq!(bound.endpoint, None);
+    assert_eq!(bound.bucket, "notes-bucket");
+
+    desk.sync_record_s3_endpoint("http://minio.example.com:9000")
+        .unwrap();
+    let recorded = |desk: &Workspace| desk.sync_binding().unwrap().unwrap().s3.unwrap().endpoint;
+    assert_eq!(
+        recorded(&desk).as_deref(),
+        Some("http://minio.example.com:9000")
+    );
+    // What is recorded is never replaced by a later build: a changed profile is refused instead.
+    desk.sync_record_s3_endpoint("").unwrap();
+    assert_eq!(
+        recorded(&desk).as_deref(),
+        Some("http://minio.example.com:9000")
+    );
+}
+
+#[test]
+fn a_bound_workspace_keeps_the_s3_service_it_was_connected_through() {
+    let desks = desks();
+    let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();
+    let on = |endpoint: &str, profile: &str| S3Binding {
+        endpoint: Some(endpoint.into()),
+        ..s3("one", "ticketd/", profile)
+    };
+    // Before a folder is chosen the connection is only a choice, so another service is fine.
+    desk.sync_connect_s3(&on("", "work"), IDENTITY).unwrap();
+    let status = desk
+        .sync_connect_s3(&on("http://minio.example.com:9000", "work"), IDENTITY)
+        .unwrap();
+    assert_eq!(
+        status.s3.unwrap().endpoint.as_deref(),
+        Some("http://minio.example.com:9000")
+    );
+    desk.sync_upload_workspace(&desks.remote, "ticketd Home")
+        .unwrap();
+
+    // The same service through another profile is this desktop's own choice.
+    desk.sync_connect_s3(&on("http://minio.example.com:9000", "personal"), IDENTITY)
+        .unwrap();
+    // Another service is the person's decision to make, by disconnecting.
+    for other in ["", "http://other.example.com:9000"] {
+        let refused = desk.sync_connect_s3(&on(other, "work"), IDENTITY);
+        assert!(
+            matches!(&refused, Err(Error::Sync(message)) if message.contains("disconnect")),
+            "{other}: {refused:?}"
+        );
+    }
+    // A caller that does not know the endpoint leaves the recorded one.
+    let status = desk
+        .sync_connect_s3(
+            &S3Binding {
+                endpoint: None,
+                ..on("", "again")
+            },
+            IDENTITY,
+        )
+        .unwrap();
+    assert_eq!(
+        status.s3.unwrap().endpoint.as_deref(),
+        Some("http://minio.example.com:9000")
+    );
+
+    // After a disconnect the bucket may be connected through another service.
+    desk.sync_disconnect().unwrap();
+    let status = desk.sync_connect_s3(&on("", "work"), IDENTITY).unwrap();
+    assert_eq!(status.s3.unwrap().endpoint.as_deref(), Some(""));
 }
 
 #[test]
