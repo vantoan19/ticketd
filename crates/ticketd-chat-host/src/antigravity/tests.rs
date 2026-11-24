@@ -1095,8 +1095,9 @@ async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
         &json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}),
     )
     .await;
-    let mut withdrawn: Vec<_> = drain(&mut opened.events)
-        .await
+    let (outcome, events) = prompt_end(&mut opened.events, "saturation").await;
+    assert_eq!(outcome, TurnOutcome::Completed, "approval-cap Prompt");
+    let mut withdrawn: Vec<_> = events
         .into_iter()
         .filter_map(|kind| match kind {
             EventKind::InteractionResolved {
@@ -1113,7 +1114,8 @@ async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
         opened.runtime.submit(start_turn("recovery")).await,
         DispatchOutcome::Written
     );
-    assert_eq!(peer.written().await["method"], "session/prompt");
+    let recovery = peer.written().await;
+    assert_eq!(recovery["method"], "session/prompt");
     permission["id"] = json!("approval-1");
     send(&mut peer, &permission).await;
     let next = next_approval(&mut opened.events).await;
@@ -1131,6 +1133,13 @@ async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
             "outcome": {"outcome": "selected", "optionId": "allow"}
         }})
     );
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": recovery["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+    let (outcome, _) = prompt_end(&mut opened.events, "recovery").await;
+    assert_eq!(outcome, TurnOutcome::Completed, "recovery Prompt");
     peer.assert_nothing_written().await;
 }
 
