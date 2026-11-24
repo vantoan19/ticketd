@@ -140,6 +140,72 @@ async fn inspection_rejects_oversized_version_output_on_either_stream() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn inspection_skips_non_executable_candidates_and_probes_first_executable() {
+    use std::fs::{self, Permissions};
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    use crate::{HarnessAdapter, Inspection};
+
+    const CHILD: &str = "TICKETD_TEST_ANTIGRAVITY_DISCOVERY_DIRECTORY";
+    const TEST: &str = "antigravity::tests::inspection_skips_non_executable_candidates_and_probes_first_executable";
+    let write_version = |path: &std::path::Path, version, mode| {
+        fs::write(path, format!("#!/bin/sh\nprintf 'agy {version}\\n'\n")).unwrap();
+        fs::set_permissions(path, Permissions::from_mode(mode)).unwrap();
+    };
+    if let Some(directory) = std::env::var_os(CHILD) {
+        let directory = PathBuf::from(directory);
+        let first = directory.join("first/agy");
+        let second = directory.join("second/agy");
+        let fallback = directory.join(".local/bin/agy");
+        let inspection = super::Antigravity.inspect().await;
+        assert!(
+            matches!(&inspection, Inspection::Installed { executable, .. } if executable == &second),
+            "{inspection:?}"
+        );
+        write_version(&first, "1.5.1", 0o700);
+        let inspection = super::Antigravity.inspect().await;
+        assert!(
+            matches!(&inspection, Inspection::Incompatible { executable, .. } if executable == &first),
+            "{inspection:?}"
+        );
+        fs::set_permissions(&first, Permissions::from_mode(0o600)).unwrap();
+        fs::remove_file(second).unwrap();
+        let inspection = super::Antigravity.inspect().await;
+        assert!(
+            matches!(&inspection, Inspection::Installed { executable, .. } if executable == &fallback),
+            "{inspection:?}"
+        );
+        return;
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let first = directory.path().join("first");
+    let second = directory.path().join("second");
+    let fallback = directory.path().join(".local/bin");
+    for path in [&first, &second, &fallback] {
+        fs::create_dir_all(path).unwrap();
+    }
+    write_version(&first.join("agy"), "1.5.15", 0o600);
+    write_version(&second.join("agy"), "1.5.15", 0o700);
+    write_version(&fallback.join("agy"), "1.5.15", 0o700);
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", TEST])
+        .env("PATH", std::env::join_paths([first, second]).unwrap())
+        .env("HOME", directory.path())
+        .env(CHILD, directory.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 fn recorded(fixture: &str) -> Vec<Value> {
     fixture
         .lines()

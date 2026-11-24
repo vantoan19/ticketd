@@ -13,7 +13,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use ticketd_core::harnesses::ANTIGRAVITY;
 
-use crate::install::{LaunchEnvironment, Os, parse_version};
+use crate::install::{LaunchEnvironment, Os, is_executable, parse_version};
 use crate::stdio::{Serving, spawn_configured, version_output};
 use crate::{
     Capabilities, Capability, Harness, HarnessAdapter, HarnessOptions, Inspection, LoginState,
@@ -46,7 +46,7 @@ fn executable() -> Option<PathBuf> {
         .candidates(names, vec![installed])
         .into_iter()
         .find_map(|path| {
-            if path.is_file() {
+            if is_executable(&path) {
                 std::path::absolute(path).ok()
             } else {
                 None
