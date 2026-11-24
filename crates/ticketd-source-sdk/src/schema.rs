@@ -189,6 +189,20 @@ impl ConfigSchema {
             if field.key.trim().is_empty() || !keys.insert(field.key.as_str()) {
                 issues.push(issue(&field.key, "has a blank or repeated setting key"));
             }
+            if let Some(pattern) = &field.pattern
+                && Regex::new(&pattern.regex).is_err()
+            {
+                issues.push(issue(&field.key, "has an invalid validation pattern"));
+            }
+            if let FieldKind::MultiSelect {
+                min_items,
+                max_items,
+                ..
+            } = &field.kind
+                && min_items > max_items
+            {
+                issues.push(issue(&field.key, "has a minimum greater than its maximum"));
+            }
             if matches!(field.kind, FieldKind::Secret) {
                 let key = env_part(&field.key);
                 if !secret_env_keys.insert(format!("{key}_COMMAND")) || !secret_env_keys.insert(key)
@@ -229,8 +243,9 @@ impl ConfigSchema {
 
     pub fn is_active(&self, field: &SchemaField, raw: &ConfigValues) -> bool {
         let mut current = field;
+        let mut seen = HashSet::from([field.key.as_str()]);
         while let Some(dependency) = &current.show_if {
-            if !raw.get(dependency).is_some_and(has_value) {
+            if !seen.insert(dependency.as_str()) || !raw.get(dependency).is_some_and(has_value) {
                 return false;
             }
             let Some(parent) = self.field(dependency) else {
@@ -409,6 +424,10 @@ impl SchemaField {
                     }
                 };
                 if text.is_empty() {
+                    return None;
+                }
+                if text.contains(['\r', '\n']) {
+                    issues.push(issue(&self.key, "must be a single line"));
                     return None;
                 }
                 if text.chars().count() > 200 {

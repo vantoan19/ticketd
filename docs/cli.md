@@ -80,6 +80,10 @@ refresh one externally owned ticket. Inspect the JSON report and exit status,
 including when a refresh was partly successful. Interactive refresh prints
 progress on stderr. Press Ctrl+C to cancel and receive exit status 130.
 
+`--set` splits multi-select values at commas. If a selection value itself
+contains a comma, pass it as one JSON array element with `--config-file`,
+for example `{"region":["North, America"]}`.
+
 Supply secrets in a JSON object through stdin with `--config-file -`.
 Use `ticketd source CONNECTION sign-in --config-file -` to replace credentials
 for a saved connection without changing its discovery settings. The author guide
