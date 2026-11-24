@@ -1,4 +1,5 @@
 import { useId, useState } from "react";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureAlert } from "@/components/ui/failure-alert";
@@ -57,6 +58,7 @@ export function ProjectFormDialog({
   const nameId = useId();
   const remoteId = useId();
   const remoteErrorId = useId();
+  const remoteMismatchId = useId();
   const scope = project?.id ?? "";
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [failure, setFailure] = useState<FailureDescription | null>(null);
@@ -68,6 +70,21 @@ export function ProjectFormDialog({
   const { detection, pending } = useProjectRemoteDetection(
     open && !lockRemote ? path : "",
   );
+  const savedRemote = project?.remote?.toLowerCase();
+  const checkoutRemotes = [
+    detection.suggested,
+    ...detection.candidates.map((candidate) => candidate.remote),
+  ].filter((remote) => remote !== null);
+  const remoteMismatch =
+    Boolean(savedRemote) &&
+    checkoutRemotes.length > 0 &&
+    !checkoutRemotes.some((remote) => remote.toLowerCase() === savedRemote);
+  const remoteDescription = [
+    remoteError && remoteErrorId,
+    remoteMismatch && remoteMismatchId,
+  ]
+    .filter(Boolean)
+    .join(" ");
   const remote =
     draft?.remote ??
     initialRemote ??
@@ -231,11 +248,23 @@ export function ProjectFormDialog({
             disabled={busy}
             readOnly={lockRemote}
             aria-invalid={Boolean(remoteError) || undefined}
-            aria-describedby={remoteError ? remoteErrorId : undefined}
+            aria-describedby={remoteDescription || undefined}
             onChange={(event) => edit({ remote: event.target.value })}
           />
           {remoteError && (
             <FieldError id={remoteErrorId}>{remoteError}</FieldError>
+          )}
+          {remoteMismatch && (
+            <Alert id={remoteMismatchId} tone="attention" role="status">
+              <AlertTitle>
+                Checkout remotes differ from the saved Project remote.
+              </AlertTitle>
+              {detection.suggested && (
+                <AlertDescription className="wrap-anywhere">
+                  The checkout suggests {detection.suggested}.
+                </AlertDescription>
+              )}
+            </Alert>
           )}
           {detection.candidates.length > 0 && (
             <Select

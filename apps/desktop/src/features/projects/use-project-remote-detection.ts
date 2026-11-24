@@ -3,29 +3,33 @@ import { client, type ProjectRemoteDetection } from "@/lib/api/client";
 
 const NO_REMOTE: ProjectRemoteDetection = { suggested: null, candidates: [] };
 
-/** Detection is optional, and a response for an old path never supplies a draft. */
+/** Detection is optional. Each visit to a path needs its own result. */
 export function useProjectRemoteDetection(path: string) {
+  const [request, setRequest] = useState({ path });
+  if (request.path !== path) setRequest({ path });
+
   const [result, setResult] = useState<{
-    path: string;
+    request: typeof request;
     detection: ProjectRemoteDetection;
   } | null>(null);
   useEffect(() => {
-    if (!path) return;
+    if (!request.path) return;
     let current = true;
-    void client.detectProjectRemote(path).then(
+    void client.detectProjectRemote(request.path).then(
       (detection) => {
-        if (current) setResult({ path, detection });
+        if (current) setResult({ request, detection });
       },
       () => {
-        if (current) setResult({ path, detection: NO_REMOTE });
+        if (current) setResult({ request, detection: NO_REMOTE });
       },
     );
     return () => {
       current = false;
     };
-  }, [path]);
+  }, [request]);
+  const detection = result?.request === request ? result.detection : null;
   return {
-    detection: path && result?.path === path ? result.detection : NO_REMOTE,
-    pending: Boolean(path && result?.path !== path),
+    detection: detection ?? NO_REMOTE,
+    pending: Boolean(path && !detection),
   };
 }
