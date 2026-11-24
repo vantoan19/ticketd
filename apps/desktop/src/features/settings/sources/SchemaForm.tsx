@@ -134,6 +134,9 @@ function MultiSelectField({
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<ChoiceOption[]>([]);
+  const [choiceLabels, setChoiceLabels] = useState(
+    () => new Map<string, string>(),
+  );
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState("");
   const [refused, setRefused] = useState("");
@@ -148,6 +151,16 @@ function MultiSelectField({
       panel.current?.contains(node) === true);
   const full = value.length >= field.max_items;
   const dynamic = field.options.source === "dynamic";
+
+  const rememberSelected = useEffectEvent((options: ChoiceOption[]) => {
+    const selected = options.filter((option) => value.includes(option.value));
+    if (selected.length === 0) return;
+    setChoiceLabels((current) => {
+      const labels = new Map(current);
+      for (const option of selected) labels.set(option.value, option.label);
+      return labels;
+    });
+  });
 
   // The loader is recreated on every render and sees the current rules (the
   // chosen repositories shape the label options), but typing, not a new
@@ -164,6 +177,7 @@ function MultiSelectField({
         .then((options) => {
           if (request !== requests.current) return;
           setSuggestions(options);
+          rememberSelected(options);
           setFailure("");
         })
         .catch((reason: unknown) => {
@@ -177,6 +191,26 @@ function MultiSelectField({
     }, SUGGESTION_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [open, query, field.key, optionsSource]);
+
+  // A reopened form knows the saved IDs. Use one bounded options read to
+  // recover their labels for fixed choices without waiting for the list to open.
+  const hasUnlabelledChoices =
+    dynamic &&
+    !field.allow_custom &&
+    value.some((item) => !choiceLabels.has(item));
+  useEffect(() => {
+    if (!hasUnlabelledChoices) return;
+    let current = true;
+    void load(field.key, "").then(
+      (options) => {
+        if (current) rememberSelected(options);
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [field.key, hasUnlabelledChoices]);
 
   // One list at a time, and a press anywhere outside the field closes its list
   // (focus alone is not reliable: a pressed button may not take focus).
@@ -208,7 +242,7 @@ function MultiSelectField({
     if (dynamic) setLoading(true);
   }
 
-  function add(item: string) {
+  function add(item: string, label?: string) {
     const text = item.trim();
     if (!text || full || value.includes(text)) return;
     // Refused here, keeping the text to correct, rather than sent and turned
@@ -219,6 +253,8 @@ function MultiSelectField({
       return;
     }
     setRefused("");
+    if (label !== undefined)
+      setChoiceLabels((current) => new Map(current).set(text, label));
     onChange([...value, text]);
     setQuery("");
     setOpen(false);
@@ -280,19 +316,29 @@ function MultiSelectField({
                 className="source-chips"
                 aria-label={`Selected ${field.label}`}
               >
-                {value.map((item) => (
-                  <li key={item} className="source-chip">
-                    <Badge>{item}</Badge>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${item}`}
-                      disabled={disabled}
-                      onClick={() => onChange(value.filter((v) => v !== item))}
-                    >
-                      <X aria-hidden="true" size={12} />
-                    </button>
-                  </li>
-                ))}
+                {value.map((item) => {
+                  const label =
+                    (field.options.source === "static"
+                      ? field.options.options.find(
+                          (option) => option.value === item,
+                        )?.label
+                      : choiceLabels.get(item)) ?? item;
+                  return (
+                    <li key={item} className="source-chip">
+                      <Badge>{label}</Badge>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${label}`}
+                        disabled={disabled}
+                        onClick={() =>
+                          onChange(value.filter((v) => v !== item))
+                        }
+                      >
+                        <X aria-hidden="true" size={12} />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             <Input
@@ -370,7 +416,7 @@ function MultiSelectField({
                   <li key={option.value}>
                     <button
                       type="button"
-                      onClick={() => add(option.value)}
+                      onClick={() => add(option.value, option.label)}
                       aria-label={`Add ${option.label}`}
                     >
                       <span>{option.label}</span>
