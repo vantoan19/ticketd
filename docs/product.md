@@ -508,6 +508,12 @@ Setup, IAM permissions and the lifecycle rule are in
 - **Conflicting writes.** A write to S3 fails instead of replacing a file another
   desktop just changed, so that change goes through the normal merge. Versioning keeps
   every version of a file, which History uses.
+- **One service per bucket.** ticketd remembers which S3 service (AWS or an
+  S3-compatible endpoint) the Workspace's bucket was connected through. If the
+  profile is edited to reach another one, sync stops with a message that the profile
+  now points to another service, and starts again when the profile points back. To
+  move a bucket on purpose, Disconnect, then connect again. A Workspace connected
+  before this was remembered takes the profile's service the next time sync works.
 - **Ended sign-in.** When the AWS session ends (an IAM Identity Center session lasts
   8 hours by default), the status line and the Workspace sync page show Sign in to AWS
   again, with a Sign in button, and no dialog interrupts the person. Changes keep

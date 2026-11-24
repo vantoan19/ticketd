@@ -21,6 +21,7 @@ use ticketd_core::{
             RemoteCapabilities, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
             RemoteRevision, RemoteStorage,
         },
+        s3_service_changed,
     },
 };
 
@@ -75,6 +76,13 @@ impl S3Storage {
         &self.binding
     }
 
+    /// The S3 service the profile reached when the storage was put together, as
+    /// [`S3Binding::endpoint`] keeps it; `None` while it has not been built.
+    pub fn reached(&self) -> Option<String> {
+        let built = self.built.lock().unwrap_or_else(PoisonError::into_inner);
+        Some(service(&built.as_ref()?.target).to_owned())
+    }
+
     /// The `s3://` address of a Workspace folder, for a person to open in another tool.
     pub fn address(&self, folder: &str) -> String {
         address(&self.binding, folder)
@@ -90,6 +98,23 @@ impl S3Storage {
 
 pub fn address(binding: &S3Binding, folder: &str) -> String {
     format!("s3://{}/{}{folder}/", binding.bucket, binding.prefix)
+}
+
+/// The S3 service a target reaches, as [`S3Binding::endpoint`] keeps it: the empty string
+/// is AWS's own.
+pub fn service(target: &S3Target) -> &str {
+    target.endpoint().unwrap_or_default()
+}
+
+/// Refuses a profile that reaches another S3 service than the one the binding was connected
+/// through. A binding with none recorded takes whatever the profile reaches.
+fn check_service(binding: &S3Binding, reached: &str) -> Result<(), RemoteError> {
+    match binding.endpoint.as_deref() {
+        Some(recorded) if recorded != reached => {
+            Err(RemoteError::Other(s3_service_changed(recorded, reached)))
+        }
+        _ => Ok(()),
+    }
 }
 
 /// The S3 console page of the folder: the standard AWS partition only, since the
@@ -192,6 +217,8 @@ fn build(binding: &S3Binding) -> Result<Built, RemoteError> {
         None => "us-east-1",
     };
     let probe = S3Target::new(&binding.bucket, probe_region, endpoint).map_err(other)?;
+    // Before anything is sent: a profile edited to another service must not be signed for.
+    check_service(binding, service(&probe))?;
     let region = discover_bucket_region(
         &probe,
         credentials.as_ref(),
@@ -215,6 +242,19 @@ static KEPT: Mutex<Option<Arc<S3Storage>>> = Mutex::new(None);
 /// test's reset cannot drop what a test running beside it is counting on.
 #[cfg(test)]
 pub(crate) static TEST_STATE: Mutex<()> = Mutex::new(());
+
+/// Keeps a storage already built for `binding`, as if sync had reached `target` through it.
+#[cfg(test)]
+pub(crate) fn keep_built(binding: &S3Binding, remote: Arc<dyn RemoteStorage>, target: S3Target) {
+    let storage = Arc::new(S3Storage::with_build(binding.clone(), move |_| {
+        Ok(Built {
+            storage: Arc::clone(&remote),
+            target: target.clone(),
+        })
+    }));
+    storage.built().ok();
+    *KEPT.lock().unwrap_or_else(PoisonError::into_inner) = Some(storage);
+}
 
 /// Drops the kept storage and the credentials kept for every profile. The next call builds
 /// the storage from the profile as it is now: its endpoint, its region and its account. Setup
@@ -252,6 +292,7 @@ mod tests {
             prefix: "ticketd/".into(),
             profile: "work".into(),
             aws_cli_path: None,
+            endpoint: Some(String::new()),
         }
     }
 
@@ -365,6 +406,77 @@ mod tests {
         assert_eq!(console_url(&other.target, &binding(), "f1"), None);
         let china = built(&fake, "cn-north-1", None);
         assert_eq!(console_url(&china.target, &binding(), "f1"), None);
+    }
+
+    #[test]
+    fn the_storage_says_which_service_it_reached_once_it_is_built() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let fake = FakeRemote::new();
+        let on = |endpoint: Option<&'static str>| {
+            let fake = fake.clone();
+            S3Storage::with_build(binding(), move |_| Ok(built(&fake, "us-east-1", endpoint)))
+        };
+        let minio = on(Some("https://minio.example.com:9000"));
+        assert_eq!(minio.reached(), None, "nothing is known before the build");
+        minio.folders().unwrap();
+        assert_eq!(
+            minio.reached().as_deref(),
+            Some("https://minio.example.com:9000")
+        );
+        let aws = on(None);
+        aws.folders().unwrap();
+        assert_eq!(aws.reached().as_deref(), Some(""));
+    }
+
+    #[test]
+    fn a_binding_with_no_service_recorded_takes_whatever_the_profile_reaches() {
+        let recorded = |endpoint: Option<&str>| S3Binding {
+            endpoint: endpoint.map(str::to_owned),
+            ..binding()
+        };
+        assert!(check_service(&recorded(None), "https://minio.example.com:9000").is_ok());
+        assert!(check_service(&recorded(Some("")), "").is_ok());
+        assert!(
+            check_service(
+                &recorded(Some("https://minio.example.com:9000")),
+                "https://minio.example.com:9000"
+            )
+            .is_ok()
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_profile_that_now_reaches_another_service_stops_sync_before_anything_is_sent() {
+        use std::os::unix::fs::PermissionsExt;
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        // The profile was edited to point at MinIO; the Workspace's bucket was connected on AWS.
+        let directory = tempfile::tempdir().unwrap();
+        let program = directory.path().join("aws");
+        std::fs::write(
+            &program,
+            "#!/bin/sh\ncase \"$1\" in\n--version) echo 'aws-cli/2.19.5 Python/3.12.7';;\nconfigure) case \"$3\" in endpoint_url) echo https://minio.example.com:9000;; *) exit 1;; esac;;\nesac\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let storage = S3Storage::new(S3Binding {
+            aws_cli_path: Some(program.display().to_string()),
+            ..binding()
+        });
+
+        let Err(RemoteError::Other(message)) = storage.folders() else {
+            panic!("a profile that reaches another service was used");
+        };
+        assert!(message.contains("This profile now points to another S3 service"));
+        assert!(message.contains("https://minio.example.com:9000"));
+        assert!(message.contains("AWS"));
+        assert!(message.contains("disconnect sync, then connect again"));
+        // Nothing was kept: the profile pointing back works again at the next call.
+        assert_eq!(storage.reached(), None);
     }
 
     #[test]

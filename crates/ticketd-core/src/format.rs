@@ -28,14 +28,14 @@ use crate::{
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one step to [`LADDER`]; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 86;
+pub const FORMAT_VERSION: i64 = 87;
 
 /// One change to what a Workspace stores. The second argument is the format version
 /// the run started from, `0` for a new Workspace.
 type Step = fn(&Transaction<'_>, i64) -> Result<(), Error>;
 
 /// Every step in order. Entry `n` takes a Workspace from format version `n - 1` to `n`.
-const LADDER: [(i64, Step); 86] = [
+const LADDER: [(i64, Step); 87] = [
     (1, |tx, _| tx.execute_batch(TICKETS).map_err(Into::into)),
     (2, |tx, _| tx.execute_batch(TICKET_BODY).map_err(Into::into)),
     (3, |tx, _| history::migrate(tx)),
@@ -146,6 +146,7 @@ const LADDER: [(i64, Step); 86] = [
     (84, |tx, _| read_models(tx)),
     (85, |tx, _| source::migrate_issue_opening(tx)),
     (86, |tx, _| sync::migrate_provider(tx)),
+    (87, |tx, _| sync::migrate_endpoint(tx)),
 ];
 
 /// Takes a Workspace at format version `from` to the current one, or creates it when

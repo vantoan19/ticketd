@@ -1040,3 +1040,6 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column sync_state.provider
 + column sync_state.s3_bucket
 + column sync_state.s3_prefix
+
+## 87
++ column sync_state.s3_endpoint

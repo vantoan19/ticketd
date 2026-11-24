@@ -387,6 +387,7 @@ fn new_desk() -> Desk {
                 prefix: "ticketd/".into(),
                 profile: "work".into(),
                 aws_cli_path: None,
+                endpoint: Some(String::new()),
             },
             "arn:aws:iam::123456789012:user/me",
         )

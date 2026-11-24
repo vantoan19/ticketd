@@ -22,6 +22,7 @@ pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, S3Binding,
     SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem,
     SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
+    s3_service_changed,
 };
 
 pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
@@ -39,6 +40,11 @@ pub(crate) fn migrate_unchanged_tickets(
     connection: &rusqlite::Connection,
 ) -> Result<(), crate::Error> {
     capture::migrate_unchanged_tickets(connection)
+}
+
+/// Format version 87: see `setup::migrate_endpoint`.
+pub(crate) fn migrate_endpoint(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
+    setup::migrate_endpoint(connection)
 }
 
 /// Format version 86: see `setup::migrate_provider`.

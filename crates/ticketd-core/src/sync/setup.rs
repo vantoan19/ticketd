@@ -143,6 +143,14 @@ pub(crate) fn migrate_provider(connection: &Connection) -> Result<(), Error> {
     )
 }
 
+/// Format version 87: the S3 service the binding's bucket was reached through, so a
+/// profile that later points elsewhere stops sync instead of switching services. Bindings
+/// made before record nothing; the desktop records the profile's service on its next
+/// successful build.
+pub(crate) fn migrate_endpoint(connection: &Connection) -> Result<(), Error> {
+    add_columns(connection, &[("sync_state", "s3_endpoint", "TEXT")])
+}
+
 fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, Error> {
     Ok(connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
@@ -262,6 +270,29 @@ pub struct S3Binding {
     pub profile: String,
     /// The `aws` program when the person chose it; `None` finds it on the usual paths.
     pub aws_cli_path: Option<String>,
+    /// The S3 service the bucket was connected through: `scheme://host[:port]` for an
+    /// S3-compatible service, the empty string for AWS's own, and `None` until it is
+    /// recorded (a binding made before it was kept). A profile that now reaches another
+    /// service stops sync: moving a bucket on purpose is Disconnect, then connect again.
+    pub endpoint: Option<String>,
+}
+
+/// What a person is told when a profile reaches another S3 service than the one the
+/// Workspace's bucket was connected through. The endpoints are as [`S3Binding::endpoint`]
+/// keeps them.
+pub fn s3_service_changed(recorded: &str, now: &str) -> String {
+    let name = |endpoint: &str| {
+        if endpoint.is_empty() {
+            "AWS".to_owned()
+        } else {
+            endpoint.to_owned()
+        }
+    };
+    format!(
+        "This profile now points to another S3 service: it reaches {}, and this Workspace's bucket was connected through {}. To move the bucket on purpose, disconnect sync, then connect again; otherwise point the profile back.",
+        name(now),
+        name(recorded)
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -481,6 +512,7 @@ struct State {
     s3_prefix: Option<String>,
     aws_profile: Option<String>,
     aws_cli_path: Option<String>,
+    s3_endpoint: Option<String>,
     last_provider: SyncProvider,
     last_bucket: Option<String>,
     last_prefix: Option<String>,
@@ -497,6 +529,7 @@ impl State {
             prefix: self.s3_prefix.clone().unwrap_or_default(),
             profile: self.aws_profile.clone().unwrap_or_default(),
             aws_cli_path: self.aws_cli_path.clone(),
+            endpoint: self.s3_endpoint.clone(),
         })
     }
 
@@ -520,7 +553,7 @@ fn from_label<T: DeserializeOwned>(text: Option<String>) -> Option<T> {
 
 fn state(connection: &Connection) -> Result<State, Error> {
     Ok(connection.query_row(
-        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account, provider, s3_bucket, s3_prefix, aws_profile, aws_cli_path, last_provider, last_bucket, last_prefix FROM sync_state",
+        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account, provider, s3_bucket, s3_prefix, aws_profile, aws_cli_path, last_provider, last_bucket, last_prefix, s3_endpoint FROM sync_state",
         [],
         |row| {
             Ok(State {
@@ -551,6 +584,7 @@ fn state(connection: &Connection) -> Result<State, Error> {
                 last_provider: from_label(row.get(23)?).unwrap_or(SyncProvider::GoogleDrive),
                 last_bucket: row.get(24)?,
                 last_prefix: row.get(25)?,
+                s3_endpoint: row.get(26)?,
             })
         },
     )?)
@@ -730,7 +764,7 @@ impl Workspace {
                 )));
             }
             scope.execute(
-                "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, aws_cli_path = NULL, connection = ?1, account = ?2",
+                "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, aws_cli_path = NULL, s3_endpoint = NULL, connection = ?1, account = ?2",
                 [connection_id, account],
             )?;
             Ok(())
@@ -776,9 +810,18 @@ impl Workspace {
                     ));
                 }
             }
+            // A bound Workspace keeps the service it was connected through; a caller that does
+            // not know the profile's service leaves it as it is.
+            let endpoint = match (state.folder.is_some(), &state.s3_endpoint, &s3.endpoint) {
+                (true, Some(recorded), Some(now)) if recorded != now => {
+                    return Err(Error::Sync(s3_service_changed(recorded, now)));
+                }
+                (true, Some(recorded), None) => Some(recorded.clone()),
+                _ => s3.endpoint.clone(),
+            };
             scope.execute(
-                "UPDATE sync_state SET provider = 's3', connection = NULL, s3_bucket = ?1, s3_prefix = ?2, aws_profile = ?3, aws_cli_path = ?4, account = ?5",
-                params![s3.bucket, s3.prefix, s3.profile, s3.aws_cli_path, identity],
+                "UPDATE sync_state SET provider = 's3', connection = NULL, s3_bucket = ?1, s3_prefix = ?2, aws_profile = ?3, aws_cli_path = ?4, s3_endpoint = ?5, account = ?6",
+                params![s3.bucket, s3.prefix, s3.profile, s3.aws_cli_path, endpoint, identity],
             )?;
             Ok(())
         })?;
@@ -793,7 +836,7 @@ impl Workspace {
     pub fn sync_disconnect(&mut self) -> Result<SyncStatus, Error> {
         // Signing out before a folder is chosen leaves what was remembered.
         self.connection.execute(
-            "UPDATE sync_state SET last_account = CASE WHEN folder IS NULL THEN last_account ELSE account END, last_provider = CASE WHEN folder IS NULL THEN last_provider ELSE provider END, last_bucket = CASE WHEN folder IS NULL THEN last_bucket ELSE s3_bucket END, last_prefix = CASE WHEN folder IS NULL THEN last_prefix ELSE s3_prefix END, last_folder = COALESCE(folder, last_folder), provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, aws_cli_path = NULL, connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
+            "UPDATE sync_state SET last_account = CASE WHEN folder IS NULL THEN last_account ELSE account END, last_provider = CASE WHEN folder IS NULL THEN last_provider ELSE provider END, last_bucket = CASE WHEN folder IS NULL THEN last_bucket ELSE s3_bucket END, last_prefix = CASE WHEN folder IS NULL THEN last_prefix ELSE s3_prefix END, last_folder = COALESCE(folder, last_folder), provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, aws_cli_path = NULL, s3_endpoint = NULL, connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
             [],
         )?;
         self.connection.execute_batch(GIVE_UP_DOWNLOADS)?;
@@ -821,6 +864,17 @@ impl Workspace {
         )?;
         touch(&self.connection)?;
         self.sync_status()
+    }
+
+    /// Record which S3 service the bound bucket is reached through, for a binding made
+    /// before one was kept. A recorded service is never replaced: a profile that reaches
+    /// another one stops sync instead. See [`S3Binding::endpoint`].
+    pub fn sync_record_s3_endpoint(&self, endpoint: &str) -> Result<(), Error> {
+        self.connection.execute(
+            "UPDATE sync_state SET s3_endpoint = ?1 WHERE provider = 's3' AND s3_endpoint IS NULL",
+            [endpoint],
+        )?;
+        Ok(())
     }
 
     /// The sync destination, or `None` when no folder is chosen. One small
@@ -1129,7 +1183,7 @@ impl Workspace {
                 .connection
                 .execute("UPDATE attachment_workspace SET id = ?1", [&folder.id])?;
             empty.connection.execute(
-                "UPDATE sync_state SET connection = ?1, account = ?2, device_name = ?3, poll_interval_secs = ?4, attachment_download = ?5, provider = ?6, s3_bucket = ?7, s3_prefix = ?8, aws_profile = ?9, aws_cli_path = ?10",
+                "UPDATE sync_state SET connection = ?1, account = ?2, device_name = ?3, poll_interval_secs = ?4, attachment_download = ?5, provider = ?6, s3_bucket = ?7, s3_prefix = ?8, aws_profile = ?9, aws_cli_path = ?10, s3_endpoint = ?11",
                 params![
                     state.connection,
                     state.account,
@@ -1140,7 +1194,8 @@ impl Workspace {
                     state.s3_bucket,
                     state.s3_prefix,
                     state.aws_profile,
-                    state.aws_cli_path
+                    state.aws_cli_path,
+                    state.s3_endpoint
                 ],
             )?;
             bind(

@@ -76,7 +76,7 @@ fn binding_of(
     // A Drive binding names its sign-in; an S3 one, its bucket and profile.
     let storage = match (bound.provider, bound.connection_id, bound.s3) {
         (SyncProvider::GoogleDrive, Some(connection), _) => Storage::Drive(connection),
-        (SyncProvider::S3, _, Some(s3)) => Storage::S3(s3),
+        (SyncProvider::S3, _, Some(s3)) => Storage::S3(learn_service(workspace, s3)),
         _ => return Ok(None),
     };
     Ok(Some(Binding {
@@ -85,6 +85,32 @@ fn binding_of(
         poll: Duration::from_secs(bound.poll_secs),
         remote: remote(&storage),
     }))
+}
+
+/// A binding made before the S3 service was recorded learns it once its storage has been
+/// built: the profile reached that service and the bucket answered. Until then (or when it
+/// cannot be written) the binding stays as it was and the next look tries again.
+fn learn_service(workspace: &Workspace, s3: S3Binding) -> S3Binding {
+    if s3.endpoint.is_some() {
+        return s3;
+    }
+    let Some(reached) = s3_storage::storage(&s3).reached() else {
+        return s3;
+    };
+    match workspace.sync_record_s3_endpoint(&reached) {
+        Ok(()) => S3Binding {
+            endpoint: Some(reached),
+            ..s3
+        },
+        Err(error) => {
+            tracing::warn!(
+                error_kind = error.kind().code(),
+                %error,
+                "could not record the S3 service of the sync binding"
+            );
+            s3
+        }
+    }
 }
 
 /// What a Workspace's sync reaches, as the core stores it.
@@ -1883,6 +1909,7 @@ mod tests {
             prefix: "ticketd/".into(),
             profile: "work".into(),
             aws_cli_path: None,
+            endpoint: Some(String::new()),
         };
         let reached = |workspace: &Workspace| {
             let fake = fake.clone();
@@ -1912,6 +1939,56 @@ mod tests {
     }
 
     #[test]
+    fn an_s3_binding_made_before_the_service_was_recorded_learns_it_from_the_built_storage() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let directory = tempfile::tempdir().unwrap();
+        let fake = FakeRemote::new();
+        let mut here = Workspace::open(directory.path().join("here.sqlite3")).unwrap();
+        let s3 = S3Binding {
+            bucket: "team-bucket".into(),
+            prefix: "ticketd/".into(),
+            profile: "work".into(),
+            aws_cli_path: None,
+            endpoint: None,
+        };
+        here.sync_connect_s3(&s3, "arn:aws:iam::1:user/mina")
+            .unwrap();
+        here.sync_upload_workspace(&fake, "Test").unwrap();
+        let stored = |workspace: &Workspace| {
+            workspace
+                .sync_binding()
+                .unwrap()
+                .unwrap()
+                .s3
+                .unwrap()
+                .endpoint
+        };
+
+        // Nothing has been built for the binding yet, so there is nothing to record.
+        crate::s3_storage::reset();
+        assert_eq!(learn_service(&here, s3.clone()), s3);
+        assert_eq!(stored(&here), None);
+
+        // Once the profile has reached its service, the binding records it.
+        let target = ticketd_core::s3::S3Target::new(
+            "team-bucket",
+            "us-east-1",
+            Some("https://minio.example.com:9000"),
+        )
+        .unwrap();
+        crate::s3_storage::keep_built(&s3, Arc::new(fake.clone()), target);
+        let learned = learn_service(&here, s3);
+        assert_eq!(
+            learned.endpoint.as_deref(),
+            Some("https://minio.example.com:9000")
+        );
+        assert_eq!(stored(&here), learned.endpoint);
+        crate::s3_storage::reset();
+    }
+
+    #[test]
     fn an_s3_workspace_uploads_downloads_and_reconnects_after_disconnect() {
         let _state = crate::s3_storage::TEST_STATE
             .lock()
@@ -1923,6 +2000,7 @@ mod tests {
             prefix: "ticketd/".into(),
             profile: "work".into(),
             aws_cli_path: None,
+            endpoint: Some(String::new()),
         };
         let desk = |file: &str, identity: &str| {
             let mut workspace = Workspace::open(directory.path().join(file)).unwrap();

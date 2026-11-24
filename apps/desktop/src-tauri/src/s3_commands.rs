@@ -250,11 +250,17 @@ pub fn sync_connect_s3(bucket: String, prefix: String, profile: String) -> Outco
         Identity::SignedIn { identity } => identity,
         Identity::SignInNeeded { .. } => return rejected("Sign in to this AWS profile first."),
     };
+    // The service the profile reaches now, kept with the binding so a profile that later
+    // points elsewhere stops sync.
+    let settings = cli.settings(&profile).map_err(|error| failed(&error))?;
+    let target = S3Target::new(bucket, "us-east-1", settings.endpoint_url.as_deref())
+        .map_err(|error| BridgeFailure::plain(&error.to_string()))?;
     let binding = S3Binding {
         bucket: bucket.to_owned(),
         prefix,
         profile,
         aws_cli_path: None,
+        endpoint: Some(crate::s3_storage::service(&target).to_owned()),
     };
     // The profile may now sign in as another account or reach another endpoint, so what was
     // kept for it is dropped and the storage is built afresh from it.
@@ -370,6 +376,7 @@ mod tests {
             prefix: "ticketd/".into(),
             profile: "work".into(),
             aws_cli_path: Some(moved.display().to_string()),
+            endpoint: Some(String::new()),
         };
         sign_in_for_recovery(&binding).unwrap();
         let ran = std::fs::read_to_string(elsewhere.path().join("ran.log")).unwrap();

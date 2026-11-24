@@ -239,7 +239,9 @@ AWS who it is, since AWS knows nothing of a MinIO account. A profile with a `ser
 needs AWS CLI 2.34.22 or later to be read; older CLIs ask you to update. AWS S3, MinIO and Ceph RGW 20.x are
 confirmed. Cloudflare R2 (no Versioning) and the Google Cloud Storage XML API (it
 ignores the conditional headers) do not work. The bucket check, not this list, decides
-for any other service.
+for any other service. A Workspace stays with the service its bucket was connected
+through: if you edit the profile to reach another endpoint, sync stops with a message.
+To move the bucket on purpose, Disconnect in Settings > Workspace sync, then connect again.
 
 ### IAM permissions
 
