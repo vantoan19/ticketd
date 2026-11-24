@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ExternalLink } from "lucide-react";
+import { ChevronDownIcon, ExternalLink } from "lucide-react";
 import {
   Alert,
   AlertActions,
@@ -8,6 +8,7 @@ import {
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { FailureAlert } from "@/components/ui/failure-alert";
+import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -435,23 +436,13 @@ function BucketField({
         </SelectContent>
       </Select>
     );
-  // The way back to the list sits beside the field, not under it: the row stays as tall as
-  // the list's trigger (both 40px), so nothing below moves when the field replaces the list.
+  // The field and the way back to the list (an icon button) share the list's 240px, and both
+  // are at most 40px tall. The row's trailing slot is then the same size in both states, so the
+  // description keeps its width (and lines) and nothing below moves.
   return (
-    <div className="flex items-center gap-2">
-      {typing && (
-        <Button
-          variant="ghost"
-          size="sm"
-          className="shrink-0 whitespace-nowrap"
-          onClick={onList}
-        >
-          Choose from the list
-        </Button>
-      )}
+    <div className="flex w-60 shrink-0 items-center gap-1">
       <Input
         id="s3-bucket"
-        className="w-60 shrink-0"
         value={value}
         disabled={!signedIn}
         placeholder="my-bucket"
@@ -460,6 +451,15 @@ function BucketField({
         autoFocus={typing}
         onChange={(event) => onChange(event.target.value)}
       />
+      {typing && (
+        <IconButton
+          label="Choose from the list"
+          className="shrink-0"
+          onClick={onList}
+        >
+          <ChevronDownIcon />
+        </IconButton>
+      )}
     </div>
   );
 }
