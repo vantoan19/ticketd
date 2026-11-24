@@ -77,17 +77,13 @@ const EXPORTED: &[(&str, &str)] = &[
     ("contextual_relationships", "kind, source_id, target_id"),
     ("ticket_parents", "child_id, parent_id"),
     (
-        "source_configurations",
-        "provider, configuration, account, contract_version, saved_at",
-    ),
-    (
         "external_identities",
-        "ticket_id, provider, external_id, locator, display, url, origin, linked_at, repository",
+        "ticket_id, provider, external_id, locator, display, url, origin, linked_at, partition, provider_name, provider_icon_svg, repository",
     ),
     ("external_ownership", "ticket_id, authority, changed_at"),
     (
         "source_sync",
-        "ticket_id, external_state, closure_reason, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since, discovery_matches, external_author, external_created_at",
+        "ticket_id, state_category, state_name, external_updated_at, last_refreshed_at, last_attempt_at, last_error_code, last_error_message, conversation_updated_at, failing_since, external_author, external_created_at",
     ),
     (
         "external_duplicate_targets",
@@ -95,7 +91,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "source_conversation",
-        "ticket_id, kind, entry_id, position, actor, event, subject, body, url, created_at, edited_at",
+        "ticket_id, kind, entry_id, position, actor, event, state_category, subject, body, url, created_at, edited_at",
     ),
     (
         "source_status",
@@ -103,7 +99,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "publication_attempts",
-        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, destination_host",
+        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, partition, destination_host, destination_site_unconfirmed",
     ),
     (
         "chats",
@@ -221,6 +217,42 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
         "request_outcomes",
         "bookkeeping that makes a retried write return its first result",
     ),
+    (
+        "source_connections",
+        "device-local settings and credential references",
+    ),
+    (
+        "source_secret_references",
+        "device-local references to source credentials in the operating system keychain",
+    ),
+    (
+        "source_connection_id_reservations",
+        "device-local connection IDs reserved to isolate credentials",
+    ),
+    (
+        "source_credential_env_reservations",
+        "device-local reserved credential override names",
+    ),
+    (
+        "source_connection_status",
+        "device-local refresh scheduling and coverage",
+    ),
+    (
+        "source_connection_tickets",
+        "device-local discovery affinity",
+    ),
+    (
+        "publication_connections",
+        "device-local publication connection binding",
+    ),
+    (
+        "source_connection_removals",
+        "device-local tickets paused after removing a connection",
+    ),
+    (
+        "source_presentations",
+        "device-local copies of installed ticket source descriptions",
+    ),
     ("sync_attachments", "device-local Workspace sync state"),
     ("sync_capture", "device-local Workspace sync state"),
     ("sync_conflicts", "device-local Workspace sync state"),
@@ -244,6 +276,11 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
 // Read by the test that keeps the export closed, and by people reviewing the format.
 #[cfg_attr(not(test), allow(dead_code))]
 const OMITTED_COLUMNS: &[(&str, &str, &str)] = &[
+    (
+        "source_sync",
+        "discovery_matches",
+        "membership depends on the local connection's settings",
+    ),
     (
         "external_duplicate_targets",
         "url",
@@ -308,7 +345,7 @@ impl Workspace {
     pub fn export(&self) -> Result<Value, Error> {
         crate::read_scope::run(&self.connection, |tx| {
             let mut result = Map::new();
-            result.insert("format_version".into(), Value::from(2));
+            result.insert("format_version".into(), Value::from(3));
             for &(table, columns) in EXPORTED {
                 let mut statement =
                     tx.prepare(&format!("SELECT {columns} FROM {table} ORDER BY rowid"))?;

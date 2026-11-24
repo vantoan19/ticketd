@@ -20,10 +20,14 @@ use uuid::Uuid;
 use super::{
     RecordKind,
     attachments::{AttachmentDownloads, MANIFEST},
-    engine::{dirty_kind, touch},
+    engine::{HELD_FILE_IDS, dirty_kind, touch},
     remote::{RemoteError, RemoteFile, RemoteFolder, RemoteKey, RemoteKind, RemoteStorage},
 };
-use crate::{Error, SyncKind, Workspace, sync_files::MAX_FILE_BYTES};
+use crate::{
+    Error, SyncKind, Workspace,
+    s3::{S3Target, checked_prefix},
+    sync_files::MAX_FILE_BYTES,
+};
 
 /// The shortest time between two polls of the storage.
 pub const MIN_POLL_INTERVAL_SECS: u64 = 30;
@@ -110,6 +114,43 @@ pub(crate) fn migrate_last_folder(connection: &Connection) -> Result<(), Error> 
     )
 }
 
+/// Format version 98: which storage the sync binding uses, where in it (the S3
+/// bucket and prefix), and this desktop's own way into it (the AWS CLI profile
+/// and the path to the `aws` program). Every binding made before is Google
+/// Drive. The last-synced copies tell [`remembered`] whether a folder is in
+/// the storage the Workspace is connecting to now.
+pub(crate) fn migrate_provider(connection: &Connection) -> Result<(), Error> {
+    add_columns(
+        connection,
+        &[
+            (
+                "sync_state",
+                "provider",
+                "TEXT NOT NULL DEFAULT 'google_drive'",
+            ),
+            ("sync_state", "s3_bucket", "TEXT"),
+            ("sync_state", "s3_prefix", "TEXT"),
+            ("sync_state", "aws_profile", "TEXT"),
+            ("sync_state", "aws_cli_path", "TEXT"),
+            (
+                "sync_state",
+                "last_provider",
+                "TEXT NOT NULL DEFAULT 'google_drive'",
+            ),
+            ("sync_state", "last_bucket", "TEXT"),
+            ("sync_state", "last_prefix", "TEXT"),
+        ],
+    )
+}
+
+/// Format version 99: the S3 service the binding's bucket was reached through, so a
+/// profile that later points elsewhere stops sync instead of switching services. Bindings
+/// made before record nothing; the desktop records the profile's service on its next
+/// successful build.
+pub(crate) fn migrate_endpoint(connection: &Connection) -> Result<(), Error> {
+    add_columns(connection, &[("sync_state", "s3_endpoint", "TEXT")])
+}
+
 fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool, Error> {
     Ok(connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
@@ -159,6 +200,13 @@ pub enum SyncRecovery {
     StorageFull,
     Offline,
     RateLimited,
+    /// The S3 profile now reaches another service than the Workspace's bucket was connected
+    /// through; the status carries the message. The way out is Disconnect (to move the bucket
+    /// on purpose) or pointing the profile back.
+    ServiceChanged,
+    /// The `aws` program is missing or too old; the status carries the message. The person
+    /// chooses where it is, or installs it.
+    CliUnavailable,
     /// Any other failure of a run; the status carries its message.
     Error,
 }
@@ -172,6 +220,11 @@ pub enum SyncRecoveryAction {
     /// Sign in to the storage again, then run [`Workspace::sync_recover`].
     Reconnect,
     Retry,
+    /// Stop syncing here, then connect again; a retry only works once the profile is changed
+    /// back.
+    Disconnect,
+    /// Choose the `aws` program (or install one), then retry.
+    ChooseProgram,
 }
 
 impl SyncRecovery {
@@ -179,6 +232,8 @@ impl SyncRecovery {
         match self {
             Self::FolderMissing => SyncRecoveryAction::Reupload,
             Self::AuthorizationExpired => SyncRecoveryAction::Reconnect,
+            Self::ServiceChanged => SyncRecoveryAction::Disconnect,
+            Self::CliUnavailable => SyncRecoveryAction::ChooseProgram,
             Self::StorageFull | Self::Offline | Self::RateLimited | Self::Error => {
                 SyncRecoveryAction::Retry
             }
@@ -192,11 +247,69 @@ impl SyncRecovery {
             RemoteError::StorageFull => Some(Self::StorageFull),
             RemoteError::Offline => Some(Self::Offline),
             RemoteError::RateLimited { .. } => Some(Self::RateLimited),
+            RemoteError::ServiceChanged(_) => Some(Self::ServiceChanged),
+            RemoteError::CliUnavailable(_) => Some(Self::CliUnavailable),
             RemoteError::PreconditionFailed { .. }
             | RemoteError::NotFound
+            | RemoteError::BucketMissing(_)
             | RemoteError::Other(_) => None,
         }
     }
+}
+
+/// The storage a Workspace's sync folder lives in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SyncProvider {
+    GoogleDrive,
+    S3,
+}
+
+impl SyncProvider {
+    /// The storage as a person names it, for messages.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::GoogleDrive => "Google Drive",
+            Self::S3 => "S3",
+        }
+    }
+}
+
+/// Where an S3 binding keeps its folder, and how this desktop reaches it.
+/// The bucket and prefix belong to the Workspace; the profile and the path to
+/// the `aws` program are this desktop's own, like a credential.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct S3Binding {
+    pub bucket: String,
+    /// Where in the bucket the Workspace folders are kept, as the person wrote it.
+    pub prefix: String,
+    /// The AWS CLI profile this desktop signs in through.
+    pub profile: String,
+    /// The `aws` program when the person chose it; `None` finds it on the usual paths.
+    pub aws_cli_path: Option<String>,
+    /// The S3 service the bucket was connected through: `scheme://host[:port]` for an
+    /// S3-compatible service, the empty string for AWS's own, and `None` until it is
+    /// recorded (a binding made before it was kept). A profile that now reaches another
+    /// service stops sync: moving a bucket on purpose is Disconnect, then connect again.
+    pub endpoint: Option<String>,
+}
+
+/// What a person is told when a profile reaches another S3 service than the one the
+/// Workspace's bucket was connected through. The endpoints are as [`S3Binding::endpoint`]
+/// keeps them.
+pub fn s3_service_changed(recorded: &str, now: &str) -> String {
+    let name = |endpoint: &str| {
+        if endpoint.is_empty() {
+            "AWS".to_owned()
+        } else {
+            endpoint.to_owned()
+        }
+    };
+    format!(
+        "This profile now points to another S3 service: it reaches {}, and this Workspace's bucket was connected through {}. To move the bucket on purpose, disconnect sync, then connect again; otherwise point the profile back.",
+        name(now),
+        name(recorded)
+    )
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -253,7 +366,13 @@ pub struct SyncStatus {
     pub connection: SyncConnection,
     /// What the desktop stored at sign-in: its storage connection and the account shown.
     pub connection_id: Option<String>,
+    /// The account shown for the sign-in: the Drive email, or the AWS identity
+    /// (ARN) the profile signs in as.
     pub account: Option<String>,
+    /// The storage this Workspace syncs with; Google Drive until another is connected.
+    pub provider: SyncProvider,
+    /// For [`SyncProvider::S3`], the bucket and this desktop's way into it.
+    pub s3: Option<S3Binding>,
     pub folder: Option<SyncFolder>,
     pub state: SyncState,
     pub last_synced_at: Option<String>,
@@ -285,6 +404,10 @@ pub struct SyncBinding {
     pub folder_id: String,
     /// The storage sign-in the desktop stored; `None` if it never signed in.
     pub connection_id: Option<String>,
+    pub provider: SyncProvider,
+    /// For [`SyncProvider::S3`], the bucket and this desktop's way into it. An
+    /// S3 binding has no `connection_id`: nothing of the sign-in is stored.
+    pub s3: Option<S3Binding>,
     pub device_name: String,
     pub poll_secs: u64,
 }
@@ -352,7 +475,7 @@ struct Registry {
 fn fits(id: &str, file: &RemoteFile) -> Result<String, Error> {
     if file.size > MAX_FILE_BYTES {
         return Err(Error::Sync(format!(
-            "{id}.json in the sync folder is larger than {} MiB and was not read; remove it in Google Drive to let ticketd write it again",
+            "{id}.json in the sync folder is larger than {} MiB and was not read; remove it from the sync folder to let ticketd write it again",
             MAX_FILE_BYTES / (1024 * 1024)
         )));
     }
@@ -401,6 +524,36 @@ struct State {
     run_due: bool,
     last_folder: Option<String>,
     last_account: Option<String>,
+    provider: SyncProvider,
+    s3_bucket: Option<String>,
+    s3_prefix: Option<String>,
+    aws_profile: Option<String>,
+    aws_cli_path: Option<String>,
+    s3_endpoint: Option<String>,
+    last_provider: SyncProvider,
+    last_bucket: Option<String>,
+    last_prefix: Option<String>,
+}
+
+impl State {
+    /// The S3 location and profile, while this is an S3 binding.
+    fn s3(&self) -> Option<S3Binding> {
+        if self.provider != SyncProvider::S3 {
+            return None;
+        }
+        Some(S3Binding {
+            bucket: self.s3_bucket.clone()?,
+            prefix: self.s3_prefix.clone().unwrap_or_default(),
+            profile: self.aws_profile.clone().unwrap_or_default(),
+            aws_cli_path: self.aws_cli_path.clone(),
+            endpoint: self.s3_endpoint.clone(),
+        })
+    }
+
+    /// Whether the desktop has signed in to the storage, before a folder is chosen.
+    fn signed_in(&self) -> bool {
+        self.connection.is_some() || self.s3().is_some()
+    }
 }
 
 /// A unit enum as the text serde gives it, for a column.
@@ -417,7 +570,7 @@ fn from_label<T: DeserializeOwned>(text: Option<String>) -> Option<T> {
 
 fn state(connection: &Connection) -> Result<State, Error> {
     Ok(connection.query_row(
-        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account FROM sync_state",
+        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account, provider, s3_bucket, s3_prefix, aws_profile, aws_cli_path, last_provider, last_bucket, last_prefix, s3_endpoint FROM sync_state",
         [],
         |row| {
             Ok(State {
@@ -440,6 +593,15 @@ fn state(connection: &Connection) -> Result<State, Error> {
                 run_due: row.get(15)?,
                 last_folder: row.get(16)?,
                 last_account: row.get(17)?,
+                provider: from_label(row.get(18)?).unwrap_or(SyncProvider::GoogleDrive),
+                s3_bucket: row.get(19)?,
+                s3_prefix: row.get(20)?,
+                aws_profile: row.get(21)?,
+                aws_cli_path: row.get(22)?,
+                last_provider: from_label(row.get(23)?).unwrap_or(SyncProvider::GoogleDrive),
+                last_bucket: row.get(24)?,
+                last_prefix: row.get(25)?,
+                s3_endpoint: row.get(26)?,
             })
         },
     )?)
@@ -489,19 +651,35 @@ pub(super) fn forget_folder(connection: &Connection) -> Result<(), Error> {
         connection
             .execute_batch("UPDATE sync_state SET last_folder = NULL, last_account = NULL;")?;
     }
+    if has_column(connection, "sync_state", "last_bucket")? {
+        connection
+            .execute_batch("UPDATE sync_state SET last_bucket = NULL, last_prefix = NULL;")?;
+    }
     connection.execute_batch(GIVE_UP_DOWNLOADS)?;
     forget_synced(connection)
 }
 
 /// The folder a disconnected Workspace can go back to: the one it last synced
-/// with, while the account signed in is the one that folder is in and the
-/// storage still lists it.
+/// with, while the storage connected is the one that folder is in and still
+/// lists it. For Google Drive that is the same account; for S3 the same bucket
+/// and prefix, through whichever profile and identity reach them.
 fn remembered(state: &State, folders: &[RemoteFolder]) -> Option<SyncFolder> {
-    let account = state
-        .account
-        .as_ref()
-        .filter(|account| !account.is_empty())?;
-    if state.folder.is_some() || state.last_account.as_ref() != Some(account) {
+    if state.folder.is_some() || state.last_provider != state.provider {
+        return None;
+    }
+    let same_storage = match state.provider {
+        SyncProvider::GoogleDrive => state
+            .account
+            .as_ref()
+            .filter(|account| !account.is_empty())
+            .is_some_and(|account| state.last_account.as_ref() == Some(account)),
+        SyncProvider::S3 => {
+            state.s3_bucket.is_some()
+                && state.last_bucket == state.s3_bucket
+                && state.last_prefix == state.s3_prefix
+        }
+    };
+    if !same_storage {
         return None;
     }
     let last = state.last_folder.as_ref()?;
@@ -584,6 +762,21 @@ impl Workspace {
         self.sync_settings()
     }
 
+    /// The `aws` program this desktop's person chose, if any. Unlike the bucket, it is kept
+    /// before a connection exists and after one ends: it belongs to this desktop.
+    pub fn sync_aws_cli_path(&self) -> Result<Option<String>, Error> {
+        Ok(state(&self.connection)?.aws_cli_path)
+    }
+
+    /// Remembers the `aws` program for this desktop (`None` forgets it). A connected S3
+    /// binding runs the new program from its next call.
+    pub fn set_sync_aws_cli_path(&mut self, path: Option<&str>) -> Result<(), Error> {
+        self.connection
+            .execute("UPDATE sync_state SET aws_cli_path = ?1", [path])?;
+        touch(&self.connection)?;
+        Ok(())
+    }
+
     /// Remember the storage sign-in, before a folder is chosen. Both values are
     /// the desktop's own: the core only keeps them with the Workspace.
     pub fn sync_connect(
@@ -591,10 +784,79 @@ impl Workspace {
         connection_id: &str,
         account: &str,
     ) -> Result<SyncStatus, Error> {
-        self.connection.execute(
-            "UPDATE sync_state SET connection = ?1, account = ?2",
-            [connection_id, account],
-        )?;
+        // Read, checked and written under one write lock, as `sync_connect_s3` does: another
+        // connection to this Workspace file could bind an S3 folder in between otherwise, and
+        // this update would keep that folder while clearing the S3 settings.
+        crate::write_scope::run(&self.connection, |scope| {
+            let state = state(scope)?;
+            if state.folder.is_some() && state.provider != SyncProvider::GoogleDrive {
+                return Err(Error::Sync(format!(
+                    "this Workspace syncs with {}; disconnect it before connecting to Google Drive",
+                    state.provider.name()
+                )));
+            }
+            scope.execute(
+                "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, s3_endpoint = NULL, connection = ?1, account = ?2",
+                [connection_id, account],
+            )?;
+            Ok(())
+        })?;
+        touch(&self.connection)?;
+        self.sync_status()
+    }
+
+    /// Remember an S3 binding, before a folder is chosen: the bucket and prefix
+    /// the folder is kept in, this desktop's AWS CLI profile and `aws` program,
+    /// and the AWS identity (ARN) the profile signs in as, shown as the account.
+    /// Nothing of the sign-in is stored: the desktop asks the AWS CLI for
+    /// credentials whenever it needs them. Once a folder is chosen, the bucket
+    /// and prefix stay; the profile may change, since another profile can reach
+    /// the same bucket.
+    pub fn sync_connect_s3(&mut self, s3: &S3Binding, identity: &str) -> Result<SyncStatus, Error> {
+        if s3.bucket.trim().is_empty() || s3.profile.trim().is_empty() {
+            return Err(Error::Sync(
+                "name the S3 bucket and the AWS CLI profile to sign in through".into(),
+            ));
+        }
+        // What the S3 storage would refuse later, refused now: a binding that can never sync
+        // is worse than none.
+        S3Target::new(&s3.bucket, "us-east-1", None)
+            .map_err(|error| Error::Sync(error.to_string()))?;
+        checked_prefix(&s3.prefix).map_err(|error| Error::Sync(error.to_string()))?;
+        // The binding is read, checked and written under one write lock: another connection
+        // to this Workspace file could bind a folder in between otherwise.
+        crate::write_scope::run(&self.connection, |scope| {
+            let state = state(scope)?;
+            if state.folder.is_some() {
+                if state.provider != SyncProvider::S3 {
+                    return Err(Error::Sync(format!(
+                        "this Workspace syncs with {}; disconnect it before connecting to S3",
+                        state.provider.name()
+                    )));
+                }
+                if state.s3_bucket.as_deref() != Some(s3.bucket.as_str())
+                    || state.s3_prefix.as_deref() != Some(s3.prefix.as_str())
+                {
+                    return Err(Error::Sync(
+                        "this Workspace syncs with another S3 bucket or prefix; disconnect it before connecting to this one".into(),
+                    ));
+                }
+            }
+            // A bound Workspace keeps the service it was connected through; a caller that does
+            // not know the profile's service leaves it as it is.
+            let endpoint = match (state.folder.is_some(), &state.s3_endpoint, &s3.endpoint) {
+                (true, Some(recorded), Some(now)) if recorded != now => {
+                    return Err(Error::Sync(s3_service_changed(recorded, now)));
+                }
+                (true, Some(recorded), None) => Some(recorded.clone()),
+                _ => s3.endpoint.clone(),
+            };
+            scope.execute(
+                "UPDATE sync_state SET provider = 's3', connection = NULL, s3_bucket = ?1, s3_prefix = ?2, aws_profile = ?3, aws_cli_path = ?4, s3_endpoint = ?5, account = ?6",
+                params![s3.bucket, s3.prefix, s3.profile, s3.aws_cli_path, endpoint, identity],
+            )?;
+            Ok(())
+        })?;
         touch(&self.connection)?;
         self.sync_status()
     }
@@ -606,7 +868,7 @@ impl Workspace {
     pub fn sync_disconnect(&mut self) -> Result<SyncStatus, Error> {
         // Signing out before a folder is chosen leaves what was remembered.
         self.connection.execute(
-            "UPDATE sync_state SET last_account = CASE WHEN folder IS NULL THEN last_account ELSE account END, last_folder = COALESCE(folder, last_folder), connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
+            "UPDATE sync_state SET last_account = CASE WHEN folder IS NULL THEN last_account ELSE account END, last_provider = CASE WHEN folder IS NULL THEN last_provider ELSE provider END, last_bucket = CASE WHEN folder IS NULL THEN last_bucket ELSE s3_bucket END, last_prefix = CASE WHEN folder IS NULL THEN last_prefix ELSE s3_prefix END, last_folder = COALESCE(folder, last_folder), provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, s3_endpoint = NULL, connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
             [],
         )?;
         self.connection.execute_batch(GIVE_UP_DOWNLOADS)?;
@@ -620,10 +882,13 @@ impl Workspace {
     /// this desktop is still the one the device registry lists, and nothing is
     /// replaced on either side.
     pub fn sync_reconnect(&mut self, remote: &dyn RemoteStorage) -> Result<SyncStatus, Error> {
-        let folder = remembered(&state(&self.connection)?, &remote.folders()?).ok_or_else(|| {
-            Error::Sync(
-                "the folder this Workspace synced with is not in this Google Drive account; upload or download instead".into(),
-            )
+        remote.check_usable()?;
+        let state = state(&self.connection)?;
+        let folder = remembered(&state, &remote.folders()?).ok_or_else(|| {
+            Error::Sync(match state.provider {
+                SyncProvider::GoogleDrive => "the folder this Workspace synced with is not in this Google Drive account; upload or download instead",
+                SyncProvider::S3 => "the folder this Workspace synced with is not in this S3 bucket and prefix; upload or download instead",
+            }.into())
         })?;
         self.connection.execute(
             "UPDATE sync_state SET folder = ?1, folder_name = ?2, first_sync = NULL, first_total = 0, recovery = NULL, recovery_message = NULL",
@@ -633,20 +898,29 @@ impl Workspace {
         self.sync_status()
     }
 
+    /// Record which S3 service the bound bucket is reached through, for a binding made
+    /// before one was kept. A recorded service is never replaced: a profile that reaches
+    /// another one stops sync instead. See [`S3Binding::endpoint`].
+    pub fn sync_record_s3_endpoint(&self, endpoint: &str) -> Result<(), Error> {
+        self.connection.execute(
+            "UPDATE sync_state SET s3_endpoint = ?1 WHERE provider = 's3' AND s3_endpoint IS NULL",
+            [endpoint],
+        )?;
+        Ok(())
+    }
+
     /// The sync destination, or `None` when no folder is chosen. One small
     /// read, for a host that asks often.
     pub fn sync_binding(&self) -> Result<Option<SyncBinding>, Error> {
-        type Row = (Option<String>, Option<String>, Option<String>, u64);
-        let (folder, connection_id, name, poll_secs): Row = self.connection.query_row(
-            "SELECT folder, connection, device_name, poll_interval_secs FROM sync_state",
-            [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
-        )?;
-        Ok(folder.map(|folder_id| SyncBinding {
+        let state = state(&self.connection)?;
+        let s3 = state.s3();
+        Ok(state.folder.map(|folder_id| SyncBinding {
             folder_id,
-            connection_id,
-            device_name: name.unwrap_or_else(computer_name),
-            poll_secs,
+            connection_id: state.connection,
+            provider: state.provider,
+            s3,
+            device_name: state.device_name.unwrap_or_else(computer_name),
+            poll_secs: state.poll_interval_secs,
         }))
     }
 
@@ -668,9 +942,8 @@ impl Workspace {
         let mut pending_uploads = Vec::new();
         let mut pending_total = 0;
         if connected {
-            // A record whose file only a newer ticketd reads is not on its way
-            // anywhere: its notice says so instead.
-            let mut statement = connection.prepare("SELECT id FROM sync_files WHERE newer")?;
+            // A held file has a notice instead of counting as a pending upload.
+            let mut statement = connection.prepare(HELD_FILE_IDS)?;
             let held = statement
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<BTreeSet<_>, _>>()?;
@@ -687,7 +960,9 @@ impl Workspace {
             let attachments = super::attachments::pending_uploads(connection)?;
             pending_total = count(
                 connection,
-                "SELECT COUNT(*) FROM sync_dirty d WHERE d.id NOT IN (SELECT id FROM sync_files WHERE newer) AND ((d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects)) OR (d.kind = 'automation' AND d.id IN (SELECT id FROM automations)) OR (d.kind = 'automation_agent' AND d.id IN (SELECT id FROM automation_agents)))",
+                &format!(
+                    "SELECT COUNT(*) FROM sync_dirty d WHERE d.id NOT IN ({HELD_FILE_IDS}) AND ((d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects)) OR (d.kind = 'automation' AND d.id IN (SELECT id FROM automations)) OR (d.kind = 'automation_agent' AND d.id IN (SELECT id FROM automation_agents)))"
+                ),
             )? + attachments.len() as u64;
             let room = PENDING_PAGE - pending_uploads.len();
             for (id, title) in attachments.into_iter().take(room) {
@@ -722,13 +997,12 @@ impl Workspace {
         } else {
             AttachmentDownloads::default()
         };
-        // A change held back by a file from a newer ticketd is not pending, but
-        // it has not reached the storage either: reading the notice does not
-        // make that synced. A file replaced from here needs nothing more.
+        // Reading a notice does not make a held change reach the storage.
+        // A file replaced from here needs nothing more.
         let unreadable = count(
             connection,
-            "SELECT (SELECT COUNT(*) FROM sync_notices WHERE read = 0 AND json_extract(notice, '$.kind') IN ('unreadable_file', 'oversized_record'))
-                  + (SELECT COUNT(*) FROM sync_dirty WHERE id IN (SELECT id FROM sync_files WHERE newer))",
+            &format!("SELECT (SELECT COUNT(*) FROM sync_notices WHERE read = 0 AND json_extract(notice, '$.kind') IN ('unreadable_file', 'oversized_record'))
+                  + (SELECT COUNT(*) FROM sync_dirty WHERE id IN ({HELD_FILE_IDS}))"),
         )?;
         let blocked = matches!(
             state.recovery,
@@ -736,6 +1010,8 @@ impl Workspace {
                 SyncRecovery::FolderMissing
                     | SyncRecovery::AuthorizationExpired
                     | SyncRecovery::StorageFull
+                    | SyncRecovery::ServiceChanged
+                    | SyncRecovery::CliUnavailable
                     | SyncRecovery::Error
             )
         );
@@ -776,9 +1052,11 @@ impl Workspace {
         Ok(SyncStatus {
             connection: match (&state.folder, &state.connection) {
                 (Some(_), _) => SyncConnection::Connected,
-                (None, Some(_)) => SyncConnection::Choosing,
-                (None, None) => SyncConnection::NotConnected,
+                (None, _) if state.signed_in() => SyncConnection::Choosing,
+                (None, _) => SyncConnection::NotConnected,
             },
+            provider: state.provider,
+            s3: state.s3(),
             connection_id: state.connection,
             account: state.account,
             folder: state.folder.map(|id| SyncFolder {
@@ -791,9 +1069,16 @@ impl Workspace {
             pending_total,
             attachment_downloads,
             needs_review,
-            recovery_message: state
-                .recovery_message
-                .filter(|_| state.recovery == Some(SyncRecovery::Error)),
+            recovery_message: state.recovery_message.filter(|_| {
+                matches!(
+                    state.recovery,
+                    Some(
+                        SyncRecovery::Error
+                            | SyncRecovery::ServiceChanged
+                            | SyncRecovery::CliUnavailable
+                    )
+                )
+            }),
             recovery: state.recovery,
             first_sync,
             retry_after: None,
@@ -804,6 +1089,7 @@ impl Workspace {
     /// What this Workspace holds, and the Workspaces already in the storage,
     /// for choosing between uploading and downloading.
     pub fn sync_setup_options(&self, remote: &dyn RemoteStorage) -> Result<SetupOptions, Error> {
+        remote.check_usable()?;
         let connection = &self.connection;
         let local = SyncCounts {
             tickets: count(connection, "SELECT COUNT(*) FROM tickets")?,
@@ -872,6 +1158,7 @@ impl Workspace {
         remote: &dyn RemoteStorage,
         name: &str,
     ) -> Result<SyncStatus, Error> {
+        remote.check_usable()?;
         if state(&self.connection)?.folder.is_some() {
             return Err(Error::Sync(
                 "this Workspace already syncs to a folder; disconnect it first".into(),
@@ -909,6 +1196,7 @@ impl Workspace {
         remote: &dyn RemoteStorage,
         folder_id: &str,
     ) -> Result<(Workspace, PathBuf), Error> {
+        remote.check_usable()?;
         let folder = remote
             .folders()?
             .into_iter()
@@ -936,13 +1224,19 @@ impl Workspace {
                 .connection
                 .execute("UPDATE attachment_workspace SET id = ?1", [&folder.id])?;
             empty.connection.execute(
-                "UPDATE sync_state SET connection = ?1, account = ?2, device_name = ?3, poll_interval_secs = ?4, attachment_download = ?5",
+                "UPDATE sync_state SET connection = ?1, account = ?2, device_name = ?3, poll_interval_secs = ?4, attachment_download = ?5, provider = ?6, s3_bucket = ?7, s3_prefix = ?8, aws_profile = ?9, aws_cli_path = ?10, s3_endpoint = ?11",
                 params![
                     state.connection,
                     state.account,
                     state.device_name,
                     state.poll_interval_secs,
-                    label(state.attachment_download)?
+                    label(state.attachment_download)?,
+                    label(state.provider)?,
+                    state.s3_bucket,
+                    state.s3_prefix,
+                    state.aws_profile,
+                    state.aws_cli_path,
+                    state.s3_endpoint
                 ],
             )?;
             bind(
@@ -1051,6 +1345,13 @@ impl Workspace {
             // Nothing ran, so there is nothing to recover from.
             Err(error) if before.folder.is_none() => return Err(error),
             Err(error) => match &error {
+                // Its sentence is the whole message, and is kept to be shown.
+                Error::Remote(RemoteError::ServiceChanged(said)) => {
+                    (Some(SyncRecovery::ServiceChanged), Some(said.clone()))
+                }
+                Error::Remote(RemoteError::CliUnavailable(said)) => {
+                    (Some(SyncRecovery::CliUnavailable), Some(said.clone()))
+                }
                 Error::Remote(remote) if SyncRecovery::of(remote).is_some() => {
                     (SyncRecovery::of(remote), None)
                 }

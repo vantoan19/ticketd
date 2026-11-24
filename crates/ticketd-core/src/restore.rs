@@ -210,6 +210,28 @@ impl Workspace {
         if version > FORMAT_VERSION {
             return Err(Error::NewerSchema(version));
         }
+        let local_recovery = backup
+            .parent()
+            .and_then(|path| path.canonicalize().ok())
+            .as_deref()
+            == Some(parent)
+            && backup
+                .file_name()
+                .zip(workspace.file_name())
+                .is_some_and(|(copy, live)| {
+                    copy.to_str()
+                        .zip(live.to_str())
+                        .is_some_and(|(copy, live)| {
+                            copy.strip_prefix(live).is_some_and(|suffix| {
+                                suffix.starts_with(backup::PRE_MIGRATION_MARKER)
+                                    || suffix.starts_with(backup::SAFETY_MARKER)
+                            })
+                        })
+                });
+        if !local_recovery {
+            crate::source::forget_connections(&restored)?;
+            crate::source::retain_connections(&mut restored, &current)?;
+        }
         if let Some(record) = Self::read_last_backup(&current).ok().flatten()
             && backup::table_exists(&restored, "last_backup")?
         {

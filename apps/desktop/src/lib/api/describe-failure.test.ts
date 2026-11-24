@@ -3,6 +3,20 @@ import { BridgeFailure } from "./bridge-failure";
 import { describeFailure, sentence } from "./describe-failure";
 
 describe("describeFailure", () => {
+  it("offers Retry when the source extension has crashed repeatedly", () => {
+    expect(
+      describeFailure(
+        { code: "extension_crash_limit", message: "runtime details" },
+        "sync this connection",
+      ),
+    ).toMatchObject({
+      code: "extension_crash_limit",
+      action: "retry",
+      sentence: "The source extension stopped after repeated crashes.",
+      details: "runtime details",
+    });
+  });
+
   it("says what did not happen in plain words and keeps the raw text for Details", () => {
     const failure = describeFailure(
       {
@@ -35,6 +49,52 @@ describe("describeFailure", () => {
       describeFailure({ code: "too_large", message: "x" }, "attach report.pdf")
         .action,
     ).toBe("change_limit");
+  });
+});
+
+describe("a message written for people", () => {
+  const refusal = {
+    code: "failed",
+    message:
+      "sync storage: storage: the bucket b does not exist; check the name",
+  };
+
+  it("stays out of the headline unless the caller knows the text is its own", () => {
+    expect(describeFailure(refusal, "read the bucket").sentence).toBe(
+      "The result couldn't be confirmed. Check the saved state before trying again.",
+    );
+  });
+
+  it("is the sentence when the caller says so, with the raw text kept for Details", () => {
+    const failure = describeFailure(refusal, "read the bucket", {
+      readable: true,
+    });
+    expect(failure.sentence).toBe(
+      "The bucket b does not exist; check the name.",
+    );
+    expect(failure.details).toBe(refusal.message);
+  });
+
+  it("is also the sentence of a not found failure the caller words itself, and offers another", () => {
+    const failure = describeFailure(
+      { code: "not_found", message: "sync storage: the bucket b is missing" },
+      "read the bucket",
+      { readable: true },
+    );
+    expect(failure.sentence).toBe("The bucket b is missing.");
+    expect(failure.action).toBe("choose_another");
+    expect(
+      describeFailure({ code: "not_found", message: "x" }, "read the bucket")
+        .sentence,
+    ).toBe("It was deleted or moved.");
+  });
+
+  it("never replaces what a classified failure already says", () => {
+    expect(
+      describeFailure({ code: "offline", message: "dns" }, "read the bucket", {
+        readable: true,
+      }).sentence,
+    ).toBe("ticketd can't reach the service. Check the connection.");
   });
 });
 

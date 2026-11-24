@@ -49,7 +49,7 @@ fn the_json_export_carries_automations_agents_and_runs_but_not_device_state() {
     let run = workspace.start_automation_runs(1).unwrap().remove(0);
 
     let export = workspace.export().unwrap();
-    assert_eq!(export["format_version"], 2);
+    assert_eq!(export["format_version"], 3);
     assert_eq!(export["automations"][0]["id"], automation.id);
     assert_eq!(export["automations"][0]["name"], "Triage");
     assert_eq!(export["automation_agents"][0]["id"], agent.id);

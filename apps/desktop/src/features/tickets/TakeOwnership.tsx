@@ -99,7 +99,8 @@ export function TakeOwnership({
         </ul>
         <p className="source-caption">
           <span className="source-number">{source.display}</span> stays as
-          provenance. GitHub comments stay as a read-only archive.
+          provenance. {source.provider_name} comments stay as a read-only
+          archive.
         </p>
         {failure && <FailureAlert size="compact" failure={failure} />}
         <div className="take-ownership-actions">

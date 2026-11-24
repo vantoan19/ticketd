@@ -11,7 +11,7 @@
 
 use std::collections::BTreeMap;
 use std::fmt::Write as _;
-use std::io::{self, Cursor, Write};
+use std::io::{self, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 
 use chrono::{Days, NaiveDate, Utc};
@@ -107,6 +107,8 @@ pub struct KnownValues {
     pub os_username: Option<String>,
     pub workspace_path: Option<String>,
     pub drive_email: Option<String>,
+    /// The AWS identity (ARN) an S3 binding signs in as. Its account ID is replaced too.
+    pub aws_identity: Option<String>,
 }
 
 impl KnownValues {
@@ -120,7 +122,20 @@ impl KnownValues {
                 .find_map(|name| std::env::var(name).ok()),
             workspace_path: workspace_path.map(|path| path.display().to_string()),
             drive_email: drive_email.map(str::to_string),
+            aws_identity: None,
         }
+    }
+
+    /// These values with the AWS identity of an S3 binding added.
+    pub fn with_aws_identity(mut self, identity: Option<&str>) -> Self {
+        self.aws_identity = identity.map(str::to_string);
+        self
+    }
+
+    /// The 12-digit account ID of the ARN in `aws_identity`, as `arn:aws:sts::123456789012:…` has it.
+    fn aws_account_id(&self) -> Option<String> {
+        let id = self.aws_identity.as_deref()?.split(':').nth(4)?;
+        (id.len() == 12 && id.bytes().all(|byte| byte.is_ascii_digit())).then(|| id.to_string())
     }
 }
 
@@ -146,10 +161,13 @@ struct Redactor {
 impl Redactor {
     fn new(known: &KnownValues) -> Self {
         let mut replacements = Vec::new();
+        let aws_account = known.aws_account_id();
         for (value, with) in [
             (&known.workspace_path, "<workspace>"),
             (&known.home, "~"),
             (&known.drive_email, "<drive-account>"),
+            (&known.aws_identity, "<aws-identity>"),
+            (&aws_account, "<aws-account>"),
         ] {
             if let Some(value) = value.as_deref().map(str::trim_end)
                 && !value.is_empty()
@@ -304,7 +322,8 @@ pub(crate) fn write(
         ("workspace.json", json(&facts.workspace, &redactor)?),
         ("errors.json", json(&errors, &redactor)?),
     ];
-    let logs = log_texts(dir, &redactor);
+    let mut logs = extension_log_summaries(dir);
+    logs.extend(log_texts(dir, &redactor));
 
     // Compression decides the size, so cut by trial: build, and if it is too big, keep
     // fewer of the newest lines in proportion to the overshoot.
@@ -360,6 +379,54 @@ fn log_texts(dir: &Path, redactor: &Redactor) -> Vec<(String, Vec<String>)> {
                 .filter_map(|line| redactor.line(line))
                 .collect();
             (format!("logs/ticketd.{}.log", file.day), lines)
+        })
+        .collect()
+}
+
+/// Summarize recent source logs. An extension can write arbitrary private data to stderr.
+fn extension_log_summaries(dir: &Path) -> Vec<(String, Vec<String>)> {
+    const FILE_LIMIT: u64 = 256 * 1024;
+    const RECENT_FILES: usize = 16;
+    let Ok(entries) = std::fs::read_dir(dir.join("sources")) else {
+        return Vec::new();
+    };
+    let cutoff =
+        std::time::SystemTime::now() - std::time::Duration::from_secs(LOG_DAYS * 24 * 60 * 60);
+    let mut files: Vec<_> = entries
+        .filter_map(Result::ok)
+        .filter_map(|entry| {
+            let name = entry.file_name().into_string().ok()?;
+            let id = name
+                .strip_suffix(".1.log")
+                .or_else(|| name.strip_suffix(".log"))?;
+            if id.is_empty()
+                || !id
+                    .bytes()
+                    .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+                || !entry.file_type().ok()?.is_file()
+            {
+                return None;
+            }
+            let modified = entry.metadata().ok()?.modified().ok()?;
+            (modified >= cutoff).then(|| (modified, name, entry.path()))
+        })
+        .collect();
+    files.sort_unstable_by(|left, right| right.cmp(left));
+    files
+        .into_iter()
+        .take(RECENT_FILES)
+        .filter_map(|(_, name, path)| {
+            let mut bytes = Vec::new();
+            std::fs::File::open(path)
+                .ok()?
+                .take(FILE_LIMIT)
+                .read_to_end(&mut bytes)
+                .ok()?;
+            let count = bytes.split_inclusive(|byte| *byte == b'\n').count();
+            Some((
+                format!("logs/sources/{name}"),
+                vec![format!("stderr_lines: {count}")],
+            ))
         })
         .collect()
 }

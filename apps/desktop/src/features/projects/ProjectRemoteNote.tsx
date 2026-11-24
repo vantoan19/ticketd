@@ -42,29 +42,37 @@ export function ProjectRemoteNote({
   useEffect(() => {
     if (!projectId || !key) return;
     let current = true;
-    void sourcesClient.previewConnectSource("github", projectId).then(
-      (preview) => {
-        if (current)
-          setSource({
-            key,
-            action:
-              preview.source !== "already_listed"
-                ? "setup"
-                : preview.tickets.length
-                  ? "backfill"
-                  : "none",
-          });
-      },
-      (reason) => {
-        if (current)
-          setSource({
-            key,
-            action:
-              toFailure(reason).code === "project_source_host_mismatch"
-                ? "setup"
-                : "none",
-          });
-      },
+    async function readSourceAction(projectId: string) {
+      const candidates = await sourcesClient.projectSourceCandidates(projectId);
+      if (!candidates.length) return "setup";
+      const results = await Promise.allSettled(
+        candidates.map(({ source }) =>
+          sourcesClient.previewConnectSource(source, projectId),
+        ),
+      );
+      const previews = results.flatMap((result) =>
+        result.status === "fulfilled" ? [result.value] : [],
+      );
+      const listed = previews.filter(
+        ({ source }) => source === "already_listed",
+      );
+      if (listed.length)
+        return listed.some(({ tickets }) => tickets.length)
+          ? "backfill"
+          : "none";
+      return previews.length ? "setup" : "none";
+    }
+    void readSourceAction(projectId).then(
+      (action) => current && setSource({ key, action }),
+      (reason) =>
+        current &&
+        setSource({
+          key,
+          action:
+            toFailure(reason).code === "project_source_host_mismatch"
+              ? "setup"
+              : "none",
+        }),
     );
     return () => {
       current = false;
@@ -88,7 +96,7 @@ export function ProjectRemoteNote({
                 ? `Detected ${suggested}.`
                 : "Detected checkout remotes."
               : action === "backfill"
-                ? "Existing GitHub tickets can be linked to this project."
+                ? "Existing source tickets can be linked to this project."
                 : "Issues from this repository aren't being imported."}{" "}
             <Button
               type="button"

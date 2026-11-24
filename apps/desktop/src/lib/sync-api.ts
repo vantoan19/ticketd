@@ -62,6 +62,17 @@ export const syncRecoveries = [
   "offline",
   /** Google Drive asked for fewer requests; sync tries again by itself. */
   "rate_limited",
+  /**
+   * The S3 profile now reaches another service than the Workspace's bucket was connected
+   * through; `recovery_message` says which. Disconnect (then connect again) moves the bucket
+   * on purpose; pointing the profile back, then Retry, undoes the edit.
+   */
+  "service_changed",
+  /**
+   * The `aws` program is missing or too old; `recovery_message` says which. Choosing where
+   * it is (or installing it), then Retry, gets sync going again.
+   */
+  "cli_unavailable",
   /** Any other failed run; `recovery_message` says what went wrong. */
   "error",
 ] as const;
@@ -74,8 +85,19 @@ const statusSchema = z.object({
    * `connected`: this Workspace syncs with `folder`.
    */
   connection: z.enum(["not_connected", "choosing", "connected"]),
-  /** The signed-in Google account's email address. */
+  /** The signed-in Google account's email address (an AWS identity for S3). */
   account: z.string().nullable(),
+  /** The storage this Workspace syncs with. Wording that names it follows this. */
+  provider: z.enum(["google_drive", "s3"]),
+  /** For S3: the bucket and prefix of the Workspace folders and this desktop's AWS CLI profile. */
+  s3: z
+    .object({
+      bucket: z.string(),
+      prefix: z.string(),
+      profile: z.string(),
+      aws_cli_path: z.string().nullable(),
+    })
+    .nullable(),
   /** The Workspace's Drive folder, once connected. */
   folder: z.object({ name: z.string() }).nullable(),
   state: z.enum(syncStates),
@@ -94,7 +116,7 @@ const statusSchema = z.object({
   }),
   needs_review: z.array(reviewItemSchema),
   recovery: z.enum(syncRecoveries).nullable(),
-  /** What went wrong, while `recovery` is `error`. */
+  /** What went wrong, while `recovery` is `error`, `service_changed` or `cli_unavailable`. */
   recovery_message: z.string().nullable().optional(),
   /** Progress of the first upload or download after setup; `null` once it finished. */
   first_sync: z
@@ -106,6 +128,8 @@ const statusSchema = z.object({
     .nullable(),
 });
 export type SyncStatus = z.infer<typeof statusSchema>;
+/** The storage a Workspace syncs with. */
+export type SyncProvider = SyncStatus["provider"];
 
 const countsSchema = z.object({
   tickets: z.number().int().nonnegative(),
@@ -170,6 +194,14 @@ export const syncApi = {
    * Leaves a connected Workspace connected, so it also serves to sign in again.
    */
   connect: () => status(invoke("sync_connect")),
+
+  /**
+   * `sync_connect_s3`: records S3 as this Workspace's storage, signed in through
+   * the AWS CLI `profile`. The prefix is written as the person likes; the host
+   * keeps it with one trailing slash. Choosing a Workspace follows.
+   */
+  connectS3: (change: { bucket: string; prefix: string; profile: string }) =>
+    status(invoke("sync_connect_s3", change)),
 
   /** `sync_setup_options`: what the setup choices would do, while `choosing`. */
   async setupOptions(): Promise<SyncSetupOptions> {

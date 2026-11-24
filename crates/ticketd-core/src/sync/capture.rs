@@ -170,6 +170,19 @@ pub(crate) fn migrate_unchanged_tickets(connection: &Connection) -> Result<(), E
     Ok(())
 }
 
+/// Capture portable state changes without syncing local refresh metadata.
+pub(crate) fn migrate_source_observation_capture(connection: &Connection) -> Result<(), Error> {
+    let marks = mark(Ticket.as_str(), "NEW", "ticket_id");
+    connection.execute_batch(&format!(
+        "CREATE TRIGGER IF NOT EXISTS sync_capture_source_observation AFTER UPDATE ON source_sync
+         WHEN (SELECT applying FROM sync_capture) = 0 AND (
+             OLD.state_category IS NOT NEW.state_category OR OLD.state_name IS NOT NEW.state_name
+             OR OLD.external_updated_at IS NOT NEW.external_updated_at
+         ) BEGIN {marks} END;"
+    ))?;
+    Ok(())
+}
+
 impl Workspace {
     /// Records changed locally and not yet cleared, oldest change first.
     pub fn dirty_records(&self) -> Result<Vec<DirtyRecord>, Error> {

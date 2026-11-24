@@ -1,24 +1,4 @@
 /* Source pages: schema-rendered form, suggestions, and discovery preview. */
-.source-form {
-  display: flex;
-  flex-flow: row wrap;
-  gap: 16px;
-}
-.source-field {
-  display: flex;
-  flex: 1 1 240px;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 0;
-}
-.source-field[data-field="repositories"] {
-  flex-basis: 100%;
-}
-.source-field > label {
-  font-weight: 400;
-  color: var(--secondary-foreground);
-  line-height: 20px;
-}
 .source-required {
   font-size: var(--text-caption);
   font-weight: 400;
@@ -31,9 +11,6 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
   color: var(--muted-foreground);
-}
-.source-field > .source-field-note {
-  margin-top: -4px;
 }
 
 /* The token field wears the Input's outline: the control boundary in dark,

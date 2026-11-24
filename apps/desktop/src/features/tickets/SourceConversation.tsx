@@ -37,25 +37,55 @@ function describeEvent(entry: EventEntry): {
   const actor = entry.actor ?? "Someone";
   const subject = entry.subject;
   switch (entry.event) {
-    case "closed_completed":
-      return {
-        text: `${actor} closed this as completed`,
-        icon: statusIcons.Done,
-      };
-    case "closed_not_planned":
-      return {
-        text: `${actor} closed this as not planned`,
-        icon: statusIcons.Canceled,
-      };
-    case "closed_duplicate":
-      return {
-        text: `${actor} closed this as a duplicate${subject ? ` of ${subject}` : ""}`,
-        icon: statusIcons.Duplicate,
-      };
     case "closed":
-      return { text: `${actor} closed this`, icon: Circle };
+      switch (entry.state_category) {
+        case "completed":
+          return {
+            text: `${actor} closed this as completed`,
+            icon: statusIcons.Done,
+          };
+        case "not_planned":
+          return {
+            text: `${actor} closed this as not planned`,
+            icon: statusIcons.Canceled,
+          };
+        case "duplicate":
+          return {
+            text: `${actor} closed this as a duplicate${subject ? ` of ${subject}` : ""}`,
+            icon: statusIcons.Duplicate,
+          };
+        default:
+          return { text: `${actor} closed this`, icon: Circle };
+      }
     case "reopened":
       return { text: `${actor} reopened this`, icon: Circle };
+    case "state_changed":
+      return {
+        text: subject
+          ? `${actor} moved this to ${subject}`
+          : `${actor} changed the workflow state`,
+        icon: Circle,
+      };
+    case "marked_duplicate":
+      return {
+        text: `${actor} marked this as a duplicate${subject ? ` of ${subject}` : ""}`,
+        icon: statusIcons.Duplicate,
+      };
+    case "unmarked_duplicate":
+      return {
+        text: `${actor} removed this duplicate link${subject ? ` to ${subject}` : ""}`,
+        icon: statusIcons.Duplicate,
+      };
+    case "duplicate_added":
+      return {
+        text: `${actor} linked ${subject ?? "an issue"} as a duplicate of this`,
+        icon: statusIcons.Duplicate,
+      };
+    case "duplicate_removed":
+      return {
+        text: `${actor} removed ${subject ?? "an issue"} as a duplicate of this`,
+        icon: statusIcons.Duplicate,
+      };
     case "assigned":
       return {
         text:

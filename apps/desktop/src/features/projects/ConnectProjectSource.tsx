@@ -1,7 +1,17 @@
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureAlert } from "@/components/ui/failure-alert";
+import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { useSourceActivity } from "@/features/tickets/source-activity";
 import { toFailure } from "@/lib/api/bridge-failure";
 import {
   describeFailure,
@@ -11,6 +21,7 @@ import {
   sourcesClient,
   type ConnectSourceMatchCount,
   type ConnectSourcePreview,
+  type ProjectSourceCandidate,
 } from "@/lib/api/sources";
 import { plural } from "@/lib/format";
 
@@ -29,10 +40,13 @@ type Exit =
   | { action: "skip" | "connected" | "edit" }
   | { action: "setup"; setup: ProjectSourceSetup };
 
-const PROVIDER = "github";
+type Choices =
+  { candidates: ProjectSourceCandidate[] } | { failure: FailureDescription };
 
 type ReviewProps = {
   projectId: string;
+  projectRemote?: string;
+  connection?: string;
   onClose: () => void;
   onSetup: (setup: ProjectSourceSetup) => void;
   onConnected: () => void;
@@ -43,12 +57,19 @@ type ReviewProps = {
 };
 
 export function ConnectProjectSource(props: ReviewProps) {
-  return <ProjectSourceReview key={props.projectId} {...props} />;
+  return (
+    <ProjectSourceReview
+      key={JSON.stringify([props.projectId, props.connection])}
+      {...props}
+    />
+  );
 }
 
 /** Review the exact effect, with a separate live count when adding discovery. */
 function ProjectSourceReview({
   projectId,
+  projectRemote,
+  connection,
   onClose,
   onSetup,
   onConnected,
@@ -56,9 +77,13 @@ function ProjectSourceReview({
   fallbackFocus,
   resumeAfterSetup = false,
 }: ReviewProps) {
+  const fieldId = useId();
+  const entries = useSourceActivity().entries;
   const [opener] = useState(() => document.activeElement);
   const [exit, setExit] = useState<Exit | null>(null);
   const [revision, setRevision] = useState(0);
+  const [choices, setChoices] = useState<Choices | null>(null);
+  const [selected, setSelected] = useState("");
   const [state, setState] = useState<PreviewState>({ status: "loading" });
   const [countRevision, setCountRevision] = useState(0);
   const [count, setCount] = useState<{
@@ -71,7 +96,41 @@ function ProjectSourceReview({
   const [changed, setChanged] = useState(false);
   useEffect(() => {
     let current = true;
-    void sourcesClient.previewConnectSource(PROVIDER, projectId).then(
+    void sourcesClient.projectSourceCandidates(projectId).then(
+      (candidates) => {
+        if (current) setChoices({ candidates });
+      },
+      (reason) => {
+        if (current)
+          setChoices({
+            failure: describeFailure(reason, "load source connections"),
+          });
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [projectId, revision]);
+  const candidates =
+    choices && "candidates" in choices ? choices.candidates : [];
+  const candidate = connection
+    ? candidates.find(({ connection_id }) => connection_id === connection)
+    : selected
+      ? candidates.find(({ source }) => source === selected)
+      : candidates.length === 1
+        ? candidates[0]
+        : undefined;
+  const showPicker =
+    !connection &&
+    (candidates.length > 1 || (candidates.length === 1 && !candidate));
+  const source = candidate?.source;
+  const sourceName =
+    entries?.find(({ connector }) => connector.provider === candidate?.provider)
+      ?.connector.name ?? candidate?.name;
+  useEffect(() => {
+    if (!source) return;
+    let current = true;
+    void sourcesClient.previewConnectSource(source, projectId).then(
       (preview) => {
         if (!current) return;
         if (
@@ -95,7 +154,7 @@ function ProjectSourceReview({
     return () => {
       current = false;
     };
-  }, [projectId, resumeAfterSetup, revision]);
+  }, [projectId, resumeAfterSetup, source]);
 
   const preview = state.status === "ready" ? state.preview : null;
   const needsSetup = preview?.source === "not_connected";
@@ -103,10 +162,10 @@ function ProjectSourceReview({
   const fingerprint = addsRepository ? preview.fingerprint : null;
   const matchCount = count?.fingerprint === fingerprint ? count : null;
   useEffect(() => {
-    if (!fingerprint || exit) return;
+    if (!fingerprint || !source || exit) return;
     let current = true;
     void sourcesClient
-      .connectSourceMatchCount(PROVIDER, projectId, fingerprint)
+      .connectSourceMatchCount(source, projectId, fingerprint)
       .then(
         (result) => {
           if (current) setCount({ fingerprint, result, failure: null });
@@ -123,11 +182,17 @@ function ProjectSourceReview({
     return () => {
       current = false;
     };
-  }, [projectId, fingerprint, countRevision, exit]);
+  }, [projectId, source, fingerprint, countRevision, exit]);
 
-  function reload() {
+  function resetPreview() {
     setState({ status: "loading" });
     setCount(null);
+    setFailure(null);
+  }
+
+  function reload() {
+    resetPreview();
+    setChoices(null);
     setRevision((previous) => previous + 1);
   }
 
@@ -143,11 +208,20 @@ function ProjectSourceReview({
 
   const linkCount = preview?.tickets.length ?? 0;
   const hasEffect = needsSetup || addsRepository || linkCount > 0;
-  const error = state.status === "failed" ? state.failure : failure;
+  const error =
+    choices && "failure" in choices
+      ? choices.failure
+      : state.status === "failed"
+        ? state.failure
+        : failure;
+  const unavailable =
+    choices &&
+    "candidates" in choices &&
+    (candidates.length === 0 || (connection && !candidate));
   const countFailure = matchCount?.failure;
 
   async function confirm() {
-    if (!preview) return;
+    if (!preview || !source) return;
     if (preview.source === "not_connected") {
       setExit({
         action: "setup",
@@ -163,11 +237,7 @@ function ProjectSourceReview({
     setChanged(false);
     setFailure(null);
     try {
-      await sourcesClient.connectSource(
-        preview.provider,
-        projectId,
-        preview.fingerprint,
-      );
+      await sourcesClient.connectSource(source, projectId, preview.fingerprint);
       setExit({ action: "connected" });
     } catch (reason) {
       const error = toFailure(reason);
@@ -175,7 +245,7 @@ function ProjectSourceReview({
         setChanged(true);
         reload();
       } else {
-        setFailure(describeFailure(error, "connect the project to GitHub"));
+        setFailure(describeFailure(error, "connect the project to the source"));
       }
     } finally {
       setBusy(false);
@@ -202,12 +272,22 @@ function ProjectSourceReview({
           ? opener
           : (fallbackFocus?.() ?? null)
       }
-      title="Connect project to GitHub"
+      title={
+        sourceName
+          ? `Connect project to ${sourceName}`
+          : "Connect project to a source"
+      }
       primaryLabel={
-        hasEffect ? (needsSetup ? "Set up GitHub" : "Confirm") : null
+        hasEffect
+          ? needsSetup
+            ? `Set up ${sourceName ?? "source"}`
+            : "Confirm"
+          : null
       }
       cancelLabel={
-        error?.code === "project_source_host_mismatch" ? "Close" : "Skip"
+        unavailable || error?.code === "project_source_host_mismatch"
+          ? "Close"
+          : "Skip"
       }
       busy={busy}
       blockedReason={
@@ -225,7 +305,7 @@ function ProjectSourceReview({
           <FailureAlert
             size="compact"
             failure={error}
-            onRetry={state.status === "failed" ? reload : () => void confirm()}
+            onRetry={failure ? () => void confirm() : reload}
             actions={
               error.code === "project_source_host_mismatch" &&
               onEditRemote && (
@@ -245,14 +325,64 @@ function ProjectSourceReview({
         ) : null
       }
     >
-      {state.status === "loading" && (
+      {showPicker && (
+        <FieldGroup>
+          <Field data-disabled={busy || undefined}>
+            <FieldLabel htmlFor={fieldId}>Source connection</FieldLabel>
+            <Select
+              value={candidate?.source ?? ""}
+              onValueChange={(value) => {
+                resetPreview();
+                setChanged(false);
+                setSelected(value);
+              }}
+              disabled={busy}
+            >
+              <SelectTrigger id={fieldId}>
+                <SelectValue placeholder="Choose a source connection…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  {candidates.map(({ source, name }) => (
+                    <SelectItem key={source} value={source}>
+                      {name}
+                    </SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+          </Field>
+        </FieldGroup>
+      )}
+      {candidate?.connection_id && !showPicker && (
+        <p>Source connection {candidate.name}</p>
+      )}
+      {unavailable && (
+        <p>
+          {connection
+            ? `This source connection is unavailable for ${projectRemote ?? "the Project remote"}.`
+            : `No source connection matches ${projectRemote ?? "this Project remote"}.`}{" "}
+          {onEditRemote && (
+            <Button
+              type="button"
+              variant="link"
+              size="inline"
+              onClick={() => setExit({ action: "edit" })}
+            >
+              Edit Project remote
+            </Button>
+          )}
+        </p>
+      )}
+      {(!choices || (candidate && state.status === "loading")) && (
         <p role="status">Checking source setup…</p>
       )}
       {preview && (
         <>
           {needsSetup && (
             <p>
-              Connect GitHub with {preview.repository} to import its issues.
+              Connect {sourceName} with {preview.repository} to import its
+              issues.
             </p>
           )}
           {addsRepository && (

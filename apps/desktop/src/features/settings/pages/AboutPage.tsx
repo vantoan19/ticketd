@@ -43,7 +43,7 @@ const PROMISES = [
     icon: HardDrive,
     title: "Stays on this computer",
     description:
-      "No analytics or crash uploads. Only update checks and the integrations you turn on, such as Google Drive and GitHub, go online.",
+      "No analytics or crash uploads. Only update checks and the integrations you turn on, such as Google Drive or a ticket source, go online.",
   },
 ];
 

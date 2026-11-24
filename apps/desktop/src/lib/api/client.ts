@@ -9,14 +9,11 @@ import { ticketStatuses } from "@/lib/statuses";
 export type { PublicationAttempt } from "@/lib/api/publication";
 
 const statusSchema = lazySchema(() => z.enum(ticketStatuses));
+const stateCategorySchema = lazySchema(() =>
+  z.enum(["open", "completed", "not_planned", "duplicate", "unknown"]),
+);
 const externalStateSchema = lazySchema(() =>
-  z.discriminatedUnion("state", [
-    z.object({ state: z.literal("open") }),
-    z.object({
-      state: z.literal("closed"),
-      reason: z.enum(["completed", "not_planned", "duplicate", "unknown"]),
-    }),
-  ]),
+  z.object({ category: stateCategorySchema, name: z.string().nullish() }),
 );
 const duplicateTargetSchema = lazySchema(() =>
   z.discriminatedUnion("kind", [
@@ -44,8 +41,11 @@ const ticketSourceSchema = lazySchema(() =>
     provider: z.string(),
     /** What people call the provider, such as "GitHub". */
     provider_name: z.string(),
+    provider_icon_svg: z.string().nullish(),
     /** Where the issue lives, such as "owner/repo". */
     place: z.string(),
+    place_label: z.string().optional(),
+    duplicate_number: z.string().optional(),
     /** The provider's short number for the issue, such as "#98". */
     number: z.string(),
     id: z.string(),
@@ -64,7 +64,7 @@ const ticketSourceSchema = lazySchema(() =>
     author: z.string().nullish(),
     /** When the issue was opened at the source; unknown until a refresh reads it. */
     created_at: z.string().nullish(),
-    /** The source closed the issue with a reason ticketd does not recognize. */
+    /** The source reported a state category ticketd cannot map to a status. */
     closure_unrecognized: z.boolean(),
     last_refreshed_at: z.string().nullable(),
     last_attempt_at: z.string().nullable(),
@@ -507,6 +507,7 @@ const conversationEntrySchema = lazySchema(() =>
       type: z.literal("event"),
       id: z.string(),
       event: z.string(),
+      state_category: stateCategorySchema.optional(),
       actor: z.string().nullable(),
       subject: z.string().nullable(),
       created_at: z.string(),
@@ -746,27 +747,27 @@ export const client = {
     return z.array(projectSchema).parse(await invoke("list_projects"));
   },
   async linkSourceRepositoryProject(
-    provider: string,
+    connection: string,
     repository: string,
     projectId: string,
   ) {
     return projectSchema.parse(
       await invoke("link_source_repository_project", {
-        provider,
+        connection,
         repository,
         projectId,
       }),
     );
   },
   async createSourceRepositoryProject(
-    provider: string,
+    connection: string,
     repository: string,
     name: string,
     path: string,
   ) {
     return projectSchema.parse(
       await invoke("create_source_repository_project", {
-        provider,
+        connection,
         repository,
         name,
         path,

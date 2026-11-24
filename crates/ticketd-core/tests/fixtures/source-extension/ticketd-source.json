@@ -1,0 +1,6 @@
+{
+  "id": "scripted",
+  "version": "0.0.1",
+  "executable": "node",
+  "args": ["driver.mjs"]
+}

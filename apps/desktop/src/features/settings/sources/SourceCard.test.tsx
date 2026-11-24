@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { githubSource } from "@/test/source-fixtures";
 import {
   act,
   cleanup,
@@ -13,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ConnectProjectSource } from "@/features/projects/ConnectProjectSource";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
+import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { SettingsNav } from "@/features/settings/SettingsNav";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { workspaceClient } from "@/lib/api/workspace";
@@ -22,6 +24,7 @@ import {
   sourcesClient,
   type DiscoveryPreview,
   type SourceEntry,
+  type SourceStatus,
 } from "@/lib/api/sources";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -33,21 +36,26 @@ vi.mock("@/lib/api/sources", async (importOriginal) => ({
   sourcesClient: {
     list: vi.fn(),
     checkConnection: vi.fn(),
+    configurationSummary: vi.fn(),
     repositoryRoutes: vi.fn(),
+    projectSourceCandidates: vi.fn(),
     previewConnectSource: vi.fn(),
     connectSource: vi.fn(),
     options: vi.fn(),
     preview: vi.fn(),
     save: vi.fn(),
+    add: vi.fn(),
+    signIn: vi.fn(),
+    rename: vi.fn(),
+    remove: vi.fn(),
+    refresh: vi.fn(),
+    cancelRefresh: vi.fn(),
   },
 }));
 
 const entry: SourceEntry = {
   connector: {
-    provider: "github",
-    name: "GitHub",
-    contract_version: 1,
-    capabilities: ["discover", "fetch"],
+    ...githubSource.connector,
     schema: {
       fields: [
         {
@@ -79,6 +87,8 @@ const entry: SourceEntry = {
 const savedRepositories: SourceEntry = {
   ...entry,
   saved: {
+    id: "github-2",
+    name: "Backend source",
     provider: "github",
     config: { repositories: ["o/r", "other/repo"] },
     account: "octo",
@@ -106,6 +116,7 @@ test("the project column shows saved repository routes while editing discovery",
   const table = await screen.findByRole("table", {
     name: "Saved repository routes",
   });
+  expect(sourcesClient.repositoryRoutes).toHaveBeenCalledWith("github-2");
   expect(
     within(table).getByRole("columnheader", { name: "Project" }),
   ).toBeTruthy();
@@ -126,14 +137,22 @@ test("the project column shows saved repository routes while editing discovery",
 });
 
 function SourceCardWithProjectReview() {
-  const [projectId, setProjectId] = useState<string | null>(null);
+  const [review, setReview] = useState<{
+    projectId: string;
+    connection: string;
+  } | null>(null);
   return (
     <>
-      <SourceCard entry={savedRepositories} onProjectLinked={setProjectId} />
-      {projectId && (
+      <SourceCard
+        entry={savedRepositories}
+        onProjectLinked={(projectId, connection) =>
+          setReview({ projectId, connection })
+        }
+      />
+      {review && (
         <ConnectProjectSource
-          projectId={projectId}
-          onClose={() => setProjectId(null)}
+          {...review}
+          onClose={() => setReview(null)}
           onSetup={() => {}}
           onConnected={() => {}}
         />
@@ -171,6 +190,7 @@ test("linking offers unclaimed projects and then reviews only backfill", async (
   vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue(repositoryRoutes);
   vi.mocked(sourcesClient.previewConnectSource).mockResolvedValue({
     provider: "github",
+    connection_id: "github-2",
     project_id: linked.id,
     repository: "other/repo",
     project_remote: linked.remote,
@@ -197,7 +217,7 @@ test("linking offers unclaimed projects and then reviews only backfill", async (
   fireEvent.click(screen.getByRole("button", { name: "Link project" }));
 
   const review = await screen.findByRole("dialog", {
-    name: "Connect project to GitHub",
+    name: "Connect project to Backend source",
   });
   expect(
     await within(review).findByText("Link 1 existing ticket"),
@@ -208,10 +228,15 @@ test("linking offers unclaimed projects and then reviews only backfill", async (
     await screen.findByRole("row", { name: /other\/repo.*Backend/ }),
   ).toBeTruthy();
   expect(sourcesClient.connectSource).toHaveBeenCalledWith(
-    "github",
+    "github-2",
     "p2",
     "reviewed",
   );
+  expect(invoke).toHaveBeenCalledWith("link_source_repository_project", {
+    connection: "github-2",
+    repository: "other/repo",
+    projectId: "p2",
+  });
 });
 
 test("create project chooses a checkout and uses the saved repository as the Project remote", async () => {
@@ -231,6 +256,7 @@ test("create project chooses a checkout and uses the saved repository as the Pro
   vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue(repositoryRoutes);
   vi.mocked(sourcesClient.previewConnectSource).mockResolvedValue({
     provider: "github",
+    connection_id: "github-2",
     project_id: created.id,
     repository: "other/repo",
     project_remote: created.remote,
@@ -261,7 +287,7 @@ test("create project chooses a checkout and uses the saved repository as the Pro
 
   expect(await screen.findByText("No existing tickets to link.")).toBeTruthy();
   expect(invoke).toHaveBeenCalledWith("create_source_repository_project", {
-    provider: "github",
+    connection: "github-2",
     repository: "other/repo",
     name: created.name,
     path: created.path,
@@ -324,6 +350,7 @@ const preview: DiscoveryPreview = {
   issues: [
     {
       display: "o/r#1",
+      label: "r#1",
       url: "https://github.example/o/r/issues/1",
       title: "First issue",
       assignees: [],
@@ -337,7 +364,22 @@ const preview: DiscoveryPreview = {
 
 beforeEach(() => {
   vi.mocked(sourcesClient.options).mockResolvedValue([]);
+  vi.mocked(sourcesClient.configurationSummary).mockResolvedValue([]);
   vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue([]);
+  vi.mocked(sourcesClient.projectSourceCandidates).mockResolvedValue([
+    {
+      source: "github",
+      provider: "github",
+      connection_id: "github",
+      name: "Other source",
+    },
+    {
+      source: "github-2",
+      provider: "github",
+      connection_id: "github-2",
+      name: "Backend source",
+    },
+  ]);
   vi.mocked(sourcesClient.checkConnection).mockResolvedValue({
     account: "octo",
   });
@@ -446,15 +488,19 @@ test("preview lists matches, then Save turns discovery on without importing at o
   expect(panel.textContent).toContain("1 issue matches");
   expect(panel.textContent).toContain("First issue");
   expect(panel.textContent).toContain("nothing has been imported");
-  expect(sourcesClient.preview).toHaveBeenCalledWith("github", {
-    repositories: ["o/r"],
-  });
+  expect(sourcesClient.preview).toHaveBeenCalledWith(
+    "github",
+    { repositories: ["o/r"] },
+    undefined,
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Save" }));
   await screen.findByText(/Matching issues are imported on the next sync/);
-  expect(sourcesClient.save).toHaveBeenCalledWith("github", {
-    repositories: ["o/r"],
-  });
+  expect(sourcesClient.save).toHaveBeenCalledWith(
+    "github",
+    { repositories: ["o/r"] },
+    undefined,
+  );
   expect(panelStatus()).toBe("Saved configuration");
 });
 
@@ -536,6 +582,105 @@ test("field problems from the core appear beside their fields", async () => {
   );
 });
 
+test("conditional settings, advanced fields and setup links use the source schema", async () => {
+  const richer: SourceEntry = {
+    ...entry,
+    connector: {
+      ...entry.connector,
+      schema: {
+        fields: [
+          ...entry.connector.schema.fields,
+          { key: "site", label: "Site", type: "text", required: false },
+          {
+            key: "project",
+            label: "Project key",
+            type: "text",
+            show_if: "site",
+            advanced: true,
+            required: true,
+            placeholder: "ENG-1",
+            help: "Use the key from the project settings.",
+            pattern: {
+              regex: "^ENG-[0-9]+$",
+              message: "must use an engineering key",
+            },
+          },
+          {
+            key: "setup",
+            label: "Set up the connection",
+            required: false,
+            type: "link",
+            url: "https://example.com/setup",
+          },
+          {
+            key: "unsafe",
+            label: "Unsafe link",
+            required: false,
+            type: "link",
+            url: "http://example.com/setup",
+          },
+          {
+            key: "unbound",
+            label: "Unbound link",
+            required: false,
+            type: "link",
+            url: "https:example.com/setup",
+          },
+        ],
+      },
+    },
+  };
+  vi.mocked(sourcesClient.preview).mockRejectedValue({
+    code: "invalid_configuration",
+    message: "configuration invalid",
+    fields: [
+      { message: "This account and site cannot be used together." },
+      { field: "project", message: "must use an engineering key" },
+    ],
+  });
+  render(<SourceCard entry={richer} />);
+  expect(
+    screen
+      .getByRole("link", { name: "Set up the connection" })
+      .getAttribute("href"),
+  ).toBe("https://example.com/setup");
+  expect(screen.queryByRole("link", { name: "Unsafe link" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Unbound link" })).toBeNull();
+  expect(screen.queryByRole("textbox", { name: "Project key" })).toBeNull();
+
+  await addRepository("o/r");
+  fireEvent.change(screen.getByLabelText(/Site/), {
+    target: { value: "example" },
+  });
+  expect(screen.queryByRole("textbox", { name: "Project key" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Advanced settings" }));
+  const project = screen.getByLabelText(/Project key/);
+  expect(project.getAttribute("placeholder")).toBe("ENG-1");
+  expect(project.getAttribute("aria-required")).toBe("true");
+  expect(
+    screen.getByText("Use the key from the project settings."),
+  ).toBeTruthy();
+  fireEvent.change(project, { target: { value: "bad" } });
+  fireEvent.click(screen.getByRole("button", { name: "Advanced settings" }));
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByText("This account and site cannot be used together.");
+  expect(
+    screen.getByText("Project key must use an engineering key"),
+  ).toBeTruthy();
+  expect(
+    screen.getByLabelText(/Project key/).getAttribute("aria-invalid"),
+  ).toBe("true");
+
+  fireEvent.change(screen.getByLabelText(/Site/), { target: { value: "" } });
+  expect(screen.queryByRole("textbox", { name: "Project key" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  expect(sourcesClient.preview).toHaveBeenLastCalledWith(
+    "github",
+    { repositories: ["o/r"] },
+    undefined,
+  );
+});
+
 test("a saved configuration is shown as saved until edited", () => {
   render(
     <SourceCard
@@ -576,6 +721,7 @@ test("dynamic suggestions come from the connector and can be picked", async () =
     "repositories",
     "",
     {},
+    undefined,
   );
   fireEvent.click(screen.getByRole("button", { name: "Add o/alpha" }));
   expect(screen.getByRole("button", { name: "Remove o/alpha" })).toBeTruthy();
@@ -593,6 +739,29 @@ test("the account is checked once on opening, apart from the saved rules", async
   fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
   await screen.findByText("Not signed in to GitHub");
   expect(screen.queryByText(/rejected the credential/)).toBeNull();
+});
+
+test("a connection check that needs required settings shows the field to complete", async () => {
+  vi.mocked(sourcesClient.checkConnection).mockRejectedValueOnce(
+    new SourceFailure(
+      "invalid_configuration",
+      "settings are incomplete",
+      null,
+      [{ field: "repositories", message: "are required for this check" }],
+    ),
+  );
+  render(<SourceCard entry={entry} />);
+  await screen.findByText("Connection settings need attention");
+  expect(
+    screen.getByText("Repositories are required for this check"),
+  ).toBeTruthy();
+
+  await addRepository("o/r");
+  expect(
+    screen.queryByText("Repositories are required for this check"),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Check connection" }));
+  await screen.findByText("Signed in as octo");
 });
 
 test("a hidden source page does not check the account until it is shown", async () => {
@@ -881,6 +1050,162 @@ test("a saved source without a credential shows one row that says how to sign in
   expect(screen.getByText("Saved for octo")).toBeTruthy();
 });
 
+test("credential replacement stays signed in through an unavailable health read", async () => {
+  const saved = {
+    id: "credential-example",
+    provider: "github",
+    config: { repositories: ["o/r"] },
+    account: "octo",
+    saved_at: "2026-02-01T00:00:00Z",
+    secret_fields: ["api_key"],
+  };
+  let rejectCheck: (error: SourceFailure) => void = () => {};
+  vi.mocked(sourcesClient.checkConnection).mockImplementationOnce(
+    () =>
+      new Promise((_resolve, reject) => {
+        rejectCheck = reject;
+      }),
+  );
+  vi.mocked(sourcesClient.signIn).mockResolvedValue({
+    ...saved,
+    session_secret_fields: ["api_key"],
+  });
+  const failedHealth: SourceStatus = {
+    provider: saved.provider,
+    connection_id: saved.id,
+    health: "unavailable",
+    last_attempt_at: null,
+    last_refreshed_at: null,
+    error: {
+      code: "unauthenticated",
+      message: "The tracker rejected the key",
+    },
+    failing_since: null,
+    retry_after: null,
+    unavailable_tickets: 0,
+    partial_message: null,
+  };
+  const readHealth = vi
+    .fn(async () => {})
+    .mockRejectedValueOnce(new Error("Health read failed"));
+  function Fixture() {
+    const [shown, setShown] = useState(true);
+    const [verifiedCredentials, setVerifiedCredentials] = useState(
+      new Map<string, { account: string; read: number }>(),
+    );
+    const [failure, setFailure] = useState(0);
+    return (
+      <SourceActivityContext.Provider
+        value={{
+          refreshing: false,
+          sources: [failedHealth],
+          entries: null,
+          intervalSecs: 300,
+          openSettings: () => {},
+          refreshAll: async () => {},
+          verifiedCredentials,
+          healthReadFailure: failure,
+          readHealth: (verified) => {
+            const generation = readHealth.mock.calls.length + 2;
+            if (verified)
+              setVerifiedCredentials(
+                new Map([
+                  [
+                    verified.connection,
+                    { account: verified.account, read: generation },
+                  ],
+                ]),
+              );
+            void readHealth().then(
+              () => setVerifiedCredentials(new Map()),
+              () => setFailure(generation),
+            );
+          },
+        }}
+      >
+        <button type="button" onClick={() => setShown(!shown)}>
+          Toggle source page
+        </button>
+        {shown && (
+          <SourceCard
+            entry={{
+              ...entry,
+              connector: {
+                ...entry.connector,
+                schema: {
+                  fields: [
+                    ...entry.connector.schema.fields,
+                    {
+                      key: "api_key",
+                      label: "API key",
+                      required: true,
+                      type: "secret",
+                    },
+                    {
+                      key: "conditional_key",
+                      label: "Conditional credential",
+                      required: false,
+                      type: "secret",
+                      show_if: "assignee",
+                    },
+                  ],
+                },
+              },
+              saved,
+            }}
+          />
+        )}
+      </SourceActivityContext.Provider>
+    );
+  }
+  render(<Fixture />);
+  await screen.findByText("Needs sign-in");
+  fireEvent.click(screen.getByRole("button", { name: "Re-enter credentials" }));
+  const dialog = within(
+    screen.getByRole("dialog", { name: "Re-enter credentials" }),
+  );
+  const input = dialog.getByLabelText(/API key/);
+  expect(input.getAttribute("type")).toBe("password");
+  expect(input.getAttribute("value")).toBe("");
+  expect(
+    dialog.queryByLabelText(/Repositories|Conditional credential/),
+  ).toBeNull();
+  fireEvent.change(input, {
+    target: { value: "synthetic replacing credential" },
+  });
+  fireEvent.click(dialog.getByRole("button", { name: "Save credentials" }));
+  await screen.findByText(/credentials last until ticketd closes/);
+  expect(readHealth).toHaveBeenCalledOnce();
+  await screen.findByText("Signed in as octo");
+  await act(async () => {
+    rejectCheck(
+      new SourceFailure("unauthenticated", "The prior token expired"),
+    );
+  });
+  expect(sourcesClient.signIn).toHaveBeenCalledWith("credential-example", {
+    api_key: "synthetic replacing credential",
+  });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(screen.queryByText("Needs sign-in")).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Re-enter credentials" }),
+  ).toBeNull();
+  expect(screen.getByText("Signed in as octo")).toBeTruthy();
+  const toggle = screen.getByRole("button", { name: "Toggle source page" });
+  fireEvent.click(toggle);
+  fireEvent.click(toggle);
+  expect(screen.getByText("Signed in as octo")).toBeTruthy();
+  expect(screen.queryByText("Needs sign-in")).toBeNull();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Retry health check" }),
+  );
+  await screen.findByText("Needs sign-in");
+  expect(readHealth).toHaveBeenCalledTimes(2);
+  expect(
+    screen.queryByRole("button", { name: "Retry health check" }),
+  ).toBeNull();
+});
+
 test("discovery uses the core's imported references and Discard restores saved rules", async () => {
   vi.mocked(sourcesClient.preview).mockResolvedValue({
     ...preview,
@@ -1000,50 +1325,137 @@ test("the save actions live in the save bar, not in the Discovery section", () =
   }
 });
 
-test("GitHub reads the draft back as one sentence", async () => {
+test("the connector's readback follows draft changes and preserves emphasis", async () => {
+  vi.mocked(sourcesClient.configurationSummary)
+    .mockResolvedValueOnce([{ text: "No repositories yet.", emphasis: false }])
+    .mockResolvedValueOnce([
+      { text: "Imports open issues from ", emphasis: false },
+      { text: "o/r", emphasis: true },
+      { text: ".", emphasis: false },
+    ])
+    .mockResolvedValueOnce([
+      { text: "Imports open issues from o/r with bug.", emphasis: false },
+    ]);
   render(<SourceCard entry={withLabels} />);
-  const readback = () => screen.getByTestId("source-readback").textContent;
-  expect(readback()).toBe(
-    "Imports open issues from no repository yet, assigned to anyone.",
-  );
+  expect(await screen.findByText("No repositories yet.")).toBeTruthy();
   await addRepository("o/r");
-  expect(readback()).toBe("Imports open issues from o/r, assigned to anyone.");
-  await addLabel("bug");
-  expect(readback()).toBe(
-    "Imports open issues from o/r that have the label bug, assigned to anyone.",
+  const summary = await screen.findByTestId("source-readback");
+  expect(summary.textContent).toBe("Imports open issues from o/r.");
+  expect(within(summary).getByText("o/r").tagName).toBe("STRONG");
+  expect(sourcesClient.configurationSummary).toHaveBeenLastCalledWith(
+    "github",
+    { repositories: ["o/r"] },
   );
-  await addLabel("urgent");
-  fireEvent.change(screen.getByLabelText(/Assignee/), {
-    target: { value: "octo" },
-  });
-  expect(readback()).toBe(
-    "Imports open issues from o/r that have the labels bug and urgent, assigned to octo.",
+  await addLabel("bug");
+  expect(
+    await screen.findByText("Imports open issues from o/r with bug."),
+  ).toBeTruthy();
+  expect(sourcesClient.configurationSummary).toHaveBeenLastCalledWith(
+    "github",
+    { repositories: ["o/r"], labels: ["bug"] },
   );
 });
 
-test("another source shows no readback sentence", () => {
+test("the Sync section shows the saved connection's refresh command with a copy button", () => {
   render(
     <SourceCard
       entry={{
         ...entry,
-        connector: { ...entry.connector, provider: "gitlab", name: "GitLab" },
+        saved: {
+          id: "github-2",
+          provider: "github",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
       }}
     />,
   );
-  expect(screen.queryByTestId("source-readback")).toBeNull();
-});
-
-test("the Sync section shows the refresh command with a copy button", () => {
-  render(<SourceCard entry={entry} />);
   const sync = screen.getByRole("region", { name: "Sync" });
   expect(sync.textContent).toContain(
     "Agents can sync without the desktop open",
   );
-  expect(sync.textContent).toContain("ticketd source refresh");
+  expect(sync.textContent).toContain("ticketd source github-2 refresh");
   expect(
     within(sync).getByRole("button", { name: "Copy sync command" }),
   ).toBeTruthy();
   expect(within(sync).getByRole("button", { name: "Sync now" })).toBeTruthy();
+});
+
+test("Sync now reports progress, cancels its run, and shows the next successful sync", async () => {
+  let rejectRefresh: (error: SourceFailure) => void = () => {};
+  vi.mocked(sourcesClient.refresh).mockImplementation(
+    (_ticket, _connection, _retry, control) =>
+      new Promise((_resolve, reject) => {
+        rejectRefresh = reject;
+        control?.update({ kind: "started" });
+        control?.update({ kind: "progress", completed: 12, total: 30 });
+      }),
+  );
+  vi.mocked(sourcesClient.cancelRefresh).mockResolvedValue(true);
+  const sourceCard = (sources: SourceStatus[]) => (
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources,
+        entries: null,
+        intervalSecs: 300,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SourceCard
+        entry={{
+          ...entry,
+          connector: {
+            ...entry.connector,
+            provider: "example",
+            name: "Example",
+          },
+          saved: {
+            id: "example-2",
+            provider: "example",
+            config: { repositories: ["o/r"] },
+            account: "octo",
+            saved_at: "2026-02-01T00:00:00Z",
+          },
+        }}
+      />
+    </SourceActivityContext.Provider>
+  );
+  const view = render(sourceCard([]));
+  const sync = within(screen.getByRole("region", { name: "Sync" }));
+  fireEvent.click(sync.getByRole("button", { name: "Sync now" }));
+  expect(await sync.findByText(/12 of 30/)).toBeTruthy();
+  fireEvent.click(sync.getByRole("button", { name: "Cancel sync" }));
+  const [, id, , control] = vi.mocked(sourcesClient.refresh).mock.calls[0]!;
+  expect(id).toBe("example-2");
+  expect(sourcesClient.cancelRefresh).toHaveBeenCalledWith(control?.id);
+  await act(async () => {
+    rejectRefresh(
+      new SourceFailure("refresh_canceled", "source refresh canceled"),
+    );
+  });
+  expect(sync.getByText("Sync canceled")).toBeTruthy();
+  expect(sync.getByRole("button", { name: "Sync now" })).toBeTruthy();
+  view.rerender(
+    sourceCard([
+      {
+        provider: "example",
+        connection_id: "example-2",
+        health: "synced",
+        last_attempt_at: new Date().toISOString(),
+        last_refreshed_at: new Date().toISOString(),
+        error: null,
+        failing_since: null,
+        retry_after: null,
+        unavailable_tickets: 0,
+        partial_message: null,
+      },
+    ]),
+  );
+  expect(sync.getByText(/^Synced/)).toBeTruthy();
+  expect(sync.queryByText("Sync canceled")).toBeNull();
 });
 
 test("a failed preview is said in the save bar, beside its actions, with no summary in the form", async () => {
@@ -1063,4 +1475,221 @@ test("a failed preview is said in the save bar, beside its actions, with no summ
     ),
   ).toBeNull();
   expect(panelStatus()).toBe("Unsaved changes");
+});
+
+test("Sources adds a named connection and renames it without changing its ID", async () => {
+  vi.mocked(sourcesClient.list).mockResolvedValue([
+    { ...entry, next_id: "github-2" },
+  ]);
+  vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
+  const created = {
+    id: "github-2",
+    name: "Work",
+    provider: "github",
+    account: "octo",
+    config: { repositories: ["o/r"] },
+    saved_at: "2026-01-01T00:00:00Z",
+  };
+  vi.mocked(sourcesClient.add).mockResolvedValue({ source: created, preview });
+  vi.mocked(sourcesClient.rename).mockResolvedValue({
+    ...created,
+    name: "Work issues",
+  });
+  render(<SourcesPage onOpen={vi.fn()} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Add GitHub connection" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: "Work" },
+  });
+  await addRepository("o/r");
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByRole("region", { name: "Preview" });
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  expect(sourcesClient.add).toHaveBeenCalledWith("github", "github-2", "Work", {
+    repositories: ["o/r"],
+  });
+  fireEvent.click(await screen.findByRole("button", { name: "Rename Work" }));
+  expect(document.activeElement).toBe(
+    screen.getByRole("textbox", { name: "Connection name" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+  const rename = screen.getByRole("button", { name: "Rename Work" });
+  expect(document.activeElement).toBe(rename);
+  fireEvent.click(rename);
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: "Work issues" },
+  });
+  vi.mocked(sourcesClient.list).mockResolvedValue([
+    {
+      ...entry,
+      saved: { ...created, name: "Work issues" },
+      next_id: "github-3",
+    },
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  await screen.findByText("Work issues");
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Rename Work issues" }),
+  );
+  expect(sourcesClient.rename).toHaveBeenCalledWith("github-2", "Work issues");
+  expect(screen.getByText(/github-2/)).toBeTruthy();
+});
+
+test("a pending rename preserves current availability and yields to the confirmed catalog", async () => {
+  const saved = {
+    id: "github-2",
+    name: "Work",
+    provider: "github",
+    account: "octo",
+    config: {},
+    saved_at: "2026-01-01T00:00:00Z",
+  };
+  const renamed = { ...saved, name: "Work issues" };
+  let commitRename: (source: typeof saved) => void = () => {};
+  vi.mocked(sourcesClient.rename).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        commitRename = resolve;
+      }),
+  );
+  const readCatalog = vi.fn(() => 3);
+  const page = (source: SourceEntry, observation: number) => (
+    <SourceActivityContext.Provider
+      value={{
+        refreshing: false,
+        sources: [],
+        entries: [source],
+        catalogObservation: observation,
+        readCatalog,
+        intervalSecs: null,
+        openSettings: () => {},
+        refreshAll: async () => {},
+      }}
+    >
+      <SourcesPage onOpen={vi.fn()} />
+    </SourceActivityContext.Provider>
+  );
+  const view = render(page({ ...entry, saved }, 1));
+  fireEvent.click(screen.getByRole("button", { name: "Rename Work" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: renamed.name },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  expect(readCatalog).not.toHaveBeenCalled();
+  await act(async () => commitRename(renamed));
+  await screen.findByText("Work issues");
+  expect(readCatalog).toHaveBeenCalledOnce();
+  view.rerender(page({ ...entry, saved, unavailable: true }, 2));
+  expect(screen.getByText("Work issues")).toBeTruthy();
+  expect(screen.getByText("Extension unavailable")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Configure" })).toBeNull();
+
+  view.rerender(
+    page({ ...entry, saved: { ...renamed, name: "Updated elsewhere" } }, 3),
+  );
+  expect(screen.getByText("Updated elsewhere")).toBeTruthy();
+  expect(screen.queryByText("Work issues")).toBeNull();
+});
+
+test("removing a connection needs confirmation and removes only that connection", async () => {
+  const saved = {
+    provider: "github",
+    account: "octo",
+    config: { repositories: ["o/r"] },
+    saved_at: "2026-01-01T00:00:00Z",
+  };
+  vi.mocked(sourcesClient.list).mockResolvedValue([
+    {
+      ...githubSource,
+      saved: { ...saved, id: "github", name: "Work" },
+    },
+    {
+      ...githubSource,
+      saved: { ...saved, id: "github-2", name: "Personal" },
+    },
+  ]);
+  vi.mocked(sourcesClient.remove).mockResolvedValue(undefined);
+  const onChanged = vi.fn(async () => {});
+  render(<SourcesPage onOpen={vi.fn()} onChanged={onChanged} />);
+  const remove = await screen.findByRole("button", { name: "Remove Work" });
+  fireEvent.click(remove);
+  const dialog = screen.getByRole("dialog", { name: "Remove Work?" });
+  expect(
+    within(dialog).getByText(/last synced content, local work/),
+  ).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Cancel" }));
+  expect(sourcesClient.remove).not.toHaveBeenCalled();
+
+  fireEvent.click(remove);
+  fireEvent.click(
+    within(screen.getByRole("dialog", { name: "Remove Work?" })).getByRole(
+      "button",
+      { name: "Remove connection" },
+    ),
+  );
+  await waitFor(() => expect(onChanged).toHaveBeenCalledOnce());
+  expect(sourcesClient.remove).toHaveBeenCalledExactlyOnceWith("github");
+  expect(screen.queryByRole("button", { name: "Remove Work" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Remove Personal" })).toBeTruthy();
+});
+
+test("Sources keeps an uninstalled provider's saved connection manageable", async () => {
+  const saved = {
+    id: "tracker",
+    name: "Archived tracker",
+    provider: "tracker",
+    account: "account",
+    config: {},
+    saved_at: "2026-01-01T00:00:00Z",
+  };
+  const catalog = (savedConnection = saved): SourceEntry[] => [
+    { ...githubSource, next_id: "github-2" },
+    {
+      connector: {
+        ...githubSource.connector,
+        name: "Fixture Tracker",
+        provider: "tracker",
+      },
+      saved: savedConnection,
+      unavailable: true,
+    },
+  ];
+  vi.mocked(sourcesClient.list).mockResolvedValue(catalog());
+  vi.mocked(sourcesClient.rename).mockResolvedValue({
+    ...saved,
+    name: "Renamed tracker",
+  });
+  vi.mocked(sourcesClient.remove).mockResolvedValue(undefined);
+  render(<SourcesPage onOpen={vi.fn()} />);
+  expect(await screen.findByText("Extension unavailable")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Configure" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: /Add Fixture Tracker/ }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Add GitHub connection" }),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Rename Archived tracker" }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: "Renamed tracker" },
+  });
+  vi.mocked(sourcesClient.list).mockResolvedValue(
+    catalog({ ...saved, name: "Renamed tracker" }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Remove Renamed tracker" }),
+  );
+  fireEvent.click(
+    within(screen.getByRole("dialog")).getByRole("button", {
+      name: "Remove connection",
+    }),
+  );
+  await waitFor(() =>
+    expect(sourcesClient.remove).toHaveBeenCalledWith("tracker"),
+  );
+  expect(screen.queryByText("Renamed tracker")).toBeNull();
 });

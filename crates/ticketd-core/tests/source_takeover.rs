@@ -4,157 +4,45 @@
 // share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
-use std::{
-    collections::BTreeMap,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+#[path = "support/fake_source.rs"]
+mod fake_source;
+
+use std::{path::PathBuf, sync::Arc};
 
 use serde_json::json;
 use ticketd_core::{
-    Error, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
+    self, Error, Status, TicketFilter, TicketPatch, Workspace, WriteRequest, WriteResult,
     source::{
-        CONTRACT_VERSION, Capability, ChoiceOption, ClosureReason, ConfigSchema, ConfigValues,
-        ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage, DiscoveryRequest,
         DuplicateTarget, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FieldKind, OptionSource, Origin, Ownership, RefreshOptions, SchemaField, SourceError,
-        SourceFilter, TicketSource, ValueFormat,
+        Origin, Ownership, RefreshOptions, SourceFilter, StateCategory, TicketSource,
     },
 };
 
-type Hook = Arc<dyn Fn() + Send + Sync>;
-
-#[derive(Default)]
-struct Remote {
-    issues: BTreeMap<u64, ExternalIssue>,
-    outage: bool,
-    /// Runs inside discovery, while no database transaction is open: an
-    /// in-flight refresh that another actor interrupts.
-    during_discovery: Option<Hook>,
-}
-
-#[derive(Clone, Default)]
-struct Fake(Arc<Mutex<Remote>>);
-
-impl Connector for Fake {
-    fn descriptor(&self) -> ConnectorDescriptor {
-        ConnectorDescriptor {
-            provider: "fake".into(),
-            name: "Fake".into(),
-            contract_version: CONTRACT_VERSION,
-            capabilities: vec![Capability::Discover, Capability::Fetch],
-            schema: ConfigSchema {
-                fields: vec![SchemaField {
-                    key: "repositories".into(),
-                    label: "Repositories".into(),
-                    help: None,
-                    required: true,
-                    kind: FieldKind::MultiSelect {
-                        options: OptionSource::Dynamic { depends_on: vec![] },
-                        allow_custom: true,
-                        min_items: 1,
-                        max_items: 3,
-                        format: Some(ValueFormat::OwnerName),
-                    },
-                }],
-            },
-        }
-    }
-    fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        Ok(ConnectionInfo {
-            account: "octo".into(),
-        })
-    }
-    fn options(
-        &self,
-        _: &str,
-        _: &str,
-        _: &ConfigValues,
-    ) -> Result<Vec<ChoiceOption>, SourceError> {
-        Ok(Vec::new())
-    }
-    fn discover(&self, _: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-        let hook = self.0.lock().unwrap().during_discovery.clone();
-        if let Some(hook) = hook {
-            hook();
-        }
-        let remote = self.0.lock().unwrap();
-        if remote.outage {
-            return Err(SourceError::Unavailable("network is down".into()));
-        }
-        let issues = remote
-            .issues
-            .values()
-            .filter(|issue| issue.state == ExternalState::Open)
-            .cloned()
-            .collect();
-        Ok(DiscoveryPage {
-            issues,
-            next_cursor: None,
-            skipped: Vec::new(),
-        })
-    }
-    fn fetch(
-        &self,
-        _: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<ExternalIssue, SourceError> {
-        let remote = self.0.lock().unwrap();
-        if remote.outage {
-            return Err(SourceError::Unavailable("network is down".into()));
-        }
-        let id: u64 = reference.identity.id.parse().unwrap();
-        remote
-            .issues
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| SourceError::NotFound("gone".into()))
-    }
-}
+use fake_source::{Failure, FakeSource, Remote};
 
 fn issue(id: u64, title: &str) -> ExternalIssue {
-    ExternalIssue {
-        reference: ExternalRef {
-            identity: ExternalIdentity {
-                provider: "fake".into(),
-                id: id.to_string(),
-            },
-            locator: format!("o/r#{id}"),
-        },
-        display: format!("o/r#{id}"),
-        url: format!("https://example.test/o/r/issues/{id}"),
-        title: title.into(),
-        body: "Body".into(),
-        state: ExternalState::Open,
-        assignees: vec![],
-        labels: vec![],
-        created_at: "2026-01-01T00:00:00Z".into(),
-        updated_at: "2026-02-01T00:00:00Z".into(),
-        author: None,
-        repository: None,
-        duplicate_of: None,
-        duplicate_of_url: None,
-        duplicate_withdrawn: false,
-    }
+    let mut issue = fake_source::issue(id, title);
+    issue.body = "Body".into();
+    issue.author = None;
+    issue
 }
 
 fn duplicate(id: u64, title: &str, canonical: u64) -> ExternalIssue {
     let mut dup = issue(id, title);
-    dup.state = ExternalState::Closed {
-        reason: ClosureReason::Duplicate,
-    };
+    dup.state = ExternalState::named(StateCategory::Duplicate, "Closed");
     dup.duplicate_of = Some(ExternalRef {
         identity: ExternalIdentity {
             provider: "fake".into(),
             id: canonical.to_string(),
         },
         locator: format!("o/r#{canonical}"),
+        partition: "o/r".into(),
     });
     dup
 }
 
 struct Fixture {
-    fake: Fake,
+    fake: FakeSource,
     engine: Engine,
     workspace: Workspace,
     dir: tempfile::TempDir,
@@ -162,7 +50,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let fake = Fake::default();
+        let fake = FakeSource::default();
         let mut engine = Engine::new();
         engine.register(Box::new(fake.clone())).unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -187,9 +75,11 @@ impl Fixture {
     }
     fn publish(&self, issue: ExternalIssue) {
         self.remote(|remote| {
-            remote
-                .issues
-                .insert(issue.reference.identity.id.parse().unwrap(), issue);
+            let id = issue.reference.identity.id.parse().unwrap();
+            if !remote.matching.contains(&id) {
+                remote.matching.push(id);
+            }
+            remote.issues.insert(id, issue);
         });
     }
     fn refresh(&mut self) {
@@ -209,7 +99,7 @@ impl Fixture {
         let mut f = Self::new();
         f.publish(issue);
         f.refresh();
-        f.remote(|r| r.outage = true);
+        f.remote(|r| r.outage = Some(Failure::Unavailable));
         f.refresh();
         assert!(f.source(1).unavailable.is_some());
         f
@@ -316,7 +206,7 @@ fn only_an_unavailable_external_ticket_can_be_taken_over() {
     ));
 
     // Once the source cannot be read it can.
-    f.remote(|r| r.outage = true);
+    f.remote(|r| r.outage = Some(Failure::Unavailable));
     f.refresh();
     f.workspace.take_ownership("T-KQ1", None).unwrap();
 }
@@ -366,7 +256,7 @@ fn a_repeated_takeover_changes_nothing_and_a_replayed_request_returns_its_first_
 fn restored_access_and_rediscovery_never_resume_sync_or_create_another_ticket() {
     let mut f = Fixture::unavailable(issue(1, "Before"));
     f.workspace.take_ownership("T-KQ1", None).unwrap();
-    f.remote(|r| r.outage = false);
+    f.remote(|r| r.outage = None);
     f.publish(issue(1, "Rewritten upstream"));
     f.refresh();
     f.refresh();
@@ -391,11 +281,11 @@ fn restored_access_and_rediscovery_never_resume_sync_or_create_another_ticket() 
 fn a_refresh_already_in_flight_cannot_undo_or_taint_a_takeover() {
     // Access returns, but a takeover lands while the refresh is gathering.
     let mut f = Fixture::unavailable(issue(1, "Before"));
-    f.remote(|r| r.outage = false);
+    f.remote(|r| r.outage = None);
     f.publish(issue(1, "Late upstream rewrite"));
     let path = f.path();
     f.remote(|r| {
-        r.during_discovery = Some(Arc::new(move || {
+        r.before_discovery = Some(Arc::new(move || {
             Workspace::open(&path)
                 .unwrap()
                 .take_ownership("T-KQ1", None)
@@ -403,7 +293,6 @@ fn a_refresh_already_in_flight_cannot_undo_or_taint_a_takeover() {
         }));
     });
     f.refresh();
-    f.remote(|r| r.during_discovery = None);
     let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(ticket.title, "Before");
     assert_eq!(ticket.source.unwrap().ownership, Ownership::Local);
@@ -413,7 +302,7 @@ fn a_refresh_already_in_flight_cannot_undo_or_taint_a_takeover() {
     let mut f = Fixture::unavailable(issue(1, "Before"));
     let path = f.path();
     f.remote(|r| {
-        r.during_discovery = Some(Arc::new(move || {
+        r.before_discovery = Some(Arc::new(move || {
             Workspace::open(&path)
                 .unwrap()
                 .take_ownership("T-KQ1", None)
@@ -441,7 +330,7 @@ fn a_taken_over_duplicate_keeps_its_status_and_target_until_it_leaves_duplicate(
         f.workspace.show_ticket(&reference).unwrap().status,
         Status::Duplicate
     );
-    f.remote(|r| r.outage = true);
+    f.remote(|r| r.outage = Some(Failure::Unavailable));
     f.refresh();
 
     let taken = f.workspace.take_ownership(&reference, None).unwrap();
@@ -476,7 +365,7 @@ fn takeover_survives_restart_export_backup_and_restore() {
     let path = f.path();
     let backup = f.dir.path().join("backup.sqlite3");
     f.workspace.backup(&backup).unwrap();
-    let before = f.workspace.show_ticket("T-KQ1").unwrap();
+    let mut before = f.workspace.show_ticket("T-KQ1").unwrap();
     let Fixture {
         workspace,
         engine,
@@ -493,12 +382,13 @@ fn takeover_survives_restart_export_backup_and_restore() {
     let mut workspace = Workspace::open(&path).unwrap();
     {
         let mut remote = fake.0.lock().unwrap();
-        remote.outage = false;
+        remote.outage = None;
         remote.issues.insert(1, issue(1, "Upstream differs"));
     }
     workspace
         .refresh_sources(&engine, &RefreshOptions::default())
         .unwrap();
+    before.source.as_mut().unwrap().discovery_matches = None;
     assert_eq!(workspace.show_ticket("T-KQ1").unwrap(), before);
     assert_eq!(workspace.list_tickets().unwrap().len(), 1);
     drop(dir);

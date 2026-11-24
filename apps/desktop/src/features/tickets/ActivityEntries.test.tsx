@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { githubSource } from "@/test/source-fixtures";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, expect, test, vi } from "vitest";
 import type { ComponentProps } from "react";
@@ -75,6 +76,7 @@ const note = {
 
 test("a change that came from a source reads as the source, not as an agent", async () => {
   bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_sources") return [githubSource];
     if (command === "activity_feed")
       return [
         {

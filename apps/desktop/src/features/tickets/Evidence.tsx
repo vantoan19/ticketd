@@ -1,3 +1,5 @@
+import { useSources } from "@/features/settings/sources/use-sources";
+import type { SourceEntry } from "@/lib/api/sources";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { Pager } from "@/components/ui/pager";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -122,6 +124,7 @@ export function Evidence({
   /** How many records there are, once loaded. */
   onCount?: (count: number) => void;
 }) {
+  const { entries: sources } = useSources();
   const formId = useId();
   const statusLine = useStatusLine();
   const { record, changed: ticketChanged } = useOpenTicket();
@@ -374,6 +377,7 @@ export function Evidence({
               {item.editing_agent && ` · ${item.editing_agent}`}
             </p>
             <EvidenceValue
+              sources={sources}
               item={item}
               onOpenFailed={() => {
                 setDeleteRetry(null);
@@ -469,7 +473,7 @@ export function Evidence({
                 onChange={(event) => {
                   const value = event.target.value;
                   // A pasted pull request link fills the type and a name (S11).
-                  const pr = pullRequest(value.trim());
+                  const pr = pullRequest(value.trim(), sources);
                   setDraft(
                     pr && !editing
                       ? {
@@ -490,11 +494,39 @@ export function Evidence({
   );
 }
 
-/** A GitHub pull request link, read as "owner/repo #57". */
-function pullRequest(value: string) {
-  const match =
-    /^https:\/\/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)\/?$/i.exec(value);
-  return match ? { repository: match[1]!, number: match[2]! } : null;
+function pullRequest(value: string, sources: readonly SourceEntry[]) {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return null;
+  }
+  if (
+    url.protocol !== "https:" ||
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash
+  )
+    return null;
+  const [owner, project, segment, number, ...rest] = url.pathname
+    .replace(/^\/|\/$/g, "")
+    .split("/");
+  if (
+    !owner ||
+    !project ||
+    !number ||
+    !/^[0-9]+$/.test(number) ||
+    rest.length > 0
+  )
+    return null;
+  const recognized = sources.some(({ connector }) => {
+    const link = connector.presentation?.pull_request_link;
+    return (
+      link && link.host === url.host && link.segment === segment?.toLowerCase()
+    );
+  });
+  return recognized ? { repository: `${owner}/${project}`, number } : null;
 }
 
 /**
@@ -504,13 +536,15 @@ function pullRequest(value: string) {
  */
 function EvidenceValue({
   item,
+  sources,
   onOpenFailed,
 }: {
   item: EvidenceRecord;
+  sources: readonly SourceEntry[];
   onOpenFailed: () => void;
 }) {
   if (/^https:\/\/\S+$/.test(item.value)) {
-    const pr = pullRequest(item.value);
+    const pr = pullRequest(item.value, sources);
     return (
       <Tooltip content={item.value}>
         <Button

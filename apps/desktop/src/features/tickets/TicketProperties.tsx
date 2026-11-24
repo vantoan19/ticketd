@@ -490,10 +490,10 @@ export function TicketProperties({
       {owner && (
         <small className="rail-status-note">
           {owner.closure_unrecognized
-            ? `${ownerName} closed this issue with a reason ticketd does not recognize, so its status was not changed. Choose Done or Canceled here, or reopen it there.`
+            ? `${ownerName} reported an unrecognized state. Choose Done or Canceled here, or check the issue there.`
             : owner.status_locked
               ? `Closed on ${ownerName}. Reopen it there to return this ticket to Todo.`
-              : `Your progress, kept in ticketd. ${ownerName} ${owner.unavailable ? "showed Open at the last sync" : "still shows Open"}.`}
+              : `Your progress, kept in ticketd. ${ownerName} controls when the issue closes.`}
         </small>
       )}
     </>
@@ -568,7 +568,7 @@ export function TicketProperties({
                   <SelectGroup>
                     <SelectLabel>
                       {owner.closure_unrecognized
-                        ? `The closure reason on ${ownerName} is unknown`
+                        ? `The state on ${ownerName} is unrecognized`
                         : owner.status_locked
                           ? `Closed on ${ownerName}`
                           : `Set by ${ownerName} when the issue closes`}
@@ -584,7 +584,7 @@ export function TicketProperties({
                   </SelectGroup>
                   <p className="status-menu-caption">
                     {owner.closure_unrecognized
-                      ? `Choose Done or Canceled here, or reopen it on ${ownerName}.`
+                      ? `Choose Done or Canceled here, or check the issue on ${ownerName}.`
                       : owner.status_locked
                         ? `Reopen it on ${ownerName} to work on it again; it comes back as Todo.`
                         : `Done, Canceled and Duplicate follow ${ownerName} when the issue closes.`}

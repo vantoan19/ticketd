@@ -390,41 +390,85 @@ system's secure store.
 
 ### Ticket sources
 
-A ticket source connects an external tracker; GitHub Issues is the provider
-([ADR 0006](adr/0006-external-ticket-authority.md)). The first connector is built in
-and run through a shared extension interface.
+GitHub Issues is built in. Linear ships with the desktop app as a ticket
+source extension. Extensions use the same ticket authority and refresh
+workflows as GitHub. [External ticket authority](adr/0006-external-ticket-authority.md)
 
-- Discovery rules (selected repositories, optional assignee and label filters) can be
-  previewed before saving, and matching issues are imported automatically. Refresh runs
-  at desktop startup, periodically while the desktop is open, and on demand
-  (`ticketd source refresh`). Synchronized content stays available offline.
-- A synchronized ticket is **externally owned**: its title, description, and status
-  are read-only and flow one way, from the tracker into ticketd. Plan membership,
-  relationships, tags, Activities, and Documents stay local and are never overwritten.
-  GitHub issue state maps to status: an open issue starts as Todo, a completed
-  closure is Done, not-planned is Canceled, and duplicate is Duplicate. While the
-  issue stays open, people and agents manage Todo, In progress, and In review
-  locally without writing to GitHub. A reopened issue returns to Todo.
+Install another extension from a local folder with `ticketd source extension add PATH`.
+Review the program and declared hosts before approving. The provider then
+appears in Settings → Sources. Authors can link their build folder with
+`ticketd source extension link PATH`. The author guide covers the contract,
+the TypeScript example and conformance. [Write a ticket source extension](ticket-source-extensions.md)
+
+- Connect your **Linear** teams with
+  a personal API key that can read them. Filter discovery by assignee, labels, or
+  project. ticketd syncs the issue's current state and its comments and
+  timeline.
+- Add and name source connections under Settings → Sources. Several accounts can
+  connect to the same provider. Connections stay on this device and are excluded
+  from Workspace sync, portable backups, and JSON exports.
+- Extension credentials go in the system keychain. When a tracker rejects
+  authentication, **Needs sign-in** opens the credential fields for that
+  connection. On Linux without a usable keyring, ticketd keeps entered
+  credentials until the current process closes and displays a notice.
+  [Credential setup](ticket-source-extensions.md#supplying-credentials) covers
+  environment overrides and password commands.
+- Preview discovery rules before saving. The available rules depend on the provider.
+  Matching issues are imported on refresh, which runs at desktop startup,
+  periodically while the desktop is open, and on demand
+  (`ticketd source CONNECTION refresh`). When connections overlap, one ticket is
+  imported and refreshed through one connection. When no local connection covers
+  a ticket, it shows its last synced content and says the provider isn’t connected
+  on this desktop. The ticket carries the provider’s display name and icon.
+  During a manually started refresh, **Cancel sync** is available in Settings → Sources.
+- An **externally owned** ticket receives its title, description, confirmed closures
+  and reopenings from the tracker. Progress on open issues, Plan membership,
+  relationships, tags, Activities, and Documents stay in ticketd.
+  A source reports a typed state category and its own name for the state. Every
+  non-terminal state is open and imports as Todo. A completed issue is Done, a
+  not-planned issue is Canceled, and a duplicate is Duplicate. An unknown state
+  gets flagged and keeps the ticket's status. While the issue stays open, people
+  and agents manage Todo, In progress, and In review in ticketd. A reopened
+  issue returns to Todo. The detail shows the tracker's state name alongside
+  ticketd's status, for example “GitHub: Closed (not planned)”.
 - A **locally owned** ticket in Todo, In progress, or In review can be published once
-  as a normal issue. The preview shows exactly what would be sent. When the saved
-  source lists the ticket's Project remote on the matching host, the preview selects
-  that repository. The person can choose a different allowed destination. Publishing
-  with the Project remote as the default requires the preview's fingerprint. Ownership
-  transfers only after ticketd confirms the issue exists, and an uncertain result is
-  resolved before any retry so no second issue is created. Local Activities, Plan membership,
+  through a connection that supports publication. The preview shows exactly what
+  would be sent. When the selected connection lists the ticket's Project remote
+  on the matching host, the preview selects that repository. You can choose
+  another allowed destination. Using the Project remote as the default requires
+  the preview's fingerprint. Ownership transfers after ticketd confirms that the
+  issue exists. Resolve an uncertain result before retrying to avoid creating a
+  second issue. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
-- If publishing leaves an attempt unresolved, recovery uses the original GitHub
-  host. See [Recover an unresolved publication](cli.md#recover-an-unresolved-publication).
-- If a source ticket becomes unavailable, ticketd keeps its content and local work and
-  warns; **Take ownership** makes it local and stops synchronization.
+  Linear publishes to one of the connection’s selected teams. Desktop shows the
+  team name and key. On the CLI, pass the team UUID from `--preview` as
+  `--destination` when more than one team is configured. The Linear key must
+  allow issue creation.
+- Recovery of an unresolved GitHub publication uses the original host. If the
+  original connection is unavailable, the CLI can attach a verified issue
+  through an explicitly selected connection on that host.
+  [Recover an unresolved publication](cli.md#recover-an-unresolved-publication)
+- If an issue disappears or becomes unavailable, ticketd keeps its status, content,
+  and local work and shows a warning. **Take ownership** makes it local and stops
+  synchronization.
 - A legacy GitHub ticket with an unverified host can hold a potential duplicate
   import until you confirm the issue's current URL on its original host. This
-  repairs the source link on the existing ticket and preserves its ownership,
-  including after takeover.
-  See [Recover a legacy GitHub issue link](cli.md#recover-a-legacy-github-issue-link).
-- CLI: the `source` command group (`save`, `refresh`, `take-ownership`,
-  `publish --preview`, `resolve`, and more).
+  repairs the link on the existing ticket and preserves its ownership.
+  [Recover a legacy GitHub issue link](cli.md#recover-a-legacy-github-issue-link)
+- A saved connection remains in Sources when its extension is uninstalled.
+  You can rename or remove it while the extension is unavailable.
+- Remove a connection in Settings → Sources or with
+  `ticketd source CONNECTION remove`. Its tickets keep their external identity,
+  last synced content, status and local work, and show **Connection removed** on
+  this desktop. Discovery of the same issue through a covering connection resumes
+  sync unless you took ownership. Any unresolved publication stays recorded
+  and continues to block a second create.
+- Extension stderr stays in bounded local logs with known credentials redacted.
+  The Diagnostics export includes line counts from recent source connection logs.
+- Use `ticketd source add PROVIDER` to add a connection and `ticketd source list`
+  to find its ID. When several connections can publish, pass
+  `ticketd source publish T-XYZ --connection CONNECTION --preview`.
 
 #### Project remote routing
 
@@ -440,8 +484,8 @@ its own Project remotes alongside checkout and source settings. Workspace export
 and backups include them.
 [ADR 0021](adr/0021-route-external-tickets-to-projects-by-project-remote.md)
 
-After setting a Project remote, you can review and confirm a connection to GitHub.
-It adds the repository to discovery when needed and links the existing non-trashed,
+After setting a Project remote, you can pick a matching connection, review its
+effect, and confirm. This adds the repository to discovery when needed and links the existing non-trashed,
 unlinked tickets whose source still owns them and reports the same repository.
 Backfill includes tickets outside the current discovery filters and records an
 ordinary project membership change for each ticket. If the repository is already
@@ -457,26 +501,33 @@ discovery leaves its Project remote on the project.
 ### Workspace sync
 
 A person using ticketd on several desktops gets the same Workspace content and
-managed Attachments on each through their own Google Drive. Every desktop keeps its
-own local Workspace and stays usable offline. There is no ticketd account, server, or
-subscription ([ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md);
-[sync file format](sync-file-format.md)).
+managed Attachments on each through their own Google Drive or their own S3 bucket.
+Every desktop keeps its own local Workspace and stays usable offline. There is no
+ticketd account, server, or subscription
+([ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md);
+[ADR 0018](adr/0018-s3-sync-storage-signed-in-through-the-aws-cli.md);
+[sync file format](sync-file-format.md)). A Workspace has one storage. Everything
+below applies to both unless it names one.
 
-- **Storage.** One visible Drive folder holds one Markdown file per ticket, Document,
-  Plan, and project; a ticket's Activities and evidence are sections of its file.
+- **Storage.** One visible folder, in Drive or under a prefix in the bucket, holds one
+  Markdown file per ticket, Document, Plan, and project; a ticket's Activities and evidence are sections of its file.
   Attachments are ordinary files. Content is stored unencrypted, and the live SQLite
   database is never synchronized. Inbox read state, checkout paths, credentials, source
   settings, window layout, drafts, and upload queues stay local.
-- **Setup.** After connecting Drive, the person uploads this Workspace or downloads an
-  existing one (after a safety backup). Independent Workspaces are never merged
+- **Setup.** Settings > Workspace sync starts with the choice of Google Drive or S3.
+  After connecting, the person uploads this Workspace or downloads an existing one
+  (after a safety backup). Independent Workspaces are never merged
   automatically. A joining desktop takes a fresh device code when needed so references
-  never clash. Disconnecting deletes nothing, and the same account can reconnect to
-  its folder. Restoring a backup disconnects the Workspace from Drive.
+  never clash. Disconnecting deletes nothing, and the same account (or, for S3, the
+  same bucket and prefix) can reconnect to its folder. Restoring a backup disconnects
+  the Workspace from its storage. To move from Drive to S3, disconnect Drive and
+  upload the Workspace to a bucket; there is no migration.
 - **When it runs.** While the desktop is open: at launch and reconnect, by polling
-  Drive (every minute by default), shortly after a save, and on Sync now. Exit makes a
-  bounded attempt to upload pending changes. The CLI never contacts Drive; its changes
-  upload when the desktop next runs. Local saving continues through outages and
-  expired authorization.
+  the storage (every minute by default), shortly after a save, and on Sync now. Exit
+  makes a bounded attempt to upload pending changes. The CLI never contacts the
+  storage; its changes upload when the desktop next runs. Local saving continues
+  through outages and expired authorization. The status line and its states work the
+  same for both storages and name the one in use.
 - **Conflicts.** Each desktop compares both sides with its last-synced copy. Different
   fields combine; tags and other sets combine additions and removals. If the same
   field changed on both, the local value is kept and the record is marked Needs
@@ -488,7 +539,79 @@ subscription ([ADR 0011](adr/0011-markdown-file-sync-through-google-drive.md);
   skipped with a Needs attention notice.
 - **Version history.** Each desktop keeps the previous version of a ticket or Document
   whenever an edit or incoming sync replaces it, for 30 days. A History view compares
-  versions, and restoring one is an ordinary edit.
+  versions, and restoring one is an ordinary edit. A desktop that never had a version
+  reads earlier ones from Drive's revisions or the bucket's object versions.
+
+#### S3
+
+An S3 bucket is a second storage for Workspace sync. It is for people who keep their
+data in AWS, or in an S3-compatible service such as MinIO or Ceph, and would rather
+not use a Google account. Drive references and uploaded copies stay Google Drive only.
+Setup, IAM permissions and the lifecycle rule are in
+[S3 sync setup](install.md#s3-sync-setup).
+
+- **Sign-in.** ticketd uses the AWS CLI v2 (2.13 or later) the person already has and
+  one of its profiles, so IAM Identity Center (SSO), assumed roles, MFA and
+  credential helpers work as in a terminal. It runs the CLI for the profile list and
+  short-lived credentials, keeps those credentials in memory only, asks for fresh ones
+  before they expire, and stores no AWS secret: not in the operating system's secure
+  store, a backup or the Workspace. It sends the S3 requests itself, never through the
+  CLI. When the CLI is missing or too old, or the machine has no profile, setup says
+  what to install or create (`aws configure sso` or `aws configure`), and the person
+  can choose the `aws` program when it is not found.
+- **Setup.** In Settings > Workspace sync the person chooses S3, picks a profile,
+  chooses Sign in when the profile needs it (it runs `aws sso login`, or `aws login`
+  for a profile set up that way, and opens the browser), then chooses the bucket and a
+  key prefix (`ticketd/` by default). The bucket is picked from a list when the
+  profile may list buckets and typed otherwise. The bucket's region comes from the
+  bucket, and the endpoint of an S3-compatible service from the profile. Then Choose a
+  workspace (Upload, Download, Reconnect), First sync, and In sync follow, as with
+  Drive. A second desktop uses its own profile, under any name, that reaches the same
+  bucket.
+- **Bucket check.** Before the first Upload, Download or Reconnect, ticketd checks the
+  bucket and refuses one that cannot sync safely, with a message that says what to
+  fix: Versioning off or suspended, no conditional writes (a second create with
+  `If-None-Match: *` must be refused), a missing permission, a KMS key the profile
+  cannot use, a missing bucket, or an unsupported bucket type such as an S3 directory
+  bucket. It leaves one small `.ticketd-bucket-check` object under the prefix, because
+  sync never deletes. A failed check can be tried again after the fix.
+- **Which services.** AWS S3, MinIO and Ceph RGW 20.x are confirmed; the MinIO
+  contract tests run in CI. Cloudflare R2 (no Versioning), the Google Cloud Storage XML
+  API (it ignores conditional headers) and S3 directory buckets are refused. Because a
+  list of services goes out of date, every bucket is checked at setup. Reading an
+  endpoint of a profile that has a `services` section needs AWS CLI 2.34.22; an older
+  CLI asks the person to update it, and a profile without that section works with any
+  supported CLI.
+- **Folder layout.** The bucket holds the same record folders as Drive, one readable
+  Markdown file per record, but keyed by GUID, since an S3 key cannot be renamed
+  without deleting. The readable name is the object's download name in the console.
+  Attachments over 16 MiB upload in parts and resume after an interruption from the
+  last finished part. A Markdown file uploaded by hand with `aws s3 cp` counts as an
+  edit from another device once it validates.
+- **Conflicting writes.** A write to S3 fails instead of replacing a file another
+  desktop just changed, so that change goes through the normal merge. Versioning keeps
+  every version of a file, which History uses.
+- **One service per bucket.** ticketd remembers which S3 service (AWS or an
+  S3-compatible endpoint) the Workspace's bucket was connected through. If the
+  profile is edited to reach another one, sync stops with a message that the profile
+  now points to another service, and starts again when the profile points back. To
+  move a bucket on purpose, Disconnect, then connect again. A Workspace connected
+  before this was remembered takes the profile's service the next time sync works.
+- **Ended sign-in.** When the AWS session ends (an IAM Identity Center session lasts
+  8 hours by default), the status line and the Workspace sync page show Sign in to AWS
+  again, with a Sign in button, and no dialog interrupts the person. Changes keep
+  saving on this computer and upload after sign-in. Quitting does not wait on an ended
+  session. A profile with static access keys has no session to end.
+- **Connected view.** The page shows the AWS identity ticketd uses (from STS), the
+  bucket, prefix and profile, and either Open in AWS console (AWS buckets) or Copy
+  `s3://` address (any other endpoint), plus the desktop's own settings and
+  Disconnect. A missing bucket folder, throttling and no network show the same
+  recovery states as Drive, worded for S3.
+- **Cost and encryption.** The person pays their provider for requests, storage and
+  kept versions. Content is stored as ticketd wrote it, unencrypted by ticketd;
+  encryption at rest is the bucket's configuration. A lifecycle rule that expires
+  noncurrent versions after more than 30 days keeps storage and listing costs bounded
+  and leaves History intact; ticketd recommends it and never sets it.
 
 ### Backup, restore, and export
 
@@ -523,7 +646,7 @@ collect OAuth tokens, proxy model requests, or change billing.
   unavailable during ordinary resume, ticketd shows a notice and starts an
   empty session. If a permission change required the restart, the queue
   stays paused and the person can explicitly choose **Start fresh**.
-  See [ADR 0024](adr/0024-antigravity-uses-acp-for-person-driven-chats.md).
+  See [ADR 0025](adr/0025-antigravity-uses-acp-for-person-driven-chats.md).
 - **Conversation.** The UI streams responses, tool activity, native approval requests,
   and questions. Observed activity is Idle, Working, Waiting for you, Interrupted, or
   Failed; a finished turn is not evidence that the task succeeded. Sending during a

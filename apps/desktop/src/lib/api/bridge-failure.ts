@@ -47,6 +47,8 @@ export const failureCodes = [
   "forbidden",
   "rate_limited",
   "unavailable",
+  "extension_crash_limit",
+  "refresh_canceled",
   "protocol",
   "unsupported",
   "invalid_configuration",
@@ -87,8 +89,11 @@ export class BridgeFailure extends Error {
     message: string,
     /** For `batch_operation`, which operation of the batch was rejected. */
     readonly index: number | null = null,
-    /** For `invalid_configuration`, the problems with each field. */
-    readonly fields: { field: string; message: string }[] = [],
+    /** For `invalid_configuration`, problems with settings or the whole form. */
+    readonly fields: {
+      field?: string | null | undefined;
+      message: string;
+    }[] = [],
     /** For `batch_operation`, the kind of the rejected operation's failure. */
     readonly causeCode: FailureCode | null = null,
   ) {
@@ -115,7 +120,7 @@ const failureSchema = lazySchema(() =>
     cause: z.enum(failureCodes).nullish().catch(null),
     message: z.string(),
     fields: z
-      .array(z.object({ field: z.string(), message: z.string() }))
+      .array(z.object({ field: z.string().nullish(), message: z.string() }))
       .nullish(),
   }),
 );

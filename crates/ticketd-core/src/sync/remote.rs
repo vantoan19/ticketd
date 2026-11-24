@@ -128,8 +128,34 @@ pub enum RemoteError {
     /// The requested file or version is not in the storage.
     #[error("the remote file or version was not found")]
     NotFound,
+    /// The bucket (or its equivalent) the person chose is not there or not visible to them.
+    /// The text names the bucket and what to check, written for people.
+    #[error("{0}")]
+    BucketMissing(String),
+    /// The profile now reaches another S3 service than the one the Workspace's bucket was
+    /// connected through. The text says which, and the way out, written for people.
+    #[error("{0}")]
+    ServiceChanged(String),
+    /// The `aws` program is missing or too old. The text says which, and that the person can
+    /// choose where it is, written for people.
+    #[error("{0}")]
+    CliUnavailable(String),
     #[error("storage: {0}")]
     Other(String),
+}
+
+/// What a storage guarantees beyond the calls of [`RemoteStorage`], so the
+/// sync engine does only the work the storage needs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RemoteCapabilities {
+    /// A [`RemoteStorage::write`] with `expected` is refused, atomically, when
+    /// the file is no longer at that version. When false the storage checks
+    /// the version just before it writes, so another device's write can land
+    /// in between and be replaced as the current version.
+    pub conditional_writes: bool,
+    /// [`RemoteStorage::revisions`] lists past versions and
+    /// [`RemoteStorage::download`] returns them, so a replaced write can be read.
+    pub keeps_revisions: bool,
 }
 
 /// Rewindable bytes, so a write can hash its content and retry a transfer.
@@ -140,6 +166,17 @@ impl<T: Read + Seek> RemoteContent for T {}
 /// chosen by the caller (letters, digits, `-`, `_`; at most 64 bytes).
 /// Implementations are shared between threads and hold no Workspace state.
 pub trait RemoteStorage: Send + Sync {
+    /// What this storage guarantees. It does not change for the life of the value.
+    fn capabilities(&self) -> RemoteCapabilities;
+
+    /// Whether the storage can safely hold a synced Workspace, asked before the first
+    /// upload, download or reconnect. A storage with nothing to check keeps this default. The
+    /// error says what to fix. A storage may write a small object of its own to find out,
+    /// but never a Workspace file.
+    fn check_usable(&self) -> Result<(), RemoteError> {
+        Ok(())
+    }
+
     /// Workspace folders this app created in the account.
     fn folders(&self) -> Result<Vec<RemoteFolder>, RemoteError>;
 

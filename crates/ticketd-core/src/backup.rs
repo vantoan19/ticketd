@@ -211,6 +211,9 @@ pub(crate) fn save_snapshot(
     copy(source, &mut destination)?;
     let files = crate::backup_archive::retained_file_inventory(root)?;
     drop(barrier);
+    if check_schema {
+        crate::source::forget_connections(&destination)?;
+    }
     crate::backup_archive::pack(&destination, files)?;
     if check_schema {
         // The ladder is not required of the live Workspace: see `Ladder::Unchecked`.

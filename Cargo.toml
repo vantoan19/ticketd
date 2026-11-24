@@ -1,6 +1,6 @@
 [workspace]
-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics", "apps/desktop/src-tauri"]
-default-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics"]
+members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics", "crates/ticketd-source-sdk", "crates/ticketd-source-linear", "apps/desktop/src-tauri"]
+default-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics", "crates/ticketd-source-sdk", "crates/ticketd-source-linear"]
 resolver = "3"
 
 [workspace.package]
@@ -12,6 +12,7 @@ repository = "https://github.com/vantoan19/ticketd"
 license = "MIT"
 
 [workspace.dependencies]
+ticketd-source-sdk = { path = "crates/ticketd-source-sdk" }
 ticketd-core = { path = "crates/ticketd-core" }
 ticketd-chat-host = { path = "crates/ticketd-chat-host" }
 ticketd-automation-runner = { path = "crates/ticketd-automation-runner" }

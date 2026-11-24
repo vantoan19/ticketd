@@ -2,17 +2,16 @@
 //! controllable fake connector. The failure scenarios are the point: every one
 //! of them must leave the ticket local, and every one that might have created an
 //! issue must block another create.
-// Clippy exempts #[test] functions but not the fake connector and fixture helpers they
-// share; those unwrap so a broken setup fails the test loudly.
-// Only the fake connector's `publish` panics (to simulate a crash) and the error
-// matchers panic on the wrong error; those carry their own allow below.
+// Fixture helpers unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
 #[path = "support/old_workspace.rs"]
 mod old_workspace;
 
+#[path = "support/fake_source.rs"]
+mod fake_source;
+
 use std::{
-    collections::BTreeMap,
     panic::{AssertUnwindSafe, catch_unwind},
     path::PathBuf,
     sync::{Arc, Mutex},
@@ -20,302 +19,28 @@ use std::{
 
 use serde_json::json;
 use ticketd_core::{
-    Error, Project, ProjectRemoteChange, Status, Ticket, TicketPatch, Workspace,
+    self, Error, Project, ProjectRemoteChange, Status, Ticket, TicketPatch, Workspace,
     source::{
-        ActionKind, AttemptState, CONTRACT_VERSION, Capability, ChoiceOption, ConfigSchema,
-        ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
-        DiscoveryRequest, Eligibility, Engine, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, FieldIssue, FieldKind, IneligibleReason, OptionSource, Origin, Ownership,
-        PublicationCandidates, PublicationError, PublicationSearch, PublishOptions, PublishRequest,
-        RefreshOptions, Resolution, ResolveOptions, SchemaField, SourceError, ValueFormat,
+        ActionKind, AttemptState, ConfigValues, Eligibility, Engine, ExternalIssue, ExternalState,
+        IneligibleReason, Origin, Ownership, PublicationError, PublishOptions, PublishRequest,
+        RefreshOptions, Resolution, ResolveOptions, SourceError,
     },
 };
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Mode {
-    /// Create the issue and return it.
-    Create,
-    /// The provider refuses before creating anything.
-    Refuse,
-    /// The request never left this machine (no DNS answer, connection refused).
-    NotSent,
-    /// The issue is created but the answer is lost (timeout).
-    LoseResponse,
-    /// The process dies during the call, after the issue exists.
-    Crash,
-}
+use fake_source::{FakeSource, PublishMode as Mode};
 
-type Hook = Arc<dyn Fn() + Send + Sync>;
-
-struct Remote {
-    mode: Mode,
-    created: Vec<PublishRequest>,
-    issues: BTreeMap<u64, ExternalIssue>,
-    /// Runs inside `publish`, after the remote issue exists, before it answers.
-    hook: Option<Hook>,
-    /// Lookups (locate, find_published) fail as if the provider were unreachable.
-    lookup_down: bool,
-    /// Whether a search reads the whole window.
-    search_complete: bool,
-    /// Runs inside a lookup, after its answer is computed, before it returns.
-    lookup_hook: Option<Hook>,
-    /// Issues the connected account created in the window whose text does not
-    /// match the attempt; searches list them without counting them as matches.
-    recent: Vec<ExternalIssue>,
-}
-
-#[derive(Clone)]
-struct Fake(Arc<Mutex<Remote>>, &'static str);
-
-impl Fake {
-    fn new() -> Self {
-        Self(
-            Arc::new(Mutex::new(Remote {
-                mode: Mode::Create,
-                created: Vec::new(),
-                issues: BTreeMap::new(),
-                hook: None,
-                lookup_down: false,
-                search_complete: true,
-                lookup_hook: None,
-                recent: Vec::new(),
-            })),
-            "example.test",
-        )
+fn fake_at_host(host: &str) -> FakeSource {
+    let source = FakeSource::default();
+    {
+        let mut remote = source.0.lock().unwrap();
+        remote.repository_host = Some(host.to_owned());
+        remote.repositories_optional = true;
     }
-}
-
-fn now_rfc3339() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    chrono::DateTime::from_timestamp(seconds as i64, 0)
-        .unwrap()
-        .to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
-}
-
-impl Fake {
-    fn answer<T>(
-        &self,
-        compute: impl FnOnce(&Remote) -> Result<T, SourceError>,
-    ) -> Result<T, SourceError> {
-        let (result, hook) = {
-            let remote = self.0.lock().unwrap();
-            if remote.lookup_down {
-                return Err(SourceError::Unavailable("provider unreachable".into()));
-            }
-            (compute(&remote), remote.lookup_hook.clone())
-        };
-        if let Some(hook) = hook {
-            hook();
-        }
-        result
-    }
-}
-
-impl Connector for Fake {
-    fn descriptor(&self) -> ConnectorDescriptor {
-        ConnectorDescriptor {
-            provider: "fake".into(),
-            name: "Fake".into(),
-            contract_version: CONTRACT_VERSION,
-            capabilities: vec![Capability::Discover, Capability::Fetch, Capability::Publish],
-            schema: ConfigSchema {
-                fields: vec![SchemaField {
-                    key: "repositories".into(),
-                    label: "Repositories".into(),
-                    help: None,
-                    required: false,
-                    kind: FieldKind::MultiSelect {
-                        options: OptionSource::Dynamic { depends_on: vec![] },
-                        allow_custom: true,
-                        min_items: 0,
-                        max_items: 3,
-                        format: Some(ValueFormat::OwnerName),
-                    },
-                }],
-            },
-        }
-    }
-
-    fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        Ok(ConnectionInfo {
-            account: "octo".into(),
-        })
-    }
-
-    fn options(
-        &self,
-        _: &str,
-        _: &str,
-        _: &ConfigValues,
-    ) -> Result<Vec<ChoiceOption>, SourceError> {
-        Ok(Vec::new())
-    }
-
-    fn discover(&self, _: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-        let remote = self.0.lock().unwrap();
-        Ok(DiscoveryPage {
-            issues: remote.issues.values().cloned().collect(),
-            next_cursor: None,
-            skipped: Vec::new(),
-        })
-    }
-
-    fn fetch(
-        &self,
-        _: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<ExternalIssue, SourceError> {
-        let remote = self.0.lock().unwrap();
-        let id: u64 = reference.identity.id.parse().unwrap();
-        remote
-            .issues
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| SourceError::NotFound("gone".into()))
-    }
-
-    fn locate(
-        &self,
-        _: &ConfigValues,
-        destination: &str,
-        text: &str,
-    ) -> Result<ExternalIssue, SourceError> {
-        self.answer(|remote| {
-            let (repository, number) = text.rsplit_once('#').unwrap_or((destination, text));
-            if repository != destination {
-                return Err(SourceError::InvalidConfiguration(vec![FieldIssue {
-                    field: "issue".into(),
-                    message: format!("is not in {destination}"),
-                }]));
-            }
-            let id: u64 = number
-                .parse()
-                .map_err(|_| SourceError::NotFound("not an issue".into()))?;
-            remote
-                .issues
-                .get(&id)
-                .cloned()
-                .ok_or_else(|| SourceError::NotFound("no such issue".into()))
-        })
-    }
-
-    fn find_published(
-        &self,
-        _: &ConfigValues,
-        search: &PublicationSearch,
-    ) -> Result<PublicationCandidates, SourceError> {
-        self.answer(|remote| {
-            Ok(PublicationCandidates {
-                matches: remote
-                    .issues
-                    .values()
-                    .filter(|issue| {
-                        issue.title == search.request.title || issue.body == search.request.body
-                    })
-                    .cloned()
-                    .collect(),
-                recent: remote.recent.clone(),
-                complete: remote.search_complete,
-            })
-        })
-    }
-
-    // Like GitHub, a destination must look like `owner/name`.
-    fn check_destination(&self, destination: &str) -> Result<(), SourceError> {
-        match destination.split_once('/') {
-            Some((owner, name)) if !owner.is_empty() && !name.is_empty() => Ok(()),
-            _ => Err(SourceError::InvalidConfiguration(vec![FieldIssue {
-                field: "destination".into(),
-                message: "must be a repository in the form owner/name".into(),
-            }])),
-        }
-    }
-
-    fn repository_for_destination(&self, destination: &str) -> Option<String> {
-        Some(format!("{}/{destination}", self.1))
-    }
-
-    // Like GitHub, owner and repository names ignore case.
-    fn same_destination(&self, a: &str, b: &str) -> bool {
-        a.eq_ignore_ascii_case(b)
-    }
-
-    fn destinations(&self, config: &ConfigValues) -> Vec<String> {
-        config
-            .get("repositories")
-            .and_then(|v| v.as_array())
-            .into_iter()
-            .flatten()
-            .map(|v| v.as_str().unwrap().to_owned())
-            .collect()
-    }
-
-    // Mode::Crash panics here on purpose: it simulates the process dying mid-call.
-    #[allow(clippy::panic)]
-    fn publish(
-        &self,
-        _: &ConfigValues,
-        request: &PublishRequest,
-    ) -> Result<ExternalIssue, SourceError> {
-        let (mode, hook) = {
-            let mut remote = self.0.lock().unwrap();
-            if remote.mode == Mode::NotSent {
-                return Err(SourceError::NotSent("could not reach the provider".into()));
-            }
-            if remote.mode == Mode::Refuse {
-                return Err(SourceError::Forbidden(
-                    "no permission to create issues".into(),
-                ));
-            }
-            remote.created.push(request.clone());
-            let id = 100 + remote.created.len() as u64;
-            let issue = ExternalIssue {
-                reference: ExternalRef {
-                    identity: ExternalIdentity {
-                        provider: "fake".into(),
-                        id: id.to_string(),
-                    },
-                    locator: format!("{}#{id}", request.destination),
-                },
-                display: format!("{}#{id}", request.destination),
-                url: format!("https://example.test/{}/issues/{id}", request.destination),
-                title: request.title.clone(),
-                body: request.body.clone(),
-                state: ExternalState::Open,
-                assignees: vec![],
-                labels: vec![],
-                created_at: now_rfc3339(),
-                updated_at: now_rfc3339(),
-                author: None,
-                repository: None,
-                duplicate_of: None,
-                duplicate_of_url: None,
-                duplicate_withdrawn: false,
-            };
-            remote.issues.insert(id, issue);
-            (remote.mode, remote.hook.clone())
-        };
-        if let Some(hook) = hook {
-            hook();
-        }
-        match mode {
-            Mode::LoseResponse => Err(SourceError::Unavailable(
-                "GitHub is unavailable (status 502); retry later".into(),
-            )),
-            Mode::Crash => panic!("process died during the create call"),
-            _ => {
-                let remote = self.0.lock().unwrap();
-                Ok(remote.issues.values().last().unwrap().clone())
-            }
-        }
-    }
+    source
 }
 
 struct Fixture {
-    fake: Fake,
+    fake: FakeSource,
     engine: Arc<Engine>,
     workspace: Workspace,
     dir: tempfile::TempDir,
@@ -327,7 +52,8 @@ fn values(value: serde_json::Value) -> ConfigValues {
 
 impl Fixture {
     fn new() -> Self {
-        let fake = Fake::new();
+        let fake = FakeSource::default();
+        fake.0.lock().unwrap().repositories_optional = true;
         let mut engine = Engine::new();
         engine.register(Box::new(fake.clone())).unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -348,7 +74,7 @@ impl Fixture {
     }
 
     fn mode(&self, mode: Mode) {
-        self.fake.0.lock().unwrap().mode = mode;
+        self.fake.0.lock().unwrap().publish_mode = mode;
     }
 
     fn created(&self) -> usize {
@@ -356,7 +82,7 @@ impl Fixture {
     }
 
     fn hook(&self, hook: impl Fn() + Send + Sync + 'static) {
-        self.fake.0.lock().unwrap().hook = Some(Arc::new(hook));
+        self.fake.0.lock().unwrap().after_publish = Some(Arc::new(hook));
     }
 
     fn publish(&mut self, reference: &str) -> Result<ticketd_core::source::PublishOutcome, Error> {
@@ -400,7 +126,7 @@ impl Fixture {
 
 fn options() -> PublishOptions {
     PublishOptions {
-        provider: "fake".into(),
+        connection: Some("fake".into()),
         destination: None,
         now: None,
         expected_fingerprint: None,
@@ -439,6 +165,126 @@ fn publication_error(error: Error) -> PublicationError {
         Error::Publication(error) => error,
         other => panic!("expected a publication error, got {other}"),
     }
+}
+
+#[test]
+fn publication_uses_the_last_successful_connection_answers_offline() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Ship this").unwrap();
+    f.fake.0.lock().unwrap().publish_destinations = Some(vec!["o/alternate".into()]);
+    // A connector can derive a destination other than the literal repository setting.
+    f.workspace
+        .save_source(&f.engine, "fake", &values(json!({"repositories": ["o/r"]})))
+        .unwrap();
+    let preview = |fixture: &Fixture| {
+        fixture
+            .workspace
+            .preview_publication(&fixture.engine, &ticket.reference, "fake", None)
+            .unwrap()
+    };
+    assert_eq!(preview(&f).destination.as_deref(), Some("o/alternate"));
+
+    f.fake.0.lock().unwrap().publish_destinations = Some(vec!["o/new".into()]);
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(preview(&f).destination.as_deref(), Some("o/new"));
+
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.publish_destinations = Some(vec!["o/unconfirmed".into()]);
+        remote.connection_error = Some("credentials expired".into());
+    }
+    let refreshed = f
+        .workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(refreshed.failures[0].code, "unauthenticated");
+    let mut f = f.reopen();
+    assert_eq!(preview(&f).destination.as_deref(), Some("o/new"));
+
+    f.fake.0.lock().unwrap().connection_error = None;
+    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
+    assert!(matches!(error, PublicationError::Failed { .. }), "{error}");
+    assert!(
+        error
+            .to_string()
+            .contains("destination is no longer available")
+    );
+    assert_eq!(f.created(), 0);
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    let sent = f.publish(&ticket.reference).unwrap();
+    assert_eq!(sent.attempt.destination, "o/unconfirmed");
+}
+
+#[test]
+fn a_check_for_the_same_settings_cannot_overwrite_a_concurrent_save() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Ship this").unwrap();
+    let path = f.path();
+    let engine = f.engine.clone();
+    let fake = f.fake.clone();
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.publish_destinations = Some(vec!["o/old".into()]);
+        remote.after_check = Some(Arc::new(move || {
+            fake.0.lock().unwrap().publish_destinations = Some(vec!["o/saved".into()]);
+            Workspace::open(&path)
+                .unwrap()
+                .save_source(&engine, "fake", &values(json!({"repositories": ["o/r"]})))
+                .unwrap();
+        }));
+    }
+    f.workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    assert_eq!(preview.destination.as_deref(), Some("o/saved"));
+}
+
+#[test]
+fn a_delayed_check_cannot_replace_the_answers_from_a_newer_refresh() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Ship this").unwrap();
+    let path = f.path();
+    let engine = f.engine.clone();
+    let fake = f.fake.clone();
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.publish_destinations = Some(vec!["o/old".into()]);
+        remote.after_check = Some(Arc::new(move || {
+            fake.0.lock().unwrap().publish_destinations = Some(vec!["o/new".into()]);
+            Workspace::open(&path)
+                .unwrap()
+                .refresh_sources(
+                    &engine,
+                    &RefreshOptions {
+                        now: Some("2026-02-02T00:00:00Z".into()),
+                        ..RefreshOptions::default()
+                    },
+                )
+                .unwrap();
+        }));
+    }
+    f.workspace
+        .refresh_sources(
+            &f.engine,
+            &RefreshOptions {
+                now: Some("2026-02-01T00:00:00Z".into()),
+                ..RefreshOptions::default()
+            },
+        )
+        .unwrap();
+    let preview = f
+        .workspace
+        .preview_publication(&f.engine, &ticket.reference, "fake", None)
+        .unwrap();
+    assert_eq!(preview.destination.as_deref(), Some("o/new"));
 }
 
 #[test]
@@ -617,6 +463,7 @@ fn publication_and_refresh_preserve_local_context_while_replacing_only_derived_f
         issue.reference.locator = "o/r#102".into();
         issue.display = "o/r#102".into();
         remote.issues.insert(102, issue);
+        remote.matching.push(102);
     }
     let report = f
         .workspace
@@ -894,10 +741,9 @@ fn a_preview_cannot_be_used_with_the_same_repository_name_on_another_host() {
         expected_fingerprint: Some(preview.fingerprint),
         ..options()
     };
+    let other = fake_at_host("other.example.test");
     let mut other_engine = Engine::new();
-    other_engine
-        .register(Box::new(Fake(f.fake.0.clone(), "other.example.test")))
-        .unwrap();
+    other_engine.register(Box::new(other.clone())).unwrap();
 
     assert!(matches!(
         f.workspace
@@ -907,6 +753,7 @@ fn a_preview_cannot_be_used_with_the_same_repository_name_on_another_host() {
         ))
     ));
     assert_eq!(f.created(), 0);
+    assert!(other.0.lock().unwrap().created.is_empty());
 }
 
 #[test]
@@ -1222,14 +1069,14 @@ fn a_definite_failure_leaves_the_ticket_local_and_allows_a_later_attempt() {
     let PublicationError::Failed { source, .. } = &error else {
         panic!("expected a definite failure, got {error}");
     };
-    assert_eq!(source.code(), "forbidden");
+    assert_eq!(source.code(), "rejected");
     assert!(error.to_string().contains("remains a local ticket"));
     let after = f.ticket(&ticket.reference);
     assert!(after.source.is_none() && after.publication.is_none());
     let attempts = f.workspace.publication_attempts(&ticket.reference).unwrap();
     assert_eq!(attempts.len(), 1);
     assert_eq!(attempts[0].state, AttemptState::Failed);
-    assert_eq!(attempts[0].failure.as_ref().unwrap().code, "forbidden");
+    assert_eq!(attempts[0].failure.as_ref().unwrap().code, "rejected");
 
     f.mode(Mode::Create);
     assert!(f.publish(&ticket.reference).is_ok());
@@ -1559,6 +1406,64 @@ fn a_version_25_workspace_gains_the_attempts_table_on_open() {
 
 // ---- Resolving an uncertain publication (#109) ----
 
+#[test]
+fn a_legacy_github_publication_site_requires_an_original_binding_or_create_response() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 96).unwrap();
+    let legacy = rusqlite::Connection::open(&path).unwrap();
+    legacy
+        .execute_batch(
+            "INSERT INTO tickets (id, reference, title, status) VALUES
+            ('bound', 'T-KQ1', 'Bound', 'Todo'),
+            ('known', 'T-KQ2', 'Known', 'Todo'),
+            ('unbound', 'T-KQ3', 'Unbound', 'Todo'),
+            ('inferred', 'T-KQ4', 'Inferred', 'Todo');
+         INSERT INTO publication_attempts (
+            id, ticket_id, provider, destination, destination_host, title, body, status,
+            started_at, lease_expires_at, updated_at
+         )
+         SELECT id, id, 'github', 'o/r', 'git.example.test', title, '', 'unresolved',
+             '2026-01-01T00:00:00Z', '2026-01-01T00:06:00Z', '2026-01-01T00:06:00Z'
+         FROM tickets;
+         INSERT INTO source_connections (
+             id, name, provider, site, configuration, account, account_key,
+             contract_version, saved_at, revision
+         ) VALUES
+           ('github', 'Work', 'github', 'git.example.test:8443', '{}', 'octo', 'octo',
+             2, '2025-12-01T00:00:00Z', 'original'),
+           ('github-2', 'Legacy', 'github', 'git.example.test:7443', '{}', 'alice', 'alice',
+             1, '2025-12-01T00:00:00Z', 'inferred');
+         INSERT INTO publication_connections (attempt_id, connection_id) VALUES
+           ('bound', 'github'), ('inferred', 'github-2');
+         UPDATE publication_attempts SET external_id = '@git.example.test:12',
+            locator = 'o/r#7', display = 'o/r#7', url = 'https://git.example.test:9443/o/r/issues/7'
+         WHERE id = 'known';",
+        )
+        .unwrap();
+    drop(legacy);
+    let workspace = Workspace::open(path).unwrap();
+    let attempt = |reference| {
+        serde_json::to_value(&workspace.publication_attempts(reference).unwrap()[0]).unwrap()
+    };
+    let bound = attempt("T-KQ1");
+    assert_eq!(bound["destination_host"], "git.example.test:8443");
+    assert!(bound.get("destination_site_unconfirmed").is_none());
+    let known = attempt("T-KQ2");
+    assert_eq!(known["destination_host"], "git.example.test:9443");
+    assert_eq!(
+        known["issue"]["identity"]["id"],
+        "@git.example.test:9443:12"
+    );
+    assert!(known.get("destination_site_unconfirmed").is_none());
+    let unbound = attempt("T-KQ3");
+    assert_eq!(unbound["destination_host"], "git.example.test");
+    assert_eq!(unbound["destination_site_unconfirmed"], true);
+    let inferred = attempt("T-KQ4");
+    assert_eq!(inferred["destination_host"], "git.example.test");
+    assert_eq!(inferred["destination_site_unconfirmed"], true);
+}
+
 fn attach(issue: Option<&str>) -> ResolveOptions {
     ResolveOptions {
         resolution: Resolution::Attach {
@@ -1630,9 +1535,9 @@ fn publication_recovery_cannot_use_the_same_repository_on_a_different_host() {
     let ticket = f.lost_response("Escalate");
     f.workspace = Workspace::open(f.path()).unwrap();
 
-    let wrong_host = Fake(Fake::new().0, "other.example.test");
+    let wrong_host = fake_at_host("other.example.test");
     let lookups = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    wrong_host.0.lock().unwrap().lookup_hook = Some(Arc::new({
+    wrong_host.0.lock().unwrap().after_lookup = Some(Arc::new({
         let lookups = lookups.clone();
         move || {
             lookups.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -1718,6 +1623,30 @@ fn a_replayed_or_duplicate_resolution_attaches_nothing_more() {
 
     let again = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
     assert!(again.replayed);
+    let explicit = |issue: &str, connection: &str| ResolveOptions {
+        resolution: Resolution::AttachUsingConnection {
+            issue: issue.into(),
+            connection: connection.into(),
+        },
+        ..attach(None)
+    };
+    assert!(
+        f.resolve(&ticket.reference, &explicit("101", "fake"))
+            .unwrap()
+            .replayed
+    );
+    let different = unrelated_issue(&f, 102, "Different issue", "Different body");
+    f.fake.0.lock().unwrap().issues.insert(102, different);
+    for request in [
+        attach(Some("102")),
+        explicit("102", "fake"),
+        explicit("101", "another-connection"),
+    ] {
+        assert!(matches!(
+            publication_error(f.resolve(&ticket.reference, &request).unwrap_err()),
+            PublicationError::Settled { .. }
+        ));
+    }
     // A different resolver (another process) sees the settled attempt too.
     let mut other = Workspace::open(f.path()).unwrap();
     let from_other = other
@@ -1847,7 +1776,7 @@ fn not_created_needs_a_complete_empty_search_and_then_allows_another_attempt() {
     f.fake.0.lock().unwrap().issues.clear();
 
     // An incomplete read proves nothing.
-    f.fake.0.lock().unwrap().search_complete = false;
+    f.fake.0.lock().unwrap().search_incomplete = true;
     assert!(matches!(
         publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err()),
         PublicationError::Unverified { .. }
@@ -1861,7 +1790,7 @@ fn not_created_needs_a_complete_empty_search_and_then_allows_another_attempt() {
         }
     ));
 
-    f.fake.0.lock().unwrap().search_complete = true;
+    f.fake.0.lock().unwrap().search_incomplete = false;
     let outcome = f.resolve(&ticket.reference, &not_created()).unwrap();
     assert_eq!(outcome.attempt.state, AttemptState::Failed);
     assert_eq!(outcome.attempt.failure.unwrap().code, "ruled_out");
@@ -1902,6 +1831,7 @@ fn discovery_holds_matching_issues_only_in_the_open_publication_repository_and_h
         // Repository matching follows the provider's case-insensitive comparison.
         remote.issues.get_mut(&101).unwrap().repository = Some("example.test/O/R".into());
         remote.issues.insert(102, different_repository);
+        remote.matching.push(102);
     }
 
     let refresh = f
@@ -1911,15 +1841,14 @@ fn discovery_holds_matching_issues_only_in_the_open_publication_repository_and_h
     assert_eq!(refresh.imported.len(), 1);
     assert_eq!(f.ticket(&refresh.imported[0]).source.unwrap().id, "102");
 
-    let other_host = Fake(Fake::new().0, "other.example.test");
+    let other_host = fake_at_host("other.example.test");
     let mut same_repository_on_other_host = unrelated_issue(&f, 103, "Escalate", "Body");
     same_repository_on_other_host.repository = Some("other.example.test/o/r".into());
-    other_host
-        .0
-        .lock()
-        .unwrap()
-        .issues
-        .insert(103, same_repository_on_other_host);
+    {
+        let mut remote = other_host.0.lock().unwrap();
+        remote.issues.insert(103, same_repository_on_other_host);
+        remote.matching.push(103);
+    }
     let mut other_engine = Engine::new();
     other_engine.register(Box::new(other_host)).unwrap();
     let refresh = f
@@ -1945,17 +1874,18 @@ fn discovery_holds_matches_in_a_legacy_publications_repository_until_the_host_is
         )
         .unwrap();
 
-    let other_host = Fake(Fake::new().0, "other.example.test");
+    let other_host = fake_at_host("other.example.test");
     let mut same_repository = unrelated_issue(&f, 102, "Escalate", "Body");
     same_repository.repository = Some("other.example.test/o/r".into());
     let mut different_repository = unrelated_issue(&f, 103, "Escalate", "Body");
     different_repository.repository = Some("other.example.test/o/other".into());
-    other_host
-        .0
-        .lock()
-        .unwrap()
-        .issues
-        .extend([(102, same_repository), (103, different_repository)]);
+    {
+        let mut remote = other_host.0.lock().unwrap();
+        remote
+            .issues
+            .extend([(102, same_repository), (103, different_repository)]);
+        remote.matching.extend([102, 103]);
+    }
     let mut other_engine = Engine::new();
     other_engine.register(Box::new(other_host)).unwrap();
     let refresh = f
@@ -1981,6 +1911,19 @@ fn discovery_holds_matches_in_a_legacy_publications_repository_until_the_host_is
 fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
     let mut f = Fixture::new();
     let ticket = f.lost_response("Escalate");
+    f.fake.0.lock().unwrap().account_from_assignee = true;
+    let importer = f
+        .workspace
+        .add_source_connection(
+            &f.engine,
+            "fake",
+            None,
+            Some("Discovery account"),
+            &values(json!({"repositories": ["o/r"], "assignee": "other"})),
+        )
+        .unwrap()
+        .source
+        .id;
     f.workspace
         .add_activity(&ticket.reference, "local work", None)
         .unwrap();
@@ -1993,14 +1936,28 @@ fn attach_adopts_an_issue_discovery_imported_after_the_attempt_began() {
         issue.body = "Rewritten".into();
     }
     f.workspace
-        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .refresh_connection(&f.engine, &importer, &RefreshOptions::default())
         .unwrap();
     assert_eq!(f.workspace.list_tickets().unwrap().len(), 2);
+    assert_eq!(
+        f.workspace
+            .ticket_source_connection("T-KQ2")
+            .unwrap()
+            .as_deref(),
+        Some(importer.as_str())
+    );
 
     let done = f
         .resolve(&ticket.reference, &accept_different("101"))
         .unwrap();
     assert_eq!(done.attempt.state, AttemptState::Succeeded);
+    assert_eq!(
+        f.workspace
+            .ticket_source_connection(&ticket.reference)
+            .unwrap()
+            .as_deref(),
+        Some("fake")
+    );
     let source = done.ticket.source.unwrap();
     assert_eq!(
         (source.id.as_str(), source.origin),
@@ -2083,41 +2040,119 @@ fn attach_rechecks_eligibility_and_brings_a_closed_issues_closure() {
 
     // Back in progress, and a teammate has meanwhile closed the issue as completed.
     set_status(&mut f, &ticket.reference, Status::InProgress);
-    f.fake.0.lock().unwrap().issues.get_mut(&101).unwrap().state = ExternalState::Closed {
-        reason: ticketd_core::source::ClosureReason::Completed,
-    };
+    f.fake.0.lock().unwrap().issues.get_mut(&101).unwrap().state =
+        ExternalState::named(ticketd_core::source::StateCategory::Completed, "Closed");
     let done = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
     assert_eq!(done.ticket.status, Status::Done);
     assert!(done.ticket.source.unwrap().status_locked);
 }
 
 #[test]
-fn a_late_creation_after_a_not_created_verdict_reopens_the_attempt_with_the_issue() {
+fn a_preflight_that_loses_its_attempt_never_dispatches_a_mutation() {
+    let mut f = Fixture::new();
+    let ticket = f.workspace.create_ticket("Racing publication").unwrap();
+    let reference = ticket.reference.clone();
+    let path = f.path();
+    let engine = f.engine.clone();
+    f.fake.0.lock().unwrap().after_check = Some(Arc::new(move || {
+        let mut other = Workspace::open(&path).unwrap();
+        other
+            .resolve_publication(
+                &engine,
+                &reference,
+                &ResolveOptions {
+                    now: Some("2026-02-01T00:10:00Z".into()),
+                    ..not_created()
+                },
+            )
+            .unwrap();
+    }));
+    let options = PublishOptions {
+        now: Some("2026-02-01T00:00:00Z".into()),
+        ..options()
+    };
+    assert!(matches!(
+        publication_error(
+            f.workspace
+                .publish_ticket(&f.engine, &ticket.reference, &options)
+                .unwrap_err()
+        ),
+        PublicationError::Failed { .. }
+    ));
+    assert_eq!(f.created(), 0);
+}
+
+#[test]
+fn a_send_lock_that_cannot_be_opened_leaves_a_definitive_failure() {
     let mut f = Fixture::new();
     let ticket = describe(&mut f, "Escalate", "Body");
+    let mut sidecar = f.path().into_os_string();
+    sidecar.push(".attachments");
+    let folder = PathBuf::from(sidecar);
+    std::fs::create_dir_all(&folder).unwrap();
+    let blocked = folder.join(".publication-dispatch-locks");
+    std::fs::write(&blocked, "this regular file prevents directory creation").unwrap();
+
+    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
+    assert!(matches!(
+        error,
+        PublicationError::Failed {
+            source: SourceError::NotSent(_),
+            ..
+        }
+    ));
+    assert_eq!(f.created(), 0);
+    assert_eq!(
+        f.workspace.publication_attempts(&ticket.reference).unwrap()[0].state,
+        AttemptState::Failed
+    );
+
+    std::fs::remove_file(blocked).unwrap();
+    assert_eq!(
+        f.publish(&ticket.reference).unwrap().attempt.state,
+        AttemptState::Succeeded
+    );
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn an_expired_lease_cannot_settle_while_the_sender_is_active() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body");
+    let unrelated = describe(&mut f, "Unrelated publication", "Other body");
     let path = f.path();
     let engine = f.engine.clone();
     let reference = ticket.reference.clone();
+    let unrelated_reference = unrelated.reference.clone();
     let fake = f.fake.clone();
-    // The publisher stalls past its lease; a resolver searches while the issue is
-    // not yet visible and confirms "not created"; then the late answer arrives.
+    // A different caller's wall clock sees the lease as expired while the
+    // issue remains invisible to search and the sender can still finish.
     f.hook(move || {
         let hidden = fake.0.lock().unwrap().issues.remove(&101).unwrap();
         let mut other = Workspace::open(&path).unwrap();
         let mut verdict = not_created();
         verdict.now = Some("2999-01-01T00:00:00Z".into());
-        other
+        let error = other
             .resolve_publication(&engine, &reference, &verdict)
+            .unwrap_err();
+        assert!(matches!(
+            publication_error(error),
+            PublicationError::StillRunning { .. }
+        ));
+        {
+            let mut remote = fake.0.lock().unwrap();
+            remote.issues.insert(101, hidden);
+            remote.after_publish = None;
+        }
+        let separate = other
+            .publish_ticket(&engine, &unrelated_reference, &options())
             .unwrap();
-        fake.0.lock().unwrap().issues.insert(101, hidden);
+        assert_eq!(separate.attempt.state, AttemptState::Succeeded);
     });
-    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
-    assert!(matches!(error, PublicationError::Unresolved { .. }));
-    let after = f.ticket(&ticket.reference);
-    let attempt = after.publication.expect("the attempt is open again");
-    assert_eq!(attempt.state, AttemptState::Unresolved);
-    assert_eq!(attempt.issue.unwrap().identity.id, "101");
-    assert!(after.source.is_none());
+    let outcome = f.publish(&ticket.reference).unwrap();
+    assert_eq!(outcome.attempt.state, AttemptState::Succeeded);
+    assert_eq!(outcome.ticket.source.unwrap().id, "101");
+    assert_eq!(f.ticket(&unrelated.reference).source.unwrap().id, "102");
 }
 
 #[test]
@@ -2144,7 +2179,7 @@ fn one_clock_judges_the_lease_so_a_crashed_attempt_is_settled_consistently() {
     ));
     // After the lease the attempt settles as not created.
     let mut late = not_created();
-    late.now = Some("2000-01-01T00:05:00Z".into());
+    late.now = Some("2000-01-01T00:08:00Z".into());
     late.agent = Some("assistant".into());
     let settled = f.resolve(&ticket.reference, &late).unwrap();
     assert_eq!(settled.attempt.state, AttemptState::Failed);
@@ -2187,7 +2222,7 @@ fn the_review_offers_only_actions_that_can_succeed() {
     {
         let mut remote = f.fake.0.lock().unwrap();
         remote.lookup_down = false;
-        remote.search_complete = false;
+        remote.search_incomplete = true;
     }
     let review = f
         .workspace
@@ -2200,7 +2235,7 @@ fn the_review_offers_only_actions_that_can_succeed() {
             .any(|a| a.kind == ActionKind::NotCreated && a.available)
     );
     // With a complete empty search it is.
-    f.fake.0.lock().unwrap().search_complete = true;
+    f.fake.0.lock().unwrap().search_incomplete = false;
     let review = f
         .workspace
         .review_publication_at(&f.engine, &ticket.reference, true, Some(&later()))
@@ -2221,9 +2256,7 @@ fn a_resolver_that_loses_a_race_to_the_same_attach_reports_a_replay() {
     let engine = f.engine.clone();
     let reference = ticket.reference.clone();
     // Another resolver attaches while this one is still verifying.
-    let fake = f.fake.clone();
-    f.fake.0.lock().unwrap().lookup_hook = Some(Arc::new(move || {
-        fake.0.lock().unwrap().lookup_hook = None;
+    f.fake.0.lock().unwrap().after_lookup = Some(Arc::new(move || {
         let mut other = Workspace::open(&path).unwrap();
         other
             .resolve_publication(&engine, &reference, &attach(Some("101")))
@@ -2252,8 +2285,7 @@ fn a_not_created_verdict_that_loses_to_an_attach_does_not_discard_the_issue() {
     let engine = f.engine.clone();
     let reference = ticket.reference.clone();
     let fake = f.fake.clone();
-    f.fake.0.lock().unwrap().lookup_hook = Some(Arc::new(move || {
-        fake.0.lock().unwrap().lookup_hook = None;
+    f.fake.0.lock().unwrap().after_lookup = Some(Arc::new(move || {
         fake.0.lock().unwrap().issues.insert(101, hidden.clone());
         let mut other = Workspace::open(&path).unwrap();
         other
@@ -2269,6 +2301,105 @@ fn a_not_created_verdict_that_loses_to_an_attach_does_not_discard_the_issue() {
     );
     assert_eq!(
         f.workspace.publication_attempts(&ticket.reference).unwrap()[0].state,
+        AttemptState::Succeeded
+    );
+}
+
+#[test]
+fn a_not_created_verdict_cannot_use_a_search_from_before_a_changed_dispatch_lease() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let attempt_id = f.ticket(&ticket.reference).publication.unwrap().id;
+    let path = f.path();
+    let lease = later();
+    let mut remote = f.fake.0.lock().unwrap();
+    remote.issues.clear();
+    remote.after_lookup = Some(Arc::new({
+        let attempt_id = attempt_id.clone();
+        let path = path.clone();
+        let lease = lease.clone();
+        move || {
+            // A competing dispatch may have extended the lease while this account's
+            // search was reading the old window.
+            let updated = rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute(
+                    "UPDATE publication_attempts SET lease_expires_at = ?2 WHERE id = ?1",
+                    rusqlite::params![attempt_id, lease],
+                )
+                .unwrap();
+            assert_eq!(updated, 1);
+        }
+    }));
+    drop(remote);
+
+    let error = publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err());
+    assert!(
+        matches!(&error, PublicationError::Unverified {
+            source: SourceError::Unavailable(message), ..
+        } if message.contains("dispatch window changed during the search")),
+        "{error}"
+    );
+    let stored: String = rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row(
+            "SELECT lease_expires_at FROM publication_attempts WHERE id = ?1",
+            [&attempt_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored, lease);
+    f.still_unresolved(&ticket.reference);
+    assert!(matches!(
+        publication_error(f.publish(&ticket.reference).unwrap_err()),
+        PublicationError::Ineligible {
+            reason: IneligibleReason::AttemptOpen,
+            ..
+        }
+    ));
+}
+
+#[test]
+fn attach_rejects_a_changed_dispatch_lease_even_when_it_looks_expired() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let attempt_id = f.ticket(&ticket.reference).publication.unwrap().id;
+    let path = f.path();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE publication_attempts
+             SET status = 'in_flight', lease_expires_at = '2026-01-01T00:01:00Z' WHERE id = ?1",
+            [&attempt_id],
+        )
+        .unwrap();
+    f.fake.0.lock().unwrap().after_lookup = Some(Arc::new(move || {
+        let updated = rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE publication_attempts
+                 SET lease_expires_at = '2026-01-01T00:02:00Z' WHERE id = ?1",
+                [&attempt_id],
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+    }));
+    let mut request = attach(Some("101"));
+    request.now = Some("2026-01-01T00:03:00Z".into());
+
+    let error = publication_error(f.resolve(&ticket.reference, &request).unwrap_err());
+    assert!(
+        matches!(&error, PublicationError::Unverified {
+            source: SourceError::Unavailable(message), ..
+        } if message.contains("dispatch window changed while verifying the issue")),
+        "{error}"
+    );
+    f.still_unresolved(&ticket.reference);
+    assert_eq!(
+        f.resolve(&ticket.reference, &request)
+            .unwrap()
+            .attempt
+            .state,
         AttemptState::Succeeded
     );
 }
@@ -2420,12 +2551,15 @@ fn attaching_the_issue_that_holds_the_sent_text_needs_no_confirmation() {
 }
 
 #[test]
-fn other_recent_issues_are_listed_but_do_not_block_not_created() {
+fn an_edited_issue_may_be_the_attempt_and_blocks_not_created() {
     let mut f = Fixture::new();
-    let ticket = f.lost_response("Never landed");
-    let other = unrelated_issue(&f, 18, "Another ticket", "Another body");
-    f.fake.0.lock().unwrap().issues.clear();
-    f.fake.0.lock().unwrap().recent = vec![other];
+    let ticket = f.lost_response("Initially published");
+    {
+        let mut source = f.fake.0.lock().unwrap();
+        let edited = source.issues.get_mut(&101).unwrap();
+        edited.title = "Edited title".into();
+        edited.body = "Edited body".into();
+    }
 
     let review = f
         .workspace
@@ -2433,15 +2567,61 @@ fn other_recent_issues_are_listed_but_do_not_block_not_created() {
         .unwrap();
     assert!(review.candidates.is_empty());
     assert_eq!(review.other_recent.len(), 1);
-    assert_eq!(review.other_recent[0].title, "Another ticket");
+    assert_eq!(review.other_recent[0].title, "Edited title");
     assert!(
         review
             .actions
             .iter()
-            .any(|a| a.kind == ActionKind::NotCreated && a.available)
+            .any(|a| a.kind == ActionKind::NotCreated && !a.available)
     );
-    let outcome = f.resolve(&ticket.reference, &not_created()).unwrap();
-    assert_eq!(outcome.attempt.state, AttemptState::Failed);
+    let error = publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err());
+    assert!(matches!(error, PublicationError::Candidates { .. }));
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn an_uncertain_reply_preserves_the_dispatch_lease() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let attempt = f.ticket(&ticket.reference).publication.unwrap();
+    let review = f
+        .workspace
+        .review_publication(&f.engine, &ticket.reference, false)
+        .unwrap();
+    let started = chrono::DateTime::parse_from_rfc3339(&attempt.started_at).unwrap();
+    let ready = chrono::DateTime::parse_from_rfc3339(&review.search_ready_at.unwrap()).unwrap();
+    assert!(ready - started >= chrono::Duration::minutes(6));
+}
+
+#[test]
+fn an_unresolved_publication_does_not_hide_discovery_in_another_destination() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let mut unrelated = unrelated_issue(&f, 42, "Escalate", "Different body");
+    unrelated.reference.partition = "o/other".into();
+    unrelated.reference.locator = "o/other#42".into();
+    unrelated.display = "o/other#42".into();
+    unrelated.created_at = chrono::Utc::now().to_rfc3339();
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.matching.push(42);
+        remote.issues.insert(42, unrelated);
+    }
+    f.workspace
+        .save_source(
+            &f.engine,
+            "fake",
+            &values(json!({"repositories": ["o/r", "o/other"]})),
+        )
+        .unwrap();
+    let report = f
+        .workspace
+        .refresh_sources(&f.engine, &RefreshOptions::default())
+        .unwrap();
+    assert_eq!(report.imported.len(), 1, "{report:?}");
+    let imported = f.ticket(&report.imported[0]);
+    assert_eq!(imported.source.unwrap().display, "o/other#42");
+    f.still_unresolved(&ticket.reference);
 }
 
 #[test]
@@ -2486,10 +2666,14 @@ fn nothing_created_is_not_concluded_before_a_just_created_issue_could_be_listed(
     let ticket = f.lost_response("Never landed");
     f.fake.0.lock().unwrap().issues.clear();
 
-    // Right away: the read was complete but proves nothing yet.
+    // A search that begins too soon is refused before it can obtain a listing.
+    f.fake.0.lock().unwrap().after_lookup = Some(Arc::new(|| {
+        panic!("looked up issues before the listing delay ended")
+    }));
     let mut early = not_created();
     early.now = None;
     let error = publication_error(f.resolve(&ticket.reference, &early).unwrap_err());
+    f.fake.0.lock().unwrap().after_lookup = None;
     assert!(
         matches!(error, PublicationError::Unverified { .. }),
         "{error}"
@@ -2518,8 +2702,12 @@ fn an_imported_ticket_says_only_local_tickets_are_published() {
     // Discovery imports an issue nobody here published.
     let mut stranger = unrelated_issue(&f, 30, "Someone else's", "Their text");
     stranger.created_at = "2030-01-01T00:00:00Z".into();
-    f.fake.0.lock().unwrap().issues.insert(30, stranger);
-    f.fake.0.lock().unwrap().issues.remove(&101);
+    {
+        let mut remote = f.fake.0.lock().unwrap();
+        remote.issues.insert(30, stranger);
+        remote.matching.push(30);
+        remote.issues.remove(&101);
+    }
     f.workspace
         .refresh_sources(&f.engine, &RefreshOptions::default())
         .unwrap();
