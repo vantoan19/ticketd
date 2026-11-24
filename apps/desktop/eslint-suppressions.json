@@ -67,11 +67,6 @@
       "count": 1
     }
   },
-  "src/features/tickets/PublishToSource.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
   "src/features/tickets/ReadOnlySource.tsx": {
     "shadcn/no-restyle": {
       "count": 2

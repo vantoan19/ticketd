@@ -142,8 +142,7 @@
   font-weight: 600;
   letter-spacing: -0.6px;
 }
-.publication-repository {
-  width: 100%;
+.publication-field [data-publication-destination] {
   font-family: var(--font-mono);
   font-size: var(--text-code);
 }
@@ -213,7 +212,7 @@
 }
 
 /* A fixed repository is still essential preview content, so keep it readable. */
-.publication-repository[data-readonly]:disabled {
+.publication-field [data-publication-destination][data-readonly]:disabled {
   color: var(--foreground);
   background: var(--surface);
 }

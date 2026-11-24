@@ -1176,9 +1176,9 @@ fn the_same_field_changed_on_two_devices_converges_in_every_order() {
 fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
     // A higher format number, with or without what else this version does not know.
     for (from, to) in [
-        ("format: 1\n", "format: 3\n"),
-        ("format: 1\n", "format: 3\nmood: \"happy\"\n"),
-        ("format: 1\n", "format: 3\n---\n<!-- ticketd:mood -->\n"),
+        ("format: 1\n", "format: 4\n"),
+        ("format: 1\n", "format: 4\nmood: \"happy\"\n"),
+        ("format: 1\n", "format: 4\n---\n<!-- ticketd:mood -->\n"),
     ] {
         let mut devices = devices();
         let reference = devices.shared_ticket("Login");
@@ -1508,16 +1508,246 @@ fn sourced(state: &str, updated: &str) -> String {
 }
 
 #[test]
-fn legacy_numeric_github_ids_round_trip_in_a_format_compatible_with_their_host() {
+fn a_synced_ticket_cannot_change_sites_under_the_same_legacy_issue_id() {
+    let mut devices = devices();
+    let id = "3f2c9a1e-0000-4000-8000-000000000001";
+    let original = sourced("open", "2026-01-03T00:00:00Z").replace("I_42", "42");
+    let key = RemoteKey::new(RemoteKind::Ticket, id);
+    devices
+        .remote
+        .write(
+            &devices.folder,
+            &key,
+            "Published.md",
+            None,
+            &mut Cursor::new(&original),
+        )
+        .unwrap();
+    devices.sync(0);
+    let incoming = original
+        .replace("example.test", "different-enterprise.test")
+        .replace("From the tracker.", "Another tracker’s description.");
+    devices.hand_edit(RemoteKind::Ticket, id, &incoming);
+    devices.workspaces[0]
+        .change_ticket(
+            "T-ZZ7",
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+
+    let report = devices.sync(0);
+    assert_eq!((report.skipped, report.uploaded), (1, 0));
+    assert_eq!(devices.remote_text(RemoteKind::Ticket, id).1, incoming);
+    let ticket = devices.workspaces[0].show_ticket("T-ZZ7").unwrap();
+    assert_eq!(ticket.status, Status::InProgress);
+    assert_eq!(ticket.body.trim(), "From the tracker.");
+    assert_eq!(
+        ticket.source.unwrap().url,
+        "https://example.test/acme/site/issues/42"
+    );
+    let notice = devices.workspaces[0].sync_notices().unwrap().remove(0);
+    assert!(
+        matches!(&notice.notice, SyncNoticeKind::UnreadableFile { reason, .. }
+        if reason.contains("legacy issue identifier"))
+    );
+    devices.workspaces[0]
+        .set_sync_read(&[notice.id], true)
+        .unwrap();
+    assert_eq!(devices.sync(0).uploaded, 0);
+    assert_eq!(devices.remote_text(RemoteKind::Ticket, id).1, incoming);
+    assert_eq!(
+        devices.workspaces[0].sync_status().unwrap().state,
+        SyncState::NeedsAttention
+    );
+
+    devices.hand_edit(RemoteKind::Ticket, id, &original);
+    assert_eq!(devices.sync(0).uploaded, 1);
+    assert!(devices.workspaces[0].sync_notices().unwrap().is_empty());
+    assert!(
+        devices
+            .remote_text(RemoteKind::Ticket, id)
+            .1
+            .contains("status: \"In progress\"")
+    );
+}
+
+#[test]
+fn a_collision_held_file_retries_when_its_source_holder_releases_the_identity() {
+    let mut devices = Devices::new(&["Desk A"]);
+    let holder = sourced("open", "2026-01-03T00:00:00Z");
+    let holder_id = "3f2c9a1e-0000-4000-8000-000000000001";
+    devices.hand_edit(RemoteKind::Ticket, holder_id, &holder);
+    devices.sync(0);
+
+    let held = devices.workspaces[0].create_ticket("Held ticket").unwrap();
+    devices.sync(0);
+    let incoming = holder
+        .replace(holder_id, &held.id)
+        .replace("T-ZZ7", &held.reference)
+        .replace("example.test", "other.example.test");
+    devices.hand_edit(RemoteKind::Ticket, &held.id, &incoming);
+    devices.workspaces[0]
+        .add_tag(&held.reference, "local-progress")
+        .unwrap();
+    let report = devices.sync(0);
+    assert_eq!((report.skipped, report.uploaded), (1, 0));
+
+    let seen = downloads(&devices);
+    assert_eq!(devices.sync(0).uploaded, 0);
+    assert_eq!(downloads(&devices), seen);
+    assert_eq!(devices.workspaces[0].sync_notices().unwrap().len(), 1);
+
+    let mut released = devices.workspaces[0]
+        .export_sync_record(SyncKind::Ticket, holder_id)
+        .unwrap();
+    released
+        .fields
+        .retain(|name, _| !name.starts_with("source_"));
+    devices.workspaces[0].apply_sync_record(&released).unwrap();
+
+    let report = devices.sync(0);
+    assert_eq!((report.skipped, report.uploaded), (0, 2));
+    assert_eq!(downloads(&devices), seen + 1);
+    assert!(devices.workspaces[0].sync_notices().unwrap().is_empty());
+    let ticket = devices.workspaces[0].show_ticket(&held.reference).unwrap();
+    assert_eq!(
+        ticket.source.unwrap().url,
+        "https://other.example.test/acme/site/issues/42"
+    );
+    assert_eq!(ticket.tags, ["local-progress"]);
+}
+
+#[test]
+fn a_format_two_cached_base_merges_a_format_three_observation_with_local_progress() {
+    let mut devices = devices();
+    let id = "3f2c9a1e-0000-4000-8000-000000000001";
+    let issue = |updated| {
+        sourced("open", updated)
+            .replace("format: 1", "format: 2")
+            .replace("I_42", "@example.test:42")
+    };
+    let legacy = issue("2026-01-03T00:00:00Z");
+    let key = RemoteKey::new(RemoteKind::Ticket, id);
+    devices
+        .remote
+        .write(
+            &devices.folder,
+            &key,
+            "Imported.md",
+            None,
+            &mut Cursor::new(&legacy),
+        )
+        .unwrap();
+    devices.sync(0);
+    devices.sync(1);
+    let path = devices.desks.directory.path().join(NAMES[1]);
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .execute(
+            "UPDATE sync_files SET content = ?2 WHERE kind = 'ticket' AND id = ?1",
+            rusqlite::params![id, legacy],
+        )
+        .unwrap();
+    devices.workspaces[1]
+        .change_ticket(
+            "T-ZZ7",
+            TicketPatch {
+                status: Some(Status::InProgress),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    let incoming = ticketd_core::SyncRecord::parse(&issue("2026-01-04T00:00:00Z"))
+        .unwrap()
+        .to_markdown()
+        .replace(
+            "source_state_name: \"Open\"",
+            "source_state_name: \"Reviewing\"",
+        );
+    devices.hand_edit(RemoteKind::Ticket, id, &incoming);
+
+    assert_eq!(devices.sync(1).conflicts, 0);
+    devices.sync(0);
+
+    for index in [0, 1] {
+        let ticket = devices.workspaces[index].show_ticket("T-ZZ7").unwrap();
+        assert_eq!(ticket.status, ticketd_core::Status::InProgress);
+        assert_eq!(
+            ticket.source.unwrap().state.name.as_deref(),
+            Some("Reviewing")
+        );
+        assert!(
+            devices.workspaces[index]
+                .sync_conflicts()
+                .unwrap()
+                .is_empty()
+        );
+    }
+}
+
+#[test]
+fn concurrent_publications_of_one_ticket_keep_one_complete_identity_on_all_devices() {
+    for order in [[0, 1, 2], [1, 0, 2]] {
+        let mut devices = devices();
+        let reference = devices.shared_ticket("One local ticket");
+        let id = devices.workspaces[0].show_ticket(&reference).unwrap().id;
+        let linked = |state, updated, external, repository: &str| {
+            ticketd_core::SyncRecord::parse(
+                &sourced(state, updated)
+                    .replace("3f2c9a1e-0000-4000-8000-000000000001", &id)
+                    .replace("T-ZZ7", &reference)
+                    .replace("I_42", external)
+                    .replace("acme/site", repository)
+                    .replace("imported", "published"),
+            )
+            .unwrap()
+        };
+        let winner = linked("open", "2026-01-03T00:00:00Z", "I_1", "acme/first");
+        let mut other = linked("closed", "2026-01-04T00:00:00Z", "I_2", "acme/other");
+        other
+            .fields
+            .insert("status".into(), SyncValue::Text("Done".into()));
+
+        devices.workspaces[0].apply_sync_record(&winner).unwrap();
+        devices.workspaces[1].apply_sync_record(&other).unwrap();
+        devices.settle(order);
+        devices.assert_converged();
+
+        for workspace in &devices.workspaces {
+            let record = workspace.export_sync_record(SyncKind::Ticket, &id).unwrap();
+            for field in [
+                "source_external_id",
+                "source_partition",
+                "source_locator",
+                "source_display",
+                "source_url",
+                "source_state_category",
+                "source_updated_at",
+                "status",
+            ] {
+                assert_eq!(
+                    record.fields[field], winner.fields[field],
+                    "{field} {order:?}"
+                );
+            }
+            assert!(workspace.sync_conflicts().unwrap().is_empty());
+        }
+    }
+}
+
+#[test]
+fn legacy_numeric_github_ids_round_trip_with_their_host() {
     const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
-    for (url, id, format) in [
+    for (url, id) in [
         (
             "https://example.test/acme/site/issues/42",
             "@example.test:7",
-            2,
         ),
-        ("", "@:7", 2),
-        ("https://github.com/acme/site/issues/42", "7", 1),
+        ("", "@:7"),
+        ("https://github.com/acme/site/issues/42", "7"),
     ] {
         let mut devices = devices();
         let legacy = sourced("open", "2026-01-03T00:00:00Z")
@@ -1530,10 +1760,7 @@ fn legacy_numeric_github_ids_round_trip_in_a_format_compatible_with_their_host()
         devices.workspaces[0].add_tag("T-ZZ7", "synced").unwrap();
         assert_eq!(devices.sync(0).uploaded, 1, "{url}");
         let written = devices.remote_text(RemoteKind::Ticket, ID).1;
-        assert!(
-            written.contains(&format!("\nformat: {format}\n")),
-            "{written}"
-        );
+        assert!(written.contains("\nformat: 3\n"), "{written}");
         assert!(written.contains(&format!("\nsource_external_id: \"{id}\"\n")));
 
         assert_eq!(devices.sync(1).skipped, 0, "{url}");
@@ -1549,77 +1776,86 @@ fn legacy_numeric_github_ids_round_trip_in_a_format_compatible_with_their_host()
 }
 
 #[test]
-fn concurrent_github_host_verifications_keep_the_winning_issue_identity_and_url_together() {
+fn concurrent_github_identity_updates_keep_the_issue_and_its_observation_together() {
     const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
-    let mut devices = devices();
+    const ENTERPRISE: &str = "https://example.test/acme/site/issues/42";
     let issue = |id: &str, url: &str, state: &str, updated: &str| {
         sourced(state, updated)
+            .replace("format: 1", "format: 2")
             .replace("\"I_42\"", &format!("\"{id}\""))
-            .replace("https://example.test/acme/site/issues/42", url)
+            .replace(ENTERPRISE, url)
     };
     let apply = |workspace: &mut Workspace, text: &str| {
         let record = ticketd_core::SyncRecord::parse(text).unwrap();
         workspace.apply_sync_record(&record).unwrap();
     };
-    apply(
-        &mut devices.workspaces[0],
-        &issue("@:5", "", "open", "2026-01-03T00:00:00Z"),
-    );
-    devices.settle([0, 1, 2]);
-
-    let public = issue(
-        "5",
-        "https://github.com/acme/site/issues/42",
-        "open",
-        "2026-01-03T00:00:00Z",
-    )
-    .replace(
-        "source_authority: \"external\"",
-        "source_authority: \"local\"",
-    )
-    .replace(
-        "source_authority_changed_at: \"2026-01-02T03:04:05.000Z\"",
-        "source_authority_changed_at: \"2026-01-04T00:00:00.000Z\"",
-    );
-    apply(&mut devices.workspaces[0], &public);
-
-    let enterprise_url = "https://example.test/acme/site/issues/42";
-    apply(
-        &mut devices.workspaces[1],
-        &issue(
+    for (previous_id, previous_url, earlier_id, earlier_url, later_id, repository) in [
+        // Two host confirmations for one unverified issue.
+        (
+            "@:5",
+            "",
+            "5",
+            "https://github.com/acme/site/issues/42",
             "@example.test:5",
-            enterprise_url,
-            "closed",
-            "2026-01-05T00:00:00Z",
+            "acme/site",
         ),
-    );
-    devices.sync(1);
-    devices.sync(0);
-
-    let written = devices.remote_text(RemoteKind::Ticket, ID).1;
-    assert!(written.contains("\nformat: 2\n"), "{written}");
-    assert!(
-        written.contains("\nsource_external_id: \"@example.test:5\"\n"),
-        "{written}"
-    );
-
-    devices.settle([0, 1, 2]);
-    for workspace in &devices.workspaces {
-        assert_eq!(workspace.sync_conflicts().unwrap(), []);
-        let source = workspace.show_ticket("T-ZZ7").unwrap().source.unwrap();
-        assert_eq!(source.id, "@example.test:5");
-        assert_eq!(source.url, enterprise_url);
-        assert_eq!(
-            source.state,
-            ticketd_core::source::ExternalState::Closed {
-                reason: ticketd_core::source::ClosureReason::Completed,
-            }
+        // Two observations across transfers of an already-qualified issue.
+        (
+            "@example.test:500",
+            ENTERPRISE,
+            "@example.test:4",
+            ENTERPRISE,
+            "@example.test:9",
+            "acme/moved",
+        ),
+    ] {
+        let mut devices = devices();
+        apply(
+            &mut devices.workspaces[0],
+            &issue(previous_id, previous_url, "open", "2026-01-03T00:00:00Z"),
         );
-        assert_eq!(source.ownership, ticketd_core::source::Ownership::Local);
-        assert_eq!(
-            workspace.export().unwrap()["external_identities"][0]["repository"],
-            "example.test/acme/site"
+        devices.settle([0, 1, 2]);
+
+        let earlier = issue(earlier_id, earlier_url, "open", "2026-01-03T00:00:00Z")
+            .replace(
+                "source_authority: \"external\"",
+                "source_authority: \"local\"",
+            )
+            .replace(
+                "source_authority_changed_at: \"2026-01-02T03:04:05.000Z\"",
+                "source_authority_changed_at: \"2026-01-04T00:00:00.000Z\"",
+            );
+        apply(&mut devices.workspaces[0], &earlier);
+
+        let later = issue(later_id, ENTERPRISE, "closed", "2026-01-05T00:00:00Z")
+            .replace("acme/site", repository);
+        apply(&mut devices.workspaces[1], &later);
+        devices.sync(1);
+        devices.sync(0);
+
+        let written = devices.remote_text(RemoteKind::Ticket, ID).1;
+        assert!(written.contains("\nformat: 3\n"), "{written}");
+        assert!(
+            written.contains(&format!("\nsource_external_id: \"{later_id}\"\n")),
+            "{written}"
         );
+
+        devices.settle([0, 1, 2]);
+        for workspace in &devices.workspaces {
+            assert_eq!(workspace.sync_conflicts().unwrap(), []);
+            let source = workspace.show_ticket("T-ZZ7").unwrap().source.unwrap();
+            assert_eq!(source.id, later_id);
+            assert_eq!(source.url, ENTERPRISE.replace("acme/site", repository));
+            assert_eq!(
+                source.state.category,
+                ticketd_core::source::StateCategory::Completed
+            );
+            assert_eq!(source.ownership, ticketd_core::source::Ownership::Local);
+            assert_eq!(
+                workspace.export().unwrap()["external_identities"][0]["repository"],
+                format!("example.test/{repository}")
+            );
+        }
     }
 }
 
@@ -1650,8 +1886,15 @@ fn source_fields_refreshed_on_two_devices_take_the_later_refresh_without_review(
                 field("source_updated_at"),
                 Some(SyncValue::Text("2026-01-05T00:00:00Z".into()))
             );
-            assert_eq!(field("source_state"), Some(SyncValue::Text("open".into())));
-            assert_eq!(field("source_closure_reason"), None, "{order:?}");
+            assert_eq!(
+                field("source_state_category"),
+                Some(SyncValue::Text("open".into()))
+            );
+            assert_eq!(
+                field("source_state_name"),
+                Some(SyncValue::Text("Open".into())),
+                "{order:?}"
+            );
         }
     }
 }
@@ -1698,7 +1941,11 @@ fn a_takeover_on_one_device_survives_a_later_refresh_on_another() {
                 field("source_authority_changed_at"),
                 text("2026-01-04T00:00:00.000Z")
             );
-            assert_eq!(field("source_state"), text("closed"), "{order:?}");
+            assert_eq!(
+                field("source_state_category"),
+                text("completed"),
+                "{order:?}"
+            );
             assert_eq!(field("source_updated_at"), text("2026-01-05T00:00:00Z"));
         }
     }

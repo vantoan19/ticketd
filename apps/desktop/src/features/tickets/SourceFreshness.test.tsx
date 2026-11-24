@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { githubSource } from "@/test/source-fixtures";
 import {
   cleanup,
   fireEvent,
@@ -59,7 +60,7 @@ function withActivity(activity: Partial<SourceActivity>, children: ReactNode) {
       value={{
         refreshing: false,
         sources: [],
-        entries: null,
+        entries: [githubSource],
         intervalSecs: null,
         openSettings: () => {},
         refreshAll: async () => {},
@@ -83,7 +84,7 @@ const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   url: "https://github.com/acme/api/issues/98",
   origin: "imported",
   ownership: "external",
-  state: { state: "open" },
+  state: { category: "open", name: "Open" },
   closure_unrecognized: false,
   last_refreshed_at: minutesAgo(30),
   last_attempt_at: minutesAgo(2),
@@ -142,6 +143,31 @@ test("the footer's status line opens the source's settings", () => {
   );
   fireEvent.click(screen.getByRole("button", { name: /GitHub synced/ }));
   expect(openSettings).toHaveBeenCalled();
+});
+
+test("unassigned tickets retain their own footer row alongside the default connection", () => {
+  const openSettings = vi.fn();
+  render(
+    withActivity(
+      {
+        openSettings,
+        sources: [
+          status({ connection_id: "github" }),
+          status({ health: "unavailable", unavailable_tickets: 1 }),
+        ],
+      },
+      <SourceStatusFooter />,
+    ),
+  );
+  const connected = screen.getByRole("button", { name: /GitHub synced/ });
+  const unassigned = screen.getByRole("button", { name: /1 source issue/ });
+  expect(connected.getAttribute("aria-describedby")).not.toBe(
+    unassigned.getAttribute("aria-describedby"),
+  );
+  fireEvent.click(connected);
+  expect(openSettings).toHaveBeenLastCalledWith("github");
+  fireEvent.click(unassigned);
+  expect(openSettings).toHaveBeenLastCalledWith(undefined);
 });
 
 test("the footer reads Refreshing GitHub… without a dot while a refresh runs", () => {
@@ -276,6 +302,7 @@ test("the unavailable notice says what failed, since when, that nothing was lost
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   expect(bridge.invoke).toHaveBeenCalledWith("refresh_sources", {
     ticket: "T-KQ1",
+    retry: true,
   });
   // A failed retry does not claim success.
   expect(

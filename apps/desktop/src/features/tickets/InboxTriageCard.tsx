@@ -1,3 +1,4 @@
+import { useSources } from "@/features/settings/sources/use-sources";
 import { Skeleton } from "@/components/ui/skeleton";
 import { onInboxAction } from "./inbox-commands";
 import { AgentContext } from "./ticket-agent-context";
@@ -78,8 +79,9 @@ export function InboxTriageCard() {
     blocked ?? noTicket ?? ticketUnavailable(record, { allowTrashed: true });
   const agent = entry?.editing_agent ?? chat?.harness_name;
   const harness = chat?.harness_id ?? editingHarness(agent);
+  const { entries: sourceEntries } = useSources();
   const description = entry
-    ? summarize(entry)
+    ? summarize(entry, sourceEntries)
     : chat?.status.detail
       ? `${agent} wants to run ${chat.status.detail}`
       : "Approval needed";

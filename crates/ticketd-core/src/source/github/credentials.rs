@@ -47,13 +47,22 @@ type Environment = Box<dyn Fn(&str) -> Option<String> + Send + Sync>;
 pub(crate) struct AmbientCredentials {
     /// The host of a custom API address, or `None` for github.com.
     custom_host: Option<String>,
+    override_name: Option<String>,
+    account: Option<String>,
     environment: Environment,
     cli: OnceLock<Option<Secret>>,
 }
 
 impl AmbientCredentials {
-    pub(crate) fn new(custom_host: Option<String>) -> Self {
-        Self::with_environment(custom_host, |name| std::env::var(name).ok())
+    pub(crate) fn new(
+        custom_host: Option<String>,
+        id: Option<&str>,
+        account: Option<&str>,
+    ) -> Self {
+        let mut credentials = Self::with_environment(custom_host, |name| std::env::var(name).ok());
+        credentials.override_name = id.map(connection_token_variable);
+        credentials.account = account.map(str::to_owned);
+        credentials
     }
 
     pub(crate) fn with_environment(
@@ -62,15 +71,34 @@ impl AmbientCredentials {
     ) -> Self {
         Self {
             custom_host,
+            override_name: None,
+            account: None,
             environment: Box::new(environment),
             cli: OnceLock::new(),
         }
     }
 }
 
+pub(super) fn connection_token_variable(id: &str) -> String {
+    format!(
+        "TICKETD_SOURCE_{}_TOKEN",
+        id.to_ascii_uppercase().replace('-', "_")
+    )
+}
+
 impl CredentialSource for AmbientCredentials {
     fn token(&self) -> Option<Secret> {
-        let names: &[&str] = if self.custom_host.is_some() {
+        if let Some(value) = self
+            .override_name
+            .as_deref()
+            .and_then(|name| (self.environment)(name))
+            && !value.trim().is_empty()
+        {
+            return Some(Secret::new(value.trim()));
+        }
+        let names: &[&str] = if self.account.is_some() {
+            &[]
+        } else if self.custom_host.is_some() {
             &["TICKETD_GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN"]
         } else {
             &["TICKETD_GITHUB_TOKEN", "GH_TOKEN", "GITHUB_TOKEN"]
@@ -84,12 +112,17 @@ impl CredentialSource for AmbientCredentials {
             }
         }
         self.cli
-            .get_or_init(|| gh_token(self.custom_host.as_deref().unwrap_or("github.com")))
+            .get_or_init(|| {
+                gh_token(
+                    self.custom_host.as_deref().unwrap_or("github.com"),
+                    self.account.as_deref(),
+                )
+            })
             .clone()
     }
 }
 
-fn gh_token(host: &str) -> Option<Secret> {
+fn gh_token(host: &str, account: Option<&str>) -> Option<Secret> {
     [
         "gh",
         "/opt/homebrew/bin/gh",
@@ -98,8 +131,17 @@ fn gh_token(host: &str) -> Option<Secret> {
     ]
     .into_iter()
     .find_map(|program| {
-        let output = Command::new(program)
-            .args(["auth", "token", "--hostname", host])
+        let mut command = Command::new(program);
+        command.args(["auth", "token", "--hostname", host]);
+        if let Some(account) = account {
+            command.args(["--user", account]);
+            command
+                .env_remove("GH_TOKEN")
+                .env_remove("GITHUB_TOKEN")
+                .env_remove("GH_ENTERPRISE_TOKEN")
+                .env_remove("GITHUB_ENTERPRISE_TOKEN");
+        }
+        let output = command
             .env("GH_PROMPT_DISABLED", "1")
             .stdin(Stdio::null())
             .stderr(Stdio::null())

@@ -36,7 +36,7 @@ const source = (overrides: Partial<TicketSource> = {}): TicketSource => ({
   url: "https://github.com/acme/api/issues/98",
   origin: "imported",
   ownership: "external",
-  state: { state: "open" },
+  state: { category: "open", name: "Open" },
   closure_unrecognized: false,
   last_refreshed_at: "2026-02-01T00:00:00Z",
   last_attempt_at: "2026-02-01T00:00:00Z",
@@ -68,10 +68,15 @@ const event = (
   kind: string,
   actor: string | null,
   subject: string | null = null,
+  stateCategory?: Extract<
+    ConversationEntry,
+    { type: "event" }
+  >["state_category"],
 ): ConversationEntry => ({
   type: "event",
   id,
   event: kind,
+  state_category: stateCategory,
   actor,
   subject,
   created_at: "2026-01-03T00:00:00Z",
@@ -100,12 +105,12 @@ test("comments and events share one connected timeline in source order, all read
     comment("501", "alice", "Please **take** a look", {
       edited_at: "2026-01-02T05:00:00Z",
     }),
-    event("601", "closed_completed", "bob"),
+    event("601", "closed", "bob", null, "completed"),
     event("602", "assigned", "bob", "carol"),
     event("603", "assigned", "dave", "dave"),
     event("604", "unassigned", "bob", "carol"),
-    event("605", "closed_duplicate", "bob"),
-    event("606", "closed_not_planned", "bob"),
+    event("605", "closed", "bob", null, "duplicate"),
+    event("606", "closed", "bob", null, "not_planned"),
     event("607", "closed", null),
     event("608", "reopened", "bob"),
   ]);

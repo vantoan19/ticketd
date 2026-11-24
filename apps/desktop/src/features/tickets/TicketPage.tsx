@@ -36,7 +36,11 @@ import {
 } from "@/features/automations/TicketRuns";
 import { useTicketRuns } from "@/features/automations/use-ticket-runs";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
-import { externalSource, sourceState } from "@/features/tickets/ticket-source";
+import {
+  externalSource,
+  sourceReference,
+  sourceState,
+} from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import { useSourcesConfigured } from "@/features/tickets/use-publication-preview";
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
@@ -158,18 +162,17 @@ export function TicketPage({
   // The reading column: title, state, description, subtickets, evidence,
   // backlinks, then notes and history.
   const source = externalSource(ticket);
+  const issueReference = source ? sourceReference(source) : null;
   const state = source ? sourceState(source) : null;
   const original =
-    source?.state.state === "closed" &&
+    source?.state.category === "duplicate" &&
     !source.unavailable &&
-    source.state.reason === "duplicate" &&
     source.duplicate_target?.kind === "external"
       ? source.duplicate_target
       : null;
   const originalLabel =
-    original && source && original.display.startsWith(`${source.place}#`)
-      ? original.display.slice(source.place.length)
-      : original?.display;
+    (issueReference?.place ? source?.duplicate_number : undefined) ??
+    original?.display;
   // The header owns the normal updated time. Only source or exceptional
   // context needs a line between the property strip and the description.
   const stateLine =
@@ -179,21 +182,7 @@ export function TicketPage({
           <>
             <span className="ticket-source-state">
               {state.tone && <StatusDot tone={state.tone} size={10} />}
-              <span>
-                {state.text}
-                {original && (
-                  <>
-                    {" "}
-                    of{" "}
-                    <Tooltip content={original.display} side="bottom">
-                      <span className="source-number" tabIndex={0}>
-                        {originalLabel}
-                      </span>
-                    </Tooltip>
-                    {original.last_known && " (last known)"}
-                  </>
-                )}
-              </span>
+              <span>{state.text}</span>
             </span>
             {source.unavailable ? (
               <span>
@@ -204,7 +193,20 @@ export function TicketPage({
               </span>
             ) : (
               <>
-                {source.state.state === "open" && <span>{source.number}</span>}
+                {source.state.category === "open" && (
+                  <span>{issueReference?.label}</span>
+                )}
+                {original && (
+                  <span>
+                    Duplicate of{" "}
+                    <Tooltip content={original.display} side="bottom">
+                      <span className="source-number" tabIndex={0}>
+                        {originalLabel}
+                      </span>
+                    </Tooltip>
+                    {original.last_known && " (last known)"}
+                  </span>
+                )}
                 {source.closed_at && (
                   <Tooltip
                     content={formatDateTime(source.closed_at)}

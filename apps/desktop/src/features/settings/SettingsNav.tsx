@@ -1,3 +1,4 @@
+import { SourceIcon } from "./sources/SourceIcon";
 import { useEffect } from "react";
 import { ArrowLeft, Search, type LucideIcon } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -31,6 +32,7 @@ interface NavItem {
   label: string;
   group: SettingsGroup;
   icon: LucideIcon;
+  iconSvg?: string | null | undefined;
 }
 
 interface NavIndicator {
@@ -54,8 +56,12 @@ function useSettingsNavItems() {
     ...SETTINGS_SECTIONS.filter(
       (section) => section.id !== "automations" || chat.enabled,
     ),
-    ...entries.map(({ connector }) =>
-      sourceSection(connector.provider, connector.name),
+    ...entries.map(({ connector, saved }) =>
+      sourceSection(
+        saved?.id ?? connector.provider,
+        saved?.name ?? connector.name,
+        connector.presentation?.icon_svg,
+      ),
     ),
   ];
   const indicator = (id: SettingsPageId): NavIndicator | null => {
@@ -66,12 +72,14 @@ function useSettingsNavItems() {
       needsSetup[id]
     )
       return { label: "Needs setup", tone: "attention" };
-    if (
-      entries.some(
-        (entry) => `source-${entry.connector.provider}` === id && entry.saved,
-      )
-    )
-      return { label: "Connected", tone: "positive" };
+    const source = entries.find(
+      (entry) =>
+        `source-${entry.saved?.id ?? entry.connector.provider}` === id &&
+        entry.saved,
+    );
+    if (source?.unavailable)
+      return { label: "Extension unavailable", tone: "attention" };
+    if (source) return { label: "Connected", tone: "positive" };
     return null;
   };
   return { items, indicator };
@@ -166,7 +174,11 @@ export function SettingsNav({
                         onClick={() => open(item.id)}
                       >
                         {selected === item.id && <Glide id="settings-nav" />}
-                        <item.icon size={16} aria-hidden="true" />
+                        {item.iconSvg ? (
+                          <SourceIcon svg={item.iconSvg} size={16} />
+                        ) : (
+                          <item.icon size={16} aria-hidden="true" />
+                        )}
                         <span className="settings-nav-label">{item.label}</span>
                         {item.id === "chat" && (
                           <Badge variant="experimental">Experimental</Badge>

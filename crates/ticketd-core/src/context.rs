@@ -134,6 +134,8 @@ pub enum ContextSourceEntry {
     Event {
         id: String,
         event: String,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        state_category: Option<crate::source::StateCategory>,
         actor: Option<String>,
         subject: Option<String>,
         created_at: String,
@@ -443,12 +445,14 @@ impl Workspace {
                         crate::source::ConversationEntry::Event {
                             id,
                             event,
+                            state_category,
                             actor,
                             subject,
                             created_at,
                         } => ContextSourceEntry::Event {
                             id,
                             event,
+                            state_category,
                             actor,
                             subject,
                             created_at,

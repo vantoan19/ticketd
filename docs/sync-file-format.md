@@ -53,7 +53,7 @@ Reproduced with an expired session cookie.
 
 The same record always produces the same bytes, so a file changes only when its record does.
 
-- `kind` comes first, then `format`, then `id`. A ticket with a host-qualified or unverified GitHub issue ID uses format 2. All other records use format 1.
+- `kind` comes first, then `format`, then `id`. A ticket with an external source uses format 3. Other records use format 1.
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
 - Every text value is a double-quoted YAML string on one line. A whole number is written bare. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
@@ -83,6 +83,8 @@ A file is rejected as a whole, with the reason, when:
 A desktop does not write a file larger than 8 MiB either: the record stays on that desktop with a Needs attention notice naming it, and uploads once it is short enough. The device list and the Attachment list are not read when they are larger than that; the run stops and names the file.
 
 A rejected file changes nothing in the Workspace, and the desktop records a Needs attention notice that names the file and the reason. The next change made to that record in ticketd replaces the file. The notice goes once the file reads again; on the desktop that replaced it, the notice instead stays in the Inbox as already read and no longer counts towards Needs attention. It says the file could not be read, why, and that the earlier file is in Drive's version history, since nothing else records what the replaced file held. There is one exception: a file with a higher `format` was written by a newer ticketd and is never replaced by a desktop that cannot read it. Changes made to that record on such a desktop wait, and its sync status stays Needs attention, until it runs a ticketd that reads the file or the file is corrected; the file is read again each time the app starts. The format number is the only mark of a newer ticketd: an unknown field or section marker in a format this version reads is rejected like any other mistake and replaced by the next change. A ticketd version that adds a field or a section marker therefore raises `format`; a test in `sync_files.rs` pins the fields and markers of the current number. A new kind of record in a folder of its own does not raise it: a ticketd from before that kind does not look in the folder, so it never reads such a file. Automations and Automation agents joined format 1 this way. A field added to a kind of file that no released ticketd has written does not raise it either, since no ticketd that cannot read the field has ever written that file; `any_command` joined the Automation agent file this way. A new form of value in an existing field (such as the `<GUID> <n>` item of `parent_removed`) is rejected by older versions in the same way and also requires raising `format`; the test does not pin value forms, so nothing fails to remind of it.
+
+When a file uses a legacy GitHub issue ID already held by an issue at a different site, ticketd leaves the file and the Workspace record in place. Local changes to that record wait until the file is corrected or removed.
 
 A file that disappears from the folder is not a deletion. The next sync run of a desktop that had synced it writes it again. The file a desktop then finds is another Drive file than the one it last synced, made later, and is merged against the last-synced copy like any change. Only a file made earlier than the one last synced (an old file restored from Drive's trash), or one whose creation time cannot be compared, is taken to share no history: every field whose value differs goes to Needs review and nothing is replaced silently.
 
@@ -138,11 +140,22 @@ The ticket that lost the relationship lists it in `blocked_by_removed` or `paren
 
 The text after the header is the description. Activities and Implementation evidence follow as sections, oldest first.
 
-An externally sourced ticket carries `source_provider`, `source_external_id`, `source_locator`, `source_display`, `source_url`, `source_origin` (imported or published), `source_linked_at`, `source_authority` (external or local), `source_authority_changed_at`, `source_state` (open or closed) and, when known, `source_closure_reason` and `source_updated_at`. They are present together or not at all.
+An externally sourced ticket carries `source_provider`, `source_external_id`, `source_locator`, `source_display`, `source_url`, `source_origin` (imported or published), `source_linked_at`, `source_authority` (external or local), `source_authority_changed_at` and `source_state_category` (open, completed, not_planned, duplicate or unknown). The observed state can also carry `source_state_name` (the tracker’s display label), `source_updated_at` and `source_partition` (the provider-defined part, such as a GitHub repository). The identity and observation travel between devices. Connection settings, IDs and removal state stay on each device.
 
-Public GitHub issue IDs are numeric. Format 2 carries GitHub Enterprise issue IDs as `@<host>:<id>` and unverified GitHub issue IDs as `@:<id>`. A desktop that reads only format 1 skips these files and leaves them in Drive until it is updated. When reading a legacy numeric ID, ticketd verifies the host from the saved issue URL and locator. Missing or ambiguous host evidence leaves the ID unverified.
+When the ticket has cached provider details, it includes the optional
+`source_provider_name` and `source_provider_icon_svg` fields. The desktop displays
+the mark as an image and uses the provider name when it has no covering local connection.
 
-When two desktops concurrently link the same ticket to different GitHub issues, the latest issue update timestamp determines which issue the ticket keeps. The issue ID, location, and associated source data travel together. Equal timestamps are ordered by the field values.
+Formats 1 and 2 use `source_state` (open or closed) and optional `source_closure_reason`. A reader converts a closed issue whose reason is absent or marked unknown to the unknown category. For GitHub it recovers the display label from the state and derives the repository from the saved URL and locator. Older clients leave files with newer formats untouched.
+
+Public GitHub issue IDs are numeric. Formats 2 and 3 carry GitHub Enterprise issue IDs as `@<host>:<id>` and unverified GitHub issue IDs as `@:<id>`. When reading a legacy numeric ID, ticketd verifies the host from the saved issue URL and locator. Missing or ambiguous host evidence leaves the ID unverified.
+
+Format 3 includes a nondefault Enterprise port in the ID as `@<host>:<port>:<id>`. When a saved issue URL and locator establish the port, ticketd also qualifies earlier hostname-only IDs on read.
+
+When two desktops observe different IDs for an already-linked GitHub issue, the latest issue update timestamp determines which identity the ticket keeps. This covers host verification and repository transfers. Equal timestamps are ordered by the field values. Concurrent links to different issues keep the lower provider and ID pair in text order. The winning issue ID, location, and associated observation travel together.
+
+Confirming the host or following a transfer preserves the receiving desktop's pause
+after a connection was removed and the issue conversation already cached there.
 
 ### Activity section
 

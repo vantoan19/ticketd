@@ -258,6 +258,13 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "google-drive",
   },
   {
+    title: "Sources",
+    description:
+      "Connect accounts on this desktop to discover and refresh tickets.",
+    keywords: "source connection provider account discovery refresh settings",
+    section: "sources",
+  },
+  {
     title: "Everywhere",
     description: "These work wherever you are in ticketd.",
     keywords:
@@ -355,25 +362,29 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
 ];
 
 /** The rows every source page has, for a source the build offers. */
-export function sourceEntries(provider: string, name: string): SettingsEntry[] {
-  const section: SettingsPageId = `source-${provider}`;
+export function sourceEntries(
+  connection: string,
+  name: string,
+  fields: string[] = [],
+): SettingsEntry[] {
+  const section: SettingsPageId = `source-${connection}`;
   return [
     {
       title: "Connection",
       description: `ticketd uses your own ${name} permissions.`,
-      keywords: `${name} account sign in token permissions check connection ${provider}`,
+      keywords: `${name} account sign in token permissions check connection ${connection}`,
       section,
     },
     {
       title: "Discovery",
       description: `Matching issues are imported as tickets on the next sync. Nothing is changed in ${name}.`,
-      keywords: `${name} rules repositories labels assignee import issues preview save ${provider}`,
+      keywords: `${name} rules ${fields.join(" ")} import issues preview save ${connection}`,
       section,
     },
     {
       title: "Sync",
       description: "Agents can sync without the desktop open",
-      keywords: `${name} refresh schedule source refresh command sync now ${provider}`,
+      keywords: `${name} refresh schedule source refresh command sync now ${connection}`,
       section,
     },
   ];

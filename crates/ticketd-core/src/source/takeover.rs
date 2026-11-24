@@ -11,12 +11,7 @@
 //! No code path turns a `local` row back into `external` for an existing
 //! identity: reconnecting needs an explicit action that does not exist yet.
 
-use rusqlite::OptionalExtension;
-
-use super::{
-    contract::FailureCode,
-    tracking::{Authority, authority},
-};
+use super::tracking::{Authority, authority, availability_projection};
 use crate::{Error, Ticket, Workspace, history, write_scope};
 
 impl Workspace {
@@ -39,22 +34,12 @@ impl Workspace {
                 return Err(Error::AlreadyLocal(reference.to_owned()));
             }
             if let Authority::External { provider, .. } = authority(transaction, &id)? {
-                let failure: Option<String> = transaction
-                    .query_row(
-                        "SELECT last_error_code FROM source_sync WHERE ticket_id = ?1",
-                        [&id],
-                        |row| row.get(0),
-                    )
-                    .optional()?
-                    .flatten();
-                let unavailable = failure
-                    .as_deref()
-                    .and_then(FailureCode::parse)
-                    .is_some_and(FailureCode::is_unavailable);
+                let unavailable = availability_projection(transaction, &id)?
+                    .is_some_and(|value| value.unavailable.is_some());
                 if !unavailable {
                     return Err(Error::SourceAvailable {
                         reference: reference.to_owned(),
-                        provider: super::provider_display_name(&provider),
+                        provider: super::provider_display_name(transaction, &provider)?,
                     });
                 }
                 transaction.execute(
@@ -67,6 +52,10 @@ impl Workspace {
                  WHERE ticket_id = ?1",
                 [&id],
             )?;
+                transaction.execute(
+                    "DELETE FROM source_connection_removals WHERE ticket_id = ?1",
+                    [&id],
+                )?;
                 history::record(transaction, &id, "ownership", &provider, "local", agent)?;
             }
             crate::read_ticket(transaction, reference)

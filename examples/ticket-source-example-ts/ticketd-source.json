@@ -1,0 +1,7 @@
+{
+  "id": "example-tracker",
+  "version": "0.1.0",
+  "executable": "node",
+  "args": ["--disable-warning=ExperimentalWarning", "tracker.ts"],
+  "hosts": []
+}

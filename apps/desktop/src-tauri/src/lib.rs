@@ -29,6 +29,7 @@ use ticketd_core::{
     MetadataSelection, Plan, PlanView, Project, ProjectRemoteChange, SafetyBackup, SidebarCounts,
     Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
     WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
+    source::{ExtensionRegistry, RefreshControl, RefreshProgress},
 };
 
 /// A failure the interface acts on by kind. The message is only for reading, so
@@ -541,26 +542,35 @@ fn edit_project(
 }
 
 #[tauri::command(async)]
-fn preview_connect_source(
-    provider: String,
+fn project_source_candidates(
     project_id: String,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<Vec<ticketd_core::source::ProjectSourceCandidate>, BridgeFailure> {
+    let engine = sources.engine().map_err(ticketd_core::Error::from)?;
+    Ok(open_workspace()?.project_source_candidates(&engine, &project_id)?)
+}
+
+#[tauri::command(async)]
+fn preview_connect_source(
+    source: String,
+    project_id: String,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::ConnectSourcePreview, BridgeFailure> {
-    Ok(open_workspace()?.preview_connect_source(
-        &ticketd_core::source::Engine::builtin(),
-        &provider,
-        &project_id,
-    )?)
+    let engine = sources.engine().map_err(ticketd_core::Error::from)?;
+    Ok(open_workspace()?.preview_connect_source(&engine, &source, &project_id)?)
 }
 
 #[tauri::command(async)]
 fn connect_source_match_count(
-    provider: String,
+    source: String,
     project_id: String,
     expected_fingerprint: String,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<Option<ticketd_core::source::ConnectSourceMatchCount>, BridgeFailure> {
+    let engine = sources.engine().map_err(ticketd_core::Error::from)?;
     Ok(open_workspace()?.connect_source_match_count(
-        &ticketd_core::source::Engine::builtin(),
-        &provider,
+        &engine,
+        &source,
         &project_id,
         &expected_fingerprint,
     )?)
@@ -568,16 +578,13 @@ fn connect_source_match_count(
 
 #[tauri::command(async)]
 fn connect_source(
-    provider: String,
+    source: String,
     project_id: String,
     expected_fingerprint: String,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::ConnectSourceOutcome, BridgeFailure> {
-    Ok(open_workspace()?.connect_source(
-        &ticketd_core::source::Engine::builtin(),
-        &provider,
-        &project_id,
-        &expected_fingerprint,
-    )?)
+    let engine = sources.engine().map_err(ticketd_core::Error::from)?;
+    Ok(open_workspace()?.connect_source(&engine, &source, &project_id, &expected_fingerprint)?)
 }
 
 #[tauri::command(async)]
@@ -1450,114 +1457,391 @@ impl From<ticketd_core::source::SourceError> for SourceFailure {
 
 #[derive(serde::Serialize)]
 struct SourceEntry {
-    connector: ticketd_core::source::ConnectorDescriptor,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    development: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    unavailable: bool,
+    connector: ticketd_core::source::SourceDescription,
     saved: Option<ticketd_core::source::SavedSource>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_id: Option<String>,
 }
 
-/// The built-in sources and what is saved for each. Network commands below run
-/// off the UI thread; none holds a database handle while it waits.
+type SourceRegistry = std::sync::Arc<ExtensionRegistry>;
+
+async fn source_task<T: Send + 'static>(
+    sources: tauri::State<'_, SourceRegistry>,
+    operation: impl FnOnce(&ExtensionRegistry) -> Result<T, SourceFailure> + Send + 'static,
+) -> Result<T, SourceFailure> {
+    let registry = sources.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || operation(&registry))
+        .await
+        .map_err(|error| SourceFailure {
+            code: "failed",
+            message: error.to_string(),
+            fields: Vec::new(),
+        })?
+}
+
+/// The available connectors and each of their device-local connections.
 #[tauri::command(async)]
-fn list_sources() -> Result<Vec<SourceEntry>, SourceFailure> {
+fn list_sources(
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<Vec<SourceEntry>, SourceFailure> {
     let workspace = open_workspace()?;
-    let engine = ticketd_core::source::Engine::builtin();
-    engine
-        .connectors()
-        .into_iter()
-        .map(|connector| {
-            let saved = workspace.saved_source(&connector.provider)?;
-            Ok(SourceEntry { connector, saved })
-        })
-        .collect()
+    let engine = sources.engine()?;
+    let saved = workspace.saved_sources()?;
+    let mut entries = Vec::new();
+    for connector in engine.descriptions() {
+        let provider = &connector.descriptor.provider;
+        let next_id = workspace.next_source_connection_id(provider)?;
+        let development = sources.is_development(provider);
+        let first = entries.len();
+        entries.extend(
+            saved
+                .iter()
+                .filter(|source| &source.provider == provider)
+                .map(|source| SourceEntry {
+                    development,
+                    unavailable: false,
+                    connector: connector.clone(),
+                    saved: Some(source.clone()),
+                    next_id: Some(next_id.clone()),
+                }),
+        );
+        if entries.len() == first {
+            entries.push(SourceEntry {
+                development,
+                unavailable: false,
+                connector,
+                saved: None,
+                next_id: Some(next_id),
+            });
+        }
+    }
+    for source in saved {
+        if engine.description(&source.provider).is_err() {
+            entries.push(SourceEntry {
+                development: false,
+                unavailable: true,
+                connector: workspace.unavailable_source_description(&source.provider)?,
+                saved: Some(source),
+                next_id: None,
+            });
+        }
+    }
+    Ok(entries)
 }
 #[tauri::command(async)]
 fn source_repository_routes(
-    provider: String,
+    connection: String,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<Vec<ticketd_core::source::SourceRepositoryRoute>, BridgeFailure> {
-    Ok(open_workspace()?
-        .source_repository_routes(&ticketd_core::source::Engine::builtin(), &provider)?)
+    let engine = sources.engine().map_err(ticketd_core::Error::from)?;
+    Ok(open_workspace()?.source_repository_routes(&engine, &connection)?)
 }
 #[tauri::command(async)]
 fn link_source_repository_project(
-    provider: String,
+    connection: String,
     repository: String,
     project_id: String,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<Project, BridgeFailure> {
+    let engine = sources.engine().map_err(ticketd_core::Error::from)?;
     Ok(open_workspace()?.link_source_repository_project(
-        &ticketd_core::source::Engine::builtin(),
-        &provider,
+        &engine,
+        &connection,
         &repository,
         &project_id,
     )?)
 }
 #[tauri::command(async)]
 fn create_source_repository_project(
-    provider: String,
+    connection: String,
     repository: String,
     name: String,
     path: String,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<Project, BridgeFailure> {
+    let engine = sources.engine().map_err(ticketd_core::Error::from)?;
     Ok(open_workspace()?.create_source_repository_project(
-        &ticketd_core::source::Engine::builtin(),
-        &provider,
+        &engine,
+        &connection,
         &repository,
         &name,
         &path,
     )?)
 }
-#[tauri::command(async)]
-fn source_check_connection(
+#[tauri::command]
+async fn source_check_connection(
     provider: String,
     config: ticketd_core::source::ConfigValues,
+    connection: Option<String>,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::ConnectionInfo, SourceFailure> {
-    Ok(ticketd_core::source::Engine::builtin().check_connection(&provider, &config)?)
+    source_task(sources, move |registry| {
+        let engine = registry.engine()?;
+        let workspace = open_workspace()?;
+        Ok(
+            workspace.check_source_connection(
+                &engine,
+                &provider,
+                connection.as_deref(),
+                &config,
+            )?,
+        )
+    })
+    .await
 }
-#[tauri::command(async)]
-fn source_options(
+#[tauri::command]
+async fn source_options(
     provider: String,
     field: String,
     query: String,
     config: ticketd_core::source::ConfigValues,
+    connection: Option<String>,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<Vec<ticketd_core::source::ChoiceOption>, SourceFailure> {
-    Ok(ticketd_core::source::Engine::builtin().options(&provider, &field, &query, &config)?)
+    source_task(sources, move |registry| {
+        let engine = registry.engine()?;
+        let workspace = open_workspace()?;
+        Ok(workspace.source_options(
+            &engine,
+            &provider,
+            connection.as_deref(),
+            &field,
+            &query,
+            &config,
+        )?)
+    })
+    .await
 }
 #[tauri::command(async)]
-fn source_preview(
+fn source_configuration_summary(
     provider: String,
     config: ticketd_core::source::ConfigValues,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<Vec<ticketd_core::source::SummaryPart>, SourceFailure> {
+    Ok(sources
+        .engine()?
+        .configuration_summary(&provider, &config)?)
+}
+#[tauri::command]
+async fn source_preview(
+    provider: String,
+    config: ticketd_core::source::ConfigValues,
+    connection: Option<String>,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::DiscoveryPreview, SourceFailure> {
-    Ok(open_workspace()?.preview_source(
-        &ticketd_core::source::Engine::builtin(),
-        &provider,
-        &config,
-    )?)
+    source_task(sources, move |registry| {
+        let engine = registry.engine()?;
+        let workspace = open_workspace()?;
+        Ok(workspace.preview_source(&engine, &provider, connection.as_deref(), &config)?)
+    })
+    .await
 }
-#[tauri::command(async)]
-fn save_source(
+#[tauri::command]
+async fn save_source(
     provider: String,
     config: ticketd_core::source::ConfigValues,
+    connection: Option<String>,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
-    let mut workspace = open_workspace()?;
-    Ok(workspace.save_source(&ticketd_core::source::Engine::builtin(), &provider, &config)?)
+    source_task(sources, move |registry| {
+        let mut workspace = open_workspace()?;
+        let engine = registry.engine()?;
+        match connection {
+            Some(id) => Ok(workspace.update_source_connection(&engine, &id, &config)?),
+            None => Ok(workspace.save_source(&engine, &provider, &config)?),
+        }
+    })
+    .await
+}
+#[tauri::command]
+async fn add_source_connection(
+    provider: String,
+    connection: String,
+    name: String,
+    config: ticketd_core::source::ConfigValues,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<ticketd_core::source::SaveOutcome, SourceFailure> {
+    source_task(sources, move |registry| {
+        Ok(open_workspace()?.add_source_connection(
+            &registry.engine()?,
+            &provider,
+            Some(&connection),
+            Some(&name),
+            &config,
+        )?)
+    })
+    .await
+}
+#[tauri::command]
+async fn update_source_credentials(
+    connection: String,
+    credentials: ticketd_core::source::ConfigValues,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<ticketd_core::source::SavedSource, SourceFailure> {
+    source_task(sources, move |registry| {
+        Ok(open_workspace()?.update_source_credentials(
+            &registry.engine()?,
+            &connection,
+            &credentials,
+        )?)
+    })
+    .await
+}
+#[tauri::command(async)]
+fn rename_source_connection(
+    connection: String,
+    name: String,
+) -> Result<ticketd_core::source::SavedSource, SourceFailure> {
+    Ok(open_workspace()?.rename_source(&connection, &name)?)
+}
+
+#[tauri::command]
+async fn remove_source_connection(
+    connection: String,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<(), SourceFailure> {
+    source_task(sources, move |_| {
+        Ok(open_workspace()?.remove_source_connection(&connection)?)
+    })
+    .await
 }
 
 /// The one refresh coordinator of this process: the startup and periodic runs and
 /// every explicit refresh go through it, so they never overlap or retry in a tight loop.
-struct Refresher(std::sync::Arc<ticketd_core::source::RefreshCoordinator>);
+struct Refresher(
+    std::sync::Arc<ticketd_core::source::RefreshCoordinator>,
+    ActiveRefreshes,
+);
+
+type ActiveRefreshes = std::sync::Mutex<std::collections::HashMap<String, RefreshControl>>;
+
+struct RegisteredRefresh<'a> {
+    id: String,
+    active: &'a ActiveRefreshes,
+    control: RefreshControl,
+}
+
+impl<'a> RegisteredRefresh<'a> {
+    fn start(id: String, active: &'a ActiveRefreshes) -> Result<Self, SourceFailure> {
+        use std::collections::hash_map::Entry;
+        let mut running = active.lock().unwrap_or_else(|error| error.into_inner());
+        if uuid::Uuid::parse_str(&id).is_ok()
+            && let Entry::Vacant(entry) = running.entry(id.clone())
+        {
+            let control = RefreshControl::default();
+            entry.insert(control.clone());
+            return Ok(Self {
+                id,
+                active,
+                control,
+            });
+        }
+        Err(SourceFailure {
+            code: "failed",
+            message: "Invalid or already active source refresh ID".into(),
+            fields: Vec::new(),
+        })
+    }
+}
+
+impl Drop for RegisteredRefresh<'_> {
+    fn drop(&mut self) {
+        self.active
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .remove(&self.id);
+        self.control.cancel();
+    }
+}
+
+#[derive(Clone, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum RefreshUpdate {
+    Started,
+    Progress(RefreshProgress),
+}
 
 /// Imports matching issues and refreshes every externally owned ticket (or just `ticket`).
 /// Provider calls finish before the workspace is written; per-ticket failures come back
 /// in the report so the saved content stays visible beside the warning. An explicit
 /// refresh waits for a running one instead of overlapping it.
-#[tauri::command(async)]
-fn refresh_sources(
+#[tauri::command]
+async fn refresh_sources(
+    webview: tauri::Webview,
     ticket: Option<String>,
+    connection: Option<String>,
+    retry: Option<bool>,
+    refresh_id: Option<String>,
+    updates: Option<tauri::ipc::JavaScriptChannelId>,
     refresher: tauri::State<'_, Refresher>,
 ) -> Result<ticketd_core::source::RefreshReport, SourceFailure> {
-    Ok(refresher.0.refresh_now(
-        &ticketd_core::source::Engine::builtin(),
-        &open_workspace,
-        ticket.as_deref(),
-    )?)
+    use tauri::Manager;
+
+    let updates = updates.map(|channel| channel.channel_on(webview.clone()));
+    let registration = refresh_id
+        .map(|id| RegisteredRefresh::start(id, &refresher.1))
+        .transpose()?;
+    let coordinator = refresher.0.clone();
+    let control = registration.as_ref().map(|run| run.control.clone());
+    let progress = control.as_ref().map(RefreshControl::progress);
+    let operation = source_task(webview.state(), move |registry| {
+        if retry.unwrap_or(false) {
+            let id = match (&connection, &ticket) {
+                (Some(id), _) => Some(id.clone()),
+                (None, Some(ticket)) => open_workspace()?.ticket_source_connection(ticket)?,
+                (None, None) => None,
+            };
+            if let Some(id) = id {
+                registry.retry(&id);
+            }
+        }
+        let engine = registry.engine()?;
+        let engine = if let Some(control) = control {
+            engine.with_refresh_control(control)
+        } else {
+            engine
+        };
+        Ok(coordinator.refresh_connection_now(
+            &engine,
+            &open_workspace,
+            connection.as_deref(),
+            ticket.as_deref(),
+        )?)
+    });
+    let (Some(updates), Some(mut progress)) = (updates, progress) else {
+        return operation.await;
+    };
+    let _ = updates.send(RefreshUpdate::Started);
+    tokio::pin!(operation);
+    loop {
+        tokio::select! {
+            biased;
+            Ok(()) = progress.changed() => {
+                let update = *progress.borrow_and_update();
+                if let Some(progress) = update {
+                    let _ = updates.send(RefreshUpdate::Progress(progress));
+                }
+            }
+            result = &mut operation => return result,
+        }
+    }
+}
+
+#[tauri::command]
+fn cancel_source_refresh(refresh_id: String, refresher: tauri::State<'_, Refresher>) -> bool {
+    let active = refresher
+        .1
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(control) = active.get(&refresh_id) {
+        control.cancel();
+        return true;
+    }
+    false
 }
 
 /// What publishing would send, and whether it is allowed. No network, no write.
@@ -1566,75 +1850,84 @@ fn preview_publication(
     reference: String,
     provider: String,
     destination: Option<String>,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::PublicationPreview, SourceFailure> {
     let workspace = open_workspace()?;
     Ok(workspace.preview_publication(
-        &ticketd_core::source::Engine::builtin(),
+        &sources.engine()?,
         &reference,
         &provider,
         destination.as_deref(),
     )?)
 }
 
-/// Publishes a local ticket once. The attempt is saved before GitHub is called and
+/// Publishes a local ticket once. The attempt is saved before the provider is called and
 /// no database handle is held while waiting; an unknown outcome comes back as a
 /// `publication_unresolved` failure and stays on the ticket.
-#[tauri::command(async)]
-fn publish_ticket(
+#[tauri::command]
+async fn publish_ticket(
     reference: String,
     provider: String,
     destination: Option<String>,
     expected_fingerprint: Option<String>,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
-    let mut workspace = open_workspace()?;
-    Ok(workspace.publish_ticket(
-        &ticketd_core::source::Engine::builtin(),
-        &reference,
-        &ticketd_core::source::PublishOptions {
-            provider,
-            destination,
-            now: None,
-            expected_fingerprint,
-            agent: None,
-        },
-    )?)
+    source_task(sources, move |registry| {
+        let mut workspace = open_workspace()?;
+        Ok(workspace.publish_ticket(
+            &registry.engine()?,
+            &reference,
+            &ticketd_core::source::PublishOptions {
+                connection: Some(provider),
+                destination,
+                now: None,
+                expected_fingerprint,
+                agent: None,
+            },
+        )?)
+    })
+    .await
 }
 
 /// What is known and unknown about an unresolved publication and which actions are
 /// safe. With `search`, asks the source for issues that may be the one created; a
 /// failed search is reported in the review, never read as "none".
-#[tauri::command(async)]
-fn review_publication(
+#[tauri::command]
+async fn review_publication(
     reference: String,
     search: bool,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::PublicationReview, SourceFailure> {
-    let workspace = open_workspace()?;
-    Ok(workspace.review_publication(
-        &ticketd_core::source::Engine::builtin(),
-        &reference,
-        search,
-    )?)
+    source_task(sources, move |registry| {
+        let workspace = open_workspace()?;
+        Ok(workspace.review_publication(&registry.engine()?, &reference, search)?)
+    })
+    .await
 }
 
 /// Settles an unresolved publication: attach a verified issue, or confirm that
 /// nothing was created. Evidence the source cannot give leaves it unresolved.
-#[tauri::command(async)]
-fn resolve_publication(
+#[tauri::command]
+async fn resolve_publication(
     reference: String,
     resolution: ticketd_core::source::Resolution,
     accept_different_content: Option<bool>,
+    sources: tauri::State<'_, SourceRegistry>,
 ) -> Result<ticketd_core::source::PublishOutcome, SourceFailure> {
-    let mut workspace = open_workspace()?;
-    Ok(workspace.resolve_publication(
-        &ticketd_core::source::Engine::builtin(),
-        &reference,
-        &ticketd_core::source::ResolveOptions {
-            resolution,
-            now: None,
-            agent: None,
-            accept_different_content: accept_different_content.unwrap_or(false),
-        },
-    )?)
+    source_task(sources, move |registry| {
+        let mut workspace = open_workspace()?;
+        Ok(workspace.resolve_publication(
+            &registry.engine()?,
+            &reference,
+            &ticketd_core::source::ResolveOptions {
+                resolution,
+                now: None,
+                agent: None,
+                accept_different_content: accept_different_content.unwrap_or(false),
+            },
+        )?)
+    })
+    .await
 }
 
 #[derive(serde::Serialize)]
@@ -1660,18 +1953,23 @@ fn source_health(refresher: tauri::State<'_, Refresher>) -> Result<SourceHealth,
 
 /// Starts the periodic refresh while the desktop runs. It wakes every few seconds only
 /// to ask the coordinator whether a run is due; nothing outlives the app.
-fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::RefreshCoordinator>) {
+fn start_periodic_refresh(
+    coordinator: std::sync::Arc<ticketd_core::source::RefreshCoordinator>,
+    sources: SourceRegistry,
+) {
     let spawned = std::thread::Builder::new()
         .name("source-refresh".into())
         .spawn(move || {
-            let engine = ticketd_core::source::Engine::builtin();
             let mut reported: Option<String> = None;
             loop {
                 // A source that fails is recorded per source by the refresh itself,
                 // and the coordinator spaces the next attempt. What it cannot record
                 // (the workspace would not open, the hold could not be read) is said
                 // once on stderr, and again only if it changes or comes back.
-                let tick = coordinator.tick(&engine, &open_workspace);
+                let tick = sources
+                    .engine()
+                    .map_err(ticketd_core::Error::from)
+                    .and_then(|engine| coordinator.tick(&engine, &open_workspace));
                 // Until the next refresh is due (it opens nothing before), at most
                 // the idle fallback; a refresh that failed tries again after ten seconds.
                 let wait = match &tick {
@@ -1687,7 +1985,6 @@ fn start_periodic_refresh(coordinator: std::sync::Arc<ticketd_core::source::Refr
                         if reported.as_deref() != Some(message.as_str()) {
                             tracing::warn!(
                                 error_kind = error.kind().code(),
-                                %error,
                                 "periodic source refresh could not run"
                             );
                             reported = Some(message);
@@ -1849,6 +2146,34 @@ impl StartupProgress {
     }
 }
 
+/// The app owns the metadata for the sidecars it distributes.
+fn install_bundled_sources(registry: &ExtensionRegistry) {
+    const SOURCES: &[(&str, &str)] = &[(
+        "ticketd-source-linear",
+        include_str!("../../../../crates/ticketd-source-linear/description.json"),
+    )];
+    let Ok(application) = std::env::current_exe() else {
+        tracing::warn!("could not locate bundled source extensions");
+        return;
+    };
+    for (name, metadata) in SOURCES {
+        let Ok(description) = serde_json::from_str(metadata) else {
+            tracing::warn!(name, "could not load bundled source description");
+            continue;
+        };
+        let sidecar = application.with_file_name(format!("{name}{}", std::env::consts::EXE_SUFFIX));
+        if let Err(error) =
+            registry.install_bundled(&sidecar, env!("CARGO_PKG_VERSION"), description)
+        {
+            tracing::warn!(
+                name,
+                error_kind = error.code(),
+                "could not install bundled source extension"
+            );
+        }
+    }
+}
+
 pub fn run() -> Result<(), tauri::Error> {
     let started = std::time::Instant::now();
     let sync = std::sync::Arc::new(sync_scheduler::Scheduler::new(
@@ -1860,6 +2185,11 @@ pub fn run() -> Result<(), tauri::Error> {
         std::sync::Arc::new(ticketd_core::source::SystemClock),
         ticketd_core::source::RefreshPolicy::default(),
     ));
+    let sources = std::sync::Arc::new(ExtensionRegistry::device().map_err(|error| {
+        tauri::Error::Setup((Box::new(error) as Box<dyn std::error::Error>).into())
+    })?);
+    install_bundled_sources(&sources);
+    let refresh_registry = sources.clone();
     let app = tauri::Builder::default()
         // Must be the first plugin. One process owns Chat execution: starting ticketd
         // again shows the running app's window instead of starting a second host.
@@ -1877,7 +2207,11 @@ pub fn run() -> Result<(), tauri::Error> {
             },
         )
         .manage(drive_commands::DrivePickerOperations::default())
-        .manage(Refresher(std::sync::Arc::clone(&coordinator)))
+        .manage(Refresher(
+            std::sync::Arc::clone(&coordinator),
+            ActiveRefreshes::default(),
+        ))
+        .manage(sources.clone())
         .manage(sync_commands::SyncHost {
             scheduler: std::sync::Arc::clone(&sync),
             started,
@@ -1953,7 +2287,7 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             updates::start(app.handle());
-            start_periodic_refresh(coordinator);
+            start_periodic_refresh(coordinator, refresh_registry);
             start_reminder_timer(open_workspace);
             sync_commands::publish_status(app.handle().clone());
             sync.start(started, sync_commands::at_launch);
@@ -2080,6 +2414,7 @@ pub fn run() -> Result<(), tauri::Error> {
             link_source_repository_project,
             create_source_repository_project,
             refresh_sources,
+            cancel_source_refresh,
             take_ownership,
             source_health,
             preview_publication,
@@ -2089,8 +2424,13 @@ pub fn run() -> Result<(), tauri::Error> {
             count_by_source,
             source_check_connection,
             source_options,
+            source_configuration_summary,
             source_preview,
             save_source,
+            add_source_connection,
+            update_source_credentials,
+            rename_source_connection,
+            remove_source_connection,
             last_backup,
             workspace_info,
             workspace_location,
@@ -2118,6 +2458,7 @@ pub fn run() -> Result<(), tauri::Error> {
             detect_project_remote,
             create_project,
             edit_project,
+            project_source_candidates,
             preview_connect_source,
             connect_source_match_count,
             connect_source,
@@ -2261,6 +2602,7 @@ pub fn run() -> Result<(), tauri::Error> {
     {
         use tauri::Manager;
         let log_dir = app.path().app_log_dir().unwrap_or_default();
+        sources.set_log_dir(&log_dir);
         app.manage(Logs(std::sync::Mutex::new(Some(
             ticketd_diagnostics::init_desktop(log_dir),
         ))));
@@ -2274,6 +2616,9 @@ pub fn run() -> Result<(), tauri::Error> {
             let logs = app
                 .try_state::<Logs>()
                 .and_then(|logs| logs.0.lock().ok()?.take());
+            if let Some(sources) = app.try_state::<SourceRegistry>() {
+                sources.shutdown();
+            }
             chat_commands::shutdown(app);
             updates::install_on_quit(app);
             drop(logs);
@@ -2345,6 +2690,24 @@ mod tests {
                 (Some("two".to_owned()), None),
                 (Some("three".to_owned()), None),
             ]
+        );
+    }
+
+    #[test]
+    fn a_source_failure_crosses_the_bridge_with_the_public_message() {
+        use ticketd_core::source::SourceError;
+
+        let error = SourceError::Unavailable("GitHub could not be reached".into())
+            .with_detail("synthetic transport diagnostic");
+        let failure =
+            serde_json::to_value(super::SourceFailure::from(error)).expect("serializable");
+        assert_eq!(
+            failure,
+            serde_json::json!({
+                "code": "unavailable",
+                "message": "GitHub could not be reached",
+                "fields": [],
+            })
         );
     }
 

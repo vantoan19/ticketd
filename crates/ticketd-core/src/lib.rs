@@ -423,7 +423,7 @@ pub enum Error {
         reference: String,
         provider: String,
         open: bool,
-        /// The issue is closed for a reason ticketd does not recognize, so Done or
+        /// The issue has an unknown state category, so Done or
         /// Canceled may be chosen here.
         closure_unrecognized: bool,
     },
@@ -456,6 +456,8 @@ pub enum Error {
     Remote(#[from] sync::remote::RemoteError),
     #[error("unreadable sync file: {0}")]
     SyncFile(String),
+    #[error("the legacy issue identifier is already used by an issue at a different site")]
+    SyncFileIdentityCollision,
     #[error("sync: {0}")]
     Sync(String),
     #[error(
@@ -564,7 +566,7 @@ fn external_status_message(
 ) -> String {
     if closure_unrecognized {
         format!(
-            "{reference} is closed on {provider} for a reason ticketd does not recognize; choose Done or Canceled here, or reopen it there"
+            "{reference} has an unrecognized state on {provider}; choose Done or Canceled here, or check the issue there"
         )
     } else if open {
         format!(

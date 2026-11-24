@@ -1,17 +1,30 @@
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
-import { X } from "lucide-react";
-import { FieldError } from "@/components/ui/field";
+import { ChevronDown, ChevronRight, X } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { failureText } from "@/lib/api/describe-failure";
-import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import {
   Popover,
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
-import type { ChoiceOption, SchemaField } from "@/lib/api/sources";
-import type { Draft } from "@/features/settings/sources/config-values";
+import type {
+  ChoiceOption,
+  FieldPresentation,
+  SchemaField,
+} from "@/lib/api/sources";
+import {
+  activeFields,
+  type Draft,
+} from "@/features/settings/sources/config-values";
+import { SourceLink } from "@/features/tickets/SourceLink";
 
 const SUGGESTION_DELAY_MS = 250;
 /** Announces which field opened its suggestions, so the others close. */
@@ -100,6 +113,8 @@ function describedBy(
 
 function MultiSelectField({
   field,
+  presentation,
+  target,
   value,
   errors,
   disabled,
@@ -107,6 +122,8 @@ function MultiSelectField({
   onChange,
 }: {
   field: MultiSelect;
+  presentation: FieldPresentation | undefined;
+  target: boolean;
   value: string[];
   errors: string[];
   disabled: boolean;
@@ -117,6 +134,9 @@ function MultiSelectField({
   const [query, setQuery] = useState("");
   const [open, setOpen] = useState(false);
   const [suggestions, setSuggestions] = useState<ChoiceOption[]>([]);
+  const [choiceLabels, setChoiceLabels] = useState(
+    () => new Map<string, string>(),
+  );
   const [loading, setLoading] = useState(false);
   const [failure, setFailure] = useState("");
   const [refused, setRefused] = useState("");
@@ -131,6 +151,16 @@ function MultiSelectField({
       panel.current?.contains(node) === true);
   const full = value.length >= field.max_items;
   const dynamic = field.options.source === "dynamic";
+
+  const rememberSelected = useEffectEvent((options: ChoiceOption[]) => {
+    const selected = options.filter((option) => value.includes(option.value));
+    if (selected.length === 0) return;
+    setChoiceLabels((current) => {
+      const labels = new Map(current);
+      for (const option of selected) labels.set(option.value, option.label);
+      return labels;
+    });
+  });
 
   // The loader is recreated on every render and sees the current rules (the
   // chosen repositories shape the label options), but typing, not a new
@@ -147,6 +177,7 @@ function MultiSelectField({
         .then((options) => {
           if (request !== requests.current) return;
           setSuggestions(options);
+          rememberSelected(options);
           setFailure("");
         })
         .catch((reason: unknown) => {
@@ -160,6 +191,26 @@ function MultiSelectField({
     }, SUGGESTION_DELAY_MS);
     return () => window.clearTimeout(timer);
   }, [open, query, field.key, optionsSource]);
+
+  // A reopened form knows the saved IDs. Use one bounded options read to
+  // recover their labels for fixed choices without waiting for the list to open.
+  const hasUnlabelledChoices =
+    dynamic &&
+    !field.allow_custom &&
+    value.some((item) => !choiceLabels.has(item));
+  useEffect(() => {
+    if (!hasUnlabelledChoices) return;
+    let current = true;
+    void load(field.key, "").then(
+      (options) => {
+        if (current) rememberSelected(options);
+      },
+      () => {},
+    );
+    return () => {
+      current = false;
+    };
+  }, [field.key, hasUnlabelledChoices]);
 
   // One list at a time, and a press anywhere outside the field closes its list
   // (focus alone is not reliable: a pressed button may not take focus).
@@ -191,7 +242,7 @@ function MultiSelectField({
     if (dynamic) setLoading(true);
   }
 
-  function add(item: string) {
+  function add(item: string, label?: string) {
     const text = item.trim();
     if (!text || full || value.includes(text)) return;
     // Refused here, keeping the text to correct, rather than sent and turned
@@ -202,6 +253,8 @@ function MultiSelectField({
       return;
     }
     setRefused("");
+    if (label !== undefined)
+      setChoiceLabels((current) => new Map(current).set(text, label));
     onChange([...value, text]);
     setQuery("");
     setOpen(false);
@@ -230,10 +283,13 @@ function MultiSelectField({
     else options[Math.min(next, options.length - 1)]?.focus();
   }
   return (
-    <div
+    <Field
       ref={container}
-      className="source-field"
+      className="min-w-0 grow basis-60 data-[target=true]:basis-full"
       data-field={field.key}
+      data-target={target || undefined}
+      data-invalid={messages.length > 0 || undefined}
+      data-disabled={disabled || undefined}
       onKeyDown={(event) => {
         // Escape closes only the foremost surface: this list, not the page.
         if (event.key === "Escape" && open) {
@@ -246,10 +302,12 @@ function MultiSelectField({
         if (!inside(event.relatedTarget as Node | null)) setOpen(false);
       }}
     >
-      <Label htmlFor={id}>
+      <FieldLabel htmlFor={id}>
         {field.label}
-        {!field.required && <span className="source-required">Optional</span>}
-      </Label>
+        <span className="source-required" aria-hidden="true">
+          {field.required ? "Required" : "Optional"}
+        </span>
+      </FieldLabel>
       <Popover open={open && !full}>
         <PopoverAnchor asChild>
           <div className="source-chip-input">
@@ -258,19 +316,29 @@ function MultiSelectField({
                 className="source-chips"
                 aria-label={`Selected ${field.label}`}
               >
-                {value.map((item) => (
-                  <li key={item} className="source-chip">
-                    <Badge>{item}</Badge>
-                    <button
-                      type="button"
-                      aria-label={`Remove ${item}`}
-                      disabled={disabled}
-                      onClick={() => onChange(value.filter((v) => v !== item))}
-                    >
-                      <X aria-hidden="true" size={12} />
-                    </button>
-                  </li>
-                ))}
+                {value.map((item) => {
+                  const label =
+                    (field.options.source === "static"
+                      ? field.options.options.find(
+                          (option) => option.value === item,
+                        )?.label
+                      : choiceLabels.get(item)) ?? item;
+                  return (
+                    <li key={item} className="source-chip">
+                      <Badge>{label}</Badge>
+                      <button
+                        type="button"
+                        aria-label={`Remove ${label}`}
+                        disabled={disabled}
+                        onClick={() =>
+                          onChange(value.filter((v) => v !== item))
+                        }
+                      >
+                        <X aria-hidden="true" size={12} />
+                      </button>
+                    </li>
+                  );
+                })}
               </ul>
             )}
             <Input
@@ -279,16 +347,16 @@ function MultiSelectField({
               value={query}
               disabled={disabled || full}
               placeholder={
-                field.key === "repositories"
-                  ? value.length > 0
-                    ? "Add another repository"
-                    : "e.g. acme/billing-api"
-                  : field.key === "labels"
-                    ? "e.g. bug, payments"
-                    : "Search or type, then press Enter"
+                (value.length > 0
+                  ? presentation?.additional_placeholder
+                  : undefined) ??
+                presentation?.placeholder ??
+                field.placeholder ??
+                "Search or type, then press Enter"
               }
               aria-describedby={describedBy(id, field, messages)}
               aria-invalid={messages.length > 0 || undefined}
+              aria-required={field.required || undefined}
               onFocus={() => {
                 if (!open) show();
               }}
@@ -348,7 +416,7 @@ function MultiSelectField({
                   <li key={option.value}>
                     <button
                       type="button"
-                      onClick={() => add(option.value)}
+                      onClick={() => add(option.value, option.label)}
                       aria-label={`Add ${option.label}`}
                     >
                       <span>{option.label}</span>
@@ -377,7 +445,7 @@ function MultiSelectField({
         pending={query}
         refused={refused}
       />
-    </div>
+    </Field>
   );
 }
 
@@ -388,86 +456,197 @@ function MultiSelectField({
  */
 export function SchemaForm({
   fields,
+  presentation,
+  targetField,
   draft,
   errors,
+  formErrors = [],
+  storedSecrets = [],
+  secretsOnly = false,
   disabled,
   loadOptions,
   onChange,
 }: {
   fields: SchemaField[];
+  presentation?: Record<string, FieldPresentation> | undefined;
+  targetField?: string | undefined;
   draft: Draft;
   errors: Record<string, string[]>;
+  formErrors?: string[];
+  storedSecrets?: readonly string[];
+  secretsOnly?: boolean;
   disabled: boolean;
   loadOptions: LoadOptions;
   onChange: (key: string, value: string | string[]) => void;
 }) {
-  return (
-    <div className="source-form">
-      {fields.map((field) => {
-        const fieldErrors = errors[field.key] ?? [];
-        if (field.type === "multi_select") {
-          const value = draft[field.key];
-          return (
-            <MultiSelectField
-              key={field.key}
-              field={field}
-              value={Array.isArray(value) ? value : []}
-              errors={fieldErrors}
-              disabled={disabled}
-              loadOptions={loadOptions}
-              onChange={(next) => onChange(field.key, next)}
-            />
-          );
-        }
+  const advancedId = useId();
+  const [expanded, setExpanded] = useState(false);
+  const visible = activeFields(fields, draft, storedSecrets).filter(
+    (field) => !secretsOnly || field.type === "secret",
+  );
+  const advanced = secretsOnly ? [] : visible.filter((field) => field.advanced);
+  const hasAdvancedErrors = advanced.some((field) => errors[field.key]?.length);
+  const showAdvanced = expanded || hasAdvancedErrors;
+
+  function renderField(field: SchemaField) {
+    const value = draft[field.key];
+    const fieldErrors = Object.hasOwn(errors, field.key)
+      ? (errors[field.key] ?? [])
+      : [];
+    switch (field.type) {
+      case "link":
+        return <SetupLink key={field.key} field={field} />;
+      case "multi_select":
+        return (
+          <MultiSelectField
+            key={field.key}
+            field={field}
+            presentation={presentation?.[field.key]}
+            target={targetField === field.key}
+            value={Array.isArray(value) ? value : []}
+            errors={fieldErrors}
+            disabled={disabled}
+            loadOptions={loadOptions}
+            onChange={(next) => onChange(field.key, next)}
+          />
+        );
+      case "text":
+      case "secret":
         return (
           <TextField
             key={field.key}
             field={field}
-            value={
-              typeof draft[field.key] === "string"
-                ? (draft[field.key] as string)
-                : ""
+            presentation={presentation?.[field.key]}
+            target={targetField === field.key}
+            value={typeof value === "string" ? value : ""}
+            stored={
+              field.type === "secret" && storedSecrets.includes(field.key)
             }
             errors={fieldErrors}
             disabled={disabled}
             onChange={(next) => onChange(field.key, next)}
           />
         );
-      })}
+    }
+  }
+
+  return (
+    <>
+      <FieldError errors={formErrors.map((message) => ({ message }))} />
+      <FieldGroup className="flex-row flex-wrap">
+        {visible
+          .filter((field) => secretsOnly || !field.advanced)
+          .map(renderField)}
+      </FieldGroup>
+      {advanced.length > 0 && (
+        <>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="self-start"
+            aria-expanded={showAdvanced}
+            aria-controls={advancedId}
+            disabled={hasAdvancedErrors}
+            onClick={() => setExpanded(!expanded)}
+          >
+            {showAdvanced ? (
+              <ChevronDown data-icon="inline-start" />
+            ) : (
+              <ChevronRight data-icon="inline-start" />
+            )}
+            Advanced settings
+          </Button>
+          <div id={advancedId} hidden={!showAdvanced}>
+            <FieldGroup className="flex-row flex-wrap">
+              {advanced.map(renderField)}
+            </FieldGroup>
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function SetupLink({
+  field,
+}: {
+  field: Extract<SchemaField, { type: "link" }>;
+}) {
+  const url = safeSetupUrl(field.url);
+  return (
+    <div
+      className="flex min-w-0 grow basis-60 flex-col gap-2"
+      data-field={field.key}
+    >
+      {url ? (
+        <SourceLink url={url}>{field.label}</SourceLink>
+      ) : (
+        <span>{field.label}</span>
+      )}
+      {field.help && <p className="source-field-note">{field.help}</p>}
     </div>
   );
 }
 
+function safeSetupUrl(text: string) {
+  if (!text.startsWith("https://") || /[\\\s]/u.test(text)) return null;
+  try {
+    const url = new URL(text);
+    return url.protocol === "https:" &&
+      url.hostname &&
+      !url.username &&
+      !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function TextField({
   field,
+  presentation,
+  target,
   value,
   errors,
+  stored,
   disabled,
   onChange,
 }: {
-  field: Extract<SchemaField, { type: "text" }>;
+  field: Extract<SchemaField, { type: "text" | "secret" }>;
+  presentation: FieldPresentation | undefined;
+  target: boolean;
   value: string;
   errors: string[];
+  stored: boolean;
   disabled: boolean;
   onChange: (value: string) => void;
 }) {
   const id = useId();
   return (
-    <div className="source-field" data-field={field.key}>
-      <Label htmlFor={id}>
+    <Field
+      className="min-w-0 grow basis-60 data-[target=true]:basis-full"
+      data-field={field.key}
+      data-target={target || undefined}
+      data-invalid={errors.length > 0 || undefined}
+      data-disabled={disabled || undefined}
+    >
+      <FieldLabel htmlFor={id}>
         {field.label}
-        {!field.required && <span className="source-required">Optional</span>}
-      </Label>
+        <span className="source-required" aria-hidden="true">
+          {field.required ? "Required" : "Optional"}
+        </span>
+      </FieldLabel>
       <Input
         id={id}
+        type={field.type === "secret" ? "password" : "text"}
+        autoComplete={field.type === "secret" ? "new-password" : undefined}
         value={value}
         disabled={disabled}
         placeholder={
-          field.key === "assignee"
-            ? "e.g. octocat"
-            : field.placeholder
-              ? `e.g. ${field.placeholder}`
-              : undefined
+          stored
+            ? "Credential saved"
+            : (presentation?.placeholder ?? field.placeholder ?? undefined)
         }
         aria-describedby={describedBy(
           id,
@@ -475,9 +654,10 @@ function TextField({
           fieldMessages(field, errors, "", ""),
         )}
         aria-invalid={errors.length > 0 || undefined}
+        aria-required={(field.required && !stored) || undefined}
         onChange={(event) => onChange(event.target.value)}
       />
       <FieldNote id={id} field={field} errors={errors} />
-    </div>
+    </Field>
   );
 }
