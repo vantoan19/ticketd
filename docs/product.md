@@ -414,6 +414,8 @@ and run through a shared extension interface.
   resolved before any retry so no second issue is created. Local Activities, Plan membership,
   dependencies, and subtickets are not published, and workspace-only attachment
   links block publication until removed. Ongoing synchronization is inbound only.
+- If publishing leaves an attempt unresolved, recovery uses the original GitHub
+  host. See [Recover an unresolved publication](cli.md#recover-an-unresolved-publication).
 - If a source ticket becomes unavailable, ticketd keeps its content and local work and
   warns; **Take ownership** makes it local and stops synchronization.
 - A legacy GitHub ticket with an unverified host can hold a potential duplicate

@@ -103,7 +103,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "publication_attempts",
-        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url",
+        "id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, failure_code, failure_message, external_id, locator, display, url, destination_host",
     ),
     (
         "chats",

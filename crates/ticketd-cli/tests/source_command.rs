@@ -708,6 +708,102 @@ fn age_attempts(cli: &Cli) {
 }
 
 #[test]
+fn legacy_publication_recovery_uses_only_verified_original_hosts() {
+    let cli = Cli::new();
+    let path = cli.dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
+    rusqlite::Connection::open(path)
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO tickets (id, reference, title, body, status) VALUES
+                ('11111111-1111-4111-8111-111111111111', 'T-KQ12', 'Escalate me', 'Why it matters', 'Todo'),
+                ('22222222-2222-4222-8222-222222222222', 'T-KQ13', 'Other ticket', '', 'Todo');
+             INSERT INTO publication_attempts
+                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at)
+                VALUES ('attempt', '11111111-1111-4111-8111-111111111111', 'github', 'o/flaky',
+                    'Escalate me', 'Why it matters', 'unresolved',
+                    '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z', '2026-01-01T00:00:00Z');
+             INSERT INTO publication_attempts
+                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at,
+                 external_id, locator, display, url)
+                VALUES ('known-attempt', '22222222-2222-4222-8222-222222222222', 'github', 'O/R',
+                    'Other ticket', '', 'unresolved', '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z',
+                    '2026-01-01T00:00:00Z', '@127.0.0.1:50', 'o/r#7', 'o/r#7',
+                    'http://127.0.0.1/o/r/issues/7');",
+        )
+        .unwrap();
+
+    let reference = "T-KQ12";
+    let review = cli.run(&["source", "resolve", reference, "--no-search"]);
+    assert_eq!(review["attempt"]["destination_host"], Value::Null);
+    assert_eq!(review["actions"][0]["available"], false);
+    assert_eq!(review["actions"][1]["available"], false);
+    assert!(
+        review["lookup_failure"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("--confirm-host")
+    );
+    let previously_recorded = cli.run(&["source", "resolve", "T-KQ13", "--no-search"]);
+    assert_eq!(
+        previously_recorded["attempt"]["destination_host"],
+        "127.0.0.1"
+    );
+    assert_eq!(previously_recorded["actions"][0]["available"], true);
+    assert_eq!(previously_recorded["actions"][1]["available"], false);
+
+    let wrong = cli.fail(
+        &[
+            "source",
+            "resolve",
+            reference,
+            "--confirm-host",
+            "github.com",
+        ],
+        None,
+    );
+    assert!(wrong.contains("uses 127.0.0.1"), "{wrong}");
+
+    let confirmed = cli.command(
+        &[
+            "source",
+            "resolve",
+            reference,
+            "--confirm-host",
+            "127.0.0.1",
+        ],
+        None,
+    );
+    assert!(
+        confirmed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&confirmed.stderr)
+    );
+    let attempt: Value = serde_json::from_slice(&confirmed.stdout).unwrap();
+    assert_eq!(attempt["destination_host"], "127.0.0.1");
+    assert_eq!(attempt["state"], "unresolved");
+    assert_eq!(cli.run(&["show", reference])["source"], Value::Null);
+
+    let overwrite = cli.fail(
+        &[
+            "source",
+            "resolve",
+            reference,
+            "--confirm-host",
+            "github.com",
+        ],
+        None,
+    );
+    assert!(
+        overwrite.contains("already recorded as 127.0.0.1"),
+        "{overwrite}"
+    );
+    cli.run(&["source", "save", "github", "--set", "repositories=o/flaky"]);
+    let outcome = cli.run(&["source", "resolve", reference, "--issue", "7"]);
+    assert_eq!(outcome["attempt"]["state"], "succeeded");
+}
+
+#[test]
 fn resolve_reviews_then_attaches_a_verified_issue_without_creating_another() {
     let cli = Cli::new();
     let reference = unresolved_ticket(&cli);

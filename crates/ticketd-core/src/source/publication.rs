@@ -4,7 +4,7 @@
 //! workflow is built around a durable **publication attempt**:
 //!
 //! 1. A short write transaction checks eligibility and inserts the attempt as
-//!    `in_flight`, with the exact title, description and destination to send. At
+//!    `in_flight`, with the exact title, description, destination and host. At
 //!    most one attempt per ticket may be open (a unique partial index), which is
 //!    what coordinates concurrent and replayed requests.
 //! 2. No transaction is open while the connector makes the remote create call.
@@ -95,6 +95,9 @@ pub struct PublicationAttempt {
     pub reference: String,
     pub provider: String,
     pub destination: String,
+    /// The host that received the create request, when verified.
+    #[serde(default)]
+    pub destination_host: Option<String>,
     pub title: String,
     pub body: String,
     /// The effective state: a stored `in_flight` attempt past its lease reads
@@ -552,6 +555,43 @@ fn fingerprint(
     Ok(format!("{hash:016x}"))
 }
 
+fn configured_destination_host(
+    engine: &Engine,
+    provider: &str,
+    destination: &str,
+) -> Result<Option<String>, SourceError> {
+    Ok(engine
+        .repository_for_destination(provider, destination)?
+        .and_then(|repository| repository.split_once('/').map(|(host, _)| host.to_owned())))
+}
+
+fn host_configuration_error(message: String) -> SourceError {
+    SourceError::InvalidConfiguration(vec![super::FieldIssue {
+        field: "source".into(),
+        message,
+    }])
+}
+
+fn check_recovery_host(engine: &Engine, attempt: &PublicationAttempt) -> Result<(), SourceError> {
+    let current = configured_destination_host(engine, &attempt.provider, &attempt.destination)?;
+    let message = match (attempt.destination_host.as_deref(), current.as_deref()) {
+        (Some(original), Some(current)) if original == current => return Ok(()),
+        // Connectors that have no repository mapping do not use a host here.
+        (None, None) if attempt.provider != super::github::PROVIDER => return Ok(()),
+        (Some(original), Some(current)) => format!(
+            "This publication was sent to {original}, but the current source uses {current}. Connect to {original} before resolving it."
+        ),
+        (Some(original), None) => format!(
+            "The current source host could not be identified. Connect to {original} before resolving this publication."
+        ),
+        (None, _) => format!(
+            "The original host of this publication is unknown. After verifying it, connect to that host and run `ticketd source resolve {} --confirm-host HOST`.",
+            attempt.reference
+        ),
+    };
+    Err(host_configuration_error(message))
+}
+
 fn published(issue: &ExternalIssue) -> PublishedIssue {
     PublishedIssue {
         identity: issue.reference.identity.clone(),
@@ -617,9 +657,46 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
+/// Format 89: preserve the host that received a publication request.
+pub(crate) fn migrate_destination_host(connection: &Connection) -> Result<(), Error> {
+    connection
+        .execute_batch("ALTER TABLE publication_attempts ADD COLUMN destination_host TEXT")?;
+    // An unresolved attempt with a recorded issue has the response from its
+    // original create call. A succeeded attempt may instead reflect an attachment
+    // made during recovery, so its issue URL does not establish the original host.
+    let mut statement = connection.prepare(
+        "SELECT id, destination, external_id, locator, url FROM publication_attempts \
+         WHERE provider = ?1 AND status = 'unresolved' AND external_id IS NOT NULL AND url IS NOT NULL",
+    )?;
+    let attempts = statement
+        .query_map([super::github::PROVIDER], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+            ))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    for (id, destination, external_id, locator, url) in attempts {
+        if let Some(remote) = super::github::repository_from_issue_url(&locator, &url)
+            && let Some((host, repository)) = remote.split_once('/')
+            && repository.eq_ignore_ascii_case(&destination)
+            && super::github::issue_id_host(&external_id) == Some(host)
+        {
+            connection.execute(
+                "UPDATE publication_attempts SET destination_host = ?2 WHERE id = ?1",
+                params![id, host],
+            )?;
+        }
+    }
+    Ok(())
+}
+
 const ATTEMPT_COLUMNS: &str = "a.id, t.reference, a.provider, a.destination, a.title, a.body, a.status, \
      a.started_at, a.updated_at, a.failure_code, a.failure_message, a.external_id, a.locator, \
-     a.display, a.url, a.lease_expires_at";
+     a.display, a.url, a.lease_expires_at, a.destination_host";
 
 /// Whether a lease has run out at `now`. Expiry is judged against the one
 /// effective clock of the call (the caller's `now`, else the database clock),
@@ -685,6 +762,7 @@ fn attempt_from_row(row: &rusqlite::Row<'_>, now: &str) -> rusqlite::Result<Publ
             }),
         provider,
         destination: row.get(3)?,
+        destination_host: row.get(16)?,
         title: row.get(4)?,
         body: row.get(5)?,
         state,
@@ -1135,11 +1213,18 @@ impl Workspace {
                     .into());
                 }
             };
+            let destination_host = configured_destination_host(engine, provider, &destination)?;
+            if provider == super::github::PROVIDER && destination_host.is_none() {
+                return Err(host_configuration_error(
+                    "A valid GitHub host is required to publish this ticket.".into(),
+                )
+                .into());
+            }
             let now = clock(transaction, options.now.as_deref())?;
             let attempt_id = Uuid::new_v4().to_string();
             transaction.execute(
-                "INSERT INTO publication_attempts (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'in_flight', ?7, strftime('%Y-%m-%dT%H:%M:%fZ', ?7, ?8), ?7)",
+                "INSERT INTO publication_attempts (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at, destination_host) \
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, 'in_flight', ?7, strftime('%Y-%m-%dT%H:%M:%fZ', ?7, ?8), ?7, ?9)",
                 params![
                     attempt_id,
                     ticket.id,
@@ -1149,6 +1234,7 @@ impl Workspace {
                     ticket.body,
                     now,
                     format!("+{LEASE_SECONDS} seconds"),
+                    destination_host,
                 ],
             )?;
             Ok(Ok(Started {
@@ -1412,6 +1498,65 @@ fn latest_attempt(
 /// status with what was read, so competing resolvers, a running publisher and
 /// discovery can never both win.
 impl Workspace {
+    /// Records an independently verified original host for a legacy unresolved
+    /// attempt. The connector must already use that host. This performs no
+    /// network calls and leaves the attempt unresolved.
+    pub fn confirm_publication_host(
+        &mut self,
+        engine: &Engine,
+        reference: &str,
+        original_host: &str,
+    ) -> Result<PublicationAttempt, Error> {
+        crate::write_scope::run(&self.connection, |transaction| {
+            let ticket = subject(transaction, reference)?;
+            let now = clock(transaction, None)?;
+            let Some(mut attempt) = open_attempt(transaction, &ticket.id, Some(&now))? else {
+                return Err(PublicationError::NothingToResolve {
+                    reference: ticket.reference,
+                }
+                .into());
+            };
+            if attempt.state == AttemptState::InFlight {
+                return Err(PublicationError::StillRunning {
+                    reference: ticket.reference,
+                    attempt_id: attempt.id,
+                }
+                .into());
+            }
+            let mismatch = |message| PublicationError::Mismatch {
+                reference: ticket.reference.clone(),
+                attempt_id: attempt.id.clone(),
+                message,
+            };
+            if let Some(host) = &attempt.destination_host {
+                return Err(mismatch(format!(
+                    "The original publication host is already recorded as {host}."
+                ))
+                .into());
+            }
+            let Some(current) =
+                configured_destination_host(engine, &attempt.provider, &attempt.destination)?
+            else {
+                return Err(
+                    mismatch("The current source host could not be identified.".into()).into(),
+                );
+            };
+            if !url::Host::parse(original_host).is_ok_and(|host| host.to_string() == current) {
+                return Err(mismatch(format!(
+                    "The confirmed original host must match the current source, which uses {current}."
+                ))
+                .into());
+            }
+            transaction.execute(
+                "UPDATE publication_attempts SET destination_host = ?2, updated_at = ?3 WHERE id = ?1",
+                params![attempt.id, current, now],
+            )?;
+            attempt.destination_host = Some(current);
+            attempt.updated_at = now;
+            Ok(attempt)
+        })
+    }
+
     /// What is known about the uncertain attempt on `reference`, what is not, and
     /// what may safely be done next. With `search`, also asks the source for
     /// issues that may be this publication's result (a network call; a failure is
@@ -1444,9 +1589,13 @@ impl Workspace {
         };
         let name = engine.descriptor(&attempt.provider)?.name;
         let running = attempt.state == AttemptState::InFlight;
+        let destination = match &attempt.destination_host {
+            Some(host) => format!("{host}/{}", attempt.destination),
+            None => attempt.destination.clone(),
+        };
         let mut known = vec![format!(
-            "ticketd asked {name} to create \"{}\" in {}.",
-            attempt.title, attempt.destination
+            "ticketd asked {name} to create \"{}\" in {destination}.",
+            attempt.title
         )];
         if let Some(issue) = &attempt.issue {
             known.push(format!(
@@ -1495,11 +1644,15 @@ impl Workspace {
         let mut candidates = Vec::new();
         let mut other_recent = Vec::new();
         let mut candidates_complete = None;
-        let mut lookup_failure = None;
+        let host_failure = check_recovery_host(engine, &attempt)
+            .err()
+            .map(|error| failure_of(&error));
+        let mut lookup_failure = host_failure.clone();
         let settled = search_settled(&attempt.started_at, &now);
         if search
             && !running
             && attempt.issue.is_none()
+            && host_failure.is_none()
             && let Some(saved) = self.saved_source(&attempt.provider)?
         {
             match engine.find_published(
@@ -1537,10 +1690,12 @@ impl Workspace {
         let actions = vec![
             ResolutionAction {
                 kind: ActionKind::Attach,
-                available: !running && conflict.is_none(),
+                available: !running && host_failure.is_none() && conflict.is_none(),
                 label: "Attach the created issue".into(),
                 detail: if running {
                     "Wait for the request to finish first.".into()
+                } else if let Some(failure) = &host_failure {
+                    failure.message.clone()
                 } else if let Some(conflict) = conflict {
                     format!("Not possible: {}", conflict.message)
                 } else if attempt.issue.is_some() {
@@ -1565,6 +1720,8 @@ impl Workspace {
                 label: "Confirm nothing was created".into(),
                 detail: if running {
                     "Wait for the request to finish first.".into()
+                } else if let Some(failure) = &host_failure {
+                    failure.message.clone()
                 } else if attempt.issue.is_some() {
                     "Not possible: the issue is known to exist.".into()
                 } else if !candidates.is_empty() {
@@ -1642,6 +1799,7 @@ impl Workspace {
                 source,
             })
         };
+        check_recovery_host(engine, &attempt).map_err(unverified)?;
         let Some(saved) = self.saved_source(&attempt.provider)? else {
             return Err(unverified(SourceError::InvalidConfiguration(vec![
                 super::FieldIssue {

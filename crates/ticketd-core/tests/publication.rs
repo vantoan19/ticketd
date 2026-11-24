@@ -1517,6 +1517,10 @@ fn attempts_survive_export_backup_and_restore() {
     let exported = f.workspace.export().unwrap();
     assert_eq!(exported["publication_attempts"][0]["status"], "unresolved");
     assert_eq!(exported["publication_attempts"][0]["destination"], "o/r");
+    assert_eq!(
+        exported["publication_attempts"][0]["destination_host"],
+        "example.test"
+    );
 
     let backup = f.dir.path().join("backup.sqlite3");
     f.workspace.backup(&backup).unwrap();
@@ -1618,6 +1622,58 @@ impl Fixture {
         assert!(after.source.is_none(), "ownership must not transfer");
         assert_eq!(after.publication.unwrap().state, AttemptState::Unresolved);
     }
+}
+
+#[test]
+fn publication_recovery_cannot_use_the_same_repository_on_a_different_host() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    f.workspace = Workspace::open(f.path()).unwrap();
+
+    let wrong_host = Fake(Fake::new().0, "other.example.test");
+    let lookups = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    wrong_host.0.lock().unwrap().lookup_hook = Some(Arc::new({
+        let lookups = lookups.clone();
+        move || {
+            lookups.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }));
+    let mut other_engine = Engine::new();
+    other_engine.register(Box::new(wrong_host)).unwrap();
+
+    for search in [false, true] {
+        let review = f
+            .workspace
+            .review_publication_at(&other_engine, &ticket.reference, search, Some(&later()))
+            .unwrap();
+        let failure = review.lookup_failure.unwrap();
+        assert!(failure.message.contains("sent to example.test"));
+        assert!(failure.message.contains("uses other.example.test"));
+        assert!(review.actions.iter().all(|action| !action.available));
+        assert!(review.candidates_complete.is_none());
+    }
+
+    for options in [not_created(), attach(Some("101"))] {
+        let error = f
+            .workspace
+            .resolve_publication(&other_engine, &ticket.reference, &options)
+            .unwrap_err();
+        assert!(matches!(
+            error,
+            Error::Publication(PublicationError::Unverified { .. })
+        ));
+        assert!(error.to_string().contains("sent to example.test"));
+        assert!(error.to_string().contains("uses other.example.test"));
+        f.still_unresolved(&ticket.reference);
+    }
+    assert_eq!(lookups.load(std::sync::atomic::Ordering::SeqCst), 0);
+    assert_eq!(
+        f.resolve(&ticket.reference, &attach(Some("101")))
+            .unwrap()
+            .attempt
+            .state,
+        AttemptState::Succeeded
+    );
 }
 
 #[test]

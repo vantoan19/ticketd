@@ -69,6 +69,25 @@ GitHub must confirm the saved issue ID, repository, and issue number. The comman
 repairs the existing ticket's source link and keeps its current ownership. Run
 `ticketd source refresh --ticket T-KQ12` afterward if GitHub still owns the ticket.
 
+## Recover an unresolved publication
+
+Run `ticketd source resolve T-KQ12` to review the attempt. Recovery uses the
+GitHub host that received the create request. If the source uses a different
+host, connect it to the original host and review again.
+
+For an older attempt with an unknown host, verify which host received the
+original request before confirming it. Connect the source to that host and
+supply its hostname, such as `github.com`, without a protocol or repository path.
+
+```sh
+ticketd source resolve T-KQ12 --confirm-host github.com
+ticketd source resolve T-KQ12
+```
+
+`--confirm-host` records the host locally. The attempt stays unresolved until
+you attach the verified issue or confirm that nothing was created. If you
+cannot verify the original host, leave the attempt unresolved.
+
 ## JSON output
 
 Most data commands print JSON on stdout. Direct commands usually return an
