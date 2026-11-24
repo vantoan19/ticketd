@@ -667,6 +667,77 @@ async fn large_tool_updates_keep_bounded_output_and_file_changes_until_completio
 }
 
 #[tokio::test]
+async fn file_reports_change_only_when_tools_report_new_file_facts() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("file-facts")).await,
+        DispatchOutcome::Written
+    );
+    let prompt = peer.written().await;
+    let update = |update| {
+        json!({"jsonrpc": "2.0", "method": "session/update",
+            "params": {"sessionId": "session-1", "update": update}})
+    };
+    let diff = |new_text| json!([{"type": "diff", "path": "/workspace/file", "newText": new_text}]);
+    for frame in [
+        json!({"sessionUpdate": "tool_call", "toolCallId": "edit", "kind": "edit",
+            "title": "Edit file", "status": "completed", "content": diff("line one\n")}),
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "edit",
+            "content": diff("same line count\n")}),
+        json!({"sessionUpdate": "tool_call", "toolCallId": "command", "kind": "execute",
+            "title": "Run command", "status": "in_progress"}),
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "command",
+            "rawOutput": {"output": "command output"}}),
+        json!({"sessionUpdate": "tool_call", "toolCallId": "second-edit", "kind": "edit",
+            "title": "Edit file again", "status": "completed", "content": diff("line one\nline two\n")}),
+        json!({"sessionUpdate": "tool_call_update", "toolCallId": "edit",
+            "rawOutput": {"output": "late output from the first edit"}}),
+    ] {
+        send(&mut peer, &update(frame)).await;
+    }
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+
+    let mut updates = Vec::new();
+    let mut reports = Vec::new();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            match opened.events.recv().await.expect("Prompt event").kind {
+                EventKind::ToolUpdated { item, output, .. } => updates.push((item.0, output)),
+                EventKind::FilesChanged { files, .. } => {
+                    assert_eq!(files.len(), 1);
+                    assert_eq!(files[0].path, "/workspace/file");
+                    reports.push(files[0].added_lines);
+                }
+                EventKind::TurnEnded { outcome, .. } => {
+                    assert_eq!(outcome, TurnOutcome::Completed);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("file facts Prompt must end");
+    assert_eq!(
+        updates
+            .iter()
+            .map(|(id, _)| id.as_str())
+            .collect::<Vec<_>>(),
+        ["edit", "edit", "command", "command", "second-edit", "edit"]
+    );
+    assert_eq!(updates[3].1.as_deref(), Some("command output"));
+    assert_eq!(
+        updates[5].1.as_deref(),
+        Some("late output from the first edit")
+    );
+    assert_eq!(reports, [Some(1), Some(2)]);
+}
+
+#[tokio::test]
 async fn bounded_file_previews_preserve_the_whole_edit_through_completion() {
     use ticketd_core::{ChatToolState, harnesses::ANTIGRAVITY};
 

@@ -121,8 +121,10 @@ impl Prompt {
             .tools
             .entry(id.clone())
             .or_insert_with(|| steps::Tool::new(id.clone()));
+        let update_files =
+            update.fields.content.is_some() || tool.status() != acp::ToolCallStatus::Completed;
         tool.merge(update.fields);
-        self.report_tool(&id, events)
+        self.report_tool(&id, update_files, events)
     }
     fn cancel_approval(&mut self, id: &acp::ToolCallId) {
         // An output-only update can repeat a failure the harness already reported.
@@ -135,7 +137,12 @@ impl Prompt {
             self.cancelled_approvals.insert(id.clone());
         }
     }
-    fn report_tool(&mut self, id: &acp::ToolCallId, events: &mut Vec<EventKind>) -> bool {
+    fn report_tool(
+        &mut self,
+        id: &acp::ToolCallId,
+        update_files: bool,
+        events: &mut Vec<EventKind>,
+    ) -> bool {
         let Some(tool) = self.tools.get(id) else {
             return false;
         };
@@ -146,12 +153,16 @@ impl Prompt {
             self.cancelled_approvals.contains(id),
         );
         events.push(event);
-        if !declined && tool.status() == acp::ToolCallStatus::Completed {
+        let mut files_changed = false;
+        if update_files && !declined && tool.status() == acp::ToolCallStatus::Completed {
             for file in tool.changes() {
-                self.files.insert(file.path.clone(), file);
+                if self.files.get(&file.path) != Some(&file) {
+                    self.files.insert(file.path.clone(), file);
+                    files_changed = true;
+                }
             }
         }
-        if !self.files.is_empty() {
+        if files_changed {
             events.push(EventKind::FilesChanged {
                 turn: self.turn.clone(),
                 files: self.files.values().cloned().collect(),
@@ -327,7 +338,7 @@ impl Session {
                 prompt
                     .tools
                     .insert(id.clone(), steps::Tool::from_call(tool));
-                prompt.report_tool(&id, &mut events);
+                prompt.report_tool(&id, true, &mut events);
             }
             acp::SessionUpdate::ToolCallUpdate(update) => {
                 prompt.flush_thought(&mut events);
