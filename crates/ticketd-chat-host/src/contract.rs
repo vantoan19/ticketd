@@ -999,7 +999,8 @@ pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
         SettingOutcome::Unsupported
     }
 
-    /// Stops the owned process tree with bounded cleanup and ends the event stream.
+    /// Stops the owned process with bounded cleanup and ends the event stream.
+    /// The host may call this again to check for exit after an unconfirmed result.
     async fn close(&self) -> CloseOutcome;
 }
 
