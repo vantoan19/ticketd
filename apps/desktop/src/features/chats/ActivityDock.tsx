@@ -276,31 +276,50 @@ function Request({
           </div>
         ) : (
           <div className="chat-request-buttons">
-            {request.options.map((option, index) => (
-              <Button
-                key={option.id}
-                type="button"
-                variant="outline"
-                size="compact"
-                data-choice=""
-                disabled={sending !== null}
-                aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
-                onClick={() => pick(option.id)}
-              >
-                {option.label}
-                {index < 3 ? (
-                  <Kbd aria-hidden="true" className="w-5">
-                    {sending === option.id ? (
-                      <LoaderCircle size={12} className="chat-spin" />
-                    ) : (
-                      index + 1
-                    )}
-                  </Kbd>
-                ) : sending === option.id ? (
-                  <LoaderCircle size={12} className="chat-spin" aria-hidden />
-                ) : null}
-              </Button>
-            ))}
+            {request.options.map((option, index) => {
+              const warningId = `${titleId}-warning-${index}`;
+              return (
+                <div key={option.id} className="chat-approval-choice">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="compact"
+                    data-choice=""
+                    disabled={sending !== null}
+                    aria-describedby={option.warning ? warningId : undefined}
+                    aria-keyshortcuts={
+                      index < 9 ? String(index + 1) : undefined
+                    }
+                    onClick={() => pick(option.id)}
+                  >
+                    {option.label}
+                    {index < 3 ? (
+                      <Kbd aria-hidden="true" className="w-5">
+                        {sending === option.id ? (
+                          <LoaderCircle size={12} className="chat-spin" />
+                        ) : (
+                          index + 1
+                        )}
+                      </Kbd>
+                    ) : sending === option.id ? (
+                      <LoaderCircle
+                        size={12}
+                        className="chat-spin"
+                        aria-hidden
+                      />
+                    ) : null}
+                  </Button>
+                  {option.warning && (
+                    <p
+                      id={warningId}
+                      className="chat-approval-warning text-xs text-muted-foreground"
+                    >
+                      {option.warning}
+                    </p>
+                  )}
+                </div>
+              );
+            })}
             {commandDisclosure}
           </div>
         )}

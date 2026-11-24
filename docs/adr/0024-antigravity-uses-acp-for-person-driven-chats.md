@@ -39,7 +39,9 @@ access is supplied by the native `--dangerously-skip-permissions` startup
 flag with the same warning as the other harnesses. Crossing that boundary
 replaces the process and resumes the Session before the next message. The
 person answers every approval Antigravity still requests, including any
-persistent choice it offers. ticketd returns the exact choice.
+persistent choice it offers. Each warning Antigravity supplies for an approval
+choice stays with that choice when the person sees it and if they need to
+retry. ticketd returns the exact choice.
 
 ## Rejected approaches
 

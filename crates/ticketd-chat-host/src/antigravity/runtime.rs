@@ -44,6 +44,7 @@ struct Prompt {
     submission: SubmissionId,
     message: String,
     message_number: usize,
+    quota_diagnostic: Option<String>,
     thought: String,
     checkpointed_thought_bytes: usize,
     tools: HashMap<acp::ToolCallId, steps::Tool>,
@@ -59,6 +60,7 @@ impl Prompt {
             submission,
             message: String::new(),
             message_number: 0,
+            quota_diagnostic: None,
             thought: String::new(),
             checkpointed_thought_bytes: 0,
             tools: HashMap::new(),
@@ -303,6 +305,8 @@ impl Session {
                 if let acp::ContentBlock::Text(text) = &chunk.content =>
             {
                 prompt.flush_thought(&mut events);
+                prompt.quota_diagnostic =
+                    is_quota_diagnostic(&text.text).then(|| text.text.clone());
                 prompt.message.push_str(&text.text);
                 events.push(EventKind::TextDelta {
                     turn: prompt.turn.clone(),
@@ -408,6 +412,12 @@ impl Session {
             .map(|option| ApprovalOption {
                 id: option.option_id.0.to_string(),
                 label: option.name.clone(),
+                warning: option
+                    .meta
+                    .as_ref()
+                    .and_then(|meta| meta.get("agy.security.warning"))
+                    .and_then(Value::as_str)
+                    .map(str::to_owned),
             })
             .collect();
         let mut reason = [
@@ -417,11 +427,6 @@ impl Session {
         ]
         .into_iter()
         .flatten()
-        .chain(
-            options
-                .iter()
-                .filter_map(|option| option.meta.as_ref()?.get("agy.security.warning")?.as_str()),
-        )
         .collect::<Vec<_>>()
         .join("\n");
         self.runtime.register_request(
@@ -491,10 +496,13 @@ impl Session {
         if !prompt.thought.is_empty() {
             events.push(prompt.take_thought(false));
         }
-        events.extend(
-            self.runtime
-                .end_turn(turn, prompt_outcome(reply), |_| Default::default()),
-        );
+        let outcome = match (prompt_outcome(reply), prompt.quota_diagnostic) {
+            (TurnOutcome::Completed, Some(diagnostic)) => {
+                TurnOutcome::Failed(problem(ProblemKind::QuotaExhausted, diagnostic))
+            }
+            (outcome, _) => outcome,
+        };
+        events.extend(self.runtime.end_turn(turn, outcome, |_| Default::default()));
         events
     }
 }
@@ -510,6 +518,15 @@ fn refused(id: Value, code: i64, message: &str) -> (Vec<EventKind>, Option<Respo
             json!({"id": id, "error": {"code": code, "message": message}}),
         )),
     )
+}
+
+fn is_quota_diagnostic(text: &str) -> bool {
+    // agy 1.5.15 sends this entire diagnostic as its final text chunk and replies
+    // with end_turn. Match its executor framing as well as the HTTP and RPC codes.
+    text.strip_prefix("\n⚠ agent executor error: generating and executing: Error 429, Message: ")
+        .and_then(|text| text.strip_suffix("]\n"))
+        .and_then(|text| text.rsplit_once(", Status: RESOURCE_EXHAUSTED, Details: ["))
+        .is_some_and(|(message, _)| !message.is_empty())
 }
 
 fn prompt_outcome(reply: &Reply) -> TurnOutcome {
