@@ -13,7 +13,7 @@ use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufRead, BufReader};
-use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
+use tokio::sync::{Mutex as AsyncMutex, Semaphore, mpsc, oneshot};
 use tokio::time::timeout;
 
 use crate::stdio::{
@@ -29,6 +29,8 @@ use crate::{
 pub(crate) const MAX_FRAME_BYTES: usize = 8 * 1024 * 1024;
 /// Timed-out requests remembered so a late reply reconciles instead of looking unknown.
 const MAX_TOMBSTONES: usize = 64;
+/// Includes deferred work and replies waiting for the input pipe.
+const MAX_PENDING_RESPONSES: usize = 16;
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct RpcError {
@@ -428,13 +430,14 @@ impl<P: Peer> Connection<P> {
     async fn read(self: Arc<Self>, stdout: Reader, events: mpsc::Sender<RuntimeEvent>) {
         let generation = self.generation;
         let mut stdout = BufReader::new(stdout);
-        let (was_open, tail, saturated) = loop {
+        let response_slots = Arc::new(Semaphore::new(MAX_PENDING_RESPONSES));
+        let (was_open, tail, saturation) = loop {
             let frame = read_frame(&mut stdout, MAX_FRAME_BYTES).await;
             let response = {
                 let mut state = self.state();
                 let Ok(Some(frame)) = frame else {
                     let mut tail = Vec::new();
-                    break (state.lose_connection(&mut tail), tail, false);
+                    break (state.lose_connection(&mut tail), tail, None);
                 };
                 let (kinds, response) = state.apply(frame);
                 // Reserve the entire batch without waiting. On saturation the
@@ -447,7 +450,11 @@ impl<P: Peer> Connection<P> {
                     }
                     Err(mpsc::error::TrySendError::Full(())) if !events.is_closed() => {
                         let mut tail = kinds;
-                        break (state.lose_connection(&mut tail), tail, true);
+                        break (
+                            state.lose_connection(&mut tail),
+                            tail,
+                            Some("the harness event buffer filled"),
+                        );
                     }
                     // Some callers intentionally discard events while using RPC.
                     Err(_) => {}
@@ -456,8 +463,17 @@ impl<P: Peer> Connection<P> {
             };
             if let Some(response) = response {
                 // A full input pipe or a slow answer must leave the reader free.
+                let Ok(slot) = Arc::clone(&response_slots).try_acquire_owned() else {
+                    let mut tail = Vec::new();
+                    break (
+                        self.state().lose_connection(&mut tail),
+                        tail,
+                        Some("the harness response queue filled"),
+                    );
+                };
                 let connection = Arc::clone(&self);
                 tokio::spawn(async move {
+                    let _slot = slot;
                     let frame = match response {
                         Response::Immediate(frame) => frame,
                         Response::Deferred(answer) => answer.await,
@@ -469,11 +485,13 @@ impl<P: Peer> Connection<P> {
         drop(stdout);
         let loss = if was_open {
             let mut loss = runtime_lost(&self.stdin, &self.child, &self.stderr).await;
-            if saturated && let EventKind::RuntimeLost { diagnostics, .. } = &mut loss {
+            if let (Some(reason), EventKind::RuntimeLost { diagnostics, .. }) =
+                (saturation, &mut loss)
+            {
                 if !diagnostics.is_empty() {
                     diagnostics.insert(0, '\n');
                 }
-                diagnostics.insert_str(0, "the harness event buffer filled");
+                diagnostics.insert_str(0, reason);
             }
             Some(loss)
         } else {

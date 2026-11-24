@@ -29,6 +29,8 @@ use crate::{
 use super::{capabilities, problem, settings, steps};
 
 const MIN_THOUGHT_CHECKPOINT_BYTES: usize = 256;
+// Include answered IDs so reusing an ID in the same Prompt can't reopen an approval.
+const MAX_PERMISSION_REQUESTS_PER_PROMPT: usize = 32;
 
 enum Call {
     Initialize,
@@ -160,7 +162,7 @@ impl Prompt {
 struct Permission {
     rpc_id: Value,
     tool: acp::ToolCallId,
-    options: Vec<acp::PermissionOption>,
+    options: Vec<(acp::PermissionOptionId, acp::PermissionOptionKind)>,
 }
 
 #[derive(Default, PartialEq, Eq)]
@@ -376,7 +378,19 @@ impl Session {
                 Some(Response::Immediate(cancelled_permission(id))),
             );
         }
-        let native = NativeRequestId::new(id.to_string());
+        // The peer can reuse a wire ID in a later Prompt. Its earlier approval
+        // stays stale, including while an approval with the same wire ID is open.
+        let native = NativeRequestId::new(format!("{}:{id}", prompt.turn.0));
+        if self.runtime.has_request(&native) {
+            return (Vec::new(), None);
+        }
+        if self.runtime.request_count() >= MAX_PERMISSION_REQUESTS_PER_PROMPT {
+            return refused(
+                id,
+                -32000,
+                "ticketd has reached the Antigravity approval limit for this turn",
+            );
+        }
         let tool = request.tool_call.tool_call_id.clone();
         let mut seen = HashSet::new();
         let options: Vec<_> = request
@@ -410,17 +424,18 @@ impl Session {
         )
         .collect::<Vec<_>>()
         .join("\n");
-        if !self.runtime.register_request(
+        self.runtime.register_request(
             native.clone(),
             Some(&prompt.turn),
             Permission {
                 rpc_id: id,
-                options,
+                options: options
+                    .into_iter()
+                    .map(|option| (option.option_id, option.kind))
+                    .collect(),
                 tool: tool.clone(),
             },
-        ) {
-            return (Vec::new(), None);
-        }
+        );
         let mut events: Vec<_> = self
             .runtime
             .processing(prompt.submission.clone(), prompt.turn.clone())
@@ -921,12 +936,12 @@ impl HarnessRuntime for AcpRuntime {
                 let InteractionAnswer::NativeApproval(selected) = response.answer else {
                     return Err(Refusal::Unsupported);
                 };
-                let option = request.options.iter().find(|option| option.option_id.0.as_ref() == selected)
+                let (option, kind) = request.options.iter().find(|(id, _)| id.0.as_ref() == selected)
                     .ok_or(Refusal::Unsupported)?;
-                let deny = matches!(option.kind, acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways)
+                let deny = matches!(kind, acp::PermissionOptionKind::RejectOnce | acp::PermissionOptionKind::RejectAlways)
                     .then(|| request.tool.clone());
                 let result = acp::RequestPermissionResponse::new(acp::RequestPermissionOutcome::Selected(
-                    acp::SelectedPermissionOutcome::new(option.option_id.clone()),
+                    acp::SelectedPermissionOutcome::new(option.clone()),
                 ));
                 Ok((json!({"id": request.rpc_id, "result": params(result).map_err(|_| Refusal::Unsupported)?}), deny))
             })?;

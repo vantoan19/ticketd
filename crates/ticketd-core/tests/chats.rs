@@ -1662,9 +1662,27 @@ fn adjacent_turns_credit_only_their_own_tagged_writes_at_the_same_millisecond() 
     let saved = reopened
         .chat_history(&chat.id, before_trim + 1, 20)
         .unwrap();
+    let backup = dir.path().join("copy.sqlite3");
+    reopened.backup(&backup).unwrap();
+    let check = reopened.inspect_backup(&backup).unwrap().check;
+    assert!(
+        matches!(
+            check,
+            ticketd_core::BackupCheck::Valid {
+                format_version: 85,
+                ..
+            }
+        ),
+        "receipt was written to an incompatible backup: {check:?}"
+    );
+    let restored = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored, &backup).unwrap();
+    let restored = Workspace::open(&restored).unwrap();
+    let portable = restored.export().unwrap();
+    assert!(portable.get("chat_record_writes").is_none());
     for (turn, changes) in expected {
         assert_eq!(
-            reopened.chat_turn_agent_changes(&chat.id, turn).unwrap(),
+            restored.chat_turn_agent_changes(&chat.id, turn).unwrap(),
             changes
         );
         let input = saved
@@ -1682,6 +1700,17 @@ fn adjacent_turns_credit_only_their_own_tagged_writes_at_the_same_millisecond() 
         assert_eq!(
             serde_json::from_str::<Vec<ChatAgentChange>>(input).unwrap(),
             changes
+        );
+        assert!(
+            portable["chat_tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|tool| {
+                    tool["turn_id"] == turn
+                        && tool["name"] == AGENT_CHANGES_RECORD_NAME
+                        && tool["input"] == *input
+                })
         );
     }
 }
@@ -1868,18 +1897,18 @@ fn a_format_85_workspace_keeps_legacy_attribution_and_its_first_turn_end() {
     let mut workspace = Workspace::open(&path).unwrap();
     let chat = workspace.chat("chat-1").unwrap();
     workspace.act_for_chat(&chat.id).unwrap();
-    let after_upgrade = workspace
+    let after_old_end = workspace
         .add_activity("T-KQ1", "After the old Turn ended", None)
         .unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     let version: i64 = db
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, ticketd_core::FORMAT_VERSION);
-    // The first end predates every sequenced write, even when their timestamps tie.
+    assert_eq!(version, 85);
+    // The first end predates the newer attribution rows, even if the timestamps tie.
     db.execute(
         "UPDATE activities SET reported_at = '2026-01-01T00:00:00.003Z' WHERE id = ?1",
-        [&after_upgrade.id],
+        [&after_old_end.id],
     )
     .unwrap();
     end_turn(&mut workspace, &chat, "turn-1");

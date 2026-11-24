@@ -1030,8 +1030,3 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 ## 85
 + column source_sync.external_author
 + column source_sync.external_created_at
-
-## 86
-+ column chat_record_writes.change_sequence
-+ column chat_submission_attempts.recorded_position
-+ column chat_turns.ended_position
