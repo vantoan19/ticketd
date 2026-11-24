@@ -65,11 +65,12 @@ import {
   receiptLine,
   stepWords,
   targetLines,
-  turns,
+  failureMarkerMatches,
   workedFor,
   isLive,
   recordNamer,
   type RecordName,
+  type TranscriptPart,
   type Turn,
   type TurnRow,
   goneWords,
@@ -1011,7 +1012,11 @@ const TurnView = memo(function TurnView({
           files row, then #364's records row. */}
       {turn.marker && (
         <div className="chat-below" data-anchor="">
-          <StopMarker item={turn.marker} harness={harness} />
+          <StopMarker
+            item={turn.marker}
+            harness={harness}
+            detailShown={failureMarkerMatches(turn.marker, turn.final?.text)}
+          />
         </div>
       )}
       {turn.files && (
@@ -1038,7 +1043,11 @@ const TurnView = memo(function TurnView({
   );
 });
 
-function markerText(item: ItemOf<"marker">, harness: string) {
+function markerText(
+  item: ItemOf<"marker">,
+  harness: string,
+  detailShown: boolean,
+) {
   const detail = item.message ? ` ${sentence(item.message)}` : "";
   switch (item.reason) {
     case "stopped":
@@ -1063,8 +1072,10 @@ function markerText(item: ItemOf<"marker">, harness: string) {
       return `Stopped when Chat storage failed. Edits already made are kept.${detail}`;
     case "stop_unconfirmed":
       return `ticketd asked ${harness} to stop but it didn't confirm. It may still be running.${detail}`;
-    case "failed":
-      return `This turn failed.${detail || ` ${harness} gave no reason.`} What it finished before that is kept.`;
+    case "failed": {
+      const reason = detailShown ? "" : detail || ` ${harness} gave no reason.`;
+      return `This turn failed.${reason} What it finished before that is kept.`;
+    }
     case "note":
     case "warning":
       return item.message ?? "";
@@ -1074,15 +1085,17 @@ function markerText(item: ItemOf<"marker">, harness: string) {
 function StopMarker({
   item,
   harness,
+  detailShown = false,
 }: {
   item: ItemOf<"marker">;
   harness: string;
+  detailShown?: boolean;
 }) {
   return (
     <p className="chat-line">
       {/* Filled, the stop sign does not read as an empty checkbox. */}
       <Square size={12} fill="currentColor" aria-hidden />
-      <span>{markerText(item, harness)}</span>
+      <span>{markerText(item, harness, detailShown)}</span>
     </p>
   );
 }
@@ -1317,6 +1330,7 @@ const excerpt = (text: string) =>
 export function Transcript({
   chat,
   items,
+  parts,
   actions,
   picked,
   onPick,
@@ -1326,6 +1340,7 @@ export function Transcript({
 }: {
   chat: ChatState;
   items: TranscriptItem[];
+  parts: TranscriptPart[];
   actions: TranscriptActions;
   /** Set while picking history; holds the chosen message ids. */
   picked?: ReadonlySet<string> | undefined;
@@ -1361,7 +1376,6 @@ export function Transcript({
     () => JSON.parse(linksKey) as { links: LinkedRecord[]; trashed: string[] },
     [linksKey],
   );
-  const parts = turns(items, chat);
   const arrivals = useArrivals(
     chat.id,
     parts.flatMap((part) =>

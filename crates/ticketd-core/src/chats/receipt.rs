@@ -1,10 +1,60 @@
 use rusqlite::{Connection, OptionalExtension, named_params, params};
 use serde::Deserialize;
 
-use super::{CHAT_AGENT_CHANGES_LIMIT, CHAT_AGENT_EXCERPT_LIMIT, ChatAgentChange, invalid};
+use super::{CHAT_AGENT_CHANGES_LIMIT, CHAT_AGENT_EXCERPT_LIMIT, ChatAgentChange, NOW, invalid};
 use crate::Error;
 
 const SUBMISSION_KEY: &str = "submission:";
+const FEED_HEADS: &str = "json_object(
+    'history', COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'ticket_history'), 0),
+    'activities', COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'activities'), 0))";
+
+/// The observed Turn whose receipt is due when its runtime is lost. Keep this value
+/// across storage failures so a retry uses the first end boundary it could read.
+pub struct ChatRuntimeLossReceipt {
+    pub(super) turn_id: String,
+    end: Option<EndBoundary>,
+}
+
+struct EndBoundary {
+    at: String,
+    feed_heads: String,
+}
+
+impl ChatRuntimeLossReceipt {
+    pub fn new(turn_id: String) -> Self {
+        Self { turn_id, end: None }
+    }
+
+    pub(super) fn record_end(
+        &mut self,
+        connection: &Connection,
+        chat_id: &str,
+    ) -> Result<&str, Error> {
+        // Read under the settlement's write lock so the time and both feed heads
+        // describe the same boundary. Keep them even if the transaction rolls back.
+        let end = match &mut self.end {
+            Some(end) => end,
+            absent => absent.insert(connection.query_row(
+                &format!("SELECT {NOW}, {FEED_HEADS}"),
+                [],
+                |row| {
+                    Ok(EndBoundary {
+                        at: row.get(0)?,
+                        feed_heads: row.get(1)?,
+                    })
+                },
+            )?),
+        };
+        save_boundary(
+            connection,
+            chat_id,
+            Boundary::End(&self.turn_id),
+            Some(&end.feed_heads),
+        )?;
+        Ok(&end.at)
+    }
+}
 
 pub(super) enum Boundary<'a> {
     Submission(&'a str),
@@ -39,12 +89,21 @@ pub(super) fn record_boundary(
     chat_id: &str,
     boundary: Boundary<'_>,
 ) -> Result<(), Error> {
+    save_boundary(connection, chat_id, boundary, None)
+}
+
+fn save_boundary(
+    connection: &Connection,
+    chat_id: &str,
+    boundary: Boundary<'_>,
+    feed_heads: Option<&str>,
+) -> Result<(), Error> {
     connection.execute(
-        "INSERT INTO chat_record_writes (chat_id, activity_id, history_number)
-         VALUES (?1, ?2, json_object(
-             'history', COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'ticket_history'), 0),
-             'activities', COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'activities'), 0)))",
-        params![chat_id, boundary.key()],
+        &format!(
+            "INSERT INTO chat_record_writes (chat_id, activity_id, history_number)
+                  VALUES (?1, ?2, COALESCE(?3, {FEED_HEADS}))"
+        ),
+        params![chat_id, boundary.key(), feed_heads],
     )?;
     Ok(())
 }

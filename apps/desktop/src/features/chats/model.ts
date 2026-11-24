@@ -450,6 +450,29 @@ export type Turn = {
 export type TranscriptPart =
   { kind: "item"; item: TranscriptItem } | { kind: "turn"; turn: Turn };
 
+export function failureMarkerMatches(
+  marker: ItemOf<"marker"> | undefined,
+  text: string | null | undefined,
+) {
+  const message = marker?.message?.trim();
+  return (
+    marker?.reason === "failed" && Boolean(message) && message === text?.trim()
+  );
+}
+
+export function visibleChatProblem(
+  problem: ChatState["problem"],
+  parts: TranscriptPart[],
+) {
+  if (problem?.kind !== "usage_limit" || !problem.past) return problem;
+  // The past notice describes the last Turn. Its diagnostic is already kept
+  // by the end marker or the response directly above it.
+  const last = lastOf(parts, (part) => part.kind === "turn");
+  return failureMarkerMatches(last?.turn.marker, problem.message)
+    ? { ...problem, message: null }
+    : problem;
+}
+
 /** What the turn row says, by how the segment ended. */
 const TURN_WORDS = {
   worked: ["Worked for", "Worked"],

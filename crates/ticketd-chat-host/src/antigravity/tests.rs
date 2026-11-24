@@ -411,6 +411,14 @@ async fn many_thought_chunks_keep_bounded_checkpoints_and_exact_final_reasoning(
     );
     assert_eq!(checkpoints[0], "α\n");
     assert!(
+        checkpoints.iter().any(|checkpoint| {
+            checkpoint.len() > "α\n".len()
+                && checkpoint.len() < before_answer.len()
+                && before_answer.starts_with(checkpoint)
+        }),
+        "expected an intermediate checkpoint before the answer flush"
+    );
+    assert!(
         checkpoints
             .windows(2)
             .all(|pair| { pair[0].len() < pair[1].len() && pair[1].starts_with(pair[0]) })
@@ -893,6 +901,8 @@ async fn next_approval(events: &mut EventStream) -> NativeRequestId {
 
 #[tokio::test(start_paused = true)]
 async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
+    use crate::InteractionResolution;
+
     let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
     assert_eq!(
         opened.runtime.submit(start_turn("saturation")).await,
@@ -902,13 +912,31 @@ async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
     let mut permission = recorded_permission();
     permission["id"] = json!("approval-0");
     send(&mut peer, &permission).await;
-    let first = next_approval(&mut opened.events).await;
+    let answered = next_approval(&mut opened.events).await;
+    let mut pending = Vec::new();
     for number in 1..32 {
         permission["id"] = json!(format!("approval-{number}"));
         send(&mut peer, &permission).await;
-        next_approval(&mut opened.events).await;
+        pending.push(next_approval(&mut opened.events).await);
     }
-    permission["id"] = json!("approval-0");
+    let stale = pending[0].clone();
+    let allow = |request| InteractionResponse {
+        generation: GENERATION,
+        request,
+        answer: InteractionAnswer::NativeApproval("allow".into()),
+    };
+    assert_eq!(
+        opened.runtime.respond(allow(answered)).await,
+        RespondOutcome::Sent
+    );
+    assert_eq!(
+        peer.written().await,
+        json!({"jsonrpc": "2.0", "id": "approval-0", "result": {
+            "outcome": {"outcome": "selected", "optionId": "allow"}
+        }})
+    );
+
+    permission["id"] = json!("approval-1");
     send(&mut peer, &permission).await;
     permission["id"] = json!("overflow");
     send(&mut peer, &permission).await;
@@ -930,53 +958,39 @@ async fn excess_approvals_are_refused_and_the_next_prompt_accepts_approvals() {
         &json!({"jsonrpc": "2.0", "id": prompt["id"], "result": {"stopReason": "end_turn"}}),
     )
     .await;
-    let finished = drain(&mut opened.events).await;
-    assert_eq!(
-        finished
-            .iter()
-            .filter(|kind| matches!(
-                kind,
-                EventKind::InteractionResolved {
-                    resolution: crate::InteractionResolution::Withdrawn,
-                    ..
-                }
-            ))
-            .count(),
-        32
-    );
+    let mut withdrawn: Vec<_> = drain(&mut opened.events)
+        .await
+        .into_iter()
+        .filter_map(|kind| match kind {
+            EventKind::InteractionResolved {
+                request,
+                resolution: InteractionResolution::Withdrawn,
+            } => Some(request),
+            _ => None,
+        })
+        .collect();
+    withdrawn.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    pending.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    assert_eq!(withdrawn, pending);
     assert_eq!(
         opened.runtime.submit(start_turn("recovery")).await,
         DispatchOutcome::Written
     );
     assert_eq!(peer.written().await["method"], "session/prompt");
-    permission["id"] = json!("approval-0");
+    permission["id"] = json!("approval-1");
     send(&mut peer, &permission).await;
     let next = next_approval(&mut opened.events).await;
     assert_eq!(
-        opened
-            .runtime
-            .respond(InteractionResponse {
-                generation: GENERATION,
-                request: first,
-                answer: InteractionAnswer::NativeApproval("allow".into()),
-            })
-            .await,
+        opened.runtime.respond(allow(stale)).await,
         RespondOutcome::NotSent(Refusal::UnknownRequest)
     );
     assert_eq!(
-        opened
-            .runtime
-            .respond(InteractionResponse {
-                generation: GENERATION,
-                request: next,
-                answer: InteractionAnswer::NativeApproval("allow".into()),
-            })
-            .await,
+        opened.runtime.respond(allow(next)).await,
         RespondOutcome::Sent
     );
     assert_eq!(
         peer.written().await,
-        json!({"jsonrpc": "2.0", "id": "approval-0", "result": {
+        json!({"jsonrpc": "2.0", "id": "approval-1", "result": {
             "outcome": {"outcome": "selected", "optionId": "allow"}
         }})
     );
@@ -1796,7 +1810,12 @@ async fn stop_notifies_antigravity_and_cancels_its_unanswered_permission() {
     };
     send(&mut peer, &tool_update("pending")).await;
     send(&mut peer, &permission["server"]).await;
-    let mut events = drain(&mut opened.events).await;
+    let events = drain(&mut opened.events).await;
+    assert!(events.iter().any(|kind| matches!(
+        kind,
+        EventKind::ToolUpdated { item, status: ToolStatus::Failed, output: None, .. }
+            if item.0 == "earlier-failure"
+    )));
     let approval = events
         .iter()
         .find_map(|kind| match kind {
@@ -1830,40 +1849,57 @@ async fn stop_notifies_antigravity_and_cancels_its_unanswered_permission() {
     // agy reports the cancelled permission as an in-progress tool, then a failure.
     send(&mut peer, &tool_update("in_progress")).await;
     send(&mut peer, &tool_update("failed")).await;
+    let failure_output = "output from the earlier failed command";
     send(
         &mut peer,
         &update(
             json!({"sessionUpdate":"tool_call_update","toolCallId":"earlier-failure",
-            "rawOutput":{"exit_code":1}}),
+            "rawOutput":{"exit_code":1,"output":failure_output}}),
         ),
     )
     .await;
+    let before_reply = drain(&mut opened.events).await;
+    assert!(
+        !before_reply
+            .iter()
+            .any(|kind| matches!(kind, EventKind::TurnEnded { .. })),
+        "the turn ended before the cancelled Prompt reply"
+    );
+    let last_tool_update = |id: &str| {
+        before_reply.iter().rev().find_map(|kind| match kind {
+            EventKind::ToolUpdated {
+                item,
+                status,
+                output,
+                ..
+            } if item.0 == id => Some((*status, output.as_deref())),
+            _ => None,
+        })
+    };
+    assert!(matches!(
+        last_tool_update(tool.as_str().unwrap()),
+        Some((ToolStatus::FailedAfterInterrupt, _))
+    ));
+    assert_eq!(
+        last_tool_update("earlier-failure"),
+        Some((ToolStatus::Failed, Some(failure_output)))
+    );
+
     send(
         &mut peer,
         &json!({"jsonrpc":"2.0","id":outgoing["id"],"result":{"stopReason":"cancelled"}}),
     )
     .await;
-    events.extend(drain(&mut opened.events).await);
+    let after_reply = drain(&mut opened.events).await;
 
     assert_eq!(
-        crate::outcome::read_end(&events),
+        crate::outcome::read_end(&after_reply),
         Some(TurnOutcome::Interrupted)
     );
-    assert!(events.iter().any(|kind| matches!(
+    assert!(before_reply.iter().chain(&after_reply).any(|kind| matches!(
         kind,
         EventKind::InteractionResolved { request, resolution: InteractionResolution::Withdrawn }
             if request == &approval.request
     )));
-    let last_status = |id: &str| {
-        events.iter().rev().find_map(|kind| match kind {
-            EventKind::ToolUpdated { item, status, .. } if item.0 == id => Some(*status),
-            _ => None,
-        })
-    };
-    assert_eq!(
-        last_status(tool.as_str().unwrap()),
-        Some(ToolStatus::FailedAfterInterrupt)
-    );
-    assert_eq!(last_status("earlier-failure"), Some(ToolStatus::Failed));
     opened.runtime.close().await;
 }
