@@ -17,8 +17,8 @@ use super::{
         CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector,
         ConnectorDescriptor, Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment,
         ExternalEvent, ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef,
-        ExternalState, PublicationCandidates, PublicationSearch, PublishRequest, SkippedPartition,
-        SourceError,
+        ExternalState, FetchedIssue, PublicationCandidates, PublicationSearch, PublishRequest,
+        SkippedPartition, SourceError,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldKind, OptionSource, SchemaField, ValueFormat,
@@ -163,6 +163,7 @@ impl GithubConnector {
     /// `subject` names what was requested, for a useful not-found message.
     fn get(&self, url: &str, subject: &str) -> Result<HttpResponse, SourceError> {
         self.send(Method::Get, url, None, subject)
+            .map(|(response, _)| response)
     }
 
     fn send(
@@ -171,7 +172,7 @@ impl GithubConnector {
         url: &str,
         body: Option<Vec<u8>>,
         subject: &str,
-    ) -> Result<HttpResponse, SourceError> {
+    ) -> Result<(HttpResponse, Option<String>), SourceError> {
         if !credential_may_travel(&self.api_url) {
             return Err(SourceError::InvalidConfiguration(vec![
                 super::schema::FieldIssue {
@@ -181,7 +182,9 @@ impl GithubConnector {
             ]));
         }
         let mut url = url.to_owned();
-        for _ in 0..=MAX_REDIRECTS {
+        let mut permanent_issue_redirect =
+            method == Method::Get && self.issue_api_locator(&url).is_some();
+        for redirects in 0..=MAX_REDIRECTS {
             if !self.is_api_url(&url) && url != self.graphql_url() {
                 return Err(SourceError::Protocol(
                     "the source referred to an address outside its API".into(),
@@ -203,13 +206,22 @@ impl GithubConnector {
                     .header("location")
                     .ok_or_else(|| SourceError::Protocol("a redirect had no destination".into()))?;
                 url = if location.starts_with('/') {
-                    format!("{}{location}", self.api_url)
+                    url::Url::parse(&url)
+                        .and_then(|base| base.join(location))
+                        .map_err(|_| {
+                            SourceError::Protocol("a redirect had an invalid destination".into())
+                        })?
+                        .to_string()
                 } else {
                     location.to_owned()
                 };
+                permanent_issue_redirect &=
+                    matches!(response.status, 301 | 308) && self.issue_api_locator(&url).is_some();
                 continue;
             }
-            return classify(response, subject);
+            let target = (redirects > 0 && permanent_issue_redirect && response.status == 200)
+                .then_some(url);
+            return Ok((classify(response, subject)?, target));
         }
         Err(SourceError::Protocol("too many redirects".into()))
     }
@@ -319,7 +331,7 @@ impl GithubConnector {
         })
         .to_string()
         .into_bytes();
-        let response = self
+        let (response, _) = self
             .send(
                 Method::Post,
                 &self.graphql_url(),
@@ -368,6 +380,19 @@ impl GithubConnector {
     fn is_api_url(&self, url: &str) -> bool {
         url.strip_prefix(&self.api_url)
             .is_some_and(|rest| rest.starts_with('/'))
+    }
+
+    fn issue_api_locator(&self, url: &str) -> Option<String> {
+        let path = url.strip_prefix(&self.api_url)?.strip_prefix("/repos/")?;
+        let (repository, number) = path.rsplit_once("/issues/")?;
+        let locator = format!("{repository}#{number}");
+        split_locator(&locator).ok()?;
+        if repository.split('/').any(|part| matches!(part, "." | ".."))
+            || number.parse::<u64>().ok()? == 0
+        {
+            return None;
+        }
+        Some(locator)
     }
 
     fn json(&self, url: &str, subject: &str) -> Result<(Value, Option<String>), SourceError> {
@@ -753,40 +778,15 @@ impl Connector for GithubConnector {
         _config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError> {
-        self.check_issue_host(reference)?;
-        let (repository, number) = split_locator(&reference.locator)?;
-        let url = format!(
-            "{}/repos/{}/issues/{number}",
-            self.api_url,
-            encode_path(repository)
-        );
-        let (value, _) = self.json(&url, &format!("issue {}", reference.locator))?;
-        let mut issue = translate_issue(self, &value, repository)?.ok_or_else(|| {
-            SourceError::NotFound(format!(
-                "{} is a pull request, not an issue",
-                reference.locator
-            ))
-        })?;
-        if issue.state
-            == (ExternalState::Closed {
-                reason: ClosureReason::Duplicate,
-            })
-        {
-            let id = value
-                .get("id")
-                .and_then(Value::as_u64)
-                .ok_or_else(|| SourceError::Protocol("an issue had no id".into()))?;
-            let (repository, number) = split_locator(&issue.reference.locator)?;
-            match self.canonical_of(repository, number, id) {
-                Canonical::Named { reference, url } => {
-                    issue.duplicate_of = Some(reference);
-                    issue.duplicate_of_url = url;
-                }
-                Canonical::Withdrawn => issue.duplicate_withdrawn = true,
-                Canonical::NotSupplied => {}
-            }
-        }
-        Ok(issue)
+        Ok(self.read_issue(reference)?.issue)
+    }
+
+    fn fetch_tracked(
+        &self,
+        _config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<FetchedIssue, SourceError> {
+        self.read_issue(reference)
     }
 
     fn conversation(
@@ -816,6 +816,80 @@ impl Connector for GithubConnector {
 }
 
 impl GithubConnector {
+    fn read_issue(&self, reference: &ExternalRef) -> Result<FetchedIssue, SourceError> {
+        self.check_issue_host(reference)?;
+        let (repository, number) = split_locator(&reference.locator)?;
+        let url = format!(
+            "{}/repos/{}/issues/{number}",
+            self.api_url,
+            encode_path(repository)
+        );
+        let (response, target) = self.send(
+            Method::Get,
+            &url,
+            None,
+            &format!("issue {}", reference.locator),
+        )?;
+        let value: Value = serde_json::from_slice(&response.body)
+            .map_err(|_| SourceError::Protocol("GitHub returned a body that is not JSON".into()))?;
+        let mut issue = translate_issue(self, &value, repository)?.ok_or_else(|| {
+            SourceError::NotFound(format!(
+                "{} is a pull request, not an issue",
+                reference.locator
+            ))
+        })?;
+        // A GitHub transfer can allocate a different REST ID. Require the old
+        // issue path to redirect permanently to the exact new issue path, and
+        // corroborate it with the destination's API and web links.
+        let transferred_from = target
+            .filter(|target| {
+                let Ok((destination, number)) = split_locator(&issue.reference.locator) else {
+                    return false;
+                };
+                let api_repository = target.strip_suffix(&format!("/issues/{number}"));
+                let web_host = url::Url::parse(&issue.url).ok();
+                issue.reference.identity != reference.identity
+                    && !repository.eq_ignore_ascii_case(destination)
+                    && value
+                        .get("id")
+                        .and_then(Value::as_u64)
+                        .is_some_and(|id| id > 0)
+                    && value.get("url").and_then(Value::as_str) == Some(target.as_str())
+                    && api_repository.is_some()
+                    && value.get("repository_url").and_then(Value::as_str) == api_repository
+                    && self.issue_api_locator(target).is_some_and(|locator| {
+                        locator.eq_ignore_ascii_case(&issue.reference.locator)
+                    })
+                    && web_host.as_ref().and_then(url::Url::host_str) == self.web_host.as_deref()
+                    && repository_from_issue_url(&issue.reference.locator, &issue.url)
+                        == issue.repository
+            })
+            .map(|_| reference.clone());
+        if issue.state
+            == (ExternalState::Closed {
+                reason: ClosureReason::Duplicate,
+            })
+        {
+            let id = value
+                .get("id")
+                .and_then(Value::as_u64)
+                .ok_or_else(|| SourceError::Protocol("an issue had no id".into()))?;
+            let (observed_repository, observed_number) = split_locator(&issue.reference.locator)?;
+            match self.canonical_of(observed_repository, observed_number, id) {
+                Canonical::Named { reference, url } => {
+                    issue.duplicate_of = Some(reference);
+                    issue.duplicate_of_url = url;
+                }
+                Canonical::Withdrawn => issue.duplicate_withdrawn = true,
+                Canonical::NotSupplied => {}
+            }
+        }
+        Ok(FetchedIssue {
+            issue,
+            transferred_from,
+        })
+    }
+
     /// Every item of a paginated list, following `Link` headers that stay under the API.
     fn all_pages(&self, first: &str, subject: &str) -> Result<Vec<Value>, SourceError> {
         let mut items = Vec::new();

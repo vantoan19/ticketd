@@ -47,8 +47,9 @@ pub struct ConnectionInfo {
     pub account: String,
 }
 
-/// An external issue's immutable identity. Titles, numbers and repository
-/// names can change; this cannot. Never match issues by display text.
+/// The immutable key of an issue record on its provider. If a transfer assigns
+/// the issue a new key, the connector must verify continuity separately. Never
+/// match issues by display text.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct ExternalIdentity {
     pub provider: String,
@@ -61,6 +62,14 @@ pub struct ExternalIdentity {
 pub struct ExternalRef {
     pub identity: ExternalIdentity,
     pub locator: String,
+}
+
+/// The current issue and, when verified by a built-in connector, its identity
+/// and locator before a repository transfer changed the provider's ID.
+#[doc(hidden)]
+pub struct FetchedIssue {
+    pub(crate) issue: ExternalIssue,
+    pub(crate) transferred_from: Option<ExternalRef>,
 }
 
 impl ClosureReason {
@@ -534,6 +543,19 @@ pub trait Connector: Send + Sync {
         config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<ExternalIssue, SourceError>;
+
+    /// Refreshes a tracked issue, with optional verified transfer evidence.
+    #[doc(hidden)]
+    fn fetch_tracked(
+        &self,
+        config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<FetchedIssue, SourceError> {
+        Ok(FetchedIssue {
+            issue: self.fetch(config, reference)?,
+            transferred_from: None,
+        })
+    }
 
     /// The part of the source an issue belongs to: what discovery reads or skips
     /// as a whole (for GitHub, the repository). ticketd keeps which parts it has

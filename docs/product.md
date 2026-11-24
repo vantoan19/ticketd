@@ -433,7 +433,8 @@ matches its repository, including the host. If no project claims the repository,
 the ticket arrives in No project. When import links a project, it records an
 ordinary project membership change in the ticket's history. Project links remain
 locally editable.
-Refresh preserves the current link even when an issue moves to another repository.
+When GitHub confirms a transfer to another repository, refresh follows the issue
+on the same ticket and keeps its existing project link and local work.
 Changing or clearing a Project remote affects future imports. Each device keeps
 its own Project remotes alongside checkout and source settings. Workspace export
 and backups include them.

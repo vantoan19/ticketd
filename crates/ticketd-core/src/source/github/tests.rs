@@ -21,6 +21,12 @@ const TOKEN: &str = "ghp_secret_token_value";
 struct Fixture {
     routes: Mutex<BTreeMap<String, VecDeque<Result<HttpResponse, TransportError>>>>,
     requests: Mutex<Vec<HttpRequest>>,
+    on_request: Mutex<Option<RequestHook>>,
+}
+
+struct RequestHook {
+    url: String,
+    run: Box<dyn FnOnce() + Send>,
 }
 
 impl Fixture {
@@ -48,6 +54,17 @@ struct Shared(Arc<Fixture>);
 impl HttpTransport for Shared {
     fn send(&self, request: &HttpRequest) -> Result<HttpResponse, TransportError> {
         self.0.requests.lock().unwrap().push(request.clone());
+        let hook = {
+            let mut hook = self.0.on_request.lock().unwrap();
+            if hook.as_ref().is_some_and(|hook| hook.url == request.url) {
+                hook.take()
+            } else {
+                None
+            }
+        };
+        if let Some(hook) = hook {
+            (hook.run)();
+        }
         self.0
             .routes
             .lock()
@@ -117,6 +134,16 @@ fn issue(id: u64, number: u64, repo: &str) -> Value {
         "user": {"login": "alice"},
         "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z"
     })
+}
+
+fn public_issue(id: u64, number: u64, repository: &str) -> Value {
+    let mut item = issue(id, number, repository);
+    item["url"] = json!(format!(
+        "{DEFAULT_API_URL}/repos/{repository}/issues/{number}"
+    ));
+    item["repository_url"] = json!(format!("{DEFAULT_API_URL}/repos/{repository}"));
+    item["html_url"] = json!(format!("https://github.com/{repository}/issues/{number}"));
+    item
 }
 
 fn config(value: Value) -> ConfigValues {
@@ -650,7 +677,8 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
     let two = format!("{public_api}/repos/o/two/issues?state=open&per_page=100&labels=bug");
     let held = issue(5, 16, "o/other");
     let first = issue(6, 13, "o/other");
-    let new = issue(7, 14, "o/two");
+    let mut new = issue(7, 14, "o/two");
+    new["created_at"] = json!("2026-01-02T00:00:00Z");
 
     public.respond(&format!("{public_api}/user"), ok(json!({"login": "octo"})));
     public.respond(&one, ok(json!([held, first])));
@@ -936,6 +964,386 @@ fn fetch_reports_the_repository_a_transferred_issue_is_now_in() {
     assert_eq!(
         issue.repository.as_deref(),
         Some("api.example.test/moved/away")
+    );
+}
+
+#[test]
+fn workspace_refresh_follows_a_github_transfer_that_changes_the_issue_id() {
+    enum Case {
+        Targeted,
+        Discovery,
+        DuringDiscovery,
+        UnverifiedDuringDiscovery,
+        SeparateIssueWithSameOpening,
+        Collision,
+        LocalCollision,
+        ReusedPath,
+        MissingOpening,
+    }
+    for case in [
+        Case::Targeted,
+        Case::Discovery,
+        Case::DuringDiscovery,
+        Case::UnverifiedDuringDiscovery,
+        Case::SeparateIssueWithSameOpening,
+        Case::Collision,
+        Case::LocalCollision,
+        Case::ReusedPath,
+        Case::MissingOpening,
+    ] {
+        let targeted = matches!(case, Case::Targeted);
+        let collision = matches!(case, Case::Collision | Case::LocalCollision);
+        let (fixture, engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+        let dir = tempfile::tempdir().unwrap();
+        let destination = dir.path().join("destination");
+        std::fs::create_dir(&destination).unwrap();
+        let mut workspace = crate::Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+        let project = workspace
+            .create_project_with_remote(
+                "Original",
+                dir.path().to_str().unwrap(),
+                Some("github.com/o/one"),
+            )
+            .unwrap();
+        let destination_project = workspace
+            .create_project_with_remote(
+                "Destination",
+                destination.to_str().unwrap(),
+                Some("github.com/o/two"),
+            )
+            .unwrap();
+        let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
+        let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
+        let discovery =
+            |repo| format!("{DEFAULT_API_URL}/repos/o/{repo}/issues?state=open&per_page=100");
+        let respond_conversation = |base| {
+            for part in ["comments", "events"] {
+                fixture.respond(&format!("{base}/{part}?per_page=100"), ok(json!([])));
+            }
+        };
+        let initial_destination = if collision {
+            respond_conversation(new.as_str());
+            json!([public_issue(99, 12, "o/two")])
+        } else {
+            json!([])
+        };
+        fixture.respond(
+            &format!("{DEFAULT_API_URL}/user"),
+            ok(json!({"login": "alice"})),
+        );
+        let mut original_issue = public_issue(77, 7, "o/one");
+        if matches!(case, Case::MissingOpening) {
+            original_issue["created_at"] = Value::Null;
+        }
+        for _ in 0..2 {
+            fixture.respond(&discovery("one"), ok(json!([original_issue.clone()])));
+            fixture.respond(&discovery("two"), ok(initial_destination.clone()));
+        }
+        workspace
+            .save_source(
+                &engine,
+                "github",
+                &config(json!({"repositories": ["o/one", "o/two"]})),
+            )
+            .unwrap();
+        respond_conversation(old.as_str());
+        let initial = workspace
+            .refresh_sources(&engine, &crate::source::RefreshOptions::default())
+            .unwrap();
+        let reference = &initial.imported[0];
+        let original = workspace.show_ticket(reference).unwrap();
+        assert_eq!(original.project_id.as_deref(), Some(project.id.as_str()));
+        workspace
+            .add_activity(reference, "Local note", None)
+            .unwrap();
+        let history = workspace.ticket_history(reference).unwrap();
+        if matches!(case, Case::LocalCollision) {
+            let destination_ref = &initial.imported[1];
+            fixture.respond(&new, status(404, json!({}), &[]));
+            workspace
+                .refresh_sources(
+                    &engine,
+                    &crate::source::RefreshOptions {
+                        ticket: Some(destination_ref.clone()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            workspace.take_ownership(destination_ref, None).unwrap();
+            workspace
+                .change_ticket(
+                    destination_ref,
+                    crate::TicketPatch {
+                        title: Some("Local destination title".into()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+        }
+
+        let mut moved = public_issue(99, 12, "o/two");
+        moved["updated_at"] = json!("2026-01-03T00:00:00Z");
+        moved["title"] = json!("Transferred issue");
+        if matches!(case, Case::ReusedPath) {
+            moved["created_at"] = json!("2026-01-02T00:00:00Z");
+        } else if matches!(case, Case::DuringDiscovery) {
+            moved["created_at"] = json!("2026-01-01T01:00:00+01:00");
+        }
+        match case {
+            Case::UnverifiedDuringDiscovery => fixture.respond(&old, status(503, json!({}), &[])),
+            Case::SeparateIssueWithSameOpening => fixture.respond(&old, ok(original_issue.clone())),
+            _ => {
+                fixture.respond(&old, status(301, json!({}), &[("location", &new)]));
+                fixture.respond(&new, ok(moved.clone()));
+            }
+        }
+        fixture.respond(
+            &discovery("one"),
+            ok(
+                if matches!(
+                    case,
+                    Case::DuringDiscovery
+                        | Case::UnverifiedDuringDiscovery
+                        | Case::SeparateIssueWithSameOpening
+                ) {
+                    json!([original_issue])
+                } else {
+                    json!([])
+                },
+            ),
+        );
+        fixture.respond(&discovery("two"), ok(json!([moved])));
+        respond_conversation(new.as_str());
+
+        let report = workspace
+            .refresh_sources(
+                &engine,
+                &crate::source::RefreshOptions {
+                    ticket: targeted.then(|| reference.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        if matches!(case, Case::SeparateIssueWithSameOpening) {
+            assert!(report.failures.is_empty());
+            assert_eq!(report.imported.len(), 1);
+            let new_ticket = workspace.show_ticket(&report.imported[0]).unwrap();
+            assert_eq!(new_ticket.project_id, Some(destination_project.id));
+            assert_eq!(
+                workspace.show_ticket(reference).unwrap().source.unwrap().id,
+                "77"
+            );
+            continue;
+        }
+        assert!(report.imported.is_empty(), "{:#?}", report.imported);
+        let after = workspace.show_ticket(reference).unwrap();
+        assert_eq!(after.id, original.id);
+        assert_eq!(after.project_id, original.project_id);
+        let source = after.source.unwrap();
+        assert_eq!(workspace.activities(reference, 10, 0).unwrap().len(), 1);
+        if matches!(case, Case::UnverifiedDuringDiscovery) {
+            assert_eq!(report.failures.len(), 1);
+            assert_eq!(
+                report.failures[0].scope,
+                crate::source::FailureScope::Partition
+            );
+            assert!(report.updated.is_empty());
+            assert_eq!(source.id, "77");
+            assert!(source.unavailable.is_none());
+            assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+            continue;
+        }
+        if collision {
+            let other = workspace.show_ticket(&initial.imported[1]).unwrap();
+            assert_eq!(report.failures.len(), 1);
+            assert!(report.failures[0].message.contains(&other.reference));
+            assert_eq!(source.id, "77");
+            assert!(source.unavailable.is_some());
+            let other_source = other.source.unwrap();
+            assert_eq!(other_source.id, "99");
+            assert!(other_source.unavailable.is_none());
+            if matches!(case, Case::LocalCollision) {
+                assert!(report.updated.is_empty());
+                assert_eq!(other_source.ownership, crate::source::Ownership::Local);
+                assert_eq!(other.title, "Local destination title");
+            } else {
+                assert_eq!(
+                    report.updated.as_slice(),
+                    std::slice::from_ref(&other.reference)
+                );
+                assert_eq!(other.title, "Transferred issue");
+            }
+            assert_eq!(other.project_id, Some(destination_project.id));
+            assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+            continue;
+        }
+        if matches!(case, Case::ReusedPath | Case::MissingOpening) {
+            assert_eq!(report.failures.len(), 1);
+            assert!(report.failures[0].message.contains("creation time"));
+            assert!(report.updated.is_empty());
+            assert_eq!(source.id, "77");
+            assert!(source.unavailable.is_some());
+            assert_eq!(after.title, original.title);
+            assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+            continue;
+        }
+        assert!(report.failures.is_empty(), "{:#?}", report.failures);
+        assert_eq!(report.updated, [reference.clone()]);
+        assert_eq!(source.id, "99");
+        assert_eq!(source.url, "https://github.com/o/two/issues/12");
+        assert_eq!(source.discovery_matches, (!targeted).then_some(true));
+        assert_eq!(workspace.ticket_history(reference).unwrap(), history);
+        assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+    }
+}
+
+#[test]
+fn tracked_fetch_resolves_an_enterprise_transfer_redirect_from_the_origin() {
+    let api = "https://github.example.test/api/v3";
+    let (fixture, engine) = setup_at(api, Some(TOKEN));
+    let destination = format!("{api}/repos/o/two/issues/12");
+    let mut item = issue(99, 12, "o/two");
+    item["url"] = json!(destination);
+    item["repository_url"] = json!(format!("{api}/repos/o/two"));
+    item["html_url"] = json!("https://github.example.test/o/two/issues/12");
+    fixture.respond(
+        &format!("{api}/repos/o/one/issues/7"),
+        status(
+            301,
+            json!({}),
+            &[("location", "/api/v3/repos/o/two/issues/12")],
+        ),
+    );
+    fixture.respond(&destination, ok(item));
+    let reference = ExternalRef {
+        identity: ExternalIdentity {
+            provider: PROVIDER.into(),
+            id: "@github.example.test:77".into(),
+        },
+        locator: "o/one#7".into(),
+    };
+    let fetched = engine
+        .fetch_tracked(
+            PROVIDER,
+            &config(json!({"repositories": ["o/one"]})),
+            &reference,
+        )
+        .unwrap();
+    assert_eq!(fetched.transferred_from, Some(reference));
+    assert_eq!(
+        fetched.issue.reference.identity.id,
+        "@github.example.test:99"
+    );
+}
+
+#[test]
+fn tracked_fetch_requires_permanent_redirect_to_the_corroborated_issue_path() {
+    let values = config(json!({"repositories": ["o/one"]}));
+    let reference = ExternalRef {
+        identity: ExternalIdentity {
+            provider: PROVIDER.into(),
+            id: "77".into(),
+        },
+        locator: "o/one#7".into(),
+    };
+    let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
+    let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
+    let foreign = "https://api.other.example/repos/o/two/issues/12";
+    for (redirect, target, number, repository) in [
+        (200, old.as_str(), 12, "o/two"),
+        (302, new.as_str(), 12, "o/two"),
+        (301, new.as_str(), 13, "o/two"),
+        (301, foreign, 12, "o/two"),
+    ] {
+        let (fixture, engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+        if redirect != 200 {
+            fixture.respond(&old, status(redirect, json!({}), &[("location", target)]));
+        }
+        fixture.respond(target, ok(public_issue(99, number, repository)));
+        assert!(
+            matches!(
+                engine.fetch_tracked(PROVIDER, &values, &reference),
+                Err(SourceError::Protocol(_))
+            ),
+            "{redirect} to {target}"
+        );
+        assert!(!fixture.urls().iter().any(|url| url == foreign));
+    }
+}
+
+#[test]
+fn stale_discovery_cannot_reimport_an_issue_after_an_overlapping_transfer() {
+    use crate::{Workspace, source::RefreshOptions};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let (fixture, engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+    let discovery = format!("{DEFAULT_API_URL}/repos/o/one/issues?state=open&per_page=100");
+    let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
+    let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
+    fixture.respond(
+        &format!("{DEFAULT_API_URL}/user"),
+        ok(json!({"login": "alice"})),
+    );
+    for _ in 0..3 {
+        fixture.respond(&discovery, ok(json!([public_issue(77, 7, "o/one")])));
+    }
+    for part in ["comments", "events"] {
+        for _ in 0..2 {
+            fixture.respond(&format!("{old}/{part}?per_page=100"), ok(json!([])));
+        }
+    }
+    workspace
+        .save_source(
+            &engine,
+            PROVIDER,
+            &config(json!({"repositories": ["o/one"]})),
+        )
+        .unwrap();
+    let initial = workspace
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    let reference = initial.imported[0].clone();
+
+    let (transfer, transfer_engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+    transfer.respond(&old, status(301, json!({}), &[("location", &new)]));
+    transfer.respond(&new, ok(public_issue(99, 12, "o/two")));
+    for part in ["comments", "events"] {
+        transfer.respond(&format!("{new}/{part}?per_page=100"), ok(json!([])));
+    }
+    let tracked = reference.clone();
+    *fixture.on_request.lock().unwrap() = Some(RequestHook {
+        url: discovery,
+        run: Box::new(move || {
+            let mut overlapping = Workspace::open(path).unwrap();
+            let report = overlapping
+                .refresh_sources(
+                    &transfer_engine,
+                    &RefreshOptions {
+                        ticket: Some(tracked.clone()),
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+            assert!(report.failures.is_empty());
+            assert_eq!(report.updated, [tracked]);
+        }),
+    });
+    let stale = workspace
+        .refresh_sources(&engine, &RefreshOptions::default())
+        .unwrap();
+    assert!(stale.failures.is_empty());
+    assert!(stale.imported.is_empty(), "{:#?}", stale.imported);
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+    assert_eq!(
+        workspace
+            .show_ticket(&reference)
+            .unwrap()
+            .source
+            .unwrap()
+            .id,
+        "99"
     );
 }
 
