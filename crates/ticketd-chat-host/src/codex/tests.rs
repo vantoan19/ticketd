@@ -312,7 +312,7 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     assert_eq!(outcome, DispatchOutcome::Written);
     assert_eq!(
         runtime.submit(start_turn("sub-1b", "Hello again")).await,
-        DispatchOutcome::NotSent(Refusal::TurnMismatch { active: None })
+        DispatchOutcome::NotSent(Refusal::StartUnconfirmed)
     );
     peer.assert_nothing_written().await;
     peer.play().await;
@@ -371,7 +371,7 @@ async fn a_correlated_turn_can_finish_before_its_start_reply() {
     assert_eq!(seen(&mut events).await, ["turn-ended older Completed []"]);
     assert_eq!(
         runtime.submit(start_turn("sub-2", "Second")).await,
-        DispatchOutcome::NotSent(Refusal::TurnMismatch { active: None }),
+        DispatchOutcome::NotSent(Refusal::StartUnconfirmed),
     );
     peer.assert_nothing_written().await;
 

@@ -148,12 +148,15 @@ impl<R> RuntimeState<R> {
         steering: bool,
     ) -> Result<(), Refusal> {
         match kind {
-            SubmissionKind::StartTurn if self.active.is_none() => Ok(()),
+            SubmissionKind::StartTurn => match &self.active {
+                None => Ok(()),
+                Some(ActiveTurn::Unconfirmed(_)) => Err(Refusal::StartUnconfirmed),
+                Some(ActiveTurn::Named(turn)) => Err(Refusal::TurnMismatch {
+                    active: Some(turn.clone()),
+                }),
+            },
             SubmissionKind::Steer { .. } if !steering => Err(Refusal::Unsupported),
             SubmissionKind::Steer { expected_turn } => self.check_turn(expected_turn),
-            SubmissionKind::StartTurn => Err(Refusal::TurnMismatch {
-                active: self.active_turn_id().cloned(),
-            }),
         }
     }
 
@@ -403,6 +406,15 @@ mod tests {
         runtime.start_written(&SubmissionId::new("first-submission"));
         assert_eq!(
             runtime.check_submission(&SubmissionKind::StartTurn, false),
+            Err(Refusal::StartUnconfirmed),
+        );
+        assert_eq!(
+            runtime.check_submission(
+                &SubmissionKind::Steer {
+                    expected_turn: turn.clone(),
+                },
+                true,
+            ),
             Err(Refusal::TurnMismatch { active: None }),
         );
         runtime.turn_started(&turn);
