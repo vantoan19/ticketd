@@ -838,3 +838,56 @@ fn a_program_that_hangs_is_stopped() {
     assert!(matches!(error, AwsCliError::TimedOut), "{error:?}");
     assert!(started.elapsed() < Duration::from_secs(10));
 }
+
+/// Whether the process is still there (`kill -0`). A process that ended and waits to be
+/// reaped is not told apart, so callers poll.
+fn is_running(pid: &str) -> bool {
+    std::process::Command::new("kill")
+        .args(["-0", pid])
+        .stderr(std::process::Stdio::null())
+        .status()
+        .unwrap()
+        .success()
+}
+
+#[test]
+fn a_timeout_ends_the_helper_the_program_started_and_the_readers_with_it() {
+    let dir = TempDir::new().unwrap();
+    let path = dir.path().join("aws");
+    let pid_file = dir.path().join("helper.pid");
+    // Like a `credential_process` helper: a child that keeps the output pipes open after the
+    // program itself is stopped.
+    fs::write(
+        &path,
+        format!(
+            "#!/bin/sh\nif [ \"$1\" = --version ]; then echo 'aws-cli/2.19.5 Python/3.12.7'; exit 0; fi\nsleep 120 &\necho $! > '{}'\nwait\n",
+            pid_file.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).unwrap();
+    let cli = AwsCli::locate_in(Some(&path), &[])
+        .unwrap()
+        .with_timeout(Duration::from_millis(500));
+
+    let started = std::time::Instant::now();
+    let error = cli.profiles().unwrap_err();
+    let took = started.elapsed();
+
+    let pid = fs::read_to_string(&pid_file).unwrap().trim().to_owned();
+    // The helper holds the readers' pipes, so it being gone is the readers ending.
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while is_running(&pid) && std::time::Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let survived = is_running(&pid);
+    if survived {
+        // Do not leave the stand-in's own helper behind when the test fails.
+        let _ = std::process::Command::new("kill")
+            .args(["-KILL", &pid])
+            .status();
+    }
+    assert!(matches!(error, AwsCliError::TimedOut), "{error:?}");
+    assert!(!survived, "the helper outlived the timeout");
+    assert!(took < Duration::from_secs(5), "took {took:?}");
+}
