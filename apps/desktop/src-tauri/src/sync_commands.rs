@@ -21,7 +21,7 @@ use ticketd_core::{
         AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, S3Binding, SetupOptions,
         SyncChoice, SyncConflict, SyncConnection, SyncItem, SyncNotice, SyncProvider, SyncRecovery,
         SyncResolution, SyncSettings, SyncStatus,
-        remote::{RemoteError, RemoteKey, RemoteKind, RemoteStorage},
+        remote::{RemoteError, RemoteKey, RemoteKind, RemoteRevision, RemoteStorage},
     },
 };
 
@@ -594,6 +594,10 @@ fn versions(
                 revisions.remove(0);
             }
         }
+        // A version this desktop holds is also what the storage got when it uploaded
+        // it: that revision is the same version, so it is listed once, as this desktop's.
+        let kept = kept_here(workspace, kind, id, &record)?;
+        let revisions = unheld(bound, kind, id, storage, revisions, kept);
         // ponytail: who wrote a revision and what it changed would cost a download
         // each; fetch them if the Drive list needs more than times.
         return Ok(revisions
@@ -649,6 +653,64 @@ fn versions(
         .collect()
 }
 
+/// The content of each version this desktop keeps of a record.
+fn kept_here(
+    workspace: &Workspace,
+    kind: RecordKind,
+    id: &str,
+    record: &SyncRecord,
+) -> Result<Vec<Content>, Error> {
+    let reference = match kind {
+        RecordKind::Ticket => text(record, "ref"),
+        RecordKind::Document => id.to_owned(),
+    };
+    workspace
+        .versions(kind, &reference)?
+        .iter()
+        .map(|version| Ok(Content::saved(workspace.version(version.id)?)))
+        .collect()
+}
+
+/// How many of the storage's revisions History reads to tell which are kept here.
+const MATCHED_REVISIONS: usize = 20;
+
+/// The storage's versions (newest first) that this desktop does not hold. No
+/// record says which storage version a kept one was uploaded as, so a revision
+/// that has the content of a kept version is taken to be it, once each.
+/// At most [`MATCHED_REVISIONS`] are read, newest first, and none once every kept
+/// version found its copy: each read is a paid request to the storage. Revisions
+/// beyond the cap are listed as they are, so one may repeat a kept version.
+fn unheld(
+    bound: &Binding,
+    kind: RecordKind,
+    id: &str,
+    storage: &str,
+    revisions: Vec<RemoteRevision>,
+    mut kept: Vec<Content>,
+) -> Vec<RemoteRevision> {
+    let mut read = 0;
+    revisions
+        .into_iter()
+        .filter(|revision| {
+            if kept.is_empty() || read >= MATCHED_REVISIONS {
+                return true;
+            }
+            read += 1;
+            // A revision that cannot be read is listed; opening it says why.
+            let Ok(content) = stored_content(bound, kind, id, storage, revision) else {
+                return true;
+            };
+            match kept.iter().position(|held| *held == content) {
+                Some(index) => {
+                    kept.swap_remove(index);
+                    false
+                }
+                None => true,
+            }
+        })
+        .collect()
+}
+
 /// The content of one earlier version, wherever it is kept.
 fn version_content(
     workspace: &Workspace,
@@ -693,26 +755,45 @@ fn version_content(
             let Some(revision) = revisions.iter().find(|known| known.version == version) else {
                 return missing();
             };
-            if revision.size > MAX_FILE_BYTES {
-                return rejected(&format!(
-                    "This version is larger than {} MiB, the most a record's file may be, and cannot be shown",
-                    MAX_FILE_BYTES / (1024 * 1024)
-                ));
-            }
-            let mut bytes = Vec::new();
-            bound
-                .remote
-                .download(&bound.folder, &key, version, &mut bytes)
-                .map_err(unloaded)?;
-            let record = String::from_utf8(bytes)
-                .map_err(|_| Error::SyncFile("the file is not UTF-8 text".into()))
-                .and_then(|file| SyncRecord::parse(&file))?;
-            if record.kind != sync_kind(kind) || record.id != id {
-                return missing();
-            }
-            Ok(Content::of(kind, &record))
+            stored_content(bound, kind, id, storage, revision)
         }
     }
+}
+
+/// The content of one version the storage keeps, read as a record file.
+fn stored_content(
+    bound: &Binding,
+    kind: RecordKind,
+    id: &str,
+    storage: &str,
+    revision: &RemoteRevision,
+) -> Outcome<Content> {
+    let missing = || rejected("This version is no longer available");
+    let version = revision.version.as_str();
+    let unloaded = |error: RemoteError| {
+        BridgeFailure::plain(&format!(
+            "Could not load this version from {storage}: {error}"
+        ))
+    };
+    let key = remote_key(kind, id);
+    if revision.size > MAX_FILE_BYTES {
+        return rejected(&format!(
+            "This version is larger than {} MiB, the most a record's file may be, and cannot be shown",
+            MAX_FILE_BYTES / (1024 * 1024)
+        ));
+    }
+    let mut bytes = Vec::new();
+    bound
+        .remote
+        .download(&bound.folder, &key, version, &mut bytes)
+        .map_err(unloaded)?;
+    let record = String::from_utf8(bytes)
+        .map_err(|_| Error::SyncFile("the file is not UTF-8 text".into()))
+        .and_then(|file| SyncRecord::parse(&file))?;
+    if record.kind != sync_kind(kind) || record.id != id {
+        return missing();
+    }
+    Ok(Content::of(kind, &record))
 }
 
 fn version_detail(
@@ -1666,6 +1747,84 @@ mod tests {
                 current: "One".into()
             }]
         );
+    }
+
+    #[test]
+    fn history_lists_an_edit_once_when_this_desktop_holds_it_and_the_storage_does() {
+        let mut desks = desks();
+        let ticket = desks.here.create_ticket("One").unwrap();
+        desks.remote.set_now("2026-03-01T09:00:00Z");
+        desks.sync_here();
+        retitle(&mut desks.here, &ticket.reference, "Two");
+        desks.remote.set_now("2026-03-02T09:00:00Z");
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+
+        // "One" is this desktop's own version and also the storage's first revision.
+        assert_eq!(
+            versions(&desks.here, None, kind, id, Source::Local)
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            versions(&desks.here, bound, kind, id, Source::Drive)
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn history_reads_at_most_a_capped_number_of_revisions_to_match_and_lists_the_rest() {
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("Edit 0").unwrap();
+        desks.sync_there();
+        desks.sync_here();
+        for edit in 1..=25 {
+            retitle(&mut desks.there, &ticket.reference, &format!("Edit {edit}"));
+            desks.sync_there();
+        }
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+        let calls = desks.remote.calls().len();
+
+        // 26 revisions, the newest held here. This desktop keeps "Edit 0", whose copy is the
+        // oldest revision: beyond the cap, so it stays listed.
+        let list = versions(&desks.here, bound, kind, id, Source::Drive).unwrap();
+        assert_eq!(list.len(), 25);
+        let downloads = desks.remote.calls()[calls..]
+            .iter()
+            .filter(|op| **op == RemoteOp::Download)
+            .count();
+        // One read tells whether the newest revision is held, then the cap for matching.
+        assert_eq!(downloads, 1 + MATCHED_REVISIONS);
+    }
+
+    #[test]
+    fn history_keeps_the_storage_versions_this_desktop_does_not_hold() {
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("One").unwrap();
+        desks.remote.set_now("2026-03-01T09:00:00Z");
+        desks.sync_there();
+        desks.sync_here();
+        retitle(&mut desks.there, &ticket.reference, "Two");
+        desks.remote.set_now("2026-03-02T09:00:00Z");
+        desks.sync_there();
+        retitle(&mut desks.there, &ticket.reference, "Three");
+        desks.remote.set_now("2026-03-03T09:00:00Z");
+        desks.sync_there();
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+
+        // This desktop kept "One", which the storage also has; "Two" only the storage has.
+        let list = versions(&desks.here, bound, kind, id, Source::S3).unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].timestamp, "2026-03-02T09:00:00Z");
+        let detail = version_detail(&desks.here, bound, kind, id, Source::S3, &list[0].id).unwrap();
+        assert_eq!(detail.fields[0].value, "Two");
     }
 
     /// F49: a Drive version larger than a record may be is listed, and is not

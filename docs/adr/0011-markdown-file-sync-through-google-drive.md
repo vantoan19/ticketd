@@ -68,7 +68,7 @@ Restoring a backup disconnects the Workspace from its sync folder: the folder is
 
 ## History
 
-Each device keeps earlier versions of tickets and Documents in its own database: whenever a local edit or an incoming sync replaces one, the previous version is saved. Versions are kept for 30 days and the current version always. Restoring a version is an ordinary edit, which then syncs. Versions themselves do not sync; a newly added desktop reads a record's earlier versions from Drive's own file revisions on request.
+Each device keeps earlier versions of tickets and Documents in its own database: whenever a local edit or an incoming sync replaces one, the previous version is saved. Versions are kept for 30 days and the current version always. Restoring a version is an ordinary edit, which then syncs. Versions themselves do not sync; a newly added desktop reads a record's earlier versions from Drive's own file revisions on request. A revision whose content equals a version the desktop keeps is that version as uploaded, so History lists it once, as the desktop's own.
 
 This history is also what makes keeping the local value on a same-field conflict, and accepting hand edits from Drive, safe: an overwritten value can be recovered for 30 days.
 

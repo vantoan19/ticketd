@@ -416,3 +416,36 @@ test("a desktop without local versions loads them from S3 and says so", async ()
   });
   expect(document.body.textContent).not.toMatch(/drive/i);
 });
+
+test("when older versions load, focus moves to the first one that loaded", async () => {
+  stored.drive = [
+    { id: "r1", timestamp: hours(24 * 40), device: null, changed: [] },
+    { id: "r2", timestamp: hours(24 * 41), device: null, changed: [] },
+  ];
+  render(connected(history));
+  const ask = await screen.findByRole("button", {
+    name: "Older versions from Drive",
+  });
+  ask.focus();
+  fireEvent.click(ask);
+  const loaded = await screen.findAllByRole("button", {
+    name: /Google Drive$/,
+  });
+  await waitFor(() => expect(document.activeElement).toBe(loaded[0]));
+});
+
+test("when the storage has no older versions, focus moves to the list", async () => {
+  stored.drive = [];
+  render(connected(history));
+  const ask = await screen.findByRole("button", {
+    name: "Older versions from Drive",
+  });
+  ask.focus();
+  fireEvent.click(ask);
+  await screen.findByText("No older versions in Google Drive");
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("navigation", { name: "Versions" }),
+    ),
+  );
+});
