@@ -19,6 +19,7 @@ const RESUME: &str = include_str!("../../tests/fixtures/antigravity/resume-own-s
 const MISSING_RESUME: &str =
     include_str!("../../tests/fixtures/antigravity/resume-missing-session.jsonl");
 const SIGNED_OUT: &str = include_str!("../../tests/fixtures/antigravity/signed-out.jsonl");
+const QUOTA_DIAGNOSTIC: &str = "\n⚠ agent executor error: generating and executing: Error 429, Message: Synthetic fixture quota exhausted for this test., Status: RESOURCE_EXHAUSTED, Details: []\n";
 
 #[cfg(unix)]
 #[tokio::test]
@@ -180,6 +181,105 @@ async fn recorded_acp_turn_uses_a_plain_prompt_and_finishes_on_its_reply() {
             ..
         }
     )));
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
+async fn recorded_acp_quota_diagnostic_ends_the_turn_with_native_wording() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("quota")).await,
+        DispatchOutcome::Written
+    );
+    let outgoing = peer.written().await;
+    // Antigravity 1.5.15 sends this complete chunk followed by an ordinary end_turn.
+    send(
+        &mut peer,
+        &text_update("agent_message_chunk", QUOTA_DIAGNOSTIC),
+    )
+    .await;
+    send(
+        &mut peer,
+        &json!({"jsonrpc": "2.0", "id": outgoing["id"], "result": {"stopReason": "end_turn"}}),
+    )
+    .await;
+
+    let events = drain(&mut opened.events).await;
+    assert!(
+        matches!(
+            events.as_slice(),
+            [.., EventKind::MessageCompleted { text, .. },
+                EventKind::TurnEnded { outcome: TurnOutcome::Failed(problem), .. }]
+                if text == QUOTA_DIAGNOSTIC
+                    && problem.kind == ProblemKind::QuotaExhausted
+                    && problem.message == QUOTA_DIAGNOSTIC
+                    && problem.resets_at.is_none()
+        ),
+        "{events:?}"
+    );
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
+async fn acp_quota_diagnostic_respects_chunk_boundaries_and_explicit_outcomes() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    let prose = format!("This is an example of an HTTP 429 warning:{QUOTA_DIAGNOSTIC}");
+    let diagnostic = text_update("agent_message_chunk", QUOTA_DIAGNOSTIC);
+    let end_turn = json!({"result": {"stopReason": "end_turn"}});
+    let cases = [
+        (
+            "discussion",
+            vec![text_update("agent_message_chunk", &prose)],
+            end_turn.clone(),
+            TurnOutcome::Completed,
+        ),
+        (
+            "reasoning",
+            vec![text_update("agent_thought_chunk", QUOTA_DIAGNOSTIC)],
+            end_turn.clone(),
+            TurnOutcome::Completed,
+        ),
+        (
+            "later-answer",
+            vec![
+                diagnostic.clone(),
+                text_update("agent_message_chunk", "Here is the answer."),
+            ],
+            end_turn,
+            TurnOutcome::Completed,
+        ),
+        (
+            "cancelled",
+            vec![diagnostic.clone()],
+            json!({"result": {"stopReason": "cancelled"}}),
+            TurnOutcome::Interrupted,
+        ),
+        (
+            "error",
+            vec![diagnostic],
+            json!({"error": {"code": -32603, "message": "Synthetic internal error"}}),
+            TurnOutcome::Failed(crate::Problem {
+                kind: ProblemKind::Other,
+                message: "Synthetic internal error".to_owned(),
+                detail: None,
+                resets_at: None,
+            }),
+        ),
+    ];
+    for (id, updates, mut reply, expected) in cases {
+        assert_eq!(
+            opened.runtime.submit(start_turn(id)).await,
+            DispatchOutcome::Written
+        );
+        reply["jsonrpc"] = json!("2.0");
+        reply["id"] = peer.written().await["id"].clone();
+        for update in updates {
+            send(&mut peer, &update).await;
+        }
+        send(&mut peer, &reply).await;
+        let events = drain(&mut opened.events).await;
+        assert_eq!(crate::outcome::read_end(&events), Some(expected), "{id}");
+    }
     opened.runtime.close().await;
 }
 
