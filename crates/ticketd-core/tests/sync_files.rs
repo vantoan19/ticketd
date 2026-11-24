@@ -424,7 +424,7 @@ fn a_malformed_file_is_rejected_with_the_reason_and_changes_nothing() {
             good.replace("trashed: false", "parent: \"T-KQ1\""),
             "'parent'",
         ),
-        (good.replace("format: 1", "format: 2"), "newer ticketd"),
+        (good.replace("format: 1", "format: 3"), "newer ticketd"),
         (good.replace("format: 1", "format: one"), "'format'"),
         (
             good.replace("trashed: false", "source_provider: \"github\""),

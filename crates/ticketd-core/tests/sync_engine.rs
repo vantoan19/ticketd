@@ -1176,9 +1176,9 @@ fn the_same_field_changed_on_two_devices_converges_in_every_order() {
 fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
     // A higher format number, with or without what else this version does not know.
     for (from, to) in [
-        ("format: 1\n", "format: 2\n"),
-        ("format: 1\n", "format: 2\nmood: \"happy\"\n"),
-        ("format: 1\n", "format: 2\n---\n<!-- ticketd:mood -->\n"),
+        ("format: 1\n", "format: 3\n"),
+        ("format: 1\n", "format: 3\nmood: \"happy\"\n"),
+        ("format: 1\n", "format: 3\n---\n<!-- ticketd:mood -->\n"),
     ] {
         let mut devices = devices();
         let reference = devices.shared_ticket("Login");
@@ -1505,6 +1505,47 @@ fn sourced(state: &str, updated: &str) -> String {
     format!(
         "---\nkind: ticket\nformat: 1\nid: \"3f2c9a1e-0000-4000-8000-000000000001\"\nref: \"T-ZZ7\"\ntitle: \"Imported\"\nstatus: \"Todo\"\ntrashed: false\nfollowing: false\nsource_provider: \"github\"\nsource_external_id: \"I_42\"\nsource_locator: \"acme/site#42\"\nsource_display: \"acme/site#42 at {updated}\"\nsource_url: \"https://example.test/acme/site/issues/42\"\nsource_origin: \"imported\"\nsource_linked_at: \"2026-01-02T03:04:05.000Z\"\nsource_authority: \"external\"\nsource_authority_changed_at: \"2026-01-02T03:04:05.000Z\"\nsource_state: \"{state}\"\n{closure}source_updated_at: \"{updated}\"\n---\nFrom the tracker.\n"
     )
+}
+
+#[test]
+fn legacy_numeric_github_ids_round_trip_in_a_format_compatible_with_their_host() {
+    const ID: &str = "3f2c9a1e-0000-4000-8000-000000000001";
+    for (url, id, format) in [
+        (
+            "https://example.test/acme/site/issues/42",
+            "@example.test:7",
+            2,
+        ),
+        ("", "@:7", 2),
+        ("https://github.com/acme/site/issues/42", "7", 1),
+    ] {
+        let mut devices = devices();
+        let legacy = sourced("open", "2026-01-03T00:00:00Z")
+            .replace("source_external_id: \"I_42\"", "source_external_id: \"7\"")
+            .replace("https://example.test/acme/site/issues/42", url);
+        devices.hand_edit(RemoteKind::Ticket, ID, &legacy);
+        assert_eq!(devices.sync(0).skipped, 0, "{url}");
+        assert_eq!(devices.remote_text(RemoteKind::Ticket, ID).1, legacy);
+
+        devices.workspaces[0].add_tag("T-ZZ7", "synced").unwrap();
+        assert_eq!(devices.sync(0).uploaded, 1, "{url}");
+        let written = devices.remote_text(RemoteKind::Ticket, ID).1;
+        assert!(
+            written.contains(&format!("\nformat: {format}\n")),
+            "{written}"
+        );
+        assert!(written.contains(&format!("\nsource_external_id: \"{id}\"\n")));
+
+        assert_eq!(devices.sync(1).skipped, 0, "{url}");
+        let received = devices.workspaces[1]
+            .export_sync_record(SyncKind::Ticket, ID)
+            .unwrap();
+        assert_eq!(
+            received.fields["source_external_id"],
+            SyncValue::Text(id.into())
+        );
+        assert_eq!(devices.sync(1).uploaded, 0, "{url}");
+    }
 }
 
 /// F38: what two desktops each refreshed from the tracker is not a decision for
