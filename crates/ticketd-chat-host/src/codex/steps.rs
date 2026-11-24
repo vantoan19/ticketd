@@ -1,10 +1,13 @@
 //! Reads the native item recorded by the Codex adapter.
+use std::collections::BTreeMap;
+use std::num::NonZeroU32;
+
 use serde_json::{Value, json};
 use ticketd_core::ChatToolState;
 
 use crate::tool_steps::{
-    CommandFacts, FileTargets, LineCounts, ReadAction, ReadTarget, StepAction, StepOutcomeOverride,
-    ToolEvidence, ToolStep, shell_step,
+    CommandFacts, FileTargets, LineCounts, OmittedFiles, ReadAction, ReadTarget, StepAction,
+    StepOutcomeOverride, ToolEvidence, ToolStep, shell_step,
 };
 use crate::{FileChangeKind, MAX_PROVIDER_DETAIL_BYTES, ProviderDetail, WebAction, diffstat};
 
@@ -32,7 +35,11 @@ pub(crate) fn read_codex_steps(mut evidence: ToolEvidence<'_>) -> Vec<ToolStep> 
                 },
             )]
         }
-        Some("fileChange") => file_changes(evidence.name, value("changes")),
+        Some("fileChange") => file_changes(
+            evidence.name,
+            value("changes"),
+            value("ticketd_omitted_files"),
+        ),
         Some("webSearch") => {
             let url = value("action")
                 .filter(|action| action["type"] == "openPage")
@@ -89,9 +96,32 @@ struct FileSteps {
     counts: LineCounts,
 }
 
-fn file_changes(title: &str, changes: Option<&Value>) -> Vec<ToolStep> {
+const FILE_KINDS: [FileChangeKind; 3] = [
+    FileChangeKind::Added,
+    FileChangeKind::Deleted,
+    FileChangeKind::Modified,
+];
+
+fn kind_key(kind: &FileChangeKind) -> &'static str {
+    match kind {
+        FileChangeKind::Added => "add",
+        FileChangeKind::Deleted => "delete",
+        FileChangeKind::Modified | FileChangeKind::Renamed { .. } => "update",
+    }
+}
+
+fn file_changes(title: &str, changes: Option<&Value>, omitted: Option<&Value>) -> Vec<ToolStep> {
+    let changes = changes.and_then(Value::as_array).map(Vec::as_slice);
+    let legacy_omission =
+        omitted.is_none() && changes.is_some_and(|changes| missing_paths(title, changes));
+    let omitted_count = |kind: &FileChangeKind| {
+        omitted
+            .and_then(|omitted| omitted[kind_key(kind)].as_u64())
+            .and_then(|count| u32::try_from(count).ok())
+            .and_then(NonZeroU32::new)
+    };
     let mut groups: Vec<FileSteps> = Vec::new();
-    for change in changes.and_then(Value::as_array).into_iter().flatten() {
+    for change in changes.into_iter().flatten() {
         let Some(path) = change["path"].as_str() else {
             continue;
         };
@@ -111,14 +141,26 @@ fn file_changes(title: &str, changes: Option<&Value>) -> Vec<ToolStep> {
             });
         }
     }
-    if groups.is_empty() {
-        return vec![
-            StepAction::Edit {
-                targets: FileTargets::Paths(vec![title.to_owned()]),
+    // The patch can omit every path for one kind, including a delete that still needs approval.
+    for kind in FILE_KINDS {
+        if omitted_count(&kind).is_some() && !groups.iter().any(|group| group.kind == kind) {
+            groups.push(FileSteps {
+                kind,
+                paths: Vec::new(),
                 counts: LineCounts::default(),
-            }
-            .into(),
-        ];
+            });
+        }
+    }
+    if groups.is_empty() {
+        groups.push(FileSteps {
+            kind: FileChangeKind::Modified,
+            paths: if legacy_omission {
+                Vec::new()
+            } else {
+                vec![title.to_owned()]
+            },
+            counts: LineCounts::default(),
+        });
     }
     groups
         .into_iter()
@@ -128,7 +170,7 @@ fn file_changes(title: &str, changes: Option<&Value>) -> Vec<ToolStep> {
                  paths,
                  counts,
              }| {
-                match kind {
+                let mut step: ToolStep = match kind {
                     FileChangeKind::Added => StepAction::Create {
                         targets: FileTargets::Paths(paths),
                         counts,
@@ -139,10 +181,41 @@ fn file_changes(title: &str, changes: Option<&Value>) -> Vec<ToolStep> {
                         counts,
                     },
                 }
-                .into()
+                .into();
+                step.omitted_files = if legacy_omission {
+                    Some(OmittedFiles::Unknown)
+                } else {
+                    omitted_count(&kind).map(OmittedFiles::Count)
+                };
+                step
             },
         )
         .collect()
+}
+
+fn missing_paths(title: &str, changes: &[Value]) -> bool {
+    let Some(original) = title.strip_prefix("Edit ") else {
+        return false;
+    };
+    if changes.is_empty() {
+        return !original.is_empty();
+    }
+    if !changes
+        .iter()
+        .any(|change| change.get("ticketd_lines").is_some())
+    {
+        return false;
+    }
+    // The old compactor kept a prefix and the tool title stored all the paths in order.
+    // Match the retained paths as a whole because a filename can contain ", ".
+    let retained = changes
+        .iter()
+        .filter_map(|change| change["path"].as_str())
+        .collect::<Vec<_>>()
+        .join(", ");
+    original
+        .strip_prefix(&retained)
+        .is_some_and(|rest| rest.starts_with(", "))
 }
 
 fn file_kind(change: &Value) -> FileChangeKind {
@@ -180,6 +253,7 @@ pub(super) fn tool_detail(kind: &str, item: &Value) -> ProviderDetail {
     }
     let mut compact = serde_json::Map::new();
     compact.insert("type".to_owned(), Value::String(kind.to_owned()));
+    let changes = item["changes"].as_array().filter(|_| kind == "fileChange");
     let fields: &[&str] = match kind {
         "commandExecution" => &["cwd", "status", "exitCode", "durationMs"],
         "fileChange" => &["status"],
@@ -188,6 +262,11 @@ pub(super) fn tool_detail(kind: &str, item: &Value) -> ProviderDetail {
         _ => &["status"],
     };
     let mut bytes = Value::Object(compact.clone()).to_string().len();
+    if let Some(changes) = changes {
+        // Reserve enough space for the omissions even when the retained prefix fills the budget.
+        bytes += r#","changes":[],"ticketd_omitted_files":{"add":,"delete":,"update":}"#.len()
+            + FILE_KINDS.len() * changes.len().to_string().len();
+    }
     for field in fields {
         if let Some(value) = item.get(field) {
             let field_bytes = field.len() + value.to_string().len() + 4;
@@ -197,26 +276,33 @@ pub(super) fn tool_detail(kind: &str, item: &Value) -> ProviderDetail {
             }
         }
     }
-    if let Some(changes) = item["changes"].as_array().filter(|_| kind == "fileChange") {
+    if let Some(changes) = changes {
         let mut files = Vec::new();
-        bytes += r#","changes":[]"#.len();
+        let mut omitted = BTreeMap::new();
         for change in changes {
             let Some(path) = change["path"].as_str() else {
                 continue;
             };
-            let counts = file_counts(change, &file_kind(change));
-            let file = json!({
-                "path": path,
-                "kind": change["kind"],
-                "ticketd_lines": {"added": counts.added, "removed": counts.removed}
-            });
-            bytes += file.to_string().len() + 1;
-            if bytes > MAX_PROVIDER_DETAIL_BYTES {
-                break;
+            let kind = file_kind(change);
+            if omitted.is_empty() {
+                let counts = file_counts(change, &kind);
+                let file = json!({
+                    "path": path,
+                    "kind": change["kind"],
+                    "ticketd_lines": {"added": counts.added, "removed": counts.removed}
+                });
+                bytes += file.to_string().len() + 1;
+                if bytes <= MAX_PROVIDER_DETAIL_BYTES {
+                    files.push(file);
+                    continue;
+                }
             }
-            files.push(file);
+            *omitted.entry(kind_key(&kind)).or_insert(0usize) += 1;
         }
         compact.insert("changes".to_owned(), Value::Array(files));
+        if !omitted.is_empty() {
+            compact.insert("ticketd_omitted_files".to_owned(), json!(omitted));
+        }
     }
     // Oversized commands still have their exact spelling in the tool title.
     ProviderDetail::from_compacted_tool_input(

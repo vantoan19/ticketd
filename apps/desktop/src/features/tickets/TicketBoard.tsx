@@ -53,6 +53,7 @@ import { SourcePill } from "./TicketList";
 import {
   readiness,
   readinessLabel,
+  readyForReview,
   rowContextItem,
   type RowContextKind,
 } from "./ticket-row";
@@ -784,7 +785,7 @@ const BoardCard = memo(function BoardCard({
       ? "Approval needed"
       : chat?.status.rank === "working"
         ? `${chat.harness_name} is working`
-        : ticket.status === "In review" && harness
+        : readyForReview(ticket)
           ? "Ready for review"
           : "";
   const source = externalSource(ticket);

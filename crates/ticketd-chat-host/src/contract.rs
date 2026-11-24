@@ -276,6 +276,8 @@ pub enum Refusal {
     StaleGeneration { current: RuntimeGeneration },
     /// The expected turn is not the active turn.
     TurnMismatch { active: Option<NativeTurnId> },
+    /// The harness has not confirmed the previous start.
+    StartUnconfirmed,
     /// No live request has this identity: never issued, already answered or withdrawn.
     UnknownRequest,
     /// The effective capabilities do not include this operation.
@@ -290,6 +292,7 @@ impl Refusal {
         match self {
             Self::StaleGeneration { .. } => "the harness session had been replaced",
             Self::TurnMismatch { .. } => "the turn it was meant for had ended",
+            Self::StartUnconfirmed => "the harness has not confirmed the previous message",
             Self::UnknownRequest => "the request was no longer open",
             Self::Unsupported => "the harness can't do that here",
             Self::RuntimeClosed => "the harness session had closed",

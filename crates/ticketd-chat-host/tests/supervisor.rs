@@ -1640,6 +1640,87 @@ async fn what_the_agent_changed_in_ticketd_is_kept_with_its_turn() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_lost_turn_keeps_only_the_writes_committed_before_its_end() {
+    use ticketd_core::ChatAgentChange;
+
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let ticket = f.core().create_ticket("Reset email").unwrap();
+    // Pin the two observations to one millisecond without depending on wall time.
+    let db = rusqlite::Connection::open(&f.path).unwrap();
+    db.execute_batch(
+        "CREATE TRIGGER pin_receipt_activity_time AFTER INSERT ON activities BEGIN
+             UPDATE activities SET reported_at = '2099-01-01T00:00:00.000Z' WHERE id = NEW.id;
+         END;
+         CREATE TRIGGER pin_receipt_end_time AFTER UPDATE OF ended_at ON chat_turns
+             WHEN OLD.ended_at IS NULL AND NEW.ended_at IS NOT NULL BEGIN
+             UPDATE chat_turns SET ended_at = '2099-01-01T00:00:00.000Z' WHERE id = NEW.id;
+         END;",
+    )
+    .unwrap();
+    drop(db);
+
+    let armed = Arc::new(AtomicBool::new(false));
+    let (path, chat_id, reference) = (f.path.clone(), f.chat.id.clone(), ticket.reference.clone());
+    let inject_write = armed.clone();
+    f.host = ChatHost::new(
+        Arc::new(move || {
+            let workspace = WorkspaceSession::for_file(&path)?.workspace()?;
+            if inject_write.load(Ordering::SeqCst)
+                && workspace.chat(&chat_id)?.active_turn.is_none()
+            {
+                // The Turn already ended in the host connection. Write through a
+                // second connection before the host can do any more persistence.
+                let mut writer = Workspace::open(&path)?;
+                writer.add_activity(&reference, "Legacy after the end", Some("codex"))?;
+                writer.act_for_chat(&chat_id)?;
+                writer.add_activity(&reference, "Tagged after the end", Some("codex"))?;
+                inject_write.store(false, Ordering::SeqCst);
+            }
+            Ok(workspace)
+        }),
+        vec![Arc::new(f.fake.clone())],
+    )
+    .unwrap();
+    f.send("Update the ticket").await;
+    let mut writer = f.core();
+    writer
+        .add_activity(&ticket.reference, "Legacy before the end", Some("codex"))
+        .unwrap();
+    writer.act_for_chat(&f.chat.id).unwrap();
+    writer
+        .add_activity(&ticket.reference, "Tagged before the end", Some("codex"))
+        .unwrap();
+    drop(writer);
+
+    armed.store(true, Ordering::SeqCst);
+    f.fake.lose_process().await;
+    settle().await;
+
+    assert!(!armed.load(Ordering::SeqCst));
+    let turn = &f.turns()[0];
+    assert_eq!(turn.state, ChatTurnState::Unknown);
+    assert_eq!(turn.ended_at.as_deref(), Some("2099-01-01T00:00:00.000Z"));
+    let input = f
+        .core()
+        .chat_latest_tool_input(&f.chat.id, AGENT_CHANGES_RECORD_NAME)
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        serde_json::from_str::<Vec<ChatAgentChange>>(&input).unwrap(),
+        [
+            ChatAgentChange::Update {
+                reference: ticket.reference.clone(),
+                excerpt: "Legacy before the end".into(),
+            },
+            ChatAgentChange::Update {
+                reference: ticket.reference,
+                excerpt: "Tagged before the end".into(),
+            },
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_chat_write_before_the_first_turn_event_is_kept_in_its_transcript() {
     let f = Fixture::new(FakeAdapter::claude());
     let ticket = f.core().create_ticket("Reset email").unwrap();

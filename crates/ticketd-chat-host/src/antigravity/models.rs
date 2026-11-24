@@ -2,8 +2,12 @@
 use std::path::Path;
 use std::process::Stdio;
 
+use tokio::io::AsyncReadExt;
+
 use crate::stdio::{Serving, command};
 use crate::{CHECK_TIMEOUT, ModelChoice, SettingOption};
+
+const MAX_MODEL_LIST_BYTES: usize = 64 * 1024;
 
 const EFFORTS: &[(&str, &str)] = &[
     ("low", "Low"),
@@ -17,11 +21,23 @@ pub(super) async fn listed(executable: &Path) -> Vec<ModelChoice> {
     let mut command = command(executable, &["models"], Serving::Nothing);
     command
         .stdin(Stdio::null())
+        .stderr(Stdio::null())
         .env("AGY_CLI_DISABLE_AUTO_UPDATE", "1");
-    match tokio::time::timeout(CHECK_TIMEOUT, command.output()).await {
-        Ok(Ok(output)) if output.status.success() => {
-            parse(&String::from_utf8_lossy(&output.stdout))
+    let output = tokio::time::timeout(CHECK_TIMEOUT, async {
+        let mut child = command.spawn().ok()?;
+        // Allow one extra byte to distinguish a complete list at the limit from overflow.
+        let mut stdout = child.stdout.take()?.take(MAX_MODEL_LIST_BYTES as u64 + 1);
+        let mut output = Vec::new();
+        stdout.read_to_end(&mut output).await.ok()?;
+        if output.len() > MAX_MODEL_LIST_BYTES {
+            // The command kills its child on drop, including when the probe times out.
+            return None;
         }
+        child.wait().await.ok()?.success().then_some(output)
+    })
+    .await;
+    match output {
+        Ok(Some(output)) => parse(&String::from_utf8_lossy(&output)),
         _ => Vec::new(),
     }
 }
@@ -96,6 +112,37 @@ fn parse(output: &str) -> Vec<ModelChoice> {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn model_probe_rejects_oversized_output_even_with_a_valid_prefix() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        const OUTPUT_BUDGET: usize = 64 * 1024;
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("agy");
+        let listing = directory.path().join("listing");
+        fs::write(
+            &executable,
+            "#!/bin/sh\n[ \"$1\" = models ] || exit 2\n\
+             printf 'diagnostic-only  Warning\\n' >&2\n\
+             exec /bin/cat \"${0%/*}/listing\"\n",
+        )
+        .unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o700)).unwrap();
+
+        let mut output = b"test-model  Test Model\n".to_vec();
+        output.resize(OUTPUT_BUDGET, b'\n');
+        fs::write(&listing, &output).unwrap();
+        let models = super::listed(&executable).await;
+        assert_eq!(models.len(), 1);
+        assert_eq!(models[0].model.id, "test-model");
+
+        output.push(b'\n');
+        fs::write(&listing, &output).unwrap();
+        assert!(super::listed(&executable).await.is_empty());
+    }
+
     #[test]
     fn listed_models_group_native_efforts_and_keep_fixed_model_names() {
         let models = super::parse(

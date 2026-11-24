@@ -208,6 +208,7 @@ export function stepWords(
 ): StepWords {
   const state = step.state ?? "done";
   const targets = step.targets ?? [];
+  const omitted = step.omitted_files;
   const key =
     step.kind === "read" && step.variant === "list"
       ? "list"
@@ -248,6 +249,12 @@ export function stepWords(
     // `target` is the command as shown (ticketd without its path); `command` is what ran.
     const command = step.target || step.command || "";
     parts = [{ text: verb }, code(command.split("\n")[0] ?? command)];
+  } else if (omitted) {
+    const files =
+      omitted.count === null
+        ? "files (partial list)"
+        : `${count(targets.length + omitted.count, "file")} (${count(omitted.count, "path")} omitted)`;
+    parts = [{ text: `${verb} ${files}` }];
   } else if (targets.length > 2) {
     // "Searched for" counts as "Searched 3 times".
     const counted = verb.replace(/ for$/, "");
@@ -281,14 +288,16 @@ export function stepWords(
               step.added_lines != null &&
               step.removed_lines != null
             ? {
-                text: `+${step.added_lines} −${step.removed_lines}`,
+                text: `${omitted ? "At least " : ""}+${step.added_lines} −${step.removed_lines}`,
                 outcome: false,
                 diffstat: true,
               }
             : undefined;
   const words = partsText(parts);
   const spoken = suffix?.diffstat
-    ? `${step.added_lines} lines added, ${step.removed_lines} removed`
+    ? omitted
+      ? `at least ${count(step.added_lines ?? 0, "line")} added and ${count(step.removed_lines ?? 0, "line")} removed`
+      : `${step.added_lines} lines added, ${step.removed_lines} removed`
     : suffix?.text;
   const single = targets.length === 1 && !step.command ? targets[0] : undefined;
   const took = step.duration_ms ? duration(step.duration_ms) : "";
@@ -344,6 +353,16 @@ export function mergeSteps(steps: Step[]): Step[] {
     delete merged.full_output;
     delete merged.result;
     delete merged.truncated;
+    if (last.omitted_files || step.omitted_files) {
+      merged.omitted_files = {
+        count:
+          last.omitted_files?.count === null ||
+          step.omitted_files?.count === null
+            ? null
+            : (last.omitted_files?.count ?? 0) +
+              (step.omitted_files?.count ?? 0),
+      };
+    }
     rows[rows.length - 1] = {
       ...merged,
       targets: [...(last.targets ?? []), ...(step.targets ?? [])],

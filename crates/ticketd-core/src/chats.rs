@@ -15,6 +15,9 @@ use uuid::Uuid;
 
 use crate::{Error, Workspace};
 
+#[cfg(test)]
+mod tests;
+
 /// Stored tool output keeps its last this-many bytes; `ChatTool::output_truncated` marks
 /// that the start was dropped. The end is kept because it is where a command reports its
 /// outcome.
@@ -201,6 +204,7 @@ pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> 
 
 /// Format 86: retain the submission and end positions and record the change head
 /// seen by each new Chat-tagged write. Rows from before this format keep no position.
+/// Index both legacy feeds by time so receipt capture only visits the Turn's window.
 pub(crate) fn migrate_write_attribution(connection: &Connection) -> Result<(), Error> {
     for (table, column) in [
         ("chat_submission_attempts", "recorded_position"),
@@ -219,7 +223,10 @@ pub(crate) fn migrate_write_attribution(connection: &Connection) -> Result<(), E
     }
     connection.execute_batch(
         "CREATE INDEX IF NOT EXISTS chat_record_writes_chat_sequence
-         ON chat_record_writes(chat_id, change_sequence) WHERE change_sequence IS NOT NULL;",
+         ON chat_record_writes(chat_id, change_sequence) WHERE change_sequence IS NOT NULL;
+         CREATE INDEX IF NOT EXISTS ticket_history_chat_receipt
+         ON ticket_history(timestamp) WHERE kind = 'status';
+         CREATE INDEX IF NOT EXISTS activities_chat_receipt ON activities(reported_at);",
     )?;
     Ok(())
 }
@@ -1332,8 +1339,9 @@ fn read_turn_agent_changes(
         return Ok(Vec::new());
     }
     // A write sees the submission or observed start at its lower bound, but cannot
-    // see the end yet. The legacy path can only use timestamps and joins from tickets
-    // so the feed indexes can seek to the time window for each one.
+    // see the end yet. Legacy branches seek into the time window before looking up
+    // tickets. X'' sorts after all TEXT timestamps, leaving a live Turn's end open
+    // while letting SQLite use an upper index bound for ended Turns.
     let mut statement = connection.prepare(
         "WITH ordered_writes AS (
              SELECT activity_id, history_number FROM chat_record_writes
@@ -1342,16 +1350,16 @@ fn read_turn_agent_changes(
          ), legacy_changes AS (
              SELECT 'status' AS kind, t.reference, t.title, h.from_value, h.to_value,
                     h.timestamp AS at, 0 AS source, h.number AS seq, h.editing_agent AS agent, w.chat_id AS writer
-             FROM tickets t CROSS JOIN ticket_history h ON h.ticket_id = t.id
+             FROM ticket_history h CROSS JOIN tickets t ON t.id = h.ticket_id
              LEFT JOIN chat_record_writes w ON w.history_number = h.number
              WHERE h.kind = 'status' AND w.change_sequence IS NULL
-               AND h.timestamp >= :attributed_start AND (:ended_at IS NULL OR h.timestamp <= :ended_at)
+               AND h.timestamp BETWEEN :attributed_start AND COALESCE(:ended_at, X'')
              UNION ALL
              SELECT 'update', t.reference, t.title, '', a.brief, a.reported_at, 1, a.number, a.editing_agent, w.chat_id
-             FROM tickets t CROSS JOIN activities a ON a.ticket_id = t.id
+             FROM activities a CROSS JOIN tickets t ON t.id = a.ticket_id
              LEFT JOIN chat_record_writes w ON w.activity_id = a.id
-             WHERE w.change_sequence IS NULL AND a.reported_at >= :attributed_start
-               AND (:ended_at IS NULL OR a.reported_at <= :ended_at)
+             WHERE w.change_sequence IS NULL
+               AND a.reported_at BETWEEN :attributed_start AND COALESCE(:ended_at, X'')
          )
          SELECT kind, reference, title, from_value, to_value FROM (
              SELECT 'status' AS kind, t.reference, t.title, h.from_value, h.to_value,
@@ -1724,6 +1732,7 @@ fn lose_contact(
     chat_id: &str,
     detail: &str,
     ending: &str,
+    receipt_turn: Option<&str>,
 ) -> Result<(), Error> {
     let ids = |sql: &str| -> Result<Vec<String>, Error> {
         let mut statement = connection.prepare(sql)?;
@@ -1738,6 +1747,15 @@ fn lose_contact(
             &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ending = ?3, ended_at = {NOW}, ended_position = ?4 WHERE id = ?1"),
             params![id, detail, ending, position],
         )?;
+        if receipt_turn == Some(id.as_str()) {
+            // Legacy writes can share the end's millisecond. Capture before another
+            // connection can commit a write with that timestamp.
+            observe(
+                connection,
+                chat_id,
+                ChatObservation::CaptureAgentChanges { turn_id: id },
+            )?;
+        }
     }
     for id in ids("SELECT id FROM chat_tools WHERE chat_id = ?1 AND state = 'running'")? {
         connection.execute(
@@ -2435,15 +2453,36 @@ impl Workspace {
     /// running tools unknown and open requests expired. Queued input is left queued and
     /// nothing is resubmitted. Returns the Chats that had something to reconcile.
     ///
-    /// The host calls this when a harness process is lost and once at startup, before it
-    /// runs anything, because stored state from a previous process or a restored backup
-    /// has no runtime behind it. `ending` is how the host names what happened to the
-    /// active turn; it is stored with the turn as given.
+    /// At startup or after a storage failure, the stored state may outlive the runtime
+    /// behind it. The host supplies `ending` for the active turn.
     pub fn mark_chat_contact_lost(
         &mut self,
         chat_id: Option<&str>,
         detail: &str,
         ending: &str,
+    ) -> Result<Vec<String>, Error> {
+        self.reconcile_chat_contact_loss(chat_id, detail, ending, None)
+    }
+
+    /// Settle a live runtime's loss and capture the observed active Turn's agent
+    /// changes in the transaction that first ends it.
+    pub fn mark_chat_runtime_lost(
+        &mut self,
+        chat_id: &str,
+        active_turn_id: Option<&str>,
+        detail: &str,
+        ending: &str,
+    ) -> Result<(), Error> {
+        self.reconcile_chat_contact_loss(Some(chat_id), detail, ending, active_turn_id)?;
+        Ok(())
+    }
+
+    fn reconcile_chat_contact_loss(
+        &mut self,
+        chat_id: Option<&str>,
+        detail: &str,
+        ending: &str,
+        receipt_turn: Option<&str>,
     ) -> Result<Vec<String>, Error> {
         self.chat_write(|connection| {
             if let Some(id) = chat_id {
@@ -2461,7 +2500,7 @@ impl Workspace {
                 .query_map([chat_id], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             for id in &affected {
-                lose_contact(connection, id, detail, ending)?;
+                lose_contact(connection, id, detail, ending, receipt_turn)?;
             }
             Ok(affected)
         })

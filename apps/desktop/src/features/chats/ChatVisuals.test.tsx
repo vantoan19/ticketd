@@ -11,6 +11,7 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import {
   ChatClientContext,
+  transcriptItemSchema,
   type Suggestion,
   type TranscriptItem,
 } from "@/features/chats/client";
@@ -178,6 +179,37 @@ test("a file name opens the file; one that is gone becomes plain text and says s
   );
   expect(screen.queryByRole("button", { name: "Open old.ts" })).toBeNull();
   expect(screen.getByText("old.ts", { selector: "code *" })).toBeTruthy();
+});
+
+test("a bounded patch shows omitted paths and qualifies its line counts", async () => {
+  const patch = {
+    kind: "edit" as const,
+    target: "src/a.ts",
+    targets: [{ text: "src/a.ts" }],
+    omitted_files: { count: 2 },
+    added_lines: 4,
+    removed_lines: 1,
+  };
+  const items = steps(patch, {
+    kind: "create",
+    target: "src/exact.ts",
+    targets: [{ text: "src/exact.ts" }],
+    added_lines: 3,
+    removed_lines: 0,
+  }).map((item) => transcriptItemSchema.parse(item));
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items,
+    },
+  ]);
+  const row = button(
+    "Edited 3 files (2 paths omitted), at least 4 lines added and 1 line removed",
+  );
+  expect(row.textContent).toContain("At least +4 −1");
+  fireEvent.click(row);
+  expect(button("Open src/a.ts")).toBeTruthy();
+  expect(screen.getByText("+3 −0")).toBeTruthy();
 });
 
 test("a command's detail strips terminal colour and says its exit and folder", async () => {
