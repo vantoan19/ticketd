@@ -245,7 +245,7 @@ pub(crate) enum ResultValue {
 #[serde(untagged)]
 #[allow(dead_code)] // A schema-facing union of messages exchanged over stdio.
 enum Contract2 {
-    Host(Request<'static>),
+    Host(Box<Request<'static>>),
     Extension(Box<Response<ResultValue>>),
     Progress(ProgressNotification),
     Cancel(CancelNotification),
