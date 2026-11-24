@@ -1032,6 +1032,19 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column source_sync.external_created_at
 
 ## 86
++ column projects.remote
++ unique index projects_remote
+
+## 87
++ column external_identities.repository
+
+## 88
+(no table, column, trigger or unique index changes)
+
+## 89
++ column publication_attempts.destination_host
+
+## 90
 + column sync_state.aws_cli_path
 + column sync_state.aws_profile
 + column sync_state.last_bucket
@@ -1041,5 +1054,5 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column sync_state.s3_bucket
 + column sync_state.s3_prefix
 
-## 87
+## 91
 + column sync_state.s3_endpoint

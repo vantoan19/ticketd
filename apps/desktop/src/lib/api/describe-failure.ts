@@ -86,6 +86,10 @@ function plainCause(
         : "It was deleted or moved.";
     case "conflict":
       return "It changed elsewhere since it was loaded. Nothing was overwritten.";
+    case "project_source_host_mismatch":
+    case "project_checkout_required":
+    case "source_repository_not_listed":
+      return sentence(message);
     case "too_large":
       return "The file is larger than the upload limit.";
     case "not_signed_in":
@@ -147,6 +151,8 @@ function nextStep(code: FailureCode): FailureDescription["action"] {
       return "reconnect";
     case "conflict":
     case "review_changed":
+    case "source_repository_not_listed":
+    case "project_checkout_required":
     case "publication_changed":
     case "publication_ineligible":
     case "publication_settled":
@@ -161,6 +167,7 @@ function nextStep(code: FailureCode): FailureDescription["action"] {
       return "choose_another";
     case "forbidden":
     case "drive_unconfigured":
+    case "project_source_host_mismatch":
     case "workspace_unreadable":
     case "publication_different_content":
     case "publication_candidates":

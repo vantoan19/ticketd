@@ -1,4 +1,6 @@
 import { ticketUnavailable } from "@/features/tickets/inboxModel";
+import type { ProjectSourceSetup } from "@/features/projects/ConnectProjectSource";
+import { ProjectRemoteNote } from "@/features/projects/ProjectRemoteNote";
 import { requestInboxAction } from "@/features/tickets/inbox-commands";
 import type { TriageSelection } from "@/features/tickets/inbox-triage-context";
 import { InboxTriageProvider } from "@/features/tickets/InboxTriageProvider";
@@ -139,6 +141,16 @@ const PlanList = lazyView(() =>
 const Projects = lazyView(() =>
   import("@/features/projects/Projects").then((module) => module.Projects),
 );
+const ProjectFormDialog = lazyView(() =>
+  import("@/features/projects/ProjectFormDialog").then(
+    (module) => module.ProjectFormDialog,
+  ),
+);
+const ConnectProjectSource = lazyView(() =>
+  import("@/features/projects/ConnectProjectSource").then(
+    (module) => module.ConnectProjectSource,
+  ),
+);
 const AutomationsView = lazyView(() =>
   import("@/features/automations/AutomationsView").then(
     (module) => module.AutomationsView,
@@ -266,6 +278,12 @@ function AppContent() {
   const [contentPanel, setContentPanel] = useState<HTMLElement | null>(null);
   const [settingsSection, setSettingsSection] =
     useState<SettingsPageId>("appearance");
+  const [projectSource, setProjectSource] = useState<
+    | ({ mode: "setup" } & ProjectSourceSetup)
+    | { mode: "review"; projectId: string; resumed?: boolean }
+    | { mode: "edit_remote"; projectId: string; exit?: "close" | "review" }
+    | null
+  >(null);
   useThemeSync();
   useInputModality();
   usePrefetch();
@@ -312,6 +330,14 @@ function AppContent() {
     }
     setView(next);
   };
+  function reviewProjectSource(projectId: string) {
+    setProjectSource({ mode: "review", projectId });
+  }
+  function setupProjectSource(setup: ProjectSourceSetup) {
+    setProjectSource({ mode: "setup", ...setup });
+    openView("settings");
+    setSettingsSection(`source-${setup.provider}`);
+  }
   useSyncNavigation({
     openSettings: () => {
       openView("settings");
@@ -695,11 +721,31 @@ function AppContent() {
     },
     [patchTicket, reportTicketChanged],
   );
+  const pendingSourceSetup =
+    projectSource?.mode === "setup" ? projectSource : null;
+  const scopedProject = projects.find((item) => item.id === navigation.project);
+  const sourceProject = projects.find(
+    (item) => item.id === projectSource?.projectId,
+  );
+  const githubSourceRevision =
+    sourceEntries.find((entry) => entry.connector.provider === "github")?.saved
+      ?.saved_at ?? "";
+  function finishProjectSourceSetup() {
+    if (!pendingSourceSetup) return;
+    void reportChange();
+    setView(viewBeforeSettings);
+    setProjectSource({
+      mode: "review",
+      projectId: pendingSourceSetup.projectId,
+      resumed: true,
+    });
+  }
   const bulk = useBulkEdit(reportChange);
   // A restore or a download from Drive replaced the whole Workspace: the
   // selection, the opened pages and a failed bulk change describe the old one.
   // The report reloads the list through the shared version.
   const replaceWorkspace = async () => {
+    setProjectSource(null);
     setSelected(null);
     clearOpened();
     bulk.reset();
@@ -1118,6 +1164,7 @@ function AppContent() {
                               origin={VIEW_NAMES[viewBeforeSettings]}
                               onBack={() => {
                                 returnToSettingsEntry.current = true;
+                                setProjectSource(null);
                                 setView(viewBeforeSettings);
                               }}
                             />
@@ -1242,6 +1289,54 @@ function AppContent() {
                                     plans={plans}
                                     create={createTicket}
                                   />
+                                  {projectSource?.mode === "review" && (
+                                    <ConnectProjectSource
+                                      projectId={projectSource.projectId}
+                                      resumeAfterSetup={
+                                        projectSource.resumed ?? false
+                                      }
+                                      onClose={() => setProjectSource(null)}
+                                      onSetup={setupProjectSource}
+                                      onConnected={() => void reportChange()}
+                                      fallbackFocus={() => contentPanel}
+                                      {...(sourceProject && {
+                                        onEditRemote: () =>
+                                          setProjectSource({
+                                            mode: "edit_remote",
+                                            projectId: sourceProject.id,
+                                          }),
+                                      })}
+                                    />
+                                  )}
+                                  {projectSource?.mode === "edit_remote" &&
+                                    sourceProject && (
+                                      <ProjectFormDialog
+                                        project={sourceProject}
+                                        open={!projectSource.exit}
+                                        onOpenChange={(open) =>
+                                          !open &&
+                                          setProjectSource({
+                                            ...projectSource,
+                                            exit: "close",
+                                          })
+                                        }
+                                        onSaved={(project) => {
+                                          void reportChange();
+                                          if (project.remote)
+                                            setProjectSource({
+                                              ...projectSource,
+                                              exit: "review",
+                                            });
+                                        }}
+                                        onExitComplete={() => {
+                                          if (projectSource.exit === "review")
+                                            reviewProjectSource(
+                                              sourceProject.id,
+                                            );
+                                          else setProjectSource(null);
+                                        }}
+                                      />
+                                    )}
                                   <ViewRegion
                                     page={`${view}:${graphOrigin ?? ""}:${guideShown ? "first-run" : firstRunPending ? "pending" : ""}`}
                                   >
@@ -1250,8 +1345,21 @@ function AppContent() {
                                         <SettingsView
                                           selected={settingsSection}
                                           onSelect={setSettingsSection}
-                                          onOpenInbox={() => setView("inbox")}
+                                          onOpenInbox={() => {
+                                            setProjectSource(null);
+                                            setView("inbox");
+                                          }}
                                           onRestore={replaceWorkspace}
+                                          onProjectLinked={(projectId) => {
+                                            void reportChange();
+                                            reviewProjectSource(projectId);
+                                          }}
+                                          {...(pendingSourceSetup && {
+                                            projectSourceSetup:
+                                              pendingSourceSetup,
+                                            onProjectSourceSaved:
+                                              finishProjectSourceSetup,
+                                          })}
                                         />
                                       )}
                                     {view === "attachments" &&
@@ -1274,6 +1382,7 @@ function AppContent() {
                                           projects={projects}
                                           loading={loading}
                                           onChange={refresh}
+                                          onConnectSource={reviewProjectSource}
                                           onOpenTickets={(item) => {
                                             navigate({});
                                             scope("all", item.id);
@@ -1482,6 +1591,20 @@ function AppContent() {
                                             key={`tickets:${recoveryGeneration}`}
                                             workspace={workspace}
                                             bulk={bulk}
+                                            projectNotice={
+                                              <ProjectRemoteNote
+                                                project={scopedProject}
+                                                sourceRevision={
+                                                  githubSourceRevision
+                                                }
+                                                onConnectSource={
+                                                  reviewProjectSource
+                                                }
+                                                onProjectChange={() =>
+                                                  void reportChange()
+                                                }
+                                              />
+                                            }
                                             hidden={
                                               ((firstRun || firstRunPending) &&
                                                 view === "tickets") ||

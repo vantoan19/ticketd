@@ -407,6 +407,210 @@ fn linking_activity_details_to_a_ticket_keeps_them_through_cli() {
 }
 
 #[test]
+fn project_create_detects_the_remote_and_show_and_list_include_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let checkout = dir.path().join("checkout");
+    git_checkout(&checkout, "git@ghe.example.com:Team/Package.git");
+    let created: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["project", "create", "Package", checkout.to_str().unwrap()],
+    ))
+    .unwrap();
+    assert_eq!(created["remote"], "ghe.example.com/Team/Package");
+    let id = created["id"].as_str().unwrap();
+    let shown: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["project", "show", id])).unwrap();
+    let listed: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["project", "list"])).unwrap();
+    assert_eq!(shown["remote"], created["remote"]);
+    assert_eq!(listed[0]["remote"], created["remote"]);
+}
+
+#[test]
+fn project_remote_flags_override_detection_and_edit_the_remote() {
+    let dir = tempfile::tempdir().unwrap();
+    let alpha = dir.path().join("alpha");
+    let beta = dir.path().join("beta");
+    for checkout in [&alpha, &beta] {
+        git_checkout(checkout, "git@ghe.example.com:Team/Package.git");
+    }
+    let alpha: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &[
+            "project",
+            "create",
+            "Alpha",
+            alpha.to_str().unwrap(),
+            "--remote",
+            "ghe.example.com/Other/Package",
+        ],
+    ))
+    .unwrap();
+    assert_eq!(alpha["remote"], "ghe.example.com/Other/Package");
+
+    let beta_path = beta.to_str().unwrap();
+    let beta: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["project", "create", "Beta", beta_path, "--no-remote"],
+    ))
+    .unwrap();
+    assert_eq!(beta["remote"], serde_json::Value::Null);
+
+    let id = beta["id"].as_str().unwrap();
+    let edited: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &[
+            "project",
+            "edit",
+            id,
+            "Beta",
+            beta_path,
+            "--remote",
+            "ghe.example.com/Team/Package",
+        ],
+    ))
+    .unwrap();
+    assert_eq!(edited["remote"], "ghe.example.com/Team/Package");
+
+    let cleared: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &["project", "edit", id, "Beta", beta_path, "--clear-remote"],
+    ))
+    .unwrap();
+    assert_eq!(cleared["remote"], serde_json::Value::Null);
+}
+
+#[test]
+fn project_register_warns_about_a_remote_mismatch_and_still_registers() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = dir.path().join("original");
+    let other = dir.path().join("other");
+    let matching = dir.path().join("matching");
+    let expected = "ghe.example.com/Team/Package";
+    let different = "ghe.example.com/Other/Fork";
+    std::fs::create_dir(&original).unwrap();
+    git_checkout(&other, "git@ghe.example.com:Other/Fork.git");
+    git_checkout(&matching, "git@ghe.example.com:TEAM/package.git");
+    let project: serde_json::Value = serde_json::from_str(&run(
+        dir.path(),
+        &[
+            "project",
+            "create",
+            "Package",
+            original.to_str().unwrap(),
+            "--remote",
+            expected,
+        ],
+    ))
+    .unwrap();
+    let id = project["id"].as_str().unwrap();
+
+    for (path, mismatch) in [(&other, true), (&matching, false)] {
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(["project", "register", id, path.to_str().unwrap()])
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap();
+        let stderr = String::from_utf8(output.stderr).unwrap();
+        assert!(output.status.success(), "{stderr}");
+        assert_eq!(stderr.contains("warning:"), mismatch, "{stderr}");
+        if mismatch {
+            assert!(
+                stderr.contains(expected) && stderr.contains(different),
+                "{stderr}"
+            );
+        }
+        let registered: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(registered["remote"], expected);
+        let canonical = std::fs::canonicalize(path).unwrap();
+        assert!(
+            registered["paths"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|value| value == canonical.to_str().unwrap())
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn project_writes_return_saved_json_when_stderr_is_closed() {
+    use std::{os::unix::net::UnixStream, process::Stdio};
+
+    let dir = tempfile::tempdir().unwrap();
+    let original = dir.path().join("original");
+    let other = dir.path().join("other");
+    let remote = "ghe.example.com/Team/Package";
+    std::fs::create_dir(&original).unwrap();
+    git_checkout(&other, "git@ghe.example.com:Other/Fork.git");
+
+    let run_with_closed_stderr = |args: &[&str]| -> serde_json::Value {
+        let (reader, writer) = UnixStream::pair().unwrap();
+        drop(reader);
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .stderr(Stdio::from(std::os::fd::OwnedFd::from(writer)))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {}", output.status);
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let created = run_with_closed_stderr(&[
+        "project",
+        "create",
+        "Package",
+        original.to_str().unwrap(),
+        "--remote",
+        remote,
+    ]);
+    assert_eq!(created["remote"], remote);
+    let id = created["id"].as_str().unwrap();
+    let registered = run_with_closed_stderr(&["project", "register", id, other.to_str().unwrap()]);
+    let canonical = std::fs::canonicalize(other).unwrap();
+    assert!(
+        registered["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path == canonical.to_str().unwrap())
+    );
+    let persisted: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["project", "show", id])).unwrap();
+    assert_eq!(registered, persisted);
+}
+
+#[allow(clippy::unwrap_used)]
+fn git_checkout(path: &Path, origin: &str) {
+    std::fs::create_dir(path).unwrap();
+    for args in [
+        &["init", "--quiet", "--template="][..],
+        &["remote", "add", "origin", origin][..],
+    ] {
+        assert!(
+            Command::new("git")
+                .arg("-C")
+                .arg(path)
+                .args(args)
+                .status()
+                .unwrap()
+                .success()
+        );
+    }
+}
+
+#[test]
 fn project_commands_refuse_a_checkout_folder_registered_elsewhere() {
     let dir = tempfile::tempdir().unwrap();
     let taken = dir.path().join("taken");

@@ -1296,7 +1296,7 @@ fn a_record_held_back_by_a_newer_format_file_is_not_a_pending_upload_and_is_put_
     let (version, synced) = desks.file(&key);
     let newer = String::from_utf8(synced)
         .unwrap()
-        .replacen("format: 1\n", "format: 2\n", 1);
+        .replacen("format: 1\n", "format: 3\n", 1);
     desks
         .remote
         .write(
@@ -2090,10 +2090,10 @@ fn s3(bucket: &str, prefix: &str, profile: &str) -> S3Binding {
 
 const IDENTITY: &str = "arn:aws:sts::123456789012:assumed-role/Admin/mina";
 
-/// Format 86 records which storage the binding uses; every earlier binding is
+/// Format 90 records which storage the binding uses; every earlier binding is
 /// a Google Drive one.
 #[test]
-fn a_format_85_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and_keeps_syncing() {
+fn a_format_89_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and_keeps_syncing() {
     let desks = desks();
     let (desk, _, _) = desks.uploaded("a");
     let folder = desk.sync_status().unwrap().folder.unwrap();
@@ -2114,7 +2114,7 @@ fn a_format_85_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and
         columns += &format!("ALTER TABLE sync_state DROP COLUMN {column};");
     }
     fixture
-        .execute_batch(&format!("{columns} PRAGMA user_version = 85;"))
+        .execute_batch(&format!("{columns} PRAGMA user_version = 89;"))
         .unwrap();
     drop(fixture);
 
@@ -2138,10 +2138,10 @@ fn a_format_85_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and
     );
 }
 
-/// Format 87 records which S3 service the bucket was reached through. A binding made before
+/// Format 91 records which S3 service the bucket was reached through. A binding made before
 /// has none recorded, and the desktop records it from the profile on its next successful build.
 #[test]
-fn a_format_86_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one() {
+fn a_format_90_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one() {
     let desks = desks();
     let path = desks.directory.path().join("a");
     let mut desk = Workspace::open(&path).unwrap();
@@ -2152,7 +2152,7 @@ fn a_format_86_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one
     drop(desk);
     let fixture = rusqlite::Connection::open(&path).unwrap();
     fixture
-        .execute_batch("ALTER TABLE sync_state DROP COLUMN s3_endpoint; PRAGMA user_version = 86;")
+        .execute_batch("ALTER TABLE sync_state DROP COLUMN s3_endpoint; PRAGMA user_version = 90;")
         .unwrap();
     drop(fixture);
 

@@ -114,7 +114,7 @@ pub(crate) fn migrate_last_folder(connection: &Connection) -> Result<(), Error> 
     )
 }
 
-/// Format version 86: which storage the sync binding uses, where in it (the S3
+/// Format version 90: which storage the sync binding uses, where in it (the S3
 /// bucket and prefix), and this desktop's own way into it (the AWS CLI profile
 /// and the path to the `aws` program). Every binding made before is Google
 /// Drive. The last-synced copies tell [`remembered`] whether a folder is in
@@ -143,7 +143,7 @@ pub(crate) fn migrate_provider(connection: &Connection) -> Result<(), Error> {
     )
 }
 
-/// Format version 87: the S3 service the binding's bucket was reached through, so a
+/// Format version 91: the S3 service the binding's bucket was reached through, so a
 /// profile that later points elsewhere stops sync instead of switching services. Bindings
 /// made before record nothing; the desktop records the profile's service on its next
 /// successful build.

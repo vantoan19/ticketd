@@ -42,12 +42,12 @@ pub(crate) fn migrate_unchanged_tickets(
     capture::migrate_unchanged_tickets(connection)
 }
 
-/// Format version 87: see `setup::migrate_endpoint`.
+/// Format version 91: see `setup::migrate_endpoint`.
 pub(crate) fn migrate_endpoint(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_endpoint(connection)
 }
 
-/// Format version 86: see `setup::migrate_provider`.
+/// Format version 90: see `setup::migrate_provider`.
 pub(crate) fn migrate_provider(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_provider(connection)
 }
