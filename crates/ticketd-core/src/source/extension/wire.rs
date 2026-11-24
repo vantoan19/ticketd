@@ -13,25 +13,18 @@ impl RpcErrorExt for RpcError {
         {
             failure.message = secrets.text(&failure.message);
             secrets.fields(&mut failure.fields);
-            let detail = failure
-                .detail
-                .take()
-                .filter(|detail| valid_failure_detail(detail));
             let error = into_source_error(failure);
-            if let Some(detail) = detail {
-                tracing::debug!(
-                    source_id = source_id.unwrap_or_default(),
-                    error_kind = error.code(),
-                    error_detail = %secrets.text(&detail),
-                    "source extension reported an error detail"
-                );
-            }
+            tracing::debug!(
+                source_id = source_id.unwrap_or_default(),
+                error_kind = error.code(),
+                error_class = error.class().as_str(),
+                "source extension reported an error"
+            );
             return error;
         }
         SourceError::Protocol(format!(
-            "JSON-RPC error {}: {}",
-            self.code,
-            secrets.text(&self.message)
+            "source extension returned JSON-RPC error {}",
+            self.code
         ))
     }
 }

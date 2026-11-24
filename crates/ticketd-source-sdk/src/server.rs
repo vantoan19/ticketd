@@ -149,7 +149,7 @@ impl ExtensionError {
         )
     }
 
-    /// Attach a fixed diagnostic code for local logs, separate from the person-facing message.
+    /// Attach a fixed diagnostic code to the wire response. ticketd does not log it.
     /// Never use tracker error text, credentials or issue content here.
     pub fn with_detail(mut self, detail: &'static str) -> Self {
         self.detail = valid_failure_detail(detail).then_some(detail);

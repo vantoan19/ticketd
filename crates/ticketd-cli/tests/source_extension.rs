@@ -308,7 +308,8 @@ fn installs_only_after_consent_and_refuses_a_changed_install() {
             .contains("tracker ran with [redacted]")
     );
 
-    fs::write(registry.join("example-tracker/extra.txt"), "a new file").unwrap();
+    let installed = Path::new(extension["path"].as_str().unwrap());
+    fs::write(installed.join("extra.txt"), "a new file").unwrap();
     let blocked = conformance();
     assert!(!blocked.status.success());
     assert!(
@@ -322,7 +323,7 @@ fn installs_only_after_consent_and_refuses_a_changed_install() {
         .output()
         .unwrap();
     assert!(removed.status.success());
-    assert!(!registry.join("example-tracker").exists());
+    assert!(!installed.exists());
     let listed = command().arg("list").output().unwrap();
     assert_eq!(
         serde_json::from_slice::<Value>(&listed.stdout).unwrap(),
@@ -517,11 +518,11 @@ fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
     let extension = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../ticketd-core/tests/fixtures/source-extension");
     let secret = "private-qz85/to%ken";
-    let command = |args: &[&str]| {
+    let command = |credential: &str, args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_ticketd"))
             .env("TICKETD_TEST_WORKSPACE", &workspace)
             .env("TICKETD_SOURCE_EXTENSIONS_DIR", &registry)
-            .env("TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY", secret)
+            .env("TICKETD_SOURCE_SCRIPTED_FIXTURE_KEY", credential)
             .env("TICKETD_LOG", "ticketd_core::source::extension::wire=debug")
             // The direct override takes precedence over a failed password command.
             .env(
@@ -532,46 +533,61 @@ fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
             .output()
             .unwrap()
     };
-    let linked = command(&["source", "extension", "link", extension.to_str().unwrap()]);
+    let linked = command(
+        secret,
+        &["source", "extension", "link", extension.to_str().unwrap()],
+    );
     assert!(linked.status.success(), "{:?}", linked.stderr);
-    for (mode, expected) in [
-        ("secret_stdout", "unexpected stdout line"),
-        ("secret_error", "tracker refused [redacted]"),
+    for (mode, value, expected) in [
+        (
+            "secret_stdout",
+            secret,
+            "unexpected source extension stdout",
+        ),
+        ("secret_error", secret, "tracker refused [redacted]"),
         (
             "secret_result",
+            secret,
+            "source extension returned a credential in its result",
+        ),
+        (
+            "embedded_secret_result",
+            "mv3k2",
             "source extension returned a credential in its result",
         ),
     ] {
-        let result = command(&[
-            "source",
-            "add",
-            "scripted",
-            "--set",
-            &format!("mode={mode}"),
-        ]);
+        let result = command(
+            value,
+            &[
+                "source",
+                "add",
+                "scripted",
+                "--set",
+                &format!("mode={mode}"),
+            ],
+        );
         assert!(!result.status.success(), "{mode}");
         let stderr = String::from_utf8_lossy(&result.stderr);
         assert!(stderr.contains(expected), "{mode}: {stderr}");
-        assert!(!stderr.contains(secret));
+        assert!(!stderr.contains(value));
         assert!(!stderr.contains("private-qz85%2Fto%25ken"));
     }
-    for (mode, expected) in [
-        ("safe_detail", Some("error_detail=fixture_response_missing")),
-        ("private_detail", None),
-        ("credential_detail", None),
-    ] {
-        let output = command(&[
-            "source",
-            "add",
-            "scripted",
-            "--set",
-            &format!("mode={mode}"),
-        ]);
+    for mode in ["safe_detail", "private_detail", "credential_detail"] {
+        let output = command(
+            secret,
+            &[
+                "source",
+                "add",
+                "scripted",
+                "--set",
+                &format!("mode={mode}"),
+            ],
+        );
         assert!(!output.status.success());
         let logs = String::from_utf8_lossy(&output.stderr);
-        if let Some(detail) = expected {
-            assert!(logs.contains(detail), "{mode}: {logs}");
-        }
+        assert!(logs.contains("error_kind=protocol"), "{mode}: {logs}");
+        assert!(!logs.contains("fixture_response_missing"));
+        assert!(!logs.contains("error_detail="));
         assert!(!logs.contains(secret));
         assert!(!logs.contains("someone@example.invalid"));
         assert!(
@@ -579,7 +595,6 @@ fn known_credentials_are_redacted_in_diagnostics_and_rejected_in_results() {
                 .any(|line| line.starts_with("error:")
                     && line.contains("could not read the tracker"))
         );
-        assert!(!logs.lines().any(|line| line.starts_with("error:") && line.contains("fixture_response_missing")));
     }
 
     let logs = directory.path().join("logs/sources");

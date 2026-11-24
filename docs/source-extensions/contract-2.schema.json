@@ -1796,7 +1796,7 @@
           "$ref": "#/$defs/WireFailureCode"
         },
         "detail": {
-          "description": "A fixed diagnostic code for local logs. Use up to 80 lower-case ASCII\nletters, digits, underscores or hyphens. Never include tracker data or credentials.",
+          "description": "A fixed diagnostic code. Use up to 80 lower-case ASCII letters, digits,\nunderscores or hyphens. ticketd accepts this field and does not log it.",
           "type": [
             "string",
             "null"

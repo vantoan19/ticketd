@@ -218,7 +218,6 @@ impl SourceError {
         tracing::debug!(
             error_kind = self.code(),
             error_class = self.class().as_str(),
-            error = %self,
             error_detail = %detail,
             "source operation failed"
         );

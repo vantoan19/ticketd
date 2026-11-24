@@ -137,7 +137,12 @@ fn malformed_and_oversized_stdout_fail_without_poisoning_the_next_call() {
         .check_connection(&configuration("broken"))
         .unwrap_err();
     assert!(matches!(malformed, SourceError::Protocol(_)));
-    assert!(malformed.to_string().contains("\"not a protocol message\""));
+    assert!(
+        malformed
+            .to_string()
+            .contains("unexpected source extension stdout")
+    );
+    assert!(!malformed.to_string().contains("not a protocol message"));
     let large = connector
         .check_connection(&configuration("oversized"))
         .unwrap_err();
@@ -145,6 +150,50 @@ fn malformed_and_oversized_stdout_fail_without_poisoning_the_next_call() {
     assert!(large.to_string().contains("line exceeds"));
     let checked = connector.check_connection(&configuration("noisy")).unwrap();
     assert_eq!(checked.connection.account, "octo");
+}
+
+#[test]
+fn idle_stdout_restarts_the_process_without_failing_the_next_request() {
+    let connector = fixture_connector(Arc::new(Host::default()), "first");
+    let account = |mode| {
+        connector
+            .check_connection(&configuration(mode))
+            .unwrap()
+            .connection
+            .account
+    };
+    let before = account("idle_noise");
+    assert_ne!(account("session"), before);
+}
+
+#[tokio::test]
+async fn a_deadline_before_writing_is_a_definite_no_send() {
+    use process::{CallBudget, CallControl, Fault, Process};
+    use tokio::{process::Command, sync::watch, time::Instant};
+
+    let mut command = Command::new("node");
+    command.args(["--eval", "process.stdin.resume()"]);
+    let mut child = Process::spawn(command, Default::default(), None).unwrap();
+    let (_closing, mut closed) = watch::channel(false);
+    let result = child
+        .exchange(
+            1,
+            b"synthetic request\n",
+            CallBudget {
+                soft: Duration::from_secs(1),
+                hard: Duration::from_secs(1),
+                grace: Duration::from_millis(100),
+            },
+            &mut CallControl {
+                refresh: None,
+                closing: &mut closed,
+                deadline: Some(Instant::now()),
+                source_id: None,
+            },
+        )
+        .await;
+    assert!(matches!(result, Err(Fault::NotSent)));
+    child.shutdown().await;
 }
 
 #[test]

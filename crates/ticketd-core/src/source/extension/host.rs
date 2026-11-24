@@ -18,7 +18,7 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use tokio::{
     runtime::{Builder, Handle},
-    sync::{mpsc, oneshot, watch},
+    sync::{Mutex as AsyncMutex, OwnedMutexGuard, mpsc, oneshot, watch},
     task::JoinHandle,
     time::{Instant, interval, sleep_until},
 };
@@ -157,9 +157,52 @@ enum Message {
 }
 
 struct Endpoint {
-    serial: Mutex<()>,
+    serial: Arc<AsyncMutex<()>>,
+    runtime: Handle,
+    closing: watch::Receiver<bool>,
     sender: mpsc::Sender<Message>,
     redactions: Redactions,
+}
+
+impl Endpoint {
+    fn acquire(
+        &self,
+        refresh: Option<&RefreshControl>,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<OwnedMutexGuard<()>, SourceError> {
+        let serial = self.serial.clone();
+        if let Ok(guard) = serial.clone().try_lock_owned() {
+            return Ok(guard);
+        }
+        // The caller owns a blocking connector interface and may already be
+        // inside another Tokio runtime. Wait on the host runtime's queue.
+        let (ready, result) = blocking::sync_channel(1);
+        let mut closing = self.closing.clone();
+        let refresh = refresh.cloned();
+        self.runtime.spawn(async move {
+            let guard = tokio::select! {
+                biased;
+                _ = wait_for_close(&mut closing) => Err(SourceError::NotSent(
+                    "the source extension host is shutting down".into(),
+                )),
+                _ = async {
+                    match refresh {
+                        Some(refresh) => refresh.canceled().await,
+                        None => std::future::pending().await,
+                    }
+                } => Err(SourceError::RefreshCanceled),
+                _ = async {
+                    match deadline {
+                        Some(deadline) => sleep_until(Instant::from_std(deadline)).await,
+                        None => std::future::pending().await,
+                    }
+                } => Err(SourceError::NotSent("the publication's time to send expired".into())),
+                guard = serial.lock_owned() => Ok(guard),
+            };
+            let _ = ready.send(guard);
+        });
+        result.recv().map_err(|_| disconnected())?
+    }
 }
 
 impl Host {
@@ -221,13 +264,15 @@ impl Host {
         let task = runtime.handle.spawn(session(
             key.clone(),
             self.limits,
-            closing,
+            closing.clone(),
             messages,
             redactions.clone(),
             log,
         ));
         let endpoint = Arc::new(Endpoint {
-            serial: Mutex::new(()),
+            serial: Arc::default(),
+            runtime: runtime.handle.clone(),
+            closing,
             sender,
             redactions,
         });
@@ -273,10 +318,7 @@ impl Host {
         }
         let request = self.encode(call, deadline)?;
         let endpoint = self.endpoint(definition, id)?;
-        let _serial = endpoint
-            .serial
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
+        let _serial = endpoint.acquire(refresh, deadline)?;
         if let Some(refresh) = refresh {
             refresh.check()?;
         }
@@ -293,12 +335,8 @@ impl Host {
             })
             .map_err(|_| SourceError::NotSent("the source extension session has stopped".into()))?;
         let value = result.recv().map_err(|_| disconnected())??;
-        serde_json::from_value(value).map_err(|error| {
-            SourceError::Protocol(format!(
-                "invalid result: {}",
-                endpoint.redactions.text(&error.to_string())
-            ))
-        })
+        serde_json::from_value(value)
+            .map_err(|_| SourceError::Protocol("invalid source extension result".into()))
     }
 
     fn encode(
@@ -335,10 +373,9 @@ impl Host {
             .map(|(_, (endpoint, _))| endpoint.clone())
             .collect();
         for endpoint in endpoints {
-            let _serial = endpoint
-                .serial
-                .lock()
-                .unwrap_or_else(|error| error.into_inner());
+            let Ok(_serial) = endpoint.acquire(None, None) else {
+                continue;
+            };
             let (reply, received) = blocking::sync_channel(1);
             if endpoint.sender.try_send(Message::Retry(reply)).is_ok() {
                 let _ = received.recv();
@@ -407,11 +444,22 @@ async fn session(
     let mut poll = interval(EXIT_POLL);
     poll.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
     let mut crashes = VecDeque::new();
-    let mut pending_stdout: Option<Fault> = None;
     loop {
         tokio::select! {
             biased;
             _ = wait_for_close(&mut closing) => break,
+            fault = idle_stdout(&mut active), if active.is_some() => {
+                if matches!(fault, Fault::Crash) {
+                    record_crash(&mut crashes);
+                } else {
+                    tracing::debug!(
+                        source_id = key.id.as_deref().unwrap_or_default(),
+                        error_kind = SourceError::from(fault).code(),
+                        "source extension closed after unexpected idle output"
+                    );
+                }
+                stop(&mut active).await;
+            }
             message = messages.recv() => match message {
                 Some(Message::Retry(reply)) => {
                     crashes.clear();
@@ -423,16 +471,11 @@ async fn session(
                     }
                     if let Err(error) = verify_launch(&definition.launch).await {
                         stop(&mut active).await;
-                        pending_stdout = None;
                         let _ = reply.send(Err(error));
                         continue;
                     }
                     if crashes.len() >= CRASH_LIMIT {
                         let _ = reply.send(Err(SourceError::ExtensionCrashLimit));
-                        continue;
-                    }
-                    if let Some(fault) = pending_stdout.take() {
-                        let _ = reply.send(Err(fault.into()));
                         continue;
                     }
                     let mut control = CallControl {
@@ -466,14 +509,6 @@ async fn session(
                 None => break,
             },
             _ = sleep_until(idle_at), if active.is_some() => stop(&mut active).await,
-            fault = idle_stdout(&mut active), if active.is_some() => {
-                if matches!(fault, Fault::Crash) {
-                    record_crash(&mut crashes);
-                } else {
-                    pending_stdout = Some(fault);
-                }
-                stop(&mut active).await;
-            }
             _ = poll.tick(), if active.is_some() => {
                 if active.as_mut().is_some_and(|(_, process)| process.child.exited()) {
                     record_crash(&mut crashes);
@@ -506,7 +541,7 @@ async fn idle_stdout(active: &mut Option<(Arc<Launch>, Process)>) -> Fault {
         return std::future::pending().await;
     };
     match process.stdout.read().await {
-        Ok(line) => process.stdout.unexpected(&line),
+        Ok(_) => Fault::Protocol("unexpected source extension stdout".into()),
         Err(fault) => fault,
     }
 }
@@ -655,4 +690,46 @@ pub(super) fn validate_handshake(launch: &Launch, hello: &Description) -> Result
 
 fn disconnected() -> SourceError {
     SourceError::Unavailable("the source extension host stopped during the request".into())
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+
+    #[test]
+    fn a_waiting_refresh_can_cancel_while_the_connection_is_busy() {
+        let runtime = Runtime::start().unwrap();
+        let (sender, _messages) = mpsc::channel(1);
+        let endpoint = Endpoint {
+            serial: Arc::default(),
+            runtime: runtime.handle.clone(),
+            closing: runtime.closing.subscribe(),
+            sender,
+            redactions: Redactions::default(),
+        };
+        let active = endpoint.acquire(None, None).unwrap();
+        let waiting = RefreshControl::default();
+        let barrier = std::sync::Barrier::new(2);
+        thread::scope(|scope| {
+            let (ready, result) = blocking::sync_channel(1);
+            let barrier = &barrier;
+            let endpoint = &endpoint;
+            let waiting = &waiting;
+            scope.spawn(move || {
+                barrier.wait();
+                let _ = ready.send(endpoint.acquire(Some(waiting), None));
+            });
+            barrier.wait();
+            waiting.cancel();
+            let canceled = result.recv_timeout(Duration::from_secs(3));
+            drop(active);
+            assert!(matches!(canceled, Ok(Err(SourceError::RefreshCanceled))));
+        });
+        assert!(endpoint.acquire(None, None).is_ok());
+        runtime.closing.send_replace(true);
+        runtime.sessions.send(Vec::new()).unwrap();
+        runtime.thread.join().unwrap();
+    }
 }

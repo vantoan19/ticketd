@@ -5040,6 +5040,7 @@ dependencies = [
  "directories",
  "fs2",
  "keyring",
+ "percent-encoding",
  "process-wrap",
  "pulldown-cmark",
  "regex",

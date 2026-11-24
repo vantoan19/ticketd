@@ -1,10 +1,12 @@
 //! Owns the process tree, and all three pipes, on the host runtime.
 
 use std::{
-    collections::VecDeque,
     io,
     process::Stdio,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc,
+        atomic::{AtomicUsize, Ordering},
+    },
     time::Duration,
 };
 
@@ -12,7 +14,7 @@ use serde_json::Value;
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader},
     process::{ChildStdin, ChildStdout, Command},
-    sync::watch,
+    sync::{mpsc, watch},
     task::JoinHandle,
     time::{Instant, Interval, interval, sleep, sleep_until, timeout},
 };
@@ -29,6 +31,8 @@ use super::{
 
 pub(super) use super::wire::LINE_LIMIT;
 const STDERR_LIMIT: usize = 16 * 1024;
+const STDERR_QUEUE: usize = 256;
+const STDERR_BATCH: usize = 16;
 const EOF_GRACE: Duration = Duration::from_millis(150);
 #[cfg(unix)]
 const TERMINATE_GRACE: Duration = Duration::from_millis(150);
@@ -40,6 +44,7 @@ pub(super) enum Fault {
     Crash,
     Protocol(String),
     Timeout,
+    NotSent,
     Canceled,
 }
 
@@ -49,6 +54,9 @@ impl From<Fault> for SourceError {
             Fault::Crash => Self::Unavailable("the source extension process exited".into()),
             Fault::Protocol(message) => Self::Protocol(message),
             Fault::Timeout => Self::Unavailable("the source extension request timed out".into()),
+            Fault::NotSent => {
+                Self::NotSent("the source extension request expired before sending".into())
+            }
             Fault::Canceled => Self::RefreshCanceled,
         }
     }
@@ -92,8 +100,10 @@ pub(super) struct Process {
     pub child: ManagedChild,
     stdin: Option<ChildStdin>,
     pub stdout: Lines,
-    stderr: Arc<Mutex<VecDeque<u8>>>,
+    redactions: Redactions,
+    stderr_bytes: Arc<AtomicUsize>,
     drain: JoinHandle<()>,
+    log_writer: Option<JoinHandle<()>>,
 }
 
 impl Process {
@@ -115,32 +125,45 @@ impl Process {
         let stdin = child.stdin().ok_or_else(missing_pipe)?;
         let stdout = child.stdout().ok_or_else(missing_pipe)?;
         let mut reader = child.stderr().ok_or_else(missing_pipe)?;
-        let stderr = Arc::new(Mutex::new(VecDeque::new()));
-        let tail = stderr.clone();
+        let stderr_bytes = Arc::new(AtomicUsize::new(0));
+        let captured = stderr_bytes.clone();
         let stderr_redactions = redactions.clone();
+        let (log_tx, log_writer) = log.map_or((None, None), |sink| {
+            let (tx, mut rx) = mpsc::channel::<Vec<u8>>(STDERR_QUEUE);
+            let writer = tokio::spawn(async move {
+                let mut write_failed = false;
+                let mut batch = Vec::new();
+                while rx.recv_many(&mut batch, STDERR_BATCH).await != 0 {
+                    let bytes = batch.concat();
+                    batch.clear();
+                    let sink = sink.clone();
+                    let failed = !tokio::task::spawn_blocking(move || sink.append(&bytes))
+                        .await
+                        .is_ok_and(|result| result.is_ok());
+                    if failed && !write_failed {
+                        tracing::warn!("could not write source extension stderr");
+                    }
+                    write_failed = failed;
+                }
+            });
+            (Some(tx), Some(writer))
+        });
         let drain = tokio::spawn(async move {
             let mut stream = stderr_redactions.stream();
             let mut buffer = [0; 4096];
-            let mut log = log;
             loop {
                 let (bytes, finished) = match reader.read(&mut buffer).await {
                     Ok(length @ 1..) => (stream.push(&buffer[..length]), false),
                     _ => (stream.finish(), true),
                 };
-                {
-                    let mut tail = tail.lock().unwrap_or_else(|error| error.into_inner());
-                    tail.extend(bytes.iter().rev().take(STDERR_LIMIT).rev());
-                    let discard = tail.len().saturating_sub(STDERR_LIMIT);
-                    tail.drain(..discard);
-                }
-                if let Some(sink) = log.clone()
+                let count = (captured.load(Ordering::Relaxed) + bytes.len()).min(STDERR_LIMIT);
+                captured.store(count, Ordering::Relaxed);
+                if let Some(log) = &log_tx
                     && !bytes.is_empty()
-                    && !tokio::task::spawn_blocking(move || sink.append(&bytes))
-                        .await
-                        .is_ok_and(|result| result.is_ok())
                 {
-                    tracing::warn!("could not write source extension stderr");
-                    log = None;
+                    // The extension must be able to write stderr even while
+                    // diagnostic storage is contended or temporarily stalled.
+                    let _ = log.try_send(bytes);
                 }
                 if finished {
                     break;
@@ -153,10 +176,11 @@ impl Process {
             stdout: Lines {
                 reader: BufReader::new(stdout),
                 frame: Vec::new(),
-                redactions,
             },
-            stderr,
+            redactions,
+            stderr_bytes,
             drain,
+            log_writer,
         })
     }
 
@@ -172,17 +196,31 @@ impl Process {
         let hard = started + limits.hard;
         let hard = control.deadline.map_or(hard, |deadline| hard.min(deadline));
         let mut deadline = hard.min(started + limits.soft);
+        if Instant::now() >= deadline {
+            return Err(Fault::NotSent);
+        }
         let mut polls = interval(EXIT_POLL);
         let stdin = self.stdin.as_mut().ok_or(Fault::Crash)?;
-        tokio::select! {
-            biased;
-            // A canceled write may have left a partial JSON frame. In that
-            // case the host closes the process rather than appending another.
-            _ = control.canceled() => return Err(Fault::Canceled),
-            _ = sleep_until(deadline) => return Err(Fault::Timeout),
-            written = stdin.write_all(frame) => written.map_err(|_| Fault::Crash)?,
-            _ = watch_for_exit(&mut self.child, &mut polls) => return Err(Fault::Crash),
-        };
+        let mut sent = 0;
+        while sent < frame.len() {
+            // write is cancellation-safe: a deadline before its first
+            // successful write proves that this request was never sent.
+            let length = tokio::select! {
+                biased;
+                _ = control.canceled() => return Err(Fault::Canceled),
+                _ = sleep_until(deadline) => return Err(if sent == 0 {
+                    Fault::NotSent
+                } else {
+                    Fault::Timeout
+                }),
+                written = stdin.write(&frame[sent..]) => written.map_err(|_| Fault::Crash)?,
+                _ = watch_for_exit(&mut self.child, &mut polls) => return Err(Fault::Crash),
+            };
+            if length == 0 {
+                return Err(Fault::Crash);
+            }
+            sent += length;
+        }
         loop {
             let inbound = tokio::select! {
                 biased;
@@ -198,7 +236,7 @@ impl Process {
                     }
                 }
                 Ok(Inbound::Reply(Response::Success(response))) => {
-                    if self.stdout.redactions.contains_secret(&response.result) {
+                    if self.redactions.contains_secret(&response.result) {
                         return Err(Fault::Protocol(
                             "source extension returned a credential in its result".into(),
                         ));
@@ -208,7 +246,7 @@ impl Process {
                 Ok(Inbound::Reply(Response::Failure(response))) => {
                     return Ok(Err(response
                         .error
-                        .into_source_error(&self.stdout.redactions, control.source_id)));
+                        .into_source_error(&self.redactions, control.source_id)));
                 }
                 Err(reason @ (Fault::Canceled | Fault::Timeout)) => {
                     if self.cancel_request(id, limits.grace, control.refresh).await {
@@ -249,7 +287,7 @@ impl Process {
                 let _ = reply.jsonrpc;
                 Ok(Inbound::Reply(Response::Failure(reply)))
             }
-            _ => Err(self.stdout.unexpected(&line)),
+            _ => Err(Fault::Protocol("unexpected source extension stdout".into())),
         }
     }
 
@@ -319,11 +357,13 @@ impl Process {
             self.drain.abort();
             let _ = self.drain.await;
         }
-        let captured = self
-            .stderr
-            .lock()
-            .unwrap_or_else(|error| error.into_inner())
-            .len();
+        if let Some(mut writer) = self.log_writer.take()
+            && timeout(REAP_LIMIT, &mut writer).await.is_err()
+        {
+            writer.abort();
+            let _ = writer.await;
+        }
+        let captured = self.stderr_bytes.load(Ordering::Relaxed);
         tracing::debug!(captured_stderr_bytes = captured, "source extension stopped");
     }
 }
@@ -342,7 +382,6 @@ async fn watch_for_exit(child: &mut ManagedChild, polls: &mut Interval) {
 pub(super) struct Lines {
     reader: BufReader<ChildStdout>,
     frame: Vec<u8>,
-    redactions: Redactions,
 }
 
 impl Lines {
@@ -353,7 +392,7 @@ impl Lines {
                 return Err(if self.frame.is_empty() {
                     Fault::Crash
                 } else {
-                    self.unexpected(&self.frame)
+                    Fault::Protocol("incomplete source extension stdout frame".into())
                 });
             }
             let newline = bytes.iter().position(|byte| *byte == b'\n');
@@ -369,18 +408,6 @@ impl Lines {
                 return Ok(std::mem::take(&mut self.frame));
             }
         }
-    }
-
-    pub(super) fn unexpected(&self, line: &[u8]) -> Fault {
-        // Match the full line before taking a short preview, including a value
-        // that starts within the preview and ends after it.
-        let redacted = self.redactions.text(&String::from_utf8_lossy(line));
-        let limit = redacted.floor_char_boundary(240.min(redacted.len()));
-        let suffix = if limit < redacted.len() { "…" } else { "" };
-        Fault::Protocol(format!(
-            "unexpected stdout line {:?}{suffix}",
-            &redacted[..limit]
-        ))
     }
 }
 

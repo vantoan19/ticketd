@@ -1865,7 +1865,6 @@ fn start_periodic_refresh(
                         if reported.as_deref() != Some(message.as_str()) {
                             tracing::warn!(
                                 error_kind = error.kind().code(),
-                                %error,
                                 "periodic source refresh could not run"
                             );
                             reported = Some(message);

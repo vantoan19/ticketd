@@ -194,15 +194,15 @@ pub struct WireFailure {
     pub class: ErrorClass,
     pub code: WireFailureCode,
     pub message: String,
-    /// A fixed diagnostic code for local logs. Use up to 80 lower-case ASCII
-    /// letters, digits, underscores or hyphens. Never include tracker data or credentials.
+    /// A fixed diagnostic code. Use up to 80 lower-case ASCII letters, digits,
+    /// underscores or hyphens. ticketd accepts this field and does not log it.
     pub detail: Option<String>,
     #[serde(default)]
     pub fields: Vec<FieldIssue>,
     pub retry_after_secs: Option<u64>,
 }
 
-/// Validate a code before sending it or logging it.
+/// Validate a diagnostic code before sending it.
 #[doc(hidden)]
 pub fn valid_failure_detail(detail: &str) -> bool {
     !detail.is_empty()

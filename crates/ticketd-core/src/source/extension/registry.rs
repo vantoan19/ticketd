@@ -8,6 +8,7 @@ use std::{
 };
 
 use fs2::FileExt;
+use percent_encoding::percent_decode_str;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::process::Command;
@@ -23,6 +24,8 @@ use crate::source::{
 const MANIFEST: &str = "ticketd-source.json";
 const MANIFEST_LIMIT: u64 = 16 * 1024;
 const RECORD_LIMIT: u64 = 1024 * 1024;
+const PACKAGE_PREFIX: &str = ".source-package-";
+const STAGING_PREFIX: &str = ".source-stage-";
 
 /// A device-local extension registration. Connections keep their own settings.
 #[derive(Serialize)]
@@ -251,6 +254,9 @@ impl Launch {
                 && let Some(password) = url.password()
             {
                 redactions.register([value, password]);
+                if let Ok(decoded) = percent_decode_str(password).decode_utf8() {
+                    redactions.register([decoded.as_ref()]);
+                }
             }
         }
     }
@@ -450,15 +456,10 @@ impl ExtensionRegistry {
     /// Register a development folder after a successful handshake.
     pub fn link(&self, path: &Path) -> Result<RegisteredExtension, SourceError> {
         let launch = Launch::load(path)?;
-        let _lock = registry_lock(&self.folder)?;
+        let _lock = self.lock()?;
         if self
             .read_record(&launch.manifest.id)
             .is_ok_and(|record| record.launch.is_installed())
-            || self
-                .folder
-                .join(&launch.manifest.id)
-                .symlink_metadata()
-                .is_ok()
         {
             return Err(SourceError::NotSent(
                 "this source extension is installed; remove it before linking a development folder"
@@ -483,7 +484,11 @@ impl ExtensionRegistry {
         let manifest = Manifest::read(&package)?;
         fs::create_dir_all(&self.folder).map_err(storage_error)?;
         let registry = self.folder.canonicalize().map_err(storage_error)?;
-        let folder = registry.join(&manifest.id);
+        let folder = registry.join(format!(
+            "{PACKAGE_PREFIX}{}.{}",
+            manifest.id,
+            uuid::Uuid::new_v4()
+        ));
         let executable = installed_executable(&manifest, &source, &package, &registry, &folder)?;
         let launch = Launch {
             manifest,
@@ -509,7 +514,7 @@ impl ExtensionRegistry {
     /// Activate the approved copy. Keep the previous package and registration
     /// usable if the new package cannot complete its handshake.
     pub fn add(&self, prepared: PreparedExtension) -> Result<RegisteredExtension, SourceError> {
-        let _lock = registry_lock(&self.folder)?;
+        let _lock = self.lock()?;
         self.activate(prepared, None)
     }
 
@@ -534,7 +539,7 @@ impl ExtensionRegistry {
         let executable = sidecar.file_name().ok_or_else(|| {
             SourceError::Protocol("the bundled source executable has no name".into())
         })?;
-        let _lock = registry_lock(&self.folder)?;
+        let _lock = self.lock()?;
         match self.read_record(&description.descriptor.provider) {
             Ok(record) => {
                 let bundled = matches!(
@@ -592,39 +597,44 @@ impl ExtensionRegistry {
                 "the extension was prepared for another registry".into(),
             ));
         }
+        let id = launch.manifest.id.clone();
+        let previous = match self.read_record(&id) {
+            Ok(record) => Some(record),
+            Err(SourceError::UnknownProvider(_)) => None,
+            Err(error) => return Err(error),
+        };
         let destination = launch.folder.clone();
-        if destination.symlink_metadata().is_ok()
-            && !self
-                .read_record(&launch.manifest.id)
-                .is_ok_and(|record| record.launch.is_installed())
-        {
-            return Err(SourceError::NotSent(
-                "the source extension install path is already occupied".into(),
-            ));
+        match destination.symlink_metadata() {
+            Ok(_) => {
+                return Err(SourceError::NotSent(
+                    "the source extension install path is already occupied".into(),
+                ));
+            }
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(storage_error(error)),
         }
-        // Move within one filesystem, even when the system temporary folder
-        // lives on a different volume.
-        let transaction = tempfile::tempdir_in(&registry).map_err(storage_error)?;
+        // Install the new generation beside the previous one. An interrupted
+        // copy or handshake cannot change the package the old record trusts.
+        let transaction = tempfile::Builder::new()
+            .prefix(STAGING_PREFIX)
+            .tempdir_in(&registry)
+            .map_err(storage_error)?;
         let package = transaction.path().join("package");
         copy_package(&staging.path().join("package"), &package).map_err(storage_error)?;
-        let previous = transaction.path().join("previous");
-        let had_previous = move_if_present(&destination, &previous)?;
-        let install = fs::rename(&package, &destination)
-            .map_err(storage_error)
-            .and_then(|()| match cached {
-                Some(hello) => self.write_record(launch, hello),
-                None => self.probe_and_record(launch),
-            });
+        fs::rename(&package, &destination).map_err(storage_error)?;
+        drop(transaction);
+        let install = match cached {
+            Some(hello) => self.write_record(launch, hello),
+            None => self.probe_and_record(launch),
+        };
         if let Err(error) = install {
-            if let Err(rollback) = restore_package(&destination, &previous, had_previous) {
-                let retained = transaction.keep();
-                return Err(SourceError::Protocol(format!(
-                    "{error}; could not restore the previous extension: {rollback}; staged files remain in {}",
-                    retained.display()
-                )));
-            }
+            remove_package(&destination);
             return Err(error);
         }
+        if let Some(record) = previous {
+            self.remove_legacy_package(&record);
+        }
+        self.reap_packages();
         Ok(consent.extension)
     }
 
@@ -642,23 +652,59 @@ impl ExtensionRegistry {
     }
 
     pub fn remove(&self, id: &str) -> Result<(), SourceError> {
-        let _lock = registry_lock(&self.folder)?;
+        let _lock = self.lock()?;
         let record = self.read_record(id)?;
-        let transaction = tempfile::tempdir_in(&self.folder).map_err(storage_error)?;
-        let removed = transaction.path().join("removed");
-        let folder = self.folder.join(id);
-        let moved = record.launch.is_installed() && move_if_present(&folder, &removed)?;
-        if let Err(error) = fs::remove_file(self.folder.join(format!("{id}.json"))) {
-            if moved && let Err(rollback) = fs::rename(&removed, &folder) {
-                let retained = transaction.keep();
-                return Err(SourceError::Protocol(format!(
-                    "{error}; could not restore the extension: {rollback}; staged files remain in {}",
-                    retained.display()
-                )));
-            }
-            return Err(storage_error(error));
-        }
+        // The atomic record update is authoritative. Deleting its package first
+        // would let an interrupted removal strand a registered extension.
+        fs::remove_file(self.folder.join(format!("{id}.json"))).map_err(storage_error)?;
+        self.remove_legacy_package(&record);
+        self.reap_packages();
         Ok(())
+    }
+
+    fn lock(&self) -> Result<File, SourceError> {
+        let lock = registry_lock(&self.folder)?;
+        self.reap_packages();
+        Ok(lock)
+    }
+
+    /// Only called while holding the registry lock. A damaged or unreadable
+    /// registration leaves its package in place for a later recovery.
+    fn reap_packages(&self) {
+        let Ok(folder) = self.folder.canonicalize() else {
+            return;
+        };
+        let Ok(entries) = fs::read_dir(&folder) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            if name.starts_with(STAGING_PREFIX) {
+                remove_package(&entry.path());
+                continue;
+            }
+            let Some(id) = package_provider(name) else {
+                continue;
+            };
+            let path = entry.path();
+            match self.read_record(id) {
+                Ok(record) if record.launch.folder != path => remove_package(&path),
+                Err(SourceError::UnknownProvider(_)) => remove_package(&path),
+                _ => {}
+            }
+        }
+    }
+
+    fn remove_legacy_package(&self, record: &Record) {
+        if let Ok(folder) = self.folder.canonicalize() {
+            let legacy = folder.join(&record.launch.manifest.id);
+            if record.launch.is_installed() && record.launch.folder == legacy {
+                remove_package(&legacy);
+            }
+        }
     }
 
     fn read_record(&self, id: &str) -> Result<Record, SourceError> {
@@ -834,27 +880,22 @@ fn registry_lock(folder: &Path) -> Result<File, SourceError> {
     Ok(file)
 }
 
-fn move_if_present(from: &Path, to: &Path) -> Result<bool, SourceError> {
-    match fs::rename(from, to) {
-        Ok(()) => Ok(true),
-        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
-        Err(error) => Err(storage_error(error)),
-    }
+fn package_provider(name: &str) -> Option<&str> {
+    let (provider, generation) = name.strip_prefix(PACKAGE_PREFIX)?.split_once('.')?;
+    (valid_id(provider) && uuid::Uuid::parse_str(generation).is_ok()).then_some(provider)
 }
 
-fn restore_package(destination: &Path, previous: &Path, had_previous: bool) -> io::Result<()> {
-    match fs::symlink_metadata(destination) {
-        Ok(metadata) if metadata.is_dir() && !metadata.is_symlink() => {
-            fs::remove_dir_all(destination)?
-        }
-        Ok(_) => fs::remove_file(destination)?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error),
+fn remove_package(path: &Path) {
+    // Never follow a link or remove anything outside the registry. In-use
+    // folders on Windows can be reclaimed by the next registry mutation.
+    if let Ok(metadata) = path.symlink_metadata()
+        && metadata.is_dir()
+        && !metadata.is_symlink()
+        && let Err(error) = fs::remove_dir_all(path)
+        && error.kind() != io::ErrorKind::NotFound
+    {
+        tracing::debug!("could not remove an unused source extension package");
     }
-    if had_previous {
-        fs::rename(previous, destination)?;
-    }
-    Ok(())
 }
 
 fn installed_executable(
@@ -1006,6 +1047,86 @@ mod bundled_tests {
     use super::*;
 
     #[test]
+    fn unused_package_generations_do_not_replace_the_installed_copy() {
+        let root = tempfile::tempdir().unwrap();
+        let registry = ExtensionRegistry::new(root.path().join("registry"));
+        let sidecar = root
+            .path()
+            .join(format!("fixture-source{}", std::env::consts::EXE_SUFFIX));
+        fs::write(&sidecar, "first generation").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o700)).unwrap();
+        }
+        let description = fixture_description();
+        registry
+            .install_bundled(&sidecar, "1.0.0", description.clone())
+            .unwrap();
+        let installed = registry.list().unwrap().remove(0);
+        let abandoned = registry.folder.join(format!(
+            "{PACKAGE_PREFIX}fixture-source.{}",
+            uuid::Uuid::new_v4()
+        ));
+        let abandoned_copy = registry.folder.join(format!("{STAGING_PREFIX}interrupted"));
+        fs::create_dir_all(&abandoned_copy).unwrap();
+        copy_package(&installed.path, &abandoned).unwrap();
+
+        // Simulate exiting after the new package was copied, before committing
+        // its registration. A second registry must still use the prior copy.
+        drop(registry);
+        let registry = ExtensionRegistry::new(root.path().join("registry"));
+        assert_eq!(registry.list().unwrap()[0].path, installed.path);
+        registry
+            .read_record("fixture-source")
+            .unwrap()
+            .launch
+            .verify_trust()
+            .unwrap();
+        registry
+            .install_bundled(&sidecar, "1.0.0", description.clone())
+            .unwrap();
+        assert!(!abandoned.exists());
+        assert!(!abandoned_copy.exists());
+
+        fs::write(&sidecar, "second generation").unwrap();
+        registry
+            .install_bundled(&sidecar, "2.0.0", description)
+            .unwrap();
+        let upgraded = registry.list().unwrap().remove(0);
+        assert_eq!(upgraded.version, "2.0.0");
+        assert_ne!(upgraded.path, installed.path);
+        assert!(!installed.path.exists());
+    }
+
+    #[test]
+    fn redacts_both_proxy_password_representations() {
+        let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension");
+        let launch = Launch::load(&folder).unwrap();
+        let mut command = Command::new("unused");
+        command.env("HTTPS_PROXY", "http://fixture:proxy%2Bpass@127.0.0.1:8080");
+        let redactions = Redactions::default();
+        launch.redact_environment(&command, &redactions);
+        assert_eq!(
+            redactions.text("proxy%2Bpass / proxy+pass"),
+            "[redacted] / [redacted]"
+        );
+    }
+
+    fn fixture_description() -> crate::source::SourceDescription {
+        crate::source::SourceDescription {
+            descriptor: crate::source::ConnectorDescriptor {
+                provider: "fixture-source".into(),
+                name: "Fixture Source".into(),
+                contract_version: CONTRACT_VERSION,
+                capabilities: vec![Capability::Discover, Capability::Fetch],
+                schema: crate::source::ConfigSchema { fields: vec![] },
+            },
+            presentation: crate::source::SourcePresentation::default(),
+        }
+    }
+
+    #[test]
     fn lists_bundled_metadata_before_the_executable_runs() {
         let root = tempfile::tempdir().unwrap();
         let registry = ExtensionRegistry::new(root.path().join("registry"));
@@ -1018,16 +1139,7 @@ mod bundled_tests {
             // The registry checks the mode, while the invalid bytes prove it never launches.
             fs::set_permissions(&sidecar, fs::Permissions::from_mode(0o700)).unwrap();
         }
-        let description = crate::source::SourceDescription {
-            descriptor: crate::source::ConnectorDescriptor {
-                provider: "fixture-source".into(),
-                name: "Fixture Source".into(),
-                contract_version: CONTRACT_VERSION,
-                capabilities: vec![Capability::Discover, Capability::Fetch],
-                schema: crate::source::ConfigSchema { fields: vec![] },
-            },
-            presentation: crate::source::SourcePresentation::default(),
-        };
+        let description = fixture_description();
 
         registry
             .install_bundled(&sidecar, "1.0.0", description.clone())

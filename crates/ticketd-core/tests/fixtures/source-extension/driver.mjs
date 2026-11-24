@@ -157,6 +157,9 @@ async function dispatch({ id, method, params }, signal) {
     if (mode === "secret_result") {
       return { result: { unexpected: credential } };
     }
+    if (mode === "embedded_secret_result") {
+      return { result: { title: `prefix${credential}suffix` } };
+    }
   }
   if (mode === "broken") {
     process.stdout.write("not a protocol message\n");
@@ -192,13 +195,11 @@ async function dispatch({ id, method, params }, signal) {
       return {
         result: {
           connection: {
-            account:
-              mode === "session"
-                ? `${params.connection_id}:${process.pid}`
-                : mode === "credential_account" &&
-                    credential !== "private-first"
-                  ? "another-account"
-                  : "octo",
+            account: ["session", "idle_noise"].includes(mode)
+              ? `${params.connection_id}:${process.pid}`
+              : mode === "credential_account" && credential !== "private-first"
+                ? "another-account"
+                : "octo",
             site: "fixture",
           },
           derived: {
@@ -312,7 +313,10 @@ async function handle(request, signal) {
   }
   if (message) {
     const response =
-      JSON.stringify({ jsonrpc: "2.0", id: request.id, ...message }) + "\n";
+      JSON.stringify({ jsonrpc: "2.0", id: request.id, ...message }) +
+      (request.params.config?.mode === "idle_noise"
+        ? "\nfixture idle output\n"
+        : "\n");
     await new Promise((resolve) => process.stdout.write(response, resolve));
   }
 }

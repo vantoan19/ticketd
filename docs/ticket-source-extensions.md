@@ -275,10 +275,9 @@ a stable `code`, its matching `class`, and a message for the person in
 | `system`    | `protocol`, `unsupported`                        |
 
 Keep the message actionable and free of private content. An optional
-`data.detail` is a fixed diagnostic code for local debug logs. Use at most 80
-lower-case ASCII letters, digits, underscores or hyphens. The host redacts
-known credentials and excludes the code from the Diagnostics ZIP. Rust
-extensions can use `ExtensionError::with_detail`.
+`data.detail` accepts up to 80 lower-case ASCII letters, digits, underscores
+or hyphens for wire compatibility. ticketd logs its own error kind and leaves
+out extension messages and detail codes.
 
 For `invalid_configuration`, `data.fields` can describe faulty inputs. For
 `rate_limited`, `data.retry_after_secs` can give an integer delay.
