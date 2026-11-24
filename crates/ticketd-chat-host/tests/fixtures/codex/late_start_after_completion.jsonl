@@ -1,0 +1,13 @@
+{"note":"Hand-built app-server traffic with synthetic values."}
+{"client":{"id":3,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-1","input":[{"type":"text","text":"First","text_elements":[]}]}}}
+{"mark":"the first start timed out"}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"older","status":"completed","items":[],"error":null}}}}
+{"mark":"a terminal notification without evidence for the first start"}
+{"server":{"method":"item/started","params":{"threadId":"thr_1","turnId":"turn_1","item":{"type":"userMessage","id":"item_1","clientId":"sub-1","content":[{"type":"text","text":"First","text_elements":[]}]}}}}
+{"mark":"the first turn is known and remains active"}
+{"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_1","status":"completed","items":[],"error":null}}}}
+{"mark":"the matching turn ended before app-server answered its start"}
+{"client":{"id":4,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-2","input":[{"type":"text","text":"Second","text_elements":[]}]}}}
+{"server":{"id":4,"result":{"turn":{"id":"turn_2","status":"inProgress","items":[],"error":null}}}}
+{"mark":"the second turn is active"}
+{"server":{"id":3,"result":{"turn":{"id":"turn_1","status":"inProgress","items":[],"error":null}}}}

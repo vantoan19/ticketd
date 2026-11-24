@@ -141,6 +141,114 @@ fn recorded_steps_keep_actions_and_counts_after_mapping() {
     assert_eq!(steps[5].outcome, Some(StepOutcomeOverride::Declined));
 }
 
+#[test]
+fn a_bounded_patch_keeps_the_actions_for_files_it_could_not_keep() {
+    use crate::{
+        FileTargets, MAX_PROVIDER_DETAIL_BYTES, OmittedFiles, StepAction, ToolEvidence,
+        read_tool_steps,
+    };
+    use ticketd_core::ChatToolState;
+
+    let mut changes: Vec<Value> = (0..150)
+        .map(|index| {
+            json!({"path": format!("/work/{index}-{}.txt", "x".repeat(120)),
+                "kind": {"type": "add"}, "diff": "new line"})
+        })
+        .collect();
+    changes.push(json!({"path": "/work/old.txt", "kind": {"type": "delete"}, "diff": "old"}));
+    let events = Session::default().notification(
+        "item/started",
+        &json!({"turnId": "turn_1", "item": {
+            "type": "fileChange", "id": "patch", "status": "inProgress", "changes": changes,
+        }}),
+    );
+    let (title, detail) = events
+        .iter()
+        .find_map(|event| match event {
+            EventKind::ToolUpdated {
+                title,
+                detail: Some(detail),
+                ..
+            } => Some((title, detail)),
+            _ => None,
+        })
+        .expect("patch tool evidence");
+    assert!(detail.payload().len() <= MAX_PROVIDER_DETAIL_BYTES);
+
+    let steps = read_tool_steps(
+        "codex",
+        ToolEvidence {
+            name: title,
+            input: detail.payload(),
+            output: None,
+            state: ChatToolState::Running,
+            working_directory: "/work",
+        },
+    );
+    let [created, deleted] = steps.as_slice() else {
+        panic!("expected a create and a delete action");
+    };
+    let StepAction::Create {
+        targets: FileTargets::Paths(paths),
+        counts,
+    } = &created.action
+    else {
+        panic!("expected a create action");
+    };
+    let Some(OmittedFiles::Count(omitted)) = created.omitted_files else {
+        panic!("expected a count of unlisted creations");
+    };
+    assert_eq!(paths.len() + omitted.get() as usize, 150);
+    assert_eq!(counts.added, Some(paths.len() as u32));
+    assert!(matches!(&deleted.action, StepAction::Delete { paths, .. } if paths.is_empty()));
+    assert!(matches!(
+        deleted.omitted_files,
+        Some(OmittedFiles::Count(count)) if count.get() == 1
+    ));
+}
+
+#[test]
+fn a_legacy_patch_reports_omissions_only_when_the_saved_inventory_is_partial() {
+    use crate::{FileTargets, LineCounts, OmittedFiles, StepAction, ToolEvidence, read_tool_steps};
+    use ticketd_core::ChatToolState;
+
+    let input = r#"{"type":"fileChange","changes":[
+        {"path":"/work/a, b.txt","kind":{"type":"update"},"ticketd_lines":{"added":2,"removed":1}}
+    ]}"#;
+    for (name, expected) in [
+        ("Edit /work/a, b.txt", None),
+        (
+            "Edit /work/a, b.txt, /work/c.txt",
+            Some(OmittedFiles::Unknown),
+        ),
+    ] {
+        let steps = read_tool_steps(
+            "codex",
+            ToolEvidence {
+                name,
+                input,
+                output: None,
+                state: ChatToolState::Completed,
+                working_directory: "/work",
+            },
+        );
+        let [step] = steps.as_slice() else {
+            panic!("expected a single edit step");
+        };
+        assert_eq!(step.omitted_files, expected);
+        assert_eq!(
+            step.action,
+            StepAction::Edit {
+                targets: FileTargets::Paths(vec!["/work/a, b.txt".to_owned()]),
+                counts: LineCounts {
+                    added: Some(2),
+                    removed: Some(1)
+                },
+            }
+        );
+    }
+}
+
 fn options() -> Options {
     Options {
         client_version: "0.0.0-test".to_owned(),
@@ -310,11 +418,15 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Hello")).await;
 
     assert_eq!(outcome, DispatchOutcome::Written);
+    assert_eq!(
+        runtime.submit(start_turn("sub-1b", "Hello again")).await,
+        DispatchOutcome::NotSent(Refusal::StartUnconfirmed)
+    );
+    peer.assert_nothing_written().await;
     peer.play().await;
     assert_eq!(
         seen(&mut events).await,
         [
-            "turn-started turn_1",
             "evidence sub-1 Acknowledged { turn: NativeTurnId(\"turn_1\") }",
             "unknown reply to an unknown request",
         ]
@@ -328,6 +440,79 @@ async fn a_late_reply_reconciles_as_evidence_and_nothing_is_resent() {
     assert_eq!(
         seen(&mut events).await,
         ["turn-ended turn_1 Interrupted [\"sub-1\"]"]
+    );
+    peer.assert_nothing_written().await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_late_start_rejection_allows_another_turn() {
+    let mut peer = provider().await;
+    assert_eq!(
+        peer.submit_unanswered("sub-1").await,
+        DispatchOutcome::Written
+    );
+
+    peer.refuse_late("sub-1").await;
+    assert_eq!(
+        seen(peer.events()).await,
+        ["evidence sub-1 Rejected { reason: \"server is shutting down (code -32600)\" }"]
+    );
+    peer.assert_nothing_else_written().await;
+    assert_eq!(
+        peer.start_turn("sub-2").await,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_correlated_turn_can_finish_before_its_start_reply() {
+    let (mut peer, runtime, mut events) = open().await;
+    peer.load(fixture!("late_start_after_completion"));
+    assert_eq!(
+        submit(&mut peer, &runtime, start_turn("sub-1", "First")).await,
+        DispatchOutcome::Written,
+    );
+
+    peer.play().await;
+    assert_eq!(seen(&mut events).await, ["turn-ended older Completed []"]);
+    assert_eq!(
+        runtime.submit(start_turn("sub-2", "Second")).await,
+        DispatchOutcome::NotSent(Refusal::StartUnconfirmed),
+    );
+    peer.assert_nothing_written().await;
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["evidence sub-1 Processing { turn: NativeTurnId(\"turn_1\") }"],
+    );
+    assert_eq!(
+        runtime.submit(start_turn("sub-2", "Second")).await,
+        turn_mismatch("turn_1"),
+    );
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["turn-ended turn_1 Completed [\"sub-1\"]"],
+    );
+    assert_eq!(
+        submit(&mut peer, &runtime, start_turn("sub-2", "Second")).await,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_2")
+        },
+    );
+
+    peer.play().await;
+    assert_eq!(
+        seen(&mut events).await,
+        ["evidence sub-1 Acknowledged { turn: NativeTurnId(\"turn_1\") }"],
+    );
+    assert_eq!(
+        runtime.submit(start_turn("sub-3", "Third")).await,
+        turn_mismatch("turn_2"),
     );
     peer.assert_nothing_written().await;
 }

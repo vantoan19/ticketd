@@ -23,6 +23,7 @@ tracing.workspace = true
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
+rusqlite = { version = "0.37", features = ["bundled"] }
 # Tests assert literal Ticket references, so they build the fixed device code in.
 ticketd-core = { workspace = true, features = ["test-device-code"] }
 tempfile = "3"
