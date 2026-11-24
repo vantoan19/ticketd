@@ -40,7 +40,11 @@ import {
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { RecordHistory } from "@/features/sync-review/RecordHistory";
 import { SourceLink } from "@/features/tickets/SourceLink";
-import { externalSource } from "@/features/tickets/ticket-source";
+import {
+  externalSource,
+  sourceLocation,
+  sourceReference,
+} from "@/features/tickets/ticket-source";
 import { useChatAboutTicket } from "@/features/chats/use-ticket-chats";
 import { type Project, type Ticket } from "@/lib/api/client";
 import { useTicketTrash } from "./use-ticket-trash";
@@ -162,6 +166,7 @@ export function TicketHeader({
     );
   }
   const owner = ticket ? externalSource(ticket) : null;
+  const issueReference = owner ? sourceReference(owner) : null;
   return (
     <>
       <PaneHeader
@@ -220,13 +225,28 @@ export function TicketHeader({
               </span>
             )}
             {selected && <TicketAgentHeader reference={selected} />}
-            {owner && (
-              <SourceLink url={owner.url} className="header-source-link">
-                <span className="sr-only">Open on {owner.provider_name}: </span>
-                <span className="header-source-place">
-                  {owner.place_label ?? owner.place}
-                </span>{" "}
-                <span className="source-number">{owner.number}</span>
+            {owner && issueReference && (
+              <SourceLink
+                url={owner.url}
+                className="header-source-link"
+                label={`Open on ${owner.provider_name}: ${sourceLocation(owner)}`}
+              >
+                {issueReference.place && (
+                  <>
+                    <span className="header-source-place">
+                      {issueReference.place}
+                    </span>{" "}
+                  </>
+                )}
+                <span
+                  className={
+                    issueReference.place
+                      ? "source-number"
+                      : "header-source-place"
+                  }
+                >
+                  {issueReference.label}
+                </span>
               </SourceLink>
             )}
           </div>

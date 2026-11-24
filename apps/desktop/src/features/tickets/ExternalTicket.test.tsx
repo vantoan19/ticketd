@@ -15,7 +15,7 @@ import { SourceFilter } from "./SourceFilter";
 import { SourceDescription } from "./ReadOnlySource";
 import { TicketDetails } from "./TicketDetails";
 import { TestReads } from "@/lib/workspace-reads/testing";
-import { TicketList } from "./TicketList";
+import { SourcePill, TicketList } from "./TicketList";
 import { TicketProperties } from "./TicketProperties";
 import { freshness, sourceLocation, sourceState } from "./ticket-source";
 import { rowContextItem } from "./ticket-row";
@@ -553,6 +553,35 @@ test("a row shows the owner's pill and a local row shows none", () => {
   // screen-reader text says the same thing in one sentence.
   expect(within(pills[0]!).getByText("Owned by GitHub, #98")).toBeTruthy();
   expect(pills[0]?.querySelector("span[aria-hidden]")?.textContent).toBe("#98");
+});
+
+test("a tracker identifier with a team prefix stays readable in the header, state and list", () => {
+  const issue = ticket({
+    source: source({
+      provider: "linear",
+      provider_name: "Linear",
+      place: "ENG",
+      place_label: "ENG",
+      number: "-42",
+      locator: "ENG-42",
+      display: "ENG-42",
+      url: "https://linear.app/example/issue/ENG-42",
+      state: { category: "open", name: "In Progress" },
+    }),
+  });
+  const { container } = render(
+    <>
+      <DetailsFixture value={issue} />
+      <SourcePill ticket={issue} />
+    </>,
+  );
+  expect(
+    screen.getByRole("link", { name: "Open on Linear: ENG-42" }),
+  ).toBeTruthy();
+  expect(container.querySelector(".ticket-state-line")?.textContent).toContain(
+    "ENG-42",
+  );
+  expect(screen.getByText("Owned by Linear, ENG-42")).toBeTruthy();
 });
 
 test("the source filter offers All, GitHub and Local with counts and reports the choice", () => {

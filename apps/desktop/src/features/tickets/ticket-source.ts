@@ -24,9 +24,21 @@ export function externalSource(ticket: Ticket): TicketSource | null {
   return ticket.source?.ownership === "external" ? ticket.source : null;
 }
 
-/** Where the issue lives, such as "owner / repo #98", from the parts the core names. */
+/** A formatted place can be shown separately. Otherwise show the issue's full reference. */
+export function sourceReference(source: TicketSource): {
+  place?: string;
+  label: string;
+} {
+  const place = source.place_label;
+  return place && place !== source.place && source.number
+    ? { place, label: source.number }
+    : { label: source.display };
+}
+
+/** Where the issue lives, from the provider's presentation. */
 export function sourceLocation(source: TicketSource): string {
-  return `${source.place_label ?? source.place} ${source.number}`.trim();
+  const { place, label } = sourceReference(source);
+  return place ? `${place} ${label}` : label;
 }
 
 /** An unavailable ticket without a working local route has no retry action. */

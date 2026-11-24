@@ -17,12 +17,14 @@ export function SourceLink({
   children,
   className,
   title,
+  label,
   icon = true,
 }: {
   url: string;
   children: ReactNode;
   className?: string;
   title?: string;
+  label?: string;
   icon?: boolean;
 }) {
   const statusLine = useStatusLine();
@@ -35,6 +37,7 @@ export function SourceLink({
       <a
         href={url}
         className={cn("source-link", className)}
+        aria-label={label}
         onClick={(event) => {
           event.preventDefault();
           void workspaceClient.openLink(url).catch((reason: unknown) => {

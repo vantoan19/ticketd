@@ -44,7 +44,7 @@ import { RowTags } from "./RowTags";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { editingHarness } from "@/features/chats/editing-harness";
 import { progressBrief } from "./progress-brief";
-import { ago, externalSource } from "./ticket-source";
+import { ago, externalSource, sourceReference } from "./ticket-source";
 import { useKnownTicket, useTicket } from "./open-ticket";
 import { useStickyRows } from "./use-sticky-rows";
 import { groupTickets } from "./ticket-groups";
@@ -546,6 +546,7 @@ export function TicketList({
 export function SourcePill({ ticket }: { ticket: Ticket }) {
   const source = externalSource(ticket);
   if (!source) return null;
+  const { label } = sourceReference(source);
   return (
     <Tooltip content={`Owned by ${source.provider_name}: ${source.display}`}>
       <Badge
@@ -554,14 +555,14 @@ export function SourcePill({ ticket }: { ticket: Ticket }) {
         tone="raised"
       >
         <span className="sr-only">
-          Owned by {source.provider_name}, {source.number}
+          Owned by {source.provider_name}, {label}
         </span>
         {source.provider_icon_svg ? (
           <SourceIcon svg={source.provider_icon_svg} size={14} />
         ) : (
           <Cloud aria-hidden="true" />
         )}
-        <span aria-hidden="true">{source.number}</span>
+        <span aria-hidden="true">{label}</span>
       </Badge>
     </Tooltip>
   );

@@ -36,7 +36,11 @@ import {
 } from "@/features/automations/TicketRuns";
 import { useTicketRuns } from "@/features/automations/use-ticket-runs";
 import { PublicationNotice } from "@/features/tickets/PublishToSource";
-import { externalSource, sourceState } from "@/features/tickets/ticket-source";
+import {
+  externalSource,
+  sourceReference,
+  sourceState,
+} from "@/features/tickets/ticket-source";
 import { TicketEditor } from "@/features/tickets/TicketEditor";
 import { useSourcesConfigured } from "@/features/tickets/use-publication-preview";
 import { useTicketTrash } from "@/features/tickets/use-ticket-trash";
@@ -158,6 +162,7 @@ export function TicketPage({
   // The reading column: title, state, description, subtickets, evidence,
   // backlinks, then notes and history.
   const source = externalSource(ticket);
+  const issueReference = source ? sourceReference(source) : null;
   const state = source ? sourceState(source) : null;
   const original =
     source?.state.category === "duplicate" &&
@@ -165,7 +170,9 @@ export function TicketPage({
     source.duplicate_target?.kind === "external"
       ? source.duplicate_target
       : null;
-  const originalLabel = source?.duplicate_number ?? original?.display;
+  const originalLabel =
+    (issueReference?.place ? source?.duplicate_number : undefined) ??
+    original?.display;
   // The header owns the normal updated time. Only source or exceptional
   // context needs a line between the property strip and the description.
   const stateLine =
@@ -187,7 +194,7 @@ export function TicketPage({
             ) : (
               <>
                 {source.state.category === "open" && (
-                  <span>{source.number}</span>
+                  <span>{issueReference?.label}</span>
                 )}
                 {original && (
                   <span>

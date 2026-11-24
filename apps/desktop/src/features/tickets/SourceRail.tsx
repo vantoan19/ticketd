@@ -22,6 +22,7 @@ import {
   connectionUnavailableText,
   externalSource,
   freshness,
+  sourceReference,
 } from "./ticket-source";
 import { useNow } from "@/lib/use-now";
 import { formatDateTime } from "@/lib/format";
@@ -43,6 +44,7 @@ export function SourceRail({
 }) {
   const now = useNow();
   const owner = externalSource(ticket);
+  const issueReference = owner ? sourceReference(owner) : null;
   const activity = useSourceActivity();
   const sync = useTicketRefresh(ticket.reference, refresh);
   const ownerName = owner ? owner.provider_name : "";
@@ -59,10 +61,12 @@ export function SourceRail({
           <span className="rail-value rail-source-identity">
             {providerIcon}
             <SourceLink url={owner.url} icon={false} title={owner.display}>
-              {owner.place && owner.number ? (
+              {issueReference?.place ? (
                 <>
                   <span className="rail-source-place">{owner.place}</span>
-                  <span className="rail-source-number">{owner.number}</span>
+                  <span className="rail-source-number">
+                    {issueReference.label}
+                  </span>
                 </>
               ) : (
                 owner.display
