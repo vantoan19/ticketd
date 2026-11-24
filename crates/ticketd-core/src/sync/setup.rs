@@ -200,6 +200,13 @@ pub enum SyncRecovery {
     StorageFull,
     Offline,
     RateLimited,
+    /// The S3 profile now reaches another service than the Workspace's bucket was connected
+    /// through; the status carries the message. The way out is Disconnect (to move the bucket
+    /// on purpose) or pointing the profile back.
+    ServiceChanged,
+    /// The `aws` program is missing or too old; the status carries the message. The person
+    /// chooses where it is, or installs it.
+    CliUnavailable,
     /// Any other failure of a run; the status carries its message.
     Error,
 }
@@ -213,6 +220,11 @@ pub enum SyncRecoveryAction {
     /// Sign in to the storage again, then run [`Workspace::sync_recover`].
     Reconnect,
     Retry,
+    /// Stop syncing here, then connect again; a retry only works once the profile is changed
+    /// back.
+    Disconnect,
+    /// Choose the `aws` program (or install one), then retry.
+    ChooseProgram,
 }
 
 impl SyncRecovery {
@@ -220,6 +232,8 @@ impl SyncRecovery {
         match self {
             Self::FolderMissing => SyncRecoveryAction::Reupload,
             Self::AuthorizationExpired => SyncRecoveryAction::Reconnect,
+            Self::ServiceChanged => SyncRecoveryAction::Disconnect,
+            Self::CliUnavailable => SyncRecoveryAction::ChooseProgram,
             Self::StorageFull | Self::Offline | Self::RateLimited | Self::Error => {
                 SyncRecoveryAction::Retry
             }
@@ -233,6 +247,8 @@ impl SyncRecovery {
             RemoteError::StorageFull => Some(Self::StorageFull),
             RemoteError::Offline => Some(Self::Offline),
             RemoteError::RateLimited { .. } => Some(Self::RateLimited),
+            RemoteError::ServiceChanged(_) => Some(Self::ServiceChanged),
+            RemoteError::CliUnavailable(_) => Some(Self::CliUnavailable),
             RemoteError::PreconditionFailed { .. }
             | RemoteError::NotFound
             | RemoteError::BucketMissing(_)
@@ -746,6 +762,21 @@ impl Workspace {
         self.sync_settings()
     }
 
+    /// The `aws` program this desktop's person chose, if any. Unlike the bucket, it is kept
+    /// before a connection exists and after one ends: it belongs to this desktop.
+    pub fn sync_aws_cli_path(&self) -> Result<Option<String>, Error> {
+        Ok(state(&self.connection)?.aws_cli_path)
+    }
+
+    /// Remembers the `aws` program for this desktop (`None` forgets it). A connected S3
+    /// binding runs the new program from its next call.
+    pub fn set_sync_aws_cli_path(&mut self, path: Option<&str>) -> Result<(), Error> {
+        self.connection
+            .execute("UPDATE sync_state SET aws_cli_path = ?1", [path])?;
+        touch(&self.connection)?;
+        Ok(())
+    }
+
     /// Remember the storage sign-in, before a folder is chosen. Both values are
     /// the desktop's own: the core only keeps them with the Workspace.
     pub fn sync_connect(
@@ -765,7 +796,7 @@ impl Workspace {
                 )));
             }
             scope.execute(
-                "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, aws_cli_path = NULL, s3_endpoint = NULL, connection = ?1, account = ?2",
+                "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, s3_endpoint = NULL, connection = ?1, account = ?2",
                 [connection_id, account],
             )?;
             Ok(())
@@ -837,7 +868,7 @@ impl Workspace {
     pub fn sync_disconnect(&mut self) -> Result<SyncStatus, Error> {
         // Signing out before a folder is chosen leaves what was remembered.
         self.connection.execute(
-            "UPDATE sync_state SET last_account = CASE WHEN folder IS NULL THEN last_account ELSE account END, last_provider = CASE WHEN folder IS NULL THEN last_provider ELSE provider END, last_bucket = CASE WHEN folder IS NULL THEN last_bucket ELSE s3_bucket END, last_prefix = CASE WHEN folder IS NULL THEN last_prefix ELSE s3_prefix END, last_folder = COALESCE(folder, last_folder), provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, aws_cli_path = NULL, s3_endpoint = NULL, connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
+            "UPDATE sync_state SET last_account = CASE WHEN folder IS NULL THEN last_account ELSE account END, last_provider = CASE WHEN folder IS NULL THEN last_provider ELSE provider END, last_bucket = CASE WHEN folder IS NULL THEN last_bucket ELSE s3_bucket END, last_prefix = CASE WHEN folder IS NULL THEN last_prefix ELSE s3_prefix END, last_folder = COALESCE(folder, last_folder), provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, s3_endpoint = NULL, connection = NULL, account = NULL, folder = NULL, folder_name = NULL, last_synced_at = NULL, recovery = NULL, recovery_message = NULL, first_sync = NULL",
             [],
         )?;
         self.connection.execute_batch(GIVE_UP_DOWNLOADS)?;
@@ -979,6 +1010,8 @@ impl Workspace {
                 SyncRecovery::FolderMissing
                     | SyncRecovery::AuthorizationExpired
                     | SyncRecovery::StorageFull
+                    | SyncRecovery::ServiceChanged
+                    | SyncRecovery::CliUnavailable
                     | SyncRecovery::Error
             )
         );
@@ -1036,9 +1069,16 @@ impl Workspace {
             pending_total,
             attachment_downloads,
             needs_review,
-            recovery_message: state
-                .recovery_message
-                .filter(|_| state.recovery == Some(SyncRecovery::Error)),
+            recovery_message: state.recovery_message.filter(|_| {
+                matches!(
+                    state.recovery,
+                    Some(
+                        SyncRecovery::Error
+                            | SyncRecovery::ServiceChanged
+                            | SyncRecovery::CliUnavailable
+                    )
+                )
+            }),
             recovery: state.recovery,
             first_sync,
             retry_after: None,
@@ -1305,6 +1345,13 @@ impl Workspace {
             // Nothing ran, so there is nothing to recover from.
             Err(error) if before.folder.is_none() => return Err(error),
             Err(error) => match &error {
+                // Its sentence is the whole message, and is kept to be shown.
+                Error::Remote(RemoteError::ServiceChanged(said)) => {
+                    (Some(SyncRecovery::ServiceChanged), Some(said.clone()))
+                }
+                Error::Remote(RemoteError::CliUnavailable(said)) => {
+                    (Some(SyncRecovery::CliUnavailable), Some(said.clone()))
+                }
                 Error::Remote(remote) if SyncRecovery::of(remote).is_some() => {
                     (SyncRecovery::of(remote), None)
                 }

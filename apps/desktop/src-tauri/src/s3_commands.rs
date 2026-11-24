@@ -5,12 +5,13 @@
 
 use std::{
     collections::HashMap,
-    path::Path,
+    path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
 };
 
 use serde::Serialize;
 use ticketd_core::{
+    Workspace,
     s3::{AwsCli, AwsCliError, ProfileCredentials, S3Target, checked_prefix},
     sync::{S3Binding, SyncStatus},
 };
@@ -57,8 +58,38 @@ fn locate(located: Result<AwsCli, AwsCliError>) -> Outcome<Result<AwsCli, CliSta
     }
 }
 
+/// The program this desktop's person chose, if any. The Workspace is released before the
+/// program runs, which can take a while.
+fn chosen_program() -> Outcome<Option<PathBuf>> {
+    Ok(open_workspace()?.sync_aws_cli_path()?.map(PathBuf::from))
+}
+
+/// The AWS CLI every command runs: the chosen program while it is still there, otherwise the
+/// usual locations.
 fn cli() -> Outcome<AwsCli> {
-    cli_at(None)
+    cli_at(chosen_program()?.as_deref())
+}
+
+/// Checks the program the person picked, and remembers it for this desktop, before any
+/// connection exists. A wrong file or an old CLI is refused with the CLI's own message and
+/// nothing is remembered.
+fn choose_cli(workspace: &mut Workspace, path: &Path) -> Outcome<()> {
+    let cli = AwsCli::locate_chosen(path).map_err(|error| failed(&error))?;
+    let program = cli.program().display().to_string();
+    workspace.set_sync_aws_cli_path(Some(&program))?;
+    Ok(())
+}
+
+/// Remembers the `aws` program the person picked, and uses it from now on.
+#[tauri::command(async)]
+pub fn s3_choose_cli(path: String) -> Outcome<()> {
+    let mut workspace = open_workspace()?;
+    choose_cli(&mut workspace, Path::new(&path))?;
+    drop(workspace);
+    // What was kept was made through the program before.
+    crate::s3_storage::reset();
+    crate::wake::CHANGED.notify();
+    Ok(())
 }
 
 /// The AWS CLI at `path` (the binding's own choice), or the usual locations.
@@ -89,7 +120,7 @@ fn profiles_of(located: Result<AwsCli, AwsCliError>) -> Outcome<Profiles> {
 /// The AWS CLI's state and the profile names in the person's configuration.
 #[tauri::command(async)]
 pub fn s3_profiles() -> Outcome<Profiles> {
-    profiles_of(AwsCli::locate(None))
+    profiles_of(AwsCli::locate(chosen_program()?.as_deref()))
 }
 
 /// Whether a profile is signed in, and if not, whether ticketd can start the sign-in.
@@ -245,7 +276,8 @@ pub fn sync_connect_s3(bucket: String, prefix: String, profile: String) -> Outco
     check_profile(&profile)?;
     let bucket = check_bucket(&bucket)?;
     let prefix = normalize_prefix(&prefix)?;
-    let cli = cli()?;
+    let chosen = chosen_program()?;
+    let cli = cli_at(chosen.as_deref())?;
     let identity = match identity_of(&cli, &profile)? {
         Identity::SignedIn { identity } => identity,
         Identity::SignInNeeded { .. } => return rejected("Sign in to this AWS profile first."),
@@ -259,7 +291,7 @@ pub fn sync_connect_s3(bucket: String, prefix: String, profile: String) -> Outco
         bucket: bucket.to_owned(),
         prefix,
         profile,
-        aws_cli_path: None,
+        aws_cli_path: chosen.map(|path| path.display().to_string()),
         endpoint: Some(crate::s3_storage::service(&target).to_owned()),
     };
     // The profile may now sign in as another account or reach another endpoint, so what was
@@ -274,6 +306,7 @@ pub fn sync_connect_s3(bucket: String, prefix: String, profile: String) -> Outco
 mod tests {
     use super::*;
     use std::sync::PoisonError;
+    use ticketd_core::Workspace;
 
     #[test]
     fn a_missing_or_old_cli_is_a_state_with_no_profiles() {
@@ -414,6 +447,31 @@ mod tests {
         forget_all_credentials();
         credentials(&cli, profile).access().unwrap();
         assert_eq!(exports(), 2);
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_chosen_aws_program_is_checked_and_remembered_for_this_desktop() {
+        let _state = crate::s3_storage::TEST_STATE
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let (directory, _) = stand_in(false);
+        let program = directory.path().join("aws");
+        let home = tempfile::tempdir().unwrap();
+        let mut workspace = Workspace::open(home.path().join("here.sqlite3")).unwrap();
+
+        // Not a program at all, and one that is not there: refused, nothing remembered.
+        let text = directory.path().join("notes.txt");
+        std::fs::write(&text, "not a program").unwrap();
+        assert!(choose_cli(&mut workspace, &text).is_err());
+        assert!(choose_cli(&mut workspace, &directory.path().join("gone")).is_err());
+        assert_eq!(workspace.sync_aws_cli_path().unwrap(), None);
+
+        choose_cli(&mut workspace, &program).unwrap();
+        assert_eq!(
+            workspace.sync_aws_cli_path().unwrap(),
+            Some(program.display().to_string())
+        );
     }
 
     #[test]

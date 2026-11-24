@@ -14,6 +14,31 @@ export type RecoveryCopy = {
   working: string | null;
 };
 
+/** The state of a connected Workspace in a word, with the tone of its dot. */
+export function connectionState(status: SyncStatus): {
+  tone: "positive" | "neutral" | "attention";
+  label: string;
+} {
+  switch (status.recovery) {
+    case null:
+      return { tone: "positive", label: "Connected" };
+    case "offline":
+      return { tone: "neutral", label: "Offline" };
+    case "rate_limited":
+      return { tone: "neutral", label: "Slowed down" };
+    case "authorization_expired":
+      return { tone: "attention", label: "Signed out" };
+    case "folder_missing":
+      return { tone: "attention", label: "Folder missing" };
+    case "storage_full":
+      return { tone: "attention", label: "Storage full" };
+    case "service_changed":
+    case "cli_unavailable":
+    case "error":
+      return { tone: "attention", label: "Not syncing" };
+  }
+}
+
 /** Wording for what stopped sync; `null` while nothing did. */
 export function recoveryCopy(status: SyncStatus): RecoveryCopy | null {
   const waiting = pendingCount(status);
@@ -65,6 +90,23 @@ export function recoveryCopy(status: SyncStatus): RecoveryCopy | null {
         title: `${storage.full} is busy`,
         description: `${storage.full} asked ticketd to slow down. Changes are saved on this computer and upload a little later.`,
         action: "Retry",
+        working: null,
+      };
+    case "service_changed":
+      return {
+        label: `${storage.short} sync stopped`,
+        title: "Sync stopped",
+        // The core's sentence names both services and both ways out.
+        description: `${status.recovery_message ?? "This profile now reaches another service than this Workspace's bucket was connected through."} Your work is saved on this computer.`,
+        action: "Disconnect",
+        working: null,
+      };
+    case "cli_unavailable":
+      return {
+        label: "AWS CLI needed",
+        title: "Sync can't use the AWS CLI",
+        description: `${status.recovery_message ?? "The AWS CLI is missing or too old."} Your work is saved on this computer.`,
+        action: "Choose the aws program…",
         working: null,
       };
     case "error":

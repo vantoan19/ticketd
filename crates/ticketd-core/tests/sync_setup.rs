@@ -811,6 +811,74 @@ fn a_failure_with_no_state_of_its_own_needs_attention_until_a_run_succeeds() {
 }
 
 #[test]
+fn a_service_that_changed_stops_sync_with_its_own_state_and_the_way_out_is_disconnect() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    a.create_ticket("Saved meanwhile").unwrap();
+    let said = "This profile now points to another S3 service: it reaches http://127.0.0.1:9001, and this Workspace's bucket was connected through http://127.0.0.1:9000.";
+    desks
+        .remote
+        .fail(RemoteOp::List, 1, RemoteError::ServiceChanged(said.into()));
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(
+        recovered(&status),
+        (
+            Some(SyncRecovery::ServiceChanged),
+            SyncState::NeedsAttention
+        )
+    );
+    // The sentence as it was written: no "sync storage: storage:" in front of it.
+    assert_eq!(status.recovery_message.as_deref(), Some(said));
+    assert_eq!(
+        SyncRecovery::ServiceChanged.action(),
+        SyncRecoveryAction::Disconnect
+    );
+    assert_eq!(status.pending_uploads.len(), 1);
+    let json = serde_json::to_value(&status).unwrap();
+    assert_eq!(json["recovery"], "service_changed");
+    // A later launch finds it too, and a run that works clears it.
+    assert_eq!(a.sync_status().unwrap(), status);
+    let status = a.sync_recover(&desks.remote).unwrap();
+    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
+    assert_eq!(status.recovery_message, None);
+}
+
+#[test]
+fn an_aws_program_that_cannot_be_used_stops_sync_and_the_way_out_is_choosing_it() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    a.create_ticket("Saved meanwhile").unwrap();
+    let said =
+        "The AWS CLI was not found. Install AWS CLI version 2, or choose where the aws program is.";
+    desks
+        .remote
+        .fail(RemoteOp::List, 1, RemoteError::CliUnavailable(said.into()));
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(
+        recovered(&status),
+        (
+            Some(SyncRecovery::CliUnavailable),
+            SyncState::NeedsAttention
+        )
+    );
+    assert_eq!(status.recovery_message.as_deref(), Some(said));
+    assert_eq!(
+        SyncRecovery::CliUnavailable.action(),
+        SyncRecoveryAction::ChooseProgram
+    );
+    assert_eq!(
+        serde_json::to_value(&status).unwrap()["recovery"],
+        "cli_unavailable"
+    );
+    let status = a.sync_recover(&desks.remote).unwrap();
+    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
+}
+
+#[test]
 fn an_attachment_whose_bytes_are_gone_here_is_reported_and_holds_nothing_up() {
     let desks = desks();
     let (mut a, reference, _) = desks.uploaded("Desk A");
@@ -2258,6 +2326,45 @@ fn a_binding_to_s3_reports_its_provider_and_location_in_status_and_binding() {
         (status.provider, status.s3),
         (SyncProvider::GoogleDrive, None)
     );
+}
+
+#[test]
+fn the_aws_program_chosen_before_connecting_is_kept_for_this_desktop_and_recorded_on_connect() {
+    let desks = desks();
+    let mut desk = Workspace::open(desks.directory.path().join("a")).unwrap();
+    assert_eq!(desk.sync_aws_cli_path().unwrap(), None);
+
+    // Chosen while nothing is connected yet.
+    desk.set_sync_aws_cli_path(Some("/Users/mina/.local/bin/aws"))
+        .unwrap();
+    assert_eq!(
+        desk.sync_aws_cli_path().unwrap().as_deref(),
+        Some("/Users/mina/.local/bin/aws")
+    );
+
+    // Connecting records it as the binding's program.
+    let mut bucket = s3("notes-bucket", "ticketd/", "work");
+    bucket.aws_cli_path = Some("/Users/mina/.local/bin/aws".into());
+    let status = desk.sync_connect_s3(&bucket, IDENTITY).unwrap();
+    assert_eq!(status.s3, Some(bucket));
+
+    // Choosing another program while connected changes the one sync runs.
+    desk.set_sync_aws_cli_path(Some("/opt/pipx/bin/aws"))
+        .unwrap();
+    let status = desk.sync_status().unwrap();
+    assert_eq!(
+        status.s3.unwrap().aws_cli_path.as_deref(),
+        Some("/opt/pipx/bin/aws")
+    );
+
+    // It is this desktop's, not the binding's: disconnecting keeps it.
+    desk.sync_disconnect().unwrap();
+    assert_eq!(
+        desk.sync_aws_cli_path().unwrap().as_deref(),
+        Some("/opt/pipx/bin/aws")
+    );
+    desk.set_sync_aws_cli_path(None).unwrap();
+    assert_eq!(desk.sync_aws_cli_path().unwrap(), None);
 }
 
 #[test]

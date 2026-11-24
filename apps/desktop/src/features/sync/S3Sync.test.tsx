@@ -25,7 +25,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/clipboard", () => ({ writeClipboard: vi.fn() }));
 vi.mock("@/lib/s3-api", async (original) => ({
   ...(await original<typeof import("@/lib/s3-api")>()),
-  s3Api: { folderLinks: vi.fn() },
+  s3Api: { folderLinks: vi.fn(), chooseCli: vi.fn() },
 }));
 vi.mock("@/lib/sync-api", async (original) => ({
   ...(await original<typeof import("@/lib/sync-api")>()),
@@ -318,6 +318,115 @@ test("an ended AWS session is signed in again through the profile", async () => 
 
   finish(connected());
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});
+
+const SAID =
+  "This profile now points to another S3 service: it reaches http://127.0.0.1:9001, and this Workspace's bucket was connected through http://127.0.0.1:9000. To move the bucket on purpose, disconnect sync, then connect again; otherwise point the profile back.";
+const stopped = () =>
+  connected({
+    state: "needs_attention",
+    recovery: "service_changed",
+    recovery_message: SAID,
+  });
+
+test("a profile that now reaches another service stops sync: not Connected, the message once, and Disconnect beside it", async () => {
+  api.status.mockResolvedValue(stopped());
+  api.disconnect.mockResolvedValue(
+    syncStatus({ connection: "not_connected", account: null, folder: null }),
+  );
+  show();
+  const notice = await screen.findByRole("alert");
+  expect(notice.textContent).toContain("Sync stopped");
+  // The sentence as the core wrote it, once, with no internal prefix.
+  expect(notice.textContent).toContain(SAID);
+  expect(notice.textContent).not.toMatch(/sync storage|storage:/i);
+  expect(document.body.textContent?.split(SAID).length).toBe(2);
+  // The page does not claim a working connection.
+  expect(screen.queryByText("Connected")).toBeNull();
+  expect(screen.getByText("Not syncing")).toBeTruthy();
+  // The way out the message names is next to it, behind the usual confirmation.
+  fireEvent.click(within(notice).getByRole("button", { name: "Disconnect…" }));
+  const dialog = await screen.findByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  await waitFor(() => expect(api.disconnect).toHaveBeenCalled());
+  expect(api.recover).not.toHaveBeenCalled();
+});
+
+test("a stopped service can still be retried once the profile points back", async () => {
+  api.status.mockResolvedValue(stopped());
+  api.recover.mockResolvedValue(connected());
+  show();
+  const notice = await screen.findByRole("alert");
+  fireEvent.click(within(notice).getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(api.recover).toHaveBeenCalled());
+  expect(await screen.findByText("Connected")).toBeTruthy();
+});
+
+test("the state of the connection agrees with the notice, and the notice sits below it so nothing above it moves", async () => {
+  api.status.mockResolvedValue(
+    connected({ state: "saved_locally", recovery: "offline" }),
+  );
+  show();
+  const notice = await screen.findByRole("alert");
+  const label = document.querySelector('[data-slot="status-label"]')!;
+  // Not a green Connected beside an Offline card.
+  expect(label.textContent).toBe("Offline");
+  expect(label.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe(
+    "neutral",
+  );
+  // The card is where it was; the notice comes after it, not before.
+  expect(
+    label.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+const NO_CLI =
+  "The AWS CLI was not found. Install AWS CLI version 2, or choose where the aws program is.";
+const noCli = () =>
+  connected({
+    state: "needs_attention",
+    recovery: "cli_unavailable",
+    recovery_message: NO_CLI,
+  });
+
+test("sync stopped for want of the aws program offers to choose it, then tries again", async () => {
+  api.status.mockResolvedValue(noCli());
+  api.recover.mockResolvedValue(connected());
+  s3.chooseCli.mockResolvedValue(true);
+  show();
+  const notice = await screen.findByRole("alert");
+  expect(notice.textContent).toContain(NO_CLI);
+  expect(notice.textContent).not.toMatch(/sync storage|storage:/i);
+  expect(screen.queryByText("Connected")).toBeNull();
+  fireEvent.click(
+    within(notice).getByRole("button", { name: "Choose the aws program…" }),
+  );
+  await waitFor(() => expect(s3.chooseCli).toHaveBeenCalled());
+  await waitFor(() => expect(api.recover).toHaveBeenCalled());
+  expect(await screen.findByText("Connected")).toBeTruthy();
+});
+
+test("a cancelled picker changes nothing, and a refused program says why", async () => {
+  api.status.mockResolvedValue(noCli());
+  s3.chooseCli.mockResolvedValueOnce(false);
+  show();
+  const notice = await screen.findByRole("alert");
+  const choose = within(notice).getByRole("button", {
+    name: "Choose the aws program…",
+  });
+  fireEvent.click(choose);
+  await waitFor(() => expect(s3.chooseCli).toHaveBeenCalledTimes(1));
+  expect(api.recover).not.toHaveBeenCalled();
+
+  s3.chooseCli.mockRejectedValueOnce(
+    hostFailure("ticketd needs AWS CLI version 2.13 or later"),
+  );
+  fireEvent.click(choose);
+  await revealFailureDetails();
+  expect(
+    await screen.findByText(/ticketd needs AWS CLI version 2\.13 or later/),
+  ).toBeTruthy();
+  expect(api.recover).not.toHaveBeenCalled();
 });
 
 test("disconnecting from a bucket says what stays", async () => {

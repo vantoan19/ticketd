@@ -85,13 +85,24 @@ fn failure(tick: &Result<Option<SyncStatus>, Error>) -> Option<Failure> {
             kind: error.kind().code(),
             message: error.to_string(),
         }),
-        Ok(Some(status)) if status.recovery == Some(SyncRecovery::Error) => Some(Failure {
-            kind: "sync_recovery",
-            message: status
-                .recovery_message
-                .clone()
-                .unwrap_or_else(|| "unknown failure".into()),
-        }),
+        Ok(Some(status))
+            if matches!(
+                status.recovery,
+                Some(
+                    SyncRecovery::Error
+                        | SyncRecovery::ServiceChanged
+                        | SyncRecovery::CliUnavailable
+                )
+            ) =>
+        {
+            Some(Failure {
+                kind: "sync_recovery",
+                message: status
+                    .recovery_message
+                    .clone()
+                    .unwrap_or_else(|| "unknown failure".into()),
+            })
+        }
         Ok(_) => None,
     }
 }

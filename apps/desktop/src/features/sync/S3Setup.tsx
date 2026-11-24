@@ -76,7 +76,7 @@ export function S3Setup() {
   // A bucket typed in, though the profile lists some: it may use more than it owns.
   const [typing, setTyping] = useState(false);
   const [prefix, setPrefix] = useState(DEFAULT_PREFIX);
-  const { busy, failure, run } = useCommand({ readable: true });
+  const { busy, failure, run, clear } = useCommand({ readable: true });
   // A check that started before another one must not put its answer back.
   const generation = useRef(0);
 
@@ -233,10 +233,17 @@ export function S3Setup() {
               signedIn={signedIn}
               value={bucket}
               typing={typing}
-              onChange={setBucket}
+              onChange={(value) => {
+                setBucket(value);
+                clear();
+              }}
               onOther={() => {
                 setBucket("");
                 setTyping(true);
+              }}
+              onList={() => {
+                setBucket("");
+                setTyping(false);
               }}
             />
           }
@@ -253,7 +260,10 @@ export function S3Setup() {
               disabled={!signedIn}
               spellCheck={false}
               autoComplete="off"
-              onChange={(event) => setPrefix(event.target.value)}
+              onChange={(event) => {
+                setPrefix(event.target.value);
+                clear();
+              }}
             />
           }
         />
@@ -376,6 +386,7 @@ function BucketField({
   typing,
   onChange,
   onOther,
+  onList,
 }: {
   buckets: string[] | null | undefined;
   signedIn: boolean;
@@ -383,6 +394,8 @@ function BucketField({
   typing: boolean;
   onChange: (value: string) => void;
   onOther: () => void;
+  /** Back to the list, when the profile lists buckets. */
+  onList: () => void;
 }) {
   if (signedIn && buckets === undefined)
     return <Skeleton className="h-10 w-60" />;
@@ -397,11 +410,17 @@ function BucketField({
         <SelectTrigger id="s3-bucket" className="w-60" title={value}>
           <SelectValue placeholder="Choose a bucket" />
         </SelectTrigger>
-        <SelectContent>
+        {/* The list is as wide as its field and starts at its edge; a long name is cut, whole on hover. */}
+        <SelectContent className="w-(--radix-select-trigger-width) max-w-(--radix-select-trigger-width)">
           <SelectGroup>
             {buckets.map((name) => (
-              <SelectItem key={name} value={name}>
-                {name}
+              <SelectItem
+                key={name}
+                value={name}
+                title={name}
+                className="*:[span]:last:min-w-0"
+              >
+                <span className="min-w-0 truncate">{name}</span>
               </SelectItem>
             ))}
             <SelectItem value={OTHER_BUCKET}>Another bucket…</SelectItem>
@@ -410,17 +429,24 @@ function BucketField({
       </Select>
     );
   return (
-    <Input
-      id="s3-bucket"
-      className="w-60"
-      value={value}
-      disabled={!signedIn}
-      placeholder="my-bucket"
-      spellCheck={false}
-      autoComplete="off"
-      autoFocus={typing}
-      onChange={(event) => onChange(event.target.value)}
-    />
+    <div className="flex flex-col items-end gap-1">
+      <Input
+        id="s3-bucket"
+        className="w-60"
+        value={value}
+        disabled={!signedIn}
+        placeholder="my-bucket"
+        spellCheck={false}
+        autoComplete="off"
+        autoFocus={typing}
+        onChange={(event) => onChange(event.target.value)}
+      />
+      {typing && (
+        <Button variant="ghost" size="sm" onClick={onList}>
+          Choose from the list
+        </Button>
+      )}
+    </div>
   );
 }
 
@@ -451,6 +477,20 @@ function CliNotice({
   const [linkFailure, setLinkFailure] = useState<FailureDescription | null>(
     null,
   );
+  const [chooseFailure, setChooseFailure] = useState<FailureDescription | null>(
+    null,
+  );
+  function chooseProgram() {
+    setChooseFailure(null);
+    s3Api
+      .chooseCli()
+      .then((chosen) => {
+        if (chosen) onCheckAgain();
+      })
+      .catch((reason: unknown) =>
+        setChooseFailure(describeFailure(reason, "use that program")),
+      );
+  }
   return (
     <div className="sync-block">
       <Alert role="status" tone="attention">
@@ -467,6 +507,9 @@ function CliNotice({
         <AlertActions>
           <Button size="sm" onClick={onCheckAgain}>
             Check again
+          </Button>
+          <Button size="sm" variant="outline" onClick={chooseProgram}>
+            Choose the aws program…
           </Button>
           <Button
             size="sm"
@@ -485,7 +528,7 @@ function CliNotice({
           </Button>
         </AlertActions>
       </Alert>
-      <Failure>{failure ?? linkFailure}</Failure>
+      <Failure>{failure ?? chooseFailure ?? linkFailure}</Failure>
     </div>
   );
 }

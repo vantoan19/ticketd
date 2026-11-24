@@ -106,7 +106,10 @@ impl Error {
                 | RemoteError::NotFound
                 | RemoteError::BucketMissing(_) => FailureKind::NotFound,
                 RemoteError::PreconditionFailed { .. } => FailureKind::Conflict,
-                RemoteError::RateLimited { .. } | RemoteError::Other(_) => FailureKind::Failed,
+                RemoteError::RateLimited { .. }
+                | RemoteError::ServiceChanged(_)
+                | RemoteError::CliUnavailable(_)
+                | RemoteError::Other(_) => FailureKind::Failed,
             },
             Self::UploadLimit { .. } => FailureKind::TooLarge,
             Self::TicketChanged(_)

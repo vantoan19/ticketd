@@ -5,6 +5,7 @@ import {
   render,
   screen,
   waitFor,
+  within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -24,6 +25,7 @@ vi.mock("@/lib/s3-api", async (original) => ({
     identity: vi.fn(),
     signIn: vi.fn(),
     buckets: vi.fn(),
+    chooseCli: vi.fn(),
   },
 }));
 vi.mock("@/lib/sync-api", async (original) => ({
@@ -109,6 +111,49 @@ test("the install guide opens through the app", async () => {
   expect(workspaceClient.openLink).toHaveBeenCalledWith(
     expect.stringContaining("docs.aws.amazon.com/cli"),
   );
+});
+
+test("a program chosen for a missing or old AWS CLI is checked, then the profiles are read again", async () => {
+  s3.profiles.mockResolvedValueOnce({
+    cli: { state: "too_old", found: "aws-cli/1.27.0" },
+    profiles: [],
+  });
+  show();
+  await screen.findByText("The AWS CLI is too old");
+
+  s3.chooseCli.mockResolvedValue(true);
+  s3.profiles.mockResolvedValueOnce(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(null);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Choose the aws program…" }),
+  );
+  expect(await screen.findByLabelText("AWS profile")).toBeTruthy();
+  expect(s3.profiles).toHaveBeenCalledTimes(2);
+});
+
+test("cancelling the file picker changes nothing, and a program ticketd refuses says why", async () => {
+  s3.profiles.mockResolvedValue({ cli: { state: "missing" }, profiles: [] });
+  show();
+  const choose = await screen.findByRole("button", {
+    name: "Choose the aws program…",
+  });
+
+  s3.chooseCli.mockResolvedValueOnce(false);
+  fireEvent.click(choose);
+  await waitFor(() => expect(s3.chooseCli).toHaveBeenCalledTimes(1));
+  expect(s3.profiles).toHaveBeenCalledTimes(1);
+
+  s3.chooseCli.mockRejectedValueOnce(
+    hostFailure("ticketd needs AWS CLI version 2.13 or later"),
+  );
+  fireEvent.click(choose);
+  await revealFailureDetails();
+  expect(
+    await screen.findByText(/ticketd needs AWS CLI version 2\.13 or later/),
+  ).toBeTruthy();
+  expect(screen.getByText("The AWS CLI isn't installed")).toBeTruthy();
+  expect(s3.profiles).toHaveBeenCalledTimes(1);
 });
 
 test("without profiles it says how to make one", async () => {
@@ -378,6 +423,44 @@ test("a long bucket name stays inside its field", async () => {
   // The field keeps its width; the text is cut with an ellipsis.
   expect(trigger.className).toContain("w-60");
   expect(trigger.textContent).toContain(long);
+  // Cut with an ellipsis (a truncating box of its own, since the trigger is a flex row),
+  // and the whole name on hover.
+  expect(trigger.getAttribute("title")).toBe(long);
+  const text = within(trigger).getByText(long);
+  expect(text.className).toContain("truncate");
+});
+
+test("a bucket typed in can go back to the list when the profile lists buckets", async () => {
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(["alpha"]);
+  show();
+  await choose(
+    await screen.findByRole("combobox", { name: "Bucket" }),
+    "Another bucket…",
+  );
+  expect(
+    ((await screen.findByLabelText("Bucket")) as HTMLElement).tagName,
+  ).toBe("INPUT");
+  fireEvent.click(screen.getByRole("button", { name: "Choose from the list" }));
+  await choose(
+    await screen.findByRole("combobox", { name: "Bucket" }),
+    "alpha",
+  );
+  expect(
+    screen.queryByRole("button", { name: "Choose from the list" }),
+  ).toBeNull();
+});
+
+test("a profile that may not list buckets has no list to go back to", async () => {
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(null);
+  show();
+  await screen.findByLabelText("Bucket");
+  expect(
+    screen.queryByRole("button", { name: "Choose from the list" }),
+  ).toBeNull();
 });
 
 test("the sync commands go over the bridge with the host's names", async () => {
@@ -402,4 +485,46 @@ test("the sync commands go over the bridge with the host's names", async () => {
     console: true,
   });
   expect(invoke).toHaveBeenCalledWith("s3_folder_links");
+});
+
+test("a refusal goes away as soon as the bucket or the prefix is edited", async () => {
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(null);
+  sync.connectS3.mockRejectedValue(
+    hostFailure("that is not a valid S3 bucket name"),
+  );
+  show();
+  const bucket = (await screen.findByLabelText("Bucket")) as HTMLInputElement;
+  await waitFor(() => expect(bucket.disabled).toBe(false));
+  const refuse = async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Connect S3" }));
+    await screen.findByRole("alert");
+  };
+  fireEvent.change(bucket, { target: { value: "bad/" } });
+  await refuse();
+  fireEvent.change(bucket, { target: { value: "bad" } });
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  await refuse();
+  fireEvent.change(screen.getByLabelText("Prefix"), {
+    target: { value: "other/" },
+  });
+  await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+});
+
+test("the open list is as wide as its field and cuts long names, whole on hover", async () => {
+  const long = "a-very-long-bucket-name-".repeat(3) + "end";
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue([long, "alpha"]);
+  show();
+  fireEvent.click(await screen.findByRole("combobox", { name: "Bucket" }));
+  const option = await screen.findByRole("option", { name: long });
+  expect(option.getAttribute("title")).toBe(long);
+  expect(within(option).getByText(long).className).toContain("truncate");
+  const list = screen
+    .getByRole("listbox")
+    .closest("[data-slot=select-content]");
+  expect(list?.className).toContain("w-(--radix-select-trigger-width)");
+  expect(list?.className).toContain("max-w-(--radix-select-trigger-width)");
 });

@@ -34,5 +34,7 @@ export function useCommand({ readable = false }: { readable?: boolean } = {}) {
       setBusy(false);
     }
   }
-  return { busy, failure, run };
+  /** Forgets a failure that no longer describes what is on the page. */
+  const clear = () => setFailure(null);
+  return { busy, failure, run, clear };
 }

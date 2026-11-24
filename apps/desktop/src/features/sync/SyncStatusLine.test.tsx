@@ -328,6 +328,51 @@ test("a sync failure with no state of its own needs attention and offers Retry",
   expect(dialog.textContent).toContain("disk I/O error");
 });
 
+test("a changed S3 service reads as a stop on the line, with Retry and the way to Disconnect", async () => {
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "service_changed",
+      recovery_message: "This profile now points to another S3 service.",
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "S3 sync stoppedSaved on this computer",
+  );
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("Sync stopped");
+  expect(dialog.textContent).toContain(
+    "This profile now points to another S3 service.",
+  );
+  expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(
+    within(dialog).getByRole("button", { name: "Disconnect in Settings" }),
+  ).toBeTruthy();
+});
+
+test("a missing aws program reads as a stop on the line, with Retry and the way to choose it", async () => {
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "cli_unavailable",
+      recovery_message: "The AWS CLI was not found.",
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "AWS CLI neededSaved on this computer",
+  );
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("The AWS CLI was not found.");
+  expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(
+    within(dialog).getByRole("button", {
+      name: "Choose the aws program in Settings",
+    }),
+  ).toBeTruthy();
+});
+
 test("a conflict waiting while offline: the popover offers Review and keeps Retry", async () => {
   const status = syncStatus({
     state: "needs_attention",

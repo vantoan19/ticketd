@@ -44,6 +44,7 @@ import { attachments } from "@/lib/api/attachments";
 import { useNow } from "@/lib/use-now";
 import { SyncFailure as Failure } from "./SyncFailure";
 import { useCommand } from "./use-sync-command";
+import { s3Api } from "@/lib/s3-api";
 import { storageName } from "./storage-name";
 import { S3Place } from "./S3Place";
 import { recoveryCopy } from "./sync-recovery";
@@ -634,35 +635,94 @@ function FirstSync({
 /** The attention notice for what stopped sync, with its one action. */
 function RecoveryNotice({ status }: { status: SyncStatus }) {
   const { busy, failure, run } = useCommand();
+  const [disconnecting, setDisconnecting] = useState(false);
   const copy = recoveryCopy(status);
   if (!copy) return null;
+  // Retrying cannot help until the profile is changed back, so the way out the message
+  // names comes first, and Retry is for a person who did that.
+  const moved = status.recovery === "service_changed";
+  const noCli = status.recovery === "cli_unavailable";
+  // A picked program is remembered for this desktop, so sync tries again at once.
+  const chooseProgram = async () => {
+    const picked = await s3Api.chooseCli();
+    if (!picked) return syncApi.status();
+    return syncApi.recover();
+  };
+  const retry = (variant: "default" | "outline") => (
+    <Button
+      size="sm"
+      variant={variant}
+      disabled={busy}
+      onClick={() => void run(syncApi.recover, "sync")}
+    >
+      Retry
+    </Button>
+  );
   return (
     <div className="sync-block">
       <Alert tone="attention">
         <AlertTitle>{copy.title}</AlertTitle>
         <AlertDescription>{copy.description}</AlertDescription>
         <AlertActions>
-          <Button
-            size="sm"
-            variant={
-              status.recovery === "offline" ||
-              status.recovery === "rate_limited"
-                ? "outline"
-                : "default"
-            }
-            disabled={busy}
-            onClick={() =>
-              void run(
-                syncApi.recover,
-                copy.action === "Retry" ? "sync" : copy.action.toLowerCase(),
-              )
-            }
-          >
-            {busy && copy.working ? copy.working : copy.action}
-          </Button>
+          {moved ? (
+            <>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => setDisconnecting(true)}
+              >
+                Disconnect…
+              </Button>
+              {retry("outline")}
+            </>
+          ) : noCli ? (
+            <>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => void run(chooseProgram, "use that program")}
+              >
+                {copy.action}
+              </Button>
+              {retry("outline")}
+            </>
+          ) : (
+            <Button
+              size="sm"
+              variant={
+                status.recovery === "offline" ||
+                status.recovery === "rate_limited"
+                  ? "outline"
+                  : "default"
+              }
+              disabled={busy}
+              onClick={() =>
+                void run(
+                  syncApi.recover,
+                  copy.action === "Retry" ? "sync" : copy.action.toLowerCase(),
+                )
+              }
+            >
+              {busy && copy.working ? copy.working : copy.action}
+            </Button>
+          )}
         </AlertActions>
       </Alert>
       <Failure>{failure}</Failure>
+      {moved && (
+        <DisconnectDialog
+          status={status}
+          open={disconnecting}
+          onOpenChange={setDisconnecting}
+          onConfirm={() => {
+            setDisconnecting(false);
+            void run(
+              syncApi.disconnect,
+              `disconnect from ${storageName(status.provider).full}`,
+            );
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -675,8 +735,9 @@ function Connected({ status }: { status: SyncStatus }) {
   if (status.provider === "s3")
     return (
       <>
-        {status.recovery && <RecoveryNotice status={status} />}
+        {/* After the card whose state it explains, so the card does not move when it comes. */}
         <S3Place status={status} />
+        {status.recovery && <RecoveryNotice status={status} />}
         <DesktopSettings />
         <Disconnect status={status} />
       </>
@@ -727,7 +788,6 @@ function Connected({ status }: { status: SyncStatus }) {
 }
 
 function Disconnect({ status }: { status: SyncStatus }) {
-  const folder = status.folder?.name;
   const s3 = status.provider === "s3";
   const { busy, failure, run } = useCommand();
   const [disconnecting, setDisconnecting] = useState(false);
@@ -750,33 +810,57 @@ function Disconnect({ status }: { status: SyncStatus }) {
         />
       </SettingsList>
       <Failure>{failure}</Failure>
-      <DialogShell
+      <DisconnectDialog
+        status={status}
         open={disconnecting}
         onOpenChange={setDisconnecting}
-        title="Disconnect this desktop?"
-        description="Sync stops on this desktop. Nothing is deleted."
-        primaryLabel="Disconnect"
-        blockedReason={null}
-        size="sm"
-        onSubmit={() => {
+        onConfirm={() => {
           setDisconnecting(false);
           void run(
             syncApi.disconnect,
             `disconnect from ${storageName(status.provider).full}`,
           );
         }}
-      >
-        <dl className="sync-summary">
-          <dt>On this computer</dt>
-          <dd>This Workspace stays as it is</dd>
-          <dt>{s3 ? "In the bucket" : "In Google Drive"}</dt>
-          <dd>
-            {folder ? `“${folder}” stays` : "Your files stay"}, for your other
-            desktops
-          </dd>
-        </dl>
-      </DialogShell>
+      />
     </SettingsSection>
+  );
+}
+
+/** The confirmation of Disconnect, where the page offers it. */
+function DisconnectDialog({
+  status,
+  open,
+  onOpenChange,
+  onConfirm,
+}: {
+  status: SyncStatus;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onConfirm: () => void;
+}) {
+  const folder = status.folder?.name;
+  const s3 = status.provider === "s3";
+  return (
+    <DialogShell
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Disconnect this desktop?"
+      description="Sync stops on this desktop. Nothing is deleted."
+      primaryLabel="Disconnect"
+      blockedReason={null}
+      size="sm"
+      onSubmit={onConfirm}
+    >
+      <dl className="sync-summary">
+        <dt>On this computer</dt>
+        <dd>This Workspace stays as it is</dd>
+        <dt>{s3 ? "In the bucket" : "In Google Drive"}</dt>
+        <dd>
+          {folder ? `“${folder}” stays` : "Your files stay"}, for your other
+          desktops
+        </dd>
+      </dl>
+    </DialogShell>
   );
 }
 

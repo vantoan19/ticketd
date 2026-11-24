@@ -17,6 +17,7 @@ import {
 import { s3Api, type S3FolderLinks } from "@/lib/s3-api";
 import { syncApi, type SyncStatus } from "@/lib/sync-api";
 import { SyncFailure as Failure } from "./SyncFailure";
+import { connectionState } from "./sync-recovery";
 import "@/features/settings/settings.css";
 import "./sync.css";
 
@@ -32,6 +33,8 @@ export function S3Place({ status }: { status: SyncStatus }) {
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const { copied, error, copy } = useCopy();
   const s3 = status.s3;
+  // Never a green Connected beside a notice that says sync stopped.
+  const state = connectionState(status);
   const folder = status.folder?.name;
   const hasFolder = status.folder !== null;
   useEffect(() => {
@@ -60,7 +63,7 @@ export function S3Place({ status }: { status: SyncStatus }) {
               <Cloud size={20} />
             </SettingsRowTile>
           }
-          title={<StatusLabel tone="positive">Connected</StatusLabel>}
+          title={<StatusLabel tone={state.tone}>{state.label}</StatusLabel>}
           description={
             <>
               {status.account && (

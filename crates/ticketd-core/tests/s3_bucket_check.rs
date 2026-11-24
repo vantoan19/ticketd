@@ -484,3 +484,31 @@ fn once_the_check_passes_upload_goes_on_to_make_the_folder() {
         "{keys:?}"
     );
 }
+
+#[test]
+fn a_missing_or_old_aws_program_is_its_own_failure_that_says_so_once() {
+    for error in [
+        AwsCliError::NotFound,
+        AwsCliError::UnsupportedVersion {
+            found: "aws-cli/2.9.0".into(),
+        },
+    ] {
+        let said = error.to_string();
+        let RemoteError::CliUnavailable(text) = cli_failure(&error) else {
+            panic!("{error:?} is not a program that cannot be used");
+        };
+        assert_eq!(text, said);
+        assert_eq!(
+            Error::Remote(RemoteError::CliUnavailable(text)).to_string(),
+            format!("sync storage: {said}")
+        );
+    }
+    // A failed export stays what it was.
+    assert!(matches!(
+        cli_failure(&AwsCliError::Failed {
+            exit_code: Some(1),
+            message: "x".into()
+        }),
+        RemoteError::Other(_)
+    ));
+}

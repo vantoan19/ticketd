@@ -240,6 +240,9 @@ fn credentials_error(error: AwsCliError) -> RemoteError {
 pub fn cli_failure(error: &AwsCliError) -> RemoteError {
     match error {
         _ if error.needs_sign_in() => RemoteError::Unauthorized,
+        AwsCliError::NotFound | AwsCliError::UnsupportedVersion { .. } => {
+            RemoteError::CliUnavailable(error.to_string())
+        }
         AwsCliError::Failed { exit_code, .. } => RemoteError::Other(format!(
             "The AWS CLI could not export this profile's credentials{}. Run the profile's `aws` command in a terminal to see why",
             exit_code.map_or_else(String::new, |code| format!(" (exit code {code})"))
