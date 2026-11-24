@@ -1878,7 +1878,7 @@ async fn publish_ticket(
             &registry.engine()?,
             &reference,
             &ticketd_core::source::PublishOptions {
-                provider,
+                connection: Some(provider),
                 destination,
                 now: None,
                 expected_fingerprint,

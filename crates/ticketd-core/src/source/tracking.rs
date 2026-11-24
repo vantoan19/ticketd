@@ -2229,13 +2229,21 @@ fn hold_transfers_from_inactive_origins(
                 partition: origin.partition.clone(),
             };
             match engine.fetch_tracked(github::PROVIDER, &source.saved.config, &reference) {
+                Ok(read) if read.transferred_from.is_none() => continue,
                 Ok(read) => {
-                    if read.transferred_from.is_some() {
-                        // The destination read confirmed the move. Its connection
-                        // cannot apply an observation for the original ticket.
-                        held.insert(read.issue.reference.identity.id);
+                    let id = &read.issue.reference.identity.id;
+                    let matching_opening = origin
+                        .opened_at
+                        .as_deref()
+                        .and_then(issue_opened_at)
+                        .zip(issue_opened_at(&read.issue.created_at))
+                        .is_some_and(|(saved, observed)| saved == observed);
+                    if matching_opening && destinations.contains(id) {
+                        held.insert(id.clone());
+                        continue;
                     }
-                    continue;
+                    // The saved path may have been reused. Keep the actual
+                    // candidates pending without suppressing the redirect target.
                 }
                 Err(error) => {
                     let failure = refresh_failure(&error, &mut batch.retry_limit, received_at);
@@ -2531,7 +2539,41 @@ impl Workspace {
                     current,
                     checked.as_ref().and_then(|check| check.verified.as_ref()),
                 ) {
-                    super::record_verified_account(transaction, &current, &verified.connection)?;
+                    if let Err(error) =
+                        super::record_verified_account(transaction, &current, &verified.connection)
+                    {
+                        let source = match error {
+                            Error::Source(
+                                source @ (SourceError::Unauthenticated(_)
+                                | SourceError::InvalidConfiguration(_)),
+                            ) => source,
+                            error => return Err(error),
+                        };
+                        let failure = failure_of(&source);
+                        if let Some(run) = gathered
+                            .runs
+                            .iter_mut()
+                            .find(|run| &run.provider == provider)
+                        {
+                            run.failure = Some(failure.clone());
+                            freshness::record_run(transaction, run, &HashSet::new(), now)?;
+                        }
+                        return Ok(RefreshReport {
+                            imported: Vec::new(),
+                            updated: Vec::new(),
+                            unchanged: 0,
+                            failures: vec![RefreshFailure {
+                                scope: FailureScope::Source,
+                                provider: provider.clone(),
+                                connection_id: source_id.map(str::to_owned),
+                                reference: None,
+                                code: failure.code,
+                                message: failure.message,
+                                retry_after_secs: None,
+                            }],
+                            refreshed_at: now.to_owned(),
+                        });
+                    }
                     let derived = &verified.derived;
                     let changed = transaction.execute(
                         "UPDATE source_connections SET derived_configuration = ?2, derived_checked_at = ?3,
@@ -2699,7 +2741,7 @@ impl Workspace {
                         crate::events::Acting::Sync
                     }),
                 )?;
-                apply_issue(
+                let accepted = apply_issue(
                     transaction,
                     engine,
                     issue,
@@ -2710,8 +2752,7 @@ impl Workspace {
                 if let Some(source_id) = source_id
                     && !replaced_config
                     && gathered.partitions.contains_key(&key)
-                    && let Some(ticket_id) =
-                        ticket_for_identity(transaction, &issue.reference.identity)?
+                    && let Some(ticket_id) = accepted
                 {
                     super::bind_ticket(transaction, &ticket_id, source_id)?;
                 }
@@ -3037,7 +3078,7 @@ struct Existing {
     last_refreshed: Option<String>,
 }
 
-/// Applies one observed issue inside the refresh write transaction.
+/// Applies one observed issue and returns the ticket ID if the read was accepted.
 fn apply_issue(
     connection: &Connection,
     engine: &Engine,
@@ -3045,7 +3086,7 @@ fn apply_issue(
     read: Option<&Conversation>,
     now: &str,
     applied: &mut Applied,
-) -> Result<(), Error> {
+) -> Result<Option<String>, Error> {
     let identity = &issue.reference.identity;
     let existing: Option<Existing> = connection
         .query_row(
@@ -3097,7 +3138,7 @@ fn apply_issue(
     match existing {
         None => {
             if super::publication::awaited_by_open_attempt(connection, engine, issue)? {
-                return Ok(());
+                return Ok(None);
             }
             let status = status_for(None, category, Status::Todo);
             let id = Uuid::new_v4().to_string();
@@ -3138,10 +3179,11 @@ fn apply_issue(
                 conversation::store(connection, &id, read, &issue.updated_at)?;
             }
             applied.imported.push(reference);
+            Ok(Some(id))
         }
         // Taken over (or otherwise local): the identity is remembered so discovery
         // neither creates another ticket nor resumes synchronization.
-        Some(Existing { authority, .. }) if authority.as_deref() != Some("external") => {}
+        Some(Existing { authority, .. }) if authority.as_deref() != Some("external") => Ok(None),
         Some(Existing {
             id,
             reference,
@@ -3167,7 +3209,7 @@ fn apply_issue(
                     .as_deref()
                     .is_some_and(|confirmed| older_observation(now, confirmed))
             {
-                return Ok(());
+                return Ok(None);
             }
             let previous = state_category.as_deref().map(StateCategory::parse);
             let next = status_for(previous, category, status);
@@ -3245,9 +3287,9 @@ fn apply_issue(
             } else {
                 applied.unchanged += 1;
             }
+            Ok(Some(id))
         }
     }
-    Ok(())
 }
 
 /// Records the canonical issue of an externally closed duplicate, with a history

@@ -423,10 +423,10 @@ fn enterprise_issue_scopes_keep_nondefault_ports_separate() {
              ('known', 'T-KQ7', 'Original port', '', 'Todo'),
              ('default', 'T-KQ8', 'Default port', '', 'Todo'),
              ('ambiguous', 'T-KQ9', 'Unverified port', '', 'Todo');
-         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, partition)
-         VALUES ('known', 'github', '@forge.example:7', 'o/r#7', 'o/r#7', 'https://forge.example:8443/o/r/issues/7', 'imported', '@forge.example/o/r'),
-                ('default', 'github', '@forge.example:8', 'o/r#8', 'o/r#8', 'https://forge.example/o/r/issues/8', 'imported', '@forge.example/o/r'),
-                ('ambiguous', 'github', '@forge.example:9', 'o/r#9', 'o/r#9', '', 'imported', '@forge.example/o/r');
+         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, partition, repository)
+         VALUES ('known', 'github', '@forge.example:7', 'o/r#7', 'o/r#7', 'https://forge.example:8443/o/r/issues/7', 'imported', '@forge.example/o/r', 'forge.example/o/r'),
+                ('default', 'github', '@forge.example:8', 'o/r#8', 'o/r#8', 'https://forge.example/o/r/issues/8', 'imported', '@forge.example/o/r', 'forge.example/o/r'),
+                ('ambiguous', 'github', '@forge.example:9', 'o/r#9', 'o/r#9', '', 'imported', '@forge.example/o/r', 'forge.example/o/r');
          INSERT INTO external_ownership (ticket_id, authority) VALUES
                 ('known', 'external'), ('default', 'external'), ('ambiguous', 'external');
          INSERT INTO source_sync (ticket_id, state_category) VALUES
@@ -508,6 +508,63 @@ fn enterprise_issue_scopes_keep_nondefault_ports_separate() {
     assert_eq!(id(&workspace, "T-KQ7"), "@forge.example:8443:7");
     assert_eq!(id(&workspace, "T-KQ8"), "@forge.example:8");
     assert_eq!(id(&workspace, "T-KQ9"), "@forge.example:9");
+
+    let project = workspace
+        .create_project_with_remote(
+            "Second site",
+            dir.path().to_str().unwrap(),
+            Some("forge.example/o/r"),
+        )
+        .unwrap();
+    let preview = workspace
+        .preview_connect_source(&second_engine, "github-2", &project.id)
+        .unwrap();
+    let mut imported = outcome.imported;
+    imported.sort();
+    assert_eq!(preview.tickets, imported);
+    let backfill = workspace
+        .connect_source(
+            &second_engine,
+            "github-2",
+            &project.id,
+            &preview.fingerprint,
+        )
+        .unwrap();
+    assert_eq!(backfill.linked_tickets, imported);
+    for reference in ["T-KQ7", "T-KQ8", "T-KQ9"] {
+        assert!(
+            workspace
+                .show_ticket(reference)
+                .unwrap()
+                .project_id
+                .is_none()
+        );
+    }
+
+    let default_api = "https://forge.example/api/v3";
+    let (default_site, default_engine) = setup_at(default_api, Some(TOKEN));
+    default_site.authenticate_as(default_api, "octo");
+    default_site.respond(
+        &format!("{default_api}/repos/o/r/issues?state=open&per_page=100"),
+        ok(json!([])),
+    );
+    workspace
+        .add_source_connection(&default_engine, PROVIDER, Some("github-3"), None, &values)
+        .unwrap();
+    let preview = workspace
+        .preview_connect_source(&default_engine, "github-3", &project.id)
+        .unwrap();
+    assert_eq!(preview.tickets, ["T-KQ8"]);
+    let backfill = workspace
+        .connect_source(
+            &default_engine,
+            "github-3",
+            &project.id,
+            &preview.fingerprint,
+        )
+        .unwrap();
+    assert_eq!(backfill.linked_tickets, ["T-KQ8"]);
+    assert!(workspace.show_ticket("T-KQ9").unwrap().project_id.is_none());
 }
 
 #[test]
@@ -1522,16 +1579,116 @@ fn a_transfer_observed_by_two_connections_keeps_one_ticket() {
 }
 
 #[test]
+fn a_conflicting_legacy_github_account_does_not_abort_another_connections_refresh() {
+    let legacy = Arc::new(Fixture::default());
+    let healthy = Arc::new(Fixture::default());
+    legacy.authenticate_account(DEFAULT_API_URL, "octo", 41);
+    healthy.authenticate_as(DEFAULT_API_URL, "bob");
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(AccountFixtures {
+            first: connector_at(DEFAULT_API_URL, &legacy, Some(TOKEN)),
+            second: healthy.clone(),
+        }))
+        .unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = crate::Workspace::open(&path).unwrap();
+    let legacy_list = format!("{DEFAULT_API_URL}/repos/o/legacy/issues?state=open&per_page=100");
+    let healthy_list = format!("{DEFAULT_API_URL}/repos/o/healthy/issues?state=open&per_page=100");
+    legacy.respond(&legacy_list, ok(json!([])));
+    healthy.respond(&healthy_list, ok(json!([])));
+    workspace
+        .save_source(
+            &engine,
+            PROVIDER,
+            &config(json!({"repositories": ["o/legacy"]})),
+        )
+        .unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            PROVIDER,
+            Some("github-2"),
+            None,
+            &config(json!({"repositories": ["o/healthy"]})),
+        )
+        .unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE source_connections SET account_key = 'octo' WHERE id = 'github'",
+            [],
+        )
+        .unwrap();
+
+    *legacy.on_request.lock().unwrap() = Some(RequestHook {
+        url: legacy_list.clone(),
+        run: Box::new(move || {
+            let (renamed, renamed_engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+            renamed.authenticate_account(DEFAULT_API_URL, "octo-renamed", 41);
+            renamed.respond(
+                &format!("{DEFAULT_API_URL}/repos/o/renamed/issues?state=open&per_page=100"),
+                ok(json!([])),
+            );
+            crate::Workspace::open(path)
+                .unwrap()
+                .add_source_connection(
+                    &renamed_engine,
+                    PROVIDER,
+                    Some("github-3"),
+                    None,
+                    &config(json!({"repositories": ["o/renamed"]})),
+                )
+                .unwrap();
+        }),
+    });
+    legacy.respond(&legacy_list, ok(json!([public_issue(77, 7, "o/legacy")])));
+    healthy.respond(&healthy_list, ok(json!([public_issue(88, 8, "o/healthy")])));
+    for (fixture, repo, issue) in [(&legacy, "legacy", 7), (&healthy, "healthy", 8)] {
+        for part in ["comments", "events"] {
+            fixture.respond(
+                &format!("{DEFAULT_API_URL}/repos/o/{repo}/issues/{issue}/{part}?per_page=100"),
+                ok(json!([])),
+            );
+        }
+    }
+
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert_eq!(report.failures.len(), 1);
+    let conflict = &report.failures[0];
+    assert_eq!(conflict.connection_id.as_deref(), Some("github"));
+    assert_eq!(conflict.scope, crate::source::FailureScope::Source);
+    assert!(conflict.message.contains("already connected"));
+    assert_eq!(report.imported.len(), 1);
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+    let ticket = workspace.show_ticket(&report.imported[0]).unwrap();
+    assert_eq!(ticket.source.unwrap().id, "88");
+    let status = workspace
+        .source_statuses()
+        .unwrap()
+        .into_iter()
+        .find(|source| source.connection_id.as_deref() == Some("github"))
+        .unwrap();
+    assert_eq!(status.error.unwrap().message, conflict.message);
+}
+
+#[test]
 fn a_destination_only_refresh_defers_a_move_and_imports_unrelated_issues() {
     enum OriginRead {
         Moved,
         Unavailable,
         Unrelated,
+        ReusedPath,
     }
     for observation in [
         OriginRead::Moved,
         OriginRead::Unavailable,
         OriginRead::Unrelated,
+        OriginRead::ReusedPath,
     ] {
         let original = Arc::new(Fixture::default());
         let destination = Arc::new(Fixture::default());
@@ -1554,6 +1711,7 @@ fn a_destination_only_refresh_defers_a_move_and_imports_unrelated_issues() {
         unrelated["created_at"] = json!("2026-01-02T00:00:00Z");
         let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
         let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
+        let unrelated_url = format!("{DEFAULT_API_URL}/repos/o/two/issues/13");
         let old_list = format!("{DEFAULT_API_URL}/repos/o/one/issues?state=open&per_page=100");
         let new_list = format!("{DEFAULT_API_URL}/repos/o/two/issues?state=open&per_page=100");
         let old_repo = config(json!({"repositories": ["o/one"]}));
@@ -1575,6 +1733,23 @@ fn a_destination_only_refresh_defers_a_move_and_imports_unrelated_issues() {
         let reference = &first.imported[0];
         let original_requests = original.urls();
 
+        let tracked_unrelated = if matches!(observation, OriginRead::ReusedPath) {
+            destination.respond(&new_list, ok(json!([unrelated])));
+            for part in ["comments", "events"] {
+                destination.respond(
+                    &format!("{unrelated_url}/{part}?per_page=100"),
+                    ok(json!([])),
+                );
+            }
+            let imported = workspace
+                .refresh_connection(&engine, "github-2", &Default::default())
+                .unwrap();
+            unrelated["title"] = json!("Unrelated issue updated");
+            unrelated["updated_at"] = json!("2026-01-04T00:00:00Z");
+            Some(imported.imported[0].clone())
+        } else {
+            None
+        };
         destination.respond(&new_list, ok(json!([new_issue, unrelated])));
         match observation {
             OriginRead::Moved => {
@@ -1582,6 +1757,13 @@ fn a_destination_only_refresh_defers_a_move_and_imports_unrelated_issues() {
                 destination.respond(&new, ok(new_issue.clone()));
             }
             OriginRead::Unavailable => destination.respond(&old, status(404, json!({}), &[])),
+            OriginRead::ReusedPath => {
+                destination.respond(
+                    &old,
+                    status(301, json!({}), &[("location", &unrelated_url)]),
+                );
+                destination.respond(&unrelated_url, ok(unrelated));
+            }
             OriginRead::Unrelated => {
                 destination.respond(&old, ok(old_issue));
                 for part in ["comments", "events"] {
@@ -1600,10 +1782,22 @@ fn a_destination_only_refresh_defers_a_move_and_imports_unrelated_issues() {
             .unwrap();
         assert_eq!(original.urls(), original_requests);
         assert!(destination.urls().contains(&old));
-        let listed_parts: String = rusqlite::Connection::open(&path).unwrap().query_row(
-            "SELECT read_partitions FROM source_connection_status WHERE connection_id = 'github-2'",
-            [], |row| row.get(0),
+        let (listed_parts, partial): (String, Option<String>) = rusqlite::Connection::open(&path).unwrap().query_row(
+            "SELECT read_partitions, partial_message FROM source_connection_status WHERE connection_id = 'github-2'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
         ).unwrap();
+        if let Some(reference) = tracked_unrelated {
+            assert!(second.imported.is_empty());
+            assert!(
+                partial.is_some_and(|message| message.contains("possible GitHub issue transfer"))
+            );
+            assert_eq!(second.updated, std::slice::from_ref(&reference));
+            assert_eq!(
+                workspace.show_ticket(&reference).unwrap().title,
+                "Unrelated issue updated"
+            );
+            continue;
+        }
         if matches!(observation, OriginRead::Unrelated) {
             assert_eq!(second.imported.len(), 2);
             assert_eq!(listed_parts, r#"["o/two"]"#);
@@ -3142,6 +3336,52 @@ fn a_request_that_never_left_is_not_sent_but_a_lost_answer_is_not_proof() {
     let error = publish_to(&engine).unwrap_err();
     assert!(matches!(error, SourceError::Unavailable(_)), "{error}");
     assert!(!error.ruled_out_creation());
+}
+
+#[test]
+fn a_create_is_not_sent_when_credentials_take_past_the_dispatch_window() {
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::{Duration, Instant},
+    };
+
+    struct LateToken {
+        deadline: Instant,
+        read: Arc<AtomicBool>,
+    }
+
+    impl CredentialSource for LateToken {
+        fn token(&self) -> Option<Secret> {
+            self.read.store(true, Ordering::Relaxed);
+            std::thread::sleep(
+                self.deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(5),
+            );
+            Some(Secret::new(TOKEN))
+        }
+    }
+
+    let fixture = Arc::new(Fixture::default());
+    let read = Arc::new(AtomicBool::new(false));
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let github = GithubConnector::new(
+        API,
+        Box::new(Shared(fixture.clone())),
+        Box::new(LateToken {
+            deadline,
+            read: read.clone(),
+        }),
+    );
+    let request = PublishRequest {
+        destination: "o/r".into(),
+        title: "Publish issue".into(),
+        body: String::new(),
+    };
+    let error = github
+        .publish_before(&ConfigValues::new(), &request, deadline)
+        .unwrap_err();
+    assert!(matches!(error, SourceError::NotSent(_)), "{error}");
+    assert!(read.load(Ordering::Relaxed));
+    assert!(fixture.urls().is_empty());
 }
 
 #[test]

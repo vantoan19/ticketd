@@ -37,11 +37,13 @@
 //! compare-and-set on the stored status, in one write transaction that holds no
 //! network call.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fs::File};
 
+use fs2::FileExt;
 use pulldown_cmark::{Event, Parser, Tag};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use super::{
@@ -220,7 +222,8 @@ pub struct PublicationPreview {
 
 #[derive(Debug, Clone, Default)]
 pub struct PublishOptions {
-    pub provider: String,
+    /// The saved connection ID. Defaults to the sole connection that can publish.
+    pub connection: Option<String>,
     /// Connector-defined destination such as `owner/name`. Defaults to the
     /// listed Project remote, or to the sole listed destination.
     pub destination: Option<String>,
@@ -1293,29 +1296,35 @@ fn require_target<'a>(
     })
 }
 
+fn default_publication_connection(
+    connection: &Connection,
+    engine: &Engine,
+) -> Result<String, Error> {
+    let connected: Vec<_> = super::configured_sources(connection)?
+        .into_iter()
+        .filter(|source| engine.can_publish(&source.saved.provider))
+        .map(|source| source.saved.id)
+        .collect();
+    match connected.as_slice() {
+        [id] => Ok(id.clone()),
+        _ => Err(
+            SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
+                "connection",
+                if connected.is_empty() {
+                    "add a source connection that can publish first".to_owned()
+                } else {
+                    format!("select --connection from: {}", connected.join(", "))
+                },
+            )])
+            .into(),
+        ),
+    }
+}
+
 impl Workspace {
-    /// Selects the connection for publication when the choice is unambiguous.
+    /// Selects the connection for a preview when the choice is unambiguous.
     pub fn default_publication_provider(&self, engine: &Engine) -> Result<String, Error> {
-        let connected: Vec<_> = self
-            .saved_sources()?
-            .into_iter()
-            .filter(|source| engine.can_publish(&source.provider))
-            .map(|source| source.id)
-            .collect();
-        match connected.as_slice() {
-            [id] => Ok(id.clone()),
-            _ => Err(
-                SourceError::InvalidConfiguration(vec![super::FieldIssue::for_field(
-                    "connection",
-                    if connected.is_empty() {
-                        "add a source connection that can publish first".to_owned()
-                    } else {
-                        format!("select --connection from: {}", connected.join(", "))
-                    },
-                )])
-                .into(),
-            ),
-        }
+        default_publication_connection(&self.connection, engine)
     }
 
     /// What publishing `reference` would send and whether it is allowed. Makes no
@@ -1432,7 +1441,6 @@ impl Workspace {
         reference: &str,
         options: &PublishOptions,
     ) -> Result<PublishOutcome, Error> {
-        let connection_id = options.provider.as_str();
         // `Err` from the scope's operation is an attempt that already published the
         // ticket: it is replayed.
         let (started, provider_name) = match crate::write_scope::run(
@@ -1448,6 +1456,14 @@ impl Workspace {
                 {
                     return Ok(Err(attempt));
                 }
+                let default;
+                let connection_id = match options.connection.as_deref() {
+                    Some(id) => id,
+                    None => {
+                        default = default_publication_connection(transaction, engine)?;
+                        default.as_str()
+                    }
+                };
                 let configured = configured_source(transaction, connection_id)?;
                 let provider = configured
                     .as_ref()
@@ -1577,8 +1593,9 @@ impl Workspace {
             }
         };
 
-        // The remote write. Nothing is held open: another process may read or
-        // write the workspace meanwhile and sees the attempt in flight.
+        // The dispatch guard protects this attempt while other processes can
+        // continue reading and writing the Workspace.
+        let _dispatch_guard;
         let (result, sent) = match started.source.check(engine) {
             Ok((scoped, checked)) => {
                 let claim = if destination_refusal(
@@ -1591,7 +1608,30 @@ impl Workspace {
                         "the selected destination is no longer available. Preview publication again".into(),
                     ))
                 } else {
-                    self.claim_dispatch(&started, &checked.connection, options.now.as_deref())
+                    match self.publication_guard(&started.reference, &started.attempt_id, true) {
+                        Ok(guard) => {
+                            _dispatch_guard = guard;
+                            self.claim_dispatch(
+                                &started,
+                                &checked.connection,
+                                options.now.as_deref(),
+                            )
+                        }
+                        Err(error @ Error::Publication(PublicationError::StillRunning { .. })) => {
+                            return Err(error);
+                        }
+                        Err(error) => {
+                            tracing::warn!(
+                                source_id = %started.source.saved.id,
+                                error_kind = error.kind().code(),
+                                "could not lock a publication before dispatch"
+                            );
+                            Err(SourceError::NotSent(
+                                "the Workspace could not lock the publication before sending"
+                                    .into(),
+                            ))
+                        }
+                    }
                 };
                 match claim {
                     Ok(deadline) => (
@@ -1766,6 +1806,42 @@ impl Workspace {
         })
     }
 
+    /// Dispatch is exclusive. Resolvers share the guard so they can still race
+    /// through verification and compare-and-set without racing a live sender.
+    fn publication_guard(
+        &self,
+        reference: &str,
+        attempt_id: &str,
+        dispatch: bool,
+    ) -> Result<File, Error> {
+        let locks = self
+            .attachment_directory()?
+            .join(".publication-dispatch-locks");
+        std::fs::create_dir_all(&locks)?;
+        let guard = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(locks.join(format!("{:x}.lock", Sha256::digest(attempt_id.as_bytes()))))?;
+        let locked = if dispatch {
+            FileExt::try_lock_exclusive(&guard)
+        } else {
+            FileExt::try_lock_shared(&guard)
+        };
+        match locked {
+            Ok(()) => Ok(guard),
+            Err(error) if error.raw_os_error() == fs2::lock_contended_error().raw_os_error() => {
+                Err(PublicationError::StillRunning {
+                    reference: reference.to_owned(),
+                    attempt_id: attempt_id.to_owned(),
+                }
+                .into())
+            }
+            Err(error) => Err(error.into()),
+        }
+    }
+
     /// Recheck the lease and source revision immediately before handing off the write.
     fn claim_dispatch(
         &mut self,
@@ -1913,6 +1989,12 @@ fn latest_attempt(
             |row| attempt_from_row(row, &now),
         )
         .optional()?)
+}
+
+enum AttachmentProof<'a> {
+    Lookup(&'a Engine),
+    Verified(&'a ExternalIssue),
+    None,
 }
 
 /// Resolution of uncertain attempts. Each resolution is verified outside any
@@ -2246,7 +2328,7 @@ impl Workspace {
             return self.settled_instead(
                 &ticket,
                 &options.resolution,
-                None,
+                AttachmentProof::Lookup(engine),
                 options.now.as_deref(),
             );
         };
@@ -2257,6 +2339,7 @@ impl Workspace {
             }
             .into());
         }
+        let _recovery_guard = self.publication_guard(&ticket.reference, &attempt.id, false)?;
         let unverified = |source| {
             Error::Publication(PublicationError::Unverified {
                 reference: ticket.reference.clone(),
@@ -2380,7 +2463,7 @@ impl Workspace {
         &self,
         ticket: &Subject,
         resolution: &Resolution,
-        identity: Option<&ExternalIdentity>,
+        proof: AttachmentProof<'_>,
         now: Option<&str>,
     ) -> Result<PublishOutcome, Error> {
         let settled = |attempt: &PublicationAttempt, message: &str| {
@@ -2408,18 +2491,12 @@ impl Workspace {
                 Resolution::Attach { .. } | Resolution::AttachUsingConnection { .. },
                 AttemptState::Succeeded,
             ) => {
-                let same = identity.is_none_or(|id| {
-                    latest
-                        .issue
-                        .as_ref()
-                        .is_some_and(|issue| &issue.identity == id)
-                });
-                if same {
+                if self.matches_settled_attachment(&latest, resolution, proof)? {
                     replay(latest)
                 } else {
                     Err(settled(
                         &latest,
-                        "this publication was already completed with a different issue; nothing was changed",
+                        "this publication was already completed. The attachment request could not be matched to the recorded issue and connection",
                     ))
                 }
             }
@@ -2447,6 +2524,60 @@ impl Workspace {
                 .into())
             }
         }
+    }
+
+    fn matches_settled_attachment(
+        &self,
+        attempt: &PublicationAttempt,
+        resolution: &Resolution,
+        proof: AttachmentProof<'_>,
+    ) -> Result<bool, Error> {
+        let Some(recorded) = &attempt.issue else {
+            return Ok(false);
+        };
+        let requested = match resolution {
+            Resolution::Attach { issue } => issue.as_deref(),
+            Resolution::AttachUsingConnection { issue, connection } => {
+                let binding: bool = self.connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM publication_connections WHERE attempt_id = ?1 AND connection_id = ?2)",
+                    params![attempt.id, connection],
+                    |row| row.get(0),
+                )?;
+                if !binding {
+                    return Ok(false);
+                }
+                Some(issue.as_str())
+            }
+            Resolution::NotCreated => return Ok(false),
+        };
+        let matches = |issue: &ExternalIssue| {
+            recorded.identity == issue.reference.identity
+                && super::legacy_issue_origin_matches(&attempt.provider, &recorded.url, &issue.url)
+        };
+        if let AttachmentProof::Verified(issue) = proof {
+            return Ok(matches(issue));
+        }
+        let Some(requested) = requested.map(str::trim).filter(|issue| !issue.is_empty()) else {
+            return Ok(true);
+        };
+        let AttachmentProof::Lookup(engine) = proof else {
+            return Ok(false);
+        };
+        // A named replay can require a provider read. Only the no-open-attempt
+        // path supplies an engine, so the read stays outside the write scope.
+        let Some(source) = publication_connection(&self.connection, attempt)? else {
+            return Ok(false);
+        };
+        if check_recovery_host(&source.bind(engine), attempt).is_err() {
+            return Ok(false);
+        }
+        let Ok((scoped, _)) = verified_publication_engine(engine, &source) else {
+            return Ok(false);
+        };
+        Ok(
+            Self::lookup_publication_issue(&scoped, attempt, &source, Some(requested))
+                .is_ok_and(|issue| matches(&issue)),
+        )
     }
 
     /// Attaches an issue the source has verified, if the attempt is still open.
@@ -2498,16 +2629,34 @@ impl Workspace {
         }
         crate::write_scope::run(&self.connection, |transaction| {
             // Compare-and-set: the attempt must still be the same open attempt.
-            let Some(open) = open_attempt(transaction, &ticket.id, now)?
-                .filter(|open| open.id == attempt.id && open.state != AttemptState::InFlight)
+            let Some(open) =
+                open_attempt(transaction, &ticket.id, now)?.filter(|open| open.id == attempt.id)
             else {
                 return self.settled_instead(
                     ticket,
-                    &Resolution::Attach { issue: None },
-                    Some(identity),
+                    &options.resolution,
+                    AttachmentProof::Verified(issue),
                     now,
                 );
             };
+            if open.lease_expires_at != attempt.lease_expires_at {
+                return Err(PublicationError::Unverified {
+                    reference: ticket.reference.clone(),
+                    attempt_id: attempt.id.clone(),
+                    source: SourceError::Unavailable(
+                        "the dispatch window changed while verifying the issue. Review the attempt and try again"
+                            .into(),
+                    ),
+                }
+                .into());
+            }
+            if open.state == AttemptState::InFlight {
+                return Err(PublicationError::StillRunning {
+                    reference: ticket.reference.clone(),
+                    attempt_id: attempt.id.clone(),
+                }
+                .into());
+            }
             if let Some(known) = &open.issue
                 && (&known.identity != identity
                     || !super::legacy_issue_origin_matches(
@@ -2702,7 +2851,12 @@ impl Workspace {
                         "the dispatch window changed during the search. Review the attempt and search again".into(),
                     )));
                 }
-                return self.settled_instead(ticket, &Resolution::NotCreated, None, Some(&now));
+                return self.settled_instead(
+                    ticket,
+                    &Resolution::NotCreated,
+                    AttachmentProof::None,
+                    Some(&now),
+                );
             }
             history::record(
                 transaction,
@@ -2802,7 +2956,7 @@ fn unbound_attach_help(attempt: &PublicationAttempt) -> String {
     }
     if attempt.destination_host.is_none() || attempt.destination_site_unconfirmed {
         return format!(
-            "Verify the original host and any nondefault port, then record it with `ticketd source resolve {} --confirm-host HOST`.",
+            "Verify the original host and any nondefault port. For GitHub Enterprise, set TICKETD_GITHUB_API_URL to that site's API URL. Record the site with `ticketd source resolve {} --confirm-host HOST`.",
             attempt.reference
         );
     }

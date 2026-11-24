@@ -98,6 +98,21 @@ fn migrates_the_site_of_a_legacy_enterprise_connection() {
     assert!(!refused.status.success());
     assert!(intercepted.is_none());
     assert!(String::from_utf8_lossy(&refused.stderr).contains("differs from the site saved"));
+
+    let (refused, intercepted) = call(
+        "https://replacement.invalid/api/v3",
+        &[
+            "source",
+            "github",
+            "options",
+            "repositories",
+            "--query",
+            "fixture",
+        ],
+    );
+    assert!(!refused.status.success());
+    assert!(intercepted.is_none());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("differs from the site saved"));
 }
 
 #[test]
@@ -156,6 +171,14 @@ fn serve() -> String {
 }
 
 fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
+    serve_site_with_login(issue_origin, published_id, || "octo")
+}
+
+fn serve_site_with_login(
+    issue_origin: &'static str,
+    published_id: i64,
+    login: impl Fn() -> &'static str + Send + 'static,
+) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     std::thread::spawn(move || {
@@ -224,7 +247,7 @@ fn serve_site(issue_origin: &'static str, published_id: i64) -> String {
             } else if path == "/user" {
                 (
                     "200 OK",
-                    json!({"id": if second { 2 } else { 1 }, "login": if second { "other" } else { "octo" }}),
+                    json!({"id": if second { 2 } else { 1 }, "login": if second { "other" } else { login() }}),
                 )
             } else if path.starts_with("/user/repos") {
                 (
@@ -311,6 +334,17 @@ impl Cli {
         token: Option<&str>,
         second: Option<&str>,
     ) -> Output {
+        let mut command = self.process(args);
+        if let Some(token) = token {
+            command.env("TICKETD_GITHUB_TOKEN", token);
+        }
+        if let Some(second) = second {
+            command.env("TICKETD_SOURCE_GITHUB_2_TOKEN", second);
+        }
+        command.output().unwrap()
+    }
+
+    fn process(&self, args: &[&str]) -> Command {
         let mut command = Command::new(env!("CARGO_BIN_EXE_ticketd"));
         command
             .args(args)
@@ -327,13 +361,7 @@ impl Cli {
             .env_remove("TICKETD_GITHUB_TOKEN")
             .env_remove("TICKETD_SOURCE_GITHUB_TOKEN")
             .env_remove("TICKETD_SOURCE_GITHUB_2_TOKEN");
-        if let Some(token) = token {
-            command.env("TICKETD_GITHUB_TOKEN", token);
-        }
-        if let Some(second) = second {
-            command.env("TICKETD_SOURCE_GITHUB_2_TOKEN", second);
-        }
-        command.output().unwrap()
+        command
     }
 
     fn run(&self, args: &[&str]) -> Value {
@@ -559,6 +587,99 @@ fn a_named_github_account_gets_connection_specific_sign_in_guidance() {
         "{failure}"
     );
     assert!(!failure.contains("set TICKETD_GITHUB_TOKEN"), "{failure}");
+}
+
+#[cfg(unix)]
+#[test]
+fn a_renamed_pinned_github_account_can_change_its_cli_selector_in_place() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let directory = tempfile::tempdir().unwrap();
+    let renamed = directory.path().join("renamed");
+    let marker = renamed.clone();
+    let api = serve_site_with_login("https://github.example", 50, move || {
+        if marker.exists() {
+            "octo-renamed"
+        } else {
+            "octo"
+        }
+    });
+    let command = directory.path().join("gh");
+    std::fs::write(
+        &command,
+        format!(
+            r#"#!/bin/sh
+[ "$1 $2" = "auth token" ] && [ "$3" = "--hostname" ] && [ "$5" = "--user" ] || exit 1
+case "$6" in
+  octo) [ ! -f "$TICKETD_GH_RENAMED" ] && printf '%s\n' '{TOKEN}' ;;
+  octo-renamed) [ -f "$TICKETD_GH_RENAMED" ] && printf '%s\n' '{TOKEN}' ;;
+  other) printf '%s\n' '{SECOND_TOKEN}' ;;
+  *) exit 1 ;;
+esac
+"#
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(command, std::fs::Permissions::from_mode(0o700)).unwrap();
+
+    let run = |args: &[&str]| -> Output {
+        Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env_clear()
+            .env("PATH", directory.path())
+            .env("HOME", directory.path())
+            .env("XDG_DATA_HOME", directory.path())
+            .env("GH_CONFIG_DIR", directory.path().join("gh-config"))
+            .env("TICKETD_GH_RENAMED", &renamed)
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                directory.path().join("workspace.sqlite3"),
+            )
+            .env("TICKETD_GITHUB_API_URL", &api)
+            .output()
+            .unwrap()
+    };
+    let checked = |output: Output| -> Value {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+
+    let added = checked(run(&[
+        "source",
+        "add",
+        "github",
+        "--set",
+        "repositories=o/r",
+        "--set",
+        "account=octo",
+    ]));
+    assert_eq!(added["source"]["id"], "github");
+    std::fs::write(&renamed, "").unwrap();
+    assert!(!run(&["source", "github", "test"]).status.success());
+    let wrong = run(&["source", "github", "edit", "--set", "account=other"]);
+    assert!(!wrong.status.success());
+    assert!(String::from_utf8_lossy(&wrong.stderr).contains("sign in as octo"));
+    assert_eq!(
+        checked(run(&["source", "github", "show"]))["config"]["account"],
+        "octo"
+    );
+
+    let updated = checked(run(&[
+        "source",
+        "github",
+        "edit",
+        "--set",
+        "account=octo-renamed",
+    ]));
+    assert_eq!(updated["source"]["id"], "github");
+    assert_eq!(updated["source"]["config"]["account"], "octo-renamed");
+    let tested = checked(run(&["source", "github", "test"]));
+    assert_eq!(tested["account"], "octo-renamed");
+    assert_eq!(tested["account_id"], "id:1");
 }
 
 #[test]
@@ -919,6 +1040,12 @@ fn publish_previews_then_creates_one_issue_and_replays_without_another() {
     assert_eq!(outcome["ticket"]["source"]["origin"], "published");
     assert_eq!(outcome["ticket"]["source"]["ownership"], "external");
 
+    let added = cli.command_with_second(
+        &["source", "add", "github", "--set", "repositories=o/r"],
+        Some(TOKEN),
+        Some(SECOND_TOKEN),
+    );
+    assert!(added.status.success(), "{:?}", added.stderr);
     let again = cli.run(&["source", "publish", &reference]);
     assert_eq!(again["replayed"], true);
     assert_eq!(again["attempt"]["id"], outcome["attempt"]["id"]);
@@ -942,6 +1069,8 @@ fn publication_replays_when_the_named_connection_has_been_removed() {
     let replay = cli.run(&args);
     assert_eq!(replay["replayed"], true);
     assert_eq!(replay["attempt"]["id"], first["attempt"]["id"]);
+    let implicit = cli.run(&["source", "publish", &reference]);
+    assert_eq!(implicit["attempt"]["id"], first["attempt"]["id"]);
 }
 
 #[test]
@@ -1137,6 +1266,53 @@ fn legacy_publication_recovery_uses_only_verified_original_hosts() {
 }
 
 #[test]
+fn an_unbound_publication_can_confirm_a_configured_enterprise_site_and_port() {
+    let cli = Cli::new();
+    let path = cli.dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 88).unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch(
+            "INSERT INTO tickets (id, reference, title, status)
+                 VALUES ('11111111-1111-4111-8111-111111111111', 'T-KQ12', 'Escalate me', 'Todo');
+             INSERT INTO publication_attempts
+                (id, ticket_id, provider, destination, title, body, status, started_at, lease_expires_at, updated_at)
+                 VALUES ('attempt', '11111111-1111-4111-8111-111111111111', 'github', 'o/r',
+                    'Escalate me', '', 'unresolved', '2026-01-01T00:00:00Z', '2026-01-01T00:02:00Z',
+                    '2026-01-01T00:00:00Z');",
+        )
+        .unwrap();
+    let site = "git.example.test:8443";
+    let args = ["source", "resolve", "T-KQ12", "--confirm-host", site];
+    let default = cli
+        .process(&args)
+        .env_remove("TICKETD_GITHUB_API_URL")
+        .output()
+        .unwrap();
+    assert!(!default.status.success());
+    assert!(String::from_utf8_lossy(&default.stderr).contains("uses github.com"));
+
+    let confirmed = cli
+        .process(&args)
+        .env(
+            "TICKETD_GITHUB_API_URL",
+            "https://git.example.test:8443/api/v3",
+        )
+        .output()
+        .unwrap();
+    assert!(
+        confirmed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&confirmed.stderr)
+    );
+    let attempt: Value = serde_json::from_slice(&confirmed.stdout).unwrap();
+    assert_eq!(attempt["destination_host"], site);
+    assert_eq!(attempt["state"], "unresolved");
+    let review = cli.run(&["source", "resolve", "T-KQ12", "--no-search"]);
+    assert!(review.get("connection_id").is_none());
+}
+
+#[test]
 fn a_legacy_publication_without_a_binding_can_only_attach_explicitly() {
     let cli = Cli::new();
     let site = cli.api.strip_prefix("http://").unwrap();
@@ -1209,6 +1385,14 @@ fn a_legacy_publication_without_a_binding_can_only_attach_explicitly() {
     let recovered = cli.run(&explicit);
     assert_eq!(recovered["attempt"]["state"], "succeeded");
     assert_eq!(recovered["ticket"]["source"]["display"], "o/flaky#7");
+    let mut different_issue = explicit;
+    different_issue[4] = "8";
+    let rejected = cli.fail(&different_issue, Some(TOKEN));
+    assert!(rejected.contains("could not be matched"), "{rejected}");
+    assert_eq!(
+        cli.run(&["show", reference])["source"]["display"],
+        "o/flaky#7"
+    );
     let historical_bindings: i64 = rusqlite::Connection::open(path)
         .unwrap()
         .query_row("SELECT COUNT(*) FROM publication_connections", [], |row| {

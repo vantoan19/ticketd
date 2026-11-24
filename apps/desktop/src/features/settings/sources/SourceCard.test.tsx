@@ -1050,7 +1050,7 @@ test("a saved source without a credential shows one row that says how to sign in
   expect(screen.getByText("Saved for octo")).toBeTruthy();
 });
 
-test("Needs sign-in opens only active credential fields and saves a replacement", async () => {
+test("credential replacement stays signed in through an unavailable health read", async () => {
   const saved = {
     id: "credential-example",
     provider: "github",
@@ -1085,51 +1085,76 @@ test("Needs sign-in opens only active credential fields and saves a replacement"
     unavailable_tickets: 0,
     partial_message: null,
   };
-  const readHealth = vi.fn(async () => {});
+  const readHealth = vi
+    .fn(async () => {})
+    .mockRejectedValueOnce(new Error("Health read failed"));
   function Fixture() {
-    const [health, setHealth] = useState(failedHealth);
+    const [shown, setShown] = useState(true);
+    const [verifiedCredentials, setVerifiedCredentials] = useState(
+      new Map<string, { account: string; read: number }>(),
+    );
+    const [failure, setFailure] = useState(0);
     return (
       <SourceActivityContext.Provider
         value={{
           refreshing: false,
-          sources: [health],
+          sources: [failedHealth],
           entries: null,
           intervalSecs: 300,
           openSettings: () => {},
           refreshAll: async () => {},
-          readHealth: async () => {
-            await readHealth();
-            setHealth({ ...failedHealth, health: "waiting", error: null });
+          verifiedCredentials,
+          healthReadFailure: failure,
+          readHealth: (verified) => {
+            const generation = readHealth.mock.calls.length + 2;
+            if (verified)
+              setVerifiedCredentials(
+                new Map([
+                  [
+                    verified.connection,
+                    { account: verified.account, read: generation },
+                  ],
+                ]),
+              );
+            void readHealth().then(
+              () => setVerifiedCredentials(new Map()),
+              () => setFailure(generation),
+            );
           },
         }}
       >
-        <SourceCard
-          entry={{
-            ...entry,
-            connector: {
-              ...entry.connector,
-              schema: {
-                fields: [
-                  ...entry.connector.schema.fields,
-                  {
-                    key: "api_key",
-                    label: "API key",
-                    required: true,
-                    type: "secret",
-                  },
-                  {
-                    key: "conditional_key",
-                    label: "Conditional credential",
-                    required: false,
-                    type: "secret",
-                    show_if: "assignee",
-                  },
-                ],
+        <button type="button" onClick={() => setShown(!shown)}>
+          Toggle source page
+        </button>
+        {shown && (
+          <SourceCard
+            entry={{
+              ...entry,
+              connector: {
+                ...entry.connector,
+                schema: {
+                  fields: [
+                    ...entry.connector.schema.fields,
+                    {
+                      key: "api_key",
+                      label: "API key",
+                      required: true,
+                      type: "secret",
+                    },
+                    {
+                      key: "conditional_key",
+                      label: "Conditional credential",
+                      required: false,
+                      type: "secret",
+                      show_if: "assignee",
+                    },
+                  ],
+                },
               },
-            },
-            saved,
-          }}
-        />
+              saved,
+            }}
+          />
+        )}
       </SourceActivityContext.Provider>
     );
   }
@@ -1166,6 +1191,19 @@ test("Needs sign-in opens only active credential fields and saves a replacement"
     screen.queryByRole("button", { name: "Re-enter credentials" }),
   ).toBeNull();
   expect(screen.getByText("Signed in as octo")).toBeTruthy();
+  const toggle = screen.getByRole("button", { name: "Toggle source page" });
+  fireEvent.click(toggle);
+  fireEvent.click(toggle);
+  expect(screen.getByText("Signed in as octo")).toBeTruthy();
+  expect(screen.queryByText("Needs sign-in")).toBeNull();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Retry health check" }),
+  );
+  await screen.findByText("Needs sign-in");
+  expect(readHealth).toHaveBeenCalledTimes(2);
+  expect(
+    screen.queryByRole("button", { name: "Retry health check" }),
+  ).toBeNull();
 });
 
 test("discovery uses the core's imported references and Discard restores saved rules", async () => {
@@ -1482,6 +1520,13 @@ test("Sources adds a named connection and renames it without changing its ID", a
   fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
     target: { value: "Work issues" },
   });
+  vi.mocked(sourcesClient.list).mockResolvedValue([
+    {
+      ...entry,
+      saved: { ...created, name: "Work issues" },
+      next_id: "github-3",
+    },
+  ]);
   fireEvent.click(screen.getByRole("button", { name: "Save name" }));
   await screen.findByText("Work issues");
   expect(document.activeElement).toBe(
@@ -1501,13 +1546,22 @@ test("a pending rename preserves current availability and yields to the confirme
     saved_at: "2026-01-01T00:00:00Z",
   };
   const renamed = { ...saved, name: "Work issues" };
-  vi.mocked(sourcesClient.rename).mockResolvedValue(renamed);
-  const page = (source: SourceEntry) => (
+  let commitRename: (source: typeof saved) => void = () => {};
+  vi.mocked(sourcesClient.rename).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        commitRename = resolve;
+      }),
+  );
+  const readCatalog = vi.fn(() => 3);
+  const page = (source: SourceEntry, observation: number) => (
     <SourceActivityContext.Provider
       value={{
         refreshing: false,
         sources: [],
         entries: [source],
+        catalogObservation: observation,
+        readCatalog,
         intervalSecs: null,
         openSettings: () => {},
         refreshAll: async () => {},
@@ -1516,21 +1570,23 @@ test("a pending rename preserves current availability and yields to the confirme
       <SourcesPage onOpen={vi.fn()} />
     </SourceActivityContext.Provider>
   );
-  const view = render(page({ ...entry, saved }));
+  const view = render(page({ ...entry, saved }, 1));
   fireEvent.click(screen.getByRole("button", { name: "Rename Work" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
     target: { value: renamed.name },
   });
   fireEvent.click(screen.getByRole("button", { name: "Save name" }));
+  expect(readCatalog).not.toHaveBeenCalled();
+  await act(async () => commitRename(renamed));
   await screen.findByText("Work issues");
-  view.rerender(page({ ...entry, saved, unavailable: true }));
+  expect(readCatalog).toHaveBeenCalledOnce();
+  view.rerender(page({ ...entry, saved, unavailable: true }, 2));
   expect(screen.getByText("Work issues")).toBeTruthy();
   expect(screen.getByText("Extension unavailable")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Configure" })).toBeNull();
 
-  view.rerender(page({ ...entry, saved: renamed, unavailable: true }));
   view.rerender(
-    page({ ...entry, saved: { ...renamed, name: "Updated elsewhere" } }),
+    page({ ...entry, saved: { ...renamed, name: "Updated elsewhere" } }, 3),
   );
   expect(screen.getByText("Updated elsewhere")).toBeTruthy();
   expect(screen.queryByText("Work issues")).toBeNull();
@@ -1587,7 +1643,7 @@ test("Sources keeps an uninstalled provider's saved connection manageable", asyn
     config: {},
     saved_at: "2026-01-01T00:00:00Z",
   };
-  vi.mocked(sourcesClient.list).mockResolvedValue([
+  const catalog = (savedConnection = saved): SourceEntry[] => [
     { ...githubSource, next_id: "github-2" },
     {
       connector: {
@@ -1595,10 +1651,11 @@ test("Sources keeps an uninstalled provider's saved connection manageable", asyn
         name: "Fixture Tracker",
         provider: "tracker",
       },
-      saved,
+      saved: savedConnection,
       unavailable: true,
     },
-  ]);
+  ];
+  vi.mocked(sourcesClient.list).mockResolvedValue(catalog());
   vi.mocked(sourcesClient.rename).mockResolvedValue({
     ...saved,
     name: "Renamed tracker",
@@ -1619,6 +1676,9 @@ test("Sources keeps an uninstalled provider's saved connection manageable", asyn
   fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
     target: { value: "Renamed tracker" },
   });
+  vi.mocked(sourcesClient.list).mockResolvedValue(
+    catalog({ ...saved, name: "Renamed tracker" }),
+  );
   fireEvent.click(screen.getByRole("button", { name: "Save name" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Remove Renamed tracker" }),

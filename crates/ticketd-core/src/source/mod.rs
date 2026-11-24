@@ -776,6 +776,11 @@ impl Workspace {
         raw: &ConfigValues,
     ) -> Result<Vec<ChoiceOption>, Error> {
         let scoped = self.source_draft_engine(engine, provider, connection, raw)?;
+        if let Some(id) = connection
+            && let Some(saved) = configured_source(&self.connection, id)?
+        {
+            saved.verify_effective_site(&scoped)?;
+        }
         Ok(scoped.options(provider, field, query, raw)?)
     }
 

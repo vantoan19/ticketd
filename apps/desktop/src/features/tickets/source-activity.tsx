@@ -20,14 +20,20 @@ export type SourceActivity = {
    * workspace. `null` where no workspace provides it (a view rendered alone).
    */
   entries: SourceEntry[] | null;
+  /** Generation of the last successful catalog observation. */
+  catalogObservation?: number;
+  /** Starts a catalog read and returns its generation. */
+  readCatalog?: () => number;
   /** How often sources refresh by themselves, in seconds; `null` when unknown. */
   intervalSecs: number | null;
   /** Opens the connection's settings, or the Sources overview. */
   openSettings: (connection?: string) => void;
   /** Refreshes every source now, as the Retry and Refresh actions do. */
   refreshAll: () => Promise<void>;
-  /** Reloads persisted health after a write that can change it. */
-  readHealth?: () => Promise<void>;
+  verifiedCredentials?: ReadonlyMap<string, { account: string; read: number }>;
+  healthReadFailure?: number;
+  /** Reloads health, optionally acknowledging an accepted credential update. */
+  readHealth?: (verified?: { connection: string; account: string }) => void;
 };
 
 export const SourceActivityContext = createContext<SourceActivity>({

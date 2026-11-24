@@ -116,8 +116,12 @@ documented `--attach`, `--issue`, or `--not-created` action only when the observ
 outcome supports it. Inspect `source resolve --help`; `--accept-different` attaches
 different external content and has different consequences. An unknown outcome is
 not evidence that creation failed, and changing retry identity could duplicate work.
-For an unbound GitHub attempt, confirm the original host and explicitly attach
-the verified issue using `--issue ISSUE --using-connection ID`.
+For an unbound GitHub attempt with an unverified site, verify the original host
+and port, then run `ticketd source resolve T-KQ1 --confirm-host HOST` separately.
+Use `HOST:PORT` for a nondefault port. For GitHub Enterprise, set
+`TICKETD_GITHUB_API_URL` to that site's API address for both commands. After
+confirmation, attach the verified issue with
+`ticketd source resolve T-KQ1 --issue ISSUE --using-connection ID`.
 
 An interactive refresh reports extension progress on stderr. Press Ctrl+C to
 cancel it. A canceled refresh exits 130.

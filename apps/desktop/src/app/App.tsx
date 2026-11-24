@@ -518,8 +518,12 @@ function AppContent() {
     revision,
     refresh,
     sourceHealth,
+    verifiedCredentials,
+    sourceHealthReadFailure,
     readSourceHealth,
     sourceEntries,
+    sourceCatalogObservation,
+    readSourceEntries,
     sourceConnectionsChanged,
     sourceRefresh,
     refreshSources,
@@ -922,6 +926,8 @@ function AppContent() {
                       sourceHealth.refreshing || sourceRefresh.running,
                     sources: sourceHealth.sources,
                     entries: sourceEntries,
+                    catalogObservation: sourceCatalogObservation,
+                    readCatalog: () => readSourceEntries().generation,
                     intervalSecs: sourceHealth.interval_secs ?? null,
                     openSettings: (connection) => {
                       openView("settings");
@@ -930,6 +936,8 @@ function AppContent() {
                       );
                     },
                     refreshAll: () => refreshSources(),
+                    verifiedCredentials,
+                    healthReadFailure: sourceHealthReadFailure,
                     readHealth: readSourceHealth,
                   }}
                 >

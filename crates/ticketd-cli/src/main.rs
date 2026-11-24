@@ -800,7 +800,7 @@ enum SourceCommand {
     Publish {
         /// The local ticket to publish, for example T-KQ12
         ticket: String,
-        /// The source connection. Can be omitted when only one can publish
+        /// The source connection. Optional when only one can publish or a successful attempt is replayed
         #[arg(long)]
         connection: Option<String>,
         /// Where to create the issue, for example owner/name. Defaults to the
@@ -2382,11 +2382,11 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
         } => {
             let registry = ExtensionRegistry::device()?;
             let engine = registry.engine()?;
-            let connection = match connection {
-                Some(id) => id,
-                None => workspace.default_publication_provider(&engine)?,
-            };
             if preview {
+                let connection = match connection {
+                    Some(id) => id,
+                    None => workspace.default_publication_provider(&engine)?,
+                };
                 serde_json::to_string(&workspace.preview_publication(
                     &engine,
                     &ticket,
@@ -2398,7 +2398,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     &engine,
                     &ticket,
                     &ticketd_core::source::PublishOptions {
-                        provider: connection,
+                        connection,
                         destination,
                         now: None,
                         expected_fingerprint: expect,

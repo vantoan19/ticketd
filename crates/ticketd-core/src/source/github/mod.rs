@@ -21,7 +21,7 @@ use super::{
         DestinationValidation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
         ExternalEventKind, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
         FetchedIssue, Publication, PublicationCandidates, PublicationSearch, PublishRequest,
-        SkippedPartition, SourceError, StateCategory,
+        SkippedPartition, SourceError, StateCategory, check_publication_deadline,
     },
     schema::{
         ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, FieldPattern,
@@ -276,7 +276,9 @@ impl GithubConnector {
         &self,
         repository: &str,
         request: &PublishRequest,
+        deadline: Option<std::time::Instant>,
     ) -> Result<ExternalIssue, SourceError> {
+        require_repository(repository)?;
         let token = self.credentials.token().ok_or_else(missing_credential)?;
         let body = serde_json::json!({ "title": request.title, "body": request.body });
         let http = HttpRequest {
@@ -285,6 +287,7 @@ impl GithubConnector {
             headers: request_headers(&token, true),
             body: Some(body.to_string().into_bytes()),
         };
+        check_publication_deadline(deadline)?;
         let response = self.transport.send(&http).map_err(|error| {
             if error.before_send {
                 // The request never left: nothing can have been created.
@@ -861,8 +864,17 @@ impl Publication for GithubConnector {
         _config: &ConfigValues,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, SourceError> {
-        require_repository(&request.destination)?;
-        self.create_issue(&request.destination, request)
+        self.create_issue(&request.destination, request, None)
+    }
+
+    fn publish_before(
+        &self,
+        _config: &ConfigValues,
+        request: &PublishRequest,
+        deadline: std::time::Instant,
+    ) -> Result<ExternalIssue, SourceError> {
+        check_publication_deadline(Some(deadline))?;
+        self.create_issue(&request.destination, request, Some(deadline))
     }
 
     fn locate(

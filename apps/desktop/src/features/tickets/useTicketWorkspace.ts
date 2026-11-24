@@ -116,7 +116,10 @@ export function useTicketWorkspace(
   // "all", "local", or a provider id such as "github".
   const [source, setSourceFilter] = useState("all");
   // The connectors and what is saved for each. The source filter appears once one is saved.
-  const [sourceEntries, setSourceEntries] = useState<SourceEntry[]>([]);
+  const [
+    { entries: sourceEntries, observation: sourceCatalogObservation },
+    setSourceCatalog,
+  ] = useState({ entries: [] as SourceEntry[], observation: 0 });
   const sourceRead = useRef(0);
   const configuredSources = [
     ...new Set(
@@ -129,9 +132,21 @@ export function useTicketWorkspace(
   // What the core persisted about each source's freshness, and whether a refresh
   // (startup, periodic or explicit) is running. Kept when a read fails, so a
   // transient error never blanks the footer or claims a refresh succeeded.
-  const [sourceHealth, setSourceHealth] = useState<SourceHealth>({
-    refreshing: false,
-    sources: [],
+  const [
+    {
+      health: sourceHealth,
+      verifiedCredentials,
+      failure: sourceHealthReadFailure,
+    },
+    setSourceHealthState,
+  ] = useState<{
+    health: SourceHealth;
+    verifiedCredentials: ReadonlyMap<string, { account: string; read: number }>;
+    failure: number;
+  }>({
+    health: { refreshing: false, sources: [] },
+    verifiedCredentials: new Map(),
+    failure: 0,
   });
   const healthRead = useRef(0);
   const [sourceRefresh, setSourceRefresh] = useState<{
@@ -327,14 +342,16 @@ export function useTicketWorkspace(
       takeExplanation,
     ],
   );
-  const readSourceEntries = useCallback(async () => {
+  const readSourceEntries = useCallback(() => {
     const request = ++sourceRead.current;
-    await sourcesClient.list().then(
+    const complete = sourcesClient.list().then(
       (entries) => {
-        if (request === sourceRead.current) setSourceEntries(entries);
+        if (request === sourceRead.current)
+          setSourceCatalog({ entries, observation: request });
       },
       () => {},
     );
+    return { generation: request, complete };
   }, []);
   useEffect(() => {
     void readSourceEntries();
@@ -342,15 +359,38 @@ export function useTicketWorkspace(
       sourceRead.current += 1;
     };
   }, [pollTick, readSourceEntries]);
-  const readSourceHealth = useCallback(async () => {
-    const request = ++healthRead.current;
-    await sourcesClient.health().then(
-      (health) => {
-        if (request === healthRead.current) setSourceHealth(health);
-      },
-      () => {},
-    );
-  }, []);
+  const readSourceHealth = useCallback(
+    (verified?: { connection: string; account: string }) => {
+      const request = ++healthRead.current;
+      if (verified)
+        setSourceHealthState((state) => ({
+          ...state,
+          verifiedCredentials: new Map(state.verifiedCredentials).set(
+            verified.connection,
+            { account: verified.account, read: request },
+          ),
+        }));
+      void sourcesClient.health().then(
+        (health) => {
+          if (request === healthRead.current)
+            setSourceHealthState((state) => ({
+              health,
+              verifiedCredentials: new Map(
+                [...state.verifiedCredentials].filter(
+                  ([, evidence]) => evidence.read > request,
+                ),
+              ),
+              failure: 0,
+            }));
+        },
+        () => {
+          if (request === healthRead.current)
+            setSourceHealthState((state) => ({ ...state, failure: request }));
+        },
+      );
+    },
+    [],
+  );
   useEffect(() => {
     void readSourceHealth();
     return () => {
@@ -380,15 +420,18 @@ export function useTicketWorkspace(
     // The save already committed. Make its settings page available while the
     // catalog read catches up. Its saved ID disables the stale Add action
     // until Core assigns the next ID.
-    setSourceEntries((current) => [
-      ...current.filter(
-        ({ connector, saved }) =>
-          connector.provider !== added.connector.provider ||
-          (saved && saved.id !== id),
-      ),
-      added,
-    ]);
-    await readSourceEntries();
+    setSourceCatalog((current) => ({
+      ...current,
+      entries: [
+        ...current.entries.filter(
+          ({ connector, saved }) =>
+            connector.provider !== added.connector.provider ||
+            (saved && saved.id !== id),
+        ),
+        added,
+      ],
+    }));
+    await readSourceEntries().complete;
   }
   // Next past the last shown ticket opens the next one once it has loaded.
   if (pendingNext !== null && tickets.length > pendingNext) {
@@ -582,9 +625,13 @@ export function useTicketWorkspace(
     sourceCounts,
     configuredSources,
     sourceEntries,
+    sourceCatalogObservation,
+    readSourceEntries,
     sourceConnectionsChanged,
     sourceRefresh,
     sourceHealth,
+    verifiedCredentials,
+    sourceHealthReadFailure,
     readSourceHealth,
     refreshSources,
     projects,

@@ -327,6 +327,14 @@ export function SourceCard({
       ? item.connection_id === connectionId
       : item.provider === provider,
   );
+  const verifiedCredential = connectionId
+    ? schedule.verifiedCredentials?.get(connectionId)
+    : undefined;
+  const staleAuthentication =
+    verifiedCredential && SIGNED_OUT.includes(health?.error?.code ?? "");
+  const healthCheckFailed =
+    verifiedCredential &&
+    (schedule.healthReadFailure ?? 0) >= verifiedCredential.read;
   const lastRefreshed = health?.last_refreshed_at;
   const retry = health?.error?.code === "extension_crash_limit";
   const syncing =
@@ -695,7 +703,12 @@ export function SourceCard({
     </div>
   );
 
-  const signedIn = account?.status === "signed_in" ? account.account : null;
+  const signedIn =
+    account?.status === "signed_in"
+      ? account.account
+      : account === null || account.status === "checking"
+        ? verifiedCredential?.account
+        : null;
   const credentialRecovery =
     saved?.id &&
     activeFields(
@@ -704,15 +717,15 @@ export function SourceCard({
       storedSecrets,
     ).some((field) => field.type === "secret") &&
     (account?.status === "signed_out" ||
-      SIGNED_OUT.includes(health?.error?.code ?? ""));
+      (!staleAuthentication && SIGNED_OUT.includes(health?.error?.code ?? "")));
   const accountLabel = credentialRecovery ? (
     <StatusLabel tone="attention">Needs sign-in</StatusLabel>
+  ) : signedIn ? (
+    <StatusLabel tone="positive">Signed in as {signedIn}</StatusLabel>
   ) : account === null || account.status === "checking" ? (
     <span className="source-checking">
       Checking your {connector.name} account…
     </span>
-  ) : account.status === "signed_in" ? (
-    <StatusLabel tone="positive">Signed in as {account.account}</StatusLabel>
   ) : account.status === "signed_out" ? (
     <StatusLabel tone="attention">
       Not signed in to {connector.name}
@@ -874,27 +887,31 @@ export function SourceCard({
               description={<span role="status">{SESSION_NOTICE}</span>}
             />
           )}
-          {saved && health && !syncing && !healthRepeatsAccount && (
-            <SettingsRow
-              title={
-                <StatusLabel tone="attention">
-                  <span data-health={health.health}>
-                    {health.health === "unavailable"
-                      ? `${connector.name} is unavailable`
-                      : health.health === "delayed"
-                        ? `${connector.name} sync is delayed`
-                        : `${connector.name} is partly synced`}
-                  </span>
-                </StatusLabel>
-              }
-              description={healthSentence}
-              trailing={
-                health.error && (
-                  <FailureDetails small details={health.error.message} />
-                )
-              }
-            />
-          )}
+          {saved &&
+            health &&
+            !syncing &&
+            !healthRepeatsAccount &&
+            !staleAuthentication && (
+              <SettingsRow
+                title={
+                  <StatusLabel tone="attention">
+                    <span data-health={health.health}>
+                      {health.health === "unavailable"
+                        ? `${connector.name} is unavailable`
+                        : health.health === "delayed"
+                          ? `${connector.name} sync is delayed`
+                          : `${connector.name} is partly synced`}
+                    </span>
+                  </StatusLabel>
+                }
+                description={healthSentence}
+                trailing={
+                  health.error && (
+                    <FailureDetails small details={health.error.message} />
+                  )
+                }
+              />
+            )}
         </SettingsList>
       </SettingsSection>
       <SettingsSection
@@ -946,7 +963,11 @@ export function SourceCard({
             setSaved(updated);
             checks.current += 1;
             setAccount({ status: "signed_in", account: updated.account });
-            void schedule.readHealth?.();
+            if (updated.id)
+              schedule.readHealth?.({
+                connection: updated.id,
+                account: updated.account,
+              });
           }}
         />
       )}
@@ -1008,6 +1029,22 @@ export function SourceCard({
                 : " and periodically while it is open"
             }. An issue that stops matching stays in your workspace and keeps syncing.`}
           />
+          {healthCheckFailed && (
+            <SettingsRow
+              description={
+                <span role="status">Couldn't check sync health.</span>
+              }
+              trailing={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => schedule.readHealth?.()}
+                >
+                  Retry health check
+                </Button>
+              }
+            />
+          )}
           <SettingsRow
             variant="stacked"
             description="Agents can sync without the desktop open"

@@ -258,7 +258,7 @@ pub struct ExternalComment {
 /// What happened in an external timeline event.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "event", content = "category", rename_all = "snake_case")]
-#[schemars(transform = allow_future_event_kinds)]
+#[schemars(transform = event_wire_schema)]
 pub enum ExternalEventKind {
     Closed(StateCategory),
     Reopened,
@@ -279,7 +279,7 @@ pub enum ExternalEventKind {
     Unsupported,
 }
 
-fn allow_future_event_kinds(schema: &mut schemars::Schema) {
+fn event_wire_schema(schema: &mut schemars::Schema) {
     let Some(kinds) = schema
         .get_mut("oneOf")
         .and_then(serde_json::Value::as_array_mut)
@@ -287,8 +287,16 @@ fn allow_future_event_kinds(schema: &mut schemars::Schema) {
         return;
     };
     let known_kinds: Vec<_> = kinds
-        .iter()
-        .filter_map(|kind| kind.pointer("/properties/event/const").cloned())
+        .iter_mut()
+        .filter_map(|kind| {
+            let properties = kind.get_mut("properties")?.as_object_mut()?;
+            let name = properties.get("event")?.get("const")?.clone();
+            // Serde accepts absent or null content on a unit variant.
+            properties
+                .entry("category")
+                .or_insert_with(|| serde_json::json!({ "type": "null" }));
+            Some(name)
+        })
         .collect();
     kinds.push(serde_json::json!({
         "type": "object",

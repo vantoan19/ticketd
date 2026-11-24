@@ -429,6 +429,9 @@
         {
           "type": "object",
           "properties": {
+            "category": {
+              "type": "null"
+            },
             "event": {
               "type": "string",
               "const": "reopened"
@@ -459,6 +462,9 @@
           "description": "This issue was marked as a duplicate of another issue.",
           "type": "object",
           "properties": {
+            "category": {
+              "type": "null"
+            },
             "event": {
               "type": "string",
               "const": "marked_duplicate"
@@ -471,6 +477,9 @@
         {
           "type": "object",
           "properties": {
+            "category": {
+              "type": "null"
+            },
             "event": {
               "type": "string",
               "const": "unmarked_duplicate"
@@ -484,6 +493,9 @@
           "description": "Another issue was marked as a duplicate of this issue.",
           "type": "object",
           "properties": {
+            "category": {
+              "type": "null"
+            },
             "event": {
               "type": "string",
               "const": "duplicate_added"
@@ -496,6 +508,9 @@
         {
           "type": "object",
           "properties": {
+            "category": {
+              "type": "null"
+            },
             "event": {
               "type": "string",
               "const": "duplicate_removed"
@@ -508,6 +523,9 @@
         {
           "type": "object",
           "properties": {
+            "category": {
+              "type": "null"
+            },
             "event": {
               "type": "string",
               "const": "assigned"
@@ -520,6 +538,9 @@
         {
           "type": "object",
           "properties": {
+            "category": {
+              "type": "null"
+            },
             "event": {
               "type": "string",
               "const": "unassigned"

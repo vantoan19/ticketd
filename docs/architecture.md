@@ -1058,6 +1058,11 @@ original repository. When no create response was recorded, the issue's creator
 and timestamp must support the attachment. The selected connection sets the
 ticket's future refresh affinity. Confirming that nothing was created requires
 the original connection and a complete search against the same dispatch lease.
+The sender holds a per-attempt file lock from the dispatch claim through result
+recording. Resolvers share that lock while verifying the attempt, so they can
+compare and settle concurrently after a sender exits. An expired lease cannot
+authorize recovery while the sender still holds the lock. GitHub also checks
+the dispatch deadline immediately before calling the transport.
 
 GitHub discovery compares a matching issue's identity site and locator
 repository to the open attempt's destination. This comparison is independent of

@@ -126,7 +126,7 @@ impl Fixture {
 
 fn options() -> PublishOptions {
     PublishOptions {
-        provider: "fake".into(),
+        connection: Some("fake".into()),
         destination: None,
         now: None,
         expected_fingerprint: None,
@@ -1623,6 +1623,30 @@ fn a_replayed_or_duplicate_resolution_attaches_nothing_more() {
 
     let again = f.resolve(&ticket.reference, &attach(Some("101"))).unwrap();
     assert!(again.replayed);
+    let explicit = |issue: &str, connection: &str| ResolveOptions {
+        resolution: Resolution::AttachUsingConnection {
+            issue: issue.into(),
+            connection: connection.into(),
+        },
+        ..attach(None)
+    };
+    assert!(
+        f.resolve(&ticket.reference, &explicit("101", "fake"))
+            .unwrap()
+            .replayed
+    );
+    let different = unrelated_issue(&f, 102, "Different issue", "Different body");
+    f.fake.0.lock().unwrap().issues.insert(102, different);
+    for request in [
+        attach(Some("102")),
+        explicit("102", "fake"),
+        explicit("101", "another-connection"),
+    ] {
+        assert!(matches!(
+            publication_error(f.resolve(&ticket.reference, &request).unwrap_err()),
+            PublicationError::Settled { .. }
+        ));
+    }
     // A different resolver (another process) sees the settled attempt too.
     let mut other = Workspace::open(f.path()).unwrap();
     let from_other = other
@@ -2059,32 +2083,76 @@ fn a_preflight_that_loses_its_attempt_never_dispatches_a_mutation() {
 }
 
 #[test]
-fn a_late_creation_after_a_not_created_verdict_reopens_the_attempt_with_the_issue() {
+fn a_send_lock_that_cannot_be_opened_leaves_a_definitive_failure() {
     let mut f = Fixture::new();
     let ticket = describe(&mut f, "Escalate", "Body");
+    let mut sidecar = f.path().into_os_string();
+    sidecar.push(".attachments");
+    let folder = PathBuf::from(sidecar);
+    std::fs::create_dir_all(&folder).unwrap();
+    let blocked = folder.join(".publication-dispatch-locks");
+    std::fs::write(&blocked, "this regular file prevents directory creation").unwrap();
+
+    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
+    assert!(matches!(
+        error,
+        PublicationError::Failed {
+            source: SourceError::NotSent(_),
+            ..
+        }
+    ));
+    assert_eq!(f.created(), 0);
+    assert_eq!(
+        f.workspace.publication_attempts(&ticket.reference).unwrap()[0].state,
+        AttemptState::Failed
+    );
+
+    std::fs::remove_file(blocked).unwrap();
+    assert_eq!(
+        f.publish(&ticket.reference).unwrap().attempt.state,
+        AttemptState::Succeeded
+    );
+    assert_eq!(f.created(), 1);
+}
+
+#[test]
+fn an_expired_lease_cannot_settle_while_the_sender_is_active() {
+    let mut f = Fixture::new();
+    let ticket = describe(&mut f, "Escalate", "Body");
+    let unrelated = describe(&mut f, "Unrelated publication", "Other body");
     let path = f.path();
     let engine = f.engine.clone();
     let reference = ticket.reference.clone();
+    let unrelated_reference = unrelated.reference.clone();
     let fake = f.fake.clone();
-    // The publisher stalls past its lease; a resolver searches while the issue is
-    // not yet visible and confirms "not created"; then the late answer arrives.
+    // A different caller's wall clock sees the lease as expired while the
+    // issue remains invisible to search and the sender can still finish.
     f.hook(move || {
         let hidden = fake.0.lock().unwrap().issues.remove(&101).unwrap();
         let mut other = Workspace::open(&path).unwrap();
         let mut verdict = not_created();
         verdict.now = Some("2999-01-01T00:00:00Z".into());
-        other
+        let error = other
             .resolve_publication(&engine, &reference, &verdict)
+            .unwrap_err();
+        assert!(matches!(
+            publication_error(error),
+            PublicationError::StillRunning { .. }
+        ));
+        {
+            let mut remote = fake.0.lock().unwrap();
+            remote.issues.insert(101, hidden);
+            remote.after_publish = None;
+        }
+        let separate = other
+            .publish_ticket(&engine, &unrelated_reference, &options())
             .unwrap();
-        fake.0.lock().unwrap().issues.insert(101, hidden);
+        assert_eq!(separate.attempt.state, AttemptState::Succeeded);
     });
-    let error = publication_error(f.publish(&ticket.reference).unwrap_err());
-    assert!(matches!(error, PublicationError::Unresolved { .. }));
-    let after = f.ticket(&ticket.reference);
-    let attempt = after.publication.expect("the attempt is open again");
-    assert_eq!(attempt.state, AttemptState::Unresolved);
-    assert_eq!(attempt.issue.unwrap().identity.id, "101");
-    assert!(after.source.is_none());
+    let outcome = f.publish(&ticket.reference).unwrap();
+    assert_eq!(outcome.attempt.state, AttemptState::Succeeded);
+    assert_eq!(outcome.ticket.source.unwrap().id, "101");
+    assert_eq!(f.ticket(&unrelated.reference).source.unwrap().id, "102");
 }
 
 #[test]
@@ -2246,24 +2314,41 @@ fn a_not_created_verdict_cannot_use_a_search_from_before_a_changed_dispatch_leas
     let lease = later();
     let mut remote = f.fake.0.lock().unwrap();
     remote.issues.clear();
-    remote.after_lookup = Some(Arc::new(move || {
-        // A competing dispatch may have extended the lease while this account's
-        // search was reading the old window.
-        rusqlite::Connection::open(&path)
-            .unwrap()
-            .execute(
-                "UPDATE publication_attempts SET lease_expires_at = ?2 WHERE id = ?1",
-                rusqlite::params![attempt_id, lease],
-            )
-            .unwrap();
+    remote.after_lookup = Some(Arc::new({
+        let attempt_id = attempt_id.clone();
+        let path = path.clone();
+        let lease = lease.clone();
+        move || {
+            // A competing dispatch may have extended the lease while this account's
+            // search was reading the old window.
+            let updated = rusqlite::Connection::open(&path)
+                .unwrap()
+                .execute(
+                    "UPDATE publication_attempts SET lease_expires_at = ?2 WHERE id = ?1",
+                    rusqlite::params![attempt_id, lease],
+                )
+                .unwrap();
+            assert_eq!(updated, 1);
+        }
     }));
     drop(remote);
 
     let error = publication_error(f.resolve(&ticket.reference, &not_created()).unwrap_err());
     assert!(
-        matches!(error, PublicationError::Unverified { .. }),
+        matches!(&error, PublicationError::Unverified {
+            source: SourceError::Unavailable(message), ..
+        } if message.contains("dispatch window changed during the search")),
         "{error}"
     );
+    let stored: String = rusqlite::Connection::open(path)
+        .unwrap()
+        .query_row(
+            "SELECT lease_expires_at FROM publication_attempts WHERE id = ?1",
+            [&attempt_id],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored, lease);
     f.still_unresolved(&ticket.reference);
     assert!(matches!(
         publication_error(f.publish(&ticket.reference).unwrap_err()),
@@ -2272,6 +2357,51 @@ fn a_not_created_verdict_cannot_use_a_search_from_before_a_changed_dispatch_leas
             ..
         }
     ));
+}
+
+#[test]
+fn attach_rejects_a_changed_dispatch_lease_even_when_it_looks_expired() {
+    let mut f = Fixture::new();
+    let ticket = f.lost_response("Escalate");
+    let attempt_id = f.ticket(&ticket.reference).publication.unwrap().id;
+    let path = f.path();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE publication_attempts
+             SET status = 'in_flight', lease_expires_at = '2026-01-01T00:01:00Z' WHERE id = ?1",
+            [&attempt_id],
+        )
+        .unwrap();
+    f.fake.0.lock().unwrap().after_lookup = Some(Arc::new(move || {
+        let updated = rusqlite::Connection::open(&path)
+            .unwrap()
+            .execute(
+                "UPDATE publication_attempts
+                 SET lease_expires_at = '2026-01-01T00:02:00Z' WHERE id = ?1",
+                [&attempt_id],
+            )
+            .unwrap();
+        assert_eq!(updated, 1);
+    }));
+    let mut request = attach(Some("101"));
+    request.now = Some("2026-01-01T00:03:00Z".into());
+
+    let error = publication_error(f.resolve(&ticket.reference, &request).unwrap_err());
+    assert!(
+        matches!(&error, PublicationError::Unverified {
+            source: SourceError::Unavailable(message), ..
+        } if message.contains("dispatch window changed while verifying the issue")),
+        "{error}"
+    );
+    f.still_unresolved(&ticket.reference);
+    assert_eq!(
+        f.resolve(&ticket.reference, &request)
+            .unwrap()
+            .attempt
+            .state,
+        AttemptState::Succeeded
+    );
 }
 
 #[test]

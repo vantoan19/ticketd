@@ -59,6 +59,10 @@ unconfigured preview gives the `provider` and `repository` to use with
 For GitHub Enterprise Server, set `TICKETD_GITHUB_API_URL` to your API address
 (for example `https://git.example.com/api/v3`) before adding and using the connection.
 
+If you selected a GitHub CLI account and its login changes, sign in to `gh` with
+the new login and run `ticketd source CONNECTION edit --set account=NEW_LOGIN`.
+Ticketd keeps the connection when GitHub confirms the same user ID.
+
 ## Recover a legacy GitHub issue link
 
 If refresh asks you to confirm a legacy ticket's GitHub host, connect the
@@ -90,6 +94,14 @@ protocol or repository path.
 ```sh
 ticketd source resolve T-KQ12 --confirm-host github.com
 ticketd source resolve T-KQ12
+```
+
+For GitHub Enterprise Server, set `TICKETD_GITHUB_API_URL` to the original
+site's API URL for both confirmation and recovery.
+
+```sh
+TICKETD_GITHUB_API_URL=https://git.example.com:8443/api/v3 \
+  ticketd source resolve T-KQ12 --confirm-host git.example.com:8443
 ```
 
 `--confirm-host` records the site locally. If the original GitHub connection

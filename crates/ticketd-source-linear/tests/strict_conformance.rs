@@ -218,7 +218,7 @@ fn recover_lost_publication(registry: &ExtensionRegistry, root: &Path, config: &
         .unwrap();
     let reference = workspace.create_ticket(LOST_TITLE).unwrap().reference;
     let options = PublishOptions {
-        provider: "linear".into(),
+        connection: Some("linear".into()),
         destination: Some(TEAM_TWO.into()),
         now: Some(DEVICE_AHEAD.into()),
         ..Default::default()
@@ -337,7 +337,7 @@ fn recover_lost_publication(registry: &ExtensionRegistry, root: &Path, config: &
             &engine,
             &ticket.reference,
             &PublishOptions {
-                provider: "linear".into(),
+                connection: Some("linear".into()),
                 destination: Some(TEAM_TWO.into()),
                 now: Some(DEVICE_AHEAD.into()),
                 ..Default::default()

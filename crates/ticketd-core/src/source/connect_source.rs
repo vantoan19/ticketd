@@ -423,8 +423,13 @@ fn read_effect(
     } else {
         ConnectSourceAction::NotConnected
     };
+    let github_site = if provider == super::github::PROVIDER {
+        scoped.issue_site(provider)?
+    } else {
+        None
+    };
     let mut statement = connection.prepare(
-        "SELECT t.id, t.reference, i.external_id
+        "SELECT t.id, t.reference, i.external_id, i.locator, i.url
          FROM external_identities i
          JOIN external_ownership o ON o.ticket_id = i.ticket_id
          JOIN tickets t ON t.id = i.ticket_id
@@ -432,15 +437,34 @@ fn read_effect(
            AND o.authority = 'external' AND t.trashed = 0 AND t.project_id IS NULL
          ORDER BY t.reference, t.id",
     )?;
-    let tickets = statement
-        .query_map(params![provider, remote], |row| {
-            Ok(EligibleTicket {
-                id: row.get(0)?,
-                reference: row.get(1)?,
-                external_id: row.get(2)?,
-            })
-        })?
-        .collect::<Result<_, _>>()?;
+    let mut rows = statement.query(params![provider, remote])?;
+    let mut tickets = Vec::new();
+    while let Some(row) = rows.next()? {
+        let external_id: String = row.get(2)?;
+        if provider == super::github::PROVIDER {
+            // The Project remote omits the port. The selected connection
+            // supplies the site boundary for backfill.
+            let Some(site) = github_site
+                .filter(|site| super::github::issue_id_site(&external_id) == Some(*site))
+            else {
+                continue;
+            };
+            if site != "github.com" && super::github::site_host(site) == site {
+                // Older Enterprise IDs omitted even nondefault ports. Require
+                // a corroborating URL before treating a bare hostname as exact.
+                let locator: String = row.get(3)?;
+                let url: String = row.get(4)?;
+                if super::github::issue_site_from_url(&locator, &url).as_deref() != Some(site) {
+                    continue;
+                }
+            }
+        }
+        tickets.push(EligibleTicket {
+            id: row.get(0)?,
+            reference: row.get(1)?,
+            external_id,
+        });
+    }
     Ok(Effect {
         project_id,
         repository: repository.to_owned(),

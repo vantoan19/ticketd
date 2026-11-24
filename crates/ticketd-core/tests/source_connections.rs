@@ -439,7 +439,7 @@ fn publication_review_uses_the_bound_connection_until_it_is_removed() {
         &engine,
         &reference,
         &PublishOptions {
-            provider: "fake-2".into(),
+            connection: Some("fake-2".into()),
             destination: Some(destination.into()),
             ..PublishOptions::default()
         },
@@ -766,6 +766,33 @@ fn removing_a_connection_preserves_work_and_only_rediscovery_resumes_sync() {
         "connection_removed"
     );
     assert!(remote.0.lock().unwrap().fetch_calls.is_empty());
+
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote.matching = vec![1];
+        remote.issues.get_mut(&1).unwrap().updated_at = "2026-01-01T00:00:00Z".into();
+    }
+    let stale = workspace
+        .refresh_connection(&engine, "fake-2", &RefreshOptions::default())
+        .unwrap();
+    assert!(stale.updated.is_empty());
+    assert_eq!(workspace.ticket_source_connection(first).unwrap(), None);
+    assert_eq!(
+        workspace
+            .show_ticket(first)
+            .unwrap()
+            .source
+            .unwrap()
+            .unavailable
+            .unwrap()
+            .code,
+        "connection_removed"
+    );
+    {
+        let mut remote = remote.0.lock().unwrap();
+        remote.matching.clear();
+        remote.issues.get_mut(&1).unwrap().updated_at = "2026-03-01T00:00:00Z".into();
+    }
 
     workspace.take_ownership(second, None).unwrap();
     let reconnected = workspace

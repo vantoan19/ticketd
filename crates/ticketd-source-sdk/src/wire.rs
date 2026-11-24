@@ -314,6 +314,24 @@ mod tests {
         }
         assert!(!excluded.contains(&json!("review_requested")));
         assert!(serde_json::from_value::<ExternalEventKind>(json!({"event": "closed"})).is_err());
+        let assigned = choices
+            .iter()
+            .find(|choice| choice["properties"]["event"]["const"] == "assigned")
+            .unwrap();
+        assert_eq!(assigned["properties"]["category"]["type"], "null");
+        assert!(
+            serde_json::from_value::<ExternalEventKind>(
+                json!({"event": "assigned", "category": "completed"})
+            )
+            .is_err()
+        );
+        assert_eq!(
+            serde_json::from_value::<ExternalEventKind>(
+                json!({"event": "assigned", "category": null})
+            )
+            .unwrap(),
+            ExternalEventKind::Assigned
+        );
         assert_eq!(
             serde_json::from_value::<ExternalEventKind>(json!({"event": "review_requested"}))
                 .unwrap(),

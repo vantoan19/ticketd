@@ -39,12 +39,12 @@ export function SourcesPage({
     onCancel: () => void;
   };
 }) {
-  const { entries, loading } = useSources();
+  const { entries, loading, observation, readCatalog } = useSources();
   const [adding, setAdding] = useState<SourceEntry | null>(null);
   const [additions, setAdditions] = useState<SourceEntry[]>([]);
-  const [names, setNames] = useState<ReadonlyMap<string, string>>(
-    () => new Map(),
-  );
+  const [names, setNames] = useState<
+    ReadonlyMap<string, { name: string; confirmation: number | undefined }>
+  >(() => new Map());
   const [removed, setRemoved] = useState<string[]>([]);
   const [removing, setRemoving] = useState<{ id: string; name: string } | null>(
     null,
@@ -98,9 +98,13 @@ export function SourcesPage({
   }
   for (const id of removed) connections.delete(id);
   const pendingNames = new Map(
-    [...names].filter(([id, name]) => {
+    [...names].filter(([id, { name, confirmation }]) => {
       const source = connections.get(id)?.saved;
-      return source && source.name !== name;
+      return (
+        source &&
+        source.name !== name &&
+        (confirmation === undefined || observation < confirmation)
+      );
     }),
   );
   if (pendingNames.size !== names.size) setNames(pendingNames);
@@ -125,9 +129,12 @@ export function SourcesPage({
     setRenameFailure(null);
     try {
       const savedName = (await sourcesClient.rename(id, name)).name;
-      if (savedName) setNames((current) => new Map(current).set(id, savedName));
+      const confirmation = readCatalog?.();
+      if (savedName)
+        setNames((current) =>
+          new Map(current).set(id, { name: savedName, confirmation }),
+        );
       closeRename(id);
-      void onChanged?.();
     } catch (reason) {
       setRenameFailure(describeFailure(reason, "rename this connection"));
     } finally {
@@ -216,7 +223,9 @@ export function SourcesPage({
               {[...connections].map(([id, entry]) => {
                 const source = entry.saved;
                 const name =
-                  pendingNames.get(id) ?? source?.name ?? entry.connector.name;
+                  pendingNames.get(id)?.name ??
+                  source?.name ??
+                  entry.connector.name;
                 const editing = rename?.id === id ? rename : null;
                 return (
                   <SettingsRow

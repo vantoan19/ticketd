@@ -212,7 +212,7 @@ fn a_rate_limited_receipt_after_creation_leaves_one_unresolved_attempt() {
         .unwrap();
     let reference = workspace.create_ticket("Publish once").unwrap().reference;
     let options = PublishOptions {
-        provider: "scripted".into(),
+        connection: Some("scripted".into()),
         destination: Some("o/r".into()),
         ..Default::default()
     };
