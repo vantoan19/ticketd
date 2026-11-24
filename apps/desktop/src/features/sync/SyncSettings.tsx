@@ -497,6 +497,18 @@ function Choose({
             setAttempt((count) => count + 1);
           },
         })}
+        {...(s3 &&
+          readFailure?.action === "choose_another" && {
+            actions: (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSwitching(true)}
+              >
+                Use another bucket…
+              </Button>
+            ),
+          })}
       >
         {readFailure ?? failure}
       </Failure>

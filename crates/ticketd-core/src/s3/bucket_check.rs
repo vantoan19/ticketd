@@ -63,6 +63,9 @@ impl From<BucketCheckError> for RemoteError {
     fn from(error: BucketCheckError) -> Self {
         match error {
             BucketCheckError::Storage(error) => error,
+            missing @ BucketCheckError::MissingBucket { .. } => {
+                RemoteError::BucketMissing(missing.to_string())
+            }
             other => RemoteError::Other(other.to_string()),
         }
     }

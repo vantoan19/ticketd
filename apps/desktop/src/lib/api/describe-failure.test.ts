@@ -61,6 +61,20 @@ describe("a message written for people", () => {
     expect(failure.details).toBe(refusal.message);
   });
 
+  it("is also the sentence of a not found failure the caller words itself, and offers another", () => {
+    const failure = describeFailure(
+      { code: "not_found", message: "sync storage: the bucket b is missing" },
+      "read the bucket",
+      { readable: true },
+    );
+    expect(failure.sentence).toBe("The bucket b is missing.");
+    expect(failure.action).toBe("choose_another");
+    expect(
+      describeFailure({ code: "not_found", message: "x" }, "read the bucket")
+        .sentence,
+    ).toBe("It was deleted or moved.");
+  });
+
   it("never replaces what a classified failure already says", () => {
     expect(
       describeFailure({ code: "offline", message: "dns" }, "read the bucket", {

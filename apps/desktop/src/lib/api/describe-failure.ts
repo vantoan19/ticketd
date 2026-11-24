@@ -80,7 +80,10 @@ function plainCause(
     case "workspace_unreadable":
       return "ticketd can't read the workspace file. Nothing changed.";
     case "not_found":
-      return "It was deleted or moved.";
+      // The S3 bucket check says which bucket is missing, in words for people.
+      return readable && sentence(message)
+        ? sentence(message)
+        : "It was deleted or moved.";
     case "conflict":
       return "It changed elsewhere since it was loaded. Nothing was overwritten.";
     case "too_large":

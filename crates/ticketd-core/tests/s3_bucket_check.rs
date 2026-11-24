@@ -138,6 +138,23 @@ fn a_missing_bucket_is_named() {
 }
 
 #[test]
+fn a_missing_bucket_is_a_not_found_failure_that_says_so_once() {
+    let bench = Bench::new();
+    bench.sim.remove_bucket();
+    let error = bench.remote().check_usable().unwrap_err();
+    assert!(matches!(error, RemoteError::BucketMissing(_)), "{error:?}");
+    // The interface offers another bucket for a not found failure, and shows the text.
+    let error = Error::Remote(error);
+    assert_eq!(error.kind(), ticketd_core::FailureKind::NotFound);
+    assert_eq!(
+        error.to_string(),
+        format!(
+            "sync storage: the bucket {BUCKET} does not exist, or the profile's account cannot see it; check the bucket name"
+        )
+    );
+}
+
+#[test]
 fn a_denied_action_is_named_wherever_the_bucket_denies_it() {
     // Each step of the check, and the action S3 names for it.
     let steps = [

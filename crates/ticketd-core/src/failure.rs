@@ -102,7 +102,9 @@ impl Error {
                 RemoteError::Unauthorized => FailureKind::NotSignedIn,
                 RemoteError::Offline => FailureKind::Offline,
                 RemoteError::StorageFull => FailureKind::DiskFull,
-                RemoteError::FolderMissing | RemoteError::NotFound => FailureKind::NotFound,
+                RemoteError::FolderMissing
+                | RemoteError::NotFound
+                | RemoteError::BucketMissing(_) => FailureKind::NotFound,
                 RemoteError::PreconditionFailed { .. } => FailureKind::Conflict,
                 RemoteError::RateLimited { .. } | RemoteError::Other(_) => FailureKind::Failed,
             },
