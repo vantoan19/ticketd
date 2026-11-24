@@ -37,6 +37,13 @@ export function readinessLabel(value: Readiness) {
   return `Blocked by ${value.by}${value.trashed ? " (in Trash)" : ""}${value.more > 0 ? ` and ${value.more} more` : ""}`;
 }
 
+export function readyForReview(ticket: Ticket): boolean {
+  const agent = ticket.progress_summary?.editing_agent;
+  return (
+    ticket.status === "In review" && Boolean(agent) && agent !== "local-person"
+  );
+}
+
 /** Visible form: the count comes right after the first blocker so truncation cannot hide it. */
 export function readinessShortLabel(value: Readiness) {
   if (value.kind !== "blocked" || value.more === 0)

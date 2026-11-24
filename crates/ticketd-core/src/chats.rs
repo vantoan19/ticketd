@@ -1724,6 +1724,7 @@ fn lose_contact(
     chat_id: &str,
     detail: &str,
     ending: &str,
+    receipt_turn: Option<&str>,
 ) -> Result<(), Error> {
     let ids = |sql: &str| -> Result<Vec<String>, Error> {
         let mut statement = connection.prepare(sql)?;
@@ -1738,6 +1739,15 @@ fn lose_contact(
             &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ending = ?3, ended_at = {NOW}, ended_position = ?4 WHERE id = ?1"),
             params![id, detail, ending, position],
         )?;
+        if receipt_turn == Some(id.as_str()) {
+            // Legacy writes can share the end's millisecond. Capture before another
+            // connection can commit a write with that timestamp.
+            observe(
+                connection,
+                chat_id,
+                ChatObservation::CaptureAgentChanges { turn_id: id },
+            )?;
+        }
     }
     for id in ids("SELECT id FROM chat_tools WHERE chat_id = ?1 AND state = 'running'")? {
         connection.execute(
@@ -2435,15 +2445,36 @@ impl Workspace {
     /// running tools unknown and open requests expired. Queued input is left queued and
     /// nothing is resubmitted. Returns the Chats that had something to reconcile.
     ///
-    /// The host calls this when a harness process is lost and once at startup, before it
-    /// runs anything, because stored state from a previous process or a restored backup
-    /// has no runtime behind it. `ending` is how the host names what happened to the
-    /// active turn; it is stored with the turn as given.
+    /// At startup or after a storage failure, the stored state may outlive the runtime
+    /// behind it. The host supplies `ending` for the active turn.
     pub fn mark_chat_contact_lost(
         &mut self,
         chat_id: Option<&str>,
         detail: &str,
         ending: &str,
+    ) -> Result<Vec<String>, Error> {
+        self.reconcile_chat_contact_loss(chat_id, detail, ending, None)
+    }
+
+    /// Settle a live runtime's loss and capture the observed active Turn's agent
+    /// changes in the transaction that first ends it.
+    pub fn mark_chat_runtime_lost(
+        &mut self,
+        chat_id: &str,
+        active_turn_id: Option<&str>,
+        detail: &str,
+        ending: &str,
+    ) -> Result<(), Error> {
+        self.reconcile_chat_contact_loss(Some(chat_id), detail, ending, active_turn_id)?;
+        Ok(())
+    }
+
+    fn reconcile_chat_contact_loss(
+        &mut self,
+        chat_id: Option<&str>,
+        detail: &str,
+        ending: &str,
+        receipt_turn: Option<&str>,
     ) -> Result<Vec<String>, Error> {
         self.chat_write(|connection| {
             if let Some(id) = chat_id {
@@ -2461,7 +2492,7 @@ impl Workspace {
                 .query_map([chat_id], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             for id in &affected {
-                lose_contact(connection, id, detail, ending)?;
+                lose_contact(connection, id, detail, ending, receipt_turn)?;
             }
             Ok(affected)
         })

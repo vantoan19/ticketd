@@ -1368,21 +1368,15 @@ impl Supervisor {
     /// Nothing more will be observed from the runtime: settle what it left open.
     fn runtime_gone(&mut self, ending: &TurnEnding) {
         let chat = self.chat_id.clone();
-        let ended = self.write(|core| {
-            core.mark_chat_contact_lost(
-                Some(&chat),
+        let active = self.active.take();
+        let _ = self.write(|core| {
+            core.mark_chat_runtime_lost(
+                &chat,
+                active.as_ref().map(|turn| turn.turn_id.as_str()),
                 &ending.detail().unwrap_or_default(),
                 &ending.key(),
             )
         });
-        if let Some(active) = self.active.take()
-            && ended.is_ok()
-        {
-            let changes = ChatObservation::CaptureAgentChanges {
-                turn_id: active.turn_id,
-            };
-            let _ = self.write(|core| core.record_chat_observations(&chat, vec![changes]));
-        }
         self.unconfirmed_start = None;
         self.turn_evidence = None;
         self.unconfirmed_deadline = None;
