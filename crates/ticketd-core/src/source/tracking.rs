@@ -1736,10 +1736,14 @@ impl Workspace {
                     )? {
                         issue
                     } else if let Some(independent) = &transfer.independent
-                        && ticket_for_identity(transaction, &independent.reference.identity)?
-                            .is_some()
+                        && let Some(owner) =
+                            ticket_for_identity(transaction, &independent.reference.identity)?
+                        && transfer
+                            .origins
+                            .iter()
+                            .all(|origin| origin.ticket_id != owner)
                     {
-                        // The destination ticket can still apply its own observation.
+                        // A separate destination ticket can still refresh after a collision.
                         independent
                     } else {
                         continue;
