@@ -591,6 +591,55 @@ async fn native_permissions_follow_config_updates_and_require_confirmation_when_
 }
 
 #[tokio::test]
+async fn resume_refuses_to_open_if_confirming_effort_changes_the_selected_model() {
+    let (mut peer, io) = pipes();
+    let mut request = request(SessionStart::Resume(NativeSessionId::new("session-1")));
+    request.settings.model = Some("gemini-4-neon".to_owned());
+    request.settings.effort = Some("high".to_owned());
+    let opening = tokio::spawn(runtime::open(io, request, settings::FULL.to_owned()));
+    startup(&mut peer, RESUME).await;
+
+    let frames = recorded(RESUME);
+    let mut configs = frames
+        .iter()
+        .find_map(|frame| frame["server"]["result"]["configOptions"].as_array())
+        .unwrap()
+        .clone();
+    for (id, value) in [("model", "gemini-4-neon"), ("thought_level", "high")] {
+        let call = peer.written().await;
+        assert_eq!(call["method"], "session/set_config_option");
+        assert_eq!(
+            call["params"],
+            json!({"sessionId": "session-1", "configId": id, "value": value})
+        );
+        for config in &mut configs {
+            if config["id"] == id {
+                config["currentValue"] = json!(value);
+            } else if id == "thought_level" && config["id"] == "model" {
+                config["currentValue"] = json!("gemini-3.1-pro");
+            }
+        }
+        send(
+            &mut peer,
+            &json!({
+                "jsonrpc": "2.0",
+                "id": call["id"],
+                "result": {"configOptions": configs}
+            }),
+        )
+        .await;
+    }
+    peer.exit(0);
+
+    let problem = opening.await.unwrap().unwrap_err();
+    assert_eq!(problem.kind, ProblemKind::Other);
+    assert_eq!(
+        problem.message,
+        "Antigravity did not confirm the requested setting"
+    );
+}
+
+#[tokio::test]
 async fn native_mode_changes_keep_the_own_and_full_access_policies() {
     let frames = recorded(MODES);
     let update = frames
