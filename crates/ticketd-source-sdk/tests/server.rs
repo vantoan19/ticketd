@@ -1,9 +1,9 @@
 #![allow(clippy::unwrap_used)]
 
 use std::{
-    io::{BufRead, BufReader, Write},
-    net::{TcpListener, TcpStream},
-    sync::{Arc, Mutex},
+    io::{self, BufRead, BufReader, Write},
+    net::{Shutdown, TcpListener, TcpStream},
+    sync::{Arc, Mutex, mpsc},
     thread,
     time::Duration,
 };
@@ -75,12 +75,25 @@ impl Extension for Tracker {
     }
 }
 
-#[test]
-fn sdk_negotiates_reports_progress_cancels_and_handles_the_next_call() {
+fn streams() -> (TcpStream, TcpStream) {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let host = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
     host.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
     let (extension, _) = listener.accept().unwrap();
+    (host, extension)
+}
+
+fn send(input: &mut TcpStream, method: &str, id: Option<u64>, params: Value) {
+    let mut value = json!({"jsonrpc":"2.0","method":method,"params":params});
+    if let Some(id) = id {
+        value["id"] = json!(id);
+    }
+    writeln!(input, "{value}").unwrap();
+}
+
+#[test]
+fn sdk_negotiates_reports_progress_cancels_and_handles_the_next_call() {
+    let (host, extension) = streams();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let tracker = Tracker(seen.clone());
     let extension_reader = extension.try_clone().unwrap();
@@ -94,13 +107,6 @@ fn sdk_negotiates_reports_progress_cancels_and_handles_the_next_call() {
     });
     let mut input = host.try_clone().unwrap();
     let mut output = BufReader::new(host);
-    let send = |input: &mut TcpStream, method, id, params: Value| {
-        let mut value = json!({"jsonrpc":"2.0","method":method,"params":params});
-        if let Some(id) = id {
-            value["id"] = json!(id);
-        }
-        writeln!(input, "{value}").unwrap();
-    };
     let receive = |output: &mut BufReader<TcpStream>| {
         let mut line = String::new();
         output.read_line(&mut line).unwrap();
@@ -179,4 +185,67 @@ fn sdk_negotiates_reports_progress_cancels_and_handles_the_next_call() {
         })
     );
     assert_eq!(*seen.lock().unwrap(), ["fixture-2", "fixture-2"]);
+}
+
+struct TerminalWriter {
+    described: bool,
+    started: mpsc::SyncSender<()>,
+    release: mpsc::Receiver<()>,
+}
+
+impl Write for TerminalWriter {
+    fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+        Ok(buffer.len())
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        if self.described {
+            self.started.send(()).unwrap();
+            let _ = self.release.recv();
+        }
+        self.described = true;
+        Ok(())
+    }
+}
+
+#[test]
+fn a_late_cancel_does_not_stall_input_behind_the_terminal_response() {
+    let (mut host, extension) = streams();
+    let (started, writing) = mpsc::sync_channel(1);
+    let (release, resume) = mpsc::sync_channel(1);
+    let (done, finished) = mpsc::sync_channel(1);
+    let session = thread::spawn(move || {
+        let writer = TerminalWriter {
+            described: false,
+            started,
+            release: resume,
+        };
+        let result = serve(
+            BufReader::new(extension),
+            writer,
+            "1.0.0",
+            Tracker(Arc::default()),
+        );
+        done.send(result).unwrap();
+    });
+    send(
+        &mut host,
+        "describe",
+        Some(1),
+        json!({"contract_versions":[2],"pid":42}),
+    );
+    send(
+        &mut host,
+        "check_connection",
+        Some(2),
+        json!({"connection_id":"fixture-2","config":{}}),
+    );
+    writing.recv_timeout(Duration::from_secs(3)).unwrap();
+    send(&mut host, "cancel", None, json!({"id":2}));
+    host.shutdown(Shutdown::Write).unwrap();
+
+    let exited = finished.recv_timeout(Duration::from_secs(3));
+    drop(release);
+    session.join().unwrap();
+    exited.unwrap().unwrap();
 }

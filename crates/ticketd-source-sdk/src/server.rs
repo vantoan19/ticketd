@@ -456,13 +456,9 @@ impl<W: Write + Send + 'static> Session<W> {
     }
 
     fn cancel(&self, id: Option<u64>) {
-        let active = if id.is_none() {
-            // Session teardown must finish even if the host stopped draining stdout.
-            self.active.try_lock().ok()
-        } else {
-            self.active.lock().ok()
-        };
-        if let Some(active) = active
+        // The worker only locks the slot after dispatch returns. By then a
+        // cancel is late, and stdout can stall while the terminal frame drains.
+        if let Ok(active) = self.active.try_lock()
             && let Some(active) = &*active
             && id.is_none_or(|id| id == active.id)
         {
