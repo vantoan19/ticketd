@@ -827,8 +827,9 @@ impl Publication for GithubConnector {
     ) -> Result<PublicationCandidates, SourceError> {
         let destination = &search.request.destination;
         require_repository(destination)?;
-        // Only the tracker clock observed before creation establishes the
-        // lower bound. Older attempts can still show possible matches.
+        // Only the tracker clock observed before creation establishes a
+        // lower bound. With no clock, read from the beginning of history
+        // and rule out a remaining issue only when the destination is empty.
         let since = search
             .tracker_since
             .as_deref()
@@ -846,7 +847,7 @@ impl Publication for GithubConnector {
             request.push_str(&encode_component(&since_text));
         }
         let mut url = Some(request);
-        let mut reliable = since.is_some();
+        let mut reliable = true;
         let subject = format!("repository {destination}");
         let mut matches = Vec::new();
         let mut recent = Vec::new();
@@ -864,7 +865,7 @@ impl Publication for GithubConnector {
                 };
                 // Newest first: the first issue older than the window ends the read.
                 let created = chrono::DateTime::parse_from_rfc3339(&issue.created_at).ok();
-                reliable &= created.is_some();
+                reliable &= since.is_some() && created.is_some();
                 if let (Some(created), Some(since)) = (created, since)
                     && created < since
                 {

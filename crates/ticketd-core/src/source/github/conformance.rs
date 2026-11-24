@@ -131,13 +131,13 @@ impl Driver for GitHubDriver {
 
     fn publication_search(complete: bool) -> Fixture<PublicationSearch> {
         let transport = Arc::new(TransportFixture::default());
-        // An absent HTTP Date keeps this fixture independent of the machine's clock.
-        transport.respond(&format!("{API}/rate_limit"), ok(json!({})));
+        // The fixture already has tracker time from the authenticated check at dispatch.
         let first_url = format!(
             "{API}/repos/o/r/issues?state=all&sort=created&direction=desc&per_page=100&since=2026-01-01T00%3A00%3A00Z"
         );
         let second_url = format!("{API}/repos/o/r/issues?page=2");
-        let search = conformance::publication_search();
+        let mut search = conformance::publication_search();
+        search.tracker_since = Some(conformance::SEARCH_SINCE.into());
         if complete {
             let mut title_match = issue(1001, 1, "o/r");
             title_match["title"] = json!(TITLE_MATCH);

@@ -1356,23 +1356,42 @@ fn a_recovery_search_uses_the_authenticated_clock_observed_at_dispatch() {
 }
 
 #[test]
-fn an_older_attempt_without_a_tracker_clock_cannot_prove_absence() {
+fn an_older_attempt_can_rule_out_an_issue_only_in_an_empty_complete_destination() {
+    let unbounded = SEARCH_URL.split("&since=").next().unwrap();
+    let search = PublicationSearch {
+        tracker_since: None,
+        account: None,
+        request: publish_request(),
+        since: "2026-03-01T00:00:00Z".into(),
+    };
+    let read = |engine: &Engine| {
+        engine
+            .find_published("github", &config(json!({"repositories": ["o/r"]})), &search)
+            .unwrap()
+    };
+
     let (fixture, engine) = setup(Some(TOKEN));
-    fixture.respond(SEARCH_URL.split("&since=").next().unwrap(), ok(json!([])));
-    let found = engine
-        .find_published(
-            "github",
-            &config(json!({"repositories": ["o/r"]})),
-            &PublicationSearch {
-                tracker_since: None,
-                account: None,
-                request: publish_request(),
-                since: "2026-03-01T00:00:00Z".into(),
-            },
-        )
-        .unwrap();
-    assert!(found.matches.is_empty());
-    assert!(!found.complete);
+    fixture.respond(unbounded, ok(json!([])));
+    let empty = read(&engine);
+    assert!(empty.complete);
+    assert!(empty.matches.is_empty() && empty.recent.is_empty());
+
+    let (fixture, engine) = setup(Some(TOKEN));
+    let mut old = created(issue(1, 1, "o/r"), "2026-02-28T21:00:00Z");
+    old["title"] = json!("Escalate");
+    fixture.respond(unbounded, ok(json!([old])));
+    let clock_ahead = read(&engine);
+    assert!(!clock_ahead.complete);
+    assert_eq!(clock_ahead.matches.len(), 1);
+
+    let (fixture, engine) = setup(Some(TOKEN));
+    let again = format!("{API}/repos/o/r/issues?page=2");
+    let link = format!("<{again}>; rel=\"next\"");
+    fixture.respond(unbounded, ok_with(json!([]), &[("link", &link)]));
+    for _ in 1..SEARCH_PAGES {
+        fixture.respond(&again, ok_with(json!([]), &[("link", &link)]));
+    }
+    assert!(!read(&engine).complete);
 }
 
 #[test]

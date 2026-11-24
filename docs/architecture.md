@@ -890,7 +890,10 @@ Each request that can change authority checks the saved account and site first.
 When upgrading a pre-connection Workspace that used GitHub Enterprise, keep its
 `TICKETD_GITHUB_API_URL` configured for the first open. The old format recorded
 no API URL. The upgrade uses the configured endpoint first, then a distinct
-known issue host if there is one.
+known issue host if there is one. GitHub recovery uses tracker time recorded
+before dispatch. For an older attempt with no tracker time, only a complete
+listing with no issues in its destination can clear the attempt as not created.
+A listing with issues can still supply candidates for review.
 
 External identity remains provider plus opaque ID. Historical GitHub issue IDs
 are numeric. If two GitHub sites return the same ID with different issue hosts,
