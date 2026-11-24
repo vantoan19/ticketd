@@ -277,6 +277,45 @@ test("rejects an account alias that matches the wire method value", (t) => {
   assert.equal(existsSync(output), false);
 });
 
+test("rejects aliases that would change an ACP update discriminator", async (t) => {
+  for (const [alias, diagnostic] of [
+    ["sessionUpdate", "an account alias in a protocol field name"],
+    ["tool_call", "an alias in a protocol label"],
+  ]) {
+    await t.test(alias, (t) => {
+      const { output, scrub } = capture(t);
+      const result = scrub([
+        [
+          2,
+          line({
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: "synthetic-session",
+              update: {
+                sessionUpdate: "tool_call",
+                toolCallId: "synthetic-tool",
+              },
+            },
+          }),
+        ],
+        [
+          2,
+          line({
+            jsonrpc: "2.0",
+            id: 1,
+            result: { account: { displayName: alias } },
+          }),
+        ],
+      ]);
+      assert.equal(result.status, 1);
+      assert.equal(result.stdout, "");
+      assert.equal(result.stderr, `Cannot safely scrub ${diagnostic}.\n`);
+      assert.equal(existsSync(output), false);
+    });
+  }
+});
+
 test("rejects an account alias in an unrecognized field of a protocol envelope", (t) => {
   const { output, scrub } = capture(t);
   const alias = "syntheticExtension";

@@ -308,6 +308,30 @@ function scrub(frames, input) {
         return remember(matched, () => "fixture-email-" + ++emailCount);
       return replaceUuid(matched);
     });
+
+  // ACP dispatches on the nested sessionUpdate tag. Check its protocol
+  // position so the same spelling can still be scrubbed inside dictionaries.
+  for (const { direction, frame } of frames) {
+    if (direction !== "server" || frame.method !== "session/update") continue;
+    const { params } = frame;
+    const update = params?.update;
+    if (typeof update?.sessionUpdate !== "string") continue;
+    if (
+      [...Object.keys(params), ...Object.keys(update)].some((field) =>
+        accountAliases.has(field),
+      )
+    ) {
+      throw new CaptureError(
+        "Cannot safely scrub an account alias in a protocol field name.",
+      );
+    }
+    if (replaceText(update.sessionUpdate) !== update.sessionUpdate) {
+      throw new CaptureError(
+        "Cannot safely scrub an alias in a protocol label.",
+      );
+    }
+  }
+
   return frames.map(({ direction, frame }) => ({
     [direction]: visit(
       frame,
