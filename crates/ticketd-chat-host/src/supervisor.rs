@@ -9,7 +9,7 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::{Future, pending};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use ticketd_core::{
     Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
@@ -23,10 +23,10 @@ use uuid::Uuid;
 
 use crate::host::{
     Activity, Board, CLOSE_TIMEOUT, CONTEXT_RECORD_NAME, ChatLive, ChatProblem, ChatView,
-    ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError, INTERRUPT_TIMEOUT,
-    LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode, SNAPSHOT_ITEMS, SendMode,
-    SettingChangeState, StopState, TEXT_CHECKPOINT_INTERVAL, TEXT_UPDATE_INTERVAL, WorkspaceOpener,
-    is_refusal,
+    ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError, HostLifecycle,
+    INTERRUPT_TIMEOUT, LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode,
+    SNAPSHOT_ITEMS, SendMode, SettingChangeState, StopState, TEXT_CHECKPOINT_INTERVAL,
+    TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal,
 };
 use crate::records::{
     FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
@@ -291,9 +291,7 @@ pub(crate) struct Supervisor {
     /// A permission restart may only resume native history, unless the person
     /// explicitly chooses a fresh session. The restriction survives failed opens.
     permission_restart_pending: bool,
-    /// The previous generation is retired, but its exit still needs confirmation.
-    /// Keep only its close handle, so its events and requests can no longer be used.
-    retired_permission_runtime: Option<Arc<dyn HarnessRuntime>>,
+    lifecycle: Arc<HostLifecycle>,
     /// What the Chat's sessions last reported in effect, as recorded with the Chat
     /// (`Chat::effective_settings`): what a session opened for it again starts with.
     recorded_settings: Option<String>,
@@ -313,7 +311,7 @@ async fn sleep_until_some(deadline: Option<Instant>) {
     }
 }
 
-async fn bounded_close(handle: &dyn HarnessRuntime) -> Option<String> {
+pub(crate) async fn bounded_close(handle: &dyn HarnessRuntime) -> Option<String> {
     match timeout(CLOSE_TIMEOUT, handle.close()).await {
         Ok(CloseOutcome::Confirmed { .. }) => None,
         Ok(CloseOutcome::Unconfirmed { reason }) => Some(reason),
@@ -329,7 +327,7 @@ impl Supervisor {
         context: Option<ContextSource>,
         board: Arc<Board>,
         unattended: Option<Arc<UnattendedChat>>,
-        feature_off: Arc<AtomicBool>,
+        lifecycle: Arc<HostLifecycle>,
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
@@ -391,14 +389,14 @@ impl Supervisor {
             start_settings: StartSettings::default(),
             reopen_for_permission: None,
             permission_restart_pending: false,
-            retired_permission_runtime: None,
+            lifecycle,
             recorded_settings: chat.effective_settings.clone(),
         };
-        tokio::spawn(supervisor.run(feature_off).instrument(span));
+        tokio::spawn(supervisor.run().instrument(span));
         sender
     }
 
-    async fn run(mut self, feature_off: Arc<AtomicBool>) {
+    async fn run(mut self) {
         loop {
             let timer = [
                 self.show_text_at,
@@ -437,7 +435,7 @@ impl Supervisor {
                     }
                     Some(command) => {
                         if self.shutting_down {
-                            if feature_off.load(Ordering::SeqCst) {
+                            if self.lifecycle.is_off() {
                                 // A command may have taken a sender before Chat was switched off.
                                 continue;
                             }
@@ -873,7 +871,7 @@ impl Supervisor {
         let message = self.write(|core| core.save_chat_input(command_id, &chat, text))?;
         let immediate = self.active.is_none() || self.steering().is_some();
         if mode == SendMode::Auto
-            && self.retired_permission_runtime.is_none()
+            && !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
             && immediate
             && message.queued
             && !self.direct.contains(&message.id)
@@ -1214,14 +1212,17 @@ impl Supervisor {
         let resend = self.resend.take();
         // End ownership before checking storage. A paused queue can still be
         // sent to directly.
-        if self
-            .stop_runtime(StopReason::ExplicitResume)
-            .await
-            .is_some()
-        {
+        let unconfirmed = self.stop_runtime(StopReason::ExplicitResume).await;
+        // Chat Off or Restore may be waiting on the old process too.
+        if unconfirmed.is_some() || self.lifecycle.serving().is_err() {
             self.hold_queue();
             if let Some(value) = self.start_settings.permission.clone() {
                 let _ = self.record_permission(&value);
+            }
+            if unconfirmed.is_none() {
+                self.direct = direct;
+                self.direct_from_queue = from_queue;
+                self.resend = resend;
             }
             return;
         }
@@ -1245,7 +1246,7 @@ impl Supervisor {
     }
 
     fn prepare_permission_restart(&mut self, origin: ChatSessionOrigin) -> Result<(), HostError> {
-        if self.retired_permission_runtime.is_some() {
+        if self.lifecycle.has_retired_permission_runtime(&self.chat_id) {
             return Err(HostError::PermissionRestartCleanupUnconfirmed);
         }
         if let Some(detail) = &self.storage_failed {
@@ -1279,6 +1280,12 @@ impl Supervisor {
         preamble: Option<String>,
         reply: Option<Reply<()>>,
     ) {
+        if let Err(error) = self.lifecycle.serving() {
+            if let Some(reply) = reply {
+                let _ = reply.send(Err(error));
+            }
+            return;
+        }
         if self.permission_restart_pending
             && let Err(error) = self.prepare_permission_restart(origin)
         {
@@ -1387,8 +1394,11 @@ impl Supervisor {
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
     /// Returns why cleanup could not be confirmed, if it could not.
     async fn stop_runtime(&mut self, why: StopReason) -> Option<String> {
-        if self.retired_permission_runtime.is_some() {
-            return self.close_retired_permission_runtime().await;
+        if self.lifecycle.has_retired_permission_runtime(&self.chat_id) {
+            return self
+                .lifecycle
+                .close_retired_permission_runtime(&self.chat_id)
+                .await;
         }
         // Kept while the runtime closes, so a turn the harness reports interrupted
         // meanwhile is recorded as ticketd's stop and not as the person's.
@@ -1403,20 +1413,16 @@ impl Supervisor {
     }
 
     /// Checks the previous generation on an explicit retry before opening a replacement.
-    async fn confirm_permission_restart_cleanup(&mut self) -> Result<(), HostError> {
-        if self.close_retired_permission_runtime().await.is_some() {
+    async fn confirm_permission_restart_cleanup(&self) -> Result<(), HostError> {
+        if self
+            .lifecycle
+            .close_retired_permission_runtime(&self.chat_id)
+            .await
+            .is_some()
+        {
             return Err(HostError::PermissionRestartCleanupUnconfirmed);
         }
-        Ok(())
-    }
-
-    async fn close_retired_permission_runtime(&mut self) -> Option<String> {
-        let handle = self.retired_permission_runtime.as_deref()?;
-        let unconfirmed = bounded_close(handle).await;
-        if unconfirmed.is_none() {
-            self.retired_permission_runtime = None;
-        }
-        unconfirmed
+        self.lifecycle.serving()
     }
 
     async fn close_runtime(&mut self, why: StopReason) -> Option<String> {
@@ -1475,7 +1481,8 @@ impl Supervisor {
         self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
             if permission_restart {
-                self.retired_permission_runtime = Some(handle);
+                self.lifecycle
+                    .retire_permission_runtime(&self.chat_id, handle);
                 self.notice(
                     "ticketd could not confirm that the previous harness exited during the permission restart. Tools it started may still be running."
                         .to_owned(),
@@ -1591,7 +1598,8 @@ impl Supervisor {
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
         if self.shutting_down
-            || self.retired_permission_runtime.is_some()
+            || self.lifecycle.serving().is_err()
+            || self.lifecycle.has_retired_permission_runtime(&self.chat_id)
             || self.storage_failed.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
@@ -2708,7 +2716,7 @@ impl Supervisor {
                 Some(detail) => Some(ChatProblem::StorageFailed {
                     detail: detail.clone(),
                 }),
-                None if self.retired_permission_runtime.is_some() => {
+                None if self.lifecycle.has_retired_permission_runtime(&self.chat_id) => {
                     Some(ChatProblem::CleanupUnconfirmed {
                         reason: HostError::PermissionRestartCleanupUnconfirmed.to_string(),
                     })

@@ -3258,6 +3258,148 @@ async fn an_unconfirmed_permission_restart_rechecks_the_old_runtime_before_recov
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_restore_keeps_only_the_unconfirmed_permission_cleanup() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let backup = f._dir.path().join("backup.sqlite3");
+    f.core()
+        .save_chat_input(None, &f.chat.id, "from the backup")
+        .unwrap();
+    f.core().set_chat_queue_paused(&f.chat.id, true).unwrap();
+    f.core().backup(&backup).unwrap();
+
+    f.send("old Turn").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("old-session"),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    let reason = "the exit could not be observed".to_owned();
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: reason.clone(),
+    });
+    let close = f.fake.hold_next_close();
+    let original = f.fake.opens()[0].generation;
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+    assert!(f.fake.written().contains(&Written::Close(original)));
+    let (unconfirmed, ()) = tokio::join!(f.host.begin_restore(), async {
+        assert!(matches!(f.host.serving(), Err(HostError::Restoring)));
+        close.send(()).unwrap();
+    });
+    let warning = UnconfirmedCleanup {
+        chat_id: f.chat.id.clone(),
+        reason,
+    };
+    assert_eq!(unconfirmed, [warning.clone()]);
+    assert!(f.host.live().is_empty());
+
+    // A failed replacement also releases the restore gate.
+    f.host.finish_restore();
+    assert!(matches!(
+        f.host.resume(&f.chat.id, ResumeMode::Native).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert_eq!(f.host.begin_restore().await, [warning]);
+    Workspace::restore(&f.path, &backup).unwrap();
+    f.host.finish_restore();
+
+    let view = f.host.attach(&f.chat.id).await.unwrap().0;
+    assert!(matches!(
+        view.live.problem,
+        Some(ChatProblem::CleanupUnconfirmed { .. })
+    ));
+    assert_eq!(view.snapshot.chat.effective_settings, None);
+    assert!(f.turns().is_empty());
+    assert!(f.send("sent after restore").await.queued);
+    assert_eq!(f.queued(), ["from the backup", "sent after restore"]);
+    assert!(matches!(
+        f.host.resume_queue(&f.chat.id).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(f.submits().len(), 1);
+
+    f.fake
+        .set_close_outcome(CloseOutcome::Confirmed { exit_code: Some(0) });
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].session, SessionStart::New);
+    assert_eq!(opens[1].settings.permission, None);
+    assert_eq!(f.submits()[1].text, "from the backup");
+    assert_eq!(f.queued(), ["sent after restore"]);
+    assert!(!f.items().iter().any(|item| matches!(
+        item,
+        ChatItem::Message(message) if message.text == "old Turn"
+    )));
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_permission_restart_does_not_open_when_chat_turns_off_during_close() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let session = NativeSessionId::new("native-session");
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: session.clone(),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    f.queue("queued before turning off").await;
+    let next = f.queue("send this first").await;
+    f.host.send_queued_now(&f.chat.id, &next.id).await.unwrap();
+    let close = f.fake.hold_next_close();
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+    assert!(
+        f.fake
+            .written()
+            .contains(&Written::Close(f.fake.opens()[0].generation))
+    );
+
+    let (unconfirmed, ()) = tokio::join!(f.host.turn_off(), async {
+        assert!(matches!(f.host.serving(), Err(HostError::TurnedOff)));
+        close.send(()).unwrap();
+    });
+    assert!(unconfirmed.is_empty());
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.queued(), ["queued before turning off", "send this first"]);
+    let chat = f.core().chat(&f.chat.id).unwrap();
+    assert!(chat.queue_paused);
+    assert_eq!(
+        chat.effective_settings.as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+
+    f.host.turn_on();
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].session, SessionStart::Resume(session));
+    assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
+    assert_eq!(f.submits()[1].text, "send this first");
+    assert_eq!(f.queued(), ["queued before turning off"]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn turning_chat_off_and_on_keeps_waiting_for_the_previous_permission_runtime() {
     let f = Fixture::new(FakeAdapter::new(
         &ticketd_core::harnesses::ANTIGRAVITY,

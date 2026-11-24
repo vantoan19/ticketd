@@ -120,6 +120,26 @@ Clippy and tests, and frontend formatting, lint, types, and tests. For prose-onl
 iteration, use `npm exec -- markdownlint-cli2` and Prettier on the changed files;
 the complete check remains the handoff check. Report failures accurately.
 
+### Scrub a developer Harness recording
+
+Run the scrubber on a finalized `.wire` file to create a JSONL fixture. New
+recordings carry the original launch and physical directory paths, so the
+scrubber can mask them even after the file is copied.
+
+```sh
+node scripts/scrub-harness-recording.mjs capture.wire fixture.jsonl
+```
+
+For a moved v1 recording, supply its original absolute capture directory with
+`--capture-root`. Repeat the option if the recording used more than one
+spelling of that directory, such as `/tmp` and `/private/tmp` on macOS.
+
+```sh
+node scripts/scrub-harness-recording.mjs \
+  --capture-root /tmp/synthetic-capture \
+  --capture-root /private/tmp/synthetic-capture capture.wire fixture.jsonl
+```
+
 ## Optional integrations
 
 Core local workflows and ordinary tests do not require GitHub or Google credentials.

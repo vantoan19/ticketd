@@ -121,8 +121,10 @@ impl Prompt {
             .tools
             .entry(id.clone())
             .or_insert_with(|| steps::Tool::new(id.clone()));
+        let update_files =
+            update.fields.content.is_some() || tool.status() != acp::ToolCallStatus::Completed;
         tool.merge(update.fields);
-        self.report_tool(&id, events)
+        self.report_tool(&id, update_files, events)
     }
     fn cancel_approval(&mut self, id: &acp::ToolCallId) {
         // An output-only update can repeat a failure the harness already reported.
@@ -135,7 +137,12 @@ impl Prompt {
             self.cancelled_approvals.insert(id.clone());
         }
     }
-    fn report_tool(&mut self, id: &acp::ToolCallId, events: &mut Vec<EventKind>) -> bool {
+    fn report_tool(
+        &mut self,
+        id: &acp::ToolCallId,
+        update_files: bool,
+        events: &mut Vec<EventKind>,
+    ) -> bool {
         let Some(tool) = self.tools.get(id) else {
             return false;
         };
@@ -146,12 +153,16 @@ impl Prompt {
             self.cancelled_approvals.contains(id),
         );
         events.push(event);
-        if !declined && tool.status() == acp::ToolCallStatus::Completed {
+        let mut files_changed = false;
+        if update_files && !declined && tool.status() == acp::ToolCallStatus::Completed {
             for file in tool.changes() {
-                self.files.insert(file.path.clone(), file);
+                if self.files.get(&file.path) != Some(&file) {
+                    self.files.insert(file.path.clone(), file);
+                    files_changed = true;
+                }
             }
         }
-        if !self.files.is_empty() {
+        if files_changed {
             events.push(EventKind::FilesChanged {
                 turn: self.turn.clone(),
                 files: self.files.values().cloned().collect(),
@@ -162,7 +173,7 @@ impl Prompt {
 }
 
 struct Permission {
-    rpc_id: Value,
+    rpc_id: Arc<Value>,
     tool: acp::ToolCallId,
     options: Vec<(acp::PermissionOptionId, acp::PermissionOptionKind)>,
 }
@@ -327,7 +338,7 @@ impl Session {
                 prompt
                     .tools
                     .insert(id.clone(), steps::Tool::from_call(tool));
-                prompt.report_tool(&id, &mut events);
+                prompt.report_tool(&id, true, &mut events);
             }
             acp::SessionUpdate::ToolCallUpdate(update) => {
                 prompt.flush_thought(&mut events);
@@ -372,21 +383,21 @@ impl Session {
         else {
             return (
                 Vec::new(),
-                Some(Response::Immediate(cancelled_permission(id))),
+                Some(Response::Immediate(cancelled_permission(&id))),
             );
         };
-        if self.runtime.interrupted(&prompt.turn) {
-            prompt.cancel_approval(&request.tool_call.tool_call_id);
-            return (
-                Vec::new(),
-                Some(Response::Immediate(cancelled_permission(id))),
-            );
-        }
         // The peer can reuse a wire ID in a later Prompt. Its earlier approval
         // stays stale, including while an approval with the same wire ID is open.
         let native = NativeRequestId::new(format!("{}:{id}", prompt.turn.0));
         if self.runtime.has_request(&native) {
             return (Vec::new(), None);
+        }
+        if self.runtime.interrupted(&prompt.turn) {
+            prompt.cancel_approval(&request.tool_call.tool_call_id);
+            return (
+                Vec::new(),
+                Some(Response::Immediate(cancelled_permission(&id))),
+            );
         }
         if self.runtime.request_count() >= MAX_PERMISSION_REQUESTS_PER_PROMPT {
             return refused(
@@ -433,7 +444,7 @@ impl Session {
             native.clone(),
             Some(&prompt.turn),
             Permission {
-                rpc_id: id,
+                rpc_id: Arc::new(id),
                 options: options
                     .into_iter()
                     .map(|option| (option.option_id, option.kind))
@@ -507,7 +518,7 @@ impl Session {
     }
 }
 
-fn cancelled_permission(id: Value) -> Value {
+fn cancelled_permission(id: &Value) -> Value {
     json!({"id": id, "result": {"outcome": {"outcome": "cancelled"}}})
 }
 
@@ -650,7 +661,6 @@ impl AcpRuntime {
             CallOutcome::Reply(value) => Ok(value),
             CallOutcome::Error(error) => {
                 let kind = if resumed_session.is_some_and(|session| {
-                    let lower = error.message.to_ascii_lowercase();
                     // agy uses the generic internal error code for this missing-history reply.
                     let missing = error.code == -32603
                         && error.message
@@ -658,11 +668,7 @@ impl AcpRuntime {
                                 "Failed to read session {}; retry, or load it with session/load",
                                 session.0
                             );
-                    error.code == -32601
-                        || missing
-                        || ["not found", "does not exist", "no conversation"]
-                            .iter()
-                            .any(|phrase| lower.contains(phrase))
+                    error.code == -32601 || missing
                 }) {
                     ProblemKind::NativeHistoryUnavailable
                 } else {
@@ -960,7 +966,7 @@ impl HarnessRuntime for AcpRuntime {
                 let result = acp::RequestPermissionResponse::new(acp::RequestPermissionOutcome::Selected(
                     acp::SelectedPermissionOutcome::new(option.clone()),
                 ));
-                Ok((json!({"id": request.rpc_id, "result": params(result).map_err(|_| Refusal::Unsupported)?}), deny))
+                Ok((json!({"id": request.rpc_id.as_ref(), "result": params(result).map_err(|_| Refusal::Unsupported)?}), deny))
             })?;
             if let Some(tool) = deny && let Some(prompt) = &mut session.prompt { prompt.denied.insert(tool); }
             Ok(frame)
@@ -968,53 +974,36 @@ impl HarnessRuntime for AcpRuntime {
     }
 
     async fn interrupt(&self, request: InterruptRequest) -> InterruptOutcome {
+        if let Err(refusal) = self.connection.check_generation(request.generation) {
+            return InterruptOutcome::NotSent(refusal);
+        }
         let outcome = self
             .connection
-            .respond(request.generation, |session| {
+            .write_frames(|session| {
+                let first_interrupt = !session.runtime.interrupted(&request.expected_turn);
                 session.runtime.mark_interrupt(&request.expected_turn)?;
                 let id = session.id.clone().ok_or(Refusal::RuntimeClosed)?;
                 let payload =
                     params(acp::CancelNotification::new(id)).map_err(|_| Refusal::Unsupported)?;
-                if let Some(prompt) = &mut session.prompt {
-                    // agy can fail these tools as soon as it receives session/cancel.
+                let mut pending = Vec::new();
+                if first_interrupt && let Some(prompt) = &mut session.prompt {
+                    // This is the only active Prompt. Its approvals can leave
+                    // the UI before their wire replies finish, and agy can
+                    // report their tool failures as soon as it receives cancel.
                     for (_, request) in session.runtime.unanswered() {
                         prompt.cancel_approval(&request.tool);
+                        pending.push(Arc::clone(&request.rpc_id));
                     }
                 }
-                Ok(json!({"method": "session/cancel", "params": payload}))
+                let cancel = json!({"method": "session/cancel", "params": payload});
+                Ok(std::iter::once(cancel)
+                    .chain(pending.into_iter().map(|id| cancelled_permission(&id))))
             })
             .await;
         match outcome {
-            RespondOutcome::Sent => {
-                let pending = self
-                    .connection
-                    .state()
-                    .peer
-                    .runtime
-                    .unanswered()
-                    .map(|(id, _)| id.clone())
-                    .collect::<Vec<_>>();
-                for id in pending {
-                    let result = self
-                        .connection
-                        .write(|session| {
-                            let request = session
-                                .runtime
-                                .unanswered()
-                                .find(|(key, _)| **key == id)
-                                .map(|(_, request)| request)
-                                .ok_or(Refusal::UnknownRequest)?;
-                            Ok(cancelled_permission(request.rpc_id.clone()))
-                        })
-                        .await;
-                    if matches!(result, Err(WriteFailure::Lost)) {
-                        return InterruptOutcome::Unconfirmed;
-                    }
-                }
-                InterruptOutcome::Acknowledged
-            }
-            RespondOutcome::NotSent(refusal) => InterruptOutcome::NotSent(refusal),
-            RespondOutcome::UnknownAfterLoss => InterruptOutcome::Unconfirmed,
+            Ok(()) if !self.connection.state().is_closed() => InterruptOutcome::Acknowledged,
+            Ok(()) | Err(WriteFailure::Lost) => InterruptOutcome::Unconfirmed,
+            Err(WriteFailure::Refused(refusal)) => InterruptOutcome::NotSent(refusal),
         }
     }
 

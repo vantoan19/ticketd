@@ -1,25 +1,86 @@
-import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
+import { parseArgs } from "node:util";
 
-const header = Buffer.from("ticketd-harness-recording-v1\n");
+const headerV1 = Buffer.from("ticketd-harness-recording-v1\n");
+const headerV2 = Buffer.from("ticketd-harness-recording-v2\n");
 const maxCaptureBytes = 64 * 1024 * 1024;
 const maxFrameBytes = 8 * 1024 * 1024;
 const decoder = new TextDecoder("utf-8", { fatal: true });
 
 class CaptureError extends Error {}
 
+function readCapture(input) {
+  const sizeError = "The input must be a recording file of at most 64 MiB.";
+  // Avoid waiting on a pipe before we can check that the handle is a file.
+  const fd = openSync(input, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > maxCaptureBytes) {
+      throw new CaptureError(sizeError);
+    }
+
+    const chunks = [];
+    let total = 0;
+    while (total <= maxCaptureBytes) {
+      const chunk = Buffer.allocUnsafe(
+        Math.min(64 * 1024, maxCaptureBytes + 1 - total),
+      );
+      const size = readSync(fd, chunk, 0, chunk.length, null);
+      if (size === 0) return Buffer.concat(chunks, total);
+      chunks.push(chunk.subarray(0, size));
+      total += size;
+    }
+    throw new CaptureError(sizeError);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function captureRoot(value) {
+  if (
+    typeof value === "string" &&
+    value.startsWith("/") &&
+    !value.includes("\0")
+  ) {
+    const root = value.replace(/\/+$/, "");
+    if (root) return root;
+  }
+  throw new CaptureError(
+    "The recording capture root must be an absolute directory path.",
+  );
+}
+
 function framesFrom(input) {
   if (!input.endsWith(".wire")) {
     throw new CaptureError("Use a finalized .wire recording.");
   }
-  const stat = statSync(input);
-  if (!stat.isFile() || stat.size > maxCaptureBytes) {
-    throw new CaptureError(
-      "The input must be a recording file of at most 64 MiB.",
-    );
-  }
-  const raw = readFileSync(input);
-  if (!raw.subarray(0, header.length).equals(header)) {
+  const raw = readCapture(input);
+  let offset = headerV1.length;
+  let roots = [];
+  const format = raw.subarray(0, offset);
+  if (format.equals(headerV2)) {
+    const end = raw.indexOf(10, offset);
+    try {
+      if (end !== -1)
+        roots = JSON.parse(decoder.decode(raw.subarray(offset, end)));
+    } catch {
+      throw new CaptureError("Invalid recording capture root metadata.");
+    }
+    if (!Array.isArray(roots) || roots.length !== 2) {
+      throw new CaptureError("Invalid recording capture root metadata.");
+    }
+    roots = roots.map(captureRoot);
+    offset = end + 1;
+  } else if (!format.equals(headerV1)) {
     throw new CaptureError("Unknown recording format.");
   }
 
@@ -28,7 +89,7 @@ function framesFrom(input) {
     1: { direction: "client", chunks: [], size: 0, lines: 0 },
     2: { direction: "server", chunks: [], size: 0, lines: 0 },
   };
-  for (let offset = header.length; offset < raw.length;) {
+  while (offset < raw.length) {
     const stream = streams[raw[offset]];
     if (!stream || offset + 5 > raw.length) {
       throw new CaptureError("Invalid recording chunk header.");
@@ -47,7 +108,7 @@ function framesFrom(input) {
   if (frames.length === 0) {
     throw new CaptureError("The recording contains no frames.");
   }
-  return frames;
+  return { frames, roots };
 }
 
 function readChunk(bytes, stream, frames) {
@@ -227,7 +288,7 @@ function visit(value, scope, parent, scalar, key, wireFields = null) {
   return scalar(value, scope);
 }
 
-function scrub(frames, input) {
+function scrub(frames, captureDirectories) {
   const aliases = new Map();
   const accountAliases = new Map();
   const ambiguousSessionAliases = new Set();
@@ -265,13 +326,9 @@ function scrub(frames, input) {
     return replacement;
   };
 
-  // Match both the launch spelling and its physical path (for example /var and
-  // /private/var on macOS). Keep filenames, relative paths and tool arguments.
-  for (const directory of [
-    dirname(resolve(input)),
-    dirname(realpathSync(input)),
-  ]) {
-    if (dirname(directory) !== directory) remember(directory, () => "/fixture");
+  // Keep filenames, relative paths and tool arguments when masking a capture root.
+  for (const directory of captureDirectories) {
+    remember(directory, () => "/fixture");
   }
   // Collect aliases first so a reference before its structured definition, or
   // in a command, message, or path, can use the same replacement.
@@ -333,6 +390,14 @@ function scrub(frames, input) {
       return replaceUuid(matched);
     });
 
+  const checkDiscriminator = (value) => {
+    if (typeof value === "string" && replaceText(value) !== value) {
+      throw new CaptureError(
+        "Cannot safely scrub an alias in a protocol label.",
+      );
+    }
+  };
+
   // ACP dispatches on the nested sessionUpdate tag. Check its protocol
   // position so the same spelling can still be scrubbed inside dictionaries.
   for (const { direction, frame } of frames) {
@@ -349,35 +414,27 @@ function scrub(frames, input) {
         "Cannot safely scrub an account alias in a protocol field name.",
       );
     }
-    if (replaceText(update.sessionUpdate) !== update.sessionUpdate) {
-      throw new CaptureError(
-        "Cannot safely scrub an alias in a protocol label.",
-      );
-    }
+    checkDiscriminator(update.sessionUpdate);
   }
 
-  return frames.map(({ direction, frame }) => ({
-    [direction]: visit(
+  const originalIds = new Map();
+  return frames.map(({ direction, frame }) => {
+    const wireFields = envelopeFields(frame, direction);
+    const scrubbed = visit(
       frame,
       null,
       "",
       (value, scope) =>
-        scope === "label"
-          ? (accountAliases.get(value) ?? value)
-          : scope
-            ? replaceScoped(value, scope)
-            : typeof value === "string"
-              ? replaceText(value)
-              : value,
+        scope && scope !== "label"
+          ? replaceScoped(value, scope)
+          : typeof value === "string"
+            ? replaceText(value)
+            : value,
       (key, value, wireFields) => {
         // Wire fields have fixed names. A dictionary can use the same spelling
         // as a key, so this exception applies only to the frame envelope.
         if (wireFields?.has(key)) {
-          if (envelopeLabels.has(key) && accountAliases.has(value)) {
-            throw new CaptureError(
-              "Cannot safely scrub an account alias in a protocol label.",
-            );
-          }
+          if (envelopeLabels.has(key)) checkDiscriminator(value);
           return key;
         }
         const alias = accountAliases.get(key);
@@ -391,20 +448,55 @@ function scrub(frames, input) {
         }
         return /^[A-Za-z_$][\w$]*$/.test(key) ? key : replaceText(key);
       },
-      envelopeFields(frame, direction),
-    ),
-  }));
+      wireFields,
+    );
+    if (wireFields?.has("id") && typeof frame.id === "string") {
+      const previous = originalIds.get(scrubbed.id);
+      if (previous !== undefined && previous !== frame.id) {
+        throw new CaptureError("Scrubbing would produce duplicate RPC IDs.");
+      }
+      originalIds.set(scrubbed.id, frame.id);
+    }
+    return { [direction]: scrubbed };
+  });
+}
+
+function argumentsForScrubbing() {
+  const usage =
+    "Usage: node scripts/scrub-harness-recording.mjs [--capture-root DIR] RAW.wire FIXTURE.jsonl";
+  let args;
+  try {
+    args = parseArgs({
+      options: { "capture-root": { type: "string", multiple: true } },
+      allowPositionals: true,
+    });
+  } catch {
+    throw new CaptureError(usage);
+  }
+  if (args.positionals.length !== 2) throw new CaptureError(usage);
+  return args;
 }
 
 try {
-  const [, , input, output, extra] = process.argv;
-  if (!input || !output || extra !== undefined) {
-    throw new CaptureError(
-      "Usage: node scripts/scrub-harness-recording.mjs RAW.wire FIXTURE.jsonl",
-    );
-  }
-  const frames = scrub(framesFrom(input), input);
-  const fixture = frames.map((frame) => JSON.stringify(frame) + "\n").join("");
+  const {
+    positionals: [input, output],
+    values,
+  } = argumentsForScrubbing();
+  const { frames, roots } = framesFrom(input);
+  // Legacy recordings made in place use the path supplied to the scrubber.
+  // The header and explicit origins survive a move of the wire file.
+  const captureDirectories = [
+    dirname(resolve(input)),
+    dirname(realpathSync(input)),
+  ].filter((directory) => dirname(directory) !== directory);
+  const scrubbed = scrub(frames, [
+    ...captureDirectories,
+    ...roots,
+    ...(values["capture-root"] ?? []).map(captureRoot),
+  ]);
+  const fixture = scrubbed
+    .map((frame) => JSON.stringify(frame) + "\n")
+    .join("");
   writeFileSync(output, fixture, { flag: "wx", mode: 0o600 });
 } catch (error) {
   // Parser and filesystem errors can quote capture bytes or private filenames.

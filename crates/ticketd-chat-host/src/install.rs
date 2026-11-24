@@ -4,7 +4,7 @@
 
 use std::env;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 pub(crate) type Version = (u64, u64, u64);
 
@@ -59,6 +59,24 @@ impl LaunchEnvironment {
             .iter()
             .flat_map(|folder| names.iter().map(|name| folder.join(name)))
             .collect()
+    }
+}
+
+pub(crate) fn is_executable(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if !metadata.is_file() {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        true
     }
 }
 
