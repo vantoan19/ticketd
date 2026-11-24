@@ -300,7 +300,7 @@ pub struct HarnessOptionsView {
     pub models: Vec<ModelChoiceView>,
     /// `current` is unset: before a session only the harness's own setting applies.
     pub permission: Option<SettingView>,
-    /// Why the harness reported no options; the picker then offers its default only.
+    /// Why the picker offers only the harness's default model.
     pub unavailable: Option<String>,
 }
 
@@ -326,10 +326,12 @@ pub fn options_view(
                 })
                 .collect(),
             permission: setting(SettingKey::Permission, options.permission.as_ref(), &none),
-            unavailable: options
-                .models
-                .is_empty()
-                .then(|| format!("{harness} listed no models")),
+            unavailable: options.model_list_error.or_else(|| {
+                options
+                    .models
+                    .is_empty()
+                    .then(|| format!("{harness} listed no models"))
+            }),
         },
         Err(reason) => HarnessOptionsView {
             harness_id: harness_id.to_owned(),

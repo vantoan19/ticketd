@@ -21,6 +21,7 @@ use tracing::Instrument;
 use crate::{CloseOutcome, EventKind, Harness};
 
 pub(crate) const MAX_STDERR_TAIL_BYTES: usize = 8 * 1024;
+const MAX_VERSION_OUTPUT_BYTES: usize = 64 * 1024;
 const VERSION_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(crate) type Reader = Box<dyn AsyncRead + Send + Unpin>;
@@ -387,21 +388,62 @@ pub(crate) async fn version_output(
     command
         .arg("--version")
         .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .envs(environment.iter().copied())
         .kill_on_drop(true);
     hide_console(&mut command);
-    let output = timeout(VERSION_PROBE_TIMEOUT, command.output())
-        .await
-        .map_err(|_| format!("`{} --version` did not finish", executable.display()))?
-        .map_err(|error| format!("Could not run {}: {error}", executable.display()))?;
-    if !output.status.success() {
+    let run_error = |error| format!("Could not run {}: {error}", executable.display());
+    let mut child = command.spawn().map_err(run_error)?;
+    let output = timeout(VERSION_PROBE_TIMEOUT, async {
+        let missing = || io::Error::other("the process has no standard streams");
+        let stdout = child.stdout.take().ok_or_else(missing)?;
+        let stderr = child.stderr.take().ok_or_else(missing)?;
+        tokio::try_join!(
+            read_probe_output(stdout, "stdout", MAX_VERSION_OUTPUT_BYTES),
+            read_probe_output(stderr, "stderr", MAX_VERSION_OUTPUT_BYTES),
+            child.wait(),
+        )
+    })
+    .await;
+    let output = match output {
+        Ok(result) => result.map_err(run_error),
+        Err(_) => Err(format!(
+            "`{} --version` did not finish",
+            executable.display()
+        )),
+    };
+    if output.is_err() {
+        let _ = timeout(EXIT_OBSERVATION, child.kill()).await;
+    }
+    let (stdout, _, status) = output?;
+    if !status.success() {
         return Err(format!(
-            "`{} --version` exited with {}",
-            executable.display(),
-            output.status
+            "`{} --version` exited with {status}",
+            executable.display()
         ));
     }
-    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    Ok(String::from_utf8_lossy(&stdout).into_owned())
+}
+
+pub(crate) async fn read_probe_output(
+    reader: impl AsyncRead + Unpin,
+    stream: &str,
+    max_bytes: usize,
+) -> io::Result<Vec<u8>> {
+    // One extra byte distinguishes overflow from a complete response at the limit.
+    let mut output = Vec::new();
+    reader
+        .take(max_bytes as u64 + 1)
+        .read_to_end(&mut output)
+        .await?;
+    if output.len() > max_bytes {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("{stream} exceeded {max_bytes} bytes"),
+        ));
+    }
+    Ok(output)
 }
 
 /// A windowed application must not flash a console for each child it starts.
@@ -743,6 +785,63 @@ mod tests {
                         Some(cwd),
                     )
                 };
+                if mode == "worker-rename-fails" {
+                    let log_dir = directory.join("logs");
+                    let logs = ticketd_diagnostics::DesktopLogs::open(
+                        &log_dir,
+                        ticketd_diagnostics::Config::default(),
+                    );
+                    assert!(logs.install());
+                    let mut io = {
+                        let span = tracing::info_span!("chat", chat_id = "chat-1");
+                        span.in_scope(|| selected(&work)).expect("spawn recorder")
+                    };
+                    let pending = std::fs::read_dir(directory)
+                        .expect("capture directory")
+                        .map(|entry| entry.expect("entry").path())
+                        .find(|path| path.extension().is_some_and(|ext| ext == "partial"))
+                        .expect("pending recording");
+                    // Block the final rename before closing the pipes that keep the worker alive.
+                    std::fs::create_dir(pending.with_extension("")).expect("block rename");
+                    let prompt = b"private synthetic prompt\n";
+                    io.stdin.write_all(prompt).await.expect("send");
+                    drop(io.stdin);
+                    let mut echoed = Vec::new();
+                    io.stdout.read_to_end(&mut echoed).await.expect("receive");
+                    assert_eq!(echoed, prompt);
+                    drop(io.stdout);
+                    assert_eq!(io.child.wait().await, Some(0));
+
+                    let deadline = std::time::Instant::now() + Duration::from_secs(2);
+                    while pending.exists() && std::time::Instant::now() < deadline {
+                        std::thread::sleep(Duration::from_millis(10));
+                    }
+                    assert!(
+                        !pending.exists(),
+                        "worker should discard the failed recording"
+                    );
+                    let path = std::fs::read_dir(&log_dir)
+                        .expect("log directory")
+                        .map(|entry| entry.expect("entry").path())
+                        .find(|path| path.extension().is_some_and(|ext| ext == "log"))
+                        .expect("log file");
+                    let text = std::fs::read_to_string(path).expect("read log");
+                    let warning = text
+                        .lines()
+                        .map(|line| {
+                            serde_json::from_str::<serde_json::Value>(line).expect("JSON line")
+                        })
+                        .find(|line| line["message"] == "could not finish harness recording")
+                        .expect("recording warning");
+                    assert_eq!(warning["level"], "WARN");
+                    assert_eq!(warning["harness"], "codex");
+                    assert_eq!(warning["error_kind"], "IsADirectory");
+                    assert_eq!(warning["spans"][0]["name"], "chat");
+                    assert_eq!(warning["spans"][0]["chat_id"], "chat-1");
+                    assert!(!text.contains("private synthetic prompt"));
+                    assert!(!text.contains(directory.to_str().expect("capture path")));
+                    return;
+                }
                 if mode == "enabled" {
                     assert!(selected(directory).is_err());
                     let outside = directory.join("synthetic-outside.txt");
@@ -883,6 +982,9 @@ mod tests {
                 0o600
             );
         }
+        let failure_run = private_run();
+        std::fs::create_dir(failure_run.path().join("work")).expect("work folder");
+        invoke("worker-rename-fails", failure_run.path());
     }
 
     #[test]

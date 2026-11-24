@@ -580,20 +580,34 @@ const REFRESHED: [&str; 6] = [
     "source_display",
     "source_url",
 ];
+const SOURCE_LINK: [&str; 3] = ["source_external_id", "source_origin", "source_linked_at"];
 
 /// When both sides refreshed, the later `source_updated_at` wins for the
-/// refreshed fields as a whole: mixing two refreshes field by field, or asking
-/// a person, helps nobody.
+/// refreshed fields as a whole. The same decision keeps a GitHub issue's
+/// provenance with its observed data when devices link different issue IDs.
 fn settle_source(
     base: Option<&SyncRecord>,
     local: &SyncRecord,
     remote: &SyncRecord,
     merged: &mut Merged,
 ) {
+    let tracks_github = |record: &SyncRecord| {
+        record
+            .fields
+            .get("source_provider")
+            .is_some_and(|value| matches!(value, SyncValue::Text(provider) if provider == "github"))
+    };
+    let different_github_issues = tracks_github(local)
+        && tracks_github(remote)
+        && local.fields.get("source_external_id") != remote.fields.get("source_external_id");
+    let grouped = |name: &str| {
+        REFRESHED.contains(&name) || (different_github_issues && SOURCE_LINK.contains(&name))
+    };
     let group = |record: &SyncRecord| -> BTreeMap<String, SyncValue> {
-        let source = record.fields.iter();
-        source
-            .filter(|(name, _)| REFRESHED.contains(&name.as_str()))
+        record
+            .fields
+            .iter()
+            .filter(|(name, _)| grouped(name))
             .map(|(name, value)| (name.clone(), value.clone()))
             .collect()
     };
@@ -615,12 +629,11 @@ fn settle_source(
     } else {
         ours
     };
-    let refreshed = |name: &str| REFRESHED.contains(&name);
-    merged.fields.retain(|name, _| !refreshed(name));
+    merged.fields.retain(|name, _| !grouped(name));
     merged.fields.extend(later);
     merged
         .conflicts
-        .retain(|conflict| !refreshed(&conflict.field));
+        .retain(|conflict| !grouped(&conflict.field));
 }
 
 /// A command grant depends on the harness and both switches. Keep the local

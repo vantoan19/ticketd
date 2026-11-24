@@ -112,7 +112,24 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     .output
                     .is_none_or(|output| output.trim().is_empty()),
         },
-        acp::ToolKind::Edit | acp::ToolKind::Move => {
+        acp::ToolKind::Move => {
+            // ACP can report one location even when the input names both ends.
+            let mut targets = Vec::new();
+            for path in ["SourcePath", "DestinationPath"]
+                .into_iter()
+                .filter_map(|key| input[key].as_str().map(str::to_owned))
+                .chain(locations())
+            {
+                if !path.is_empty() && !targets.contains(&path) {
+                    targets.push(path);
+                }
+            }
+            StepAction::Edit {
+                targets: FileTargets::Paths(targets),
+                counts: LineCounts::default(),
+            }
+        }
+        acp::ToolKind::Edit => {
             let diff_paths = || {
                 diffs(&tool)
                     .map(|diff| diff.path.to_string_lossy().into_owned())
@@ -122,7 +139,7 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                 let mut diffs = diffs(&tool).peekable();
                 diffs.peek().is_some() && diffs.all(|diff| diff.old_text.is_none())
             });
-            if tool.kind == acp::ToolKind::Edit && all_files_added {
+            if all_files_added {
                 let targets = diff_paths();
                 StepAction::Create {
                     targets: FileTargets::Paths(if targets.is_empty() {
@@ -140,13 +157,11 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
             } else {
                 let targets = locations();
                 StepAction::Edit {
-                    targets: FileTargets::Paths(
-                        if tool.kind == acp::ToolKind::Edit && targets.is_empty() {
-                            diff_paths()
-                        } else {
-                            targets
-                        },
-                    ),
+                    targets: FileTargets::Paths(if targets.is_empty() {
+                        diff_paths()
+                    } else {
+                        targets
+                    }),
                     counts: LineCounts::default(),
                 }
             }

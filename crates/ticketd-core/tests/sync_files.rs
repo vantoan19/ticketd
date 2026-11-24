@@ -424,7 +424,7 @@ fn a_malformed_file_is_rejected_with_the_reason_and_changes_nothing() {
             good.replace("trashed: false", "parent: \"T-KQ1\""),
             "'parent'",
         ),
-        (good.replace("format: 1", "format: 2"), "newer ticketd"),
+        (good.replace("format: 1", "format: 3"), "newer ticketd"),
         (good.replace("format: 1", "format: one"), "'format'"),
         (
             good.replace("trashed: false", "source_provider: \"github\""),
@@ -496,6 +496,10 @@ fn external_source_provenance_travels_with_the_ticket() {
     let source = ticket.source.unwrap();
     assert_eq!(source.locator, "acme/site#42");
     assert_eq!(source.ownership, ticketd_core::source::Ownership::External);
+    let repository = |workspace: &Workspace| {
+        workspace.export().unwrap()["external_identities"][0]["repository"].clone()
+    };
+    assert_eq!(repository(&workspace), "example.test/acme/site");
     assert_eq!(
         workspace
             .export_sync_record(SyncKind::Ticket, &ticket.id)
@@ -503,8 +507,23 @@ fn external_source_provenance_travels_with_the_ticket() {
             .to_markdown(),
         text
     );
+    // A transfer on another device replaces the stored repository as well as the locator.
+    let transferred = text.replace("acme/site", "acme/moved");
+    workspace
+        .apply_sync_record(&SyncRecord::parse(&transferred).unwrap())
+        .unwrap();
+    assert_eq!(repository(&workspace), "example.test/acme/moved");
+    // A locator without a matching canonical URL cannot contribute a repository.
+    let unknown = transferred.replace(
+        "source_locator: \"acme/moved",
+        "source_locator: \"acme/elsewhere",
+    );
+    workspace
+        .apply_sync_record(&SyncRecord::parse(&unknown).unwrap())
+        .unwrap();
+    assert!(repository(&workspace).is_null());
     // Another device taking the ticket over arrives as a changed field.
-    let taken = SyncRecord::parse(&text.replace(
+    let taken = SyncRecord::parse(&unknown.replace(
         "source_authority: \"external\"",
         "source_authority: \"local\"",
     ))

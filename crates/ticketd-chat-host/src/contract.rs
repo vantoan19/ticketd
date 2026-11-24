@@ -609,6 +609,8 @@ impl Setting {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct HarnessOptions {
     pub models: Vec<ModelChoice>,
+    /// Why model discovery failed when permission choices are still available.
+    pub model_list_error: Option<String>,
     /// `current` is the harness's own setting when it said; `unchangeable` when
     /// ticketd cannot choose it.
     pub permission: Option<Setting>,

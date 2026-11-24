@@ -10,20 +10,27 @@
 //!   the engine first and write in one short transaction afterwards, so no
 //!   network I/O ever happens while the database is locked.
 
+mod connect_source;
 mod contract;
 mod conversation;
 mod engine;
 mod freshness;
 mod github;
 mod publication;
+mod repository_routes;
 mod schedule;
 mod schema;
 mod takeover;
 mod tracking;
 
-use rusqlite::{OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
+pub use connect_source::{
+    ConnectSourceAction, ConnectSourceMatchCount, ConnectSourceOutcome, ConnectSourcePreview,
+};
+#[doc(hidden)]
+pub use contract::FetchedIssue;
 pub use contract::{
     CONTRACT_VERSION, Capability, ClosureReason, ConnectionInfo, Connector, ConnectorDescriptor,
     Conversation, DiscoveryPage, DiscoveryRequest, ExternalComment, ExternalEvent,
@@ -40,6 +47,7 @@ pub use publication::{
     PublicationLocalData, PublicationPreview, PublicationReview, PublishOptions, PublishOutcome,
     PublishedIssue, Resolution, ResolutionAction, ResolveOptions,
 };
+pub use repository_routes::{SourceRepositoryProject, SourceRepositoryRoute};
 pub use schedule::{Clock, RefreshCoordinator, RefreshPolicy, Run, Skip, SystemClock};
 pub use schema::{
     ChoiceOption, ConfigSchema, ConfigValues, FieldIssue, FieldKind, OptionSource, SchemaField,
@@ -53,6 +61,8 @@ pub use tracking::{
 };
 
 use crate::{Error, Workspace};
+
+const REPOSITORIES: &str = "repositories";
 
 /// A source's validated configuration as saved in the workspace.
 ///
@@ -104,6 +114,39 @@ pub(crate) fn migrate_issue_opening(connection: &rusqlite::Connection) -> Result
     tracking::migrate_issue_opening(connection)
 }
 
+pub(crate) use tracking::{migrate_github_issue_hosts, migrate_issue_repository};
+
+/// Derive a repository from existing external identity without a connector or network access.
+pub(crate) fn repository_from_saved_issue(
+    provider: &str,
+    locator: &str,
+    url: &str,
+) -> Option<String> {
+    match provider {
+        github::PROVIDER => github::repository_from_issue_url(locator, url),
+        _ => None,
+    }
+}
+
+/// Older Drive records still carry bare numeric GitHub IDs; normalize those
+/// before comparing them to identities in the upgraded Workspace.
+pub(crate) fn scope_saved_issue_identity(
+    provider: &str,
+    id: &str,
+    locator: &str,
+    url: &str,
+) -> Option<String> {
+    if provider != github::PROVIDER {
+        return None;
+    }
+    let repository = repository_from_saved_issue(provider, locator, url);
+    let host = repository
+        .as_deref()
+        .and_then(|remote| remote.split_once('/'))
+        .map(|(host, _)| host);
+    github::scope_legacy_issue_id(id, host).filter(|scoped| scoped != id)
+}
+
 /// Format version 82: the parts of each source that have been read.
 pub(crate) fn migrate_read_partitions(connection: &rusqlite::Connection) -> Result<(), Error> {
     freshness::migrate_read_partitions(connection)
@@ -117,6 +160,12 @@ pub(crate) fn migrate_run_counts(connection: &rusqlite::Connection) -> Result<()
 /// Step 26: publication attempts.
 pub(crate) fn migrate_publication(connection: &rusqlite::Connection) -> Result<(), Error> {
     publication::migrate(connection)
+}
+
+pub(crate) fn migrate_publication_destination_host(
+    connection: &rusqlite::Connection,
+) -> Result<(), Error> {
+    publication::migrate_destination_host(connection)
 }
 
 /// How a provider and one of its issues are named for people: the provider's
@@ -213,15 +262,7 @@ pub(crate) fn populate_publication(
 impl Workspace {
     /// The saved configuration for `provider`, if one was saved.
     pub fn saved_source(&self, provider: &str) -> Result<Option<SavedSource>, Error> {
-        let row = self
-            .connection
-            .query_row(
-                "SELECT provider, configuration, account, saved_at FROM source_configurations WHERE provider = ?1",
-                [provider],
-                row_parts,
-            )
-            .optional()?;
-        row.map(into_saved).transpose()
+        saved_source(&self.connection, provider)
     }
 
     pub fn saved_sources(&self) -> Result<Vec<SavedSource>, Error> {
@@ -262,38 +303,76 @@ impl Workspace {
         provider: &str,
         raw: &ConfigValues,
     ) -> Result<SaveOutcome, Error> {
-        let config = engine.validate(provider, raw)?;
-        let preview = self.preview_source(engine, provider, &config)?;
-        let configuration = serde_json::to_string(&config)?;
+        let (config, preview) = self.prepare_source_save(engine, provider, raw)?;
         crate::write_scope::run(&self.connection, |transaction| {
-            let previous: Option<String> = transaction
-                .query_row(
-                    "SELECT configuration FROM source_configurations WHERE provider = ?1",
-                    [provider],
-                    |row| row.get(0),
-                )
-                .optional()?;
-            let previous = previous
-                .map(|raw| serde_json::from_str::<ConfigValues>(&raw))
-                .transpose()?;
-            if previous.as_ref() != Some(&config) {
-                transaction.execute("UPDATE source_sync SET discovery_matches = NULL WHERE ticket_id IN (SELECT i.ticket_id FROM external_identities i JOIN external_ownership o ON o.ticket_id = i.ticket_id WHERE i.provider = ?1 AND o.authority = 'external')", [provider])?;
-            }
-            transaction.execute(
-            "INSERT INTO source_configurations (provider, configuration, account, contract_version) VALUES (?1, ?2, ?3, ?4) ON CONFLICT(provider) DO UPDATE SET configuration = excluded.configuration, account = excluded.account, contract_version = excluded.contract_version, saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
-            params![provider, configuration, preview.account, CONTRACT_VERSION],
-        )?;
-            let row = transaction.query_row(
-            "SELECT provider, configuration, account, saved_at FROM source_configurations WHERE provider = ?1",
-            [provider],
-            row_parts,
-        )?;
             Ok(SaveOutcome {
-                source: into_saved(row)?,
+                source: persist_source(transaction, provider, &config, &preview.account)?,
                 preview,
             })
         })
     }
+
+    fn prepare_source_save(
+        &self,
+        engine: &Engine,
+        provider: &str,
+        raw: &ConfigValues,
+    ) -> Result<(ConfigValues, DiscoveryPreview), Error> {
+        let config = engine.validate(provider, raw)?;
+        let preview = self.preview_source(engine, provider, &config)?;
+        Ok((config, preview))
+    }
+}
+
+fn persist_source(
+    transaction: &Connection,
+    provider: &str,
+    config: &ConfigValues,
+    account: &str,
+) -> Result<SavedSource, Error> {
+    let previous = saved_source(transaction, provider)?;
+    if previous.as_ref().map(|source| &source.config) != Some(config) {
+        transaction.execute(
+            "UPDATE source_sync SET discovery_matches = NULL
+             WHERE ticket_id IN (
+                SELECT i.ticket_id FROM external_identities i
+                JOIN external_ownership o ON o.ticket_id = i.ticket_id
+                WHERE i.provider = ?1 AND o.authority = 'external'
+             )",
+            [provider],
+        )?;
+    }
+    let configuration = serde_json::to_string(config)?;
+    transaction.execute(
+        "INSERT INTO source_configurations (provider, configuration, account, contract_version)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(provider) DO UPDATE SET
+            configuration = excluded.configuration,
+            account = excluded.account,
+            contract_version = excluded.contract_version,
+            saved_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')",
+        params![provider, configuration, account, CONTRACT_VERSION],
+    )?;
+    let row = transaction.query_row(
+        "SELECT provider, configuration, account, saved_at FROM source_configurations WHERE provider = ?1",
+        [provider],
+        row_parts,
+    )?;
+    into_saved(row)
+}
+
+fn saved_source(
+    connection: &rusqlite::Connection,
+    provider: &str,
+) -> Result<Option<SavedSource>, Error> {
+    let row = connection
+        .query_row(
+            "SELECT provider, configuration, account, saved_at FROM source_configurations WHERE provider = ?1",
+            [provider],
+            row_parts,
+        )
+        .optional()?;
+    row.map(into_saved).transpose()
 }
 
 fn row_parts(row: &rusqlite::Row<'_>) -> rusqlite::Result<(String, String, String, String)> {
