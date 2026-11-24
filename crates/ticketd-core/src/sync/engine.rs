@@ -16,7 +16,7 @@ use uuid::Uuid;
 use super::{
     RecordKind,
     capture::mark_dirty,
-    merge::{BlockedBy, loop_edges, merge},
+    merge::{BlockedBy, Conflict, Fields, Merged, loop_edges, merge},
     remote::{RemoteError, RemoteFile, RemoteKey, RemoteKind, RemoteStorage},
 };
 use crate::{
@@ -60,7 +60,8 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-/// One field of a record that this device and another changed differently.
+/// One field that needs review because concurrent changes to a record do not
+/// combine safely.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncConflictField {
     /// A header field name or `body`; `<section GUID>:<field>` inside an
@@ -507,7 +508,7 @@ fn settle_source(
     base: Option<&SyncRecord>,
     local: &SyncRecord,
     remote: &SyncRecord,
-    merged: &mut super::merge::Merged,
+    merged: &mut Merged,
 ) {
     let group = |record: &SyncRecord| -> BTreeMap<String, SyncValue> {
         let source = record.fields.iter();
@@ -542,6 +543,43 @@ fn settle_source(
         .retain(|conflict| !refreshed(&conflict.field));
 }
 
+/// A command grant depends on the harness and both switches. Keep the local
+/// policy for review when both devices made different changes to it, while
+/// continuing to merge allowlists edited under the same harness and switches.
+fn merge_agent_command_policy(base: &Fields, local: &Fields, remote: &Fields, merged: &mut Merged) {
+    const MODE: [&str; 3] = ["harness", "run_commands", "any_command"];
+    const LIST: &str = "allowed_commands";
+    let same_mode = |left: &Fields, right: &Fields| {
+        MODE.iter()
+            .all(|field| left.get(*field) == right.get(*field))
+    };
+    let same_policy =
+        |left: &Fields, right: &Fields| same_mode(left, right) && left.get(LIST) == right.get(LIST);
+    if same_mode(local, remote) || same_policy(local, base) || same_policy(remote, base) {
+        return;
+    }
+    merged
+        .conflicts
+        .retain(|conflict| !MODE.contains(&conflict.field.as_str()) && conflict.field != LIST);
+    for field in MODE.into_iter().chain([LIST]) {
+        let (ours, theirs) = (local.get(field), remote.get(field));
+        if let Some(ours) = ours {
+            merged.fields.insert(field.to_owned(), ours.clone());
+        } else {
+            merged.fields.remove(field);
+        }
+        if ours != theirs {
+            merged.conflicts.push(Conflict {
+                field: field.to_owned(),
+                base: base.get(field).cloned(),
+                local: ours.cloned(),
+                remote: theirs.cloned(),
+            });
+        }
+    }
+    merged.conflicts.sort_by(|a, b| a.field.cmp(&b.field));
+}
+
 /// Merge two versions of a record against their last-synced copy. Sections are
 /// matched by GUID; one removed on a side that the other side changed is kept.
 /// Conflicts keep the local value and name sections as `<GUID>:<field>`.
@@ -549,14 +587,13 @@ fn merge_records(
     base: Option<&SyncRecord>,
     local: &SyncRecord,
     remote: &SyncRecord,
-) -> (SyncRecord, Vec<super::merge::Conflict>) {
+) -> (SyncRecord, Vec<Conflict>) {
     let empty = BTreeMap::new();
-    let top = merge(
-        base.map_or(&empty, |base| &base.fields),
-        &local.fields,
-        &remote.fields,
-    );
-    let mut top = top;
+    let base_fields = base.map_or(&empty, |base| &base.fields);
+    let mut top = merge(base_fields, &local.fields, &remote.fields);
+    if local.kind == SyncKind::AutomationAgent {
+        merge_agent_command_policy(base_fields, &local.fields, &remote.fields, &mut top);
+    }
     settle_source(base, local, remote, &mut top);
     // The status a Duplicate returns to is bookkeeping, not a decision. Two
     // desktops that made the ticket a Duplicate from different statuses keep
@@ -1002,6 +1039,7 @@ impl Workspace {
                 "the file's kind and id do not match where it is stored".into(),
             ));
         }
+        remote.validate_agent_command_policy()?;
         let device = device_of(file);
         self.applying_incoming(device.as_deref(), |workspace| {
             // A hand edit may name a ticket by its reference; records hold GUIDs.

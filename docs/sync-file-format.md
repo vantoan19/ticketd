@@ -210,7 +210,8 @@ A project file has no text after its header.
 | `allowed_commands`                                    | With `run_commands`, and without `any_command`, the only commands allowed; none listed allows none. Their order is not kept. |
 | `trashed`                                             | Whether the agent was deleted.                                                                                               |
 
-The text after the header is the agent's instructions.
+The text after the header is the agent's instructions. Codex requires `any_command: true` when `run_commands` is on.
+When both desktops edit the command policy and disagree about the harness or command switches, Workspace sync keeps the local policy and puts the differences in review. With the same harness and switches, allowlist edits merge as a set.
 
 ### Automation
 

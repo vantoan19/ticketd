@@ -1379,6 +1379,18 @@ fn the_switches_become_codex_sandbox_shell_and_environment_settings() {
     }
 }
 
+#[test]
+fn a_command_policy_without_an_explicit_grant_leaves_the_codex_shell_disabled() {
+    let mut agent = unattended(false, false);
+    agent.tools.any_command = false;
+    agent.tools.allowed_commands = vec!["fixture-command".into()];
+
+    let overrides = super::switch_overrides(&agent.tools);
+    assert_eq!(overrides["features.shell_tool"], json!(false));
+    assert_eq!(overrides["features.view_image"], json!(false));
+    assert!(super::has_no_environment(&agent.tools));
+}
+
 /// The fixture checks that the thread and every turn are started with approvals off
 /// and the sandbox, here for an agent with "Edit files" off; a command Codex declines then fails the turn as a denied tool.
 #[tokio::test(start_paused = true)]

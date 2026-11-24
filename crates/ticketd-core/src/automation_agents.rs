@@ -129,6 +129,12 @@ fn validated(
             descriptor.name
         )));
     }
+    validate_command_policy(
+        descriptor,
+        settings.tools.run_commands,
+        settings.tools.any_command,
+    )
+    .map_err(Error::InvalidAutomationAgent)?;
     if !(1..=MAX_TURN_LIMIT).contains(&settings.turn_limit) {
         return Err(Error::InvalidAutomationAgent(format!(
             "the turn limit must be a whole number from 1 to {MAX_TURN_LIMIT}"
@@ -159,26 +165,19 @@ fn validated(
     Ok(settings)
 }
 
-pub(crate) fn validate_command_transition(
-    before: (&str, bool, bool),
-    after: (&str, bool, bool),
-) -> Result<(), Error> {
-    let (previous, ran_commands, allowed_any) = before;
-    let (next, runs_commands, allows_any) = after;
-    let command_control = |key: &str| match crate::harnesses::descriptor(key)?.unattended {
-        UnattendedSupport::Supported(reach) => Some(reach.commands),
-        UnattendedSupport::Unsupported { .. } => None,
-    };
-    if ran_commands
-        && !allowed_any
-        && runs_commands
+pub(crate) fn validate_command_policy(
+    descriptor: &HarnessDescriptor,
+    runs_commands: bool,
+    allows_any: bool,
+) -> Result<(), String> {
+    if runs_commands
         && !allows_any
-        && command_control(previous) == Some(CommandControl::AllowlistOrAny)
-        && command_control(next) == Some(CommandControl::OffOrAny)
+        && let UnattendedSupport::Supported(reach) = descriptor.unattended
+        && reach.commands == CommandControl::OffOrAny
     {
-        return Err(Error::InvalidAutomationAgent(
-            "the new harness cannot enforce a command list. Turn commands off or explicitly allow any command."
-                .to_owned(),
+        return Err(format!(
+            "{} requires an explicit grant to run any command. Turn commands off or allow any command.",
+            descriptor.name
         ));
     }
     Ok(())
@@ -288,24 +287,7 @@ impl Workspace {
         settings: AutomationAgentSettings,
     ) -> Result<AutomationAgent, Error> {
         let s = validated(settings, HARNESS_DESCRIPTORS)?;
-        let transaction = self.connection.transaction()?;
-        let (harness, run_commands, any_command): (String, bool, bool) = transaction
-            .query_row(
-                "SELECT harness, run_commands, any_command FROM automation_agents WHERE id = ?1 AND trashed = 0",
-                [id],
-                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-            )
-            .optional()?
-            .ok_or_else(|| Error::AutomationAgentNotFound(id.to_owned()))?;
-        validate_command_transition(
-            (&harness, run_commands, any_command),
-            (
-                s.harness.as_str(),
-                s.tools.run_commands,
-                s.tools.any_command,
-            ),
-        )?;
-        let changed = transaction.execute(
+        let changed = self.connection.execute(
             "UPDATE automation_agents SET name = ?2, harness = ?3, model = ?4, instructions = ?5, read_files = ?6, edit_files = ?7, run_commands = ?8, allowed_commands = ?9, use_web = ?10, turn_limit = ?11, time_limit_minutes = ?12, any_command = ?13 WHERE id = ?1 AND trashed = 0",
             params![
                 id,
@@ -326,7 +308,6 @@ impl Workspace {
         if changed == 0 {
             return Err(Error::AutomationAgentNotFound(id.to_owned()));
         }
-        transaction.commit()?;
         Ok(AutomationAgent {
             id: id.to_owned(),
             settings: s,
