@@ -16,6 +16,19 @@ use crate::source::conformance::{
 
 use super::{host::Limits, *};
 
+#[test]
+fn the_published_schema_matches_the_source_contract() {
+    let published = include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../docs/source-extensions/contract-2.schema.json"
+    ));
+    let generated = serde_json::to_string_pretty(&contract_schema()).unwrap() + "\n";
+    assert!(
+        published == generated,
+        "regenerate the Contract 2 schema as described in docs/source-extensions/README.md"
+    );
+}
+
 fn fixture_connector(host: Arc<Host>, connection: &str) -> ProcessConnector {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension");
     let launch = Arc::new(Launch::load(&folder).unwrap());
