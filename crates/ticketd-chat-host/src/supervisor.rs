@@ -1084,8 +1084,19 @@ impl Supervisor {
     }
 
     async fn reopen_for_permission(&mut self, value: String) {
-        // Carry over later picks made while the harness was answering the change.
         if let Some(runtime) = &self.runtime {
+            // Resuming restores native history. The replacement must open with the
+            // settings the harness last confirmed, overlaid with any later picks.
+            if let Some(settings) = &runtime.settings {
+                self.start_settings.model = settings
+                    .model
+                    .as_ref()
+                    .and_then(|model| model.current.clone());
+                self.start_settings.effort = settings
+                    .effort
+                    .as_ref()
+                    .and_then(|effort| effort.current.clone());
+            }
             for change in &runtime.setting_changes {
                 if change.state == SettingChangeState::Held {
                     let target = match change.setting {
