@@ -7,9 +7,9 @@ import {
 } from "@/components/ui/popover";
 import { CircleAlert } from "lucide-react";
 import type { SourceCounts, Ticket } from "@/lib/api/client";
-import type { RefreshReport } from "@/lib/api/sources";
+import { providerName, type RefreshReport } from "@/lib/api/sources";
 import { useSourceActivity } from "./source-activity";
-import { providerName } from "./ticket-source";
+import { useSources } from "@/features/settings/sources/use-sources";
 import "./ticket-list.css";
 
 /**
@@ -28,6 +28,7 @@ export function SourceFilter({
   /** Providers with a saved configuration, so the filter appears before the first import. */
   providers: string[];
 }) {
+  const { entries } = useSources();
   const known = [
     ...new Set([...providers, ...Object.keys(counts?.providers ?? {})]),
   ].sort();
@@ -42,7 +43,7 @@ export function SourceFilter({
           { value: "all", label: "All", count: counts?.all ?? 0 },
           ...known.map((provider) => ({
             value: provider,
-            label: providerName(provider),
+            label: providerName(provider, entries),
             count: counts?.providers[provider] ?? 0,
           })),
           { value: "local", label: "Local", count: counts?.local ?? 0 },
@@ -73,7 +74,10 @@ export function SourceRefresh({
   tickets?: Ticket[];
 }) {
   const activity = useSourceActivity();
-  const name = providers.map(providerName).join(", ");
+  const { entries } = useSources();
+  const name = providers
+    .map((provider) => providerName(provider, entries))
+    .join(", ");
   const running = activity.refreshing || state.running;
   const failedAt = state.errorAt ? Date.parse(state.errorAt) : null;
   const superseded =

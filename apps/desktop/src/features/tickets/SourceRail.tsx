@@ -12,12 +12,18 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { StatusDot } from "@/components/ui/status-dot";
+import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import { client, type Ticket } from "@/lib/api/client";
 import { LocalPublication } from "./PublishToSource";
 import { RailRow, RailSection } from "./RailSection";
 import { SourceLink } from "./SourceLink";
 import { useSourceActivity } from "./source-activity";
-import { externalSource, freshness } from "./ticket-source";
+import {
+  connectionUnavailableText,
+  externalSource,
+  freshness,
+  sourceReference,
+} from "./ticket-source";
 import { useNow } from "@/lib/use-now";
 import { formatDateTime } from "@/lib/format";
 import { useTicketRefresh } from "./useTicketRefresh";
@@ -38,20 +44,29 @@ export function SourceRail({
 }) {
   const now = useNow();
   const owner = externalSource(ticket);
+  const issueReference = owner ? sourceReference(owner) : null;
   const activity = useSourceActivity();
   const sync = useTicketRefresh(ticket.reference, refresh);
   const ownerName = owner ? owner.provider_name : "";
+  const connectionUnavailable = owner ? connectionUnavailableText(owner) : null;
+  const providerIcon = owner?.provider_icon_svg ? (
+    <SourceIcon svg={owner.provider_icon_svg} size={16} />
+  ) : (
+    <Cloud aria-hidden="true" />
+  );
   const body = (
     <>
       {owner ? (
         <div className="rail-source">
           <span className="rail-value rail-source-identity">
-            <Cloud aria-hidden="true" />
+            {providerIcon}
             <SourceLink url={owner.url} icon={false} title={owner.display}>
-              {owner.place && owner.number ? (
+              {issueReference?.place ? (
                 <>
                   <span className="rail-source-place">{owner.place}</span>
-                  <span className="rail-source-number">{owner.number}</span>
+                  <span className="rail-source-number">
+                    {issueReference.label}
+                  </span>
                 </>
               ) : (
                 owner.display
@@ -62,11 +77,13 @@ export function SourceRail({
             <>
               <span className="rail-value">
                 <StatusDot tone="attention" size={10} />
-                Unavailable since {formatDateTime(owner.unavailable.since)}
+                {connectionUnavailable ??
+                  `Unavailable since ${formatDateTime(owner.unavailable.since)}`}
               </span>
               <small className="rail-note">
-                Showing the last synced copy. Nothing in ticketd was deleted or
-                completed.
+                {connectionUnavailable
+                  ? "Showing the last synced copy."
+                  : "Showing the last synced copy. Nothing in ticketd was deleted or completed."}
               </small>
             </>
           ) : (
@@ -105,15 +122,17 @@ export function SourceRail({
               />
             </small>
           )}
-          {owner.origin === "imported" && (
+          {owner.origin === "imported" && !connectionUnavailable && (
             <small className="rail-note">
               {owner.discovery_matches === false ? (
                 "No longer matches discovery. It keeps syncing while you have access."
-              ) : (
+              ) : owner.place ? (
                 <>
                   Found by discovery in{" "}
                   <span className="source-number">{owner.place}</span>.
                 </>
+              ) : (
+                "Found by discovery."
               )}
             </small>
           )}
@@ -132,7 +151,7 @@ export function SourceRail({
               <RailRow
                 icon={<Settings2 aria-hidden="true" />}
                 muted
-                onClick={activity.openSettings}
+                onClick={() => activity.openSettings(owner.provider)}
               >
                 Discovery settings
               </RailRow>
@@ -149,7 +168,11 @@ export function SourceRail({
                 <RefreshCw data-icon="inline-start" />
                 Refresh
               </Button>
-              <Button variant="ghost" size="sm" onClick={activity.openSettings}>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => activity.openSettings(owner.provider)}
+              >
                 Discovery settings
               </Button>
             </div>
@@ -158,7 +181,7 @@ export function SourceRail({
             <FailureAlert
               size="compact"
               failure={sync.failure}
-              onRetry={() => void sync.run()}
+              onRetry={() => void sync.run(true)}
             />
           )}
         </div>
@@ -197,13 +220,7 @@ export function SourceRail({
       <PopoverTrigger asChild>
         <RailRow
           aria-label={`Source: ${name}`}
-          icon={
-            owner ? (
-              <Cloud aria-hidden="true" />
-            ) : (
-              <LaptopMinimal aria-hidden="true" />
-            )
-          }
+          icon={owner ? providerIcon : <LaptopMinimal aria-hidden="true" />}
         >
           {name}
         </RailRow>

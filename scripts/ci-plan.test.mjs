@@ -76,8 +76,9 @@ const table = [
   // Rust only.
   ["crates/ticketd-core/src/lib.rs", RUST],
   ["skills/ticketd/SKILL.md", RUST],
-  // A Rust test reads this document.
+  // Rust tests read these files.
   ["docs/sync-file-format.md", RUST],
+  ["docs/source-extensions/contract-2.schema.json", RUST],
   // Shared configuration: both.
   ["Cargo.toml", BOTH],
   ["Cargo.lock", BOTH],

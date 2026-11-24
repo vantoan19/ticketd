@@ -5,7 +5,9 @@ import {
   sourceLine,
   useSourceActivity,
 } from "@/features/tickets/source-activity";
-import { ago, providerName } from "@/features/tickets/ticket-source";
+import { ago } from "@/features/tickets/ticket-source";
+import { providerName } from "@/lib/api/sources";
+import { useSources } from "@/features/settings/sources/use-sources";
 import { useNow } from "@/lib/use-now";
 import { SyncStatusLine } from "@/features/sync/SyncStatusLine";
 import { useSyncStatus } from "@/features/sync/sync-status";
@@ -14,14 +16,9 @@ import { useIsMobile } from "@/hooks/use-mobile";
 
 export function SourceStatusFooter() {
   const now = useNow();
-  const {
-    refreshing,
-    sources,
-    refreshAll,
-    openSettings,
-    openSourceSettings,
-    intervalSecs,
-  } = useSourceActivity();
+  const { entries } = useSources();
+  const { refreshing, sources, refreshAll, openSettings, intervalSecs } =
+    useSourceActivity();
   // Only the folded rail hides the two lines, so only it repeats them.
   const { sidebarCollapsed } = usePreferences();
   const isMobile = useIsMobile();
@@ -42,7 +39,15 @@ export function SourceStatusFooter() {
     >
       {synced && <SyncStatusLine />}
       {sources.map((status) => {
-        const name = providerName(status.provider);
+        const connection = status.connection_id;
+        const row = connection
+          ? `connection-${connection}`
+          : `unassigned-${status.provider}`;
+        const name =
+          (connection
+            ? entries.find((entry) => entry.saved?.id === connection)?.saved
+                ?.name
+            : undefined) ?? providerName(status.provider, entries);
         const state = sourceLine(status, refreshing);
         const synced = status.last_refreshed_at
           ? ago(status.last_refreshed_at, now)
@@ -76,18 +81,14 @@ export function SourceStatusFooter() {
                 ? `${name} last synced ${synced}`
                 : "Showing saved content"
               : `${synced ?? "Not synced yet"}${intervalSecs ? ` · every ${Math.round(intervalSecs / 60)} min` : ""}`;
-        const detailId = `sidebar-source-${status.provider}`;
+        const detailId = `sidebar-source-${row}`;
         return (
-          <div className="sidebar-source" key={status.provider}>
+          <div className="sidebar-source" key={row}>
             <Tooltip content={folded ? `${label} · ${detail}` : null}>
               <button
                 type="button"
                 className="sidebar-source-line"
-                onClick={() =>
-                  openSourceSettings
-                    ? openSourceSettings(status.provider)
-                    : openSettings()
-                }
+                onClick={() => openSettings(connection)}
                 aria-describedby={detailId}
               >
                 <span className="sidebar-source-label">

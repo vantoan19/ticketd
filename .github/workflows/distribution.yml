@@ -115,6 +115,24 @@ jobs:
           node scripts/release-version.mjs tauri-config "$config" "${updater[@]}"
           npm run desktop -- build --bundles "$bundle" --config "$config" -- --locked
           if [[ ${#updater[@]} -gt 0 ]]; then echo 'signed_updater=true' >> "$GITHUB_OUTPUT"; fi
+      - name: Check macOS installer includes Linear
+        if: runner.os == 'macOS'
+        run: |
+          mount="$(mktemp -d)"
+          hdiutil attach target/release/bundle/dmg/*.dmg -readonly -nobrowse -mountpoint "$mount"
+          trap 'hdiutil detach "$mount" && rmdir "$mount"' EXIT
+          test -x "$mount/ticketd.app/Contents/MacOS/ticketd-source-linear"
+      - name: Check Windows installer includes Linear
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem target/release/bundle/msi/*.msi | Select-Object -First 1
+          $folder = Join-Path $env:RUNNER_TEMP "ticketd-msi-contents"
+          $process = Start-Process msiexec.exe -ArgumentList ('/a "' + $installer.FullName + '" /qn TARGETDIR="' + $folder + '"') -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "MSI extraction exited with $($process.ExitCode)" }
+          if (!(Get-ChildItem $folder -Recurse -File -Filter ticketd-source-linear.exe)) {
+            throw "The MSI did not include the Linear extension"
+          }
       - name: Smoke-test installed Linux package
         if: runner.os == 'Linux'
         run: |
@@ -128,6 +146,7 @@ jobs:
           export TICKETD_SMOKE_CLI=/usr/bin/ticketd
           export TICKETD_SMOKE_DESKTOP=/usr/bin/ticketd-desktop
           trap 'rm -rf "$XDG_DATA_HOME"' EXIT
+          test -x /usr/bin/ticketd-source-linear
           test "$("$TICKETD_SMOKE_CLI" --version)" = "$(target/release/ticketd --version)"
           # shellcheck disable=SC2016 # $driver expands in the inner sh.
           xvfb-run -a sh -c 'tauri-driver & driver=$!; trap "kill $driver; wait $driver 2>/dev/null" EXIT; node tests/native/install.mjs'

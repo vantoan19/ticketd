@@ -13,6 +13,8 @@ import { ConnectProjectSource } from "./ConnectProjectSource";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
+Element.prototype.scrollIntoView ??= () => {};
+
 afterEach(() => {
   cleanup();
   vi.mocked(invoke).mockReset();
@@ -22,10 +24,18 @@ const preview = {
   project_id: "p1",
   project_remote: "github.com/team/app",
   provider: "github",
+  connection_id: "github",
   repository: "team/app",
   source: "add_repository",
   tickets: ["T-ABCDE", "T-FGHJK"],
   fingerprint: "reviewed",
+};
+
+const candidate = {
+  source: "github",
+  provider: "github",
+  connection_id: "github",
+  name: "GitHub",
 };
 
 function Review() {
@@ -44,6 +54,7 @@ test.each(["Confirm", "Skip"])(
   "%s closes the reviewed project connection",
   async (action) => {
     vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "project_source_candidates") return [candidate];
       if (command === "preview_connect_source") return preview;
       if (command === "connect_source_match_count")
         return { matched: 17, complete: false };
@@ -65,7 +76,7 @@ test.each(["Confirm", "Skip"])(
             [
               "connect_source",
               {
-                provider: "github",
+                source: "github",
                 projectId: "p1",
                 expectedFingerprint: "reviewed",
               },
@@ -79,6 +90,7 @@ test.each(["Confirm", "Skip"])(
 test("a changed connection effect requires a new confirmation", async () => {
   let current = preview;
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "project_source_candidates") return [candidate];
     if (command === "preview_connect_source") return current;
     if (command === "connect_source_match_count")
       return { matched: 3, complete: true };
@@ -104,7 +116,7 @@ test("a changed connection effect requires a new confirmation", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(invoke).toHaveBeenCalledWith("connect_source", {
-    provider: "github",
+    source: "github",
     projectId: "p1",
     expectedFingerprint: "updated",
   });
@@ -113,6 +125,7 @@ test("a changed connection effect requires a new confirmation", async () => {
 test("a failed match count offers details and retries without connecting", async () => {
   let countFailed = false;
   vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "project_source_candidates") return [candidate];
     if (command === "preview_connect_source") return preview;
     if (command === "connect_source_match_count") {
       if (countFailed) return { matched: 4, complete: true };
@@ -142,6 +155,7 @@ test("changing projects disables confirmation until the new effect is reviewed",
     fingerprint: "second",
   };
   vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "project_source_candidates") return [candidate];
     if (command === "preview_connect_source") {
       if (args && "projectId" in args && args.projectId === "p2") return second;
       return { ...preview, source: "already_listed" };
@@ -163,7 +177,7 @@ test("changing projects disables confirmation until the new effect is reviewed",
   fireEvent.click(await screen.findByRole("button", { name: "Confirm" }));
   await waitFor(() =>
     expect(invoke).toHaveBeenCalledWith("connect_source", {
-      provider: "github",
+      source: "github",
       projectId: "p2",
       expectedFingerprint: "second",
     }),
@@ -195,4 +209,42 @@ test("a host mismatch names the remote and hands off to editing after the dialog
   fireEvent.click(action);
   await waitFor(() => expect(edit).toHaveBeenCalledOnce());
   expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+test("the selected connection supplies the reviewed count and confirmation", async () => {
+  const selected = {
+    ...candidate,
+    source: "github-2",
+    connection_id: "github-2",
+    name: "Work GitHub",
+  };
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "project_source_candidates") return [candidate, selected];
+    if (command === "preview_connect_source")
+      return { ...preview, connection_id: selected.connection_id };
+    if (command === "connect_source_match_count")
+      return { matched: 4, complete: true };
+    return { repository_added: true, linked_tickets: preview.tickets };
+  });
+  render(<Review />);
+  const picker = await screen.findByRole("combobox", {
+    name: "Source connection",
+  });
+  expect(screen.queryByRole("button", { name: "Confirm" })).toBeNull();
+  fireEvent.keyDown(picker, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("option", { name: selected.name }));
+  await screen.findByText("Import issues from github.com/team/app (4 match)");
+  fireEvent.click(screen.getByRole("button", { name: "Confirm" }));
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(invoke).toHaveBeenCalledWith("preview_connect_source", {
+    source: "github-2",
+    projectId: "p1",
+  });
+  for (const command of ["connect_source_match_count", "connect_source"]) {
+    expect(invoke).toHaveBeenCalledWith(command, {
+      source: "github-2",
+      projectId: "p1",
+      expectedFingerprint: "reviewed",
+    });
+  }
 });

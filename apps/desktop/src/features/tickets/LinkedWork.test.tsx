@@ -586,7 +586,7 @@ test("a source-closed duplicate shows its external, resolved or unknown target w
         url: "",
         origin: "imported",
         ownership: "external",
-        state: { state: "closed", reason: "duplicate" },
+        state: { category: "duplicate", name: "Closed" },
         closure_unrecognized: false,
         last_refreshed_at: null,
         last_attempt_at: null,

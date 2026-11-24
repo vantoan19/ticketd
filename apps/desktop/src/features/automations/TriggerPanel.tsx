@@ -1,3 +1,4 @@
+import { useSources } from "@/features/settings/sources/use-sources";
 import { useId, type ReactNode } from "react";
 import { ChevronDown, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import {
-  CONDITION_SOURCES,
+  LOCAL_SOURCE,
   dayName,
   OR,
   projectName,
@@ -356,7 +357,7 @@ const ADDABLE: {
   },
   {
     label: "Source",
-    note: "GitHub or Local",
+    note: "Is one of the sources you choose",
     blank: { kind: "source", any_of: [] },
   },
   {
@@ -380,12 +381,24 @@ export function ConditionRows({
   projects: Project[];
   onChange: (conditions: AutomationCondition[]) => void;
 }) {
+  const { entries: sources } = useSources();
+  const providers = [
+    ...new Set(sources.map(({ connector }) => connector.provider)),
+  ];
+  const sourceNote = OR.format([
+    ...providers.map((provider) => sourceName(provider, sources)),
+    "Local",
+  ]);
   const set = (index: number, condition: AutomationCondition) =>
     onChange(conditions.map((item, at) => (at === index ? condition : item)));
   return (
     <div className="flow-panel-section">
       <h4>Only when</h4>
       {conditions.map((condition, index) => {
+        const sourceOptions =
+          condition.kind === "source"
+            ? [...new Set([...providers, LOCAL_SOURCE, ...condition.any_of])]
+            : [];
         const has =
           condition.kind === "tag" && (condition.has ? "has" : "does not have");
         // The projects or the source it names; nothing until one is chosen.
@@ -395,7 +408,7 @@ export function ConditionRows({
                 condition.any_of.map((item) =>
                   condition.kind === "project"
                     ? projectName(item, projects)
-                    : sourceName(item),
+                    : sourceName(item, sources),
                 ),
               )
             : null;
@@ -479,7 +492,7 @@ export function ConditionRows({
                   menu="Source is"
                 >
                   {/* One of several, like the projects. */}
-                  {CONDITION_SOURCES.map((source) => (
+                  {sourceOptions.map((source) => (
                     <DropdownMenuCheckboxItem
                       key={source}
                       // Open for the next pick: one condition names several.
@@ -489,7 +502,7 @@ export function ConditionRows({
                         set(index, {
                           ...condition,
                           // Kept in the order the menu lists them.
-                          any_of: CONDITION_SOURCES.filter((item) =>
+                          any_of: sourceOptions.filter((item) =>
                             item === source
                               ? checked
                               : condition.any_of.includes(item),
@@ -497,7 +510,7 @@ export function ConditionRows({
                         })
                       }
                     >
-                      {sourceName(source)}
+                      {sourceName(source, sources)}
                     </DropdownMenuCheckboxItem>
                   ))}
                 </Pick>
@@ -546,7 +559,13 @@ export function ConditionRows({
               >
                 <span className="flow-menu-item-text">
                   {label}
-                  <small>{taken ? "Already a condition" : note}</small>
+                  <small>
+                    {taken
+                      ? "Already a condition"
+                      : blank.kind === "source"
+                        ? sourceNote
+                        : note}
+                  </small>
                 </span>
               </DropdownMenuItem>
             );

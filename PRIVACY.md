@@ -26,7 +26,10 @@ level, the part of ticketd that wrote it, a short message, and IDs, counts, dura
 and error kinds. By design, it never holds the text of your tickets, Documents, Plans
 or Chats. Error messages from your operating system can still contain a file path.
 The files never leave your machine by themselves; sharing them is your choice. The
-CLI writes warnings and errors to your terminal and keeps no log file.
+CLI writes its own warnings and errors to your terminal. Both the desktop and CLI
+keep bounded, rotated stderr logs for each source connection. ticketd redacts known
+credential values before writing them. Extensions can still write private content
+to these local files.
 
 Settings → Diagnostics can export those logs for a bug report: a `.zip` of under 5 MB
 with a summary (app, OS and WebView versions, log level, whether sync is on, Harness
@@ -34,7 +37,9 @@ versions), the Workspace's health (Format version, a SQLite integrity check, fil
 sizes, and the number of rows in each table), the kinds of warning and error with how
 often they happened, and the last 3 days of logs. Each log line is rebuilt from a short
 list of fields, so any other field is dropped, and your home folder, OS username,
-Workspace path, Drive account email and AWS identity (its ARN and account ID) are replaced wherever they appear. IDs are kept.
+Workspace path, Drive account email and AWS identity (its ARN and account ID) are replaced
+wherever they appear. IDs are kept. Each recent source connection log is represented by its
+line count. The ZIP omits extension stderr text.
 Nothing is uploaded: ticketd saves the file where you choose, and anything you attach to
 a public GitHub issue can be read by anyone.
 

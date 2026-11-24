@@ -1,3 +1,4 @@
+import { Channel } from "@tauri-apps/api/core";
 import { lazySchema } from "@/lib/api/lazy-schema";
 import { z } from "zod";
 import { BridgeFailure, invoke, structured, toFailure } from "./bridge-failure";
@@ -22,6 +23,10 @@ const fieldBase = () => ({
   label: z.string(),
   help: z.string().nullish(),
   required: z.boolean(),
+  placeholder: z.string().nullish(),
+  pattern: z.object({ regex: z.string(), message: z.string() }).nullish(),
+  advanced: z.boolean().optional(),
+  show_if: z.string().nullish(),
 });
 
 const optionSourceSchema = lazySchema(() =>
@@ -42,7 +47,6 @@ const schemaFieldSchema = lazySchema(() =>
     z.object({
       ...fieldBase(),
       type: z.literal("text"),
-      placeholder: z.string().nullish(),
       format: z.string().nullish(),
     }),
     z.object({
@@ -54,9 +58,49 @@ const schemaFieldSchema = lazySchema(() =>
       max_items: z.number(),
       format: z.string().nullish(),
     }),
+    z.object({ ...fieldBase(), type: z.literal("link"), url: z.string() }),
+    z.object({ ...fieldBase(), type: z.literal("secret") }),
   ]),
 );
 export type SchemaField = z.infer<typeof schemaFieldSchema>;
+
+const fieldPresentationSchema = lazySchema(() =>
+  z.object({
+    placeholder: z.string().nullish(),
+    additional_placeholder: z.string().nullish(),
+  }),
+);
+export type FieldPresentation = z.infer<typeof fieldPresentationSchema>;
+
+const presentationSchema = lazySchema(() =>
+  z.object({
+    icon_svg: z.string().nullish(),
+    sign_in: z.object({
+      terminal_hint: z.string().nullish(),
+      desktop_hint: z.string().nullish(),
+      desktop_instruction: z.string().nullish(),
+    }),
+    fields: z.record(z.string(), fieldPresentationSchema),
+    target: z
+      .object({
+        field: z.string(),
+        label: z.string(),
+        example: z.string(),
+        choose: z.string(),
+        add: z.string(),
+      })
+      .nullish(),
+    discovery_note: z.string().nullish(),
+    pull_request_link: z
+      .object({ host: z.string(), segment: z.string() })
+      .nullish(),
+    hosts: z.array(z.string()),
+  }),
+);
+const summaryPartSchema = lazySchema(() =>
+  z.object({ text: z.string(), emphasis: z.boolean() }),
+);
+export type SummaryPart = z.infer<typeof summaryPartSchema>;
 
 const connectorSchema = lazySchema(() =>
   z.object({
@@ -65,6 +109,7 @@ const connectorSchema = lazySchema(() =>
     contract_version: z.number(),
     capabilities: z.array(z.string()),
     schema: z.object({ fields: z.array(schemaFieldSchema) }),
+    presentation: presentationSchema.optional(),
   }),
 );
 export type Connector = z.infer<typeof connectorSchema>;
@@ -75,10 +120,14 @@ export type SourceConfig = z.infer<typeof configSchema>;
 
 const savedSourceSchema = lazySchema(() =>
   z.object({
+    id: z.string().optional(),
+    name: z.string().optional(),
     provider: z.string(),
     config: configSchema,
     account: z.string(),
     saved_at: z.string(),
+    secret_fields: z.array(z.string()).optional(),
+    session_secret_fields: z.array(z.string()).optional(),
   }),
 );
 export type SavedSource = z.infer<typeof savedSourceSchema>;
@@ -87,9 +136,22 @@ const sourceEntrySchema = lazySchema(() =>
   z.object({
     connector: connectorSchema,
     saved: savedSourceSchema.nullable(),
+    next_id: z.string().optional(),
+    development: z.boolean().optional(),
+    unavailable: z.boolean().optional(),
   }),
 );
 export type SourceEntry = z.infer<typeof sourceEntrySchema>;
+
+export function providerName(
+  provider: string,
+  entries: readonly SourceEntry[],
+): string {
+  return (
+    entries.find(({ connector }) => connector.provider === provider)?.connector
+      .name ?? provider
+  );
+}
 
 const sourceRepositoryRouteSchema = lazySchema(() =>
   z.object({
@@ -100,6 +162,18 @@ const sourceRepositoryRouteSchema = lazySchema(() =>
 );
 export type SourceRepositoryRoute = z.infer<typeof sourceRepositoryRouteSchema>;
 
+const projectSourceCandidateSchema = lazySchema(() =>
+  z.object({
+    source: z.string(),
+    provider: z.string(),
+    connection_id: z.string().nullable(),
+    name: z.string(),
+  }),
+);
+export type ProjectSourceCandidate = z.infer<
+  typeof projectSourceCandidateSchema
+>;
+
 const previewSchema = lazySchema(() =>
   z.object({
     provider: z.string(),
@@ -107,6 +181,7 @@ const previewSchema = lazySchema(() =>
     issues: z.array(
       z.object({
         display: z.string(),
+        label: z.string().optional(),
         url: z.string(),
         title: z.string(),
         ticket: z.string().nullish(),
@@ -135,6 +210,7 @@ const connectSourcePreviewSchema = lazySchema(() =>
     project_id: z.string(),
     project_remote: z.string(),
     provider: z.string(),
+    connection_id: z.string().nullable(),
     repository: z.string(),
     source: z.enum(["not_connected", "add_repository", "already_listed"]),
     tickets: z.array(z.string()),
@@ -179,6 +255,18 @@ const refreshReportSchema = lazySchema(() =>
 );
 export type RefreshReport = z.infer<typeof refreshReportSchema>;
 
+const refreshEventSchema = lazySchema(() =>
+  z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("started") }),
+    z.object({
+      kind: z.literal("progress"),
+      completed: z.number().int().nonnegative(),
+      total: z.number().int().nonnegative().nullish(),
+    }),
+  ]),
+);
+type RefreshEvent = z.infer<typeof refreshEventSchema>;
+
 /** How a source is doing, as the core decides it. Clients only word it. */
 export const sourceHealthValues = [
   "waiting",
@@ -193,6 +281,7 @@ const sourceStatusSchema = lazySchema(() =>
   z.object({
     provider: z.string(),
     health: z.enum(sourceHealthValues),
+    connection_id: z.string().optional(),
     last_attempt_at: z.string().nullable(),
     /** The last run in which the source could be read. */
     last_refreshed_at: z.string().nullable(),
@@ -253,6 +342,7 @@ const publicationPreviewSchema = lazySchema(() =>
     provider_name: z.string(),
     destination: z.string().nullable(),
     destinations: z.array(z.string()),
+    destination_labels: z.record(z.string(), z.string()).optional(),
     title: z.string(),
     body: z.string(),
     /** Identifies this title, description and destination; handed back to publish exactly this. */
@@ -290,10 +380,32 @@ export const sourcesClient = {
    * `ticket`. Saved content stays in place when the source cannot be reached; the
    * report names what failed.
    */
-  async refresh(ticket?: string) {
+  async refresh(
+    ticket?: string,
+    connection?: string,
+    retry = false,
+    control?: { id: string; update: (event: RefreshEvent) => void },
+  ) {
+    const updates = control ? new Channel<unknown>() : undefined;
+    if (control && updates) {
+      updates.onmessage = (value) =>
+        control.update(refreshEventSchema.parse(value));
+    }
     return refreshReportSchema.parse(
-      await structured(invoke("refresh_sources", { ticket: ticket ?? null })),
+      await structured(
+        invoke("refresh_sources", {
+          ticket: ticket ?? null,
+          ...(connection && { connection }),
+          ...(retry && { retry }),
+          ...(control && { refreshId: control.id, updates }),
+        }),
+      ),
     );
+  },
+  async cancelRefresh(refreshId: string) {
+    return z
+      .boolean()
+      .parse(await structured(invoke("cancel_source_refresh", { refreshId })));
   },
   /** Persisted freshness of each source and whether a refresh is running. No network I/O. */
   async health() {
@@ -339,7 +451,7 @@ export const sourcesClient = {
   },
   /**
    * What is known and unknown about an unresolved publication and the safe next
-   * actions. With `search`, GitHub is asked for issues that may be the one created.
+   * actions. With `search`, the source is asked for issues that may be the one created.
    */
   async reviewPublication(reference: string, search: boolean) {
     return publicationReviewSchema.parse(
@@ -367,77 +479,152 @@ export const sourcesClient = {
       ),
     );
   },
-  /** The built-in sources and what is saved for each. */
+  /** The registered sources and what is saved for each. */
   async list() {
     return z
       .array(sourceEntrySchema)
       .parse(await structured(invoke("list_sources")));
   },
-  async repositoryRoutes(provider: string) {
+  async repositoryRoutes(connection: string) {
     return z
       .array(sourceRepositoryRouteSchema)
-      .parse(await invoke("source_repository_routes", { provider }));
+      .parse(await invoke("source_repository_routes", { connection }));
   },
-  async checkConnection(provider: string, config: SourceConfig) {
+  async checkConnection(
+    provider: string,
+    config: SourceConfig,
+    connection?: string,
+  ) {
     return connectionSchema.parse(
-      await structured(invoke("source_check_connection", { provider, config })),
+      await structured(
+        invoke("source_check_connection", {
+          provider,
+          config,
+          ...(connection && { connection }),
+        }),
+      ),
     );
+  },
+  async configurationSummary(provider: string, config: SourceConfig) {
+    return z
+      .array(summaryPartSchema)
+      .parse(
+        await structured(
+          invoke("source_configuration_summary", { provider, config }),
+        ),
+      );
   },
   async options(
     provider: string,
     field: string,
     query: string,
     config: SourceConfig,
+    connection?: string,
   ) {
-    return z
-      .array(choiceOptionSchema)
-      .parse(
-        await structured(
-          invoke("source_options", { provider, field, query, config }),
-        ),
-      );
+    return z.array(choiceOptionSchema).parse(
+      await structured(
+        invoke("source_options", {
+          provider,
+          field,
+          query,
+          config,
+          ...(connection && { connection }),
+        }),
+      ),
+    );
   },
-  /** Lists what discovery would match. Imports and saves nothing. */
-  async previewConnectSource(provider: string, projectId: string) {
+  async projectSourceCandidates(projectId: string) {
+    return z
+      .array(projectSourceCandidateSchema)
+      .parse(await invoke("project_source_candidates", { projectId }));
+  },
+  async previewConnectSource(source: string, projectId: string) {
     return connectSourcePreviewSchema.parse(
-      await invoke("preview_connect_source", { provider, projectId }),
+      await invoke("preview_connect_source", { source, projectId }),
     );
   },
   async connectSourceMatchCount(
-    provider: string,
+    source: string,
     projectId: string,
     expectedFingerprint: string,
   ) {
     return connectSourceMatchCountSchema.parse(
       await invoke("connect_source_match_count", {
-        provider,
+        source,
         projectId,
         expectedFingerprint,
       }),
     );
   },
   async connectSource(
-    provider: string,
+    source: string,
     projectId: string,
     expectedFingerprint: string,
   ) {
     return connectSourceOutcomeSchema.parse(
       await invoke("connect_source", {
-        provider,
+        source,
         projectId,
         expectedFingerprint,
       }),
     );
   },
-  async preview(provider: string, config: SourceConfig) {
+  /** Lists what discovery would match. Imports and saves nothing. */
+  async preview(provider: string, config: SourceConfig, connection?: string) {
     return previewSchema.parse(
-      await structured(invoke("source_preview", { provider, config })),
+      await structured(
+        invoke("source_preview", {
+          provider,
+          config,
+          ...(connection && { connection }),
+        }),
+      ),
     );
   },
   /** Validates, previews, and saves the discovery configuration. Imports nothing. */
-  async save(provider: string, config: SourceConfig) {
+  async save(provider: string, config: SourceConfig, connection?: string) {
     return saveOutcomeSchema.parse(
-      await structured(invoke("save_source", { provider, config })),
+      await structured(
+        invoke("save_source", {
+          provider,
+          config,
+          ...(connection && { connection }),
+        }),
+      ),
     );
+  },
+  async add(
+    provider: string,
+    connection: string,
+    name: string,
+    config: SourceConfig,
+  ) {
+    return saveOutcomeSchema.parse(
+      await structured(
+        invoke("add_source_connection", {
+          provider,
+          connection,
+          name,
+          config,
+        }),
+      ),
+    );
+  },
+  async rename(connection: string, name: string) {
+    return savedSourceSchema.parse(
+      await structured(
+        invoke("rename_source_connection", { connection, name }),
+      ),
+    );
+  },
+  async signIn(connection: string, credentials: SourceConfig) {
+    return savedSourceSchema.parse(
+      await structured(
+        invoke("update_source_credentials", { connection, credentials }),
+      ),
+    );
+  },
+  async remove(connection: string) {
+    await structured(invoke("remove_source_connection", { connection }));
   },
 };

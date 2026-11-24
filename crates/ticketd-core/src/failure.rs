@@ -197,6 +197,7 @@ impl Error {
             | Self::NoCheckoutFolder(_)
             | Self::Path(_)
             | Self::SyncFile(_)
+            | Self::SyncFileIdentityCollision
             | Self::Sync(_)
             | Self::NewerSchema(_) => FailureKind::Failed,
         }

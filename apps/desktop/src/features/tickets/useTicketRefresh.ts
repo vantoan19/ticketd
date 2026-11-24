@@ -16,11 +16,13 @@ export function useTicketRefresh(
 ) {
   const [running, setRunning] = useState(false);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
-  async function run() {
+  async function run(retry = false) {
     setRunning(true);
     setFailure(null);
     try {
-      const report = await sourcesClient.refresh(reference);
+      const report = await (retry
+        ? sourcesClient.refresh(reference, undefined, true)
+        : sourcesClient.refresh(reference));
       const first = report.failures[0];
       if (first) {
         // Source reports retain transport diagnostics; only shared public copy is shown.

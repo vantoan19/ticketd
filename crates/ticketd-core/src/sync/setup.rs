@@ -20,7 +20,7 @@ use uuid::Uuid;
 use super::{
     RecordKind,
     attachments::{AttachmentDownloads, MANIFEST},
-    engine::{dirty_kind, touch},
+    engine::{HELD_FILE_IDS, dirty_kind, touch},
     remote::{RemoteError, RemoteFile, RemoteFolder, RemoteKey, RemoteKind, RemoteStorage},
 };
 use crate::{
@@ -114,7 +114,7 @@ pub(crate) fn migrate_last_folder(connection: &Connection) -> Result<(), Error> 
     )
 }
 
-/// Format version 90: which storage the sync binding uses, where in it (the S3
+/// Format version 98: which storage the sync binding uses, where in it (the S3
 /// bucket and prefix), and this desktop's own way into it (the AWS CLI profile
 /// and the path to the `aws` program). Every binding made before is Google
 /// Drive. The last-synced copies tell [`remembered`] whether a folder is in
@@ -143,7 +143,7 @@ pub(crate) fn migrate_provider(connection: &Connection) -> Result<(), Error> {
     )
 }
 
-/// Format version 91: the S3 service the binding's bucket was reached through, so a
+/// Format version 99: the S3 service the binding's bucket was reached through, so a
 /// profile that later points elsewhere stops sync instead of switching services. Bindings
 /// made before record nothing; the desktop records the profile's service on its next
 /// successful build.
@@ -942,9 +942,8 @@ impl Workspace {
         let mut pending_uploads = Vec::new();
         let mut pending_total = 0;
         if connected {
-            // A record whose file only a newer ticketd reads is not on its way
-            // anywhere: its notice says so instead.
-            let mut statement = connection.prepare("SELECT id FROM sync_files WHERE newer")?;
+            // A held file has a notice instead of counting as a pending upload.
+            let mut statement = connection.prepare(HELD_FILE_IDS)?;
             let held = statement
                 .query_map([], |row| row.get::<_, String>(0))?
                 .collect::<Result<BTreeSet<_>, _>>()?;
@@ -961,7 +960,9 @@ impl Workspace {
             let attachments = super::attachments::pending_uploads(connection)?;
             pending_total = count(
                 connection,
-                "SELECT COUNT(*) FROM sync_dirty d WHERE d.id NOT IN (SELECT id FROM sync_files WHERE newer) AND ((d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects)) OR (d.kind = 'automation' AND d.id IN (SELECT id FROM automations)) OR (d.kind = 'automation_agent' AND d.id IN (SELECT id FROM automation_agents)))",
+                &format!(
+                    "SELECT COUNT(*) FROM sync_dirty d WHERE d.id NOT IN ({HELD_FILE_IDS}) AND ((d.kind = 'ticket' AND d.id IN (SELECT id FROM tickets)) OR (d.kind = 'document' AND d.id IN (SELECT id FROM documents)) OR (d.kind = 'plan' AND d.id IN (SELECT id FROM plans)) OR (d.kind = 'project' AND d.id IN (SELECT id FROM projects)) OR (d.kind = 'automation' AND d.id IN (SELECT id FROM automations)) OR (d.kind = 'automation_agent' AND d.id IN (SELECT id FROM automation_agents)))"
+                ),
             )? + attachments.len() as u64;
             let room = PENDING_PAGE - pending_uploads.len();
             for (id, title) in attachments.into_iter().take(room) {
@@ -996,13 +997,12 @@ impl Workspace {
         } else {
             AttachmentDownloads::default()
         };
-        // A change held back by a file from a newer ticketd is not pending, but
-        // it has not reached the storage either: reading the notice does not
-        // make that synced. A file replaced from here needs nothing more.
+        // Reading a notice does not make a held change reach the storage.
+        // A file replaced from here needs nothing more.
         let unreadable = count(
             connection,
-            "SELECT (SELECT COUNT(*) FROM sync_notices WHERE read = 0 AND json_extract(notice, '$.kind') IN ('unreadable_file', 'oversized_record'))
-                  + (SELECT COUNT(*) FROM sync_dirty WHERE id IN (SELECT id FROM sync_files WHERE newer))",
+            &format!("SELECT (SELECT COUNT(*) FROM sync_notices WHERE read = 0 AND json_extract(notice, '$.kind') IN ('unreadable_file', 'oversized_record'))
+                  + (SELECT COUNT(*) FROM sync_dirty WHERE id IN ({HELD_FILE_IDS}))"),
         )?;
         let blocked = matches!(
             state.recovery,

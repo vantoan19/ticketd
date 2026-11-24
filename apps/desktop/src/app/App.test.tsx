@@ -1,5 +1,7 @@
+import { beaconIcon, beaconSource, githubSource } from "@/test/source-fixtures";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { Ticket } from "@/lib/api/client";
+import type { SourceHealth } from "@/lib/api/sources";
 import {
   reportWorkspaceFailure,
   clearWorkspaceFailure,
@@ -2205,6 +2207,7 @@ test("the source filter narrows list and counts together without a header Refres
       provider: "github",
       provider_name: "GitHub",
       place: "acme/api",
+      place_label: "acme / api",
       number: "#98",
       status_choices: ["Todo", "In progress", "In review"],
       id: "9",
@@ -2213,7 +2216,7 @@ test("the source filter narrows list and counts together without a header Refres
       url: "https://github.com/acme/api/issues/98",
       origin: "imported",
       ownership: "external",
-      state: { state: "open" },
+      state: { category: "open", name: "Open" },
       closure_unrecognized: false,
       last_refreshed_at: null,
       last_attempt_at: null,
@@ -2274,7 +2277,7 @@ test("the source filter narrows list and counts together without a header Refres
 });
 
 test("the sidebar footer follows persisted source health and keeps the list", async () => {
-  let health: unknown = {
+  let health: SourceHealth = {
     refreshing: false,
     sources: [
       {
@@ -2293,6 +2296,17 @@ test("the sidebar footer follows persisted source health and keeps the list", as
   await renderBulk({
     find_tickets: () => [bulkTicket(1)],
     count_tickets: counted({ todo: 1 }),
+    list_sources: [
+      {
+        ...githubSource,
+        saved: {
+          provider: "github",
+          config: { repositories: ["o/r"] },
+          account: "octo",
+          saved_at: "2026-02-01T00:00:00Z",
+        },
+      },
+    ],
     source_health: () => health,
   });
   const footer = screen.getByRole("group", { name: "Ticket sources" });
@@ -2300,7 +2314,7 @@ test("the sidebar footer follows persisted source health and keeps the list", as
   // The failure never empties the list.
   expect(screen.getByText("First")).toBeTruthy();
   // A refresh started elsewhere (startup or periodic) shows up on the next poll.
-  health = { ...(health as object), refreshing: true };
+  health = { ...health, refreshing: true };
   await act(async () => {
     await vi.advanceTimersByTimeAsync(2100);
   });
@@ -13032,7 +13046,7 @@ const reviewSource = {
   url: "https://github.com/acme/api/issues/98",
   origin: "imported",
   ownership: "external",
-  state: { state: "open" },
+  state: { category: "open", name: "Open" },
   closure_unrecognized: false,
   last_refreshed_at: null,
   last_attempt_at: null,
@@ -13056,6 +13070,105 @@ const reviewSourceEntry = {
     saved_at: "2026-02-01T00:00:00Z",
   },
 };
+
+test("Settings renders the registered providers' display data as text and an isolated icon", async () => {
+  await renderReviewApp({
+    list_sources: [githubSource, beaconSource],
+    source_check_connection: () => {
+      throw { code: "unauthenticated", message: "Signed out", fields: [] };
+    },
+    source_configuration_summary: [
+      { text: "Imports issues for ", emphasis: false },
+      { text: "PLATFORM", emphasis: true },
+      { text: ".", emphasis: false },
+    ],
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  await screen.findByRole("button", { name: "GitHub" });
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Beacon Tracker/ }),
+  );
+  const heading = await screen.findByRole("heading", {
+    name: "Beacon Tracker",
+  });
+  expect(
+    await screen.findByText("Open Beacon Console and sign in."),
+  ).toBeTruthy();
+  expect(screen.getByText("Use a Beacon team key.")).toBeTruthy();
+  expect(
+    screen.getByText("Routine sync only reads from Beacon Tracker."),
+  ).toBeTruthy();
+  expect(screen.getByPlaceholderText("e.g. PLATFORM")).toHaveProperty(
+    "value",
+    "PLATFORM",
+  );
+  expect((await screen.findByTestId("source-readback")).textContent).toBe(
+    "Imports issues for PLATFORM.",
+  );
+  const icon = heading.closest("header")?.querySelector("svg");
+  expect(icon?.querySelector("image")?.getAttribute("href")).toBe(
+    `data:image/svg+xml,${encodeURIComponent(beaconIcon)}`,
+  );
+  expect(icon?.querySelector("script")).toBeNull();
+});
+
+test("a new connection can be configured while the shared source list is refreshing", async () => {
+  const available = { ...beaconSource, saved: null, next_id: "beacon" };
+  const source = {
+    id: "beacon",
+    name: "Work tracker",
+    provider: "beacon",
+    account: "demo",
+    config: { team: "PLATFORM" },
+    saved_at: "2026-02-01T00:00:00Z",
+  };
+  const preview = {
+    provider: "beacon",
+    account: "demo",
+    matched: 0,
+    complete: true,
+    issues: [],
+  };
+  const readAfterAdd = vi.fn(() => new Promise(() => {}));
+  let added = false;
+  await renderReviewApp({
+    list_sources: () => (added ? readAfterAdd() : [available]),
+    source_check_connection: { account: "demo" },
+    source_preview: preview,
+    add_source_connection: () => {
+      added = true;
+      return { source, preview };
+    },
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(await screen.findByRole("button", { name: "Sources" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: "Add Beacon Tracker connection",
+    }),
+  );
+  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
+    target: { value: source.name },
+  });
+  fireEvent.change(screen.getByPlaceholderText("e.g. PLATFORM"), {
+    target: { value: source.config.team },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
+  await screen.findByText(/No open issues match these rules/);
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  expect(
+    (
+      (await screen.findByRole("button", {
+        name: "Add Beacon Tracker connection",
+      })) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
+  await screen.findByRole("heading", { name: source.name });
+  await waitFor(() => expect(readAfterAdd).toHaveBeenCalled());
+});
 
 const projectForRemote = {
   id: "project-remote",
@@ -13093,6 +13206,8 @@ test("setting up the source from a project pre-fills discovery and resumes backf
   let saved = false;
   const configured = {
     ...reviewSourceEntry,
+    next_id: "github",
+    saved: { ...reviewSourceEntry.saved, id: "github", name: "GitHub" },
     connector: {
       ...reviewSourceEntry.connector,
       schema: {
@@ -13123,10 +13238,19 @@ test("setting up the source from a project pre-fills discovery and resumes backf
     list_sources: () => [
       { ...configured, saved: saved ? configured.saved : null },
     ],
+    project_source_candidates: () => [
+      {
+        source: saved ? "github" : "provider:github",
+        provider: "github",
+        connection_id: saved ? "github" : null,
+        name: "GitHub",
+      },
+    ],
     preview_connect_source: () => ({
       project_id: project.id,
       project_remote: project.remote,
       provider: "github",
+      connection_id: saved ? "github" : null,
       repository: "acme/api",
       source: saved ? "already_listed" : "not_connected",
       tickets: ["T-ABCDE"],
@@ -13135,7 +13259,7 @@ test("setting up the source from a project pre-fills discovery and resumes backf
     source_check_connection: { account: "octo" },
     source_options: [],
     source_preview: discovery,
-    save_source: () => {
+    add_source_connection: () => {
       saved = true;
       return { source: configured.saved, preview: discovery };
     },
@@ -13150,14 +13274,24 @@ test("setting up the source from a project pre-fills discovery and resumes backf
   await screen.findByRole("button", { name: "Remove acme/api" });
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByRole("region", { name: "Preview" });
-  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
   const review = within(
     await screen.findByRole("dialog", { name: "Connect project to GitHub" }),
   );
   expect(await review.findByText("Link 1 existing ticket")).toBeTruthy();
   expect(review.queryByText(/Import issues from/)).toBeNull();
-  expect(bridge.invoke).toHaveBeenCalledWith("save_source", {
+  expect(bridge.invoke).toHaveBeenCalledWith("preview_connect_source", {
+    source: "provider:github",
+    projectId: project.id,
+  });
+  expect(bridge.invoke).toHaveBeenCalledWith("preview_connect_source", {
+    source: configured.saved.id,
+    projectId: project.id,
+  });
+  expect(bridge.invoke).toHaveBeenCalledWith("add_source_connection", {
     provider: "github",
+    name: "GitHub",
+    connection: "github",
     config: { repositories: ["acme/api"] },
   });
   expect(

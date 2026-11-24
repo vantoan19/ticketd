@@ -69,6 +69,11 @@ type Load =
   | { kind: "ready"; review: PublicationReview }
   | { kind: "failed"; failure: FailureDescription };
 
+export type PublicationRetryTarget = {
+  connectionId: string;
+  destination: string;
+};
+
 export function ReviewBody({
   attempt,
   close,
@@ -77,7 +82,7 @@ export function ReviewBody({
 }: {
   inline?: boolean;
   attempt: PublicationAttempt;
-  close: (kind?: PublicationResolution["kind"]) => void;
+  close: (retry?: PublicationRetryTarget) => void;
   refresh: () => Promise<void>;
 }) {
   const [load, setLoad] = useState<Load>({ kind: "loading" });
@@ -126,11 +131,21 @@ export function ReviewBody({
     setError(null);
     setDifferent(null);
     try {
-      await sourcesClient.resolvePublication(attempt.reference, resolution, {
-        acceptDifferentContent,
-      });
+      const { attempt: settled } = await sourcesClient.resolvePublication(
+        attempt.reference,
+        resolution,
+        { acceptDifferentContent },
+      );
       await refresh();
-      close(resolution.kind);
+      const connectionId =
+        load.kind === "ready" ? load.review.connection_id : undefined;
+      close(
+        resolution.kind === "not_created" &&
+          settled.id === attempt.id &&
+          connectionId
+          ? { connectionId, destination: settled.destination }
+          : undefined,
+      );
     } catch (reason) {
       // The attempt is unchanged: show why, keep the review open.
       const failure = toFailure(reason);
@@ -148,7 +163,8 @@ export function ReviewBody({
   if (load.kind === "loading")
     return (
       <p role="status">
-        Reading the attempt and looking in {attempt.destination}…
+        Reading the attempt and looking in{" "}
+        {attempt.destination_label ?? attempt.destination}…
       </p>
     );
   if (load.kind === "failed")
@@ -226,7 +242,9 @@ export function ReviewBody({
                   >
                     Not this one
                   </Button>
-                  <SourceLink url={candidate.url}>Open on GitHub</SourceLink>
+                  <SourceLink url={candidate.url}>
+                    Open on {review.provider_name}
+                  </SourceLink>
                 </div>
               </article>
             ))}
@@ -387,7 +405,7 @@ export function ReviewBody({
         Check again
       </Button>
       <Candidates
-        label={`Issues in ${attempt.destination} that match what was sent`}
+        label={`Issues in ${attempt.destination_label ?? attempt.destination} that match what was sent`}
         candidates={review.candidates}
         busy={busy}
         attach={(candidate) =>
@@ -395,7 +413,7 @@ export function ReviewBody({
         }
       />
       <Candidates
-        label={`Other recent issues from your account in ${attempt.destination} (these do not block confirming that nothing was created)`}
+        label={`Other recent issues from your account in ${attempt.destination_label ?? attempt.destination} (these do not block confirming that nothing was created)`}
         candidates={review.other_recent}
         busy={busy}
         attach={(candidate) =>

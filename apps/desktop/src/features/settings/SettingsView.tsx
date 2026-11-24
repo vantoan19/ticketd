@@ -3,6 +3,7 @@ import { modifierKeyLabel } from "@/lib/platform";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { useSources } from "@/features/settings/sources/use-sources";
+import type { SourceEntry } from "@/lib/api/sources";
 import { AboutPage } from "@/features/settings/pages/AboutPage";
 import { AgentSkillsPage } from "@/features/settings/pages/AgentSkillsPage";
 import { AppearancePage } from "@/features/settings/pages/AppearancePage";
@@ -23,6 +24,7 @@ import {
   SearchPage,
 } from "@/features/settings/pages/SearchPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
+import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { useFadeThrough } from "@/features/settings/fade-through";
 // The keyframes of the page's own entrance (settings-layout.css plays them).
 import "@/components/ui/enter";
@@ -46,9 +48,11 @@ function isFindShortcut(event: KeyboardEvent) {
 export function SettingsView({
   onRestore,
   onOpenInbox,
+  onSourcesChanged,
   onSelect,
   projectSourceSetup,
   onProjectSourceSaved,
+  onProjectSourceCancel,
   onProjectLinked,
   selected: chosen = "appearance",
 }: {
@@ -58,9 +62,11 @@ export function SettingsView({
   /** Called after anything replaced the Workspace: a restore, or a download from Drive. */
   onRestore: () => Promise<void>;
   onOpenInbox: () => void;
+  onSourcesChanged?: (added?: SourceEntry) => Promise<void>;
   projectSourceSetup?: ProjectSourceSetup;
-  onProjectSourceSaved?: () => void;
-  onProjectLinked?: (projectId: string) => void;
+  onProjectSourceSaved?: (connection: string) => void;
+  onProjectSourceCancel?: () => void;
+  onProjectLinked?: (projectId: string, connection: string) => void;
 }) {
   // The parent mounts this only while Settings is open, so every page reads
   // fresh data on each visit. A restore or a download replaces the workspace
@@ -119,16 +125,29 @@ export function SettingsView({
       {selected === "diagnostics" && <DiagnosticsPage />}
       {selected === "about" && <AboutPage />}
       {selected === "search" && <SearchPage />}
+      {selected === "sources" && (
+        <SourcesPage
+          onOpen={(id) => onSelect?.(`source-${id}`)}
+          onChanged={onSourcesChanged}
+          {...(projectSourceSetup &&
+            onProjectSourceSaved &&
+            onProjectSourceCancel && {
+              projectSetup: {
+                setup: projectSourceSetup,
+                onSaved: onProjectSourceSaved,
+                onCancel: onProjectSourceCancel,
+              },
+            })}
+        />
+      )}
       {sources.map((entry) => (
         <SourcePage
-          key={`${restores}:${entry.connector.provider}`}
+          key={`${restores}:${entry.saved?.id ?? entry.connector.provider}`}
           entry={entry}
-          active={selected === `source-${entry.connector.provider}`}
+          active={
+            selected === `source-${entry.saved?.id ?? entry.connector.provider}`
+          }
           {...(onProjectLinked && { onProjectLinked })}
-          {...(projectSourceSetup?.provider === entry.connector.provider && {
-            initialRepository: projectSourceSetup.repository,
-            ...(onProjectSourceSaved && { onSaved: onProjectSourceSaved }),
-          })}
         />
       ))}
     </div>

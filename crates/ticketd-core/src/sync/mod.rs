@@ -13,11 +13,12 @@ mod setup;
 
 pub use crate::sync_files::MAX_FILE_BYTES;
 pub use attachments::{AttachmentAvailability, AttachmentAvailabilityState, AttachmentDownloads};
+pub(crate) use capture::migrate_source_observation_capture;
 pub use capture::{DirtyRecord, RecordKind};
-pub(crate) use engine::removed_by_sync;
 pub use engine::{
     SyncChoice, SyncConflict, SyncConflictField, SyncNotice, SyncNoticeKind, SyncResolution,
 };
+pub(crate) use engine::{migrate_source_state_conflicts, removed_by_sync};
 pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, S3Binding,
     SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem,
@@ -42,12 +43,12 @@ pub(crate) fn migrate_unchanged_tickets(
     capture::migrate_unchanged_tickets(connection)
 }
 
-/// Format version 91: see `setup::migrate_endpoint`.
+/// Format version 99: see `setup::migrate_endpoint`.
 pub(crate) fn migrate_endpoint(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_endpoint(connection)
 }
 
-/// Format version 90: see `setup::migrate_provider`.
+/// Format version 98: see `setup::migrate_provider`.
 pub(crate) fn migrate_provider(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_provider(connection)
 }

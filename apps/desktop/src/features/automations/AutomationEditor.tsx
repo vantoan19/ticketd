@@ -1,3 +1,4 @@
+import { useSources } from "@/features/settings/sources/use-sources";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import {
   ArrowLeft,
@@ -201,6 +202,7 @@ export function AutomationEditor({
   /** How the reads the editor and its views make by themselves went. */
   onRead: ReportRead;
 }) {
+  const { entries: sources } = useSources();
   const headingId = useId();
   const section = useRef<HTMLElement>(null);
   const [draft, setDraft] = useState(() => definitionOf(automation));
@@ -672,7 +674,7 @@ export function AutomationEditor({
             only={
               // Kept, but not asked, while nothing starts it from a ticket.
               automation.has_ticket
-                ? conditionsLine(draft.conditions, projects)
+                ? conditionsLine(draft.conditions, projects, sources)
                 : undefined
             }
             onSelect={setSelected}

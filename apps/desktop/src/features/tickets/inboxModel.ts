@@ -1,7 +1,7 @@
 import type { Entry as HistoryEntry } from "@/lib/api/history";
 import { startOfLocalDay } from "@/lib/format";
 import { describeChange } from "./history-sentence";
-import { providerName } from "./ticket-source";
+import { providerName, type SourceEntry } from "@/lib/api/sources";
 import { progressBrief } from "./progress-brief";
 export type { Entry } from "@/lib/api/inbox";
 import type { Entry } from "@/lib/api/inbox";
@@ -35,7 +35,10 @@ export function entryNoun(entry: Entry): string {
 }
 
 /** A plain-language summary. Internal event keys never appear in it. */
-export function summarize(entry: Entry): string {
+export function summarize(
+  entry: Entry,
+  sources: readonly SourceEntry[] = [],
+): string {
   // A run that needs attention: its Automation, then why.
   if (entry.kind === "automation_run")
     return `${entry.editing_agent ?? "An Automation"} needs attention${
@@ -48,9 +51,13 @@ export function summarize(entry: Entry): string {
         ? entry.deleted
           ? "Update deleted"
           : `New update: ${progressBrief(entry.to_value)}`
-        : describeChange(entry.kind, entry.from_value, entry.to_value);
+        : describeChange(entry.kind, entry.from_value, entry.to_value, {
+            project: () => undefined,
+            plan: () => undefined,
+            source: (id) => providerName(id, sources),
+          });
   return entry.editing_agent
-    ? `${base} · ${providerName(entry.editing_agent)}`
+    ? `${base} · ${providerName(entry.editing_agent, sources)}`
     : base;
 }
 

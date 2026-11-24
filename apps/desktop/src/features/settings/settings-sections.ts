@@ -72,6 +72,7 @@ export const SETTINGS_SECTIONS = [
     group: "Connections",
     icon: Cloud,
   },
+  { id: "sources", label: "Sources", group: "Connections", icon: CircleDot },
   {
     id: "keyboard-shortcuts",
     label: "Keyboard shortcuts",
@@ -127,12 +128,17 @@ export const SEARCH_PAGE: SettingsPageMeta = {
 };
 
 /** The nav entry for an available source, listed under Connections. */
-export function sourceSection(provider: string, name: string) {
+export function sourceSection(
+  provider: string,
+  name: string,
+  iconSvg?: string | null,
+) {
   return {
     id: `source-${provider}` as const,
     label: name,
     group: "Connections" as const,
     icon: CircleDot as LucideIcon,
+    iconSvg,
   };
 }
 

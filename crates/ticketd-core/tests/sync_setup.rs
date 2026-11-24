@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used)] // Setup that fails must fail the test.
 
 use std::io::Cursor;
+use std::path::PathBuf;
 
 use ticketd_core::{
     Error, TicketPatch, Workspace,
@@ -1364,7 +1365,7 @@ fn a_record_held_back_by_a_newer_format_file_is_not_a_pending_upload_and_is_put_
     let (version, synced) = desks.file(&key);
     let newer = String::from_utf8(synced)
         .unwrap()
-        .replacen("format: 1\n", "format: 3\n", 1);
+        .replacen("format: 1\n", "format: 4\n", 1);
     desks
         .remote
         .write(
@@ -1907,19 +1908,9 @@ fn a_folder_uploaded_again_by_one_desk_merges_the_others_edits_without_review() 
 #[test]
 fn a_format_61_workspace_without_download_attempts_gains_the_column() {
     let desks = desks();
-    let (desk, _, _) = desks.uploaded("a");
-    drop(desk);
-    let path = desks.directory.path().join("a");
-    let fixture = rusqlite::Connection::open(&path).unwrap();
-    fixture
-        .execute_batch(
-            "ALTER TABLE sync_attachments DROP COLUMN attempts; PRAGMA user_version = 61;",
-        )
-        .unwrap();
-    drop(fixture);
-
+    let path = synced_workspace_at_format(&desks, 61);
     let mut desk = Workspace::open(&path).unwrap();
-    desk.sync_now(&desks.remote).unwrap();
+    assert_eq!(desk.sync_now(&desks.remote).unwrap().recovery, None);
     drop(desk);
     let migrated = rusqlite::Connection::open(&path).unwrap();
     let attempts: i64 = migrated
@@ -2126,17 +2117,7 @@ fn reconnect_is_not_offered_to_another_account_a_missing_folder_or_a_restored_wo
 #[test]
 fn a_format_64_workspace_gains_the_remembered_folder() {
     let desks = desks();
-    let (desk, _, _) = desks.uploaded("a");
-    drop(desk);
-    let path = desks.directory.path().join("a");
-    let fixture = rusqlite::Connection::open(&path).unwrap();
-    fixture
-        .execute_batch(
-            "ALTER TABLE sync_state DROP COLUMN last_folder; ALTER TABLE sync_state DROP COLUMN last_account; PRAGMA user_version = 64;",
-        )
-        .unwrap();
-    drop(fixture);
-
+    let path = synced_workspace_at_format(&desks, 64);
     let mut desk = Workspace::open(&path).unwrap();
     desk.sync_disconnect().unwrap();
     desk.sync_connect("connection-1", "person@example.com")
@@ -2158,10 +2139,10 @@ fn s3(bucket: &str, prefix: &str, profile: &str) -> S3Binding {
 
 const IDENTITY: &str = "arn:aws:sts::123456789012:assumed-role/Admin/mina";
 
-/// Format 90 records which storage the binding uses; every earlier binding is
+/// Format 98 records which storage the binding uses; every earlier binding is
 /// a Google Drive one.
 #[test]
-fn a_format_89_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and_keeps_syncing() {
+fn a_format_97_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and_keeps_syncing() {
     let desks = desks();
     let (desk, _, _) = desks.uploaded("a");
     let folder = desk.sync_status().unwrap().folder.unwrap();
@@ -2182,7 +2163,7 @@ fn a_format_89_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and
         columns += &format!("ALTER TABLE sync_state DROP COLUMN {column};");
     }
     fixture
-        .execute_batch(&format!("{columns} PRAGMA user_version = 89;"))
+        .execute_batch(&format!("{columns} PRAGMA user_version = 97;"))
         .unwrap();
     drop(fixture);
 
@@ -2206,10 +2187,10 @@ fn a_format_89_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and
     );
 }
 
-/// Format 91 records which S3 service the bucket was reached through. A binding made before
+/// Format 99 records which S3 service the bucket was reached through. A binding made before
 /// has none recorded, and the desktop records it from the profile on its next successful build.
 #[test]
-fn a_format_90_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one() {
+fn a_format_98_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one() {
     let desks = desks();
     let path = desks.directory.path().join("a");
     let mut desk = Workspace::open(&path).unwrap();
@@ -2220,7 +2201,7 @@ fn a_format_90_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one
     drop(desk);
     let fixture = rusqlite::Connection::open(&path).unwrap();
     fixture
-        .execute_batch("ALTER TABLE sync_state DROP COLUMN s3_endpoint; PRAGMA user_version = 90;")
+        .execute_batch("ALTER TABLE sync_state DROP COLUMN s3_endpoint; PRAGMA user_version = 98;")
         .unwrap();
     drop(fixture);
 
@@ -2544,4 +2525,30 @@ fn downloading_a_workspace_keeps_this_desktops_s3_binding() {
         Some(IDENTITY)
     );
     assert_eq!(desk.sync_now(&desks.remote).unwrap().recovery, None);
+}
+
+fn synced_workspace_at_format(desks: &Desks, format: i64) -> PathBuf {
+    let current = "current";
+    let (desk, _, _) = desks.uploaded(current);
+    drop(desk);
+    let path = desks.directory.path().join("historical.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, format).unwrap();
+    let fixture = rusqlite::Connection::open(&path).unwrap();
+    fixture
+        .execute(
+            "ATTACH DATABASE ?1 AS synced",
+            [desks.directory.path().join(current).to_string_lossy()],
+        )
+        .unwrap();
+    fixture
+        .execute_batch(
+            "UPDATE sync_state SET (connection, account, folder, folder_name, device_id, device_name,
+                                    last_synced_at, run_token, run_previous, run_due) = (
+                 SELECT connection, account, folder, folder_name, device_id, device_name,
+                        last_synced_at, run_token, run_previous, run_due FROM synced.sync_state
+                 WHERE id = 1
+             ) WHERE id = 1;",
+        )
+        .unwrap();
+    path
 }
