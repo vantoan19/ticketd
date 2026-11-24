@@ -154,6 +154,22 @@ test("a bucket the check turns down says why, and is checked again once it is fi
   expect(api.setupOptions).toHaveBeenCalledTimes(2);
 });
 
+test("a bucket that does not exist says so in the headline", async () => {
+  api.status.mockResolvedValue(choosing());
+  api.setupOptions.mockRejectedValue(
+    hostFailure(
+      "sync storage: storage: the bucket ticketd-qa-nonexistent does not exist, or the profile's account cannot see it; check the bucket name",
+    ),
+  );
+  show();
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Couldn't read the bucket.");
+  expect(alert.textContent).toContain(
+    "The bucket ticketd-qa-nonexistent does not exist, or the profile's account cannot see it; check the bucket name.",
+  );
+  expect(alert.textContent).not.toContain("couldn't be confirmed");
+});
+
 test("downloading from the bucket asks first, like a restore", async () => {
   api.status.mockResolvedValue(choosing());
   api.downloadWorkspace.mockResolvedValue({

@@ -76,7 +76,7 @@ export function S3Setup() {
   // A bucket typed in, though the profile lists some: it may use more than it owns.
   const [typing, setTyping] = useState(false);
   const [prefix, setPrefix] = useState(DEFAULT_PREFIX);
-  const { busy, failure, run } = useCommand();
+  const { busy, failure, run } = useCommand({ readable: true });
   // A check that started before another one must not put its answer back.
   const generation = useRef(0);
 

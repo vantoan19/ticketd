@@ -6,8 +6,11 @@ import {
 import type { SyncStatus } from "@/lib/sync-api";
 import { useSyncStatus } from "./sync-status";
 
-/** Runs one sync command at a time and keeps what it failed with. */
-export function useCommand() {
+/**
+ * Runs one sync command at a time and keeps what it failed with. `readable`:
+ * the host words its refusals for people (S3), so they are shown as they are.
+ */
+export function useCommand({ readable = false }: { readable?: boolean } = {}) {
   const { apply } = useSyncStatus();
   const [busy, setBusy] = useState(false);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
@@ -24,7 +27,7 @@ export function useCommand() {
       apply(await command());
       return true;
     } catch (reason) {
-      setFailure(describeFailure(reason, action));
+      setFailure(describeFailure(reason, action, { readable }));
       return false;
     } finally {
       running.current = false;
