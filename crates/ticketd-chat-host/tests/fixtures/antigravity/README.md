@@ -23,6 +23,8 @@ process restarts.
   native Full access flag. The shell Prompt runs without an ACP approval request.
 - `resume-own-settings.jsonl` resumes again without the flag. The server asks
   for shell approval, which the probe cancels.
+- `resume-missing-session.jsonl` captures the resume error from a different
+  disposable profile that has no history for the Session.
 
 The captures do not establish signed-in account behavior, persistent approval
 scope, or shell environment propagation inside agy's sandbox.

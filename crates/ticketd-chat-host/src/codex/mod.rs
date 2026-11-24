@@ -201,7 +201,7 @@ impl HarnessAdapter for CodexAdapter {
         let Some(executable) = self.executable() else {
             return Inspection::NotInstalled;
         };
-        let reported = match version_output(&executable).await {
+        let reported = match version_output(&executable, &[]).await {
             Ok(reported) => reported,
             Err(reason) => return Inspection::ProbeFailed { reason },
         };
@@ -259,7 +259,7 @@ impl HarnessAdapter for CodexAdapter {
             resets_at: None,
         })?;
         // The version floor holds for every open, attended or not (8A4).
-        let reported = version_output(&executable)
+        let reported = version_output(&executable, &[])
             .await
             .map_err(|reason| Problem {
                 kind: ProblemKind::Other,

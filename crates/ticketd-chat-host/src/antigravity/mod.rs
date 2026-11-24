@@ -82,10 +82,11 @@ impl HarnessAdapter for Antigravity {
         let Some(executable) = executable() else {
             return Inspection::NotInstalled;
         };
-        let version = match version_output(&executable).await {
-            Ok(version) => version.trim().to_owned(),
-            Err(reason) => return Inspection::ProbeFailed { reason },
-        };
+        let version =
+            match version_output(&executable, &[("AGY_CLI_DISABLE_AUTO_UPDATE", "1")]).await {
+                Ok(version) => version.trim().to_owned(),
+                Err(reason) => return Inspection::ProbeFailed { reason },
+            };
         match parse_version(&version) {
             Some(found) if found >= MINIMUM_VERSION => Inspection::Installed {
                 executable,

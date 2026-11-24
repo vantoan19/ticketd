@@ -1006,13 +1006,15 @@ export function createMockChatClient(
         kind: "session",
         history: history.kind,
         count:
-          history.kind === "picked"
-            ? history.ids.length
-            : history.kind === "last_messages"
-              ? Math.min(history.count, messages.length)
-              : history.kind === "all"
-                ? messages.length
-                : 1,
+          history.kind === "none"
+            ? 0
+            : history.kind === "picked"
+              ? history.ids.length
+              : history.kind === "last_messages"
+                ? Math.min(history.count, messages.length)
+                : history.kind === "all"
+                  ? messages.length
+                  : 1,
       });
       patch(id, { activity: "idle", problem: null });
     },

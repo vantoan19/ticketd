@@ -995,6 +995,7 @@ export type NoticeAction =
   | "resend"
   | "discard"
   | "pick-folder"
+  | "start-fresh"
   | "resume";
 
 export type Notice = {
@@ -1144,8 +1145,18 @@ export function problemNotice(problem: Problem, harness: string): Notice {
       return {
         tone: "attention",
         title: problem.title,
-        body: "You can still read it here. To keep going, resume in a fresh session and choose which history to give it.",
-        actions: ["resume"],
+        body:
+          problem.history_recovery === "start_fresh"
+            ? "You can still read it here. Start fresh to continue without importing earlier messages."
+            : problem.history_recovery === "select_history"
+              ? "You can still read it here. To keep going, resume in a fresh session and choose which history to give it."
+              : "You can still read it here.",
+        actions:
+          problem.history_recovery === "start_fresh"
+            ? ["start-fresh"]
+            : problem.history_recovery === "select_history"
+              ? ["resume"]
+              : [],
       };
     case "session_in_use":
       if (past)

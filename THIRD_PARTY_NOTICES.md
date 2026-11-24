@@ -101,6 +101,10 @@ say which harness a Chat runs. The path data was copied verbatim from
 licensed (Copyright (c) 2026 T3 Tools Inc.). The marks themselves are trademarks
 of Anthropic PBC and OpenAI and are not covered by that license.
 
+The Antigravity mark is Google's. Its path data was copied verbatim from the
+[one-color icon](https://antigravity.google/assets/image/brand/antigravity-icon__one-color.svg)
+in the [Google Antigravity press kit](https://antigravity.google/press).
+
 Still to confirm before distributing a build: that this use (a monochrome mark
 naming the tool beside its name, never altered or recolored) is within each
 publisher's brand guidelines.

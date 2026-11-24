@@ -126,7 +126,7 @@ struct AppServer {
 
 impl AppServer {
     fn start(io: Io, generation: RuntimeGeneration, options: Options) -> (Arc<Self>, EventStream) {
-        let (rpc, events) = Connection::start(
+        let (rpc, events, _) = Connection::start(
             io,
             CodexPeer::default(),
             generation,

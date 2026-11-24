@@ -53,6 +53,8 @@ export const problemSchema = z.object({
   blocks_send: z.boolean(),
   /** The host's plain explanation, for kinds whose wording depends on what was observed. */
   message: z.string().nullish(),
+  /** Recovery offered when the harness's native history is unavailable. */
+  history_recovery: z.enum(["start_fresh", "select_history"]).nullish(),
   /** A terminal command to copy, such as the harness's own sign-in. */
   command: z.string().nullish(),
   help_url: z.string().nullish(),
@@ -479,7 +481,13 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
     kind: z.literal("session"),
-    history: z.enum(["last_response", "last_messages", "all", "picked"]),
+    history: z.enum([
+      "none",
+      "last_response",
+      "last_messages",
+      "all",
+      "picked",
+    ]),
     count: z.number().int().nonnegative(),
   }),
   /** One reasoning item. Times are milliseconds since the Unix epoch, as reported. */
@@ -763,6 +771,7 @@ export const suggestionSchema = z.discriminatedUnion("kind", [
 export type Suggestion = z.infer<typeof suggestionSchema>;
 export type RequestAnswer = { option_id: string } | { text: string };
 export type HistorySelection =
+  | { kind: "none" }
   | { kind: "last_response" }
   | { kind: "last_messages"; count: number }
   | { kind: "all" }

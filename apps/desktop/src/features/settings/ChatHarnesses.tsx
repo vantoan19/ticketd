@@ -54,7 +54,7 @@ function harnessDetail(harness: HarnessStatus) {
 }
 
 /**
- * Settings › Chat: whether Claude Code and Codex can run here, one row each
+ * Settings › Chat: whether each harness can run here, one row per harness
  * with its official mark and status, the command to copy where one helps,
  * and Check again. The nav's Needs setup dot on Chat follows this list.
  */
@@ -86,7 +86,7 @@ export function ChatHarnesses() {
   return (
     <SettingsSection
       title="Harnesses"
-      caption="Chat runs the copy of Claude Code or Codex installed on this computer, signed in as you."
+      caption="Each harness runs on this computer with its own sign-in."
       actions={
         <Button
           type="button"
