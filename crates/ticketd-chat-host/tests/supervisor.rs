@@ -1152,6 +1152,58 @@ async fn a_trashed_chat_cannot_be_resumed() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_chat_trashed_during_retained_runtime_cleanup_cannot_be_resumed() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: "the exit could not be observed".to_owned(),
+    });
+    let setting = f.fake.hold_next_setting();
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    setting.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+    assert!(!f.live().await.running);
+
+    f.fake
+        .set_close_outcome(CloseOutcome::Confirmed { exit_code: Some(0) });
+    let cleanup = f.fake.hold_next_close();
+    let original = f.fake.opens()[0].generation;
+    let (resumed, ()) = tokio::join!(f.host.resume(&f.chat.id, ResumeMode::Native), async {
+        settle().await;
+        let closes = f
+            .fake
+            .written()
+            .into_iter()
+            .filter(|command| *command == Written::Close(original))
+            .count();
+        assert_eq!(closes, 2, "resume is waiting for cleanup");
+        assert!(f.core().set_chat_trashed(&f.chat.id, true).unwrap().trashed);
+        cleanup.send(()).unwrap();
+    });
+
+    assert_eq!(
+        f.fake.opens().len(),
+        1,
+        "no replacement runtime was started"
+    );
+    assert!(matches!(
+        resumed,
+        Err(HostError::Core(Error::ChatTrashed(id))) if id == f.chat.id
+    ));
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_feed_of_a_view_ends_when_the_supervisor_of_its_chat_stops() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;

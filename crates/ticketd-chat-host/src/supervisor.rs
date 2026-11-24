@@ -1052,19 +1052,10 @@ impl Supervisor {
             let _ = reply.send(Err(HostError::Busy));
             return;
         }
-        let chat_id = self.chat_id.clone();
-        let chat = match self.core(|core| core.chat(&chat_id)) {
-            // A trashed Chat runs nothing until it is restored.
-            Ok(chat) if chat.trashed => {
-                let _ = reply.send(Err(Error::ChatTrashed(chat_id).into()));
-                return;
-            }
-            Ok(chat) => chat,
-            Err(error) => {
-                let _ = reply.send(Err(error.into()));
-                return;
-            }
-        };
+        if let Err(error) = self.chat_for_resume() {
+            let _ = reply.send(Err(error.into()));
+            return;
+        }
         if self.native_history_only()
             && matches!(&mode, ResumeMode::FreshSession { history } if !history.trim().is_empty())
         {
@@ -1086,6 +1077,14 @@ impl Supervisor {
         if self.runtime.is_some() {
             self.stop_runtime(StopReason::ExplicitResume).await;
         }
+        // Another Workspace connection can change or trash the Chat during cleanup.
+        let chat = match self.chat_for_resume() {
+            Ok(chat) => chat,
+            Err(error) => {
+                let _ = reply.send(Err(error.into()));
+                return;
+            }
+        };
         let (session, origin, preamble) = match mode {
             ResumeMode::FreshSession { history } => (
                 SessionStart::New,
@@ -1095,6 +1094,14 @@ impl Supervisor {
             ResumeMode::Native => native_session(&chat),
         };
         self.open(&chat, session, origin, preamble, Some(reply));
+    }
+
+    fn chat_for_resume(&self) -> Result<Chat, Error> {
+        let chat = self.core(|core| core.chat(&self.chat_id))?;
+        if chat.trashed {
+            return Err(Error::ChatTrashed(chat.id));
+        }
+        Ok(chat)
     }
 
     fn native_history_only(&self) -> bool {
