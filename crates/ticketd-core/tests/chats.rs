@@ -1668,10 +1668,8 @@ fn adjacent_turns_credit_only_their_own_tagged_writes_at_the_same_millisecond() 
     assert!(
         matches!(
             check,
-            ticketd_core::BackupCheck::Valid {
-                format_version: 85,
-                ..
-            }
+            ticketd_core::BackupCheck::Valid { format_version, .. }
+                if i64::from(format_version) == ticketd_core::FORMAT_VERSION
         ),
         "receipt was written to an incompatible backup: {check:?}"
     );
