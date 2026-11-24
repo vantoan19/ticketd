@@ -133,6 +133,49 @@ test("scrubs structured and embedded identities while keeping protocol and tool 
   assert.match(third.server.path, /\\files\\example\.txt$/);
 });
 
+test("rejects a recording that grows past 64 MiB after its size is checked", (t) => {
+  const { directory, output } = capture(t);
+  const input = join(directory, "synthetic.wire");
+  const preload = join(directory, "grow-recording.cjs");
+  const frame = line({ method: "initialize" });
+  const chunk = Buffer.alloc(5);
+  chunk[0] = 1;
+  chunk.writeUInt32LE(frame.length, 1);
+  writeFileSync(
+    input,
+    Buffer.concat([
+      Buffer.from("ticketd-harness-recording-v1\n"),
+      chunk,
+      frame,
+    ]),
+  );
+  writeFileSync(
+    preload,
+    `const fs = require("node:fs");
+const fstat = fs.fstatSync;
+fs.fstatSync = (...args) => {
+  const stat = fstat(...args);
+  fs.truncateSync(process.argv[2], 64 * 1024 * 1024 + 1);
+  return stat;
+};
+require("node:module").syncBuiltinESMExports();
+`,
+  );
+  const result = spawnSync(
+    process.execPath,
+    ["--require", preload, cli, input, output],
+    {
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(
+    result.stderr,
+    "The input must be a recording file of at most 64 MiB.\n",
+  );
+  assert.equal(existsSync(output), false);
+});
+
 test("rejects malformed data before creating a fixture or printing private bytes", (t) => {
   const { directory, output, scrub } = capture(t);
   const sensitive = "synthetic-private-parse-error";

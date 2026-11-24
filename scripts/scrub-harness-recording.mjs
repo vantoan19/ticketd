@@ -1,4 +1,12 @@
-import { readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readSync,
+  realpathSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, resolve } from "node:path";
 
 const header = Buffer.from("ticketd-harness-recording-v1\n");
@@ -8,17 +16,38 @@ const decoder = new TextDecoder("utf-8", { fatal: true });
 
 class CaptureError extends Error {}
 
+function readCapture(input) {
+  const sizeError = "The input must be a recording file of at most 64 MiB.";
+  // Avoid waiting on a pipe before we can check that the handle is a file.
+  const fd = openSync(input, constants.O_RDONLY | constants.O_NONBLOCK);
+  try {
+    const stat = fstatSync(fd);
+    if (!stat.isFile() || stat.size > maxCaptureBytes) {
+      throw new CaptureError(sizeError);
+    }
+
+    const chunks = [];
+    let total = 0;
+    while (total <= maxCaptureBytes) {
+      const chunk = Buffer.allocUnsafe(
+        Math.min(64 * 1024, maxCaptureBytes + 1 - total),
+      );
+      const size = readSync(fd, chunk, 0, chunk.length, null);
+      if (size === 0) return Buffer.concat(chunks, total);
+      chunks.push(chunk.subarray(0, size));
+      total += size;
+    }
+    throw new CaptureError(sizeError);
+  } finally {
+    closeSync(fd);
+  }
+}
+
 function framesFrom(input) {
   if (!input.endsWith(".wire")) {
     throw new CaptureError("Use a finalized .wire recording.");
   }
-  const stat = statSync(input);
-  if (!stat.isFile() || stat.size > maxCaptureBytes) {
-    throw new CaptureError(
-      "The input must be a recording file of at most 64 MiB.",
-    );
-  }
-  const raw = readFileSync(input);
+  const raw = readCapture(input);
   if (!raw.subarray(0, header.length).equals(header)) {
     throw new CaptureError("Unknown recording format.");
   }
