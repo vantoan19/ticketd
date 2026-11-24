@@ -467,24 +467,32 @@ test("a bucket typed in can go back to the list when the profile lists buckets",
   ).toBeNull();
 });
 
-test("the way back to the list sits beside the typed field, so the row keeps its height", async () => {
+test("the typed field takes the list's place without changing the row's text or width", async () => {
   s3.profiles.mockResolvedValue(ready("work"));
   s3.identity.mockResolvedValue(signedIn);
   s3.buckets.mockResolvedValue(["alpha"]);
   show();
-  await choose(
-    await screen.findByRole("combobox", { name: "Bucket" }),
-    "Another bucket…",
-  );
+  const trigger = await screen.findByRole("combobox", { name: "Bucket" });
+  const description = "The bucket that keeps this workspace.";
+  const slot = (control: HTMLElement) =>
+    control.closest(".settings-list-row-trailing") as HTMLElement;
+  expect(screen.getByText(description)).toBeTruthy();
+  const listed = slot(trigger);
+  expect(trigger.className).toContain("w-60");
+
+  await choose(trigger, "Another bucket…");
   const input = (await screen.findByLabelText("Bucket")) as HTMLElement;
+  // jsdom has no layout, so this pins what keeps the row's height: the same description, and a
+  // trailing slot of the same 240px (w-60) shared by the field and the way back (an icon), so
+  // nothing takes the description's width or adds a line.
+  expect(screen.getByText(description)).toBeTruthy();
+  expect(slot(input)).toBe(listed);
+  const field = input.parentElement as HTMLElement;
+  expect(field.className).toContain("w-60");
   const back = screen.getByRole("button", { name: "Choose from the list" });
-  // jsdom has no layout, so this pins the structure that keeps the height: one flex row
-  // (not a column under the field) holding both, so the row is as tall as the 40px field.
-  expect(back.parentElement).toBe(input.parentElement);
-  const row = input.parentElement as HTMLElement;
-  expect(row.className).toContain("flex");
-  expect(row.className).not.toContain("flex-col");
-  expect(row.className).toContain("items-center");
+  expect(back.parentElement).toBe(field);
+  expect(back.className).toContain("shrink-0");
+  expect(back.textContent).toBe("");
 });
 
 test("a profile that may not list buckets has no list to go back to", async () => {
