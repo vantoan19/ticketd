@@ -48,7 +48,7 @@ function versionLabel(
   const fields = entry.changed.map((field) => fieldLabel(kind, field));
   return [
     remote
-      ? storage
+      ? `Kept in ${storage}`
       : entry.oldest
         ? "Earliest version kept"
         : (entry.device ?? "This desktop"),
@@ -260,20 +260,20 @@ export function RecordHistory({
           ? `From ${storage.full}. Restoring adds a new version; nothing is lost.`
           : "Kept for 30 days. Restoring adds a new version; nothing is lost."
       }
-      onSubmit={() => void restore()}
-      size="lg"
-      busy={busy}
-    >
-      <div className="sync-history-feedback">
-        {error && (
+      error={
+        error && (
           <FailureState
             failure={error.failure}
             onRetry={error.retry}
             size="inline"
             detailsVariant="popover"
           />
-        )}
-      </div>
+        )
+      }
+      onSubmit={() => void restore()}
+      size="lg"
+      busy={busy}
+    >
       <div className="sync-history">
         {!loaded ? (
           !error && (

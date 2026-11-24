@@ -108,6 +108,16 @@ test("lists versions, compares the newest earlier one with now, and restores it"
   expect(onClose).toHaveBeenCalled();
 });
 
+test("the list starts right under the header, with no band reserved for a failure", async () => {
+  open();
+  await screen.findByRole("navigation", { name: "Versions" });
+  const body = document.querySelector(".dialog-shell-body");
+  expect(body?.children).toHaveLength(1);
+  expect(body?.firstElementChild?.classList.contains("sync-history")).toBe(
+    true,
+  );
+});
+
 test("choosing a version shows what changed since; the current version cannot be restored", async () => {
   open();
   fireEvent.click(
@@ -342,6 +352,31 @@ test("an S3 binding reads, names and restores the bucket's versions, and never s
     ),
   );
   expect(document.body.textContent).not.toMatch(/drive/i);
+});
+
+test("a version kept in a storage is captioned the same way for Drive and S3, not by the bare name", async () => {
+  stored.drive = [
+    { id: "r1", timestamp: hours(24 * 40), device: null, changed: [] },
+  ];
+  stored.s3 = [
+    { id: "ver-9", timestamp: hours(24 * 40), device: null, changed: [] },
+  ];
+  for (const [provider, caption] of [
+    ["google_drive", "Kept in Google Drive"],
+    ["s3", "Kept in S3"],
+  ] as const) {
+    render(connected(history, provider));
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: /Older versions from (Drive|S3)/,
+      }),
+    );
+    const row = await screen.findByRole("button", {
+      name: new RegExp(`${caption}$`),
+    });
+    expect(row.querySelector("small")?.textContent).toBe(caption);
+    cleanup();
+  }
 });
 
 test("a failure reading one storage is gone when the History reads another", async () => {
