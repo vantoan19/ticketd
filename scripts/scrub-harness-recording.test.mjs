@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -8,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -24,8 +25,10 @@ function capture(t) {
   return {
     directory,
     output,
-    scrub(chunks) {
-      const contents = [Buffer.from("ticketd-harness-recording-v1\n")];
+    scrub(chunks, { roots, destination, args = [] } = {}) {
+      const contents = roots
+        ? [Buffer.from("ticketd-harness-recording-v2\n"), line(roots)]
+        : [Buffer.from("ticketd-harness-recording-v1\n")];
       for (const [direction, bytes] of chunks) {
         const header = Buffer.alloc(5);
         header[0] = direction;
@@ -33,7 +36,11 @@ function capture(t) {
         contents.push(header, bytes);
       }
       writeFileSync(input, Buffer.concat(contents));
-      return spawnSync(process.execPath, [cli, input, output], {
+      const movedInput = destination
+        ? join(destination, basename(input))
+        : input;
+      if (destination) copyFileSync(input, movedInput);
+      return spawnSync(process.execPath, [cli, ...args, movedInput, output], {
         encoding: "utf8",
       });
     },
@@ -131,6 +138,106 @@ test("scrubs structured and embedded identities while keeping protocol and tool 
   assert.match(third.server.unixPath, /\/files\/example\.txt$/);
   assert.match(third.server.command, /^cat .*\/private\/example\.txt$/);
   assert.match(third.server.path, /\\files\\example\.txt$/);
+});
+
+test("scrubs both original root spellings after a recording is copied", (t) => {
+  const { directory, output, scrub } = capture(t);
+  const { directory: destination } = capture(t);
+  const origin = directory.startsWith("/")
+    ? directory
+    : "/tmp/" + basename(directory);
+  const alternate = "/tmp/synthetic-symlink/" + basename(directory);
+  const result = scrub(
+    [
+      [
+        1,
+        line({
+          method: "session/new",
+          params: { cwd: origin + "/work", path: alternate + "/work/file.txt" },
+        }),
+      ],
+    ],
+    { roots: [origin, alternate], destination },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const { client } = JSON.parse(readFileSync(output, "utf8"));
+  assert.deepEqual(client.params, {
+    cwd: "/fixture/work",
+    path: "/fixture/work/file.txt",
+  });
+});
+
+test("scrubs a copied legacy recording with an explicit original root", (t) => {
+  const { directory, output, scrub } = capture(t);
+  const { directory: destination } = capture(t);
+  const origin = directory.startsWith("/")
+    ? directory
+    : "/tmp/" + basename(directory);
+  const alternate = "/tmp/synthetic-symlink/" + basename(directory);
+  const result = scrub(
+    [
+      [
+        1,
+        line({
+          method: "session/new",
+          params: { cwd: origin + "/work", path: alternate + "/work/file.txt" },
+        }),
+      ],
+    ],
+    {
+      destination,
+      args: ["--capture-root", origin, "--capture-root", alternate],
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const { client } = JSON.parse(readFileSync(output, "utf8"));
+  assert.deepEqual(client.params, {
+    cwd: "/fixture/work",
+    path: "/fixture/work/file.txt",
+  });
+});
+
+test("rejects a recording that grows past 64 MiB after its size is checked", (t) => {
+  const { directory, output } = capture(t);
+  const input = join(directory, "synthetic.wire");
+  const preload = join(directory, "grow-recording.cjs");
+  const frame = line({ method: "initialize" });
+  const chunk = Buffer.alloc(5);
+  chunk[0] = 1;
+  chunk.writeUInt32LE(frame.length, 1);
+  writeFileSync(
+    input,
+    Buffer.concat([
+      Buffer.from("ticketd-harness-recording-v1\n"),
+      chunk,
+      frame,
+    ]),
+  );
+  writeFileSync(
+    preload,
+    `const fs = require("node:fs");
+const fstat = fs.fstatSync;
+fs.fstatSync = (...args) => {
+  const stat = fstat(...args);
+  fs.truncateSync(process.argv[2], 64 * 1024 * 1024 + 1);
+  return stat;
+};
+require("node:module").syncBuiltinESMExports();
+`,
+  );
+  const result = spawnSync(
+    process.execPath,
+    ["--require", preload, cli, input, output],
+    {
+      encoding: "utf8",
+    },
+  );
+  assert.equal(result.status, 1);
+  assert.equal(
+    result.stderr,
+    "The input must be a recording file of at most 64 MiB.\n",
+  );
+  assert.equal(existsSync(output), false);
 });
 
 test("rejects malformed data before creating a fixture or printing private bytes", (t) => {
@@ -289,6 +396,41 @@ test("replaces a known account alias in a protocol label", (t) => {
   assert.equal(notice.server.text, "Report for fixture-account-1");
 });
 
+test("scrubs private paths in descriptive protocol labels", (t) => {
+  const { output, scrub } = capture(t);
+  const result = scrub([
+    [
+      1,
+      line({
+        method: "tools/call",
+        params: {
+          name: "/home/synthetic-label-owner/report.txt",
+          kind: "read",
+        },
+      }),
+    ],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const { client } = JSON.parse(readFileSync(output, "utf8"));
+  assert.deepEqual(client, {
+    method: "tools/call",
+    params: { name: "/fixture/home-1/report.txt", kind: "read" },
+  });
+});
+
+test("rejects a private path in a wire method without printing it", (t) => {
+  const { output, scrub } = capture(t);
+  const privatePath = "/home/synthetic-method-owner/tool";
+  const result = scrub([[1, line({ id: 1, method: privatePath })]]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(
+    result.stderr,
+    "Cannot safely scrub an alias in a protocol label.\n",
+  );
+  assert.equal(existsSync(output), false);
+});
+
 test("replaces a known account alias used as an identifier-shaped dictionary key", (t) => {
   const { output, scrub } = capture(t);
   const alias = "syntheticAccountAlias";
@@ -361,7 +503,7 @@ test("rejects an account alias that matches the wire method value", (t) => {
   assert.equal(result.stdout, "");
   assert.equal(
     result.stderr,
-    "Cannot safely scrub an account alias in a protocol label.\n",
+    "Cannot safely scrub an alias in a protocol label.\n",
   );
   assert.equal(existsSync(output), false);
 });
@@ -435,6 +577,43 @@ test("rejects a dictionary when account alias redaction would duplicate a key", 
     "Scrubbing would produce duplicate object keys.\n",
   );
   assert.equal(existsSync(output), false);
+});
+
+test("rejects a scrubbed RPC ID that would collide with another request", (t) => {
+  const { output, scrub } = capture(t);
+  const alias = "syntheticRpcOwner";
+  const result = scrub([
+    [1, line({ id: alias, method: "initialize" })],
+    [1, line({ id: "fixture-account-1", method: "session/new" })],
+    [2, line({ id: alias, result: { account: { displayName: alias } } })],
+    [2, line({ id: "fixture-account-1", result: {} })],
+  ]);
+  assert.equal(result.status, 1);
+  assert.equal(result.stdout, "");
+  assert.equal(result.stderr, "Scrubbing would produce duplicate RPC IDs.\n");
+  assert.equal(existsSync(output), false);
+});
+
+test("preserves RPC correlation in both directions and keeps string and numeric IDs distinct", (t) => {
+  const { output, scrub } = capture(t);
+  const alias = "syntheticRpcOwner";
+  const result = scrub([
+    [1, line({ id: alias, method: "initialize" })],
+    [2, line({ id: "7", method: "session/request_permission" })],
+    [1, line({ id: 7, method: "session/new" })],
+    [2, line({ id: alias, result: { account: { displayName: alias } } })],
+    [1, line({ id: "7", result: {} })],
+    [2, line({ id: 7, result: {} })],
+  ]);
+  assert.equal(result.status, 0, result.stderr);
+  const frames = readFileSync(output, "utf8")
+    .trimEnd()
+    .split("\n")
+    .map(JSON.parse);
+  assert.deepEqual(
+    frames.map(({ client, server }) => (client ?? server).id),
+    ["fixture-account-1", "7", 7, "fixture-account-1", "7", 7],
+  );
 });
 
 test("rejects frames with integers the scrubber cannot preserve", (t) => {
