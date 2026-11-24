@@ -578,6 +578,7 @@ async fn a_new_session_opens_with_new_chats_picks() {
             model: Some("sonnet".to_owned()),
             effort: Some("high".to_owned()),
             permission: Some("acceptEdits".to_owned()),
+            ..StartSettings::default()
         },
     };
     let opening = open_over(io, &request, Path::new(CLAUDE), Options::default());

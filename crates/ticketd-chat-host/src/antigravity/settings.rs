@@ -51,6 +51,12 @@ pub(super) fn options(select: &acp::SessionConfigSelect) -> Vec<&acp::SessionCon
     }
 }
 
+pub(super) fn offers(select: &acp::SessionConfigSelect, value: &str) -> bool {
+    options(select)
+        .iter()
+        .any(|option| option.value.0.as_ref() == value)
+}
+
 pub(super) fn update_mode(
     configs: &mut [acp::SessionConfigOption],
     mode: acp::SessionModeId,

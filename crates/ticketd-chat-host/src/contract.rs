@@ -180,6 +180,9 @@ pub struct Unattended {
 pub struct StartSettings {
     pub model: Option<String>,
     pub effort: Option<String>,
+    /// A confirmed effort carried across a permission restart and model change.
+    /// The harness can keep the new model's default if it no longer offers this level.
+    pub retain_effort_if_supported: bool,
     pub permission: Option<String>,
 }
 

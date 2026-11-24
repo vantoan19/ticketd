@@ -1097,16 +1097,26 @@ impl Supervisor {
                     .as_ref()
                     .and_then(|effort| effort.current.clone());
             }
+            let mut model_changed = false;
+            let mut effort_picked = false;
             for change in &runtime.setting_changes {
                 if change.state == SettingChangeState::Held {
                     let target = match change.setting {
-                        SettingKey::Model => &mut self.start_settings.model,
-                        SettingKey::Effort => &mut self.start_settings.effort,
+                        SettingKey::Model => {
+                            model_changed =
+                                self.start_settings.model.as_ref() != Some(&change.value);
+                            &mut self.start_settings.model
+                        }
+                        SettingKey::Effort => {
+                            effort_picked = true;
+                            &mut self.start_settings.effort
+                        }
                         SettingKey::Permission => &mut self.start_settings.permission,
                     };
                     *target = Some(change.value.clone());
                 }
             }
+            self.start_settings.retain_effort_if_supported = model_changed && !effort_picked;
         }
         self.start_settings.permission.get_or_insert(value);
         self.permission_restart_pending = true;

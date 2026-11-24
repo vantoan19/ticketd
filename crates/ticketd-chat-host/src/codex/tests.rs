@@ -802,7 +802,7 @@ async fn a_new_session_sends_the_chosen_model_and_effort_with_its_first_turn() {
         settings: StartSettings {
             model: Some("gpt-b".to_owned()),
             effort: Some("high".to_owned()),
-            permission: None,
+            ..StartSettings::default()
         },
     };
     let (opened, ()) = tokio::join!(open_over(io, &request, options()), peer.play());

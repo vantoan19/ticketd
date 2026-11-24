@@ -779,6 +779,7 @@ pub(super) fn recorded_settings(recorded: Option<&str>) -> StartSettings {
         permission: reopen("permission_mode")
             .filter(|mode| super::report::offered_permission(mode))
             .map(str::to_owned),
+        ..StartSettings::default()
     }
 }
 
