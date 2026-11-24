@@ -538,6 +538,59 @@ fn project_register_warns_about_a_remote_mismatch_and_still_registers() {
     }
 }
 
+#[cfg(unix)]
+#[test]
+fn project_writes_return_saved_json_when_stderr_is_closed() {
+    use std::{os::unix::net::UnixStream, process::Stdio};
+
+    let dir = tempfile::tempdir().unwrap();
+    let original = dir.path().join("original");
+    let other = dir.path().join("other");
+    let remote = "ghe.example.com/Team/Package";
+    std::fs::create_dir(&original).unwrap();
+    git_checkout(&other, "git@ghe.example.com:Other/Fork.git");
+
+    let run_with_closed_stderr = |args: &[&str]| -> serde_json::Value {
+        let (reader, writer) = UnixStream::pair().unwrap();
+        drop(reader);
+        let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(args)
+            .env("HOME", dir.path())
+            .env("XDG_DATA_HOME", dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .stderr(Stdio::from(std::os::fd::OwnedFd::from(writer)))
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{args:?}: {}", output.status);
+        serde_json::from_slice(&output.stdout).unwrap()
+    };
+    let created = run_with_closed_stderr(&[
+        "project",
+        "create",
+        "Package",
+        original.to_str().unwrap(),
+        "--remote",
+        remote,
+    ]);
+    assert_eq!(created["remote"], remote);
+    let id = created["id"].as_str().unwrap();
+    let registered = run_with_closed_stderr(&["project", "register", id, other.to_str().unwrap()]);
+    let canonical = std::fs::canonicalize(other).unwrap();
+    assert!(
+        registered["paths"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|path| path == canonical.to_str().unwrap())
+    );
+    let persisted: serde_json::Value =
+        serde_json::from_str(&run(dir.path(), &["project", "show", id])).unwrap();
+    assert_eq!(registered, persisted);
+}
+
 #[allow(clippy::unwrap_used)]
 fn git_checkout(path: &Path, origin: &str) {
     std::fs::create_dir(path).unwrap();

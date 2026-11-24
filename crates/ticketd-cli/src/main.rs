@@ -1714,7 +1714,9 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     remote.as_deref(),
                 )?;
                 if project.remote.is_some() {
-                    eprintln!(
+                    // The hint is best effort so stdout can report the committed project.
+                    let _ = writeln!(
+                        std::io::stderr().lock(),
                         "hint: Preview connecting this project with `ticketd project connect-source {} --preview`.",
                         project.id
                     );
@@ -1756,7 +1758,8 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             ProjectCommand::Register { id, path } => {
                 let registration = workspace.register_checkout_with_warning(&id, &path)?;
                 if let Some(warning) = registration.warning {
-                    eprintln!(
+                    let _ = writeln!(
+                        std::io::stderr().lock(),
                         "warning: The checkout's detected remote {} differs from the Project remote {}.",
                         warning.checkout_remote, warning.project_remote
                     );
