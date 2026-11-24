@@ -145,7 +145,7 @@ const open = async (stored: Automation[] = []) => {
 const openFirst = async (stored: Automation[]) => {
   await open(stored);
   const rows = screen.getByRole("list", { name: "Automations" });
-  fireEvent.click(within(rows).getAllByRole("button")[0]!);
+  fireEvent.click((await within(rows).findAllByRole("button"))[0]!);
   return screen.findByRole("application", { name: "Steps" });
 };
 /** Opens the menu a button carries and chooses an item from it. */
