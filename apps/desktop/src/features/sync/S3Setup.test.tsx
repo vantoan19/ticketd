@@ -25,6 +25,7 @@ vi.mock("@/lib/s3-api", async (original) => ({
     identity: vi.fn(),
     signIn: vi.fn(),
     buckets: vi.fn(),
+    chooseCli: vi.fn(),
   },
 }));
 vi.mock("@/lib/sync-api", async (original) => ({
@@ -110,6 +111,49 @@ test("the install guide opens through the app", async () => {
   expect(workspaceClient.openLink).toHaveBeenCalledWith(
     expect.stringContaining("docs.aws.amazon.com/cli"),
   );
+});
+
+test("a program chosen for a missing or old AWS CLI is checked, then the profiles are read again", async () => {
+  s3.profiles.mockResolvedValueOnce({
+    cli: { state: "too_old", found: "aws-cli/1.27.0" },
+    profiles: [],
+  });
+  show();
+  await screen.findByText("The AWS CLI is too old");
+
+  s3.chooseCli.mockResolvedValue(true);
+  s3.profiles.mockResolvedValueOnce(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(null);
+  fireEvent.click(
+    screen.getByRole("button", { name: "Choose the aws program…" }),
+  );
+  expect(await screen.findByLabelText("AWS profile")).toBeTruthy();
+  expect(s3.profiles).toHaveBeenCalledTimes(2);
+});
+
+test("cancelling the file picker changes nothing, and a program ticketd refuses says why", async () => {
+  s3.profiles.mockResolvedValue({ cli: { state: "missing" }, profiles: [] });
+  show();
+  const choose = await screen.findByRole("button", {
+    name: "Choose the aws program…",
+  });
+
+  s3.chooseCli.mockResolvedValueOnce(false);
+  fireEvent.click(choose);
+  await waitFor(() => expect(s3.chooseCli).toHaveBeenCalledTimes(1));
+  expect(s3.profiles).toHaveBeenCalledTimes(1);
+
+  s3.chooseCli.mockRejectedValueOnce(
+    hostFailure("ticketd needs AWS CLI version 2.13 or later"),
+  );
+  fireEvent.click(choose);
+  await revealFailureDetails();
+  expect(
+    await screen.findByText(/ticketd needs AWS CLI version 2\.13 or later/),
+  ).toBeTruthy();
+  expect(screen.getByText("The AWS CLI isn't installed")).toBeTruthy();
+  expect(s3.profiles).toHaveBeenCalledTimes(1);
 });
 
 test("without profiles it says how to make one", async () => {

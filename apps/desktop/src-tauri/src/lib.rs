@@ -2120,6 +2120,7 @@ pub fn run() -> Result<(), tauri::Error> {
             diagnostics_commands::diagnostics_export,
             sync_commands::sync_connect,
             s3_commands::s3_profiles,
+            s3_commands::s3_choose_cli,
             s3_commands::s3_identity,
             s3_commands::s3_sign_in,
             s3_commands::s3_buckets,

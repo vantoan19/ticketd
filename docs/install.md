@@ -211,8 +211,10 @@ signs in through the AWS CLI you already use and stores no AWS secret.
 What you need:
 
 - **AWS CLI v2, version 2.13 or later**, on each desktop. ticketd looks in
-  `/opt/homebrew/bin`, `/usr/local/bin` and `/usr/bin`, because an app opened from
-  Finder does not get your shell's `PATH`.
+  `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/usr/local/aws-cli`, because
+  an app opened from Finder does not get your shell's `PATH`. If yours is somewhere
+  else (installed with pipx or conda, say), choose it with **Choose the aws program…**
+  when setup says the CLI isn't installed; ticketd remembers the choice on that desktop.
 - **A profile.** Create one in a terminal with `aws configure sso` (IAM Identity
   Center) or `aws configure` (access keys). Assumed roles, MFA and credential helpers
   such as aws-vault work unchanged, and each desktop picks its own profile, under any
