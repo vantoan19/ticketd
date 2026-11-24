@@ -58,10 +58,12 @@ export function bridgeDefault(
     case "search_tags":
     case "source_conversation":
     case "source_repository_routes":
+    case "project_source_candidates":
     case "sync_conflicts": // without sync: nothing to review, every file local
     case "sync_notices":
     case "attachment_availability":
     case "list_trash":
+    case "source_configuration_summary":
     case "list_sources": // no built-in connector unless a test supplies one
       return [];
     case "count_tickets":
@@ -79,6 +81,8 @@ export function bridgeDefault(
       return {
         connection: "not_connected",
         account: null,
+        provider: "google_drive",
+        s3: null,
         folder: null,
         state: "saved_locally",
         last_synced_at: null,

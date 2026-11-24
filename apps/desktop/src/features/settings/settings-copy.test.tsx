@@ -20,6 +20,7 @@ import { sourcesClient } from "@/lib/api/sources";
 import { workspaceClient } from "@/lib/api/workspace";
 import { syncApi } from "@/lib/sync-api";
 import { TestReads } from "@/lib/workspace-reads/testing";
+import { githubSource } from "@/test/source-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn().mockImplementation(async (command: string) =>
@@ -78,6 +79,7 @@ vi.mock("@/lib/api/sources", async (original) => ({
   sourcesClient: {
     list: vi.fn(),
     checkConnection: vi.fn(),
+    configurationSummary: vi.fn(),
     repositoryRoutes: vi.fn().mockResolvedValue([]),
     options: vi.fn(),
     preview: vi.fn(),
@@ -223,18 +225,8 @@ test("every search entry's title and description are on the page it opens", asyn
 }, 30_000);
 
 test("a source page carries the title and description of its search entries", async () => {
-  vi.mocked(sourcesClient.list).mockResolvedValue([
-    {
-      connector: {
-        provider: "github",
-        name: "GitHub",
-        contract_version: 1,
-        capabilities: ["discover", "fetch"],
-        schema: { fields: [] },
-      },
-      saved: null,
-    },
-  ]);
+  vi.mocked(sourcesClient.list).mockResolvedValue([githubSource]);
+  vi.mocked(sourcesClient.configurationSummary).mockResolvedValue([]);
   vi.mocked(sourcesClient.checkConnection).mockResolvedValue({
     account: "octo",
   });

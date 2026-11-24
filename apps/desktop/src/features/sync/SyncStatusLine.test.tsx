@@ -62,9 +62,9 @@ async function footer(status: SyncStatus) {
   await waitFor(() => expect(api.status).toHaveBeenCalled());
 }
 const line = () => screen.findByRole("button", { expanded: false });
-async function popover() {
+async function popover(name = "Google Drive sync") {
   fireEvent.click(await line());
-  return screen.findByRole("dialog", { name: "Google Drive sync" });
+  return screen.findByRole("dialog", { name });
 }
 const change = (title: string) => ({
   kind: "ticket" as const,
@@ -224,6 +224,55 @@ test("an expired sign-in offers Reconnect in the popover; the line stays one tar
   expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
 });
 
+test("an ended AWS session asks quietly on the line and signs in from the popover", async () => {
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "authorization_expired",
+      pending_uploads: [change("A")],
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "AWS sign-in expiredSaved on this computer",
+  );
+  // Nothing opened by itself.
+  expect(screen.queryByRole("dialog")).toBeNull();
+  let finish: (status: SyncStatus) => void = () => {};
+  api.recover.mockReturnValue(
+    new Promise<SyncStatus>((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("Sign in to AWS again");
+  expect(dialog.textContent).toContain("1 change uploads once you sign in.");
+  expect(
+    within(dialog).queryByRole("button", { name: "Reconnect" }),
+  ).toBeNull();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(api.recover).toHaveBeenCalled());
+  expect(
+    (
+      within(dialog).getByRole("button", {
+        name: "Waiting for sign-in…",
+      }) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
+
+  // Signed in: sync ran again and what waited is uploaded.
+  finish(syncStatus({ provider: "s3" }));
+  await waitFor(() =>
+    expect(
+      within(dialog).queryByRole("button", { name: "Sign in" }),
+    ).toBeNull(),
+  );
+  fireEvent.keyDown(dialog, { key: "Escape" });
+  await waitFor(async () =>
+    expect((await line()).textContent).toBe("S3 synced1 min ago"),
+  );
+});
+
 test("the popover is reachable by keyboard and leads to Sync settings", async () => {
   await footer(syncStatus());
   const trigger = await line();
@@ -277,6 +326,51 @@ test("a sync failure with no state of its own needs attention and offers Retry",
   const dialog = await popover();
   expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(dialog.textContent).toContain("disk I/O error");
+});
+
+test("a changed S3 service reads as a stop on the line, with Retry and the way to Disconnect", async () => {
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "service_changed",
+      recovery_message: "This profile now points to another S3 service.",
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "S3 sync stoppedSaved on this computer",
+  );
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("Sync stopped");
+  expect(dialog.textContent).toContain(
+    "This profile now points to another S3 service.",
+  );
+  expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(
+    within(dialog).getByRole("button", { name: "Disconnect in Settings" }),
+  ).toBeTruthy();
+});
+
+test("a missing aws program reads as a stop on the line, with Retry and the way to choose it", async () => {
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "cli_unavailable",
+      recovery_message: "The AWS CLI was not found.",
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "AWS CLI neededSaved on this computer",
+  );
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("The AWS CLI was not found.");
+  expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(
+    within(dialog).getByRole("button", {
+      name: "Choose the aws program in Settings",
+    }),
+  ).toBeTruthy();
 });
 
 test("a conflict waiting while offline: the popover offers Review and keeps Retry", async () => {
@@ -353,4 +447,50 @@ test("the same status sent again re-renders nothing", async () => {
     shellRendered.mock.calls.length,
     readerRendered.mock.calls.length,
   ]).toEqual(before);
+});
+
+test("an S3 binding names S3 on the line and in the popover, never Drive", async () => {
+  await footer(syncStatus({ provider: "s3" }));
+  expect((await line()).textContent).toBe("S3 synced1 min ago");
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("S3 synced");
+  expect(dialog.textContent).not.toMatch(/drive/i);
+  cleanup();
+
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "upload_pending",
+      pending_uploads: [change("A")],
+    }),
+  );
+  expect((await popover("S3 sync")).textContent).toContain("Uploading to S3");
+  cleanup();
+
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "saved_locally",
+      recovery: "rate_limited",
+      pending_uploads: [change("A")],
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "Saved on this computerS3 is busy · 1 change waiting",
+  );
+  cleanup();
+
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "authorization_expired",
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "AWS sign-in expiredSaved on this computer",
+  );
+  expect((await popover("S3 sync")).textContent).toContain(
+    "Sign in to AWS again",
+  );
 });

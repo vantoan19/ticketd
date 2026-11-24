@@ -42,7 +42,7 @@ PATH` accepts `--remote host/owner/name` or `--clear-remote`. `project show` and
 detected remote still succeeds and prints a warning to stderr.
 
 When project creation sets a Project remote, stderr includes a hint to preview
-connecting the project to GitHub.
+connecting the project to a ticket source.
 
 ```sh
 ticketd project connect-source PROJECT_ID --preview
@@ -52,9 +52,16 @@ ticketd project connect-source PROJECT_ID --expect FINGERPRINT
 The offline preview returns the discovery action in `source` (`add_repository`,
 `already_listed`, or `not_connected`), ticket references in `tickets`, and the
 `fingerprint` to pass with `--expect`. Confirmation returns `repository_added`
-and `linked_tickets`. If the effect changed, get a new preview. If no GitHub source
-is saved, connect it first with `ticketd source save github --set repositories=OWNER/NAME`
-using the preview's `repository`, then preview again.
+and `linked_tickets`. If several connections match, pass `--connection ID` for
+preview and confirmation. If the effect changed, get a new preview. An
+unconfigured preview gives the `provider` and `repository` to use with
+`ticketd source add PROVIDER --set repositories=OWNER/NAME` before previewing again.
+For GitHub Enterprise Server, set `TICKETD_GITHUB_API_URL` to your API address
+(for example `https://git.example.com/api/v3`) before adding and using the connection.
+
+If you selected a GitHub CLI account and its login changes, sign in to `gh` with
+the new login and run `ticketd source CONNECTION edit --set account=NEW_LOGIN`.
+Ticketd keeps the connection when GitHub confirms the same user ID.
 
 ## Recover a legacy GitHub issue link
 
@@ -69,28 +76,47 @@ ticketd source reconcile-github T-KQ12 --issue https://github.com/OWNER/NAME/iss
 GitHub must confirm the saved stable issue ID at the URL you supply. A new
 repository or issue number is accepted when that ID stays the same. The command
 repairs the existing ticket's source link and keeps its current ownership.
-Run `ticketd source refresh --ticket T-KQ12` afterward if GitHub still owns the
+Run `ticketd source CONNECTION refresh --ticket T-KQ12` afterward if GitHub still owns the
 ticket. If discovery held a separate issue with the same ID on another GitHub
 host, refresh that host again after confirming the legacy ticket's link.
 
 ## Recover an unresolved publication
 
 Run `ticketd source resolve T-KQ12` to review the attempt. Recovery uses the
-GitHub host that received the create request. If the source uses a different
-host, connect it to the original host and review again.
+original connection when available. For GitHub, the connection must use the
+same hostname and port that received the create request.
 
-For an older attempt with an unknown host, verify which host received the
-original request before confirming it. Connect the source to that host and
-supply its hostname, such as `github.com`, without a protocol or repository path.
+For an older attempt with an unknown host or port, verify which site received
+the original request. Connect the source to that site and supply its hostname,
+such as `github.com`. For a nondefault port use `hostname:port`, without a
+protocol or repository path.
 
 ```sh
 ticketd source resolve T-KQ12 --confirm-host github.com
 ticketd source resolve T-KQ12
 ```
 
-`--confirm-host` records the host locally. The attempt stays unresolved until
-you attach the verified issue or confirm that nothing was created. If you
-cannot verify the original host, leave the attempt unresolved.
+For GitHub Enterprise Server, set `TICKETD_GITHUB_API_URL` to the original
+site's API URL for both confirmation and recovery.
+
+```sh
+TICKETD_GITHUB_API_URL=https://git.example.com:8443/api/v3 \
+  ticketd source resolve T-KQ12 --confirm-host git.example.com:8443
+```
+
+`--confirm-host` records the site locally. If the original GitHub connection
+is unavailable and you have verified the issue, explicitly choose a saved
+GitHub connection on the original site.
+
+```sh
+ticketd source resolve T-KQ12 --issue owner/repo#7 --using-connection github
+```
+
+GitHub verifies the issue in the original repository. When the create response
+didn't record an issue, the selected account must match the issue's creator and
+the issue's date must be consistent with the attempt. The usual review for
+different content still applies. Confirming that nothing was created requires
+the original connection.
 
 ## JSON output
 
@@ -114,6 +140,58 @@ Runtime failures exit with status 1 and argument errors with status 2.
 - `list --latest-update` and `search --latest-update` print
   `{"ticket": ..., "latest_update": ...}` rows. The update, with its bounded brief, appears only
   beside the ticket; the ticket inside the row has no `latest_update` of its own.
+
+## Ticket sources
+
+Use `ticketd source list` to find a provider and read its settings schema.
+Each row has a `connector` description and a `saved` connection. An available
+provider with no saved connection has `saved: null`. Use `connector.provider`
+to add a connection and `saved.id` to operate on one. A display name can change
+while the ID stays the same. The `list` and `search` filter `--source PROVIDER`
+matches externally owned tickets across the provider's connections.
+Use `--source local` for locally owned tickets.
+
+```sh
+ticketd source add PROVIDER --set KEY=VALUE --preview
+ticketd source add PROVIDER --name "Work" --set KEY=VALUE
+ticketd source CONNECTION status
+ticketd source CONNECTION refresh
+```
+
+Adding or editing a connection validates and stores its settings. Refresh
+imports matches and updates tracked tickets. Use `refresh --ticket T-KQ1` to
+refresh one externally owned ticket. Inspect the JSON report and exit status,
+including when a refresh was partly successful. Interactive refresh prints
+progress on stderr. Press Ctrl+C to cancel and receive exit status 130.
+
+`--set` splits multi-select values at commas. If a selection value itself
+contains a comma, pass it as one JSON array element with `--config-file`,
+for example `{"region":["North, America"]}`.
+
+Supply secrets in a JSON object through stdin with `--config-file -`.
+Use `ticketd source CONNECTION sign-in --config-file -` to replace credentials
+for a saved connection without changing its discovery settings. The author guide
+also covers keychain storage, environment overrides and password commands.
+[Credential setup](ticket-source-extensions.md#supplying-credentials)
+
+Use `ticketd source extension list` to inspect extension registrations.
+`ticketd source extension add PATH` asks for approval before running and
+installing a local package. `ticketd source extension link PATH` runs the
+development copy in place. `ticketd source extension remove ID` removes the
+registration. Test a registered extension with
+`ticketd source conformance PROVIDER --set KEY=VALUE`. The default run is
+read-only and prints a report with any skip reasons. Use `--strict` for additional
+required observations. `--publish DESTINATION` opts into one tracker write.
+[Author guide](ticket-source-extensions.md)
+
+For publishing a local ticket and resolving an uncertain attempt, open the
+bundled source guide with `ticketd skills get sources`.
+For Linear, pass the team UUID from the preview when choosing between configured
+teams. Replace `linear` with your connection ID if it differs.
+
+```sh
+ticketd source publish T-KQ1 --connection linear --destination TEAM_UUID --preview
+```
 
 ## Atomic batches
 

@@ -14,6 +14,9 @@ use serde_json::{Value, json};
 use super::{credentials::Secret, transport::TransportError, *};
 use crate::source::{Engine, Surface, schema::ConfigValues};
 
+#[path = "conformance.rs"]
+mod conformance_fixture;
+
 const API: &str = "https://api.example.test";
 const TOKEN: &str = "ghp_secret_token_value";
 
@@ -22,6 +25,7 @@ struct Fixture {
     routes: Mutex<BTreeMap<String, VecDeque<Result<HttpResponse, TransportError>>>>,
     requests: Mutex<Vec<HttpRequest>>,
     on_request: Mutex<Option<RequestHook>>,
+    accounts: Mutex<BTreeMap<String, (String, u64)>>,
 }
 
 struct RequestHook {
@@ -37,6 +41,17 @@ impl Fixture {
             .entry(url.to_owned())
             .or_default()
             .push_back(response);
+    }
+
+    fn authenticate_as(&self, api: &str, account: &str) {
+        self.authenticate_account(api, account, if account == "bob" { 2 } else { 1 });
+    }
+
+    fn authenticate_account(&self, api: &str, account: &str, id: u64) {
+        self.accounts
+            .lock()
+            .unwrap()
+            .insert(format!("{api}/user"), (account.into(), id));
     }
 
     fn urls(&self) -> Vec<String> {
@@ -71,6 +86,14 @@ impl HttpTransport for Shared {
             .unwrap()
             .get_mut(&request.url)
             .and_then(VecDeque::pop_front)
+            .or_else(|| {
+                self.0
+                    .accounts
+                    .lock()
+                    .unwrap()
+                    .get(&request.url)
+                    .map(|(account, id)| ok(json!({"login": account, "id": id})))
+            })
             .unwrap_or_else(|| Err(format!("no fixture for {}", request.url).into()))
     }
 }
@@ -89,14 +112,23 @@ fn setup(token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
 
 fn setup_at(api: &str, token: Option<&'static str>) -> (Arc<Fixture>, Engine) {
     let fixture = Arc::new(Fixture::default());
-    let connector = GithubConnector::new(
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(connector_at(api, &fixture, token)))
+        .unwrap();
+    (fixture, engine)
+}
+
+fn connector(fixture: &Arc<Fixture>, token: Option<&'static str>) -> GithubConnector {
+    connector_at(API, fixture, token)
+}
+
+fn connector_at(api: &str, fixture: &Arc<Fixture>, token: Option<&'static str>) -> GithubConnector {
+    GithubConnector::new(
         api,
         Box::new(Shared(fixture.clone())),
         Box::new(Token(token)),
-    );
-    let mut engine = Engine::new();
-    engine.register(Box::new(connector)).unwrap();
-    (fixture, engine)
+    )
 }
 
 fn ok(body: Value) -> Result<HttpResponse, TransportError> {
@@ -128,10 +160,10 @@ fn issue(id: u64, number: u64, repo: &str) -> Value {
     json!({
         "id": id, "number": number, "title": format!("Issue {number}"),
         "body": "Details", "state": "open", "state_reason": null,
-        "html_url": format!("https://github.example/{repo}/issues/{number}"),
+        "html_url": format!("{API}/{repo}/issues/{number}"),
         "repository_url": format!("{API}/repos/{repo}"),
         "assignees": [{"login": "octo"}], "labels": [{"name": "bug"}, "plain"],
-        "user": {"login": "alice"},
+        "user": {"login": "alice", "id": 1},
         "created_at": "2026-01-01T00:00:00Z", "updated_at": "2026-01-02T00:00:00Z"
     })
 }
@@ -218,7 +250,7 @@ fn a_legacy_publication_holds_matching_github_issues_without_project_remote_prov
             .unwrap(),
         None
     );
-    fixture.respond(&format!("{api}/user"), ok(json!({"login": "octo"})));
+    fixture.authenticate_as(api, "octo");
     for (id, repository) in [(7, "o/one"), (8, "o/other")] {
         let listed = format!("{api}/repos/{repository}/issues?state=open&per_page=100");
         fixture.respond(&listed, ok(json!([])));
@@ -273,15 +305,19 @@ fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
     let values = config(json!({"repositories": ["o/one"]}));
     let public_api = "https://api.github.com";
     let (public, public_engine) = setup_at(public_api, Some(TOKEN));
+    public.authenticate_as(public_api, "octo");
     assert_eq!(
-        public_engine.partitions("github", &values).unwrap(),
+        public_engine
+            .check("github", &values)
+            .unwrap()
+            .derived
+            .partitions,
         ["o/one"]
     );
     let mut public_issue = issue(7, 7, "o/one");
     public_issue["title"] = json!("Public issue");
     public_issue["html_url"] = json!("https://github.com/o/one/issues/7");
     let listed = |api| format!("{api}/repos/o/one/issues?state=open&per_page=100");
-    public.respond(&format!("{public_api}/user"), ok(json!({"login": "octo"})));
     public.respond(&listed(public_api), ok(json!([public_issue])));
     workspace
         .save_source(&public_engine, "github", &values)
@@ -306,7 +342,13 @@ fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
     let (enterprise, enterprise_engine) = setup(Some(TOKEN));
     let mut enterprise_issue = issue(7, 7, "o/one");
     enterprise_issue["title"] = json!("Enterprise issue");
+    enterprise.authenticate_as(API, "octo");
     enterprise.respond(&listed(API), ok(json!([enterprise_issue])));
+    enterprise.respond(&listed(API), ok(json!([enterprise_issue])));
+    let enterprise_source = workspace
+        .add_source_connection(&enterprise_engine, "github", None, None, &values)
+        .unwrap()
+        .source;
     for suffix in ["comments", "events"] {
         enterprise.respond(
             &format!("{API}/repos/o/one/issues/7/{suffix}?per_page=100"),
@@ -314,7 +356,11 @@ fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
         );
     }
     workspace
-        .refresh_sources(&enterprise_engine, &Default::default())
+        .refresh_connection(
+            &enterprise_engine,
+            &enterprise_source.id,
+            &Default::default(),
+        )
         .unwrap();
     let tickets = workspace.list_tickets().unwrap();
     assert_eq!(tickets.len(), 2);
@@ -354,13 +400,179 @@ fn switching_github_hosts_keeps_colliding_issue_ids_and_locators_separate() {
     enterprise.respond(&listed(API), ok(json!([])));
     enterprise.respond(&format!("{API}/repos/o/one/issues/7"), ok(enterprise_issue));
     workspace
-        .refresh_sources(&enterprise_engine, &Default::default())
+        .refresh_connection(
+            &enterprise_engine,
+            &enterprise_source.id,
+            &Default::default(),
+        )
         .unwrap();
     assert_eq!(membership(&workspace, &public_ticket.reference), Some(true));
     assert_eq!(
         membership(&workspace, &enterprise_ticket.reference),
         Some(false)
     );
+}
+
+#[test]
+fn enterprise_issue_scopes_keep_nondefault_ports_separate() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    crate::create_workspace_at_format_version(&path, 96).unwrap();
+    rusqlite::Connection::open(&path).unwrap().execute_batch(
+        "INSERT INTO tickets (id, reference, title, body, status) VALUES
+             ('known', 'T-KQ7', 'Original port', '', 'Todo'),
+             ('default', 'T-KQ8', 'Default port', '', 'Todo'),
+             ('ambiguous', 'T-KQ9', 'Unverified port', '', 'Todo');
+         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin, partition, repository)
+         VALUES ('known', 'github', '@forge.example:7', 'o/r#7', 'o/r#7', 'https://forge.example:8443/o/r/issues/7', 'imported', '@forge.example/o/r', 'forge.example/o/r'),
+                ('default', 'github', '@forge.example:8', 'o/r#8', 'o/r#8', 'https://forge.example/o/r/issues/8', 'imported', '@forge.example/o/r', 'forge.example/o/r'),
+                ('ambiguous', 'github', '@forge.example:9', 'o/r#9', 'o/r#9', '', 'imported', '@forge.example/o/r', 'forge.example/o/r');
+         INSERT INTO external_ownership (ticket_id, authority) VALUES
+                ('known', 'external'), ('default', 'external'), ('ambiguous', 'external');
+         INSERT INTO source_sync (ticket_id, state_category) VALUES
+                ('known', 'open'), ('default', 'open'), ('ambiguous', 'open');"
+    ).unwrap();
+    let mut workspace = crate::Workspace::open(&path).unwrap();
+    let id = |workspace: &crate::Workspace, reference: &str| {
+        workspace.show_ticket(reference).unwrap().source.unwrap().id
+    };
+    assert_eq!(id(&workspace, "T-KQ7"), "@forge.example:8443:7");
+    assert_eq!(id(&workspace, "T-KQ8"), "@forge.example:8");
+    assert_eq!(id(&workspace, "T-KQ9"), "@forge.example:9");
+
+    let first_api = "https://forge.example:8443/api/v3";
+    let (first, first_engine) = setup_at(first_api, Some(TOKEN));
+    first.authenticate_as(first_api, "octo");
+    let values = config(json!({"repositories": ["o/r"]}));
+    first.respond(
+        &format!("{first_api}/repos/o/r/issues?state=open&per_page=100"),
+        ok(json!([issue(7, 7, "o/r")])),
+    );
+    let first_saved = workspace
+        .save_source(&first_engine, PROVIDER, &values)
+        .unwrap();
+    assert_eq!(first_saved.preview.already_here, 1);
+    assert_eq!(
+        workspace
+            .ticket_source_connection("T-KQ7")
+            .unwrap()
+            .as_deref(),
+        Some("github")
+    );
+
+    let second_site = "https://forge.example:9443";
+    let second_api = &format!("{second_site}/api/v3");
+    let (second, second_engine) = setup_at(second_api, Some(TOKEN));
+    second.authenticate_as(second_api, "octo");
+    let list = format!("{second_api}/repos/o/r/issues?state=open&per_page=100");
+    let items: Vec<_> = [7, 8, 9]
+        .into_iter()
+        .map(|id| {
+            let mut item = issue(id, id, "o/r");
+            item["html_url"] = json!(format!("{second_site}/o/r/issues/{id}"));
+            item
+        })
+        .collect();
+    second.respond(&list, ok(json!(items)));
+    let second_saved = workspace
+        .add_source_connection(&second_engine, PROVIDER, Some("github-2"), None, &values)
+        .unwrap();
+    assert_eq!(second_saved.preview.already_here, 0);
+    second.respond(&list, ok(json!(items)));
+    for id in [7, 8] {
+        for part in ["comments", "events"] {
+            second.respond(
+                &format!("{second_api}/repos/o/r/issues/{id}/{part}?per_page=100"),
+                ok(json!([])),
+            );
+        }
+    }
+    let outcome = workspace
+        .refresh_connection(&second_engine, "github-2", &Default::default())
+        .unwrap();
+    assert_eq!(
+        outcome
+            .imported
+            .iter()
+            .map(|reference| id(&workspace, reference))
+            .collect::<Vec<_>>(),
+        ["@forge.example:9443:7", "@forge.example:9443:8"]
+    );
+    assert!(
+        outcome
+            .failures
+            .iter()
+            .any(|failure| failure.reference.as_deref() == Some("T-KQ9")
+                && failure.message.contains("reconcile-github"))
+    );
+    assert_eq!(id(&workspace, "T-KQ7"), "@forge.example:8443:7");
+    assert_eq!(id(&workspace, "T-KQ8"), "@forge.example:8");
+    assert_eq!(id(&workspace, "T-KQ9"), "@forge.example:9");
+
+    let project = workspace
+        .create_project_with_remote(
+            "Second site",
+            dir.path().to_str().unwrap(),
+            Some("forge.example/o/r"),
+        )
+        .unwrap();
+    let preview = workspace
+        .preview_connect_source(&second_engine, "github-2", &project.id)
+        .unwrap();
+    let mut imported = outcome.imported;
+    imported.sort();
+    assert_eq!(preview.tickets, imported);
+    let backfill = workspace
+        .connect_source(
+            &second_engine,
+            "github-2",
+            &project.id,
+            &preview.fingerprint,
+        )
+        .unwrap();
+    assert_eq!(backfill.linked_tickets, imported);
+    for reference in ["T-KQ7", "T-KQ8", "T-KQ9"] {
+        assert!(
+            workspace
+                .show_ticket(reference)
+                .unwrap()
+                .project_id
+                .is_none()
+        );
+    }
+
+    let default_api = "https://forge.example/api/v3";
+    let (default_site, default_engine) = setup_at(default_api, Some(TOKEN));
+    default_site.authenticate_as(default_api, "octo");
+    default_site.respond(
+        &format!("{default_api}/repos/o/r/issues?state=open&per_page=100"),
+        ok(json!([])),
+    );
+    workspace
+        .add_source_connection(&default_engine, PROVIDER, Some("github-3"), None, &values)
+        .unwrap();
+    let preview = workspace
+        .preview_connect_source(&default_engine, "github-3", &project.id)
+        .unwrap();
+    assert_eq!(preview.tickets, ["T-KQ8"]);
+    let backfill = workspace
+        .connect_source(
+            &default_engine,
+            "github-3",
+            &project.id,
+            &preview.fingerprint,
+        )
+        .unwrap();
+    assert_eq!(backfill.linked_tickets, ["T-KQ8"]);
+    assert!(workspace.show_ticket("T-KQ9").unwrap().project_id.is_none());
+}
+
+#[test]
+fn a_pinned_github_connection_names_its_script_token() {
+    let connector = GithubConnector::ambient_for(Some("github-2"), Some("octo"));
+    let hint = connector.presentation().sign_in.terminal_hint.unwrap();
+    assert!(hint.contains("TICKETD_SOURCE_GITHUB_2_TOKEN"));
+    assert!(!hint.contains("TICKETD_GITHUB_TOKEN"));
 }
 
 #[test]
@@ -406,7 +618,7 @@ fn data_residency_discovery_reuses_legacy_tickets_and_routes_by_their_web_host()
     }
     let values = config(json!({"repositories": ["o/one"]}));
     let listed = format!("{api}/repos/o/one/issues?state=open&per_page=100");
-    fixture.respond(&format!("{api}/user"), ok(json!({"login": "octo"})));
+    fixture.authenticate_as(api, "octo");
     fixture.respond(&listed, ok(json!(issues)));
     let saved = workspace.save_source(&engine, "github", &values).unwrap();
     assert_eq!(saved.preview.already_here, 2);
@@ -453,7 +665,7 @@ fn discovery_withholds_a_possible_legacy_match_even_after_takeover() {
     let listed = format!("{public_api}/repos/o/one/issues?state=open&per_page=100");
     let mut candidate = issue(5, 12, "o/one");
     candidate["html_url"] = json!("https://github.com/o/one/issues/12");
-    fixture.respond(&format!("{public_api}/user"), ok(json!({"login": "octo"})));
+    fixture.authenticate_as(public_api, "octo");
     fixture.respond(&listed, ok(json!([candidate])));
     workspace
         .save_source(
@@ -554,7 +766,7 @@ fn a_legacy_issue_at_a_different_location_waits_for_explicit_confirmation() {
     let (fixture, engine) = setup(Some(TOKEN));
     let candidate = issue(5, 17, "o/other");
     let listed = format!("{API}/repos/o/other/issues?state=open&per_page=100");
-    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    fixture.authenticate_as(API, "octo");
     fixture.respond(&listed, ok(json!([candidate])));
     workspace
         .save_source(
@@ -624,12 +836,12 @@ fn a_confirmed_identity_keeps_its_ticket_when_an_unverified_id_also_matches() {
          INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin)
          VALUES ('verified', 'github', '@api.example.test:5', 'o/other#17', 'o/other#17', 'https://api.example.test/o/other/issues/17', 'imported');
          INSERT INTO external_ownership (ticket_id, authority) VALUES ('verified', 'local');
-         INSERT INTO source_sync (ticket_id, external_state) VALUES ('verified', 'open');",
+         INSERT INTO source_sync (ticket_id, state_category) VALUES ('verified', 'open');",
     ).unwrap();
     let (fixture, engine) = setup(Some(TOKEN));
     let issue = issue(5, 17, "o/other");
     let listed = format!("{API}/repos/o/other/issues?state=open&per_page=100");
-    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    fixture.authenticate_as(API, "octo");
     fixture.respond(&listed, ok(json!([issue])));
     workspace
         .save_source(
@@ -680,7 +892,7 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
     let mut new = issue(7, 14, "o/two");
     new["created_at"] = json!("2026-01-02T00:00:00Z");
 
-    public.respond(&format!("{public_api}/user"), ok(json!({"login": "octo"})));
+    public.authenticate_as(public_api, "octo");
     public.respond(&one, ok(json!([held, first])));
     public.respond(&two, ok(json!([])));
     workspace
@@ -702,12 +914,26 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
     public.respond(&two, ok(json!([])));
     conversation("o/other/issues/13");
     let refresh = workspace
-        .refresh_sources(&public_engine, &Default::default())
+        .refresh_connection(&public_engine, "github", &Default::default())
         .unwrap();
     assert_eq!(refresh.imported.len(), 1);
     assert_eq!(workspace.workspace_events_after(head, 100).unwrap(), []);
 
     let (enterprise, enterprise_engine) = setup(Some(TOKEN));
+    enterprise.authenticate_as(API, "octo");
+    enterprise.respond(
+        &format!("{API}/repos/o/one/issues?state=open&per_page=100"),
+        ok(json!([])),
+    );
+    workspace
+        .add_source_connection(
+            &enterprise_engine,
+            "github",
+            None,
+            None,
+            &config(json!({"repositories": ["o/one"]})),
+        )
+        .unwrap();
     enterprise.respond(
         &format!("{API}/repos/o/one/issues/12"),
         ok(issue(5, 12, "o/one")),
@@ -724,7 +950,7 @@ fn holding_a_legacy_match_defers_first_read_for_its_repository_only() {
     conversation("o/other/issues/16");
     conversation("o/two/issues/14");
     let refresh = workspace
-        .refresh_sources(&public_engine, &Default::default())
+        .refresh_connection(&public_engine, "github", &Default::default())
         .unwrap();
     assert_eq!(refresh.imported.len(), 2);
     assert!(workspace.list_tickets().unwrap().into_iter().any(|ticket| {
@@ -749,7 +975,12 @@ fn adding_a_repository_checks_it_even_when_the_first_repository_fills_the_previe
     let first = format!("{API}/repos/o/one/issues?state=open&per_page=100");
     let second = format!("{API}/repos/o/one/issues?page=2");
     let target = format!("{API}/repos/o/target/issues?state=open&per_page=100");
-    let validate_account = || fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    let validate_account = || {
+        fixture.respond(
+            &format!("{API}/user"),
+            ok(json!({"login": "octo", "id": 1})),
+        )
+    };
     validate_account();
     fixture.respond(&first, ok(json!([])));
     let saved = workspace
@@ -886,36 +1117,11 @@ fn a_page_of_only_pull_requests_does_not_end_discovery() {
 fn closure_reasons_map_to_neutral_states() {
     let (fixture, engine) = setup(Some(TOKEN));
     for (reason, expected) in [
-        (
-            json!("completed"),
-            ExternalState::Closed {
-                reason: ClosureReason::Completed,
-            },
-        ),
-        (
-            json!("not_planned"),
-            ExternalState::Closed {
-                reason: ClosureReason::NotPlanned,
-            },
-        ),
-        (
-            json!("duplicate"),
-            ExternalState::Closed {
-                reason: ClosureReason::Duplicate,
-            },
-        ),
-        (
-            json!(null),
-            ExternalState::Closed {
-                reason: ClosureReason::Unknown,
-            },
-        ),
-        (
-            json!("something_new"),
-            ExternalState::Closed {
-                reason: ClosureReason::Unknown,
-            },
-        ),
+        (json!("completed"), StateCategory::Completed),
+        (json!("not_planned"), StateCategory::NotPlanned),
+        (json!("duplicate"), StateCategory::Duplicate),
+        (json!(null), StateCategory::Unknown),
+        (json!("something_new"), StateCategory::Unknown),
     ] {
         let mut closed = issue(7, 7, "o/one");
         closed["state"] = json!("closed");
@@ -927,6 +1133,7 @@ fn closure_reasons_map_to_neutral_states() {
                 id: "@api.example.test:7".into(),
             },
             locator: "o/one#7".into(),
+            partition: "o/one".into(),
         };
         let fetched = engine
             .fetch(
@@ -935,7 +1142,13 @@ fn closure_reasons_map_to_neutral_states() {
                 &reference,
             )
             .unwrap();
-        assert_eq!(fetched.state, expected);
+        assert_eq!(
+            serde_json::to_value(&fetched.state).unwrap(),
+            json!({
+                "category": expected.as_str(),
+                "name": "Closed",
+            }),
+        );
     }
 }
 
@@ -952,6 +1165,7 @@ fn fetch_reports_the_repository_a_transferred_issue_is_now_in() {
             id: "@api.example.test:77".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
 
     let issue = engine
@@ -979,6 +1193,7 @@ fn workspace_refresh_follows_a_github_transfer_that_changes_the_issue_id() {
         LocalCollision,
         ReusedPath,
         MissingOpening,
+        ReplacedConfiguration,
     }
     for case in [
         Case::Targeted,
@@ -990,6 +1205,7 @@ fn workspace_refresh_follows_a_github_transfer_that_changes_the_issue_id() {
         Case::LocalCollision,
         Case::ReusedPath,
         Case::MissingOpening,
+        Case::ReplacedConfiguration,
     ] {
         let targeted = matches!(case, Case::Targeted);
         let collision = matches!(case, Case::Collision | Case::LocalCollision);
@@ -1027,10 +1243,7 @@ fn workspace_refresh_follows_a_github_transfer_that_changes_the_issue_id() {
         } else {
             json!([])
         };
-        fixture.respond(
-            &format!("{DEFAULT_API_URL}/user"),
-            ok(json!({"login": "alice"})),
-        );
+        fixture.authenticate_as(DEFAULT_API_URL, "alice");
         let mut original_issue = public_issue(77, 7, "o/one");
         if matches!(case, Case::MissingOpening) {
             original_issue["created_at"] = Value::Null;
@@ -1114,6 +1327,18 @@ fn workspace_refresh_follows_a_github_transfer_that_changes_the_issue_id() {
         );
         fixture.respond(&discovery("two"), ok(json!([moved])));
         respond_conversation(new.as_str());
+        if matches!(case, Case::ReplacedConfiguration) {
+            let db = dir.path().join("workspace.sqlite3");
+            *fixture.on_request.lock().unwrap() = Some(RequestHook {
+                url: old.clone(),
+                run: Box::new(move || {
+                    rusqlite::Connection::open(db).unwrap().execute(
+                        "UPDATE source_connections SET configuration = json_set(configuration, '$.assignee', 'alice'), revision = 'changed' WHERE id = 'github'",
+                        [],
+                    ).unwrap();
+                }),
+            });
+        }
 
         let report = workspace
             .refresh_sources(
@@ -1141,6 +1366,12 @@ fn workspace_refresh_follows_a_github_transfer_that_changes_the_issue_id() {
         assert_eq!(after.project_id, original.project_id);
         let source = after.source.unwrap();
         assert_eq!(workspace.activities(reference, 10, 0).unwrap().len(), 1);
+        if matches!(case, Case::ReplacedConfiguration) {
+            assert!(report.updated.is_empty());
+            assert_eq!(source.id, "77");
+            assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+            continue;
+        }
         if matches!(case, Case::UnverifiedDuringDiscovery) {
             assert_eq!(report.failures.len(), 1);
             assert_eq!(
@@ -1197,6 +1428,421 @@ fn workspace_refresh_follows_a_github_transfer_that_changes_the_issue_id() {
     }
 }
 
+/// A transport fixture that binds each test connection to its own account.
+struct AccountFixtures {
+    first: GithubConnector,
+    second: Arc<Fixture>,
+}
+
+impl Connector for AccountFixtures {
+    fn descriptor(&self) -> ConnectorDescriptor {
+        self.first.descriptor()
+    }
+
+    fn for_connection(&self, id: &str, _: &ConfigValues) -> Option<Box<dyn Connector>> {
+        (id == "github-2").then(|| {
+            Box::new(connector_at(DEFAULT_API_URL, &self.second, Some(TOKEN))) as Box<dyn Connector>
+        })
+    }
+
+    fn check_connection(&self, config: &ConfigValues) -> Result<ConnectionCheck, SourceError> {
+        self.first.check_connection(config)
+    }
+
+    fn options(
+        &self,
+        field: &str,
+        query: &str,
+        config: &ConfigValues,
+    ) -> Result<Vec<ChoiceOption>, SourceError> {
+        self.first.options(field, query, config)
+    }
+
+    fn discover(&self, request: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
+        self.first.discover(request)
+    }
+
+    fn fetch(
+        &self,
+        config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<ExternalIssue, SourceError> {
+        self.first.fetch(config, reference)
+    }
+
+    fn fetch_tracked(
+        &self,
+        config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<FetchedIssue, SourceError> {
+        self.first.fetch_tracked(config, reference)
+    }
+
+    fn conversation(
+        &self,
+        config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<Conversation, SourceError> {
+        self.first.conversation(config, reference)
+    }
+
+    fn issue_site(&self) -> Option<&str> {
+        self.first.issue_site()
+    }
+
+    fn publication(&self) -> Option<&dyn Publication> {
+        self.first.publication()
+    }
+}
+
+#[test]
+fn a_transfer_observed_by_two_connections_keeps_one_ticket() {
+    for verified in [true, false] {
+        let original = Arc::new(Fixture::default());
+        let destination = Arc::new(Fixture::default());
+        original.authenticate_as(DEFAULT_API_URL, "alice");
+        destination.authenticate_as(DEFAULT_API_URL, "bob");
+        let mut engine = Engine::new();
+        engine
+            .register(Box::new(AccountFixtures {
+                first: connector_at(DEFAULT_API_URL, &original, Some(TOKEN)),
+                second: destination.clone(),
+            }))
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let mut workspace = crate::Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+        let old_issue = public_issue(77, 7, "o/one");
+        let new_issue = public_issue(99, 12, "o/two");
+        let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
+        let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
+        let old_list = format!("{DEFAULT_API_URL}/repos/o/one/issues?state=open&per_page=100");
+        let new_list = format!("{DEFAULT_API_URL}/repos/o/two/issues?state=open&per_page=100");
+        original.respond(&old_list, ok(json!([old_issue])));
+        destination.respond(&new_list, ok(json!([])));
+        workspace
+            .save_source(
+                &engine,
+                "github",
+                &config(json!({"repositories": ["o/one"]})),
+            )
+            .unwrap();
+        workspace
+            .add_source_connection(
+                &engine,
+                "github",
+                Some("github-2"),
+                None,
+                &config(json!({"repositories": ["o/two"]})),
+            )
+            .unwrap();
+
+        original.respond(&old_list, ok(json!([old_issue])));
+        for part in ["comments", "events"] {
+            original.respond(&format!("{old}/{part}?per_page=100"), ok(json!([])));
+        }
+        let first = workspace
+            .refresh_connection(&engine, "github", &Default::default())
+            .unwrap();
+        let reference = &first.imported[0];
+
+        original.respond(&old_list, ok(json!([old_issue])));
+        destination.respond(&new_list, ok(json!([new_issue])));
+        if verified {
+            original.respond(&old, status(301, json!({}), &[("location", &new)]));
+            original.respond(&new, ok(new_issue));
+            for part in ["comments", "events"] {
+                original.respond(&format!("{new}/{part}?per_page=100"), ok(json!([])));
+            }
+        } else {
+            original.respond(&old, status(503, json!({}), &[]));
+        }
+        let second = workspace
+            .refresh_sources(&engine, &Default::default())
+            .unwrap();
+        assert!(second.imported.is_empty());
+        let ticket = workspace.show_ticket(reference).unwrap();
+        assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+        assert_eq!(
+            ticket.source.unwrap().id,
+            if verified { "99" } else { "77" }
+        );
+        if verified {
+            assert_eq!(second.updated, std::slice::from_ref(reference));
+        } else {
+            assert!(second.failures.iter().any(|failure| {
+                failure.scope == crate::source::FailureScope::Partition
+                    && failure.reference.as_ref() == Some(reference)
+            }));
+        }
+    }
+}
+
+#[test]
+fn a_conflicting_legacy_github_account_does_not_abort_another_connections_refresh() {
+    let legacy = Arc::new(Fixture::default());
+    let healthy = Arc::new(Fixture::default());
+    legacy.authenticate_account(DEFAULT_API_URL, "octo", 41);
+    healthy.authenticate_as(DEFAULT_API_URL, "bob");
+    let mut engine = Engine::new();
+    engine
+        .register(Box::new(AccountFixtures {
+            first: connector_at(DEFAULT_API_URL, &legacy, Some(TOKEN)),
+            second: healthy.clone(),
+        }))
+        .unwrap();
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = crate::Workspace::open(&path).unwrap();
+    let legacy_list = format!("{DEFAULT_API_URL}/repos/o/legacy/issues?state=open&per_page=100");
+    let healthy_list = format!("{DEFAULT_API_URL}/repos/o/healthy/issues?state=open&per_page=100");
+    legacy.respond(&legacy_list, ok(json!([])));
+    healthy.respond(&healthy_list, ok(json!([])));
+    workspace
+        .save_source(
+            &engine,
+            PROVIDER,
+            &config(json!({"repositories": ["o/legacy"]})),
+        )
+        .unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            PROVIDER,
+            Some("github-2"),
+            None,
+            &config(json!({"repositories": ["o/healthy"]})),
+        )
+        .unwrap();
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute(
+            "UPDATE source_connections SET account_key = 'octo' WHERE id = 'github'",
+            [],
+        )
+        .unwrap();
+
+    *legacy.on_request.lock().unwrap() = Some(RequestHook {
+        url: legacy_list.clone(),
+        run: Box::new(move || {
+            let (renamed, renamed_engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+            renamed.authenticate_account(DEFAULT_API_URL, "octo-renamed", 41);
+            renamed.respond(
+                &format!("{DEFAULT_API_URL}/repos/o/renamed/issues?state=open&per_page=100"),
+                ok(json!([])),
+            );
+            crate::Workspace::open(path)
+                .unwrap()
+                .add_source_connection(
+                    &renamed_engine,
+                    PROVIDER,
+                    Some("github-3"),
+                    None,
+                    &config(json!({"repositories": ["o/renamed"]})),
+                )
+                .unwrap();
+        }),
+    });
+    legacy.respond(&legacy_list, ok(json!([public_issue(77, 7, "o/legacy")])));
+    healthy.respond(&healthy_list, ok(json!([public_issue(88, 8, "o/healthy")])));
+    for (fixture, repo, issue) in [(&legacy, "legacy", 7), (&healthy, "healthy", 8)] {
+        for part in ["comments", "events"] {
+            fixture.respond(
+                &format!("{DEFAULT_API_URL}/repos/o/{repo}/issues/{issue}/{part}?per_page=100"),
+                ok(json!([])),
+            );
+        }
+    }
+
+    let report = workspace
+        .refresh_sources(&engine, &Default::default())
+        .unwrap();
+    assert_eq!(report.failures.len(), 1);
+    let conflict = &report.failures[0];
+    assert_eq!(conflict.connection_id.as_deref(), Some("github"));
+    assert_eq!(conflict.scope, crate::source::FailureScope::Source);
+    assert!(conflict.message.contains("already connected"));
+    assert_eq!(report.imported.len(), 1);
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+    let ticket = workspace.show_ticket(&report.imported[0]).unwrap();
+    assert_eq!(ticket.source.unwrap().id, "88");
+    let status = workspace
+        .source_statuses()
+        .unwrap()
+        .into_iter()
+        .find(|source| source.connection_id.as_deref() == Some("github"))
+        .unwrap();
+    assert_eq!(status.error.unwrap().message, conflict.message);
+}
+
+#[test]
+fn a_destination_only_refresh_defers_a_move_and_imports_unrelated_issues() {
+    enum OriginRead {
+        Moved,
+        Unavailable,
+        Unrelated,
+        ReusedPath,
+    }
+    for observation in [
+        OriginRead::Moved,
+        OriginRead::Unavailable,
+        OriginRead::Unrelated,
+        OriginRead::ReusedPath,
+    ] {
+        let original = Arc::new(Fixture::default());
+        let destination = Arc::new(Fixture::default());
+        original.authenticate_as(DEFAULT_API_URL, "alice");
+        destination.authenticate_as(DEFAULT_API_URL, "bob");
+        let mut engine = Engine::new();
+        engine
+            .register(Box::new(AccountFixtures {
+                first: connector_at(DEFAULT_API_URL, &original, Some(TOKEN)),
+                second: destination.clone(),
+            }))
+            .unwrap();
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let mut workspace = crate::Workspace::open(&path).unwrap();
+        let old_issue = public_issue(77, 7, "o/one");
+        let new_issue = public_issue(99, 12, "o/two");
+        let mut unrelated = public_issue(100, 13, "o/two");
+        unrelated["created_at"] = json!("2026-01-02T00:00:00Z");
+        let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
+        let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
+        let unrelated_url = format!("{DEFAULT_API_URL}/repos/o/two/issues/13");
+        let old_list = format!("{DEFAULT_API_URL}/repos/o/one/issues?state=open&per_page=100");
+        let new_list = format!("{DEFAULT_API_URL}/repos/o/two/issues?state=open&per_page=100");
+        let old_repo = config(json!({"repositories": ["o/one"]}));
+        let new_repo = config(json!({"repositories": ["o/two"]}));
+        original.respond(&old_list, ok(json!([old_issue])));
+        destination.respond(&new_list, ok(json!([])));
+        workspace.save_source(&engine, PROVIDER, &old_repo).unwrap();
+        workspace
+            .add_source_connection(&engine, PROVIDER, Some("github-2"), None, &new_repo)
+            .unwrap();
+
+        original.respond(&old_list, ok(json!([old_issue])));
+        for part in ["comments", "events"] {
+            original.respond(&format!("{old}/{part}?per_page=100"), ok(json!([])));
+        }
+        let first = workspace
+            .refresh_connection(&engine, "github", &Default::default())
+            .unwrap();
+        let reference = &first.imported[0];
+        let original_requests = original.urls();
+
+        let tracked_unrelated = if matches!(observation, OriginRead::ReusedPath) {
+            destination.respond(&new_list, ok(json!([unrelated])));
+            for part in ["comments", "events"] {
+                destination.respond(
+                    &format!("{unrelated_url}/{part}?per_page=100"),
+                    ok(json!([])),
+                );
+            }
+            let imported = workspace
+                .refresh_connection(&engine, "github-2", &Default::default())
+                .unwrap();
+            unrelated["title"] = json!("Unrelated issue updated");
+            unrelated["updated_at"] = json!("2026-01-04T00:00:00Z");
+            Some(imported.imported[0].clone())
+        } else {
+            None
+        };
+        destination.respond(&new_list, ok(json!([new_issue, unrelated])));
+        match observation {
+            OriginRead::Moved => {
+                destination.respond(&old, status(301, json!({}), &[("location", &new)]));
+                destination.respond(&new, ok(new_issue.clone()));
+            }
+            OriginRead::Unavailable => destination.respond(&old, status(404, json!({}), &[])),
+            OriginRead::ReusedPath => {
+                destination.respond(
+                    &old,
+                    status(301, json!({}), &[("location", &unrelated_url)]),
+                );
+                destination.respond(&unrelated_url, ok(unrelated));
+            }
+            OriginRead::Unrelated => {
+                destination.respond(&old, ok(old_issue));
+                for part in ["comments", "events"] {
+                    destination.respond(&format!("{new}/{part}?per_page=100"), ok(json!([])));
+                }
+            }
+        }
+        for part in ["comments", "events"] {
+            destination.respond(
+                &format!("{DEFAULT_API_URL}/repos/o/two/issues/13/{part}?per_page=100"),
+                ok(json!([])),
+            );
+        }
+        let second = workspace
+            .refresh_connection(&engine, "github-2", &Default::default())
+            .unwrap();
+        assert_eq!(original.urls(), original_requests);
+        assert!(destination.urls().contains(&old));
+        let (listed_parts, partial): (String, Option<String>) = rusqlite::Connection::open(&path).unwrap().query_row(
+            "SELECT read_partitions, partial_message FROM source_connection_status WHERE connection_id = 'github-2'",
+            [], |row| Ok((row.get(0)?, row.get(1)?)),
+        ).unwrap();
+        if let Some(reference) = tracked_unrelated {
+            assert!(second.imported.is_empty());
+            assert!(
+                partial.is_some_and(|message| message.contains("possible GitHub issue transfer"))
+            );
+            assert_eq!(second.updated, std::slice::from_ref(&reference));
+            assert_eq!(
+                workspace.show_ticket(&reference).unwrap().title,
+                "Unrelated issue updated"
+            );
+            continue;
+        }
+        if matches!(observation, OriginRead::Unrelated) {
+            assert_eq!(second.imported.len(), 2);
+            assert_eq!(listed_parts, r#"["o/two"]"#);
+            continue;
+        }
+        assert_eq!(second.imported.len(), 1);
+        assert_eq!(listed_parts, "[]");
+        assert_eq!(
+            workspace
+                .show_ticket(&second.imported[0])
+                .unwrap()
+                .source
+                .unwrap()
+                .id,
+            "100",
+        );
+        assert_eq!(
+            workspace.show_ticket(reference).unwrap().source.unwrap().id,
+            "77"
+        );
+
+        original.respond(&old, status(301, json!({}), &[("location", &new)]));
+        original.respond(&new, ok(new_issue));
+        for part in ["comments", "events"] {
+            original.respond(&format!("{new}/{part}?per_page=100"), ok(json!([])));
+        }
+        let third = workspace
+            .refresh_connection(
+                &engine,
+                "github",
+                &crate::source::RefreshOptions {
+                    ticket: Some(reference.clone()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(third.updated, std::slice::from_ref(reference));
+        assert_eq!(
+            workspace.show_ticket(reference).unwrap().source.unwrap().id,
+            "99"
+        );
+        assert_eq!(workspace.list_tickets().unwrap().len(), 2);
+    }
+}
+
 #[test]
 fn tracked_fetch_resolves_an_enterprise_transfer_redirect_from_the_origin() {
     let api = "https://github.example.test/api/v3";
@@ -1221,6 +1867,7 @@ fn tracked_fetch_resolves_an_enterprise_transfer_redirect_from_the_origin() {
             id: "@github.example.test:77".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     let fetched = engine
         .fetch_tracked(
@@ -1245,6 +1892,7 @@ fn tracked_fetch_requires_permanent_redirect_to_the_corroborated_issue_path() {
             id: "77".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     let old = format!("{DEFAULT_API_URL}/repos/o/one/issues/7");
     let new = format!("{DEFAULT_API_URL}/repos/o/two/issues/12");
@@ -1291,10 +1939,7 @@ fn stale_discovery_cannot_reimport_or_overwrite_an_issue_after_an_overlapping_tr
         let original = public_issue(77, 7, "o/one");
         let mut latest = public_issue(99, 12, "o/two");
         latest["title"] = json!("Fresh observation");
-        fixture.respond(
-            &format!("{DEFAULT_API_URL}/user"),
-            ok(json!({"login": "alice"})),
-        );
+        fixture.authenticate_as(DEFAULT_API_URL, "alice");
         for _ in 0..2 {
             fixture.respond(&discovery("one"), ok(json!([original])));
             fixture.respond(&discovery("two"), ok(json!([])));
@@ -1321,6 +1966,7 @@ fn stale_discovery_cannot_reimport_or_overwrite_an_issue_after_an_overlapping_tr
         let reference = initial.imported[0].clone();
 
         let (transfer, transfer_engine) = setup_at(DEFAULT_API_URL, Some(TOKEN));
+        transfer.authenticate_as(DEFAULT_API_URL, "alice");
         transfer.respond(&old, status(301, json!({}), &[("location", &new)]));
         transfer.respond(&new, ok(latest.clone()));
         for part in ["comments", "events"] {
@@ -1390,6 +2036,7 @@ fn fetch_refuses_a_pull_request_and_a_different_identity() {
             id: id.into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     let mut pull_request = issue(7, 7, "o/one");
     pull_request["pull_request"] = json!({});
@@ -1471,6 +2118,7 @@ fn a_gone_issue_is_not_found_not_an_unusable_answer() {
             id: "@api.example.test:7".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     for code in [404, 410] {
         fixture.respond(
@@ -1522,7 +2170,10 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
         .unwrap();
     assert_eq!(summary.skipped[0].code, "forbidden");
     // Saving rules that name an unreadable repository is still refused.
-    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    fixture.respond(
+        &format!("{API}/user"),
+        ok(json!({"login": "octo", "id": 1})),
+    );
     fixture.respond(
         &format!("{API}/repos/o/gone/issues?state=open&per_page=100"),
         status(404, json!({"message": "Not Found"}), &[]),
@@ -1534,7 +2185,7 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
     // The refusal points at the repositories field and names the repository once.
     let error = engine.preview("github", &values).unwrap_err();
     assert_eq!(error.issues().len(), 1);
-    assert_eq!(error.issues()[0].field, "repositories");
+    assert_eq!(error.issues()[0].field.as_deref(), Some("repositories"));
     assert_eq!(
         error.issues()[0].message,
         "cannot be used: o/gone was not found, or your account cannot see it"
@@ -1548,6 +2199,10 @@ fn an_inaccessible_repository_is_skipped_and_the_next_one_still_discovered() {
 fn a_repository_has_one_name_as_a_part_of_the_source() {
     let (fixture, engine) = setup(Some(TOKEN));
     fixture.respond(
+        &format!("{API}/user"),
+        ok(json!({"login": "octo", "id": 1})),
+    );
+    fixture.respond(
         &format!("{API}/repos/O/Gone/issues?state=open&per_page=100"),
         status(404, json!({"message": "Not Found"}), &[]),
     );
@@ -1559,12 +2214,12 @@ fn a_repository_has_one_name_as_a_part_of_the_source() {
     let mut found = Vec::new();
     let summary = engine
         .discover("github", &values, |issue| {
-            found.push(engine.partition("github", &issue.reference));
+            found.push(issue.reference.partition);
             ControlFlow::Continue(())
         })
         .unwrap();
     assert_eq!(
-        engine.partitions("github", &values).unwrap(),
+        engine.check("github", &values).unwrap().derived.partitions,
         ["@api.example.test/o/gone", "@api.example.test/o/live"]
     );
     assert_eq!(found, ["@api.example.test/o/live"]);
@@ -1575,16 +2230,26 @@ fn a_repository_has_one_name_as_a_part_of_the_source() {
 /// case or order, and by its bare name when neither narrows discovery.
 #[test]
 fn a_repository_is_read_under_its_assignee_and_labels() {
-    let (_fixture, engine) = setup(Some(TOKEN));
-    let scope = |values: serde_json::Value| engine.partition_scope("github", &config(values));
+    let (fixture, engine) = setup(Some(TOKEN));
+    let scope = |values: serde_json::Value| {
+        fixture.respond(
+            &format!("{API}/user"),
+            ok(json!({"login": "octo", "id": 1})),
+        );
+        engine
+            .check("github", &config(values))
+            .unwrap()
+            .derived
+            .discovery_scope
+    };
     assert_eq!(scope(json!({"repositories": ["o/r"]})), "");
     assert_eq!(
         scope(json!({"repositories": ["o/r"], "assignee": "Octo", "labels": ["Bug", "a"]})),
-        "?assignee=octo&labels=a,bug"
+        "assignee=octo&labels=a,bug"
     );
     assert_eq!(
         scope(json!({"repositories": ["o/r"], "assignee": "octo", "labels": ["bug", "A"]})),
-        "?assignee=octo&labels=a,bug"
+        "assignee=octo&labels=a,bug"
     );
 }
 
@@ -1698,10 +2363,94 @@ fn the_credential_is_sent_only_to_the_api_and_redirects_stay_there() {
 }
 
 #[test]
+fn a_legacy_github_login_pins_the_account_before_it_can_be_renamed() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.authenticate_account(API, "octo", 41);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = crate::Workspace::open(&path).unwrap();
+    let listed = format!("{API}/repos/o/one/issues?state=open&per_page=100");
+    let settings = config(json!({"repositories": ["o/one"], "account": "octo"}));
+    fixture.respond(&listed, ok(json!([])));
+    workspace.save_source(&engine, PROVIDER, &settings).unwrap();
+    let database = rusqlite::Connection::open(&path).unwrap();
+    let saved_id = || {
+        database
+            .query_row(
+                "SELECT account_key FROM source_connections WHERE id = 'github'",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .unwrap()
+    };
+    assert_eq!(saved_id(), "id:41");
+    database
+        .execute(
+            "UPDATE source_connections SET account_key = 'octo' WHERE id = 'github'",
+            [],
+        )
+        .unwrap();
+
+    fixture.respond(&listed, ok(json!([])));
+    let duplicate = workspace
+        .add_source_connection(&engine, PROVIDER, None, None, &settings)
+        .unwrap_err();
+    assert!(duplicate.to_string().contains("already connected"));
+
+    fixture.authenticate_account(API, "octo-renamed", 41);
+    assert!(workspace.test_source_connection(&engine, "github").is_err());
+    assert_eq!(saved_id(), "octo");
+
+    fixture.authenticate_account(API, "octo", 41);
+    fixture.respond(&listed, ok(json!([])));
+    assert!(
+        workspace
+            .refresh_connection(&engine, "github", &Default::default())
+            .unwrap()
+            .failures
+            .is_empty()
+    );
+    assert_eq!(saved_id(), "id:41");
+
+    fixture.authenticate_account(API, "octo-renamed", 41);
+    fixture.respond(&listed, ok(json!([])));
+    assert!(
+        workspace
+            .refresh_connection(&engine, "github", &Default::default())
+            .unwrap()
+            .failures
+            .is_empty()
+    );
+    assert_eq!(
+        workspace.saved_source("github").unwrap().unwrap().account,
+        "octo-renamed"
+    );
+    fixture.respond(&listed, ok(json!([])));
+    let preview = workspace
+        .preview_source(&engine, PROVIDER, Some("github"), &settings)
+        .unwrap();
+    assert_eq!(preview.account, "octo-renamed");
+    fixture.respond(&listed, ok(json!([])));
+    workspace
+        .update_source_connection(&engine, "github", &settings)
+        .unwrap();
+
+    fixture.authenticate_account(API, "octo", 57);
+    assert!(workspace.test_source_connection(&engine, "github").is_err());
+    assert_eq!(saved_id(), "id:41");
+}
+
+#[test]
 fn connection_check_names_the_account_and_preview_lists_matches() {
     let (fixture, engine) = setup(Some(TOKEN));
-    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
-    fixture.respond(&format!("{API}/user"), ok(json!({"login": "octo"})));
+    fixture.respond(
+        &format!("{API}/user"),
+        ok(json!({"login": "octo", "id": 1})),
+    );
+    fixture.respond(
+        &format!("{API}/user"),
+        ok(json!({"login": "octo", "id": 1})),
+    );
     fixture.respond(
         &format!("{API}/repos/o/one/issues?state=open&per_page=100"),
         ok(json!([issue(1, 1, "o/one")])),
@@ -1850,6 +2599,7 @@ fn fetch_duplicate(
             id: "@api.example.test:7".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     engine
         .fetch(
@@ -2027,9 +2777,7 @@ fn an_unreadable_pull_request_or_failed_lookup_is_an_unknown_target_not_a_failed
         );
         assert_eq!(
             fetched.state,
-            ExternalState::Closed {
-                reason: ClosureReason::Duplicate
-            }
+            ExternalState::named(StateCategory::Duplicate, "Closed")
         );
     }
 }
@@ -2047,6 +2795,7 @@ fn only_duplicate_closures_ask_for_a_canonical_issue() {
             id: "@api.example.test:7".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     engine
         .fetch(
@@ -2101,7 +2850,10 @@ fn publishing_posts_only_the_title_and_description_and_returns_the_created_issue
 
     assert_eq!(created.reference.identity.id, "@api.example.test:77");
     assert_eq!(created.reference.locator, "o/r#12");
-    assert_eq!(created.state, ExternalState::Open);
+    assert_eq!(
+        created.state,
+        ExternalState::named(StateCategory::Open, "Open")
+    );
     let requests = fixture.requests.lock().unwrap();
     assert_eq!(requests.len(), 1);
     assert_eq!(requests[0].method, Method::Post);
@@ -2173,6 +2925,7 @@ fn conversation_of(engine: &Engine) -> Result<Conversation, SourceError> {
             id: "@api.example.test:7".into(),
         },
         locator: "o/one#7".into(),
+        partition: "o/one".into(),
     };
     engine
         .conversation(
@@ -2242,10 +2995,10 @@ fn comments_and_events_follow_every_page_and_translate_to_neutral_entries() {
         [
             ExternalEventKind::Assigned,
             ExternalEventKind::Unassigned,
-            ExternalEventKind::Closed(ClosureReason::Duplicate),
+            ExternalEventKind::Closed(StateCategory::Duplicate),
             ExternalEventKind::Reopened,
-            ExternalEventKind::Closed(ClosureReason::NotPlanned),
-            ExternalEventKind::Closed(ClosureReason::Unknown),
+            ExternalEventKind::Closed(StateCategory::NotPlanned),
+            ExternalEventKind::Closed(StateCategory::Unknown),
         ],
         "unrelated events such as labels are left out"
     );
@@ -2355,11 +3108,22 @@ fn locating_reads_an_issue_only_inside_the_destination() {
 
 const SEARCH_URL: &str = "https://api.example.test/repos/o/r/issues?state=all&sort=created&direction=desc&per_page=100&since=2026-03-01T00%3A00%3A00Z";
 
+#[test]
+fn an_enterprise_site_includes_its_nondefault_port() {
+    assert_eq!(site_of("https://forge.example/api/v3"), "forge.example");
+    assert_eq!(
+        site_of("https://forge.example:8443/api/v3"),
+        "forge.example:8443"
+    );
+    assert_eq!(site_of("https://api.github.com:443"), "");
+}
+
 fn search_for_title(engine: &Engine) -> Result<PublicationCandidates, SourceError> {
     engine.find_published(
         "github",
         &config(json!({"repositories": ["o/r"]})),
         &PublicationSearch {
+            tracker_since: Some("2026-03-01T00:00:00Z".into()),
             account: None,
             request: publish_request(),
             since: "2026-03-01T00:00:00Z".into(),
@@ -2412,7 +3176,7 @@ fn searching_reads_the_whole_window_and_matches_by_content() {
 }
 
 #[test]
-fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_match_blocks() {
+fn the_accounts_other_issues_in_the_window_are_listed_apart_from_text_matches() {
     let (fixture, engine) = setup(Some(TOKEN));
     let mut rewritten = created(issue(9, 9, "o/r"), "2026-03-02T00:00:00Z");
     rewritten["title"] = json!("Renamed by a teammate");
@@ -2428,14 +3192,14 @@ fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_matc
             "github",
             &config(json!({"repositories": ["o/r"]})),
             &PublicationSearch {
+                tracker_since: Some("2026-03-01T00:00:00Z".into()),
                 account: Some("octo".into()),
                 request: publish_request(),
                 since: "2026-03-01T00:00:00Z".into(),
             },
         )
         .unwrap();
-    // The rewritten issue does not match the sent text, so it is listed for
-    // information only; someone else's issue is not listed at all.
+    // The rewritten issue has no text match but remains a recovery candidate.
     assert!(found.matches.is_empty());
     let ids: Vec<_> = found
         .recent
@@ -2446,29 +3210,110 @@ fn the_accounts_other_issues_in_the_window_are_listed_apart_and_only_a_text_matc
 }
 
 #[test]
-fn a_local_clock_ahead_of_githubs_moves_the_search_window_back() {
+fn publication_recovery_matches_the_creator_id_across_a_login_change() {
     let (fixture, engine) = setup(Some(TOKEN));
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-    // GitHub says it is an hour earlier than this machine thinks.
-    let github_now = chrono::DateTime::from_timestamp(i64::try_from(now).unwrap() - 3600, 0)
-        .unwrap()
-        .to_rfc2822();
+    let mut rewritten = created(issue(9, 9, "o/r"), "2026-03-02T00:00:00Z");
+    rewritten["user"] = json!({"login": "octo-renamed", "id": 41});
+    rewritten["body"] = json!("Rewritten by an automation");
+    let mut reused_login = created(issue(8, 8, "o/r"), "2026-03-02T00:00:00Z");
+    reused_login["user"] = json!({"login": "octo", "id": 57});
+    reused_login["body"] = json!("Unrelated");
+    let search = PublicationSearch {
+        tracker_since: Some("2026-03-01T00:00:00Z".into()),
+        account: Some("id:41".into()),
+        request: publish_request(),
+        since: "2026-03-01T00:00:00Z".into(),
+    };
+    let values = config(json!({"repositories": ["o/r"]}));
+    fixture.respond(SEARCH_URL, ok(json!([rewritten, reused_login])));
+    let found = engine.find_published(PROVIDER, &values, &search).unwrap();
+    assert!(found.complete);
+    assert!(found.matches.is_empty());
+    assert_eq!(found.recent[0].reference.identity.id, "@api.example.test:9");
+    assert_eq!(found.recent.len(), 1);
+
+    reused_login["user"] = Value::Null;
+    fixture.respond(SEARCH_URL, ok(json!([reused_login])));
+    let unknown = engine.find_published(PROVIDER, &values, &search).unwrap();
+    assert!(!unknown.complete);
+    assert!(unknown.matches.is_empty() && unknown.recent.is_empty());
+}
+
+#[test]
+fn a_recovery_search_uses_the_authenticated_clock_observed_at_dispatch() {
+    let (fixture, engine) = setup(Some(TOKEN));
     fixture.respond(
-        &format!("{API}/rate_limit"),
-        ok_with(json!({}), &[("date", &github_now)]),
+        &format!("{API}/user"),
+        ok_with(
+            json!({ "login": "octo", "id": 1 }),
+            &[("date", "Sun, 01 Mar 2026 00:00:00 GMT")],
+        ),
     );
-    // Whether the search itself is answered does not matter; its window does.
-    let _ = search_for_title(&engine);
-    let urls = fixture.urls();
-    let search = urls.iter().find(|url| url.contains("since=")).unwrap();
-    let since = search.split("since=").nth(1).unwrap().replace("%3A", ":");
-    let since = chrono::DateTime::parse_from_rfc3339(&since).unwrap();
-    let expected = chrono::DateTime::parse_from_rfc3339("2026-03-01T00:00:00Z").unwrap()
-        - chrono::Duration::seconds(3600);
-    assert!((since - expected).num_seconds().abs() <= 5, "{since}");
+    let settings = config(json!({"repositories": ["o/r"]}));
+    let checked = engine.check("github", &settings).unwrap();
+    assert_eq!(
+        checked.connection.tracker_time.as_deref(),
+        Some("2026-03-01T00:00:00Z")
+    );
+    let mut received = created(issue(9, 9, "o/r"), "2026-03-01T00:30:00Z");
+    received["title"] = json!("Escalate");
+    fixture.respond(SEARCH_URL, ok(json!([received])));
+    let found = engine
+        .find_published(
+            "github",
+            &settings,
+            &PublicationSearch {
+                tracker_since: checked.connection.tracker_time,
+                account: None,
+                request: publish_request(),
+                since: "2026-03-01T02:00:00Z".into(),
+            },
+        )
+        .unwrap();
+    assert!(found.complete);
+    assert_eq!(
+        found.matches[0].reference.identity.id,
+        "@api.example.test:9"
+    );
+}
+
+#[test]
+fn an_older_attempt_can_rule_out_an_issue_only_in_an_empty_complete_destination() {
+    let unbounded = SEARCH_URL.split("&since=").next().unwrap();
+    let search = PublicationSearch {
+        tracker_since: None,
+        account: None,
+        request: publish_request(),
+        since: "2026-03-01T00:00:00Z".into(),
+    };
+    let read = |engine: &Engine| {
+        engine
+            .find_published("github", &config(json!({"repositories": ["o/r"]})), &search)
+            .unwrap()
+    };
+
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(unbounded, ok(json!([])));
+    let empty = read(&engine);
+    assert!(empty.complete);
+    assert!(empty.matches.is_empty() && empty.recent.is_empty());
+
+    let (fixture, engine) = setup(Some(TOKEN));
+    let mut old = created(issue(1, 1, "o/r"), "2026-02-28T21:00:00Z");
+    old["title"] = json!("Escalate");
+    fixture.respond(unbounded, ok(json!([old])));
+    let clock_ahead = read(&engine);
+    assert!(!clock_ahead.complete);
+    assert_eq!(clock_ahead.matches.len(), 1);
+
+    let (fixture, engine) = setup(Some(TOKEN));
+    let again = format!("{API}/repos/o/r/issues?page=2");
+    let link = format!("<{again}>; rel=\"next\"");
+    fixture.respond(unbounded, ok_with(json!([]), &[("link", &link)]));
+    for _ in 1..SEARCH_PAGES {
+        fixture.respond(&again, ok_with(json!([]), &[("link", &link)]));
+    }
+    assert!(!read(&engine).complete);
 }
 
 #[test]
@@ -2491,6 +3336,52 @@ fn a_request_that_never_left_is_not_sent_but_a_lost_answer_is_not_proof() {
     let error = publish_to(&engine).unwrap_err();
     assert!(matches!(error, SourceError::Unavailable(_)), "{error}");
     assert!(!error.ruled_out_creation());
+}
+
+#[test]
+fn a_create_is_not_sent_when_credentials_take_past_the_dispatch_window() {
+    use std::{
+        sync::atomic::{AtomicBool, Ordering},
+        time::{Duration, Instant},
+    };
+
+    struct LateToken {
+        deadline: Instant,
+        read: Arc<AtomicBool>,
+    }
+
+    impl CredentialSource for LateToken {
+        fn token(&self) -> Option<Secret> {
+            self.read.store(true, Ordering::Relaxed);
+            std::thread::sleep(
+                self.deadline.saturating_duration_since(Instant::now()) + Duration::from_millis(5),
+            );
+            Some(Secret::new(TOKEN))
+        }
+    }
+
+    let fixture = Arc::new(Fixture::default());
+    let read = Arc::new(AtomicBool::new(false));
+    let deadline = Instant::now() + Duration::from_secs(1);
+    let github = GithubConnector::new(
+        API,
+        Box::new(Shared(fixture.clone())),
+        Box::new(LateToken {
+            deadline,
+            read: read.clone(),
+        }),
+    );
+    let request = PublishRequest {
+        destination: "o/r".into(),
+        title: "Publish issue".into(),
+        body: String::new(),
+    };
+    let error = github
+        .publish_before(&ConfigValues::new(), &request, deadline)
+        .unwrap_err();
+    assert!(matches!(error, SourceError::NotSent(_)), "{error}");
+    assert!(read.load(Ordering::Relaxed));
+    assert!(fixture.urls().is_empty());
 }
 
 #[test]
@@ -2530,10 +3421,7 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
     let missing = engine
         .check_connection("github", &config(json!({})))
         .unwrap_err();
-    assert!(
-        matches!(missing, SourceError::Unauthenticated(_)),
-        "{missing}"
-    );
+    assert!(matches!(missing, SourceError::SignIn { .. }), "{missing}");
     assert_eq!(
         missing.to_string(),
         "no GitHub credential found. Run `gh auth login` to sign in."
@@ -2549,7 +3437,7 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
         .unwrap_err();
     assert_eq!(
         rejected.to_string(),
-        "GitHub rejected the credential: Bad credentials. Run `gh auth login` to sign in again."
+        "GitHub rejected the credential. Run `gh auth login` to sign in again."
     );
 
     for error in [&missing, &rejected] {
@@ -2592,32 +3480,50 @@ fn a_missing_repository_list_reads_as_a_sentence() {
 }
 
 #[test]
-fn only_owner_name_destinations_can_be_published_to() {
-    let (_, engine) = setup(Some(TOKEN));
-    assert!(engine.check_destination("github", "o/r").is_ok());
-    for bad in ["nonsense", "a b/c", "o/"] {
-        let error = engine.check_destination("github", bad).unwrap_err();
-        assert_eq!(error.issues()[0].field, "destination", "{bad}");
-    }
+fn github_connection_answers_describe_repository_destinations() {
+    let (fixture, engine) = setup(Some(TOKEN));
+    fixture.respond(
+        &format!("{API}/user"),
+        ok(json!({"login": "octo", "id": 1})),
+    );
+    let config = config(json!({"repositories": ["Acme/Tracker"]}));
+    let rules = engine.check("github", &config).unwrap().derived.publication;
+    assert_eq!(rules.destinations, ["Acme/Tracker"]);
+    assert!(rules.case_insensitive);
+    assert_eq!(rules.validation.unwrap().format, ValueFormat::OwnerName);
 }
 
 #[test]
-fn github_destinations_are_compared_without_regard_to_case() {
-    let (_, engine) = setup(Some(TOKEN));
-    let allowed = vec!["Acme/Tracker".to_owned()];
+fn github_describes_how_to_present_its_configuration() {
+    let (_, engine) = setup(None);
+    let description = engine.description("github").unwrap();
+    assert_eq!(description.descriptor.name, "GitHub");
+    assert_eq!(description.presentation.hosts, vec![host_of(API)]);
     assert!(
-        engine
-            .destination_allowed("github", "acme/tracker", &allowed)
+        description
+            .presentation
+            .icon_svg
+            .as_deref()
             .unwrap()
+            .starts_with("<svg")
     );
-    assert!(
-        !engine
-            .destination_allowed("github", "acme/secret-roadmap", &allowed)
-            .unwrap()
+    assert_eq!(
+        description
+            .presentation
+            .sign_in
+            .desktop_instruction
+            .as_deref(),
+        Some("Run “gh auth login” in a terminal, then choose Check connection.")
     );
-    assert!(
-        engine
-            .destination_allowed("github", "any/repo", &[])
-            .unwrap()
+    let summary = engine.configuration_summary(
+        "github",
+        &config(json!({"repositories": ["example/api"], "labels": ["bug", "help"], "assignee": "someone"})),
+    ).unwrap();
+    assert_eq!(
+        summary
+            .iter()
+            .map(|part| part.text.as_str())
+            .collect::<String>(),
+        "Imports open issues from example/api that have the labels bug and help, assigned to someone."
     );
 }

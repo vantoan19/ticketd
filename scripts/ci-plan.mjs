@@ -49,6 +49,12 @@ const rules = [
   { match: startsWith("skills/"), frontend: false, rust: true },
   // A Rust test parses the examples in this document (tests/sync_files.rs).
   { match: oneOf("docs/sync-file-format.md"), frontend: false, rust: true },
+  // The source extension tests compare this schema with the generated contract.
+  {
+    match: oneOf("docs/source-extensions/contract-2.schema.json"),
+    frontend: false,
+    rust: true,
+  },
   // The docs site includes this file (apps/docs/content/docs/reference/glossary.mdx).
   // It also includes PRIVACY.md (content/docs/reference/privacy.mdx).
   { match: oneOf("GLOSSARY.md", "PRIVACY.md"), frontend: true, rust: false },
@@ -225,6 +231,7 @@ export const JOBS = {
   rust: { name: "Rust tests", lane: "rust" },
   ui: { name: "Frontend tests", lane: "frontend" },
   pages: { name: "Windows Pages check", lane: "frontend" },
+  minio: { name: "S3 storage (MinIO)", lane: "rust" },
 };
 
 function readPlan(needs) {

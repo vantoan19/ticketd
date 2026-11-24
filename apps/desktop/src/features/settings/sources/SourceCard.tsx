@@ -1,7 +1,18 @@
-import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { AlignLeft, CircleDot, Link, RefreshCw, UserRound } from "lucide-react";
 import { CommandBlock } from "@/components/ui/command-block";
+import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureDetails } from "@/components/ui/failure-alert";
 import {
   describeFailure,
@@ -9,6 +20,7 @@ import {
 } from "@/lib/api/describe-failure";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
+import { SourceIcon } from "./SourceIcon";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import {
@@ -24,6 +36,7 @@ import {
   type LoadOptions,
 } from "@/features/settings/sources/SchemaForm";
 import {
+  activeFields,
   configFromDraft,
   configKey,
   draftFromConfig,
@@ -39,8 +52,8 @@ import {
   type DiscoveryPreview,
   type SavedSource,
   type SourceEntry,
-  type SourceConfig,
   type SourceFailure,
+  type SummaryPart,
 } from "@/lib/api/sources";
 
 type Busy = "previewing" | "saving" | null;
@@ -60,6 +73,7 @@ type Account =
   | { status: "checking" }
   | { status: "signed_in"; account: string }
   | { status: "signed_out"; failure: FailureDescription }
+  | { status: "settings"; key: string; failure: SourceFailure }
   | { status: "failed"; failure: FailureDescription };
 
 /** The core says these when the account itself is the problem. */
@@ -68,30 +82,120 @@ const SIGNED_OUT: readonly string[] = [
   "not_signed_in",
   "forbidden",
 ];
+const NO_SECRETS: readonly string[] = [];
+const SESSION_NOTICE =
+  "The system keyring is unavailable. These credentials last until ticketd closes.";
+
+function CredentialDialog({
+  entry,
+  saved,
+  onClose,
+  onSaved,
+}: {
+  entry: SourceEntry;
+  saved: SavedSource & { id: string };
+  onClose: () => void;
+  onSaved: (saved: SavedSource) => void;
+}) {
+  const fields = entry.connector.schema.fields;
+  const [draft, setDraft] = useState(() =>
+    draftFromConfig(fields, saved.config),
+  );
+  const [busy, setBusy] = useState(false);
+  const [failure, setFailure] = useState<SourceFailure | null>(null);
+  const stored = saved.secret_fields ?? NO_SECRETS;
+  const visible = activeFields(fields, draft, stored);
+  const config = configFromDraft(fields, draft, stored);
+  const credentials = Object.fromEntries(
+    visible
+      .filter(
+        (field) => field.type === "secret" && Object.hasOwn(config, field.key),
+      )
+      .map((field) => [field.key, config[field.key]]),
+  );
+  const errors = new Map<string, string[]>();
+  const formErrors: string[] = [];
+  for (const { field, message } of failure?.fields ?? []) {
+    if (
+      field &&
+      visible.some(
+        (setting) => setting.key === field && setting.type === "secret",
+      )
+    ) {
+      errors.set(field, [...(errors.get(field) ?? []), message]);
+    } else {
+      formErrors.push(field ? `${field} ${message}` : message);
+    }
+  }
+  async function save() {
+    setBusy(true);
+    setFailure(null);
+    try {
+      onSaved(await sourcesClient.signIn(saved.id, credentials));
+    } catch (reason) {
+      setFailure(toSourceFailure(reason));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <DialogShell
+      open
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+      title="Re-enter credentials"
+      description={`Update the credentials for ${saved.name ?? entry.connector.name}.`}
+      primaryLabel={busy ? "Saving…" : "Save credentials"}
+      blockedReason={
+        busy
+          ? "Checking credentials…"
+          : Object.keys(credentials).length === 0
+            ? "Enter a credential to save."
+            : null
+      }
+      onSubmit={() => void save()}
+      busy={busy}
+      error={failure && failure.fields.length === 0 ? failure.message : null}
+    >
+      <SchemaForm
+        fields={fields}
+        presentation={entry.connector.presentation?.fields}
+        draft={draft}
+        storedSecrets={stored}
+        secretsOnly
+        errors={Object.fromEntries(errors)}
+        formErrors={formErrors}
+        disabled={busy}
+        loadOptions={async () => []}
+        onChange={(field, value) => {
+          setDraft((current) => ({ ...current, [field]: value }));
+          setFailure(null);
+        }}
+      />
+    </DialogShell>
+  );
+}
 
 /**
  * What to do when the credential is missing or refused. Not signed in needs a
  * sign-in, not "connecting again", and the way to it is named.
  */
 function signInStep(connector: SourceEntry["connector"]) {
-  return connector.provider === "github"
-    ? "Run “gh auth login” in a terminal, then choose Check connection."
-    : `Sign in to ${connector.name} on this computer, then choose Check connection.`;
-}
-
-function fieldErrors(failure: SourceFailure | null) {
-  const grouped: Record<string, string[]> = {};
-  for (const issue of failure?.fields ?? [])
-    (grouped[issue.field] ??= []).push(issue.message);
-  return grouped;
+  return (
+    connector.presentation?.sign_in.desktop_instruction ??
+    `Sign in to ${connector.name} on this computer, then choose Check connection.`
+  );
 }
 
 function PreviewPanel({
   preview,
+  discoveryNote,
   refresh,
   busy,
 }: {
   preview: DiscoveryPreview;
+  discoveryNote: string | null | undefined;
   refresh: () => void;
   busy: boolean;
 }) {
@@ -115,8 +219,8 @@ function PreviewPanel({
             )}
             {preview.matched === 0
               ? "No open issues match these rules. You can still save them."
-              : `Checked as ${preview.account}; nothing has been imported.`}{" "}
-            Pull requests are not included.
+              : `Checked as ${preview.account}; nothing has been imported.`}
+            {discoveryNote && ` ${discoveryNote}`}
             {preview.issues.length < preview.matched &&
               ` Showing the first ${preview.issues.length}.`}
           </p>
@@ -140,7 +244,7 @@ function PreviewPanel({
                 <tr key={issue.display}>
                   <td>
                     <SourceLink url={issue.url} className="source-preview-ref">
-                      {issue.display.split("/").at(-1)}
+                      {issue.label ?? issue.display}
                     </SourceLink>
                   </td>
                   <td>{issue.title}</td>
@@ -166,47 +270,17 @@ function PreviewPanel({
   );
 }
 
-/** "a, b and c": the last item joined by "and". */
-function joinNames(items: string[]) {
-  return items.length < 2
-    ? items.join("")
-    : `${items.slice(0, -1).join(", ")} and ${items.at(-1)}`;
-}
-
-/**
- * The GitHub draft in one sentence, so the rules can be read at a glance.
- * Clauses that do not apply are left out.
- */
-function Readback({ config }: { config: SourceConfig }) {
-  const list = (key: string) => {
-    const value = config[key];
-    return Array.isArray(value)
-      ? value.filter((item): item is string => typeof item === "string")
-      : [];
-  };
-  const repositories = list("repositories");
-  const labels = list("labels");
-  const assignee =
-    typeof config.assignee === "string" ? config.assignee.trim() : "";
+function Readback({ parts }: { parts: SummaryPart[] }) {
   return (
     <SettingsListFooter>
       <span className="source-readback" data-testid="source-readback">
         <AlignLeft size={16} aria-hidden="true" />
         <span>
-          Imports open issues from{" "}
-          <strong>
-            {repositories.length > 0
-              ? repositories.join(", ")
-              : "no repository yet"}
-          </strong>
-          {labels.length > 0 && (
-            <>
-              {" "}
-              that have the {labels.length === 1 ? "label" : "labels"}{" "}
-              <strong>{joinNames(labels)}</strong>
-            </>
-          )}
-          , assigned to <strong>{assignee || "anyone"}</strong>.
+          {parts.map(({ text, emphasis }, index) => (
+            <Fragment key={index}>
+              {emphasis ? <strong>{text}</strong> : text}
+            </Fragment>
+          ))}
         </span>
       </span>
     </SettingsListFooter>
@@ -221,31 +295,53 @@ function Readback({ config }: { config: SourceConfig }) {
 export function SourceCard({
   entry,
   hidden = false,
+  adding,
   initialRepository,
-  onSaved,
   onProjectLinked,
 }: {
   entry: SourceEntry;
+  adding?: {
+    id: string;
+    onAdded: (source: SavedSource) => void;
+    onCancel: () => void;
+  };
   /** Keeps the page mounted but out of sight, so its draft and preview survive. */
   hidden?: boolean;
   /** The repository that opened first-time source setup. */
   initialRepository?: string;
-  onSaved?: () => void;
-  onProjectLinked?: (projectId: string) => void;
+  onProjectLinked?: (projectId: string, connection: string) => void;
 }) {
   const now = useNow();
   const { connector } = entry;
+  const { presentation, provider } = connector;
+  const [saved, setSaved] = useState<SavedSource | null>(entry.saved);
+  const [name, setName] = useState(connector.name);
+  const connectionId = adding?.id ?? saved?.id;
+  const publishes = connector.capabilities.includes("publish");
+  const syncedFields = connector.capabilities.includes("comments")
+    ? "title, description, state and comments"
+    : "title, description and state";
   const schedule = useSourceActivity();
-  const health = schedule.sources.find(
-    (item) => item.provider === connector.provider,
+  const health = schedule.sources.find((item) =>
+    connectionId
+      ? item.connection_id === connectionId
+      : item.provider === provider,
   );
+  const verifiedCredential = connectionId
+    ? schedule.verifiedCredentials?.get(connectionId)
+    : undefined;
+  const staleAuthentication =
+    verifiedCredential && SIGNED_OUT.includes(health?.error?.code ?? "");
+  const healthCheckFailed =
+    verifiedCredential &&
+    (schedule.healthReadFailure ?? 0) >= verifiedCredential.read;
   const lastRefreshed = health?.last_refreshed_at;
+  const retry = health?.error?.code === "extension_crash_limit";
   const syncing =
     health === undefined ||
     health.health === "synced" ||
     health.health === "waiting";
   const fields = connector.schema.fields;
-  const [saved, setSaved] = useState<SavedSource | null>(entry.saved);
   const [draft, setDraft] = useState<Draft>(() =>
     draftFromConfig(
       fields,
@@ -257,6 +353,7 @@ export function SourceCard({
   const [failure, setFailure] = useState<SourceFailure | null>(null);
   const [failedStep, setFailedStep] = useState<Exclude<Busy, null>>("saving");
   const [account, setAccount] = useState<Account | null>(null);
+  const [signIn, setSignIn] = useState(false);
   const checks = useRef(0);
   const [previewed, setPreviewed] = useState<{
     key: string;
@@ -272,8 +369,44 @@ export function SourceCard({
     [],
   );
 
-  const config = useMemo(() => configFromDraft(fields, draft), [fields, draft]);
+  const storedSecrets = saved?.secret_fields ?? NO_SECRETS;
+  const config = useMemo(
+    () => configFromDraft(fields, draft, storedSecrets),
+    [fields, draft, storedSecrets],
+  );
   const key = configKey(config);
+  const publicConfig = useMemo(
+    () =>
+      Object.fromEntries(
+        Object.entries(config).filter(
+          ([key]) =>
+            !fields.some(
+              (field) => field.key === key && field.type === "secret",
+            ),
+        ),
+      ),
+    [config, fields],
+  );
+  const publicKey = configKey(publicConfig);
+  const [readback, setReadback] = useState<{
+    key: string;
+    parts: SummaryPart[];
+  } | null>(null);
+  useEffect(() => {
+    if (hidden) return;
+    let current = true;
+    void sourcesClient.configurationSummary(provider, publicConfig).then(
+      (parts) => {
+        if (current) setReadback({ key: publicKey, parts });
+      },
+      () => {
+        if (current) setReadback(null);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [publicConfig, hidden, publicKey, provider]);
   const dirty =
     saved === null
       ? Object.keys(config).length > 0
@@ -281,15 +414,46 @@ export function SourceCard({
   const preview = previewed?.key === key ? previewed.preview : null;
   const stale = previewed !== null && previewed.key !== key;
   const working = busy !== null;
-  const repositories = config.repositories;
-  const hasTarget = fields.some((field) => field.key === "repositories")
-    ? Array.isArray(repositories) && repositories.length > 0
-    : Object.keys(config).length > 0;
+  const targetField = presentation?.target;
+  const target = targetField ? config[targetField.field] : undefined;
+  const visible = activeFields(fields, draft, storedSecrets);
+  const hasTarget =
+    !visible.some((field) => field.key === targetField?.field) ||
+    ((Array.isArray(target) || typeof target === "string") &&
+      target.length > 0);
   const canPreview = !working && hasTarget;
-  const canSave = preview !== null && !working && (dirty || saved === null);
+  const canSave =
+    preview !== null &&
+    !working &&
+    (dirty || saved === null) &&
+    (!adding || name.trim().length > 0);
+  const settingsProblem =
+    account?.status === "settings" && account.key === key
+      ? account.failure
+      : null;
+  const fieldErrors = new Map<string, string[]>();
+  const formErrors: string[] = [];
+  for (const { field, message } of (failure ?? settingsProblem)?.fields ?? []) {
+    const visibleField =
+      field && visible.find((setting) => setting.key === field);
+    if (visibleField && visibleField.type !== "link") {
+      fieldErrors.set(visibleField.key, [
+        ...(fieldErrors.get(visibleField.key) ?? []),
+        message,
+      ]);
+    } else {
+      formErrors.push(field ? `${field} ${message}` : message);
+    }
+  }
 
   const loadOptions: LoadOptions = (field, query) =>
-    sourcesClient.options(connector.provider, field, query, config);
+    sourcesClient.options(
+      connector.provider,
+      field,
+      query,
+      config,
+      connectionId,
+    );
 
   function edit(fieldKey: string, value: string | string[]) {
     setDraft((current) => ({ ...current, [fieldKey]: value }));
@@ -327,16 +491,22 @@ export function SourceCard({
       const info = await sourcesClient.checkConnection(
         connector.provider,
         config,
+        connectionId,
       );
       next = { status: "signed_in", account: info.account };
     } catch (reason) {
-      const failure = describeFailure(
-        toSourceFailure(reason),
-        `check your ${connector.name} account`,
-      );
-      next = SIGNED_OUT.includes(failure.code)
-        ? { status: "signed_out", failure }
-        : { status: "failed", failure };
+      const sourceFailure = toSourceFailure(reason);
+      if (sourceFailure.code === "invalid_configuration") {
+        next = { status: "settings", key, failure: sourceFailure };
+      } else {
+        const failure = describeFailure(
+          sourceFailure,
+          `check your ${connector.name} account`,
+        );
+        next = SIGNED_OUT.includes(failure.code)
+          ? { status: "signed_out", failure }
+          : { status: "failed", failure };
+      }
     }
     if (request === checks.current) setAccount(next);
   }
@@ -348,10 +518,65 @@ export function SourceCard({
     checked.current = true;
     firstCheck();
   }, [hidden]);
+  const [activeSync, setActiveSync] = useState<{
+    id: string;
+    ready: boolean;
+    stopping: boolean;
+    progress: string;
+  } | null>(null);
+  const [canceledSync, setCanceledSync] = useState<{
+    lastRefreshed: string | null;
+  } | null>(null);
+  const syncCanceled =
+    canceledSync !== null &&
+    canceledSync.lastRefreshed === (lastRefreshed ?? null);
+  async function refreshConnection(connection: string) {
+    const id = crypto.randomUUID();
+    setCanceledSync(null);
+    setActiveSync({ id, ready: false, stopping: false, progress: "" });
+    try {
+      const report = await sourcesClient.refresh(undefined, connection, retry, {
+        id,
+        update(event) {
+          setActiveSync((sync) => {
+            if (sync?.id !== id) return sync;
+            if (event.kind === "started") return { ...sync, ready: true };
+            const progress =
+              event.total == null
+                ? String(event.completed)
+                : `${event.completed} of ${event.total}`;
+            return { ...sync, progress };
+          });
+        },
+      });
+      if (report.failures.length > 0) throw report.failures[0];
+    } catch (reason) {
+      if (toSourceFailure(reason).code === "refresh_canceled") {
+        setCanceledSync({ lastRefreshed: lastRefreshed ?? null });
+      } else {
+        setNotice(describeFailure(reason, "sync this connection").sentence);
+      }
+    } finally {
+      setActiveSync(null);
+    }
+  }
+  async function cancelSync() {
+    if (!activeSync) return;
+    const { id } = activeSync;
+    setActiveSync({ ...activeSync, stopping: true });
+    try {
+      await sourcesClient.cancelRefresh(id);
+    } catch (reason) {
+      setNotice(describeFailure(reason, "cancel this sync").sentence);
+      setActiveSync((sync) =>
+        sync?.id === id ? { ...sync, stopping: false } : sync,
+      );
+    }
+  }
   const previewMatches = () =>
     run(
       "previewing",
-      () => sourcesClient.preview(connector.provider, config),
+      () => sourcesClient.preview(connector.provider, config, connectionId),
       (result) => {
         setPreviewed({ key, preview: result });
         // The preview ran as this account: that answers the check too.
@@ -362,9 +587,13 @@ export function SourceCard({
   const save = () =>
     run(
       "saving",
-      () => sourcesClient.save(connector.provider, config),
+      () =>
+        adding
+          ? sourcesClient.add(connector.provider, adding.id, name, config)
+          : sourcesClient.save(connector.provider, config, connectionId),
       (outcome) => {
         setSaved(outcome.source);
+        adding?.onAdded(outcome.source);
         setDraft(draftFromConfig(fields, outcome.source.config));
         setPreviewed({
           key: configKey(outcome.source.config),
@@ -373,7 +602,6 @@ export function SourceCard({
         setNotice(
           "Saved. Matching issues are imported on the next sync, then kept up to date automatically.",
         );
-        onSaved?.();
       },
     );
 
@@ -408,7 +636,7 @@ export function SourceCard({
         ? "Unsaved changes. Preview the matching issues before saving."
         : status === "saved"
           ? "These rules are saved. Matching issues are kept up to date automatically."
-          : "Not configured. Add a repository, then preview the matching issues.";
+          : `Not configured. ${targetField?.add ?? "Enter discovery rules"}, then preview the matching issues.`;
   // A failure that is not about one field is said where the next step is: the
   // save bar. Field problems stay under their fields (set SR-05).
   const barFailure =
@@ -440,14 +668,25 @@ export function SourceCard({
           {barText}
         </p>
       )}
-      <Button
-        variant="ghost"
-        size="sm"
-        disabled={working || !dirty}
-        onClick={discard}
-      >
-        Discard changes
-      </Button>
+      {adding ? (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={working}
+          onClick={adding.onCancel}
+        >
+          Cancel
+        </Button>
+      ) : (
+        <Button
+          variant="ghost"
+          size="sm"
+          disabled={working || !dirty}
+          onClick={discard}
+        >
+          Discard changes
+        </Button>
+      )}
       {!preview && (
         <Button
           variant="outline"
@@ -459,28 +698,47 @@ export function SourceCard({
         </Button>
       )}
       <Button size="sm" disabled={!canSave} onClick={save}>
-        {busy === "saving" ? "Saving…" : "Save"}
+        {busy === "saving" ? "Saving…" : adding ? "Add connection" : "Save"}
       </Button>
     </div>
   );
 
-  const signedIn = account?.status === "signed_in" ? account.account : null;
-  const accountLabel =
-    account === null || account.status === "checking" ? (
-      <span className="source-checking">
-        Checking your {connector.name} account…
-      </span>
-    ) : account.status === "signed_in" ? (
-      <StatusLabel tone="positive">Signed in as {account.account}</StatusLabel>
-    ) : account.status === "signed_out" ? (
-      <StatusLabel tone="attention">
-        Not signed in to {connector.name}
-      </StatusLabel>
-    ) : (
-      <StatusLabel tone="attention">
-        Couldn't check your {connector.name} account
-      </StatusLabel>
-    );
+  const signedIn =
+    account?.status === "signed_in"
+      ? account.account
+      : account === null || account.status === "checking"
+        ? verifiedCredential?.account
+        : null;
+  const credentialRecovery =
+    saved?.id &&
+    activeFields(
+      fields,
+      draftFromConfig(fields, saved.config),
+      storedSecrets,
+    ).some((field) => field.type === "secret") &&
+    (account?.status === "signed_out" ||
+      (!staleAuthentication && SIGNED_OUT.includes(health?.error?.code ?? "")));
+  const accountLabel = credentialRecovery ? (
+    <StatusLabel tone="attention">Needs sign-in</StatusLabel>
+  ) : signedIn ? (
+    <StatusLabel tone="positive">Signed in as {signedIn}</StatusLabel>
+  ) : account === null || account.status === "checking" ? (
+    <span className="source-checking">
+      Checking your {connector.name} account…
+    </span>
+  ) : account.status === "signed_out" ? (
+    <StatusLabel tone="attention">
+      Not signed in to {connector.name}
+    </StatusLabel>
+  ) : account.status === "settings" ? (
+    <StatusLabel tone={settingsProblem ? "attention" : "neutral"}>
+      {settingsProblem ? "Connection settings need attention" : "Check needed"}
+    </StatusLabel>
+  ) : (
+    <StatusLabel tone="attention">
+      Couldn't check your {connector.name} account
+    </StatusLabel>
+  );
   const accountFailure =
     account?.status === "signed_out" || account?.status === "failed"
       ? account.failure
@@ -490,10 +748,15 @@ export function SourceCard({
   // not been found signed out itself.
   const needsSignIn = (code: string) =>
     code === "unauthenticated" || code === "not_signed_in";
-  const accountSentence =
-    accountFailure && needsSignIn(accountFailure.code)
-      ? signInStep(connector)
-      : accountFailure?.sentence;
+  const accountSentence = credentialRecovery
+    ? "Re-enter the credentials for this connection."
+    : account?.status === "settings"
+      ? settingsProblem
+        ? "Update the settings below, then check again."
+        : "Check the updated settings to verify the connection."
+      : accountFailure && needsSignIn(accountFailure.code)
+        ? signInStep(connector)
+        : accountFailure?.sentence;
   const healthSentence = health?.error
     ? needsSignIn(health.error.code)
       ? signInStep(connector)
@@ -503,16 +766,24 @@ export function SourceCard({
         ).sentence
     : undefined;
   const healthRepeatsAccount =
-    account?.status === "signed_out" &&
+    (credentialRecovery || account?.status === "signed_out") &&
     !!health?.error &&
     SIGNED_OUT.includes(health.error.code);
 
   return (
     <SettingsPage
       group="Connections"
-      label={connector.name}
+      label={
+        adding
+          ? `Add ${connector.name} connection`
+          : (entry.saved?.name ?? connector.name)
+      }
       icon={CircleDot}
-      lede={`Bring matching ${connector.name} issues into this workspace. Their title, description, state and comments sync inward; ${connector.name} stays the place to edit them.`}
+      iconContent={<SourceIcon svg={presentation?.icon_svg} />}
+      titleAccessory={
+        entry.development && <Badge variant="experimental">Development</Badge>
+      }
+      lede={`Bring matching ${connector.name} issues into this workspace. Their ${syncedFields} sync inward; ${connector.name} stays the place to edit them.`}
       endSlot={
         <StatusLabel tone={short.tone} size="caption">
           {short.text}
@@ -535,6 +806,22 @@ export function SourceCard({
         }
       >
         <SettingsList>
+          {adding && (
+            <SettingsRow variant="stacked">
+              <Field>
+                <FieldLabel htmlFor="source-connection-name">
+                  Connection name
+                </FieldLabel>
+                <Input
+                  id="source-connection-name"
+                  maxLength={100}
+                  value={name}
+                  disabled={working}
+                  onChange={(event) => setName(event.target.value)}
+                />
+              </Field>
+            </SettingsRow>
+          )}
           {/* Two facts, two rows: whether this workspace is connected (saved
               rules, as the ticket menu means it), and whose account the
               check reached (set SR-01). */}
@@ -553,10 +840,20 @@ export function SourceCard({
             }
             description={
               saved
-                ? `Routine sync only reads; ticketd writes to ${connector.name} only when you publish a ticket.`
-                : `Save discovery rules below to connect this workspace. Until then tickets can't be published to ${connector.name}.`
+                ? publishes
+                  ? `Routine sync only reads; ticketd writes to ${connector.name} only when you publish a ticket.`
+                  : `Routine sync only reads from ${connector.name}.`
+                : publishes
+                  ? `Save discovery rules below to connect this workspace. Until then tickets can't be published to ${connector.name}.`
+                  : "Save discovery rules below to connect this workspace."
             }
           />
+          {!!presentation?.hosts?.length && (
+            <SettingsRow
+              title="Declared hosts"
+              description={presentation.hosts.join(", ")}
+            />
+          )}
           <SettingsRow
             leading={
               <SettingsRowTile>
@@ -572,32 +869,49 @@ export function SourceCard({
                   : `ticketd uses your own ${connector.name} sign-in and permissions.`
             }
             trailing={
-              accountFailure?.details ? (
+              credentialRecovery ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setSignIn(true)}
+                >
+                  Re-enter credentials
+                </Button>
+              ) : accountFailure?.details ? (
                 <FailureDetails small details={accountFailure.details} />
               ) : undefined
             }
           />
-          {saved && health && !syncing && !healthRepeatsAccount && (
+          {!!saved?.session_secret_fields?.length && (
             <SettingsRow
-              title={
-                <StatusLabel tone="attention">
-                  <span data-health={health.health}>
-                    {health.health === "unavailable"
-                      ? `${connector.name} is unavailable`
-                      : health.health === "delayed"
-                        ? `${connector.name} sync is delayed`
-                        : `${connector.name} is partly synced`}
-                  </span>
-                </StatusLabel>
-              }
-              description={healthSentence}
-              trailing={
-                health.error && (
-                  <FailureDetails small details={health.error.message} />
-                )
-              }
+              description={<span role="status">{SESSION_NOTICE}</span>}
             />
           )}
+          {saved &&
+            health &&
+            !syncing &&
+            !healthRepeatsAccount &&
+            !staleAuthentication && (
+              <SettingsRow
+                title={
+                  <StatusLabel tone="attention">
+                    <span data-health={health.health}>
+                      {health.health === "unavailable"
+                        ? `${connector.name} is unavailable`
+                        : health.health === "delayed"
+                          ? `${connector.name} sync is delayed`
+                          : `${connector.name} is partly synced`}
+                    </span>
+                  </StatusLabel>
+                }
+                description={healthSentence}
+                trailing={
+                  health.error && (
+                    <FailureDetails small details={health.error.message} />
+                  )
+                }
+              />
+            )}
         </SettingsList>
       </SettingsSection>
       <SettingsSection
@@ -608,8 +922,12 @@ export function SourceCard({
           <SettingsRow variant="stacked">
             <SchemaForm
               fields={fields}
+              presentation={presentation?.fields}
+              targetField={targetField?.field}
               draft={draft}
-              errors={fieldErrors(failure)}
+              storedSecrets={storedSecrets}
+              errors={Object.fromEntries(fieldErrors)}
+              formErrors={formErrors}
               disabled={working}
               loadOptions={loadOptions}
               onChange={edit}
@@ -622,47 +940,87 @@ export function SourceCard({
               </p>
             )}
           </SettingsRow>
-          {connector.provider === "github" && <Readback config={config} />}
+          {readback?.key === publicKey && readback.parts.length > 0 && (
+            <Readback parts={readback.parts} />
+          )}
           {preview && (
             <PreviewPanel
               preview={preview}
+              discoveryNote={presentation?.discovery_note}
               refresh={() => void previewMatches()}
               busy={working}
             />
           )}
         </SettingsList>
       </SettingsSection>
-      {connector.provider === "github" && (
+      {signIn && saved?.id && (
+        <CredentialDialog
+          entry={entry}
+          saved={{ ...saved, id: saved.id }}
+          onClose={() => setSignIn(false)}
+          onSaved={(updated) => {
+            setSignIn(false);
+            setSaved(updated);
+            checks.current += 1;
+            setAccount({ status: "signed_in", account: updated.account });
+            if (updated.id)
+              schedule.readHealth?.({
+                connection: updated.id,
+                account: updated.account,
+              });
+          }}
+        />
+      )}
+      {connector.provider === "github" && saved?.id && (
         <SourceRepositoryRoutes
-          provider={connector.provider}
+          connection={saved.id}
           hidden={hidden}
-          savedKey={saved ? configKey(saved.config) : ""}
+          savedKey={configKey(saved.config)}
           {...(onProjectLinked && { onProjectLinked })}
         />
       )}
       <SettingsSection
         title="Sync"
         actions={
-          <Button
-            variant="ghost"
-            size="sm"
-            disabled={schedule.refreshing || saved === null}
-            onClick={() => void schedule.refreshAll()}
-          >
-            <RefreshCw aria-hidden="true" />
-            Sync now
-          </Button>
+          activeSync ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={!activeSync.ready || activeSync.stopping}
+              onClick={() => void cancelSync()}
+            >
+              Cancel sync
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={schedule.refreshing || saved === null}
+              onClick={() =>
+                void (connectionId
+                  ? refreshConnection(connectionId)
+                  : schedule.refreshAll())
+              }
+            >
+              <RefreshCw aria-hidden="true" />
+              {retry ? "Retry" : "Sync now"}
+            </Button>
+          )
         }
       >
         <SettingsList>
           <SettingsRow
             title={
               <span role="status">
-                {schedule.refreshing
-                  ? `Syncing ${connector.name}…`
-                  : lastRefreshed
-                    ? `${syncing ? "Synced" : "Last synced"} ${ago(lastRefreshed, now) ?? formatDateTime(lastRefreshed)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}`
-                    : "Not synced yet"}
+                {activeSync?.stopping
+                  ? "Canceling sync…"
+                  : schedule.refreshing || activeSync
+                    ? `Syncing ${connector.name}…${activeSync?.progress ? ` · ${activeSync.progress}` : ""}`
+                    : syncCanceled
+                      ? "Sync canceled"
+                      : lastRefreshed
+                        ? `${syncing ? "Synced" : "Last synced"} ${ago(lastRefreshed, now) ?? formatDateTime(lastRefreshed)}${health?.last_checked_tickets != null ? ` · ${health.last_checked_tickets} ${connector.name} ${health.last_checked_tickets === 1 ? "ticket" : "tickets"} checked` : ""}`
+                        : "Not synced yet"}
               </span>
             }
             description={`Runs when ticketd opens${
@@ -671,12 +1029,28 @@ export function SourceCard({
                 : " and periodically while it is open"
             }. An issue that stops matching stays in your workspace and keeps syncing.`}
           />
+          {healthCheckFailed && (
+            <SettingsRow
+              description={
+                <span role="status">Couldn't check sync health.</span>
+              }
+              trailing={
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => schedule.readHealth?.()}
+                >
+                  Retry health check
+                </Button>
+              }
+            />
+          )}
           <SettingsRow
             variant="stacked"
             description="Agents can sync without the desktop open"
           >
             <CommandBlock
-              command="ticketd source refresh"
+              command={`ticketd source ${connectionId ?? "CONNECTION"} refresh`}
               copyLabel="Copy sync command"
             />
           </SettingsRow>

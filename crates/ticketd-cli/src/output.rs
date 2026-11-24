@@ -105,6 +105,10 @@ pub struct WorkspaceStatus {
 /// One entry of `ticketd source list`.
 #[derive(Serialize)]
 pub struct SourceListing<D: Serialize, S: Serialize> {
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub development: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unavailable: bool,
     pub connector: D,
     pub saved: S,
 }

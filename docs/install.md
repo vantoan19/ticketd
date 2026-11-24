@@ -201,3 +201,118 @@ To keep the same workspace on two computers, follow [Sync two desktops with Goog
 ### Publisher and developer configuration
 
 For source and distribution builds, see [Configure Google Drive for a build](releasing.md#configure-google-drive-for-a-build).
+
+## S3 sync setup
+
+Workspace sync can keep its folder in an S3 bucket instead of Google Drive
+([ADR 0018](adr/0018-s3-sync-storage-signed-in-through-the-aws-cli.md)). ticketd
+signs in through the AWS CLI you already use and stores no AWS secret.
+
+What you need:
+
+- **AWS CLI v2, version 2.13 or later**, on each desktop. ticketd looks in
+  `/opt/homebrew/bin`, `/usr/local/bin`, `/usr/bin` and `/usr/local/aws-cli`, because
+  an app opened from Finder does not get your shell's `PATH`. If yours is somewhere
+  else (installed with pipx or conda, say), choose it with **Choose the aws program…**
+  when setup says the CLI isn't installed; ticketd remembers the choice on that desktop.
+- **A profile.** Create one in a terminal with `aws configure sso` (IAM Identity
+  Center) or `aws configure` (access keys). Assumed roles, MFA and credential helpers
+  such as aws-vault work unchanged, and each desktop picks its own profile, under any
+  name, so long as it reaches the same bucket.
+- **A bucket with Versioning turned on.** Create it yourself; ticketd does not create
+  buckets or change their settings. Use a general purpose bucket: S3 directory buckets
+  have no Versioning.
+
+In **Settings > Workspace sync**, choose **S3**, pick the profile, and choose **Sign
+in** if the profile needs it. Then choose the bucket (a list when the profile may list
+buckets, otherwise type its name) and a prefix (`ticketd/` by default). Before the
+first sync, ticketd checks the bucket and refuses one that cannot sync safely, saying
+what to fix: Versioning off or suspended, a bucket that does not refuse a second
+create with `If-None-Match: *`, a missing permission (named where S3 names it), a KMS
+key the profile cannot use, or a bucket that does not exist. The check leaves one small
+object, `.ticketd-bucket-check`, under the prefix, because sync never deletes. After it
+passes, the Upload, Download and Reconnect choices work as with Google Drive.
+
+An S3-compatible service works when it supports Versioning, conditional writes
+(`If-None-Match` and `If-Match`) and SHA-256 checksums. Its endpoint comes from the
+profile's `endpoint_url`, and must be `https` unless the service runs on this computer
+(`localhost`). Setup checks that the profile's credentials can be exported rather than asking
+AWS who it is, since AWS knows nothing of a MinIO account. A profile with a `services` section (a service-specific `s3` endpoint)
+needs AWS CLI 2.34.22 or later to be read; older CLIs ask you to update. AWS S3, MinIO and Ceph RGW 20.x are
+confirmed. Cloudflare R2 (no Versioning) and the Google Cloud Storage XML API (it
+ignores the conditional headers) do not work. The bucket check, not this list, decides
+for any other service. A Workspace stays with the service its bucket was connected
+through: if you edit the profile to reach another endpoint, sync stops with a message.
+To move the bucket on purpose, Disconnect in Settings > Workspace sync, then connect again.
+
+### IAM permissions
+
+Give the profile no more than this. Replace `my-bucket` and the `ticketd/` prefix:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:GetBucketVersioning",
+        "s3:ListBucketMultipartUploads"
+      ],
+      "Resource": "arn:aws:s3:::my-bucket"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload",
+        "s3:ListMultipartUploadParts"
+      ],
+      "Resource": "arn:aws:s3:::my-bucket/ticketd/*"
+    }
+  ]
+}
+```
+
+- `s3:ListAllMyBuckets` is optional. With it, setup offers a list of buckets; without
+  it, you type the bucket's name.
+- The three multipart permissions (`s3:AbortMultipartUpload`,
+  `s3:ListMultipartUploadParts` and `s3:ListBucketMultipartUploads`) are used only for
+  Attachments over 16 MiB. The bucket check tries `s3:ListBucketMultipartUploads`, but
+  not the other two. Without `s3:ListMultipartUploadParts`, an interrupted upload
+  cannot resume. Without `s3:AbortMultipartUpload`, abandoned parts stay in the bucket,
+  and are billed, until a lifecycle rule that aborts incomplete multipart uploads
+  removes them.
+- For a bucket encrypted with a KMS key, also allow `kms:GenerateDataKey` and
+  `kms:Decrypt` on that key.
+
+### Lifecycle rule
+
+Sync lists a folder's object versions to find changes, so the cost of a sync run grows
+with history, and each version is billed as storage. Add a lifecycle rule that expires
+noncurrent versions after more than 30 days. It bounds both without affecting History,
+which keeps 30 days of versions on each desktop. For the prefix `ticketd/`:
+
+```json
+{
+  "Rules": [
+    {
+      "ID": "ticketd-expire-old-versions",
+      "Status": "Enabled",
+      "Filter": { "Prefix": "ticketd/" },
+      "NoncurrentVersionExpiration": { "NoncurrentDays": 31 }
+    }
+  ]
+}
+```
+
+This command replaces the bucket's whole lifecycle configuration, including rules for
+other prefixes. If the bucket already has rules, read them first with `aws s3api
+get-bucket-lifecycle-configuration --bucket my-bucket`, add this rule to them, and apply
+the combined file (or add the rule in the S3 console instead). Then apply it with `aws
+s3api put-bucket-lifecycle-configuration --bucket my-bucket --lifecycle-configuration
+file://rule.json`. ticketd never sets the rule itself.

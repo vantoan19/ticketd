@@ -1,3 +1,5 @@
+import { providerName } from "@/lib/api/sources";
+import { useSources } from "@/features/settings/sources/use-sources";
 import { preserveNewerFocus } from "@/components/ui/use-focus-return";
 import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
 import { onTicketUpdate } from "./activity-composer-request";
@@ -667,7 +669,9 @@ function RecoveredActivity({
     setSeenNewest(newestEntry);
     setShownThrough(seenNewest);
   }
+  const { entries: sources } = useSources();
   const lookups = {
+    source: (id: string) => providerName(id, sources),
     project: (id: string) =>
       projects.find((project) => project.id === id)?.name,
     plan: (id: string) => plans.find((plan) => plan.id === id)?.name,
@@ -1217,7 +1221,7 @@ function RecoveredActivity({
                     meta={
                       entry.editing_agent && (
                         <span className="activity-agent">
-                          {attribution(entry.editing_agent)}
+                          {attribution(entry.editing_agent, sources)}
                         </span>
                       )
                     }

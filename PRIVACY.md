@@ -26,7 +26,10 @@ level, the part of ticketd that wrote it, a short message, and IDs, counts, dura
 and error kinds. By design, it never holds the text of your tickets, Documents, Plans
 or Chats. Error messages from your operating system can still contain a file path.
 The files never leave your machine by themselves; sharing them is your choice. The
-CLI writes warnings and errors to your terminal and keeps no log file.
+CLI writes its own warnings and errors to your terminal. Both the desktop and CLI
+keep bounded, rotated stderr logs for each source connection. ticketd redacts known
+credential values before writing them. Extensions can still write private content
+to these local files.
 
 Settings → Diagnostics can export those logs for a bug report: a `.zip` of under 5 MB
 with a summary (app, OS and WebView versions, log level, whether sync is on, Harness
@@ -34,7 +37,9 @@ versions), the Workspace's health (Format version, a SQLite integrity check, fil
 sizes, and the number of rows in each table), the kinds of warning and error with how
 often they happened, and the last 3 days of logs. Each log line is rebuilt from a short
 list of fields, so any other field is dropped, and your home folder, OS username,
-Workspace path and Drive account email are replaced wherever they appear. IDs are kept.
+Workspace path, Drive account email and AWS identity (its ARN and account ID) are replaced
+wherever they appear. IDs are kept. Each recent source connection log is represented by its
+line count. The ZIP omits extension stderr text.
 Nothing is uploaded: ticketd saves the file where you choose, and anything you attach to
 a public GitHub issue can be read by anyone.
 
@@ -44,9 +49,10 @@ these files may be able to read their content.
 
 ## Workspace sync
 
-Workspace sync is optional and off until you connect Google Drive for it. While
-it is on, ticketd stores a copy of your Workspace content in a visible folder it
-creates in your own Google Drive: one Markdown file for every ticket (with its
+Workspace sync is optional and off until you connect Google Drive or an S3 bucket
+for it. A Workspace uses one of them. While it is on, ticketd stores a copy of your
+Workspace content in a visible folder it creates in your own Google Drive, or under a
+prefix you choose in your own S3 bucket: one Markdown file for every ticket (with its
 authored Activities and Implementation evidence), Document, Plan and project,
 including tags, relationships, follows, reminders and external-source provenance,
 plus your managed Attachment files.
@@ -64,6 +70,20 @@ and receives none of this content.
 Sync uses the same per-file `drive.file` access as attachments. ticketd can reach
 only files it created or you selected for it, not the rest of your Drive.
 
+**With S3**, the same files are stored in your bucket, unencrypted by ticketd unless
+your bucket encrypts them (server-side encryption or a KMS key is the bucket's
+configuration, not ticketd's). They are readable by anyone your bucket's policy and
+your AWS account allow, and by your storage provider. The bucket must keep object
+versions, so earlier versions of a file stay in the bucket until your lifecycle rule
+(if any) expires them, and ticketd also leaves a small `.ticketd-bucket-check` file
+under the prefix. ticketd signs in through the AWS CLI on your computer: it runs the
+CLI to get credentials, keeps them in memory only, and stores no AWS
+secret, not in the OS secure store, a backup or the Workspace. It sends the requests
+to your bucket's endpoint itself and to no one else. What the CLI contacts to sign you
+in (for example IAM Identity Center) is governed by AWS and your organization. ticketd
+has no server and receives none of this content. The AWS profile name and the path to
+the `aws` program stay on each desktop and are not synced.
+
 The following never leave the device through sync: Attention inbox read state,
 project checkout paths, credentials, source connection settings, window layout,
 unfinished drafts, upload queues, and the 30-day local version history.
@@ -76,7 +96,7 @@ unfinished drafts, upload queues, and the 30-day local version history.
 | Publish a ticket to a source                              | The selected provider receives the content included in the publication. Review the preview and destination before publishing.                                                                                                                                                                                                                                                                                  |
 | Sign in to Google Drive or select a file                  | Google's sign-in and Picker services receive the authorization requests. ticketd requests per-file `drive.file` access and stores selected-file identity and metadata locally.                                                                                                                                                                                                                                 |
 | Upload or retrieve a Drive attachment                     | Google receives the selected upload bytes and metadata, or serves the requested download. These operations need network access.                                                                                                                                                                                                                                                                                |
-| Use Workspace sync                                        | Google Drive receives your synced Workspace content and managed Attachment files, unencrypted, in a folder in your own Drive. See [Workspace sync](#workspace-sync).                                                                                                                                                                                                                                           |
+| Use Workspace sync                                        | Google Drive, or the S3 bucket you chose, receives your synced Workspace content and managed Attachment files, unencrypted by ticketd, in a folder in your own Drive or under a prefix in your own bucket. See [Workspace sync](#workspace-sync).                                                                                                                                                              |
 | Check for updates                                         | The desktop makes an anonymous GitHub Releases request on launch, daily while open, and on demand. It downloads and verifies a newer release in the background. GitHub sees the connecting IP address (or your proxy's), as with any web request, and which release and platform file is downloaded; no account, installed version or workspace data is sent. Turn off scheduled requests in Settings → About. |
 | Open an external link                                     | Your browser or OS handler opens the destination under its own privacy settings.                                                                                                                                                                                                                                                                                                                               |
 | Share an export, backup, screenshot, or diagnostic report | The recipient receives whatever you include; ticketd does not redact authored ticket content from a workspace backup or export.                                                                                                                                                                                                                                                                                |
@@ -124,6 +144,10 @@ APIs will adhere to the
 [Google API Services User Data Policy](https://developers.google.com/terms/api-services-user-data-policy),
 including the Limited Use requirements.
 
+S3 sync stores no AWS credential. It gets credentials from the AWS CLI's profile
+you chose and keeps them only in memory. Diagnostics exports replace the AWS identity
+(its ARN and account ID). See [S3 sync setup](https://github.com/vantoan19/ticketd/blob/main/docs/install.md#s3-sync-setup).
+
 ## Retention, backups, and removal
 
 Trashing an item is reversible and does not immediately erase all its data. Local
@@ -131,13 +155,16 @@ attachment cleanup, quarantine, and purge have distinct effects; review their
 confirmation messages. Removing a remote attachment from ticketd does not delete
 the corresponding Google Drive file.
 
-Workspace sync never deletes a record: an item you trash keeps its file in Drive,
-marked as in Trash. Turning sync off on a desktop removes nothing from that desktop or
-from Drive. Deleting a single synced file in Drive does not remove it: the next
-sync run of a connected desktop uploads it again. Sync stops only when the whole
-folder is removed or the desktop is disconnected. To remove synced content from
-Google, disconnect your desktops and delete the folder in Drive yourself; Drive's
-own trash and revision retention then apply.
+Workspace sync never deletes a record: an item you trash keeps its file in Drive or
+the bucket, marked as in Trash. Turning sync off on a desktop removes nothing from that
+desktop or from the storage. Deleting a single synced file in Drive does not remove
+it: the next sync run of a connected desktop uploads it again. Sync stops only when
+the whole folder is removed or the desktop is disconnected. To remove synced content
+from Google, disconnect your desktops and delete the folder in Drive yourself; Drive's
+own trash and revision retention then apply. To remove it from S3, disconnect your
+desktops and delete the prefix's objects and all their versions in the bucket
+yourself; the bucket's Versioning keeps earlier versions until you delete them or a
+lifecycle rule expires them.
 
 Uninstalling the desktop leaves workspace data behind. Backups and exports also
 remain wherever you saved them. A backup retains local workspace data and local

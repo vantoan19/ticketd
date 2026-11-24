@@ -30,8 +30,8 @@ Old steps are history and stay frozen. Two things make an edit to one visible:
   what each format version added and removed, by name. A test regenerates it
   and compares; an environment variable rewrites it on purpose. An edit to an old
   step shows up as a diff in that version's section.
-- Three small fixtures are backups saved by the code that shipped format
-  versions 55, 65 and 72, made through that code's own CLI by
+- Four small fixtures are backups saved by the code that shipped format
+  versions 55, 65, 72 and 89, made through that code's own CLI by
   `scripts/regenerate-format-fixtures`. A test checks that each validates as a
   backup, restores, and migrates to the current version.
 

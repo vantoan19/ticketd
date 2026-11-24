@@ -22,14 +22,53 @@
 
 use std::collections::{BTreeSet, HashSet};
 
+use chrono::{DateTime, Datelike, SecondsFormat, TimeDelta, Timelike, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::{FailureScope, RefreshFailure, SourceFailure, contract::FailureCode};
 use crate::{Error, Workspace};
 
-/// Used when a rate-limited source does not say how long to wait.
-const DEFAULT_RATE_LIMIT_SECS: u64 = 300;
+/// Used when a rate-limited source does not give a usable deadline.
+const DEFAULT_RATE_LIMIT: TimeDelta = TimeDelta::minutes(5);
+
+pub(super) struct RateLimitHold {
+    until: String,
+    pub(super) seconds: u64,
+}
+
+impl RateLimitHold {
+    pub(super) fn new(received_at: Option<&str>, requested: Option<u64>) -> Self {
+        let received = match received_at {
+            Some(time) => DateTime::parse_from_rfc3339(time)
+                .ok()
+                .map(|time| time.with_timezone(&Utc)),
+            None => Some(Utc::now()),
+        };
+        let fallback = DEFAULT_RATE_LIMIT.num_seconds() as u64;
+        let seconds = requested.unwrap_or(fallback);
+        let (until, seconds) = received
+            .and_then(|received| {
+                retry_deadline(received, seconds)
+                    .map(|until| (until, seconds))
+                    .or_else(|| retry_deadline(received, fallback).map(|until| (until, fallback)))
+            })
+            .unwrap_or_else(|| (Utc::now() + DEFAULT_RATE_LIMIT, fallback));
+        Self {
+            until: until.to_rfc3339_opts(SecondsFormat::Millis, true),
+            seconds,
+        }
+    }
+}
+
+fn retry_deadline(received: DateTime<Utc>, seconds: u64) -> Option<DateTime<Utc>> {
+    let delay = TimeDelta::try_seconds(i64::try_from(seconds).ok()?)?;
+    received.checked_add_signed(delay).filter(|until| {
+        // SQLite's date functions need a four-digit year and do not accept leap
+        // seconds. The scheduler uses nonnegative seconds since the Unix epoch.
+        until.year() <= 9999 && until.timestamp() >= 0 && until.nanosecond() < 1_000_000_000
+    })
+}
 
 /// Why and since when a ticket cannot be refreshed. Present only while it can't.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -61,6 +100,8 @@ pub enum SourceHealth {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SourceStatus {
     pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_id: Option<String>,
     pub health: SourceHealth,
     pub last_attempt_at: Option<String>,
     /// The last run in which the source could be read.
@@ -142,13 +183,13 @@ pub(crate) fn migrate_read_partitions(connection: &Connection) -> Result<(), Err
 /// (`imported`): a part nothing came from is read again as if for the first time.
 pub(crate) fn read_partitions(
     connection: &Connection,
-    provider: &str,
+    connection_id: &str,
     imported: Option<&HashSet<String>>,
 ) -> Result<HashSet<String>, Error> {
     let stored: Option<(Option<String>, bool)> = connection
         .query_row(
-            "SELECT read_partitions, last_refreshed_at IS NOT NULL FROM source_status WHERE provider = ?1",
-            [provider],
+            "SELECT read_partitions, last_refreshed_at IS NOT NULL FROM source_connection_status WHERE connection_id = ?1",
+            [connection_id],
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .optional()?;
@@ -162,8 +203,8 @@ pub(crate) fn read_partitions(
 /// What one provider's run found, for [`record_run`].
 pub(crate) struct ProviderRun {
     pub provider: String,
+    pub connection_id: String,
     pub failure: Option<SourceFailure>,
-    pub retry_after_secs: Option<u64>,
     /// Discovery rules the run skipped because they could not be read.
     pub skipped: Vec<String>,
     /// The parts of the source the run read in full, and the ones it skipped.
@@ -177,7 +218,8 @@ pub(crate) struct ProviderRun {
 /// A successful run leaves as read the parts it read, and the parts it skipped
 /// that `read_before` holds: a part that cannot be read for a while stays read,
 /// one that was never read stays unread, and one no longer asked for is
-/// forgotten, so adding it again is a first read again.
+/// forgotten, so adding it again is a first read again. A successful manual
+/// run still honors the tracker's active retry deadline.
 pub(crate) fn record_run(
     connection: &Connection,
     run: &ProviderRun,
@@ -198,28 +240,43 @@ pub(crate) fn record_run(
             let read = serde_json::to_string(&read)?;
             let partial = (!run.skipped.is_empty()).then(|| run.skipped.join("; "));
             connection.execute(
-                "INSERT INTO source_status (provider, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, read_partitions) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
-                 ON CONFLICT(provider) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
-                 error_code = NULL, error_message = NULL, failing_since = NULL, retry_after = NULL, partial_message = ?3, last_checked_tickets = ?4, \
+                "INSERT INTO source_connection_status (connection_id, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, read_partitions) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
+                 ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
+                 error_code = NULL, error_message = NULL, failing_since = NULL, \
+                 retry_after = CASE WHEN julianday(source_connection_status.retry_after) <= julianday(?2) \
+                             THEN NULL ELSE source_connection_status.retry_after END, \
+                 partial_message = ?3, last_checked_tickets = ?4, \
                  read_partitions = ?5 \
-                 WHERE source_status.last_attempt_at IS NULL OR source_status.last_attempt_at <= ?2",
-                params![run.provider, now, partial, run.checked_tickets, read],
+                 WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
+                params![run.connection_id, now, partial, run.checked_tickets, read],
             )?;
         }
         Some(failure) => {
-            let retry = (FailureCode::parse(&failure.code) == Some(FailureCode::RateLimited))
-                .then(|| run.retry_after_secs.unwrap_or(DEFAULT_RATE_LIMIT_SECS));
             connection.execute(
-                "INSERT INTO source_status (provider, last_attempt_at, error_code, error_message, failing_since, retry_after) \
-                 VALUES (?1, ?2, ?3, ?4, ?2, CASE WHEN ?5 IS NULL THEN NULL ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ?2, '+' || ?5 || ' seconds') END) \
-                 ON CONFLICT(provider) DO UPDATE SET last_attempt_at = ?2, error_code = ?3, error_message = ?4, \
-                 failing_since = COALESCE(failing_since, ?2), partial_message = NULL, \
-                 retry_after = CASE WHEN ?5 IS NULL THEN NULL ELSE strftime('%Y-%m-%dT%H:%M:%fZ', ?2, '+' || ?5 || ' seconds') END \
-                 WHERE source_status.last_attempt_at IS NULL OR source_status.last_attempt_at <= ?2",
-                params![run.provider, now, failure.code, failure.message, retry],
+                "INSERT INTO source_connection_status (connection_id, last_attempt_at, error_code, error_message, failing_since) \
+                 VALUES (?1, ?2, ?3, ?4, ?2) \
+                 ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, error_code = ?3, error_message = ?4, \
+                 failing_since = COALESCE(failing_since, ?2), partial_message = NULL \
+                 WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
+                params![run.connection_id, now, failure.code, failure.message],
             )?;
         }
     }
+    Ok(())
+}
+
+pub(super) fn record_hold(
+    connection: &Connection,
+    id: &str,
+    hold: &RateLimitHold,
+) -> Result<(), Error> {
+    connection.execute(
+        "INSERT INTO source_connection_status (connection_id, retry_after)
+         VALUES (?1, ?2)
+         ON CONFLICT(connection_id) DO UPDATE SET retry_after = excluded.retry_after
+         WHERE retry_after IS NULL OR retry_after < excluded.retry_after",
+        params![id, hold.until],
+    )?;
     Ok(())
 }
 
@@ -241,7 +298,7 @@ impl super::RefreshReport {
 }
 
 impl RefreshFailure {
-    fn interrupts(&self) -> bool {
+    pub(super) fn interrupts(&self) -> bool {
         match self.scope {
             FailureScope::Source => true,
             FailureScope::Ticket => {
@@ -273,36 +330,59 @@ fn health_of(
 impl Workspace {
     /// Each saved or previously run source's persisted status, by provider.
     pub fn source_statuses(&self) -> Result<Vec<SourceStatus>, Error> {
-        let mut statement = self.connection.prepare(&format!(
-            "SELECT p.provider, s.last_attempt_at, s.last_refreshed_at, s.error_code, s.error_message, \
-                    s.failing_since, s.retry_after, \
-                    (SELECT COUNT(*) FROM external_identities i \
-                       JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
-                       JOIN source_sync y ON y.ticket_id = i.ticket_id \
-                      WHERE i.provider = p.provider AND y.last_error_code IN ({})), \
-                    s.partial_message, s.last_checked_tickets, \
-                    (SELECT COUNT(*) FROM external_identities i \
-                       JOIN external_ownership o ON o.ticket_id = i.ticket_id AND o.authority = 'external' \
-                      WHERE i.provider = p.provider) \
-             FROM (SELECT provider FROM source_configurations UNION SELECT provider FROM source_status \
-                   UNION SELECT provider FROM external_identities) p \
-             LEFT JOIN source_status s ON s.provider = p.provider \
-             ORDER BY p.provider",
-            FailureCode::unavailable_sql_list()
-        ))?;
-        let rows = statement
+        self.read(Self::read_source_statuses)
+    }
+
+    fn read_source_statuses(&self) -> Result<Vec<SourceStatus>, Error> {
+        let mut statement = self.connection.prepare(
+            "SELECT c.provider, s.last_attempt_at, s.last_refreshed_at, s.error_code, s.error_message,
+                    s.failing_since, s.retry_after, s.partial_message, s.last_checked_tickets, c.id
+             FROM source_connections c LEFT JOIN source_connection_status s ON s.connection_id = c.id
+             UNION ALL
+             SELECT p.provider, s.last_attempt_at, s.last_refreshed_at, s.error_code, s.error_message,
+                    s.failing_since, s.retry_after, s.partial_message, s.last_checked_tickets, NULL
+             FROM (SELECT provider FROM source_status UNION SELECT provider FROM external_identities) p
+             LEFT JOIN source_status s ON s.provider = p.provider
+               AND NOT EXISTS (SELECT 1 FROM source_connections c WHERE c.provider = p.provider)
+             ORDER BY 1, 10",
+        )?;
+        let sources = super::configured_sources(&self.connection)?;
+        let mut counts = std::collections::HashMap::<(String, Option<String>), (u32, u32)>::new();
+        for ticket in super::tracking::tracked(&self.connection, None)? {
+            let id = ticket
+                .connection(&sources)
+                .map(|source| source.saved.id.clone());
+            let count = counts.entry((ticket.provider, id.clone())).or_default();
+            count.0 += 1;
+            if id.is_none()
+                || ticket
+                    .error_code
+                    .as_deref()
+                    .and_then(FailureCode::parse)
+                    .is_some_and(|code| code != FailureCode::NotConfigured && code.is_unavailable())
+            {
+                count.1 += 1;
+            }
+        }
+        let mut rows = statement
             .query_map([], |row| {
                 let code: Option<String> = row.get(3)?;
                 let message: Option<String> = row.get(4)?;
                 let attempted: Option<String> = row.get(1)?;
-                let unavailable_tickets: u32 = row.get(7)?;
-                let partial_message: Option<String> = row.get(8)?;
+                let provider: String = row.get(0)?;
+                let connection_id: Option<String> = row.get(9)?;
+                let (tracked_tickets, unavailable_tickets) = counts
+                    .get(&(provider.clone(), connection_id.clone()))
+                    .copied()
+                    .unwrap_or_default();
+                let partial_message: Option<String> = row.get(7)?;
                 let error = code.map(|code| SourceFailure {
                     code,
                     message: message.unwrap_or_default(),
                 });
                 Ok(SourceStatus {
-                    provider: row.get(0)?,
+                    provider,
+                    connection_id,
                     health: health_of(
                         error.as_ref(),
                         attempted.is_some(),
@@ -311,8 +391,8 @@ impl Workspace {
                     ),
                     last_attempt_at: attempted,
                     last_refreshed_at: row.get(2)?,
-                    last_checked_tickets: row.get(9)?,
-                    tracked_tickets: row.get(10)?,
+                    last_checked_tickets: row.get(8)?,
+                    tracked_tickets,
                     error,
                     failing_since: row.get(5)?,
                     retry_after: row.get(6)?,
@@ -321,14 +401,37 @@ impl Workspace {
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
+        rows.retain(|status| {
+            status.connection_id.is_some()
+                || status.tracked_tickets > 0
+                || !sources
+                    .iter()
+                    .any(|source| source.saved.provider == status.provider)
+        });
         Ok(rows)
+    }
+
+    pub(super) fn source_schedule(&self) -> Result<Vec<(String, u64)>, Error> {
+        self.read(|workspace| {
+            let mut statement = workspace.connection.prepare(
+                "SELECT c.id, CAST(strftime('%s', s.retry_after) AS INTEGER)
+                 FROM source_connections c LEFT JOIN source_connection_status s ON s.connection_id = c.id
+                 ORDER BY c.rowid",
+            )?;
+            Ok(statement
+                .query_map([], |row| {
+                    let hold: Option<i64> = row.get(1)?;
+                    Ok((row.get(0)?, hold.and_then(|time| u64::try_from(time).ok()).unwrap_or(0)))
+                })?
+                .collect::<Result<Vec<_>, _>>()?)
+        })
     }
 
     /// The latest time, in seconds since the Unix epoch, before which any source
     /// asked not to be contacted again. `None` when no hold is recorded.
     pub fn source_hold_until(&self) -> Result<Option<u64>, Error> {
         let epoch: Option<i64> = self.connection.query_row(
-            "SELECT MAX(CAST(strftime('%s', retry_after) AS INTEGER)) FROM source_status WHERE retry_after IS NOT NULL",
+            "SELECT MAX(CAST(strftime('%s', retry_after) AS INTEGER)) FROM source_connection_status WHERE retry_after IS NOT NULL",
             [],
             |row| row.get(0),
         )?;

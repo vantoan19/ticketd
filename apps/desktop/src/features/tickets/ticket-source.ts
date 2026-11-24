@@ -1,4 +1,5 @@
 import type { DuplicateTarget, Ticket, TicketSource } from "@/lib/api/client";
+import type { SourceEntry } from "@/lib/api/sources";
 import { ticketStatuses } from "@/lib/statuses";
 
 /** External choices come from the core; retained provenance does not imply ownership. */
@@ -6,17 +7,16 @@ export function ticketStatusChoices(ticket: Ticket): readonly string[] {
   return externalSource(ticket)?.status_choices ?? ticketStatuses;
 }
 
-export function providerName(provider: string): string {
-  return provider === "github" ? "GitHub" : provider;
-}
-
 /**
  * Who a change is attributed to. A change that came from a source is recorded
  * under the provider's id; it reads as the source, never as an editing agent.
  */
-export function attribution(agent: string): string {
-  const name = providerName(agent);
-  return name === agent ? agent : `Changed on ${name}`;
+export function attribution(
+  agent: string,
+  sources: readonly SourceEntry[],
+): string {
+  const source = sources.find(({ connector }) => connector.provider === agent);
+  return source ? `Changed on ${source.connector.name}` : agent;
 }
 
 /** The source of a ticket the provider currently owns; null for local tickets. */
@@ -24,9 +24,33 @@ export function externalSource(ticket: Ticket): TicketSource | null {
   return ticket.source?.ownership === "external" ? ticket.source : null;
 }
 
-/** Where the issue lives, such as "owner / repo #98", from the parts the core names. */
+/** A formatted place can be shown separately. Otherwise show the issue's full reference. */
+export function sourceReference(source: TicketSource): {
+  place?: string;
+  label: string;
+} {
+  const place = source.place_label;
+  return place && place !== source.place && source.number
+    ? { place, label: source.number }
+    : { label: source.display };
+}
+
+/** Where the issue lives, from the provider's presentation. */
 export function sourceLocation(source: TicketSource): string {
-  return `${source.place.replace("/", " / ")} ${source.number}`.trim();
+  const { place, label } = sourceReference(source);
+  return place ? `${place} ${label}` : label;
+}
+
+/** An unavailable ticket without a working local route has no retry action. */
+export function connectionUnavailableText(source: TicketSource): string | null {
+  switch (source.unavailable?.code) {
+    case "connection_removed":
+      return "Connection removed";
+    case "not_configured":
+      return `${source.provider_name} isn't connected on this desktop`;
+    default:
+      return null;
+  }
 }
 
 /** The state line's words, and the tone of its dot, if it has one. */
@@ -34,24 +58,33 @@ export function sourceState(source: TicketSource): {
   text: string;
   tone: "positive" | "attention" | null;
 } {
-  const name = source.provider_name;
   if (source.unavailable)
-    return { text: "Source unavailable", tone: "attention" };
-  if (source.state.state === "open")
-    return { text: `Open on ${name}`, tone: "positive" };
-  switch (source.state.reason) {
-    case "completed":
-      return { text: `Closed on ${name} as completed`, tone: null };
-    case "not_planned":
-      return { text: `Closed on ${name} as not planned`, tone: null };
-    case "duplicate":
-      return { text: `Closed on ${name} as a duplicate`, tone: null };
-    case "unknown":
-      return {
-        text: `Closed on ${name}; the reason is not recognized`,
-        tone: "attention",
-      };
-  }
+    return {
+      text: connectionUnavailableText(source) ?? "Source unavailable",
+      tone: "attention",
+    };
+  const { category, name } = source.state;
+  const categoryLabel = {
+    open: "Open",
+    completed: "Completed",
+    not_planned: "Not planned",
+    duplicate: "Duplicate",
+    unknown: "Unrecognized state",
+  }[category];
+  const label = name?.trim() || categoryLabel;
+  const qualifier =
+    category !== "open" && label.toLowerCase() !== categoryLabel.toLowerCase()
+      ? ` (${categoryLabel.toLowerCase()})`
+      : "";
+  return {
+    text: `${source.provider_name}: ${label}${qualifier}`,
+    tone:
+      category === "open"
+        ? "positive"
+        : category === "unknown"
+          ? "attention"
+          : null,
+  };
 }
 
 /** "just now", "4 min ago", "2 h ago", "3 d ago"; null when the time cannot be read. */
@@ -76,11 +109,23 @@ export function freshness(source: TicketSource, now = Date.now()): string {
 export function unavailableNotice(
   source: TicketSource,
   now = Date.now(),
-): { title: string; detail: string; since: string } | null {
+): { title: string; detail: string; since: string; canRetry?: false } | null {
   const unavailable = source.unavailable;
   if (!unavailable || source.ownership !== "external") return null;
   const name = source.provider_name;
   const since = ago(unavailable.since, now) ?? unavailable.since;
+  const connectionTitle = connectionUnavailableText(source);
+  if (connectionTitle) {
+    return {
+      title: connectionTitle,
+      detail:
+        unavailable.code === "connection_removed"
+          ? "The last synced copy and your local work are still here. Sync resumes when a connection discovers this issue again."
+          : "You’re viewing the last synced copy. Add a connection for this issue in Settings → Sources to refresh it.",
+      since: `Since ${since}`,
+      canRetry: false,
+    };
+  }
   // Worded by what failed, once: the provider's own text is not chained on.
   const cause =
     unavailable.code === "not_found"

@@ -75,7 +75,21 @@ Most workspace commands print JSON on stdout. `ticketd document link TARGET` pri
 | `export-markdown`        | Export a ticket or Document with portable Markdown, available files and a manifest. |
 | `restore-workspace PATH` | Restore a backup.                                                                   |
 | `export`                 | Export a portable JSON snapshot.                                                    |
-| `source`                 | Connect and configure ticket sources such as GitHub.                                |
+
+## Ticket sources
+
+| Command                                     | Does                                                       |
+| ------------------------------------------- | ---------------------------------------------------------- |
+| `source list`                               | Find provider IDs, settings schemas and saved connections. |
+| `source add PROVIDER`                       | Preview settings with `--preview` or add a connection.     |
+| `source CONNECTION refresh`                 | Import matches and update tracked tickets.                 |
+| `source CONNECTION sign-in --config-file -` | Replace credentials supplied as a JSON object on stdin.    |
+| `source extension add PATH`                 | Review and install a local extension package.              |
+| `source extension link PATH`                | Register and run a development package in place.           |
+| `source conformance PROVIDER`               | Check a registered extension against the contract.         |
+
+Run `ticketd skills get sources` for connection, publication and recovery workflows.
+See the [CLI source guide](https://github.com/vantoan19/ticketd/blob/main/docs/cli.md#ticket-sources).
 
 ## Filters shared by `list` and `search`
 
@@ -87,6 +101,6 @@ Most workspace commands print JSON on stdout. `ticketd document link TARGET` pri
 | `--tag TAG`                         | Tickets with every tag given. Repeat the flag. |
 | `--availability ready` or `blocked` | Ready or Blocked tickets.                      |
 | `--family REFERENCE`                | A parent ticket and its subtickets.            |
-| `--source github` or `local`        | Tickets owned by a source, or local ones.      |
+| `--source PROVIDER` or `local`      | Tickets owned by a source, or local ones.      |
 | `--limit N`, `--offset N`           | A page of results. The default limit is 50.    |
 | `--latest-update`                   | Adds each ticket's latest update.              |

@@ -16,15 +16,15 @@ import { useWorkspaceChange } from "@/lib/workspace-change";
 const title = "Saved repository routes";
 
 export function SourceRepositoryRoutes({
-  provider,
+  connection,
   hidden,
   savedKey,
   onProjectLinked,
 }: {
-  provider: string;
+  connection: string;
   hidden: boolean;
   savedKey: string;
-  onProjectLinked?: (projectId: string) => void;
+  onProjectLinked?: (projectId: string, connection: string) => void;
 }) {
   const [routes, setRoutes] = useState<SourceRepositoryRoute[]>([]);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
@@ -47,7 +47,7 @@ export function SourceRepositoryRoutes({
   function linked(projectId: string) {
     close();
     reload();
-    onProjectLinked?.(projectId);
+    onProjectLinked?.(projectId, connection);
   }
   function close() {
     setSelection(null);
@@ -59,7 +59,7 @@ export function SourceRepositoryRoutes({
   useEffect(() => {
     if (hidden) return;
     let current = true;
-    void sourcesClient.repositoryRoutes(provider).then(
+    void sourcesClient.repositoryRoutes(connection).then(
       (loaded) => {
         if (current) {
           setRoutes(loaded);
@@ -74,7 +74,7 @@ export function SourceRepositoryRoutes({
     return () => {
       current = false;
     };
-  }, [provider, hidden, savedKey, refresh, version]);
+  }, [connection, hidden, savedKey, refresh, version]);
 
   if (!routes.length && !failure && !selection) return null;
   return (
@@ -138,7 +138,7 @@ export function SourceRepositoryRoutes({
       )}
       {selection?.step === "choose" && (
         <LinkRepositoryProjectDialog
-          provider={provider}
+          connection={connection}
           repository={selection.repository}
           onClose={close}
           onReloadRoutes={() => {
@@ -157,7 +157,7 @@ export function SourceRepositoryRoutes({
           lockRemote
           createProject={(name, path) =>
             client.createSourceRepositoryProject(
-              provider,
+              connection,
               selection.repository,
               name,
               path,

@@ -4,8 +4,10 @@
 // share; those unwrap so a broken setup fails the test loudly.
 #![allow(clippy::unwrap_used)]
 
+#[path = "support/fake_source.rs"]
+mod fake_source;
+
 use std::{
-    collections::BTreeMap,
     sync::{
         Arc, Mutex,
         atomic::{AtomicU64, Ordering},
@@ -15,167 +17,22 @@ use std::{
 
 use serde_json::json;
 use ticketd_core::{
-    Status, Workspace,
+    self, Status, Workspace,
     source::{
-        CONTRACT_VERSION, Capability, ChoiceOption, Clock, ClosureReason, ConfigSchema,
-        ConfigValues, ConnectionInfo, Connector, ConnectorDescriptor, DiscoveryPage,
-        DiscoveryRequest, Engine, ExternalIdentity, ExternalIssue, ExternalRef, ExternalState,
-        FailureScope, FieldKind, OptionSource, RefreshCoordinator, RefreshOptions, RefreshPolicy,
-        RefreshReport, Run, SchemaField, Skip, SkippedPartition, SourceError, SourceHealth,
-        TicketSource, ValueFormat,
+        Clock, Engine, ExternalIssue, ExternalState, FailureScope, RefreshCoordinator,
+        RefreshOptions, RefreshPolicy, RefreshReport, Run, Skip, SourceHealth, StateCategory,
+        TicketSource,
     },
 };
 
-#[derive(Clone)]
-enum Failure {
-    Unavailable,
-    Forbidden,
-    RateLimited(Option<u64>),
-}
-
-#[derive(Default)]
-struct Remote {
-    issues: BTreeMap<u64, ExternalIssue>,
-    matching: Vec<u64>,
-    /// Fails discovery and every fetch.
-    outage: Option<Failure>,
-    /// Fails the fetch of these issues with NotFound.
-    deleted: Vec<u64>,
-    /// Fails the fetch of these issues with an unusable answer.
-    broken: Vec<u64>,
-    /// A repository discovery had to skip because nobody can read it.
-    skipped: Option<String>,
-    discover_calls: usize,
-    fetch_calls: Vec<u64>,
-}
-
-#[derive(Clone, Default)]
-struct Fake(Arc<Mutex<Remote>>);
-
-fn fail(failure: &Failure) -> SourceError {
-    match failure {
-        Failure::Unavailable => SourceError::Unavailable("network is down".into()),
-        Failure::Forbidden => SourceError::Forbidden("access was revoked".into()),
-        Failure::RateLimited(secs) => SourceError::RateLimited {
-            retry_after_secs: *secs,
-        },
-    }
-}
-
-impl Connector for Fake {
-    fn descriptor(&self) -> ConnectorDescriptor {
-        ConnectorDescriptor {
-            provider: "fake".into(),
-            name: "Fake".into(),
-            contract_version: CONTRACT_VERSION,
-            capabilities: vec![Capability::Discover, Capability::Fetch],
-            schema: ConfigSchema {
-                fields: vec![SchemaField {
-                    key: "repositories".into(),
-                    label: "Repositories".into(),
-                    help: None,
-                    required: true,
-                    kind: FieldKind::MultiSelect {
-                        options: OptionSource::Dynamic { depends_on: vec![] },
-                        allow_custom: true,
-                        min_items: 1,
-                        max_items: 3,
-                        format: Some(ValueFormat::OwnerName),
-                    },
-                }],
-            },
-        }
-    }
-    fn check_connection(&self, _: &ConfigValues) -> Result<ConnectionInfo, SourceError> {
-        Ok(ConnectionInfo {
-            account: "octo".into(),
-        })
-    }
-    fn options(
-        &self,
-        _: &str,
-        _: &str,
-        _: &ConfigValues,
-    ) -> Result<Vec<ChoiceOption>, SourceError> {
-        Ok(Vec::new())
-    }
-    fn discover(&self, _: DiscoveryRequest<'_>) -> Result<DiscoveryPage, SourceError> {
-        let mut remote = self.0.lock().unwrap();
-        remote.discover_calls += 1;
-        if let Some(failure) = &remote.outage {
-            return Err(fail(failure));
-        }
-        let issues = remote
-            .matching
-            .iter()
-            .filter_map(|id| remote.issues.get(id))
-            .filter(|issue| issue.state == ExternalState::Open)
-            .cloned()
-            .collect();
-        Ok(DiscoveryPage {
-            issues,
-            next_cursor: None,
-            skipped: remote
-                .skipped
-                .iter()
-                .map(|name| SkippedPartition {
-                    code: "not_found".into(),
-                    message: format!("{name}: was not found"),
-                    field: None,
-                    partition: name.clone(),
-                })
-                .collect(),
-        })
-    }
-    fn fetch(
-        &self,
-        _: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<ExternalIssue, SourceError> {
-        let mut remote = self.0.lock().unwrap();
-        let id: u64 = reference.identity.id.parse().unwrap();
-        remote.fetch_calls.push(id);
-        if let Some(failure) = &remote.outage {
-            return Err(fail(failure));
-        }
-        if remote.broken.contains(&id) {
-            return Err(SourceError::Protocol("answered with status 500".into()));
-        }
-        if remote.deleted.contains(&id) {
-            return Err(SourceError::NotFound("the issue was deleted".into()));
-        }
-        remote
-            .issues
-            .get(&id)
-            .cloned()
-            .ok_or_else(|| SourceError::NotFound("gone".into()))
-    }
-}
+use fake_source::{Failure, FakeSource, Remote};
 
 fn issue(id: u64, updated_at: &str) -> ExternalIssue {
-    ExternalIssue {
-        reference: ExternalRef {
-            identity: ExternalIdentity {
-                provider: "fake".into(),
-                id: id.to_string(),
-            },
-            locator: format!("o/r#{id}"),
-        },
-        display: format!("o/r#{id}"),
-        url: format!("https://example.test/o/r/issues/{id}"),
-        title: format!("Issue {id}"),
-        body: "Body".into(),
-        state: ExternalState::Open,
-        assignees: vec![],
-        labels: vec![],
-        created_at: "2026-01-01T00:00:00Z".into(),
-        updated_at: updated_at.into(),
-        author: None,
-        repository: None,
-        duplicate_of: None,
-        duplicate_of_url: None,
-        duplicate_withdrawn: false,
-    }
+    let mut issue = fake_source::issue(id, &format!("Issue {id}"));
+    issue.body = "Body".into();
+    issue.author = None;
+    issue.updated_at = updated_at.into();
+    issue
 }
 
 const T0: &str = "2026-02-01T00:00:00Z";
@@ -186,7 +43,7 @@ const T3: &str = "2026-02-01T00:30:00Z";
 const DAY: u64 = 20_485 * 86_400;
 
 struct Fixture {
-    fake: Fake,
+    fake: FakeSource,
     engine: Engine,
     workspace: Workspace,
     dir: tempfile::TempDir,
@@ -194,7 +51,7 @@ struct Fixture {
 
 impl Fixture {
     fn new() -> Self {
-        let fake = Fake::default();
+        let fake = FakeSource::default();
         let mut engine = Engine::new();
         engine.register(Box::new(fake.clone())).unwrap();
         let dir = tempfile::tempdir().unwrap();
@@ -247,6 +104,25 @@ impl Fixture {
 }
 
 #[test]
+fn refresh_checks_the_connection_before_reading_discovery_or_tracked_issues() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    f.refresh_at(T0);
+    f.remote(|remote| {
+        remote.issues.get_mut(&1).unwrap().title = "Title without a verified connection".into();
+        remote.matching.clear();
+        remote.connection_error = Some("the credential expired".into());
+    });
+    let report = f.refresh_at(T1);
+    assert_eq!(report.failures[0].scope, FailureScope::Source);
+    assert_eq!(report.failures[0].code, "unauthenticated");
+    assert_eq!(f.workspace.show_ticket("T-KQ1").unwrap().title, "Issue 1");
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(status.last_refreshed_at.as_deref(), Some(T0));
+    assert_eq!(status.error.unwrap().code, "unauthenticated");
+}
+
+#[test]
 fn provider_checked_count_tracks_accepted_runs_and_survives_failures_and_reopen() {
     let mut f = Fixture::new();
     let status = f.workspace.source_statuses().unwrap().remove(0);
@@ -280,8 +156,8 @@ fn provider_checked_count_tracks_accepted_runs_and_survives_failures_and_reopen(
     );
     assert_eq!(status.last_refreshed_at.as_deref(), Some(T1));
     assert_eq!(
-        f.workspace.export().unwrap()["source_status"][0]["last_checked_tickets"],
-        3
+        f.workspace.export().unwrap()["source_status"],
+        serde_json::json!([])
     );
 
     // A single-ticket read is not a whole-provider run.
@@ -337,14 +213,23 @@ fn older_serialized_source_status_defaults_the_added_fields() {
 
 #[test]
 fn migration_from_28_keeps_freshness_but_does_not_invent_a_count() {
-    let mut f = Fixture::new();
-    f.publish(issue(1, T0));
-    f.refresh_at(T0);
-    let path = f.dir.path().join("workspace.sqlite3");
-    drop(f.workspace);
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    ticketd_core::create_workspace_at_format_version(&path, 28).unwrap();
     let db = rusqlite::Connection::open(&path).unwrap();
     db.execute_batch(
-        "ALTER TABLE source_status DROP COLUMN last_checked_tickets; ALTER TABLE activities RENAME COLUMN brief TO content; ALTER TABLE activities RENAME COLUMN reported_at TO created_at; ALTER TABLE activities RENAME TO notes; PRAGMA user_version = 28;",
+        "INSERT INTO tickets (id, title, status) VALUES ('issue-1', 'Old ticket', 'Todo');
+         INSERT INTO source_configurations (provider, configuration, account, contract_version)
+           VALUES ('fake', '{\"repositories\":[\"o/r\"]}', 'octo', 1);
+         INSERT INTO external_identities (ticket_id, provider, external_id, locator, display, url, origin)
+           VALUES ('issue-1', 'fake', '1', 'o/r#1', 'o/r#1', 'https://example.test/o/r/issues/1', 'imported');
+         INSERT INTO external_ownership (ticket_id, authority) VALUES ('issue-1', 'external');
+         INSERT INTO source_sync (ticket_id, external_state) VALUES ('issue-1', 'open');",
+    )
+    .unwrap();
+    db.execute(
+        "INSERT INTO source_status (provider, last_refreshed_at) VALUES ('fake', ?1)",
+        [T0],
     )
     .unwrap();
     drop(db);
@@ -507,10 +392,8 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     let mut f = Fixture::new();
     f.publish(issue(1, T0));
     f.refresh_at(T0);
-    let mut closed = issue(1, T2);
-    closed.state = ExternalState::Closed {
-        reason: ClosureReason::Completed,
-    };
+    let mut closed = issue(1, "2026-02-01T00:20:00.500Z");
+    closed.state = ExternalState::named(StateCategory::Completed, "Closed");
     f.publish(closed);
     f.refresh_at(T2);
     assert_eq!(
@@ -521,14 +404,46 @@ fn an_older_observation_never_regresses_confirmed_source_state() {
     // A slower overlapping run delivers what it saw before the closure.
     f.remote(|r| {
         let stale = r.issues.get_mut(&1).unwrap();
-        stale.state = ExternalState::Open;
-        stale.updated_at = T1.into();
+        stale.state = ExternalState::named(StateCategory::Open, "Open");
+        stale.updated_at = "2026-02-01T00:20:00Z".into();
         stale.title = "Stale title".into();
     });
     f.refresh_at(T3);
     let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
     assert_eq!(ticket.status, Status::Done);
     assert_eq!(ticket.title, "Issue 1");
+
+    f.remote(|r| r.issues.get_mut(&1).unwrap().updated_at = "unknown".into());
+    let report = f.refresh_at(T3);
+    assert!(
+        report.failures.iter().any(|failure| {
+            failure.code == "protocol" && failure.message.contains("updated_at")
+        })
+    );
+    let ticket = f.workspace.show_ticket("T-KQ1").unwrap();
+    assert_eq!(ticket.status, Status::Done);
+    assert_eq!(ticket.title, "Issue 1");
+}
+
+#[test]
+fn a_dated_observation_repairs_an_undated_cached_issue() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    f.refresh_at(T0);
+    let cache = rusqlite::Connection::open(f.dir.path().join("workspace.sqlite3")).unwrap();
+    cache
+        .execute("UPDATE source_sync SET external_updated_at = 'unknown'", [])
+        .unwrap();
+    drop(cache);
+
+    let mut closed = issue(1, T1);
+    closed.state = ExternalState::named(StateCategory::Completed, "Closed");
+    f.publish(closed);
+    f.refresh_at(T1);
+    assert_eq!(
+        f.workspace.show_ticket("T-KQ1").unwrap().status,
+        Status::Done
+    );
 }
 
 #[test]
@@ -561,6 +476,58 @@ fn a_rate_limit_persists_a_hold_that_survives_a_restart() {
 }
 
 #[test]
+fn a_successful_refresh_honors_an_active_hold_renewed_to_the_same_deadline() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    f.refresh_at(T0);
+    f.remote(|r| r.outage = Some(Failure::RateLimited(Some(1800))));
+    assert_eq!(f.refresh_at(T0).failures[0].code, "rate_limited");
+    assert_eq!(
+        f.workspace.source_hold_until().unwrap(),
+        Some(DAY + 30 * 60)
+    );
+    f.remote(|r| r.outage = None);
+    let path = f.dir.path().join("workspace.sqlite3");
+    let engine = f.engine.clone();
+    let fake = f.fake.clone();
+    f.remote(|r| {
+        r.before_discovery = Some(Arc::new(move || {
+            fake.0.lock().unwrap().outage = Some(Failure::RateLimited(Some(600)));
+            let report = Workspace::open(&path)
+                .unwrap()
+                .refresh_sources(
+                    &engine,
+                    &RefreshOptions {
+                        ticket: Some("T-KQ1".into()),
+                        now: Some(T2.into()),
+                    },
+                )
+                .unwrap();
+            assert_eq!(report.failures[0].code, "rate_limited");
+            fake.0.lock().unwrap().outage = None;
+        }));
+    });
+
+    assert!(f.refresh_at(T1).failures.is_empty());
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(status.last_refreshed_at.as_deref(), Some(T1));
+    assert!(status.error.is_none());
+    assert_eq!(
+        f.workspace.source_hold_until().unwrap(),
+        Some(DAY + 30 * 60)
+    );
+
+    // A successful manual read cannot shorten the tracker deadline.
+    assert!(f.refresh_at(T2).failures.is_empty());
+    assert_eq!(
+        f.workspace.source_hold_until().unwrap(),
+        Some(DAY + 30 * 60)
+    );
+    assert!(f.refresh_at(T3).failures.is_empty());
+    assert_eq!(f.workspace.source_hold_until().unwrap(), None);
+}
+
+#[test]
 fn one_unreadable_issue_neither_stops_the_others_nor_backs_off_the_source() {
     let mut f = Fixture::new();
     for id in 1..=3 {
@@ -572,9 +539,7 @@ fn one_unreadable_issue_neither_stops_the_others_nor_backs_off_the_source() {
         r.matching.clear();
         r.broken.push(1);
         let closed = r.issues.get_mut(&2).unwrap();
-        closed.state = ExternalState::Closed {
-            reason: ClosureReason::Completed,
-        };
+        closed.state = ExternalState::named(StateCategory::Completed, "Closed");
         closed.updated_at = T1.into();
     });
     let report = f.refresh_at(T1);
@@ -597,7 +562,7 @@ fn one_unreadable_issue_neither_stops_the_others_nor_backs_off_the_source() {
 fn an_unreadable_repository_is_skipped_visibly_without_stopping_discovery() {
     let mut f = Fixture::new();
     f.publish(issue(1, T0));
-    f.remote(|r| r.skipped = Some("o/gone".into()));
+    f.remote(|r| r.inaccessible = vec!["o/gone".into()]);
     let report = f.refresh_at(T0);
     assert_eq!(report.imported, vec!["T-KQ1".to_owned()]);
     assert_eq!(report.failures.len(), 1);
@@ -608,7 +573,7 @@ fn an_unreadable_repository_is_skipped_visibly_without_stopping_discovery() {
     assert!(status.partial_message.unwrap().contains("o/gone"));
     assert!(status.error.is_none());
 
-    f.remote(|r| r.skipped = None);
+    f.remote(|r| r.inaccessible.clear());
     f.refresh_at(T1);
     let status = f.workspace.source_statuses().unwrap().remove(0);
     assert_eq!(status.health, SourceHealth::Synced);
@@ -776,6 +741,31 @@ fn failures_back_off_without_a_tight_retry_loop_and_recovery_resets() {
 }
 
 #[test]
+fn a_rate_limit_hold_starts_when_the_tracker_replies() {
+    let f = Fixture::new();
+    let clock = ManualClock::at(DAY);
+    let coordinator = coordinator(&clock);
+    let open = || {
+        assert!(
+            coordinator.is_refreshing(),
+            "take the refresh slot before reading the schedule"
+        );
+        f.open_workspace()
+    };
+    let remote_clock = clock.clone();
+    f.remote(|r| {
+        r.before_discovery = Some(Arc::new(move || remote_clock.advance(120)));
+        r.outage = Some(Failure::RateLimited(Some(1800)));
+    });
+    ran(coordinator.tick(&f.engine, &open).unwrap());
+    assert_eq!(
+        f.workspace.source_hold_until().unwrap(),
+        Some(DAY + 120 + 1800)
+    );
+    assert!(!coordinator.is_refreshing());
+}
+
+#[test]
 fn a_rate_limit_delays_the_next_run_by_what_the_source_asked() {
     let f = Fixture::new();
     f.publish(issue(1, T0));
@@ -859,6 +849,52 @@ fn a_manual_refresh_overlapping_a_running_one_waits_instead_of_interleaving() {
     manual.join().unwrap();
     assert_eq!(*order.lock().unwrap(), vec!["background", "manual"]);
     assert!(!coordinator.is_refreshing());
+}
+
+#[test]
+fn a_queued_manual_refresh_can_be_canceled_before_the_running_one_finishes() {
+    use std::{sync::mpsc, time::Duration};
+    let coordinator = Arc::new(coordinator(&ManualClock::default()));
+    let (running_tx, running_rx) = mpsc::channel();
+    let (release_tx, release_rx) = mpsc::channel::<()>();
+    let background = {
+        let coordinator = coordinator.clone();
+        thread::spawn(move || {
+            coordinator.run_now(|| {
+                running_tx.send(()).unwrap();
+                release_rx.recv().unwrap();
+                Ok(RefreshReport::default())
+            })
+        })
+    };
+    running_rx.recv().unwrap();
+    let control = ticketd_core::source::RefreshControl::default();
+    let engine = Engine::new().with_refresh_control(control.clone());
+    let (result_tx, result_rx) = mpsc::channel();
+    let foreground = {
+        let coordinator = coordinator.clone();
+        thread::spawn(move || {
+            let result = coordinator.refresh_now(
+                &engine,
+                &|| -> Result<Workspace, ticketd_core::Error> {
+                    panic!("a canceled queued refresh must not open its Workspace");
+                },
+                None,
+            );
+            result_tx.send(result).unwrap();
+        })
+    };
+    control.cancel();
+    let result = result_rx.recv_timeout(Duration::from_secs(2));
+    release_tx.send(()).unwrap();
+    background.join().unwrap().unwrap();
+    foreground.join().unwrap();
+    assert!(matches!(
+        result.unwrap(),
+        Err(ticketd_core::Error::Source(
+            ticketd_core::source::SourceError::RefreshCanceled
+        ))
+    ));
 }
 
 #[test]

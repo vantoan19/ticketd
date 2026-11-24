@@ -52,6 +52,9 @@
   min-height: 0;
   width: 100%;
   overflow-y: auto;
+  /* A classic scrollbar appearing on a longer page (an error, a list) must not
+     narrow the column and shift it sideways. */
+  scrollbar-gutter: stable;
   scroll-padding-top: 48px;
 }
 

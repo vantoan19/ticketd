@@ -239,6 +239,7 @@ fn a_line_is_rebuilt_from_allowed_fields_and_ids_are_kept() {
             "ticket_ref": "TK-7", "chat_id": "chat-9f2", "automation_run_id": "run-1",
             "source_id": "src-3", "request_id": "req-5", "error_kind": "offline", "repeat_count": 3, "count": 3, "state": "x", "attempt": 2, "duration_ms": 5,
             "title": "Quarterly plan", "error": "could not reach the drive",
+            "error_detail": "extension_private_detail",
             "nested": {"title": "Quarterly plan"}, "list": ["Quarterly plan"],
             "spans": [{"name": "sync_pass", "source_id": "src-3", "title": "Quarterly plan"}],
             "span": {"name": "sync_pass", "source_id": "src-3", "title": "Quarterly plan"},
@@ -272,7 +273,7 @@ fn known_values_are_replaced_wherever_they_appear_and_ids_are_not() {
     let mut line = event(
         &day,
         "WARN",
-        "could not open /Users/jdoe/Drive/Work for jdoe@example.com",
+        "could not open /Users/jdoe/Drive/Work for jdoe@example.com; User: arn:aws:sts::123456789012:assumed-role/Admin/jdoe is not authorized on arn:aws:iam::123456789012:role/Sync",
     );
     line["target"] = "ticketd_core::sync".into();
     line["chat_id"] = "chat-jdoe-1".into();
@@ -284,6 +285,7 @@ fn known_values_are_replaced_wherever_they_appear_and_ids_are_not() {
         os_username: Some("jdoe".into()),
         workspace_path: Some("/Users/jdoe/Drive/Work".into()),
         drive_email: Some("jdoe@example.com".into()),
+        aws_identity: Some("arn:aws:sts::123456789012:assumed-role/Admin/jdoe".into()),
     };
     facts.workspace.quick_check = "failed at /Users/jdoe/Drive/Work/ticketd.db".into();
 
@@ -292,15 +294,51 @@ fn known_values_are_replaced_wherever_they_appear_and_ids_are_not() {
     let files = read_zip(&exported.path);
     let log = file(&files, &format!("logs/ticketd.{day}.log"));
     assert!(
-        log.contains("could not open <workspace> for <drive-account>"),
+        log.contains("could not open <workspace> for <drive-account>; User: <aws-identity> is not authorized on arn:aws:iam::<aws-account>:role/Sync"),
         "{log}"
     );
     // An ID is kept as it is, even where it contains the username.
     assert!(log.contains("chat-jdoe-1"), "{log}");
     assert!(file(&files, "workspace.json").contains("<workspace>/ticketd.db"));
     for (name, text) in &files {
-        for secret in ["/Users/jdoe", "jdoe@example.com"] {
+        for secret in [
+            "/Users/jdoe",
+            "jdoe@example.com",
+            "123456789012",
+            "assumed-role/Admin",
+        ] {
             assert!(!text.contains(secret), "{secret} in {name}");
         }
     }
+}
+
+#[test]
+fn the_bundle_includes_source_log_counts_without_extension_text() {
+    let logs_dir = tempfile::tempdir().unwrap();
+    let out = tempfile::tempdir().unwrap();
+    let sources = logs_dir.path().join("sources");
+    fs::create_dir(&sources).unwrap();
+    fs::write(
+        sources.join("example-tracker.log"),
+        "Private acquisition ticket\nprivate-contact@example.com\n",
+    )
+    .unwrap();
+    fs::write(sources.join("example-tracker.1.log"), "old stderr\n").unwrap();
+    fs::write(sources.join("example-tracker.lock"), "private bookkeeping").unwrap();
+    let logs = DesktopLogs::open(logs_dir.path(), Config::default());
+    let files = read_zip(&logs.export(out.path(), &facts()).unwrap().path);
+    assert_eq!(
+        file(&files, "logs/sources/example-tracker.log"),
+        "stderr_lines: 2\n"
+    );
+    assert_eq!(
+        file(&files, "logs/sources/example-tracker.1.log"),
+        "stderr_lines: 1\n"
+    );
+    for (_, text) in &files {
+        assert!(!text.contains("Private acquisition ticket"));
+        assert!(!text.contains("private-contact@example.com"));
+        assert!(!text.contains("old stderr"));
+    }
+    assert!(!names(&files).contains(&"logs/sources/example-tracker.lock"));
 }

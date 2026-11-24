@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { githubSource } from "@/test/source-fixtures";
 import {
   act,
   cleanup,
@@ -100,6 +101,7 @@ const eligible = {
 /** GitHub as the core reports it: connected, and able to create issues. */
 const githubEntry = {
   connector: {
+    ...githubSource.connector,
     provider: "github",
     name: "GitHub",
     contract_version: 1,
@@ -180,6 +182,72 @@ test("an eligible local ticket previews the exact issue, then publishes it", asy
   );
   await waitFor(() => expect(refresh).toHaveBeenCalled());
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("Linear team choices show names and publish to the selected UUID", async () => {
+  const engineering = "20000000-0000-4000-8000-000000000001";
+  const design = "20000000-0000-4000-8000-000000000002";
+  const linear = {
+    ...githubEntry,
+    connector: {
+      ...githubEntry.connector,
+      provider: "linear",
+      name: "Linear",
+      presentation: {
+        ...githubEntry.connector.presentation,
+        target: {
+          field: "team",
+          label: "Team",
+          example: "Engineering",
+          choose: "Choose a team",
+          add: "Add a team",
+        },
+      },
+    },
+    saved: { ...githubEntry.saved, provider: "linear", name: "Linear" },
+  };
+  bridge.invoke.mockImplementation(async (command, args) => {
+    if (command === "list_sources") return [linear];
+    if (command === "show_ticket") return ticket();
+    if (command === "preview_publication") {
+      return {
+        ...eligible,
+        provider: "linear",
+        provider_name: "Linear",
+        destination: args.destination,
+        destinations: [engineering, design],
+        destination_labels: {
+          [engineering]: "Engineering (ENG)",
+          [design]: "Design (DES)",
+        },
+      };
+    }
+    if (command === "publish_ticket")
+      return { attempt: attempt({ state: "succeeded" }), replayed: false };
+    return [];
+  });
+  rail(ticket());
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Publish to Linear/ }),
+  );
+  const dialog = await screen.findByRole("dialog", {
+    name: /Publish T-KQ1 to Linear/,
+  });
+  const select = await within(dialog).findByRole("combobox", { name: "Team" });
+  fireEvent.keyDown(select, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("option", { name: "Design (DES)" }));
+  await waitFor(() => expect(select.textContent).toContain("Design (DES)"));
+  fireEvent.click(
+    within(dialog).getByRole("button", { name: "Publish issue" }),
+  );
+  await waitFor(() =>
+    expect(bridge.invoke).toHaveBeenCalledWith("publish_ticket", {
+      reference: "T-KQ1",
+      provider: "linear",
+      destination: design,
+      expectedFingerprint: "00000000000000a1",
+    }),
+  );
 });
 
 test("Publish stays in place while the preview reads again after an edit", async () => {
@@ -434,6 +502,7 @@ test("the publication dialog keeps a Close action and closes without sending", a
 test("the dialog selects Core's default and refreshes it after a stale preview", async () => {
   let changed = false;
   bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_sources") return [githubEntry];
     if (command === "preview_publication")
       return {
         ...eligible,
@@ -951,6 +1020,69 @@ test("connecting the source in Settings makes a local ticket publishable without
   connected = true;
   rerender(view([githubEntry]));
   await screen.findByRole("button", { name: /Publish to GitHub/ });
+});
+
+test("publication notices show the saved destination label instead of its UUID", async () => {
+  const destination = "10000000-0000-4000-8000-000000000001";
+  const labelled = attempt({
+    provider: "linear",
+    destination,
+    destination_label: "Platform Team (PLAT)",
+  });
+  reviewAnswers(
+    review({ attempt: labelled, provider_name: "Linear", known: [] }),
+  );
+  render(
+    <PublicationNotice
+      ticket={ticket({ publication: labelled })}
+      refresh={vi.fn(async () => {})}
+    />,
+  );
+  const panel = screen.getByRole("region", { name: "Publish outcome unknown" });
+  expect(within(panel).getByText("Platform Team (PLAT)")).toBeTruthy();
+  await within(panel).findByText(/Checked Linear just now/);
+  expect(panel.textContent).not.toContain(destination);
+});
+
+test("publishing again previews the original connection and destination without creating an issue", async () => {
+  const original = attempt({ destination: "acme/platform" });
+  bridge.invoke.mockImplementation(async (command: string) => {
+    if (command === "list_sources")
+      return [
+        githubEntry,
+        {
+          ...githubEntry,
+          saved: { ...githubEntry.saved, id: "github-2", account: "work" },
+        },
+      ];
+    if (command === "review_publication")
+      return review({ attempt: original, connection_id: "github-2" });
+    if (command === "resolve_publication")
+      return { attempt: { ...original, state: "failed" }, replayed: false };
+    if (command === "preview_publication")
+      return {
+        ...eligible,
+        destination: original.destination,
+        destinations: ["acme/api", original.destination],
+      };
+    return [];
+  });
+  render(
+    <PublicationNotice
+      ticket={ticket({ publication: original })}
+      refresh={vi.fn(async () => {})}
+    />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Publish again" }));
+  await screen.findByRole("dialog", { name: "Publish T-KQ1 to GitHub" });
+  expect(bridge.invoke).toHaveBeenCalledWith("preview_publication", {
+    reference: original.reference,
+    provider: "github-2",
+    destination: original.destination,
+  });
+  expect(bridge.invoke.mock.calls.map(([command]) => command)).not.toContain(
+    "publish_ticket",
+  );
 });
 
 test("the inline unresolved panel keeps retry disabled after dismissing a candidate and can check again", async () => {

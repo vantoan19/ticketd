@@ -48,7 +48,8 @@ Each device keeps a copy of every file as it was last synced. When a record chan
 - **Tags and other sets:** additions and removals from both sides combine. An addition wins over a concurrent removal. No review.
 - **Dependency loops:** two devices can each add a dependency that is valid alone and forms a loop together. Every device then drops the same edge, the later one, chosen by a rule that depends only on the set of edges, and shows a notice naming it.
 - **The same external issue imported on two devices:** each device made its own ticket before they synced, and only one ticket may hold a source identity. A ticket that was published from the Workspace keeps the source over one that was imported; otherwise the ticket with the lower GUID keeps it, on every device. The other loses its source fields and becomes a Duplicate of it, with its content kept. A keeper that is in Trash still keeps the source and the other ticket still becomes its Duplicate. When two devices recorded different statuses for the Duplicate to return to, both keep the same one. No review and no notice.
-- **Source fields refreshed on two devices:** the refresh with the later `source_updated_at` wins as a whole for the fields a refresh writes (state, closure reason, update time, locator, display and URL). No review. Who holds authority over the ticket is not part of a refresh and merges like any other field, so taking a ticket over on one device survives a refresh on another.
+- **Different external issues linked to the same ticket:** a change to the provider or external ID takes its complete source fields with it. When two devices link the ticket to different issues, the lower provider and external ID pair in text order wins on every device. If two devices observe different IDs for an already-linked GitHub issue during host verification or a transfer, the later observation determines the issue ID and location, and authority merges like any other field.
+- **Source fields refreshed on two devices:** the refresh with the later `source_updated_at` wins as a whole for the fields a refresh writes (state category, state name, update time, locator, display, URL, and discovery partition). No review. Who holds authority over the ticket is not part of a refresh and merges like any other field, so taking a ticket over on one device survives a refresh on another.
 
 No duplicate ticket or conflict-copy file is ever created. A file that cannot be read is skipped with a Needs attention notice and changes nothing locally.
 
@@ -68,7 +69,7 @@ Restoring a backup disconnects the Workspace from its sync folder: the folder is
 
 ## History
 
-Each device keeps earlier versions of tickets and Documents in its own database: whenever a local edit or an incoming sync replaces one, the previous version is saved. Versions are kept for 30 days and the current version always. Restoring a version is an ordinary edit, which then syncs. Versions themselves do not sync; a newly added desktop reads a record's earlier versions from Drive's own file revisions on request.
+Each device keeps earlier versions of tickets and Documents in its own database: whenever a local edit or an incoming sync replaces one, the previous version is saved. Versions are kept for 30 days and the current version always. Restoring a version is an ordinary edit, which then syncs. Versions themselves do not sync; a newly added desktop reads a record's earlier versions from Drive's own file revisions on request. A revision whose content equals a version the desktop keeps is that version as uploaded, so History lists it once, as the desktop's own.
 
 This history is also what makes keeping the local value on a same-field conflict, and accepting hand edits from Drive, safe: an overwritten value can be recovered for 30 days.
 
@@ -87,5 +88,5 @@ This ADR governs only what happens between devices. The last-synced copy is a sy
 - A desktop writes its run token to the device list once per app session, on its first run after launch. A run with nothing to send writes nothing to Drive.
 - Change discovery lists the whole folder and compares file versions. This is adequate for one person's Workspace and is the first thing to revisit if a Workspace outgrows it.
 - Personal state stays on each device: Attention inbox read state, checkout paths, credentials, window layout, unfinished drafts and upload queues.
-- The remote side sits behind a narrow file-storage interface with a Google Drive adapter. Other storage providers are not planned.
+- The remote side sits behind a narrow file-storage interface with a Google Drive adapter. [ADR 0018](0018-s3-sync-storage-signed-in-through-the-aws-cli.md) adds an S3 adapter.
 - A later paid ticketd cloud may use a stronger protocol with server-side ordering, accounts and encryption. Nothing here builds it; GUID identity and device-scoped references are the parts intended to carry over.
