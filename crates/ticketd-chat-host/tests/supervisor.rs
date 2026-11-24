@@ -1841,7 +1841,7 @@ async fn a_lost_turn_keeps_only_the_writes_committed_before_its_end() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn storage_recovery_keeps_the_lost_turns_receipt_at_its_first_end_boundary() {
+async fn storage_recovery_after_chat_off_and_on_keeps_the_lost_turns_receipt() {
     use ticketd_core::ChatAgentChange;
 
     let f = Fixture::new(FakeAdapter::codex());
@@ -1892,6 +1892,11 @@ async fn storage_recovery_keeps_the_lost_turns_receipt_at_its_first_end_boundary
             .is_none()
     );
 
+    assert_eq!(f.host.turn_off().await, Vec::new());
+    f.host.turn_on();
+    assert_eq!(f.turns()[0].state, ChatTurnState::Active);
+    let problem_after_enabling = f.live().await.problem;
+
     writer
         .add_activity(&ticket.reference, "After the loss", Some("codex"))
         .unwrap();
@@ -1912,6 +1917,10 @@ async fn storage_recovery_keeps_the_lost_turns_receipt_at_its_first_end_boundary
         panic!("expected one Turn receipt, got {receipts:?}");
     };
     assert_eq!(receipt.turn_id, turn_id);
+    assert!(matches!(
+        problem_after_enabling,
+        Some(ChatProblem::StorageFailed { .. })
+    ));
     assert_eq!(
         serde_json::from_str::<Vec<ChatAgentChange>>(&receipt.input).unwrap(),
         [ChatAgentChange::Update {
