@@ -572,7 +572,7 @@ const chats: MockChat[] = [
       title: "Plan the 2FA rollout",
       harness: claude,
       activity: "failed",
-      problem: { kind: "history_lost" },
+      problem: { kind: "history_lost", history_recovery: "select_history" },
     }),
     items: [
       you("h1", "Plan the 2FA rollout in three phases."),

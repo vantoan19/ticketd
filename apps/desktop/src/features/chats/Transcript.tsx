@@ -1133,17 +1133,17 @@ const Item = memo(function Item({
           actions={actions}
         />
       );
-    case "session":
+    case "session": {
+      const label =
+        item.history === "none"
+          ? "Fresh session · no earlier messages imported"
+          : `Fresh session · started with ${SESSION_HISTORY[item.history](item.count)}`;
       return (
-        <div
-          className="chat-divider"
-          role="separator"
-          aria-label={`Fresh session · started with ${SESSION_HISTORY[item.history](item.count)}`}
-        >
-          Fresh session · started with{" "}
-          {SESSION_HISTORY[item.history](item.count)}
+        <div className="chat-divider" role="separator" aria-label={label}>
+          {label}
         </div>
       );
+    }
     case "marker":
       return item.reason === "warning" ? (
         <Warnings items={[item]} harness={harness} />

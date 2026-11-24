@@ -7,9 +7,9 @@ use std::time::Duration;
 use serde_json::json;
 use ticketd_chat_host::testing::{FakeAdapter, SubmitReply, Written};
 use ticketd_chat_host::{
-    ApprovalDecision, DeliveryEvidence, EventKind, InteractionRequest, NativeItemId,
-    NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, Problem, ProblemKind,
-    ProviderDetail, ToolStatus, TurnOutcome,
+    ApprovalDecision, Capabilities, Capability, DeliveryEvidence, EventKind, HarnessSettings,
+    InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
+    Problem, ProblemKind, ProviderDetail, SettingOutcome, ToolStatus, TurnOutcome,
 };
 use ticketd_core::{ChatDelivery, ChatSubmissionIntent};
 
@@ -90,11 +90,14 @@ async fn settle() {
 
 impl Fixture {
     async fn new() -> Self {
+        Self::with_adapter(FakeAdapter::codex()).await
+    }
+
+    async fn with_adapter(fake: FakeAdapter) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
         // The desktop creates its workspace before its session opens it.
         drop(Workspace::open(&path).unwrap());
-        let fake = FakeAdapter::codex();
         let chats = Chats::new(
             Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
             vec![Arc::new(fake.clone())],
@@ -115,7 +118,7 @@ impl Fixture {
     fn input(&self, message: &str) -> NewChatInput {
         NewChatInput {
             command_id: uuid::Uuid::new_v4().to_string(),
-            harness_id: "codex".to_owned(),
+            harness_id: self.fake.harness().key.as_str().to_owned(),
             folder: Some(self.dir.path().to_string_lossy().into_owned()),
             links: Vec::new(),
             message: message.to_owned(),
@@ -944,6 +947,102 @@ async fn a_fresh_session_starts_with_the_history_the_person_selected_and_replays
     assert!(sent.ends_with("\n\ncontinue"));
     let too_many = HistorySelection::LastMessages { count: 0 };
     assert!(f.chats.resume(&id, too_many).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn native_only_permission_restart_offers_fresh_recovery_and_refuses_history_selection() {
+    let f = Fixture::with_adapter(FakeAdapter::new(
+        &ticketd_core::harnesses::ANTIGRAVITY,
+        Capabilities {
+            steering: Capability::Unsupported {
+                reason: String::new(),
+            },
+        },
+    ))
+    .await;
+    let id = f.chat().await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    let recorded = r#"{"permission":"ask"}"#;
+    f.emit(EventKind::Notice {
+        turn: None,
+        kind: NoticeKind::EffectiveSettings,
+        message: String::new(),
+        detail: Some(ProviderDetail::new("settings", recorded)),
+    })
+    .await;
+    f.emit(EventKind::SettingsState(HarnessSettings {
+        permission: f.fake.permission_before_session(Some(recorded), None),
+        ..HarnessSettings::default()
+    }))
+    .await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    let answer = f.fake.hold_next_setting();
+    f.fake
+        .fail_next_open(failure(ProblemKind::NativeHistoryUnavailable));
+    f.chats
+        .change_setting(&id, SettingKey::Permission, "full")
+        .await
+        .unwrap();
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+
+    let (opened, _) = f.open(&id).await;
+    let chat = opened.snapshot.chat;
+    let problem = serde_json::to_value(chat.problem.unwrap()).unwrap();
+    assert_eq!(problem["kind"], "history_lost");
+    assert_eq!(problem["history_recovery"], "start_fresh");
+    assert!(!chat.has_composer);
+    assert!(chat.queue_paused);
+    // Reject the unsupported choice before looking up even an invalid message id.
+    let error = f
+        .chats
+        .resume(
+            &id,
+            HistorySelection::Picked {
+                ids: vec!["absent".to_owned()],
+            },
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(
+        error.message,
+        "This harness can only resume its own history"
+    );
+    assert_eq!(f.fake.opens().len(), 1);
+
+    let selection = serde_json::from_value(json!({ "kind": "none" })).unwrap();
+    f.chats.resume(&id, selection).await.unwrap();
+    let opens = f.fake.opens();
+    assert_eq!(opens[1].session, ticketd_chat_host::SessionStart::New);
+    assert_eq!(opens[1].settings.permission.as_deref(), Some("full"));
+    assert_eq!(f.submitted(), ["first"]);
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-2"),
+    })
+    .await;
+
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.chat.has_composer);
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Session {
+            history: "none",
+            count: 0,
+            ..
+        }
+    )));
+    f.chats.resume_queue(&id).await.unwrap();
+    f.chats.send(&id, "continue", SendMode::Auto).await.unwrap();
+    settle().await;
+    assert_eq!(f.submitted(), ["first", "continue"]);
 }
 
 #[tokio::test(start_paused = true)]
