@@ -24,7 +24,7 @@ impl Extension for Tracker {
                 provider: "fixture".into(),
                 name: "Fixture".into(),
                 contract_version: 2,
-                capabilities: vec![Capability::Discover, Capability::Fetch],
+                capabilities: vec![Capability::Discover, Capability::Fetch, Capability::Publish],
                 schema: ConfigSchema { fields: vec![] },
             },
             presentation: SourcePresentation::default(),
@@ -112,7 +112,12 @@ fn sdk_negotiates_reports_progress_cancels_and_handles_the_next_call() {
         Some(1),
         json!({"contract_versions":[2],"pid":42}),
     );
-    assert_eq!(receive(&mut output)["result"]["contract_version"], 2);
+    let hello = receive(&mut output);
+    assert_eq!(hello["result"]["contract_version"], 2);
+    assert_eq!(
+        hello["result"]["description"]["capabilities"],
+        json!(["discover", "fetch"]),
+    );
     send(
         &mut input,
         "discover",

@@ -5,7 +5,7 @@ use serde_json::{Value, json};
 use ticketd_source_sdk::{
     ChoiceOption, ConfigValues, ConnectionCheck, ConnectionInfo, Conversation,
     DerivedConfiguration, DestinationRules, DiscoveryPage, DiscoveryRequest, ErrorCode, Extension,
-    ExtensionError, ExternalIssue, ExternalRef, FieldIssue, PublicationCandidates,
+    ExtensionError, ExternalIssue, ExternalRef, FieldIssue, Publication, PublicationCandidates,
     PublicationSearch, PublishRequest, RequestContext, SourceDescription, StateCategory,
 };
 use uuid::Uuid;
@@ -237,6 +237,38 @@ impl Extension for Linear {
         external_issue(&api, issue)
     }
 
+    fn publication(&self) -> Option<&dyn Publication> {
+        Some(self)
+    }
+
+    fn conversation(
+        &self,
+        context: &RequestContext<'_>,
+        config: &ConfigValues,
+        reference: &ExternalRef,
+    ) -> Result<Conversation, ExtensionError> {
+        let id = issue_id(reference)?;
+        let api = self.api(context, config)?;
+        let comments: Vec<Comment> = api.all(
+            "LinearComments",
+            json!({"id": id}),
+            &["issue", "comments"],
+            None,
+        )?;
+        let history: Vec<History> = api.all(
+            "LinearHistory",
+            json!({"id": id}),
+            &["issue", "history"],
+            None,
+        )?;
+        Ok(Conversation {
+            comments: comments.into_iter().map(Into::into).collect(),
+            events: history.into_iter().flat_map(History::into_events).collect(),
+        })
+    }
+}
+
+impl Publication for Linear {
     fn publish(
         &self,
         context: &RequestContext<'_>,
@@ -275,32 +307,6 @@ impl Extension for Linear {
         search: &PublicationSearch,
     ) -> Result<PublicationCandidates, ExtensionError> {
         publication::find_published(&self.api(context, config)?, search)
-    }
-
-    fn conversation(
-        &self,
-        context: &RequestContext<'_>,
-        config: &ConfigValues,
-        reference: &ExternalRef,
-    ) -> Result<Conversation, ExtensionError> {
-        let id = issue_id(reference)?;
-        let api = self.api(context, config)?;
-        let comments: Vec<Comment> = api.all(
-            "LinearComments",
-            json!({"id": id}),
-            &["issue", "comments"],
-            None,
-        )?;
-        let history: Vec<History> = api.all(
-            "LinearHistory",
-            json!({"id": id}),
-            &["issue", "history"],
-            None,
-        )?;
-        Ok(Conversation {
-            comments: comments.into_iter().map(Into::into).collect(),
-            events: history.into_iter().flat_map(History::into_events).collect(),
-        })
     }
 }
 

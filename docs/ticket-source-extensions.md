@@ -424,8 +424,10 @@ Pin a tested commit with Cargo's `--rev` when distributing your extension.
 Use the Rust toolchain in [`rust-toolchain.toml`](../rust-toolchain.toml).
 Implement `Extension` with your description, connection check, discovery and
 fetch, then call `serve_stdio` from your entry point. Add validation, dynamic
-choices, conversation or publication as needed. Read the current connection
-ID from `RequestContext`. Report progress with `RequestContext::progress`
+choices or conversation as needed. To offer publication, implement the
+`Publication` trait and expose it through `Extension::publication`. The SDK
+derives the `publish` capability from that implementation. Read the current
+connection ID from `RequestContext`. Report progress with `RequestContext::progress`
 and check `is_canceled` before network calls and between pages. Keep I/O
 bounded so cancellation can be acknowledged promptly. Use `serve` with supplied
 streams for protocol tests.

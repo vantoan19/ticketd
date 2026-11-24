@@ -12,7 +12,7 @@ pub mod wire;
 pub use model::*;
 pub use presentation::*;
 pub use schema::*;
-pub use server::{Extension, ExtensionError, RequestContext, serve, serve_stdio};
+pub use server::{Extension, ExtensionError, Publication, RequestContext, serve, serve_stdio};
 pub use wire::WireFailureCode as ErrorCode;
 
 /// Check that the extension refused a probe for a contract it cannot support.

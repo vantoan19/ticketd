@@ -11,8 +11,8 @@ use std::{
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
-    CONTRACT_VERSION, ChoiceOption, ConfigValues, ConnectionCheck, Conversation, DiscoveryPage,
-    DiscoveryRequest, ErrorClass, ErrorCode, ExternalIssue, ExternalRef, FieldIssue,
+    CONTRACT_VERSION, Capability, ChoiceOption, ConfigValues, ConnectionCheck, Conversation,
+    DiscoveryPage, DiscoveryRequest, ErrorClass, ErrorCode, ExternalIssue, ExternalRef, FieldIssue,
     PublicationCandidates, PublicationSearch, PublishRequest, SourceDescription,
     wire::{
         Call, CancelNotification, Description, Failure, JsonRpc, LINE_LIMIT, ProgressMethod,
@@ -73,33 +73,35 @@ pub trait Extension: Send + Sync + 'static {
         Err(ExtensionError::unsupported("conversation"))
     }
 
+    /// The SDK advertises publication when the extension supplies all three operations.
+    fn publication(&self) -> Option<&dyn Publication> {
+        None
+    }
+}
+
+/// The operations required to offer publication and recover an uncertain create.
+pub trait Publication: Send + Sync {
     fn publish(
         &self,
-        _context: &RequestContext<'_>,
-        _config: &ConfigValues,
-        _request: &PublishRequest,
-    ) -> Operation<ExternalIssue> {
-        Err(ExtensionError::unsupported("publication"))
-    }
+        context: &RequestContext<'_>,
+        config: &ConfigValues,
+        request: &PublishRequest,
+    ) -> Operation<ExternalIssue>;
 
     fn locate(
         &self,
-        _context: &RequestContext<'_>,
-        _config: &ConfigValues,
-        _destination: &str,
-        _text: &str,
-    ) -> Operation<ExternalIssue> {
-        Err(ExtensionError::unsupported("issue lookup"))
-    }
+        context: &RequestContext<'_>,
+        config: &ConfigValues,
+        destination: &str,
+        text: &str,
+    ) -> Operation<ExternalIssue>;
 
     fn find_published(
         &self,
-        _context: &RequestContext<'_>,
-        _config: &ConfigValues,
-        _search: &PublicationSearch,
-    ) -> Operation<PublicationCandidates> {
-        Err(ExtensionError::unsupported("publication recovery"))
-    }
+        context: &RequestContext<'_>,
+        config: &ConfigValues,
+        search: &PublicationSearch,
+    ) -> Operation<PublicationCandidates>;
 }
 
 /// A classified failure, with a person-readable message that contains no
@@ -309,7 +311,19 @@ pub fn serve(
                             contract_versions: vec![CONTRACT_VERSION],
                             contract_version: negotiated.then_some(CONTRACT_VERSION),
                             version: version.to_owned(),
-                            description: negotiated.then(|| extension.description()),
+                            description: negotiated.then(|| {
+                                let mut description = extension.description();
+                                let capabilities = &mut description.descriptor.capabilities;
+                                if extension.publication().is_some() {
+                                    if !capabilities.contains(&Capability::Publish) {
+                                        capabilities.push(Capability::Publish);
+                                    }
+                                } else {
+                                    capabilities
+                                        .retain(|capability| *capability != Capability::Publish);
+                                }
+                                description
+                            }),
                         }),
                     })?;
                 } else if negotiated {
@@ -487,6 +501,11 @@ fn dispatch(
         canceled,
         send_progress,
     };
+    let publication = || {
+        extension
+            .publication()
+            .ok_or_else(|| ExtensionError::unsupported("publication"))
+    };
     match &call {
         Call::Describe { .. } => Err(ExtensionError::new(
             ErrorCode::Protocol,
@@ -541,7 +560,7 @@ fn dispatch(
         Call::Publish {
             connection,
             request,
-        } => extension
+        } => publication()?
             .publish(
                 &context(&connection.connection_id),
                 &connection.config,
@@ -552,7 +571,7 @@ fn dispatch(
             connection,
             destination,
             text,
-        } => extension
+        } => publication()?
             .locate(
                 &context(&connection.connection_id),
                 &connection.config,
@@ -560,7 +579,7 @@ fn dispatch(
                 text,
             )
             .map(ResultValue::Issue),
-        Call::FindPublished { connection, search } => extension
+        Call::FindPublished { connection, search } => publication()?
             .find_published(
                 &context(&connection.connection_id),
                 &connection.config,
