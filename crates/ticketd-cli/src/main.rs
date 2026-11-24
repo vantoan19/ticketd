@@ -2481,11 +2481,12 @@ fn source_command(
             settings,
         } => {
             let values = source_settings(&engine, &provider, ConfigValues::new(), settings)?;
-            let id = workspace.next_source_connection_id(&provider)?;
             if preview {
-                let scoped = workspace.source_draft_engine(&engine, &provider, &id, &values)?;
-                serde_json::to_string(&workspace.preview_source(&scoped, &provider, &values)?)?
+                serde_json::to_string(
+                    &workspace.preview_source(&engine, &provider, None, &values)?,
+                )?
             } else {
+                let id = workspace.next_source_connection_id(&provider)?;
                 let outcome = workspace.add_source_connection(
                     &engine,
                     &provider,
@@ -2544,15 +2545,23 @@ fn run_source_connection(
             settings,
         } => {
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
-            let scoped =
-                workspace.source_draft_engine(&engine, &saved.provider, connection, &values)?;
-            serde_json::to_string(&scoped.options(&saved.provider, &field, &query, &values)?)?
+            serde_json::to_string(&workspace.source_options(
+                &engine,
+                &saved.provider,
+                Some(connection),
+                &field,
+                &query,
+                &values,
+            )?)?
         }
         SourceConnectionCommand::Preview { settings } => {
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;
-            let scoped =
-                workspace.source_draft_engine(&engine, &saved.provider, connection, &values)?;
-            serde_json::to_string(&workspace.preview_source(&scoped, &saved.provider, &values)?)?
+            serde_json::to_string(&workspace.preview_source(
+                &engine,
+                &saved.provider,
+                Some(connection),
+                &values,
+            )?)?
         }
         SourceConnectionCommand::Edit { settings } => {
             let values = source_settings(&engine, &saved.provider, saved.config, settings)?;

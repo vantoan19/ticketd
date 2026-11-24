@@ -872,7 +872,8 @@ The code lives in `ticketd_core::source`, from the inside out:
   `conversation.rs`, `freshness.rs`, and `mod.rs` for saved configuration):
   methods on `Workspace` that call the engine first and then write in one short
   transaction, so no network I/O happens while the database is locked.
-  `save_source` validates and previews before it saves.
+  Workspace check, preview, and option lookups bind the draft to its source
+  connection and credentials. `save_source` validates and previews before it saves.
 
 Each registered connector describes its name and icon, issue labels, sign-in
 instructions, settings fields and summary, required target, and network hosts.

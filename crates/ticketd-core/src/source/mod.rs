@@ -604,6 +604,35 @@ impl Workspace {
     ) -> Result<ConnectionInfo, Error> {
         let saved =
             configured_source(&self.connection, id)?.ok_or_else(|| unknown_connection(id))?;
+        self.test_saved_source(engine, &saved)
+    }
+
+    /// Check the account for a setup draft. A draft matching a saved
+    /// connection also checks its account binding and records auth failures.
+    /// Omit the connection ID to check a new connection.
+    pub fn check_source_connection(
+        &self,
+        engine: &Engine,
+        provider: &str,
+        connection: Option<&str>,
+        raw: &ConfigValues,
+    ) -> Result<ConnectionInfo, Error> {
+        if let Some(id) = connection
+            && let Some(saved) = configured_source(&self.connection, id)?
+            && saved.saved.provider == provider
+            && &saved.saved.config == raw
+        {
+            return self.test_saved_source(engine, &saved);
+        }
+        let scoped = self.source_draft_engine(engine, provider, connection, raw)?;
+        Ok(scoped.check_connection(provider, raw)?)
+    }
+
+    fn test_saved_source(
+        &self,
+        engine: &Engine,
+        saved: &ConfiguredSource,
+    ) -> Result<ConnectionInfo, Error> {
         let started = clock(&self.connection, None)?;
         match saved.check(engine) {
             Ok((_, checked)) => Ok(checked.connection),
@@ -623,7 +652,7 @@ impl Workspace {
                              ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, error_code = ?3, error_message = ?4,
                                 failing_since = COALESCE(failing_since, ?2), partial_message = NULL
                              WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
-                            params![id, started, error.code(), error.to_string(), saved.revision],
+                            params![saved.saved.id, started, error.code(), error.to_string(), saved.revision],
                         )?;
                         Ok(())
                     })?;
@@ -633,20 +662,40 @@ impl Workspace {
         }
     }
 
-    /// Bind setup requests to any credential references already saved on this
-    /// device. Add and conformance requests can operate without references.
-    pub fn source_draft_engine(
+    // Bind the draft to its prospective or saved ID so credentials come from
+    // the same place they will when it is saved.
+    fn source_draft_engine(
         &self,
         engine: &Engine,
         provider: &str,
-        id: &str,
+        id: Option<&str>,
         raw: &ConfigValues,
     ) -> Result<Engine, Error> {
-        let references = crate::read_scope::run(&self.connection, |connection| {
-            check_credential_environment(connection, engine, provider, id)?;
-            credentials::references(connection, id)
+        let (id, references) = crate::read_scope::run(&self.connection, |connection| {
+            let id = match id {
+                Some(id) => Cow::Borrowed(id),
+                None => Cow::Owned(next_connection_id(connection, provider)?),
+            };
+            check_credential_environment(connection, engine, provider, &id)?;
+            let references = credentials::references(connection, &id)?;
+            Ok((id, references))
         })?;
-        Ok(engine.for_connection_with_secret_refs(provider, id, raw, &references, None))
+        Ok(engine.for_connection_with_secret_refs(provider, &id, raw, &references, None))
+    }
+
+    /// Look up choices using the credentials and settings for a setup draft.
+    /// Omit the connection ID to use the next available ID for this provider.
+    pub fn source_options(
+        &self,
+        engine: &Engine,
+        provider: &str,
+        connection: Option<&str>,
+        field: &str,
+        query: &str,
+        raw: &ConfigValues,
+    ) -> Result<Vec<ChoiceOption>, Error> {
+        let scoped = self.source_draft_engine(engine, provider, connection, raw)?;
+        Ok(scoped.options(provider, field, query, raw)?)
     }
 
     /// The ID an add operation will use unless another connection is added first.
@@ -709,13 +758,16 @@ impl Workspace {
 
     /// Previews discovery against the workspace's stable external identities.
     /// Retained identities and trashed tickets are already here as well.
+    /// Omit the connection ID to preview a new connection.
     pub fn preview_source(
         &self,
         engine: &Engine,
         provider: &str,
+        connection: Option<&str>,
         raw: &ConfigValues,
     ) -> Result<DiscoveryPreview, Error> {
-        let scoped = engine.with_workflow_credentials(provider, raw)?;
+        let scoped = self.source_draft_engine(engine, provider, connection, raw)?;
+        let scoped = scoped.with_workflow_credentials(provider, raw)?;
         let config = scoped.validate_configuration(provider, raw)?;
         self.preview_source_with_config(&scoped, provider, &config)
             .map(|(preview, _, _)| preview)
@@ -792,7 +844,7 @@ impl Workspace {
         }
         let mut raw = previous.saved.config.clone();
         raw.extend(secrets.clone());
-        let scoped = self.source_draft_engine(engine, provider, id, &raw)?;
+        let scoped = self.source_draft_engine(engine, provider, Some(id), &raw)?;
         previous.verify_effective_site(&scoped)?;
         let scoped = scoped.with_workflow_credentials(provider, &raw)?;
         let normalized = scoped.validate_configuration(provider, &raw)?;
@@ -851,7 +903,7 @@ impl Workspace {
                     .provider
             }
         };
-        let scoped = self.source_draft_engine(engine, provider, id, raw)?;
+        let scoped = self.source_draft_engine(engine, provider, Some(id), raw)?;
         if add.is_none()
             && let Some(previous) = &previous
         {

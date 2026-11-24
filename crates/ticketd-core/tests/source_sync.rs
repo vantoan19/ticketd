@@ -1469,7 +1469,7 @@ fn preview_reports_existing_stable_identities_and_discovery_membership_survives_
     let config = f.workspace.saved_source("fake").unwrap().unwrap().config;
     let preview = f
         .workspace
-        .preview_source(&f.engine, "fake", &config)
+        .preview_source(&f.engine, "fake", Some("fake"), &config)
         .unwrap();
     assert_eq!((preview.new, preview.already_here), (1, 1));
     assert_eq!(preview.issues[0].ticket.as_deref(), Some(imported.as_str()));

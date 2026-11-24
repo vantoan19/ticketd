@@ -1455,18 +1455,14 @@ async fn source_check_connection(
     source_task(sources, move |registry| {
         let engine = registry.engine()?;
         let workspace = open_workspace()?;
-        let id = match connection {
-            Some(id) => id,
-            None => workspace.next_source_connection_id(&provider)?,
-        };
-        if workspace
-            .saved_source(&id)?
-            .is_some_and(|saved| saved.provider == provider && saved.config == config)
-        {
-            return Ok(workspace.test_source_connection(&engine, &id)?);
-        }
-        let scoped = workspace.source_draft_engine(&engine, &provider, &id, &config)?;
-        Ok(scoped.check_connection(&provider, &config)?)
+        Ok(
+            workspace.check_source_connection(
+                &engine,
+                &provider,
+                connection.as_deref(),
+                &config,
+            )?,
+        )
     })
     .await
 }
@@ -1482,12 +1478,14 @@ async fn source_options(
     source_task(sources, move |registry| {
         let engine = registry.engine()?;
         let workspace = open_workspace()?;
-        let id = match connection {
-            Some(id) => id,
-            None => workspace.next_source_connection_id(&provider)?,
-        };
-        let scoped = workspace.source_draft_engine(&engine, &provider, &id, &config)?;
-        Ok(scoped.options(&provider, &field, &query, &config)?)
+        Ok(workspace.source_options(
+            &engine,
+            &provider,
+            connection.as_deref(),
+            &field,
+            &query,
+            &config,
+        )?)
     })
     .await
 }
@@ -1511,12 +1509,7 @@ async fn source_preview(
     source_task(sources, move |registry| {
         let engine = registry.engine()?;
         let workspace = open_workspace()?;
-        let id = match connection {
-            Some(id) => id,
-            None => workspace.next_source_connection_id(&provider)?,
-        };
-        let scoped = workspace.source_draft_engine(&engine, &provider, &id, &config)?;
-        Ok(workspace.preview_source(&scoped, &provider, &config)?)
+        Ok(workspace.preview_source(&engine, &provider, connection.as_deref(), &config)?)
     })
     .await
 }

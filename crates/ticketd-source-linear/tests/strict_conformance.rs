@@ -109,37 +109,38 @@ fn verify_connector() {
     let registry = ExtensionRegistry::new(root.path().join("registry"));
     registry.link(&package).unwrap();
     let draft = ConfigValues::new();
-    let engine = registry
-        .engine()
-        .unwrap()
-        .for_connection("linear", "linear", &draft);
-    let account = engine.check_connection("linear", &draft).unwrap();
+    let engine = registry.engine().unwrap();
+    let workspace = Workspace::open(root.path().join("draft.sqlite3")).unwrap();
+    let account = workspace
+        .check_source_connection(&engine, "linear", None, &draft)
+        .unwrap();
     assert_eq!(account.account, "Fixture User");
     assert_eq!(account.site, SITE);
-    let error = engine.preview("linear", &draft).unwrap_err();
+    let error = workspace
+        .preview_source(&engine, "linear", None, &draft)
+        .unwrap_err();
     assert!(matches!(
         error,
-        SourceError::InvalidConfiguration(issues)
+        Error::Source(SourceError::InvalidConfiguration(issues))
             if issues.iter().any(|issue| issue.field.as_deref() == Some("team"))
     ));
     let malformed_team: ConfigValues =
         serde_json::from_value(json!({"team": ["not a team id"]})).unwrap();
-    let error = engine
-        .check_connection("linear", &malformed_team)
+    let error = workspace
+        .check_source_connection(&engine, "linear", Some("linear"), &malformed_team)
         .unwrap_err();
-    assert!(matches!(error, SourceError::InvalidConfiguration(_)));
+    assert!(matches!(
+        error,
+        Error::Source(SourceError::InvalidConfiguration(_))
+    ));
 
     let config: ConfigValues = serde_json::from_value(json!({
         "team": [TEAM_TWO, TEAM],
         "assignee": ["me"],
     }))
     .unwrap();
-    let connector = registry
-        .engine()
-        .unwrap()
-        .for_connection("linear", "linear", &config);
-    let assignees = connector
-        .options("linear", "assignee", "", &config)
+    let assignees = workspace
+        .source_options(&engine, "linear", Some("linear"), "assignee", "", &config)
         .unwrap();
     assert_eq!(
         assignees
@@ -148,10 +149,18 @@ fn verify_connector() {
             .collect::<Vec<_>>(),
         ["me", USER, USER_TWO]
     );
-    let labels = connector.options("linear", "labels", "", &config).unwrap();
+    let labels = workspace
+        .source_options(&engine, "linear", None, "labels", "", &config)
+        .unwrap();
     assert_eq!(labels[0].label, "Across teams");
+    let preview = workspace
+        .preview_source(&engine, "linear", None, &config)
+        .unwrap();
+    assert_eq!((preview.new, preview.already_here), (2, 0));
+    assert!(workspace.saved_sources().unwrap().is_empty());
     assert_conformance(&registry, &config, None);
 
+    let connector = engine.for_connection("linear", "linear", &config);
     let mut bare_teams = config;
     bare_teams.remove("assignee");
     assert_conformance(&registry, &bare_teams, None);
