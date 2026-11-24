@@ -165,9 +165,8 @@ pub struct Unattended {
     pub run_id: String,
     /// `None` is the harness's default model.
     pub model: Option<String>,
-    /// The agent's switches as saved. Codex has no command list (`any_command` and
-    /// `allowed_commands`: with `run_commands` it runs any), and no read switch of its
-    /// own: its shell does the reading.
+    /// The agent's switches as saved. Codex reads through its shell, which needs
+    /// both `run_commands` and `any_command`.
     pub tools: ticketd_core::AutomationAgentTools,
     /// How many turns the agent may take, where the harness can cap them. Codex
     /// cannot.
