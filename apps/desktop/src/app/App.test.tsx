@@ -2211,6 +2211,7 @@ test("the source filter narrows list and counts together without a header Refres
       provider: "github",
       provider_name: "GitHub",
       place: "acme/api",
+      place_label: "acme / api",
       number: "#98",
       status_choices: ["Todo", "In progress", "In review"],
       id: "9",

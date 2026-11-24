@@ -374,14 +374,15 @@ export function useTicketWorkspace(
       return;
     }
     // The save already committed. Make its settings page available while the
-    // catalog read catches up, and wait for Core to assign the next Add ID.
+    // catalog read catches up. Its saved ID disables the stale Add action
+    // until Core assigns the next ID.
     setSourceEntries((current) => [
       ...current.filter(
         ({ connector, saved }) =>
           connector.provider !== added.connector.provider ||
           (saved && saved.id !== id),
       ),
-      { ...added, next_id: undefined },
+      added,
     ]);
     await readSourceEntries();
   }
