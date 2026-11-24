@@ -9,11 +9,12 @@ use std::collections::{BTreeMap, HashSet, VecDeque};
 use std::future::{Future, pending};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 
 use ticketd_core::{
     Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
-    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, Workspace,
+    ChatRuntimeLossReceipt, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnState,
+    Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
@@ -97,7 +98,8 @@ pub(crate) enum Command {
     Changed,
     /// The Chat's links were changed; the session is given the new context.
     LinksChanged,
-    /// Stop the runtime and end the supervisor; replies with unconfirmed cleanup.
+    /// Stop the runtime and report unconfirmed cleanup. An unresolved permission
+    /// restart keeps its supervisor when Chat is switched off.
     Shutdown(StopReason, oneshot::Sender<Option<String>>),
 }
 
@@ -179,6 +181,12 @@ struct ActiveTurn {
     span: tracing::Span,
 }
 
+struct PendingRuntimeLoss {
+    ending: TurnEnding,
+    receipt: Option<ChatRuntimeLossReceipt>,
+    pause_queue: bool,
+}
+
 struct LiveRequest {
     generation: RuntimeGeneration,
     request: NativeRequestId,
@@ -250,6 +258,7 @@ pub(crate) struct Supervisor {
     stop_when_turn_known: bool,
     problem: Option<ChatProblem>,
     storage_failed: Option<String>,
+    pending_runtime_loss: Option<PendingRuntimeLoss>,
     subscribers: Vec<Publisher>,
     cursor: i64,
     last_live: Option<ChatLive>,
@@ -315,6 +324,7 @@ impl Supervisor {
         context: Option<ContextSource>,
         board: Arc<Board>,
         unattended: Option<Unattended>,
+        feature_off: Arc<AtomicBool>,
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
@@ -360,6 +370,7 @@ impl Supervisor {
             stop_when_turn_known: false,
             problem: None,
             storage_failed: None,
+            pending_runtime_loss: None,
             subscribers: Vec::new(),
             cursor: 0,
             last_live: None,
@@ -378,11 +389,11 @@ impl Supervisor {
             retired_permission_runtime: None,
             recorded_settings: chat.effective_settings.clone(),
         };
-        tokio::spawn(supervisor.run().instrument(span));
+        tokio::spawn(supervisor.run(feature_off).instrument(span));
         sender
     }
 
-    async fn run(mut self) {
+    async fn run(mut self, feature_off: Arc<AtomicBool>) {
         loop {
             let timer = [
                 self.show_text_at,
@@ -397,13 +408,34 @@ impl Supervisor {
                 command = self.commands.recv() => match command {
                     Some(Command::Shutdown(why, reply)) => {
                         self.shutting_down = true;
+                        let keep_recovery = why == StopReason::TurnedOff
+                            && self.permission_restart_pending
+                            && self.runtime.is_none()
+                            && self.opening.is_none();
                         let unconfirmed = self.stop_runtime(why).await;
                         self.publish();
+                        if keep_recovery {
+                            // Leave the restart plan and any close handle in place.
+                            // Views reattach after Chat is enabled again.
+                            self.subscribers.clear();
+                            self.queue_started = false;
+                            let _ = reply.send(unconfirmed);
+                            continue;
+                        }
                         self.board.report(&self.chat_id, self.number, None);
+                        self.commands.close();
                         let _ = reply.send(unconfirmed);
                         return;
                     }
                     Some(command) => {
+                        if self.shutting_down {
+                            if feature_off.load(Ordering::SeqCst) {
+                                // A command may have taken a sender before Chat was switched off.
+                                continue;
+                            }
+                            self.shutting_down = false;
+                            self.shut_down_for = None;
+                        }
                         let turn = self.turn_span();
                         self.on_command(command).instrument(turn).await;
                     }
@@ -414,13 +446,15 @@ impl Supervisor {
                         return;
                     }
                 },
-                Some(done) = self.finished.recv() => {
+                Some(done) = self.finished.recv(), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_done(done));
                 }
-                event = next_event(&mut self.runtime) => {
+                event = next_event(&mut self.runtime), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_event(event));
                 }
-                () = sleep_until_some(timer) => self.turn_span().in_scope(|| self.on_timer()),
+                () = sleep_until_some(timer), if !self.shutting_down => {
+                    self.turn_span().in_scope(|| self.on_timer());
+                }
             }
             if self.storage_failed.is_some() && (self.runtime.is_some() || self.opening.is_some()) {
                 // Controlled shutdown: nothing more can be recorded, so nothing more runs.
@@ -840,24 +874,27 @@ impl Supervisor {
         if self.storage_failed.is_none() {
             return Ok(());
         }
-        let ending = TurnEnding::StoppedByTicketd(StopReason::StorageFailed);
-        self.core(|core| {
-            core.mark_chat_contact_lost(
-                Some(&self.chat_id),
-                &ending.detail().unwrap_or_default(),
-                &ending.key(),
-            )
-        })
-        .map_err(|error| HostError::StorageFailed(error.to_string()))?;
+        let settled = if self.pending_runtime_loss.is_some() {
+            self.settle_runtime_loss()
+        } else {
+            let ending = TurnEnding::StoppedByTicketd(StopReason::StorageFailed);
+            self.core(|core| {
+                core.mark_chat_contact_lost(
+                    Some(&self.chat_id),
+                    &ending.detail().unwrap_or_default(),
+                    &ending.key(),
+                )?;
+                Ok(())
+            })
+        };
+        settled.map_err(|error| HostError::StorageFailed(error.to_string()))?;
         self.storage_failed = None;
         self.problem = None;
         Ok(())
     }
 
     async fn resume_queue(&mut self) -> Result<(), HostError> {
-        if self.permission_restart_pending {
-            self.recover_storage()?;
-        }
+        self.recover_storage()?;
         self.confirm_permission_restart_cleanup().await?;
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, false))?;
@@ -1006,6 +1043,13 @@ impl Supervisor {
             let _ = reply.send(Err(HostError::InteractionExpired));
             return;
         };
+        // The harness still holds the native request if it refuses a mismatched answer.
+        if matches!(live.kind, InteractionKind::NativeApproval { .. })
+            && !matches!(answer, InteractionAnswer::NativeApproval(_))
+        {
+            let _ = reply.send(Err(HostError::InteractionExpired));
+            return;
+        }
         let response = match &answer {
             InteractionAnswer::Approval(ApprovalDecision::Allow) => "allow".to_owned(),
             InteractionAnswer::Approval(ApprovalDecision::AllowForSession) => {
@@ -1052,19 +1096,10 @@ impl Supervisor {
             let _ = reply.send(Err(HostError::Busy));
             return;
         }
-        let chat_id = self.chat_id.clone();
-        let chat = match self.core(|core| core.chat(&chat_id)) {
-            // A trashed Chat runs nothing until it is restored.
-            Ok(chat) if chat.trashed => {
-                let _ = reply.send(Err(Error::ChatTrashed(chat_id).into()));
-                return;
-            }
-            Ok(chat) => chat,
-            Err(error) => {
-                let _ = reply.send(Err(error.into()));
-                return;
-            }
-        };
+        if let Err(error) = self.chat_for_resume() {
+            let _ = reply.send(Err(error.into()));
+            return;
+        }
         if self.native_history_only()
             && matches!(&mode, ResumeMode::FreshSession { history } if !history.trim().is_empty())
         {
@@ -1073,9 +1108,7 @@ impl Supervisor {
             ))));
             return;
         }
-        if self.permission_restart_pending
-            && let Err(error) = self.recover_storage()
-        {
+        if let Err(error) = self.recover_storage() {
             let _ = reply.send(Err(error));
             return;
         }
@@ -1086,6 +1119,14 @@ impl Supervisor {
         if self.runtime.is_some() {
             self.stop_runtime(StopReason::ExplicitResume).await;
         }
+        // Another Workspace connection can change or trash the Chat during cleanup.
+        let chat = match self.chat_for_resume() {
+            Ok(chat) => chat,
+            Err(error) => {
+                let _ = reply.send(Err(error.into()));
+                return;
+            }
+        };
         let (session, origin, preamble) = match mode {
             ResumeMode::FreshSession { history } => (
                 SessionStart::New,
@@ -1095,6 +1136,14 @@ impl Supervisor {
             ResumeMode::Native => native_session(&chat),
         };
         self.open(&chat, session, origin, preamble, Some(reply));
+    }
+
+    fn chat_for_resume(&self) -> Result<Chat, Error> {
+        let chat = self.core(|core| core.chat(&self.chat_id))?;
+        if chat.trashed {
+            return Err(Error::ChatTrashed(chat.id));
+        }
+        Ok(chat)
     }
 
     fn native_history_only(&self) -> bool {
@@ -1347,10 +1396,11 @@ impl Supervisor {
             if let Some(reply) = opening.reply {
                 let _ = reply.send(Err(HostError::Quitting));
             }
-            self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
+            self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
             return Some("the harness was still starting".to_owned());
         }
         let Some(runtime) = &self.runtime else {
+            let _ = self.settle_runtime_loss();
             return None;
         };
         let (handle, generation) = (runtime.handle.clone(), runtime.generation);
@@ -1386,7 +1436,7 @@ impl Supervisor {
         };
         self.keep_unanswered_permission();
         self.runtime = None;
-        self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
+        self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
             if permission_restart {
                 self.retired_permission_runtime = Some(handle);
@@ -1416,17 +1466,15 @@ impl Supervisor {
     }
 
     /// Nothing more will be observed from the runtime: settle what it left open.
-    fn runtime_gone(&mut self, ending: &TurnEnding) {
-        let chat = self.chat_id.clone();
+    fn runtime_gone(&mut self, ending: TurnEnding, pause_queue: bool) {
         let active = self.active.take();
-        let _ = self.write(|core| {
-            core.mark_chat_runtime_lost(
-                &chat,
-                active.as_ref().map(|turn| turn.turn_id.as_str()),
-                &ending.detail().unwrap_or_default(),
-                &ending.key(),
-            )
-        });
+        self.pending_runtime_loss
+            .get_or_insert_with(|| PendingRuntimeLoss {
+                ending,
+                receipt: active.map(|turn| ChatRuntimeLossReceipt::new(turn.turn_id)),
+                pause_queue,
+            });
+        let _ = self.settle_runtime_loss();
         self.unconfirmed_start = None;
         self.turn_evidence = None;
         self.unconfirmed_deadline = None;
@@ -1439,6 +1487,34 @@ impl Supervisor {
         self.stop = None;
         self.stop_deadline = None;
         self.stop_when_turn_known = false;
+    }
+
+    fn settle_runtime_loss(&mut self) -> Result<(), Error> {
+        let Some(mut loss) = self.pending_runtime_loss.take() else {
+            return Ok(());
+        };
+        let chat = self.chat_id.clone();
+        let settled = self.write(|core| {
+            let settled = core.mark_chat_runtime_lost(
+                &chat,
+                loss.receipt.as_mut(),
+                &loss.ending.detail().unwrap_or_default(),
+                &loss.ending.key(),
+            );
+            // The queue can still be paused if only Turn settlement was refused by
+            // storage. Keep that pause on the retry if its own write failed too.
+            let paused = if loss.pause_queue {
+                core.set_chat_queue_paused(&chat, true)
+                    .map(|_| loss.pause_queue = false)
+            } else {
+                Ok(())
+            };
+            settled.and(paused)
+        });
+        if settled.as_ref().is_err_and(|error| !is_refusal(error)) {
+            self.pending_runtime_loss = Some(loss);
+        }
+        settled
     }
 
     fn on_loss(&mut self, detail: String) {
@@ -1458,9 +1534,9 @@ impl Supervisor {
             // `stop_runtime` settles what was open, with its own reason.
             return;
         }
-        self.runtime_gone(&TurnEnding::ContactLost(Some(detail.clone())));
+        self.runtime_gone(TurnEnding::ContactLost(Some(detail.clone())), !quiet);
         if !quiet {
-            self.pause(ChatProblem::RuntimeLost { detail });
+            self.problem = Some(ChatProblem::RuntimeLost { detail });
         }
     }
 

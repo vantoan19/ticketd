@@ -16,6 +16,7 @@ use uuid::Uuid;
 use crate::{Error, Workspace};
 
 mod receipt;
+pub use receipt::ChatRuntimeLossReceipt;
 #[cfg(test)]
 mod tests;
 
@@ -1577,7 +1578,7 @@ fn lose_contact(
     chat_id: &str,
     detail: &str,
     ending: &str,
-    receipt_turn: Option<&str>,
+    receipt: Option<&mut ChatRuntimeLossReceipt>,
 ) -> Result<(), Error> {
     let ids = |sql: &str| -> Result<Vec<String>, Error> {
         let mut statement = connection.prepare(sql)?;
@@ -1586,14 +1587,24 @@ fn lose_contact(
             .collect::<Result<Vec<_>, _>>()?;
         Ok(ids)
     };
+    let mut receipt = receipt;
     for id in ids("SELECT id FROM chat_turns WHERE chat_id = ?1 AND state = 'active'")? {
+        let ended_at = match receipt
+            .as_deref_mut()
+            .filter(|receipt| receipt.turn_id == id)
+        {
+            Some(receipt) => Some(receipt.record_end(connection, chat_id)?),
+            None => {
+                receipt::record_boundary(connection, chat_id, receipt::Boundary::End(&id))?;
+                None
+            }
+        };
         log(connection, chat_id, "turn", &id)?;
-        receipt::record_boundary(connection, chat_id, receipt::Boundary::End(&id))?;
         connection.execute(
-            &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ending = ?3, ended_at = {NOW} WHERE id = ?1"),
-            params![id, detail, ending],
+            &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ending = ?3, ended_at = COALESCE(?4, {NOW}) WHERE id = ?1"),
+            params![id, detail, ending, ended_at],
         )?;
-        if receipt_turn == Some(id.as_str()) {
+        if ended_at.is_some() {
             // Legacy writes can share the end's millisecond. Capture before another
             // connection can commit a write with that timestamp.
             observe(
@@ -2330,11 +2341,11 @@ impl Workspace {
     pub fn mark_chat_runtime_lost(
         &mut self,
         chat_id: &str,
-        active_turn_id: Option<&str>,
+        receipt: Option<&mut ChatRuntimeLossReceipt>,
         detail: &str,
         ending: &str,
     ) -> Result<(), Error> {
-        self.reconcile_chat_contact_loss(Some(chat_id), detail, ending, active_turn_id)?;
+        self.reconcile_chat_contact_loss(Some(chat_id), detail, ending, receipt)?;
         Ok(())
     }
 
@@ -2343,7 +2354,7 @@ impl Workspace {
         chat_id: Option<&str>,
         detail: &str,
         ending: &str,
-        receipt_turn: Option<&str>,
+        mut receipt: Option<&mut ChatRuntimeLossReceipt>,
     ) -> Result<Vec<String>, Error> {
         self.chat_write(|connection| {
             if let Some(id) = chat_id {
@@ -2361,7 +2372,7 @@ impl Workspace {
                 .query_map([chat_id], |row| row.get::<_, String>(0))?
                 .collect::<Result<Vec<_>, _>>()?;
             for id in &affected {
-                lose_contact(connection, id, detail, ending, receipt_turn)?;
+                lose_contact(connection, id, detail, ending, receipt.as_deref_mut())?;
             }
             Ok(affected)
         })
