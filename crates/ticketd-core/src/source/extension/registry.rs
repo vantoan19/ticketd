@@ -26,7 +26,8 @@ const MANIFEST_LIMIT: u64 = 16 * 1024;
 const RECORD_LIMIT: u64 = 1024 * 1024;
 const PACKAGE_PREFIX: &str = ".source-package-";
 const STAGING_PREFIX: &str = ".source-stage-";
-const STAGING_MARKER: &str = ".ticketd-source-install";
+const PACKAGE_DIR: &str = "package";
+const OWNERSHIP_MARKER: &str = ".ticketd-source-install";
 
 /// A device-local extension registration. Connections keep their own settings.
 #[derive(Serialize)]
@@ -480,7 +481,7 @@ impl ExtensionRegistry {
         let source = path.canonicalize().map_err(storage_error)?;
         let staging = tempfile::tempdir().map_err(storage_error)?;
         let staging_path = staging.path().canonicalize().map_err(storage_error)?;
-        let package = staging_path.join("package");
+        let package = staging_path.join(PACKAGE_DIR);
         if staging_path.starts_with(&source) {
             return Err(SourceError::Protocol("cannot install this extension folder because it contains the system temporary directory".into()));
         }
@@ -488,11 +489,13 @@ impl ExtensionRegistry {
         let manifest = Manifest::read(&package)?;
         fs::create_dir_all(&self.folder).map_err(storage_error)?;
         let registry = self.folder.canonicalize().map_err(storage_error)?;
-        let folder = registry.join(format!(
-            "{PACKAGE_PREFIX}{}.{}",
-            manifest.id,
-            uuid::Uuid::new_v4()
-        ));
+        let folder = registry
+            .join(format!(
+                "{PACKAGE_PREFIX}{}.{}",
+                manifest.id,
+                uuid::Uuid::new_v4()
+            ))
+            .join(PACKAGE_DIR);
         let executable = installed_executable(&manifest, &source, &package, &registry, &folder)?;
         let launch = Launch {
             manifest,
@@ -597,18 +600,22 @@ impl ExtensionRegistry {
             launch,
             staging,
         } = prepared;
-        if launch.folder.parent() != Some(&registry) {
+        let Some(destination) = launch
+            .folder
+            .parent()
+            .filter(|path| path.parent() == Some(&registry))
+            .map(Path::to_path_buf)
+        else {
             return Err(SourceError::Protocol(
                 "the extension was prepared for another registry".into(),
             ));
-        }
+        };
         let id = launch.manifest.id.clone();
         let previous = match self.read_record(&id) {
             Ok(record) => Some(record),
             Err(SourceError::UnknownProvider(_)) => None,
             Err(error) => return Err(error),
         };
-        let destination = launch.folder.clone();
         match destination.symlink_metadata() {
             Ok(_) => {
                 return Err(SourceError::NotSent(
@@ -618,17 +625,17 @@ impl ExtensionRegistry {
             Err(error) if error.kind() == io::ErrorKind::NotFound => {}
             Err(error) => return Err(storage_error(error)),
         }
-        // Install the new generation beside the previous one. An interrupted
-        // copy or handshake cannot change the package the old record trusts.
+        // Move ownership and the approved copy into place together. The
+        // marker stays outside the package whose digest the person approved.
         let transaction = tempfile::Builder::new()
             .prefix(STAGING_PREFIX)
             .tempdir_in(&registry)
             .map_err(storage_error)?;
-        File::create_new(transaction.path().join(STAGING_MARKER)).map_err(storage_error)?;
-        let package = transaction.path().join("package");
-        copy_package(&staging.path().join("package"), &package).map_err(storage_error)?;
-        fs::rename(&package, &destination).map_err(storage_error)?;
-        drop(transaction);
+        File::create_new(transaction.path().join(OWNERSHIP_MARKER)).map_err(storage_error)?;
+        let package = transaction.path().join(PACKAGE_DIR);
+        copy_package(&staging.path().join(PACKAGE_DIR), &package).map_err(storage_error)?;
+        fs::rename(transaction.path(), &destination).map_err(storage_error)?;
+        let _ = transaction.keep();
         let install = match cached {
             Some(hello) => self.write_record(launch, hello),
             None => self.probe_and_record(launch),
@@ -683,31 +690,38 @@ impl ExtensionRegistry {
         let Ok(entries) = fs::read_dir(&folder) else {
             return;
         };
-        for entry in entries.flatten() {
+        let mut registered = Vec::new();
+        let mut owned = Vec::new();
+        for entry in entries {
+            let Ok(entry) = entry else {
+                return;
+            };
             let name = entry.file_name();
             let Some(name) = name.to_str() else {
                 continue;
             };
-            if name.starts_with(STAGING_PREFIX) {
-                let path = entry.path();
-                // A development folder can have the same prefix.
-                if path
-                    .join(STAGING_MARKER)
+            if let Some(id) = name.strip_suffix(".json").filter(|id| valid_id(id)) {
+                match self.read_record(id) {
+                    Ok(record) => registered.push(record.launch.folder),
+                    Err(SourceError::UnknownProvider(_)) => (),
+                    Err(_) => return,
+                }
+            } else if (name.starts_with(STAGING_PREFIX) || package_provider(name).is_some())
+                && entry
+                    .path()
+                    .join(OWNERSHIP_MARKER)
                     .symlink_metadata()
                     .is_ok_and(|metadata| metadata.is_file())
-                {
-                    remove_package(&path);
-                }
-                continue;
+            {
+                owned.push(entry.path());
             }
-            let Some(id) = package_provider(name) else {
-                continue;
-            };
-            let path = entry.path();
-            match self.read_record(id) {
-                Ok(record) if record.launch.folder != path => remove_package(&path),
-                Err(SourceError::UnknownProvider(_)) => remove_package(&path),
-                _ => {}
+        }
+        for path in owned {
+            if !registered
+                .iter()
+                .any(|registered| registered.starts_with(&path))
+            {
+                remove_package(&path);
             }
         }
     }
@@ -1082,10 +1096,17 @@ mod bundled_tests {
             "{PACKAGE_PREFIX}fixture-source.{}",
             uuid::Uuid::new_v4()
         ));
+        let unowned = registry.folder.join(format!(
+            "{PACKAGE_PREFIX}fixture-source.{}",
+            uuid::Uuid::new_v4()
+        ));
         let abandoned_copy = registry.folder.join(format!("{STAGING_PREFIX}interrupted"));
         fs::create_dir_all(&abandoned_copy).unwrap();
-        File::create_new(abandoned_copy.join(STAGING_MARKER)).unwrap();
-        copy_package(&installed.path, &abandoned).unwrap();
+        File::create_new(abandoned_copy.join(OWNERSHIP_MARKER)).unwrap();
+        fs::create_dir(&abandoned).unwrap();
+        File::create_new(abandoned.join(OWNERSHIP_MARKER)).unwrap();
+        copy_package(&installed.path, &abandoned.join(PACKAGE_DIR)).unwrap();
+        copy_package(&installed.path, &unowned).unwrap();
 
         // Simulate exiting after the new package was copied, before committing
         // its registration. A second registry must still use the prior copy.
@@ -1103,6 +1124,7 @@ mod bundled_tests {
             .unwrap();
         assert!(!abandoned.exists());
         assert!(!abandoned_copy.exists());
+        assert!(unowned.join(MANIFEST).is_file());
 
         fs::write(&sidecar, "second generation").unwrap();
         registry
