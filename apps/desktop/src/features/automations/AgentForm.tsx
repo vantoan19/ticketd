@@ -256,6 +256,7 @@ export function AgentForm({
   const reach = harness?.unattended;
   const needsCommands = reach?.reads === "requires_commands";
   const canListCommands = reach?.commands === "allowlist_or_any";
+  const commandsAreOffOrAny = reach?.commands === "off_or_any";
   const toolDescriptions: Partial<
     Record<(typeof TOOLS)[number]["key"], string>
   > = {
@@ -263,7 +264,7 @@ export function AgentForm({
     ...(reach?.edits_in_step_folder_only && {
       edit_files: "Only in the step’s folder",
     }),
-    ...(reach?.commands === "off_or_any" && { run_commands: "Any command" }),
+    ...(commandsAreOffOrAny && { run_commands: "Any command" }),
   };
   const title = draft.name.trim() || "New agent";
   /** An Automation with a step that runs this agent: it cannot be deleted. */
@@ -466,7 +467,15 @@ export function AgentForm({
                       <Switch
                         aria-label={tool}
                         checked={draft.tools[key]}
-                        onCheckedChange={(on) => changeTools({ [key]: on })}
+                        onCheckedChange={(on) =>
+                          changeTools({
+                            [key]: on,
+                            // Workspace sync may only see the final settings.
+                            ...(key === "run_commands" &&
+                              on &&
+                              commandsAreOffOrAny && { any_command: true }),
+                          })
+                        }
                       />
                     }
                   >
