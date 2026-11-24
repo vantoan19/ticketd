@@ -21,46 +21,59 @@ fn capturing_a_short_turn_skips_unrelated_tickets_and_feed_rows() {
             },
         )
         .unwrap();
+    // Seed unrelated status moves and Activities on both sides of the short Turn.
+    // Pin timestamps so a time-only query would visit all those rows.
+    let populate = |workspace: &Workspace, first: i64, last: i64| {
+        workspace
+            .connection
+            .execute(
+                "WITH RECURSIVE ticket_numbers(n) AS (
+                 VALUES (?1) UNION ALL SELECT n + 1 FROM ticket_numbers WHERE n < ?2
+             )
+             INSERT INTO tickets (id, reference, title, status)
+             SELECT 'ticket-' || n, 'T-KQ' || n, 'Outcome', 'Todo' FROM ticket_numbers",
+                params![first, last],
+            )
+            .unwrap();
+        workspace.connection.execute_batch(
+            "INSERT INTO ticket_history (ticket_id, kind, from_value, to_value, editing_agent, timestamp)
+             SELECT id, 'status', 'Todo', 'In progress', 'claude-code', '2026-01-01T00:00:00.000Z'
+             FROM tickets WHERE id NOT IN (SELECT ticket_id FROM ticket_history WHERE kind = 'status');
+             INSERT INTO activities (id, ticket_id, brief, editing_agent, reported_at)
+             SELECT 'activity-' || ticket_id, ticket_id, 'Drafted the copy', editing_agent, timestamp
+             FROM ticket_history WHERE kind = 'status' AND ticket_id NOT IN (SELECT ticket_id FROM activities);",
+        ).unwrap();
+    };
+    populate(&workspace, 1, 1_000);
     workspace
         .record_chat_observations(
             &chat.id,
-            vec![
-                ChatObservation::TurnStarted {
-                    turn_id: "turn".into(),
-                    native_turn_id: None,
-                },
-                ChatObservation::TurnEnded {
-                    turn_id: "turn".into(),
-                    state: ChatTurnState::Completed,
-                    detail: None,
-                    problem: None,
-                    problem_resets_at: None,
-                    ending: None,
-                },
-            ],
+            vec![ChatObservation::TurnStarted {
+                turn_id: "turn".into(),
+                native_turn_id: None,
+            }],
         )
         .unwrap();
-    // Pin the receipt window between two large sets of legacy writes. Only the
-    // two changes on T-KQ2001 share the Turn's start and end timestamp.
+    populate(&workspace, 2_001, 2_001);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnEnded {
+                turn_id: "turn".into(),
+                state: ChatTurnState::Completed,
+                detail: None,
+                problem: None,
+                problem_resets_at: None,
+                ending: None,
+            }],
+        )
+        .unwrap();
+    populate(&workspace, 1_001, 2_000);
     workspace
         .connection
         .execute_batch(
             "UPDATE chat_turns SET started_at = '2026-01-01T00:00:00.000Z',
-                                   ended_at = '2026-01-01T00:00:00.000Z';
-             WITH RECURSIVE tickets_to_add(n) AS (
-                 VALUES (1) UNION ALL SELECT n + 1 FROM tickets_to_add WHERE n < 2001
-             )
-             INSERT INTO tickets (id, reference, title, status)
-             SELECT 'ticket-' || n, 'T-KQ' || n, 'Outcome', 'Todo' FROM tickets_to_add;
-             INSERT INTO ticket_history (ticket_id, kind, from_value, to_value, editing_agent, timestamp)
-             SELECT id, 'status', 'Todo', 'In progress', 'claude-code', at FROM (
-                 SELECT id, CASE WHEN rowid <= 1000 THEN '2025-01-01T00:00:00.000Z'
-                                 WHEN id = 'ticket-2001' THEN '2026-01-01T00:00:00.000Z'
-                                 ELSE '2027-01-01T00:00:00.000Z' END AS at FROM tickets
-             );
-             INSERT INTO activities (id, ticket_id, brief, editing_agent, reported_at)
-             SELECT 'activity-' || ticket_id, ticket_id, 'Drafted the copy', editing_agent, timestamp
-             FROM ticket_history WHERE kind = 'status';",
+                               ended_at = '2026-01-01T00:00:00.000Z';",
         )
         .unwrap();
 
