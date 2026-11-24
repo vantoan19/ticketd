@@ -118,7 +118,7 @@ impl Driver for GitHubDriver {
     fn publish_failure(failure: PublishFailure) -> Fixture<PublishRequest> {
         let transport = Arc::new(TransportFixture::default());
         let response = match failure {
-            PublishFailure::Refused => status(403, json!({"message": "Creation forbidden"}), &[]),
+            PublishFailure::Refused => status(422, json!({"message": "Creation refused"}), &[]),
             PublishFailure::NotSent => Err(TransportError {
                 message: "connection refused".into(),
                 before_send: true,

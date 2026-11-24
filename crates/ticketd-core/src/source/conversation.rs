@@ -82,8 +82,8 @@ pub(super) fn migrate_state_categories(connection: &Connection) -> Result<(), Er
     Ok(())
 }
 
-fn event_parts(kind: ExternalEventKind) -> (&'static str, Option<StateCategory>) {
-    match kind {
+fn event_parts(kind: ExternalEventKind) -> Option<(&'static str, Option<StateCategory>)> {
+    Some(match kind {
         ExternalEventKind::Closed(category) => ("closed", Some(category)),
         ExternalEventKind::Reopened => ("reopened", Some(StateCategory::Open)),
         ExternalEventKind::StateChanged(category) => ("state_changed", Some(category)),
@@ -93,7 +93,8 @@ fn event_parts(kind: ExternalEventKind) -> (&'static str, Option<StateCategory>)
         ExternalEventKind::DuplicateRemoved => ("duplicate_removed", None),
         ExternalEventKind::Assigned => ("assigned", None),
         ExternalEventKind::Unassigned => ("unassigned", None),
-    }
+        ExternalEventKind::Unsupported => return None,
+    })
 }
 
 fn entries_of(conversation: &Conversation) -> Vec<ConversationEntry> {
@@ -109,16 +110,16 @@ fn entries_of(conversation: &Conversation) -> Vec<ConversationEntry> {
             edited_at: (!comment.updated_at.is_empty() && comment.updated_at != comment.created_at)
                 .then(|| comment.updated_at.clone()),
         })
-        .chain(conversation.events.iter().map(|event| {
-            let (kind, state_category) = event_parts(event.kind);
-            ConversationEntry::Event {
+        .chain(conversation.events.iter().filter_map(|event| {
+            let (kind, state_category) = event_parts(event.kind)?;
+            Some(ConversationEntry::Event {
                 id: event.id.clone(),
                 event: kind.to_owned(),
                 state_category,
                 actor: event.actor.clone(),
                 subject: event.subject.clone(),
                 created_at: event.created_at.clone(),
-            }
+            })
         }))
         .collect();
     // Stable: a comment stays ahead of an event written in the same second.

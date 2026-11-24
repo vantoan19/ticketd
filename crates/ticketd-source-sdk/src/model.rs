@@ -2,7 +2,10 @@
 use std::collections::BTreeMap;
 
 use crate::{ConfigSchema, ConfigValues, ValueFormat};
-use serde::{Deserialize, Deserializer, Serialize, de::value};
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{IgnoredAny, value},
+};
 
 /// The contract version this build of ticketd speaks. The engine refuses to
 /// register a connector that declares a different one.
@@ -265,6 +268,15 @@ pub enum ExternalEventKind {
     DuplicateRemoved,
     Assigned,
     Unassigned,
+    /// An event kind this version of the SDK does not recognize.
+    #[doc(hidden)]
+    #[serde(other, deserialize_with = "ignore_event_content", skip_serializing)]
+    #[schemars(skip)]
+    Unsupported,
+}
+
+fn ignore_event_content<'de, D: Deserializer<'de>>(deserializer: D) -> Result<(), D::Error> {
+    IgnoredAny::deserialize(deserializer).map(|_| ())
 }
 
 /// A timeline event such as a closure, reopening or assignment change.
@@ -284,7 +296,16 @@ pub struct ExternalEvent {
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 pub struct Conversation {
     pub comments: Vec<ExternalComment>,
+    #[serde(deserialize_with = "deserialize_events")]
     pub events: Vec<ExternalEvent>,
+}
+
+fn deserialize_events<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Vec<ExternalEvent>, D::Error> {
+    let mut events = Vec::<ExternalEvent>::deserialize(deserializer)?;
+    events.retain(|event| event.kind != ExternalEventKind::Unsupported);
+    Ok(events)
 }
 
 /// One request for a page of discovery results.

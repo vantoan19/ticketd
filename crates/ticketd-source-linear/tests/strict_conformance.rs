@@ -30,6 +30,7 @@ const USER_TWO: &str = "30000000-0000-4000-8000-000000000002";
 const CREATED: &str = "20000000-0000-4000-8000-000000000003";
 const LOST: &str = "20000000-0000-4000-8000-000000000004";
 const LOST_TITLE: &str = "Mutation committed before its answer was lost";
+const REFUSED_TITLE: &str = "Explicitly refused mutation";
 const DEVICE_AHEAD: &str = "2025-01-03T15:20:00Z";
 const READY: &str = "2025-01-03T15:35:00Z";
 const SITE: &str = "40000000-0000-4000-8000-000000000001";
@@ -155,6 +156,24 @@ fn verify_connector() {
     bare_teams.remove("assignee");
     assert_conformance(&registry, &bare_teams, None);
     assert_conformance(&registry, &bare_teams, Some(TEAM_TWO));
+
+    let mut request = PublishRequest {
+        title: REFUSED_TITLE.into(),
+        body: String::new(),
+        destination: TEAM_TWO.into(),
+    };
+    let error = connector
+        .publish("linear", &bare_teams, &request)
+        .unwrap_err();
+    assert_eq!(error.code(), "rejected");
+    assert!(error.ruled_out_creation());
+
+    request.destination = "bad-destination".into();
+    let error = connector
+        .publish("linear", &bare_teams, &request)
+        .unwrap_err();
+    assert_eq!(error.code(), "unavailable");
+    assert!(error.ruled_out_creation());
 
     let incomplete = connector
         .find_published(
@@ -483,6 +502,10 @@ fn serve(stream: TcpStream, created: &mut Option<Value>, lost: &mut Option<Value
                 Some("more-issues") => page(vec![issue(ISSUE_TWO, TEAM_TWO, "SECOND-1")], None),
                 _ => unreachable!(),
             }})
+        }
+        "LinearPublish" if variables["input"]["title"] == REFUSED_TITLE => {
+            assert_eq!(variables["input"]["teamId"], TEAM_TWO);
+            json!({"issueCreate": {"success": false, "issue": null}})
         }
         "LinearPublish" if variables["input"]["title"] == LOST_TITLE => {
             assert!(

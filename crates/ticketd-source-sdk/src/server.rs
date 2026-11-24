@@ -8,7 +8,7 @@ use std::{
     thread,
 };
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::{
     CONTRACT_VERSION, ChoiceOption, ConfigValues, ConnectionCheck, Conversation, DiscoveryPage,
@@ -264,6 +264,37 @@ pub fn serve(
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid source request"))?;
         match inbound {
             Inbound::Cancel(notice) => session.cancel(Some(notice.params.id)),
+            Inbound::Other(message) => {
+                if matches!(
+                    message.method.as_str(),
+                    "describe"
+                        | "check_connection"
+                        | "validate"
+                        | "options"
+                        | "discover"
+                        | "fetch"
+                        | "conversation"
+                        | "publish"
+                        | "locate"
+                        | "find_published"
+                        | "cancel"
+                ) {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "invalid source request",
+                    ));
+                }
+                if let Some(id) = message.id {
+                    session.failure(
+                        id,
+                        RpcError {
+                            code: -32601,
+                            message: "method not found".into(),
+                            data: None,
+                        },
+                    )?;
+                }
+            }
             Inbound::Request(request) => {
                 let Request { id, call, .. } = request;
                 if let Call::Describe {
@@ -299,6 +330,21 @@ pub fn serve(
 enum Inbound {
     Request(Request<'static>),
     Cancel(CancelNotification),
+    Other(OtherMethod),
+}
+
+#[derive(Deserialize)]
+struct OtherMethod {
+    #[serde(rename = "jsonrpc")]
+    _jsonrpc: JsonRpc,
+    method: String,
+    #[serde(default, deserialize_with = "request_id")]
+    id: Option<u64>,
+}
+
+fn request_id<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Option<u64>, D::Error> {
+    // Only an absent id denotes a notification. Requests carry numeric ids.
+    u64::deserialize(deserializer).map(Some)
 }
 
 struct Active {

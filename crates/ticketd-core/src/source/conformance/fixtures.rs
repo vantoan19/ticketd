@@ -239,7 +239,7 @@ pub(in crate::source) fn comment_ids_survive_repeated_reads_and_edits<D: Driver>
 
 pub(in crate::source) fn failed_publication_classifies_creation_honestly<D: Driver>() {
     for (failure, class, ruled_out) in [
-        (PublishFailure::Refused, ErrorClass::Auth, true),
+        (PublishFailure::Refused, ErrorClass::Config, true),
         (PublishFailure::NotSent, ErrorClass::Transient, true),
         (PublishFailure::ResponseLost, ErrorClass::Transient, false),
     ] {

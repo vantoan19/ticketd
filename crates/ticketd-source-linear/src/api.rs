@@ -167,15 +167,27 @@ impl Graphql<'_> {
             .and_then(|value| httpdate::parse_http_date(value).ok());
         self.response_time.set(time);
         let status = response.status().as_u16();
-        // The GraphQL read error codes do not establish when a mutation failed.
-        if publishing && !(200..300).contains(&status) {
-            return Err(unconfirmed_creation());
-        }
         let retry_after = response
             .headers()
             .get("retry-after")
             .and_then(|value| value.to_str().ok())
             .and_then(retry_after);
+        // These statuses refuse the mutation's only POST. Execution errors
+        // inside a GraphQL response can arrive after the issue was created.
+        if publishing {
+            let refusal = match status {
+                401 => Some("Linear rejected the API key"),
+                403 => Some("Linear denied access to create the issue"),
+                429 => Some("Linear rate limited the create request"),
+                _ => None,
+            };
+            if let Some(message) = refusal {
+                return Err(ExtensionError::new(ErrorCode::Rejected, message));
+            }
+            if !(200..300).contains(&status) {
+                return Err(unconfirmed_creation());
+            }
+        }
         match status {
             401 => return Err(failure(ErrorCode::Unauthenticated)),
             403 => return Err(failure(ErrorCode::Forbidden)),

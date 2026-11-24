@@ -81,6 +81,7 @@ const problem = (kind, message, classification, detail) => ({
   },
 });
 let reads = 0;
+const published = [];
 
 async function dispatch({ id, method, params }, signal) {
   if (method === "describe") {
@@ -265,7 +266,25 @@ async function dispatch({ id, method, params }, signal) {
             comment("101", reads === 1 ? "original" : "edited"),
             comment("102", "second"),
           ],
-          events: [],
+          events:
+            mode === "future_events"
+              ? [
+                  {
+                    id: "201",
+                    kind: {event: "future_event", category: {extra: true}},
+                    actor: null,
+                    subject: null,
+                    created_at: now,
+                  },
+                  {
+                    id: "202",
+                    kind: {event: "assigned"},
+                    actor: null,
+                    subject: "alice",
+                    created_at: now,
+                  },
+                ]
+              : [],
         },
       };
     }
@@ -279,14 +298,20 @@ async function dispatch({ id, method, params }, signal) {
               "auth",
             );
       }
-      if (mode === "refuse") return problem("forbidden", "no access", "auth");
+      if (mode === "create_then_rate_limit") {
+        published.push(issue(String(30 + published.length), params.request.title));
+        return problem("rate_limited", "could not read the receipt", "transient");
+      }
+      if (mode === "refuse") return problem("rejected", "no access", "config");
       if (mode === "not_sent")
         return problem("not_sent", "request was never sent", "transient");
       return problem("unavailable", "response lost", "transient");
     case "find_published":
       return {
         result:
-          mode === "complete"
+          mode === "create_then_rate_limit"
+            ? { matches: published, recent: [], complete: false }
+            : mode === "complete"
             ? {
                 matches: [
                   issue("1", "Conformance publication"),

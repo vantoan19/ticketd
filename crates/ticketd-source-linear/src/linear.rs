@@ -243,8 +243,17 @@ impl Extension for Linear {
         config: &ConfigValues,
         request: &PublishRequest,
     ) -> Result<ExternalIssue, ExtensionError> {
-        let teams = required_teams(config)?;
-        publication::publish(&self.api(context, config)?, &teams, request)
+        let teams = selected_teams(config);
+        if teams.is_empty() {
+            return Err(ExtensionError::new(
+                ErrorCode::NotSent,
+                "choose a Linear team before publishing",
+            ));
+        }
+        let api = self
+            .api(context, config)
+            .map_err(|error| ExtensionError::new(ErrorCode::NotSent, error.to_string()))?;
+        publication::publish(&api, &teams, request)
     }
 
     fn locate(

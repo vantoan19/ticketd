@@ -20,6 +20,7 @@ const SEARCH_PAGES: usize = 20;
 #[derive(Deserialize)]
 struct MutationReceipt {
     success: bool,
+    #[serde(deserialize_with = "Deserialize::deserialize")]
     issue: Option<Issue>,
 }
 
@@ -28,18 +29,26 @@ pub(crate) fn publish(
     teams: &[Uuid],
     request: &PublishRequest,
 ) -> Result<ExternalIssue, ExtensionError> {
-    let team = destination(&request.destination)?;
-    if !teams.contains(&team) {
-        return Err(ExtensionError::configuration(vec![FieldIssue::for_field(
-            "destination",
-            "choose one of the teams saved for this Linear connection",
-        )]));
-    }
+    let team = destination(&request.destination)
+        .ok()
+        .filter(|team| teams.contains(team))
+        .ok_or_else(|| {
+            ExtensionError::new(
+                ErrorCode::NotSent,
+                "choose one of the teams saved for this Linear connection",
+            )
+        })?;
     let receipt: MutationReceipt = api.create_issue(json!({
         "teamId": team,
         "title": request.title,
         "description": request.body,
     }))?;
+    if !receipt.success && receipt.issue.is_none() {
+        return Err(ExtensionError::new(
+            ErrorCode::Rejected,
+            "Linear refused to create the issue",
+        ));
+    }
     let issue = receipt
         .issue
         .filter(|issue| receipt.success && issue.team.id == team)

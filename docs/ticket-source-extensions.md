@@ -124,7 +124,9 @@ If no offered version is supported, return your version list and extension
 version. Omit `contract_version` and `description` or set them to `null`. At a
 successful handshake, the provider ID and extension version must match the
 manifest. Change the contract version for changes to existing behavior or
-required shapes. An optional addition can use the same version.
+required shapes. An optional addition can use the same version. ticketd ignores
+capabilities and conversation event kinds it does not recognize. A description
+that uses a new settings field type requires a ticketd version that supports it.
 
 Every operation after `describe` includes an explicit `connection_id` and
 `config`. Use the current config for the current request. Two connections can
@@ -219,6 +221,9 @@ completed within that request. Omit `total` when unknown.
 }
 ```
 
+Reply to an unrecognized request method with JSON-RPC error code `-32601`
+(method not found). Ignore notifications with unrecognized methods.
+
 Keep reading stdin while a request is in flight. If a person cancels or the
 call times out after the request was fully sent, ticketd sends a notification.
 
@@ -287,9 +292,9 @@ access denial.
 
 For publication, use `not_sent` when the request could not have reached the
 tracker and `rejected` when the tracker explicitly refused to create the issue.
-A timeout, lost response or ambiguous tracker answer leaves publication
-unresolved. Report an appropriate `unavailable` or `protocol` error, so
-ticketd can check for a created issue before allowing another write.
+Any other error leaves the publication unresolved. For example, if creation
+succeeds and a follow-up read is rate limited, return `rate_limited`. ticketd
+keeps that failure and checks for a created issue before allowing another write.
 In `find_published`, report the search as complete only if you finished
 reading the relevant issues in that destination and can trust the lower bound.
 A connection check can report the tracker’s current RFC 3339 `tracker_time`

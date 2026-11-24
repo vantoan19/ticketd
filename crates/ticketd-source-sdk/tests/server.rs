@@ -123,6 +123,11 @@ fn sdk_negotiates_reports_progress_cancels_and_handles_the_next_call() {
         receive(&mut output),
         json!({"jsonrpc":"2.0","method":"progress","params":{"id":2,"completed":1,"total":2}})
     );
+    send(&mut input, "future_notification", None, json!({"id":2}));
+    send(&mut input, "future_request", Some(5), json!({"id":2}));
+    let unknown = receive(&mut output);
+    assert_eq!(unknown["id"], 5);
+    assert_eq!(unknown["error"]["code"], -32601);
     send(&mut input, "cancel", None, json!({"id":2}));
     assert_eq!(receive(&mut output)["error"]["code"], -32800);
     send(

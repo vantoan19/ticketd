@@ -35,6 +35,10 @@ pub enum SourceError {
     RateLimited { retry_after_secs: Option<u64> },
     #[error("{0}")]
     Unavailable(String),
+    /// A process extension failed after dispatch without evidence about creation.
+    #[doc(hidden)]
+    #[error(transparent)]
+    PublicationUnconfirmed(Box<SourceError>),
     #[error("the source extension crashed five times in three minutes. Retry to restart it")]
     ExtensionCrashLimit,
     #[error("source refresh canceled")]
@@ -192,6 +196,7 @@ impl FailureCode {
 impl SourceError {
     pub(crate) fn failure_code(&self) -> FailureCode {
         match self {
+            Self::PublicationUnconfirmed(error) => error.failure_code(),
             Self::Unauthenticated(_) | Self::SignIn { .. } => FailureCode::Unauthenticated,
             Self::Forbidden(_) => FailureCode::Forbidden,
             Self::NotFound(_) => FailureCode::NotFound,
@@ -250,7 +255,10 @@ impl SourceError {
             | Self::InvalidConfiguration(_)
             | Self::UnknownProvider(_)
             | Self::IncompatibleContract { .. } => true,
-            Self::Unavailable(_) | Self::Protocol(_) | Self::RefreshCanceled => false,
+            Self::PublicationUnconfirmed(_)
+            | Self::Unavailable(_)
+            | Self::Protocol(_)
+            | Self::RefreshCanceled => false,
         }
     }
 
@@ -262,6 +270,9 @@ impl SourceError {
                 message,
                 guidance: Box::new(guidance()),
             },
+            Self::PublicationUnconfirmed(error) => {
+                Self::PublicationUnconfirmed(Box::new(error.with_sign_in(guidance)))
+            }
             other => other,
         }
     }
@@ -272,6 +283,7 @@ impl SourceError {
             Self::SignIn { guidance, .. } => guidance
                 .hint(surface)
                 .map_or_else(|| self.to_string(), |hint| format!("{self} {hint}")),
+            Self::PublicationUnconfirmed(error) => error.message_for(surface),
             other => other.to_string(),
         }
     }
@@ -280,6 +292,7 @@ impl SourceError {
     pub fn issues(&self) -> &[FieldIssue] {
         match self {
             Self::InvalidConfiguration(issues) => issues,
+            Self::PublicationUnconfirmed(error) => error.issues(),
             _ => &[],
         }
     }

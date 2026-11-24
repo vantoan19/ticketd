@@ -131,6 +131,83 @@ impl Driver for ProcessDriver {
 conformance::contract_tests!(scripted, super::ProcessDriver);
 
 #[test]
+fn an_unknown_settings_field_kind_requests_a_newer_host() {
+    let connector = fixture_connector(Arc::new(Host::default()), "first");
+    let mut hello = serde_json::to_value(connector.definition.cached.as_deref().unwrap()).unwrap();
+    hello["description"]["schema"]["fields"][0]["type"] = "future_field".into();
+    let result = host::parse_handshake(&connector.definition.launch, hello);
+    assert!(matches!(
+        result,
+        Err(SourceError::Protocol(message)) if message.contains("needs a newer ticketd")
+    ));
+}
+
+#[test]
+fn a_future_event_kind_does_not_hide_known_conversation_entries() {
+    let connector = fixture_connector(Arc::new(Host::default()), "first");
+    let conversation = connector
+        .conversation(&configuration("future_events"), &reference(1))
+        .unwrap();
+    assert_eq!(conversation.comments.len(), 2);
+    assert_eq!(conversation.events.len(), 1);
+    assert_eq!(
+        conversation.events[0].kind,
+        super::super::ExternalEventKind::Assigned
+    );
+}
+
+#[test]
+fn a_rate_limited_receipt_after_creation_leaves_one_unresolved_attempt() {
+    use crate::{
+        Error, Workspace,
+        source::{PublicationError, PublishOptions},
+    };
+
+    let scratch = tempfile::tempdir().unwrap();
+    let registry = ExtensionRegistry::new(scratch.path().join("extensions"));
+    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension");
+    registry.link(&fixture).unwrap();
+    let engine = registry.engine().unwrap();
+    let mut workspace = Workspace::open(scratch.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .add_source_connection(
+            &engine,
+            "scripted",
+            None,
+            None,
+            &configuration("create_then_rate_limit"),
+        )
+        .unwrap();
+    let reference = workspace.create_ticket("Publish once").unwrap().reference;
+    let options = PublishOptions {
+        provider: "scripted".into(),
+        destination: Some("o/r".into()),
+        ..Default::default()
+    };
+
+    let failure = workspace.publish_ticket(&engine, &reference, &options);
+    assert!(
+        matches!(
+            failure,
+            Err(Error::Publication(PublicationError::Unresolved { .. }))
+        ),
+        "{failure:?}"
+    );
+    let attempts = workspace.publication_attempts(&reference).unwrap();
+    assert_eq!(attempts.len(), 1);
+    assert_eq!(attempts[0].failure.as_ref().unwrap().code, "rate_limited");
+    assert!(matches!(
+        workspace.publish_ticket(&engine, &reference, &options),
+        Err(Error::Publication(PublicationError::Ineligible { .. }))
+    ));
+    let review = workspace
+        .review_publication_at(&engine, &reference, true, None)
+        .unwrap();
+    assert_eq!(review.candidates.len(), 1);
+    assert_eq!(review.candidates[0].identity.id, "30");
+}
+
+#[test]
 fn malformed_and_oversized_stdout_fail_without_poisoning_the_next_call() {
     let connector = fixture_connector(Arc::new(Host::default()), "first");
     let malformed = connector

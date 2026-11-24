@@ -345,6 +345,7 @@ impl Host {
         deadline: Option<std::time::Instant>,
     ) -> Result<EncodedRequest, SourceError> {
         let id = (self.next.fetch_add(1, Ordering::Relaxed) % ((1 << 53) - 1)) + 1;
+        let publishing = matches!(call, Call::Publish { .. });
         let request = Request {
             jsonrpc: JsonRpc::V2,
             id,
@@ -359,6 +360,7 @@ impl Host {
             id,
             frame: frame.0,
             deadline,
+            publishing,
         })
     }
 
@@ -412,6 +414,7 @@ struct EncodedRequest {
     id: u64,
     frame: Vec<u8>,
     deadline: Option<std::time::Instant>,
+    publishing: bool,
 }
 
 struct CappedFrame(Vec<u8>);
@@ -629,19 +632,29 @@ async fn serve(
     if let Err(error) = check_publication_deadline(request.deadline) {
         return Ok(Err(error));
     }
-    match active.as_mut() {
-        Some((_, process)) => {
-            process
-                .exchange(
-                    request.id,
-                    &request.frame,
-                    limits.budget(!connection),
-                    control,
-                )
-                .await
+    let Some((_, process)) = active.as_mut() else {
+        return Err(Fault::Crash);
+    };
+    let result = process
+        .exchange(
+            request.id,
+            &request.frame,
+            limits.budget(!connection),
+            control,
+        )
+        .await?;
+    Ok(result.map_err(|error| {
+        // A process can make further tracker calls after creating the issue.
+        // Only explicit mutation evidence can settle its attempt as failed.
+        if request.publishing
+            && error.ruled_out_creation()
+            && !matches!(error, SourceError::NotSent(_) | SourceError::Rejected(_))
+        {
+            SourceError::PublicationUnconfirmed(Box::new(error))
+        } else {
+            error
         }
-        None => Err(Fault::Crash),
-    }
+    }))
 }
 
 fn describe(versions: &[u32]) -> Call<'_> {
@@ -655,6 +668,20 @@ pub(super) fn parse_handshake(
     launch: &Launch,
     response: Value,
 ) -> Result<Description, SourceError> {
+    if response["description"]["schema"]["fields"]
+        .as_array()
+        .is_some_and(|fields| {
+            fields.iter().any(|field| {
+                field["type"].as_str().is_some_and(|kind| {
+                    !matches!(kind, "text" | "multi_select" | "link" | "secret")
+                })
+            })
+        })
+    {
+        return Err(SourceError::Protocol(
+            "the source extension uses a settings field type that needs a newer ticketd".into(),
+        ));
+    }
     let hello: Description = serde_json::from_value(response)
         .map_err(|error| SourceError::Protocol(format!("invalid description: {error}")))?;
     validate_handshake(launch, &hello)?;
