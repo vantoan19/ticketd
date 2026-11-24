@@ -713,6 +713,12 @@ mod tests {
                 .filter(|path| path.extension().is_some_and(|ext| ext == "wire"))
                 .collect::<Vec<_>>()
         };
+        let private_run = || {
+            tempfile::Builder::new()
+                .permissions(std::fs::Permissions::from_mode(0o700))
+                .tempdir_in("/tmp")
+                .expect("private temporary Workspace")
+        };
         if let Some(mode) = std::env::var_os(CHILD) {
             let workspace = std::env::var_os("TICKETD_TEST_WORKSPACE").expect("test Workspace");
             let directory = Path::new(&workspace).parent().expect("private folder");
@@ -757,9 +763,28 @@ mod tests {
                 return;
             }
             if mode == "wrong-workspace" {
-                let prepared =
-                    crate::prepare_harness_recording(|| Ok(directory.join("another.sqlite3")));
-                assert!(prepared.is_err());
+                let alternate = private_run();
+                let alternate_workspace = alternate.path().join("workspace.sqlite3");
+                let alternate_workspace = ticketd_core::Workspace::open(&alternate_workspace)
+                    .expect("open alternate disposable Workspace");
+                let info = alternate_workspace
+                    .workspace_info()
+                    .expect("Workspace info");
+                let actual = Path::new(&info.path)
+                    .canonicalize()
+                    .expect("canonical alternate Workspace");
+                let error = crate::prepare_harness_recording(|| Ok(actual.clone()))
+                    .expect_err("reject the existing alternate Workspace");
+                assert_eq!(
+                    error.to_string(),
+                    "Harness recording needs a fresh private folder under /tmp with a work folder and a new workspace.sqlite3"
+                );
+                assert_ne!(
+                    actual,
+                    Path::new(&workspace)
+                        .canonicalize()
+                        .expect("reserved Workspace")
+                );
                 return;
             }
             if ["inside-git", "existing-workspace", "linked-work"]
@@ -905,12 +930,6 @@ mod tests {
             return;
         }
 
-        let private_run = || {
-            tempfile::Builder::new()
-                .permissions(std::fs::Permissions::from_mode(0o700))
-                .tempdir_in("/tmp")
-                .expect("private temporary Workspace")
-        };
         let invoke = |mode, directory: &Path| {
             let mut command = TestCommand::new(std::env::current_exe().expect("test executable"));
             command.args([
