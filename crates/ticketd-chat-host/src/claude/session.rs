@@ -115,7 +115,7 @@ impl Session {
         }
         self.turns_started += 1;
         let id = NativeTurnId(format!("local-turn-{}", self.turns_started));
-        self.runtime.turn_started(Some(&id));
+        self.runtime.turn_started(&id);
         events.push(EventKind::TurnStarted { turn: id.clone() });
         id
     }
