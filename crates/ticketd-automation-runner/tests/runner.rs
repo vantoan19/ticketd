@@ -49,12 +49,12 @@ fn opener(path: &Path) -> WorkspaceOpener {
     Arc::new(move || WorkspaceSession::for_file(&path)?.workspace())
 }
 
-fn tools() -> AutomationAgentTools {
+fn tools(harness: &AgentHarness) -> AutomationAgentTools {
     AutomationAgentTools {
         read_files: true,
         edit_files: false,
         run_commands: true,
-        any_command: false,
+        any_command: *harness == AgentHarness::Codex,
         allowed_commands: vec!["npm test".into()],
         use_web: false,
     }
@@ -94,10 +94,10 @@ impl Fixture {
         let agent = workspace
             .create_automation_agent(AutomationAgentSettings {
                 name: "Triage".into(),
+                tools: tools(&harness),
                 harness,
                 model: Some("gpt-test".into()),
                 instructions: INSTRUCTIONS.into(),
-                tools: tools(),
                 turn_limit: 12,
                 time_limit_minutes: 5,
             })
@@ -289,7 +289,7 @@ async fn tagging_a_ticket_runs_the_agent_as_a_chat_owned_by_the_run() {
     let unattended = opens[0].unattended.clone().unwrap();
     assert_eq!(unattended.run_id, run.id);
     assert_eq!(unattended.model.as_deref(), Some("gpt-test"));
-    assert_eq!(unattended.tools, tools());
+    assert_eq!(unattended.tools, tools(&AgentHarness::Codex));
     assert_eq!(unattended.turn_limit, 12);
     // L1: the harness gets the ticketd CLI to put on the agent's PATH.
     assert_eq!(opens[0].ticketd_cli, ticketd_chat_host::cli::executable());

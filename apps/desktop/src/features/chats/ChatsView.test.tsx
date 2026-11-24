@@ -397,6 +397,67 @@ test("an approval is answered from the dock and leaves no receipt row of its own
   expect(document.activeElement).toBe(composer("Steer Codex"));
 });
 
+test("Antigravity approval warnings stay with their choices when an answer needs retry", async () => {
+  const reason = "Review the command before approving.";
+  const allowWarning = "Adds a rule to always allow this command.";
+  const denyWarning = "Adds a rule to always deny this command.";
+  const options = [
+    { id: "once", label: "Allow once" },
+    { id: "provider-option-7", label: "Allow always", warning: allowWarning },
+    { id: "provider-option-9", label: "Deny always", warning: denyWarning },
+  ];
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Fixture Chat",
+        activity: "waiting",
+        harness: { id: "antigravity", name: "Antigravity" },
+      },
+      [{ ...approval, title: "Antigravity wants to run", reason, options }],
+    ),
+  );
+  const request = screen.getByRole("group", {
+    name: /^Antigravity wants to run/,
+    description: reason,
+  });
+  const answer = vi
+    .spyOn(client, "answer")
+    .mockRejectedValueOnce(new Error("Disconnected"));
+  const choices = within(request);
+  const seeWarnings = () => {
+    expect(choices.getByText(allowWarning)).toBeTruthy();
+    expect(choices.getByText(denyWarning)).toBeTruthy();
+    expect(
+      choices.getByRole("button", { name: "Allow once", description: /^$/ }),
+    ).toBeTruthy();
+    expect(
+      choices.getByRole("button", {
+        name: "Deny always",
+        description: denyWarning,
+      }),
+    ).toBeTruthy();
+    return choices.getByRole("button", {
+      name: "Allow always",
+      description: allowWarning,
+    });
+  };
+
+  expect(answer).not.toHaveBeenCalled();
+  fireEvent.click(seeWarnings());
+  expect(await choices.findByText("Pick again to retry.")).toBeTruthy();
+  fireEvent.click(seeWarnings());
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("group", { name: /^Antigravity wants to run/ }),
+    ).toBeNull(),
+  );
+  expect(answer.mock.calls).toEqual([
+    ["c1", "req-1", { option_id: "provider-option-7" }],
+    ["c1", "req-1", { option_id: "provider-option-7" }],
+  ]);
+});
+
 test("an expired request cannot be answered", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [{ ...approval, state: "expired" }]),

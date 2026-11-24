@@ -474,12 +474,12 @@ the person's MCP servers, plugins and apps turned off. The same overrides also s
 their hooks, notify program, project `AGENTS.md`, memories, sub-agents, computer and browser
 use, and Codex's bundled skills (the agent editor does not list these). The switches map as follows. "Edit
 files" off is a `readOnly` sandbox; on, a `workspaceWrite` sandbox whose only writable place
-is the step's folder. "Run commands" off sets `features.shell_tool=false` (and turns the image
-viewer off), which also ends the agent's reading, because Codex has no read tool and reads
-through its shell; with it on the agent runs any command inside the sandbox, as Codex has no
-list of allowed commands. With both off, the thread starts with `environments: []`, so
+is the step's folder. Codex can run any command inside the sandbox when both
+`run_commands` and `any_command` are enabled. Without that grant, ticketd disables
+the shell and image viewer. This also ends the agent's reading because Codex
+reads through its shell. With commands and edits disabled, the thread starts with `environments: []`, so
 `apply_patch` goes too. "Read files" is not a Codex setting, and no read limit is applied: it
-can read any file the person can when Run commands is on. The agent reaches its tickets through
+can read any file the person can when its shell is enabled. The agent reaches its tickets through
 ticketd's own tool: the thread declares one dynamic tool, `ticketd`, over the experimental app-server API,
 and ticketd answers its `item/tool/call` requests by running the bundled CLI in its own process
 with the arguments as an array, the step's folder as working directory and the run's identity, so

@@ -8,7 +8,7 @@ use crate::SyncValue;
 /// which for a set is the same as empty.
 pub type Fields = BTreeMap<String, SyncValue>;
 
-/// A field both sides changed to different values since the last-synced copy.
+/// A field whose two values need review after merging concurrent changes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Conflict {
     pub field: String,

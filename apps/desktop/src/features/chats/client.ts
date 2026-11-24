@@ -353,6 +353,7 @@ const requestOptionSchema = z.object({
   id: z.string(),
   label: z.string(),
   description: z.string().nullish(),
+  warning: z.string().nullish(),
 });
 
 /** `turn_id`: the turn that owns the item, when one does. */
