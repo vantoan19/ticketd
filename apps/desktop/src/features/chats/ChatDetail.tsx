@@ -412,6 +412,17 @@ function Conversation({
   useEffect(() => {
     if (document.activeElement === document.body) messageBox.current?.focus();
   }, []);
+  const [freshStarts, setFreshStarts] = useState(0);
+  const handledFreshStart = useRef(0);
+  const composerShown =
+    chat.has_composer && !picked && chat.retention !== "trashed";
+  useLayoutEffect(() => {
+    if (!composerShown || freshStarts === handledFreshStart.current) return;
+    handledFreshStart.current = freshStarts;
+    // The recovery reply and the snapshot that mounts the box can arrive in
+    // either order. Moving elsewhere while recovery runs keeps focus there.
+    if (document.activeElement === document.body) messageBox.current?.focus();
+  }, [composerShown, freshStarts]);
   const { quotes, remove: removeQuote } = useQuotes(id);
   // A quote added from elsewhere puts the person in the box after it.
   const quoteCount = useRef(quotes.length);
@@ -607,9 +618,13 @@ function Conversation({
   const trashed = chat.retention === "trashed";
   const onNotice = (action: Exclude<NoticeAction, "help" | "copy-command">) => {
     if (action === "check") quietly(client.checkAgain(id), "check again");
-    else if (action === "start-fresh")
-      quietly(client.resume(id, { kind: "none" }), "start a fresh session");
-    else if (action === "resume") setResuming(true);
+    else if (action === "start-fresh") {
+      // An earlier queue edit's autofocus must expire before the box returns.
+      if (!chat.has_composer) setEdits(0);
+      void run(client.resume(id, { kind: "none" }), "start a fresh session")
+        .then(() => setFreshStarts((count) => count + 1))
+        .catch(() => {});
+    } else if (action === "resume") setResuming(true);
     else if (action === "pick-folder")
       quietly(
         client
