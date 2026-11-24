@@ -163,6 +163,10 @@ whole. For a real tracker, use canonical site and partition keys, and set
 `account_id` when the display label can change or is shared. The
 `discovery_scope` key is stable for a particular set of filters and empty
 when discovery reads the whole partition.
+During setup, `check_connection` may receive credentials before discovery
+settings are complete. Verify the account first. If this source requires a
+discovery target and none has been chosen, return empty partitions and
+destinations. Previewing and saving still require a complete configuration.
 Publication can supply `destination_labels` with the canonical destination strings
 as keys. Ticketd uses these labels in the preview and sends the canonical value.
 The `find_published` search carries `account_id` when supplied, otherwise the

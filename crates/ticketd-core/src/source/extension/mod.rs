@@ -69,17 +69,15 @@ impl ProcessConnector {
             connection_id: id.into(),
             config: Cow::Borrowed(config),
         });
-        // Options use drafts while the person is still filling in the form.
-        // Other operations see the normalized settings with the current secret.
-        let resolved = if matches!(call, Call::Options { .. }) {
-            resolved
-        } else {
-            self.description
-                .descriptor
-                .schema
-                .validate(&resolved)
-                .map_err(SourceError::InvalidConfiguration)?
-        };
+        // Setup can load options and verify credentials before discovery rules
+        // are complete. Issue operations always require a full configuration.
+        let schema = &self.description.descriptor.schema;
+        let resolved = match &call {
+            Call::Options { .. } => Ok(resolved),
+            Call::CheckConnection(_) => schema.validate_connection_draft(&resolved),
+            _ => schema.validate(&resolved),
+        }
+        .map_err(SourceError::InvalidConfiguration)?;
         self.call(id, &resolved, call, deadline)
     }
 

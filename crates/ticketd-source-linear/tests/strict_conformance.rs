@@ -16,7 +16,7 @@ use ticketd_core::{
     source::{
         ActionKind, ConfigValues, ConformanceOptions, ConformanceOutcome, ExtensionRegistry,
         PublicationError, PublicationSearch, PublishOptions, PublishRequest, RefreshOptions,
-        Resolution, ResolveOptions,
+        Resolution, ResolveOptions, SourceError,
     },
 };
 
@@ -104,6 +104,27 @@ fn verify_connector() {
 
     let registry = ExtensionRegistry::new(root.path().join("registry"));
     registry.link(&package).unwrap();
+    let draft = ConfigValues::new();
+    let engine = registry
+        .engine()
+        .unwrap()
+        .for_connection("linear", "conformance", &draft);
+    let account = engine.check_connection("linear", &draft).unwrap();
+    assert_eq!(account.account, "Fixture User");
+    assert_eq!(account.site, SITE);
+    let error = engine.preview("linear", &draft).unwrap_err();
+    assert!(matches!(
+        error,
+        SourceError::InvalidConfiguration(issues)
+            if issues.iter().any(|issue| issue.field.as_deref() == Some("team"))
+    ));
+    let malformed_team: ConfigValues =
+        serde_json::from_value(json!({"team": ["not a team id"]})).unwrap();
+    let error = engine
+        .check_connection("linear", &malformed_team)
+        .unwrap_err();
+    assert!(matches!(error, SourceError::InvalidConfiguration(_)));
+
     let config: ConfigValues = serde_json::from_value(json!({
         "team": [TEAM_TWO, TEAM],
         "assignee": ["me"],

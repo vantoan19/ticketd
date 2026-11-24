@@ -72,14 +72,16 @@ impl Extension for Linear {
         context: &RequestContext<'_>,
         config: &ConfigValues,
     ) -> Result<ConnectionCheck, ExtensionError> {
-        let teams = required_teams(config)?;
+        let teams = selected_teams(config);
         let api = self.api(context, config)?;
         let connection: LinearConnection = api.request("LinearConnection", json!({}), &[])?;
         let tracker_time = api
             .response_time()
             .map(|time| chrono::DateTime::<chrono::Utc>::from(time).to_rfc3339());
-        let destination_labels: BTreeMap<_, _> = api
-            .all::<Team>(
+        let destination_labels: BTreeMap<_, _> = if teams.is_empty() {
+            BTreeMap::new()
+        } else {
+            api.all::<Team>(
                 "LinearConfiguredTeams",
                 json!({"teams": teams}),
                 &["teams"],
@@ -88,7 +90,8 @@ impl Extension for Linear {
             .into_iter()
             .filter(|team| teams.contains(&team.id))
             .map(|team| (team.id.to_string(), format!("{} ({})", team.name, team.key)))
-            .collect();
+            .collect()
+        };
         let destinations: Vec<_> = teams.iter().map(Uuid::to_string).collect();
         if destinations
             .iter()
@@ -100,13 +103,15 @@ impl Extension for Linear {
             )]));
         }
         let filters = Filters::read(config);
-        let scope =
-            if filters.assignee.is_none() && filters.labels.is_empty() && filters.project.is_none()
-            {
-                String::new()
-            } else {
-                json!([filters.assignee, filters.labels, filters.project]).to_string()
-            };
+        let scope = if teams.is_empty()
+            || (filters.assignee.is_none()
+                && filters.labels.is_empty()
+                && filters.project.is_none())
+        {
+            String::new()
+        } else {
+            json!([filters.assignee, filters.labels, filters.project]).to_string()
+        };
         Ok(ConnectionCheck {
             connection: ConnectionInfo {
                 account: connection.viewer.display_name,

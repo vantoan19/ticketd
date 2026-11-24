@@ -245,6 +245,22 @@ impl ConfigSchema {
     /// text trimmed, empty optional fields omitted, selections trimmed and
     /// de-duplicated in order. Every problem is reported, not just the first.
     pub fn validate(&self, raw: &ConfigValues) -> Result<ConfigValues, Vec<FieldIssue>> {
+        self.validate_settings(raw, true)
+    }
+
+    /// Checks supplied settings and required credentials before discovery is configured.
+    pub fn validate_connection_draft(
+        &self,
+        raw: &ConfigValues,
+    ) -> Result<ConfigValues, Vec<FieldIssue>> {
+        self.validate_settings(raw, false)
+    }
+
+    fn validate_settings(
+        &self,
+        raw: &ConfigValues,
+        require_complete: bool,
+    ) -> Result<ConfigValues, Vec<FieldIssue>> {
         self.check_definition()?;
         let mut issues = Vec::new();
         let mut values = ConfigValues::new();
@@ -272,15 +288,19 @@ impl ConfigSchema {
                 Some(value) => {
                     values.insert(field.key.clone(), value);
                 }
-                None if field.required => issues.push(issue(
-                    &field.key,
-                    // A selection holds several values; its label is plural.
-                    if matches!(field.kind, FieldKind::MultiSelect { .. }) {
-                        "are required"
-                    } else {
-                        "is required"
-                    },
-                )),
+                None if field.required
+                    && (require_complete || matches!(field.kind, FieldKind::Secret)) =>
+                {
+                    issues.push(issue(
+                        &field.key,
+                        // A selection holds several values; its label is plural.
+                        if matches!(field.kind, FieldKind::MultiSelect { .. }) {
+                            "are required"
+                        } else {
+                            "is required"
+                        },
+                    ))
+                }
                 None => {}
             }
         }
