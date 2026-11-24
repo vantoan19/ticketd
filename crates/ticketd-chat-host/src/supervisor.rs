@@ -277,6 +277,9 @@ pub(crate) struct Supervisor {
     /// A permission restart may only resume native history, unless the person
     /// explicitly chooses a fresh session. The restriction survives failed opens.
     permission_restart_pending: bool,
+    /// The previous generation is retired, but its exit still needs confirmation.
+    /// Keep only its close handle, so its events and requests can no longer be used.
+    retired_permission_runtime: Option<Arc<dyn HarnessRuntime>>,
     /// What the Chat's sessions last reported in effect, as recorded with the Chat
     /// (`Chat::effective_settings`): what a session opened for it again starts with.
     recorded_settings: Option<String>,
@@ -293,6 +296,14 @@ async fn sleep_until_some(deadline: Option<Instant>) {
     match deadline {
         Some(deadline) => sleep_until(deadline).await,
         None => pending().await,
+    }
+}
+
+async fn bounded_close(handle: &dyn HarnessRuntime) -> Option<String> {
+    match timeout(CLOSE_TIMEOUT, handle.close()).await {
+        Ok(CloseOutcome::Confirmed { .. }) => None,
+        Ok(CloseOutcome::Unconfirmed { reason }) => Some(reason),
+        Err(_) => Some("the harness did not confirm that it exited in time".to_owned()),
     }
 }
 
@@ -364,6 +375,7 @@ impl Supervisor {
             start_settings: StartSettings::default(),
             reopen_for_permission: None,
             permission_restart_pending: false,
+            retired_permission_runtime: None,
             recorded_settings: chat.effective_settings.clone(),
         };
         tokio::spawn(supervisor.run().instrument(span));
@@ -564,10 +576,10 @@ impl Supervisor {
                 let _ = reply.send(self.request_stop());
             }
             Command::ResumeQueue(reply) => {
-                let _ = reply.send(self.resume_queue());
+                let _ = reply.send(self.resume_queue().await);
             }
             Command::SendQueuedNow { message_id, reply } => {
-                let _ = reply.send(self.send_queued_now(message_id));
+                let _ = reply.send(self.send_queued_now(message_id).await);
             }
             Command::Respond {
                 interaction_id,
@@ -576,7 +588,7 @@ impl Supervisor {
             } => self.respond(interaction_id, answer, reply),
             Command::Resume { mode, reply } => self.resume(mode, reply).await,
             Command::Resend { message_id, reply } => {
-                let _ = reply.send(self.request_resend(message_id));
+                let _ = reply.send(self.request_resend(message_id).await);
             }
             Command::Trash(reply) => {
                 let chat = self.chat_id.clone();
@@ -807,6 +819,7 @@ impl Supervisor {
         let message = self.write(|core| core.save_chat_input(command_id, &chat, text))?;
         let immediate = self.active.is_none() || self.steering().is_some();
         if mode == SendMode::Auto
+            && self.retired_permission_runtime.is_none()
             && immediate
             && message.queued
             && !self.direct.contains(&message.id)
@@ -841,10 +854,11 @@ impl Supervisor {
         Ok(())
     }
 
-    fn resume_queue(&mut self) -> Result<(), HostError> {
+    async fn resume_queue(&mut self) -> Result<(), HostError> {
         if self.permission_restart_pending {
             self.recover_storage()?;
         }
+        self.confirm_permission_restart_cleanup().await?;
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, false))?;
         // The person asked for the queue to run: it opens a session when none is live.
@@ -858,7 +872,7 @@ impl Supervisor {
     /// Sends one queued input now: it steers the turn in progress or starts one. Only
     /// that input goes; a paused queue stays paused. Refused while a turn runs that
     /// cannot be steered, since the input could only wait in the queue where it is.
-    fn send_queued_now(&mut self, message_id: String) -> Result<(), HostError> {
+    async fn send_queued_now(&mut self, message_id: String) -> Result<(), HostError> {
         if let Some(detail) = &self.storage_failed {
             return Err(HostError::StorageFailed(detail.clone()));
         }
@@ -870,6 +884,7 @@ impl Supervisor {
         if !queued.iter().any(|message| message.id == message_id) {
             return Err(Error::Chat("this input is not in the queue".to_owned()).into());
         }
+        self.confirm_permission_restart_cleanup().await?;
         if !self.direct.contains(&message_id) {
             self.direct_from_queue.insert(message_id.clone());
             self.direct.push_back(message_id);
@@ -914,7 +929,7 @@ impl Supervisor {
     /// The person decided to send input again although its first delivery is uncertain.
     /// Only that input is dispatched, as a new submission: the queue is paused first, so
     /// nothing else follows it until the person resumes the queue.
-    fn request_resend(&mut self, message_id: String) -> Result<(), HostError> {
+    async fn request_resend(&mut self, message_id: String) -> Result<(), HostError> {
         if let Some(detail) = &self.storage_failed {
             return Err(HostError::StorageFailed(detail.clone()));
         }
@@ -930,6 +945,7 @@ impl Supervisor {
         if self.core(|core| core.chat(&chat))?.trashed {
             return Err(Error::ChatTrashed(chat).into());
         }
+        self.confirm_permission_restart_cleanup().await?;
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.direct.clear();
         self.direct_from_queue.clear();
@@ -1063,6 +1079,10 @@ impl Supervisor {
             let _ = reply.send(Err(error));
             return;
         }
+        if let Err(error) = self.confirm_permission_restart_cleanup().await {
+            let _ = reply.send(Err(error));
+            return;
+        }
         if self.runtime.is_some() {
             self.stop_runtime(StopReason::ExplicitResume).await;
         }
@@ -1131,6 +1151,9 @@ impl Supervisor {
             .is_some()
         {
             self.hold_queue();
+            if let Some(value) = self.start_settings.permission.clone() {
+                let _ = self.record_permission(&value);
+            }
             return;
         }
         let chat = match self.core(|core| core.chat(&self.chat_id)) {
@@ -1153,6 +1176,9 @@ impl Supervisor {
     }
 
     fn prepare_permission_restart(&mut self, origin: ChatSessionOrigin) -> Result<(), HostError> {
+        if self.retired_permission_runtime.is_some() {
+            return Err(HostError::PermissionRestartCleanupUnconfirmed);
+        }
         if let Some(detail) = &self.storage_failed {
             return Err(HostError::StorageFailed(detail.clone()));
         }
@@ -1276,6 +1302,9 @@ impl Supervisor {
     /// Stops the owned runtime with bounded cleanup and records that contact ended.
     /// Returns why cleanup could not be confirmed, if it could not.
     async fn stop_runtime(&mut self, why: StopReason) -> Option<String> {
+        if self.retired_permission_runtime.is_some() {
+            return self.close_retired_permission_runtime().await;
+        }
         // Kept while the runtime closes, so a turn the harness reports interrupted
         // meanwhile is recorded as ticketd's stop and not as the person's.
         let before = self.shut_down_for.replace(why);
@@ -1284,6 +1313,23 @@ impl Supervisor {
         self.closing = false;
         if !self.shutting_down {
             self.shut_down_for = before;
+        }
+        unconfirmed
+    }
+
+    /// Checks the previous generation on an explicit retry before opening a replacement.
+    async fn confirm_permission_restart_cleanup(&mut self) -> Result<(), HostError> {
+        if self.close_retired_permission_runtime().await.is_some() {
+            return Err(HostError::PermissionRestartCleanupUnconfirmed);
+        }
+        Ok(())
+    }
+
+    async fn close_retired_permission_runtime(&mut self) -> Option<String> {
+        let handle = self.retired_permission_runtime.as_deref()?;
+        let unconfirmed = bounded_close(handle).await;
+        if unconfirmed.is_none() {
+            self.retired_permission_runtime = None;
         }
         unconfirmed
     }
@@ -1330,15 +1376,11 @@ impl Supervisor {
                 }
             }
         }
-        let unconfirmed = if self.runtime.is_some() {
-            let closing = self
-                .drive(timeout(CLOSE_TIMEOUT, async move { handle.close().await }))
-                .await;
-            match closing {
-                Ok(CloseOutcome::Confirmed { .. }) => None,
-                Ok(CloseOutcome::Unconfirmed { reason }) => Some(reason),
-                Err(_) => Some("the harness did not confirm that it exited in time".to_owned()),
-            }
+        let permission_restart =
+            why == StopReason::ExplicitResume && self.permission_restart_pending;
+        // Losing the event stream does not prove that the previous process exited.
+        let unconfirmed = if permission_restart || self.runtime.is_some() {
+            self.drive(bounded_close(handle.as_ref())).await
         } else {
             None
         };
@@ -1346,9 +1388,17 @@ impl Supervisor {
         self.runtime = None;
         self.runtime_gone(&TurnEnding::StoppedByTicketd(why));
         if let Some(reason) = &unconfirmed {
-            self.problem = Some(ChatProblem::CleanupUnconfirmed {
-                reason: reason.clone(),
-            });
+            if permission_restart {
+                self.retired_permission_runtime = Some(handle);
+                self.notice(
+                    "ticketd could not confirm that the previous harness exited during the permission restart. Tools it started may still be running."
+                        .to_owned(),
+                );
+            } else {
+                self.problem = Some(ChatProblem::CleanupUnconfirmed {
+                    reason: reason.clone(),
+                });
+            }
         }
         unconfirmed
     }
@@ -1429,6 +1479,7 @@ impl Supervisor {
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
         if self.shutting_down
+            || self.retired_permission_runtime.is_some()
             || self.storage_failed.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
@@ -2545,6 +2596,11 @@ impl Supervisor {
                 Some(detail) => Some(ChatProblem::StorageFailed {
                     detail: detail.clone(),
                 }),
+                None if self.retired_permission_runtime.is_some() => {
+                    Some(ChatProblem::CleanupUnconfirmed {
+                        reason: HostError::PermissionRestartCleanupUnconfirmed.to_string(),
+                    })
+                }
                 None => self.problem.clone(),
             },
             context: self.runtime.as_ref().and_then(|r| r.context.clone()),
