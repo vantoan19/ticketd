@@ -61,6 +61,7 @@ struct State {
     submit_replies: VecDeque<ScriptedReply>,
     interrupt_outcomes: VecDeque<InterruptOutcome>,
     close_outcome: CloseOutcome,
+    close_holds: VecDeque<oneshot::Receiver<()>>,
     opens: Vec<OpenRequest>,
     written: Vec<Written>,
     respond_calls: usize,
@@ -124,6 +125,7 @@ impl FakeAdapter {
                 submit_replies: VecDeque::new(),
                 interrupt_outcomes: VecDeque::new(),
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
+                close_holds: VecDeque::new(),
                 opens: Vec::new(),
                 written: Vec::new(),
                 respond_calls: 0,
@@ -236,6 +238,13 @@ impl FakeAdapter {
 
     pub fn set_close_outcome(&self, outcome: CloseOutcome) {
         self.state().close_outcome = outcome;
+    }
+
+    /// The next close is written, then waits for the returned sender before reporting its outcome.
+    pub fn hold_next_close(&self) -> oneshot::Sender<()> {
+        let (sender, receiver) = oneshot::channel();
+        self.state().close_holds.push_back(receiver);
+        sender
     }
 
     /// What `options` reports; without it the fake cannot tell.
@@ -527,7 +536,7 @@ impl HarnessRuntime for FakeRuntime {
 
     /// Closing a runtime that is no longer live reports the scripted outcome too.
     async fn close(&self) -> CloseOutcome {
-        let outcome = {
+        let (outcome, hold) = {
             let mut state = self.fake.state();
             if state
                 .live
@@ -537,10 +546,13 @@ impl HarnessRuntime for FakeRuntime {
                 state.live = None;
             }
             state.written.push(Written::Close(self.generation));
-            state.close_outcome.clone()
+            (state.close_outcome.clone(), state.close_holds.pop_front())
         };
         // As with a real process: its event stream has ended before `close` returns.
         tokio::task::yield_now().await;
+        if let Some(hold) = hold {
+            let _ = hold.await;
+        }
         outcome
     }
 }
