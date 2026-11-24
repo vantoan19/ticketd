@@ -257,6 +257,11 @@ export function SourcesPage({
                 key={entry.connector.provider}
                 variant="outline"
                 size="sm"
+                disabled={Boolean(
+                  entry.next_id &&
+                  (connections.has(entry.next_id) ||
+                    removed.includes(entry.next_id)),
+                )}
                 onClick={() => setAdding(entry)}
               >
                 <Plus aria-hidden="true" /> Add {entry.connector.name}{" "}

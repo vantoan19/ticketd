@@ -66,7 +66,10 @@ fn linear_passes_strict_conformance_through_the_host() {
         ])
         .env("LINEAR_CONFORMANCE_CHILD", &endpoint)
         .env(ENDPOINT, &endpoint)
-        .env("TICKETD_SOURCE_CONFORMANCE_API_KEY", KEY)
+        .env(
+            "TICKETD_SOURCE_CONFORMANCE_API_KEY",
+            "another-test-credential",
+        )
         .env("TICKETD_SOURCE_LINEAR_API_KEY", KEY)
         .output()
         .unwrap();
@@ -324,10 +327,12 @@ fn recover_lost_publication(registry: &ExtensionRegistry, root: &Path, config: &
 }
 
 fn assert_conformance(registry: &ExtensionRegistry, config: &ConfigValues, publish: Option<&str>) {
+    let mut config = config.clone();
+    config.insert("api_key".into(), json!(KEY));
     let report = registry
         .conformance(
             "linear",
-            config,
+            &config,
             &ConformanceOptions {
                 strict: true,
                 publish: publish.map(str::to_owned),

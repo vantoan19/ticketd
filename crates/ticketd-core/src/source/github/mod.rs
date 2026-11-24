@@ -1044,11 +1044,13 @@ fn configured_api_url() -> Option<String> {
 
 fn site_of(url: &str) -> String {
     let host = host_of(url).to_ascii_lowercase();
-    if matches!(
-        host.as_str(),
-        "api.github.com" | "github.com" | "localhost" | "127.0.0.1" | "[::1]"
-    ) {
+    let port = url::Url::parse(url).ok().and_then(|url| url.port());
+    if matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]")
+        || (port.is_none() && matches!(host.as_str(), "api.github.com" | "github.com"))
+    {
         String::new()
+    } else if let Some(port) = port {
+        format!("{host}:{port}")
     } else {
         host
     }

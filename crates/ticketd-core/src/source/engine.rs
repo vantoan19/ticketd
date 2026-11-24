@@ -363,7 +363,7 @@ impl Engine {
             )?;
             skipped.extend(page.skipped);
             for issue in page.issues {
-                verify_identity(provider, &issue.reference.identity)?;
+                verify_issue(provider, &issue)?;
                 if !seen_identities.insert(issue.reference.identity.clone()) {
                     continue;
                 }
@@ -498,6 +498,7 @@ impl Engine {
         }
         let config = connector.configuration_for_request(raw)?;
         let issue = with_guidance(connector, connector.fetch(&config, reference))?;
+        verify_issue(provider, &issue)?;
         if issue.reference.identity != reference.identity {
             return Err(SourceError::Protocol(
                 "the source returned a different issue than requested".into(),
@@ -539,7 +540,7 @@ impl Engine {
             None => publication.publish(&config, request),
         };
         let issue = with_guidance(connector, result)?;
-        verify_identity(provider, &issue.reference.identity)?;
+        verify_issue(provider, &issue)?;
         if issue.state.category != StateCategory::Open {
             return Err(SourceError::Protocol(
                 "the created issue was not reported open".into(),
@@ -561,7 +562,7 @@ impl Engine {
         let publication = publication(connector)?;
         let config = connector.configuration_for_request(raw)?;
         let issue = with_guidance(connector, publication.locate(&config, destination, text))?;
-        verify_identity(provider, &issue.reference.identity)?;
+        verify_issue(provider, &issue)?;
         Ok(issue)
     }
 
@@ -577,7 +578,7 @@ impl Engine {
         let config = connector.configuration_for_request(raw)?;
         let found = with_guidance(connector, publication.find_published(&config, search))?;
         for issue in found.matches.iter().chain(&found.recent) {
-            verify_identity(provider, &issue.reference.identity)?;
+            verify_issue(provider, issue)?;
         }
         Ok(found)
     }
@@ -631,6 +632,21 @@ impl Engine {
         self.find(provider)
             .ok_or_else(|| SourceError::UnknownProvider(provider.to_owned()))
     }
+}
+
+fn verify_issue(provider: &str, issue: &ExternalIssue) -> Result<(), SourceError> {
+    verify_identity(provider, &issue.reference.identity)?;
+    for (field, time) in [
+        ("created_at", &issue.created_at),
+        ("updated_at", &issue.updated_at),
+    ] {
+        if chrono::DateTime::parse_from_rfc3339(time).is_err() {
+            return Err(SourceError::Protocol(format!(
+                "an issue's {field} must be an RFC 3339 timestamp"
+            )));
+        }
+    }
+    Ok(())
 }
 
 /// Reject malformed identities before any source result can reach a Workspace write.

@@ -1223,6 +1223,16 @@ fn locating_reads_an_issue_only_inside_the_destination() {
 
 const SEARCH_URL: &str = "https://api.example.test/repos/o/r/issues?state=all&sort=created&direction=desc&per_page=100&since=2026-03-01T00%3A00%3A00Z";
 
+#[test]
+fn an_enterprise_site_includes_its_nondefault_port() {
+    assert_eq!(site_of("https://forge.example/api/v3"), "forge.example");
+    assert_eq!(
+        site_of("https://forge.example:8443/api/v3"),
+        "forge.example:8443"
+    );
+    assert_eq!(site_of("https://api.github.com:443"), "");
+}
+
 fn search_for_title(engine: &Engine) -> Result<PublicationCandidates, SourceError> {
     engine.find_published(
         "github",

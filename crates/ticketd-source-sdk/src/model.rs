@@ -28,7 +28,10 @@ pub struct ConnectorDescriptor {
     pub provider: String,
     pub name: String,
     pub contract_version: u32,
+    /// Known names describe the supported operations. A host ignores names for
+    /// future optional capabilities that it does not yet recognize.
     #[serde(deserialize_with = "known_capabilities")]
+    #[schemars(with = "Vec<String>")]
     pub capabilities: Vec<Capability>,
     pub schema: ConfigSchema,
 }
@@ -211,8 +214,9 @@ pub struct ExternalIssue {
     pub state: ExternalState,
     pub assignees: Vec<String>,
     pub labels: Vec<String>,
-    /// When the issue was opened at the source.
+    /// When the issue was opened at the source, as an RFC 3339 timestamp.
     pub created_at: String,
+    /// When the issue was last updated at the source, as an RFC 3339 timestamp.
     pub updated_at: String,
     /// The source identity that opened the issue, when known.
     #[serde(default)]

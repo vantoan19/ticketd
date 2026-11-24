@@ -13161,6 +13161,13 @@ test("a new connection can be configured while the shared source list is refresh
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByText(/No open issues match these rules/);
   fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
+  expect(
+    (
+      (await screen.findByRole("button", {
+        name: "Add Beacon Tracker connection",
+      })) as HTMLButtonElement
+    ).disabled,
+  ).toBe(true);
   fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
   await screen.findByRole("heading", { name: source.name });
   await waitFor(() => expect(readAfterAdd).toHaveBeenCalled());

@@ -169,8 +169,17 @@ pub(super) fn run(
     let descriptor = engine.descriptor(provider)?;
     let mut report = ConformanceReport::new(provider);
     report.result("version_refusal", refusal);
+    // A test for one provider must not receive a credential intended for
+    // another provider or a saved connection.
+    let permitted_env = HashSet::new();
     let engine = match engine
-        .for_connection(provider, "conformance", raw)
+        .for_connection_with_secret_refs(
+            provider,
+            "conformance",
+            raw,
+            &Default::default(),
+            Some(&permitted_env),
+        )
         .with_workflow_credentials(provider, raw)
     {
         Ok(engine) => engine,
@@ -305,59 +314,58 @@ pub(super) fn run(
         ),
     }
 
-    let first = sample(&engine, provider, &config)?;
-    if first.is_empty() {
-        report.unobserved(
+    let first = sample(&engine, provider, &config);
+    match &first {
+        Ok(first) if !first.is_empty() => {
+            let repeated = sample(&engine, provider, &config).and_then(|repeated| {
+                verify_sample(
+                    &engine,
+                    provider,
+                    &config,
+                    first,
+                    &repeated,
+                    &connection.derived.partitions,
+                )
+            });
+            match repeated {
+                Ok(true) => report.pass("stable_identity"),
+                Ok(false) => report.unobserved(
+                    "stable_identity",
+                    "no locator was observed in both discovery samples",
+                    options,
+                ),
+                Err(error) => report.fail("stable_identity", error),
+            }
+        }
+        Ok(_) => report.unobserved(
             "stable_identity",
             "discovery returned no issues to fetch",
             options,
+        ),
+        Err(error) => report.fail("stable_identity", error),
+    }
+    if !descriptor.capabilities.contains(&Capability::Comments) {
+        report.skip(
+            "conversation",
+            "the extension does not declare comments",
+            false,
         );
-        if descriptor.capabilities.contains(&Capability::Comments) {
-            report.unobserved(
-                "conversation",
-                "discovery returned no issues with a conversation to check",
-                options,
-            );
-        } else {
-            report.skip(
-                "conversation",
-                "the extension does not declare comments",
-                false,
-            );
-        }
     } else {
-        let repeated = sample(&engine, provider, &config)?;
-        report.result(
-            "stable_identity",
-            verify_sample(
-                &engine,
-                provider,
-                &config,
-                &first,
-                &repeated,
-                &connection.derived.partitions,
-            ),
-        );
-        if descriptor.capabilities.contains(&Capability::Comments) {
-            let reference = &first[0].reference;
-            let repeated_read =
-                || comment_identity_set(connector.conversation(&config, reference)?.comments);
-            report.result(
+        match first {
+            Ok(issues) => match verify_conversation(connector, &config, &issues) {
+                Ok(true) => report.pass("conversation"),
+                Ok(false) => report.unobserved(
+                    "conversation",
+                    "no populated conversation was observed",
+                    options,
+                ),
+                Err(error) => report.fail("conversation", error),
+            },
+            Err(_) => report.skip(
                 "conversation",
-                repeated_read().and_then(|first| {
-                    let second = repeated_read()?;
-                    require(
-                        first == second,
-                        "the same conversation returned different comment IDs",
-                    )
-                }),
-            );
-        } else {
-            report.skip(
-                "conversation",
-                "the extension does not declare comments",
+                "discovery failed before a conversation could be checked",
                 false,
-            );
+            ),
         }
     }
     match options.closure_probes.as_ref() {
@@ -489,12 +497,13 @@ fn verify_sample(
     first: &[ExternalIssue],
     repeated: &[ExternalIssue],
     partitions: &[String],
-) -> Result<(), SourceError> {
+) -> Result<bool, SourceError> {
     let repeated: HashMap<_, _> = repeated
         .iter()
         .map(|issue| (&issue.reference.locator, &issue.reference.identity))
         .collect();
     let mut distinct = HashSet::new();
+    let mut observed_again = false;
     for issue in first {
         let identity = &issue.reference.identity;
         verify_identity(provider, identity)?;
@@ -507,6 +516,7 @@ fn verify_sample(
             "a discovered issue named a part absent from the connection check",
         )?;
         if let Some(reobserved) = repeated.get(&issue.reference.locator) {
+            observed_again = true;
             require(
                 *reobserved == identity,
                 "a repeated discovery returned a different identity for the same locator",
@@ -518,18 +528,48 @@ fn verify_sample(
             "list and fetch returned different identities",
         )?;
     }
-    Ok(())
+    Ok(observed_again)
 }
 
-fn comment_identity_set(
-    comments: Vec<super::ExternalComment>,
+fn verify_conversation(
+    connector: &dyn Connector,
+    config: &ConfigValues,
+    issues: &[ExternalIssue],
+) -> Result<bool, SourceError> {
+    for issue in issues {
+        let reference = &issue.reference;
+        let initial = connector.conversation(config, reference)?;
+        if initial.comments.is_empty() && initial.events.is_empty() {
+            continue;
+        }
+        let repeated = connector.conversation(config, reference)?;
+        require(
+            conversation_ids(initial.comments.into_iter().map(|entry| entry.id))?
+                == conversation_ids(repeated.comments.into_iter().map(|entry| entry.id))?,
+            "the same conversation returned different comment IDs",
+        )?;
+        require(
+            conversation_ids(initial.events.into_iter().map(|entry| entry.id))?
+                == conversation_ids(repeated.events.into_iter().map(|entry| entry.id))?,
+            "the same conversation returned different event IDs",
+        )?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn conversation_ids(
+    entries: impl IntoIterator<Item = String>,
 ) -> Result<HashSet<String>, SourceError> {
     let mut ids = HashSet::new();
-    for comment in comments {
-        require(!comment.id.trim().is_empty(), "a comment has no stable ID")?;
+    for id in entries {
         require(
-            ids.insert(comment.id),
-            "a conversation returned a comment ID more than once",
+            !id.trim().is_empty(),
+            "a conversation record has no stable ID",
+        )?;
+        require(
+            ids.insert(id),
+            "a conversation returned an ID more than once in the same record type",
         )?;
     }
     Ok(ids)
@@ -549,7 +589,11 @@ fn check_publication(
     check_destination(&connection.derived.publication, destination)?;
     require(
         !connection.connection.publication_requires_tracker_time
-            || connection.connection.tracker_time.is_some(),
+            || connection
+                .connection
+                .tracker_time
+                .as_deref()
+                .is_some_and(|time| chrono::DateTime::parse_from_rfc3339(time).is_ok()),
         "the source did not confirm its clock for publication recovery",
     )?;
     let request = PublishRequest {

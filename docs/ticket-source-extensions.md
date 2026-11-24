@@ -121,7 +121,7 @@ shared version. For example, a minimal Contract 2 description can return the res
 ```
 
 If no offered version is supported, return your version list and extension
-version with `contract_version` and `description` set to `null`. At a
+version. Omit `contract_version` and `description` or set them to `null`. At a
 successful handshake, the provider ID and extension version must match the
 manifest. Change the contract version for changes to existing behavior or
 required shapes. An optional addition can use the same version.
@@ -374,7 +374,8 @@ entries, while the references stay on the device.
 Run `ticketd source conformance PROVIDER` against the registered extension
 using synthetic or test data. Supply ordinary settings with `--set KEY=VALUE`
 or use `--config-file -` to pipe a JSON object of settings and credentials.
-The conformance connection ID for environment overrides is `conformance`.
+Supply extension credentials explicitly in that JSON for each test run.
+Saved connection and shared environment overrides are excluded from conformance.
 The CLI prints a JSON report and exits with an error when a check fails.
 
 - The default run reads only. It checks version refusal, connection validation,
