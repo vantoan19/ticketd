@@ -2584,6 +2584,49 @@ mod tests {
         }
     }
 
+    #[test]
+    fn a_saved_antigravity_create_retains_its_target_after_preview_compaction() {
+        use super::{Tracker, item};
+
+        let chat = Chat {
+            harness: "antigravity".to_owned(),
+            ..chat(None)
+        };
+        let record = ChatItem::Tool(tool(
+            "Write files",
+            r#"{"toolCallId":"t","title":"","kind":"edit","status":"completed","rawInput":{"TargetFile":"/work/limiter/src/generated.rs","_ticketdAllFilesAdded":true,"_ticketdAddedLines":64}}"#,
+            ChatToolState::Completed,
+            None,
+        ));
+        let approval = ChatItem::Interaction(ChatInteraction {
+            id: "ask".to_owned(),
+            position: 0,
+            turn_id: "turn".to_owned(),
+            kind: ChatInteractionKind::Approval,
+            native_request_id: None,
+            prompt: "Permission to write files".to_owned(),
+            reason: None,
+            state: ChatInteractionState::Answered,
+            response: Some("allow".to_owned()),
+            tool_id: Some("t".to_owned()),
+            asked_at: None,
+            resolved_at: None,
+        });
+        let tracker = Tracker::from_items(&[record.clone(), approval.clone()]);
+        let live = ChatLive::idle();
+        let Some(Item::Steps { steps, .. }) = item(&record, &chat, &live, None, &tracker) else {
+            panic!("a step");
+        };
+        let Some(Item::Request { subject, .. }) = item(&approval, &chat, &live, None, &tracker)
+        else {
+            panic!("an approval");
+        };
+        assert_eq!(steps[0].kind, "create");
+        assert_eq!(steps[0].added_lines, Some(64));
+        assert_eq!(texts(&steps[0]), ["src/generated.rs"]);
+        assert_eq!(subject.as_deref(), Some("src/generated.rs"));
+    }
+
     /// #367: a turn's records read by whether it still runs, and a stop that did not
     /// confirm leaves the plan unconfirmed rather than finished.
     #[test]

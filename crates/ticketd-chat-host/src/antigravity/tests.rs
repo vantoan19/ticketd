@@ -394,6 +394,114 @@ async fn bounded_file_previews_preserve_the_whole_edit_through_completion() {
 }
 
 #[tokio::test]
+async fn create_keeps_targets_and_line_counts_when_the_diff_preview_cannot_fit() {
+    use ticketd_core::{ChatToolState, harnesses::ANTIGRAVITY};
+
+    use crate::{
+        FileTargets, LineCounts, MAX_PROVIDER_DETAIL_BYTES, StepAction, ToolEvidence,
+        read_tool_steps,
+    };
+
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_eq!(
+        opened.runtime.submit(start_turn("create-files")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(peer.written().await["method"], "session/prompt");
+
+    let component = format!("/{}", "nested".repeat(30));
+    let directory = format!("/workspace{}", component.repeat(3));
+    let long_paths: Vec<_> = (0..32)
+        .map(|index| format!("{directory}/file-{index}.rs"))
+        .collect();
+    let input = "/workspace/input.rs";
+    let location = "/workspace/location.rs";
+    let diff = "/workspace/diff.rs".to_owned();
+    for (id, paths, native_location, expected, added) in [
+        ("input", long_paths.as_slice(), None, input, 64),
+        (
+            "location",
+            long_paths.as_slice(),
+            Some(location),
+            location,
+            64,
+        ),
+        (
+            "intact",
+            std::slice::from_ref(&diff),
+            Some(location),
+            diff.as_str(),
+            2,
+        ),
+    ] {
+        let content: Vec<_> = paths
+            .iter()
+            .map(|path| json!({"type": "diff", "path": path, "newText": "first\nsecond\n"}))
+            .collect();
+        let locations: Vec<_> = native_location
+            .into_iter()
+            .map(|path| json!({"path": path}))
+            .collect();
+        send(
+            &mut peer,
+            &json!({
+                "jsonrpc": "2.0", "method": "session/update",
+                "params": {
+                    "sessionId": "session-1",
+                    "update": {
+                        "sessionUpdate": "tool_call", "toolCallId": id, "title": "Write files",
+                        "kind": "edit", "status": "completed", "rawInput": {"TargetFile": input},
+                        "content": content, "locations": locations
+                    }
+                }
+            }),
+        )
+        .await;
+
+        let (title, detail) = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let EventKind::ToolUpdated {
+                    item,
+                    title,
+                    detail: Some(detail),
+                    ..
+                } = opened.events.recv().await.unwrap().kind
+                    && item.0 == id
+                {
+                    break (title, detail);
+                }
+            }
+        })
+        .await
+        .expect("saved tool detail");
+        assert!(detail.payload().len() <= MAX_PROVIDER_DETAIL_BYTES);
+        assert_eq!(detail.truncated(), paths.len() > 1);
+        let steps = read_tool_steps(
+            ANTIGRAVITY.key.as_str(),
+            ToolEvidence {
+                name: &title,
+                input: detail.payload(),
+                state: ChatToolState::Completed,
+                output: None,
+                working_directory: "/workspace",
+            },
+        );
+        assert_eq!(
+            steps[0].action,
+            StepAction::Create {
+                targets: FileTargets::Paths(vec![expected.to_owned()]),
+                counts: LineCounts {
+                    added: Some(added),
+                    removed: None,
+                },
+            },
+            "tool {id}"
+        );
+    }
+    opened.runtime.close().await;
+}
+
+#[tokio::test]
 async fn forwards_a_native_permission_id_once_and_keeps_the_providers_labels() {
     let (mut peer, mut opened) = open(
         RESUME,
