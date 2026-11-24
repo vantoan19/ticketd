@@ -233,6 +233,8 @@ fn output_tail(output: &str) -> &str {
 pub struct RequestOption {
     pub id: String,
     pub label: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -769,6 +771,7 @@ fn approval_option(decision: ApprovalDecision) -> RequestOption {
     RequestOption {
         id: id.to_owned(),
         label: label.to_owned(),
+        warning: None,
     }
 }
 
@@ -948,6 +951,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps:
                 .map(|option| RequestOption {
                     id: option.id.clone(),
                     label: option.label.clone(),
+                    warning: option.warning.clone(),
                 })
                 .collect(),
             false,
@@ -960,6 +964,7 @@ fn request(interaction: &ChatInteraction, live: &ChatLive, harness: &str, steps:
                     .map(|option| RequestOption {
                         id: option.clone(),
                         label: option.clone(),
+                        warning: None,
                     })
                     .collect(),
                 false,
@@ -2582,6 +2587,61 @@ mod tests {
                 (vec![expected], Some(expected))
             );
         }
+    }
+
+    #[test]
+    fn a_live_native_approval_serializes_each_choices_warning() {
+        use super::item;
+        use ticketd_chat_host::{ApprovalOption, InteractionKind, LiveInteraction};
+
+        let reason = "Review the command.";
+        let approval = ChatItem::Interaction(
+            serde_json::from_value(json!({
+                "id": "ask",
+                "position": 1,
+                "turn_id": "turn",
+                "kind": "approval",
+                "prompt": "Print a fixture",
+                "reason": reason,
+                "state": "pending"
+            }))
+            .unwrap(),
+        );
+        let chat = Chat {
+            harness: "antigravity".to_owned(),
+            ..chat(Some("turn"))
+        };
+        let mut live = ChatLive::idle();
+        live.interactions.push(LiveInteraction {
+            interaction_id: "ask".to_owned(),
+            kind: InteractionKind::NativeApproval {
+                description: "Print a fixture".to_owned(),
+                reason: Some(reason.to_owned()),
+                options: vec![
+                    ApprovalOption {
+                        id: "allow".to_owned(),
+                        label: "Allow once".to_owned(),
+                        warning: None,
+                    },
+                    ApprovalOption {
+                        id: "provider-option-7".to_owned(),
+                        label: "Allow always".to_owned(),
+                        warning: Some("Adds a persistent rule.".to_owned()),
+                    },
+                ],
+            },
+        });
+        let tracker = Tracker::from_items(std::slice::from_ref(&approval));
+        let view = item(&approval, &chat, &live, None, &tracker).unwrap();
+        let json = serde_json::to_value(view).unwrap();
+        assert_eq!(json["reason"], reason);
+        assert_eq!(
+            json["options"],
+            json!([
+                {"id": "allow", "label": "Allow once"},
+                {"id": "provider-option-7", "label": "Allow always", "warning": "Adds a persistent rule."},
+            ])
+        );
     }
 
     #[test]

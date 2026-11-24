@@ -1069,6 +1069,23 @@ impl SyncRecord {
         Ok(record)
     }
 
+    /// Enforce current command policy before accepting or applying a snapshot.
+    /// Parsing also reads historical merge bases, which must keep their original values.
+    pub(crate) fn validate_agent_command_policy(&self) -> Result<(), Error> {
+        if self.kind == SyncKind::AutomationAgent
+            && let Some(harness) = text(&self.fields, "harness").and_then(descriptor)
+        {
+            let on = |field| matches!(self.fields.get(field), Some(SyncValue::Flag(true)));
+            crate::automation_agents::validate_command_policy(
+                harness,
+                on("run_commands"),
+                on("any_command"),
+            )
+            .map_err(bad)?;
+        }
+        Ok(())
+    }
+
     /// Check a record built or merged in code the way a parsed file is checked.
     pub fn validate(&self) -> Result<(), Error> {
         validate(Block::Record(self.kind), &self.id, &self.fields)?;
@@ -1720,18 +1737,6 @@ impl Apply<'_> {
                 (created, true)
             }
         };
-        if record.kind == SyncKind::AutomationAgent && !created {
-            let runs =
-                |fields: &Fields| matches!(fields.get("run_commands"), Some(SyncValue::Flag(true)));
-            let any =
-                |fields: &Fields| matches!(fields.get("any_command"), Some(SyncValue::Flag(true)));
-            let previous = text(&current.fields, "harness").unwrap_or_default();
-            let next = text(&record.fields, "harness").unwrap_or_default();
-            crate::automation_agents::validate_command_transition(
-                (previous, runs(&current.fields), any(&current.fields)),
-                (next, runs(&record.fields), any(&record.fields)),
-            )?;
-        }
         let (schema, _) = shape(Block::Record(record.kind));
         for name in schema.iter().map(|field| field.0).chain(["body"]) {
             if present(&current.fields, name) != present(&record.fields, name) {
@@ -1867,6 +1872,7 @@ impl Workspace {
     /// external ownership, dependency loops) do not apply: the record is taken as it is.
     pub fn apply_sync_record(&mut self, record: &SyncRecord) -> Result<Vec<MissingTarget>, Error> {
         record.validate()?;
+        record.validate_agent_command_policy()?;
         crate::write_scope::run(&self.connection, |transaction| {
             let mut apply = Apply {
                 c: transaction,

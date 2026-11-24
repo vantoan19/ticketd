@@ -104,25 +104,26 @@ pub(super) fn unattended_params(
     (thread, turn)
 }
 
-/// The `config` overrides that carry the "Run commands" switch. Codex has no read
-/// tool: it reads files through its shell, so "Run commands" off removes the shell
-/// and with it the agent's reading (what Codex itself loads, such as AGENTS.md, still
-/// loads). Its image viewer, which reads any image file, goes with it. With "Run
-/// commands" on the agent may run any command inside the sandbox: Codex has no list
-/// of allowed commands, and no setting here limits what it reads.
+/// Codex needs an explicit grant for its shell, which runs any command inside the
+/// sandbox. Without the grant both the shell and image viewer are disabled. Codex
+/// still reads its own startup files, including AGENTS.md.
 pub(super) fn switch_overrides(tools: &AutomationAgentTools) -> Value {
-    let mut overrides = json!({"features.shell_tool": tools.run_commands});
-    if !tools.run_commands {
+    let shell = allows_shell(tools);
+    let mut overrides = json!({"features.shell_tool": shell});
+    if !shell {
         overrides["features.view_image"] = json!(false);
     }
     overrides
 }
 
-/// Whether the agent gets no Codex environment at all (no shell, and no `apply_patch`
-/// to write files): neither "Run commands" nor "Edit files" is on. Only ticketd's own
-/// tool is left. `thread/start.environments` is how Codex says so.
+/// When both the shell and file edits are disabled, only ticketd's own tool is
+/// available. Request this through `thread/start.environments`.
 pub(super) fn has_no_environment(tools: &AutomationAgentTools) -> bool {
-    !tools.run_commands && !tools.edit_files
+    !allows_shell(tools) && !tools.edit_files
+}
+
+fn allows_shell(tools: &AutomationAgentTools) -> bool {
+    tools.run_commands && tools.any_command
 }
 
 /// The `config` overrides of an unattended thread: none of the person's own MCP
