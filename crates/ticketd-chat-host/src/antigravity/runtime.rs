@@ -116,13 +116,21 @@ struct Permission {
     options: Vec<acp::PermissionOption>,
 }
 
+#[derive(Default, PartialEq, Eq)]
+enum PermissionPolicy {
+    #[default]
+    Own,
+    Native,
+    Full,
+}
+
 #[derive(Default)]
 struct Session {
     runtime: RuntimeState<Permission>,
     id: Option<acp::SessionId>,
     prompt: Option<Prompt>,
     configs: Vec<acp::SessionConfigOption>,
-    mode: String,
+    permission_policy: PermissionPolicy,
 }
 
 impl Session {
@@ -149,8 +157,18 @@ impl Session {
         ]
     }
 
+    fn current_permission(&self) -> Option<&str> {
+        match self.permission_policy {
+            PermissionPolicy::Own => Some(settings::OWN),
+            PermissionPolicy::Full => Some(settings::FULL),
+            PermissionPolicy::Native => settings::select(&self.configs, SettingKey::Permission)
+                .map(|(_, select)| select.current_value.0.as_ref())
+                .filter(|value| !matches!(*value, settings::OWN | settings::FULL)),
+        }
+    }
+
     fn settings_report(&self) -> EventKind {
-        EventKind::SettingsState(settings::reported(&self.configs, &self.mode))
+        EventKind::SettingsState(settings::reported(&self.configs, self.current_permission()))
     }
 
     fn configured(&mut self, setting: SettingKey, wanted: String, value: &Value) -> Vec<EventKind> {
@@ -161,7 +179,7 @@ impl Session {
         };
         self.configs = reply.config_options;
         if setting == SettingKey::Permission && confirmed(&self.configs, setting, &wanted) {
-            self.mode = wanted;
+            self.permission_policy = PermissionPolicy::Native;
         }
         vec![self.settings_report()]
     }
@@ -190,6 +208,13 @@ impl Session {
             acp::SessionUpdate::ConfigOptionUpdate(update) => {
                 self.configs = update.config_options;
                 return vec![self.settings_report()];
+            }
+            acp::SessionUpdate::CurrentModeUpdate(update) => {
+                return if settings::update_mode(&mut self.configs, update.current_mode_id) {
+                    vec![self.settings_report()]
+                } else {
+                    Vec::new()
+                };
             }
             acp::SessionUpdate::UsageUpdate(usage) if usage.size > 0 => {
                 return vec![EventKind::ContextUsage(ContextUsage {
@@ -649,12 +674,11 @@ pub(super) async fn open(
     let (connection, events) = Connection::start(
         io,
         Session {
-            mode: if permission == settings::FULL {
-                settings::FULL
+            permission_policy: if permission == settings::FULL {
+                PermissionPolicy::Full
             } else {
-                settings::OWN
-            }
-            .to_owned(),
+                PermissionPolicy::Own
+            },
             ..Default::default()
         },
         request.generation,
@@ -824,8 +848,8 @@ impl HarnessRuntime for AcpRuntime {
                     reason: refusal.reason().to_owned(),
                 };
             }
-            let current = state.peer.mode.as_str();
-            if change.value == current {
+            let current = state.peer.current_permission();
+            if current == Some(change.value.as_str()) {
                 return SettingOutcome::Applied;
             }
             if let Some(reason) =
@@ -833,7 +857,7 @@ impl HarnessRuntime for AcpRuntime {
             {
                 return SettingOutcome::Refused { reason };
             }
-            if current == settings::FULL
+            if state.peer.permission_policy == PermissionPolicy::Full
                 || matches!(change.value.as_str(), settings::OWN | settings::FULL)
             {
                 return SettingOutcome::ReopenSession;
