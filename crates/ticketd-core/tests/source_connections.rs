@@ -317,20 +317,23 @@ fn conversation_survives_removal_of_the_first_connection_that_found_an_issue() {
             .issues
             .insert(1, fake_source::issue_in("owner/shared", 1, "Shared issue"));
         remote.matching.push(1);
-        remote.conversations.insert(
-            1,
-            ticketd_core::source::Conversation {
-                comments: vec![ticketd_core::source::ExternalComment {
-                    id: "comment-1".into(),
-                    author: "Fixture User".into(),
-                    body: "This comment belongs to the issue.".into(),
-                    url: "https://example.test/owner/shared/issues/1#comment-1".into(),
-                    created_at: "2026-01-01T00:00:00Z".into(),
-                    updated_at: "2026-01-01T00:00:00Z".into(),
-                }],
-                events: Vec::new(),
-            },
-        );
+        for account in ["alice", "bob"] {
+            let comment_id = format!("comment-from-{account}");
+            remote.conversations_by_account.insert(
+                (account.into(), 1),
+                ticketd_core::source::Conversation {
+                    comments: vec![ticketd_core::source::ExternalComment {
+                        id: comment_id.clone(),
+                        author: account.into(),
+                        body: "This comment belongs to the issue.".into(),
+                        url: format!("https://example.test/owner/shared/issues/1#{comment_id}"),
+                        created_at: "2026-01-01T00:00:00Z".into(),
+                        updated_at: "2026-01-01T00:00:00Z".into(),
+                    }],
+                    events: Vec::new(),
+                },
+            );
+        }
         remote.before_conversation.insert(
             1,
             std::sync::Arc::new(move || {
@@ -355,7 +358,7 @@ fn conversation_survives_removal_of_the_first_connection_that_found_an_issue() {
     let transcript = workspace.source_conversation(&report.imported[0]).unwrap();
     assert!(transcript.iter().any(|entry| matches!(
         entry,
-        ticketd_core::source::ConversationEntry::Comment { id, .. } if id == "comment-1"
+        ticketd_core::source::ConversationEntry::Comment { id, .. } if id == "comment-from-bob"
     )));
     assert_eq!(remote.0.lock().unwrap().conversation_calls, [1, 1]);
 }

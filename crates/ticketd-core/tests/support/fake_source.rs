@@ -83,6 +83,7 @@ pub struct Remote {
     pub before_discovery: Option<Hook>,
     pub after_discovery: Option<Hook>,
     pub conversations: BTreeMap<u64, Conversation>,
+    pub conversations_by_account: BTreeMap<(String, u64), Conversation>,
     pub conversation_outage: Option<String>,
     pub conversation_calls: Vec<u64>,
     pub before_conversation: BTreeMap<u64, Hook>,
@@ -311,7 +312,7 @@ impl Connector for FakeSource {
 
     fn conversation(
         &self,
-        _: &ConfigValues,
+        config: &ConfigValues,
         reference: &ExternalRef,
     ) -> Result<Conversation, SourceError> {
         let id = issue_id(reference)?;
@@ -324,7 +325,11 @@ impl Connector for FakeSource {
         if let Some(message) = remote.conversation_outage.clone() {
             return Err(SourceError::Unavailable(message));
         }
-        Ok(remote.conversations.get(&id).cloned().unwrap_or_default())
+        let account = config.get("assignee").and_then(serde_json::Value::as_str);
+        let conversation = account
+            .and_then(|name| remote.conversations_by_account.get(&(name.to_owned(), id)))
+            .or_else(|| remote.conversations.get(&id));
+        Ok(conversation.cloned().unwrap_or_default())
     }
 
     fn publication(&self) -> Option<&dyn Publication> {
