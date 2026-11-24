@@ -44,6 +44,7 @@ import { attachments } from "@/lib/api/attachments";
 import { useNow } from "@/lib/use-now";
 import { SyncFailure as Failure } from "./SyncFailure";
 import { useCommand } from "./use-sync-command";
+import { s3Api } from "@/lib/s3-api";
 import { storageName } from "./storage-name";
 import { S3Place } from "./S3Place";
 import { recoveryCopy } from "./sync-recovery";
@@ -640,6 +641,13 @@ function RecoveryNotice({ status }: { status: SyncStatus }) {
   // Retrying cannot help until the profile is changed back, so the way out the message
   // names comes first, and Retry is for a person who did that.
   const moved = status.recovery === "service_changed";
+  const noCli = status.recovery === "cli_unavailable";
+  // A picked program is remembered for this desktop, so sync tries again at once.
+  const chooseProgram = async () => {
+    const picked = await s3Api.chooseCli();
+    if (!picked) return syncApi.status();
+    return syncApi.recover();
+  };
   const retry = (variant: "default" | "outline") => (
     <Button
       size="sm"
@@ -664,6 +672,17 @@ function RecoveryNotice({ status }: { status: SyncStatus }) {
                 onClick={() => setDisconnecting(true)}
               >
                 Disconnect…
+              </Button>
+              {retry("outline")}
+            </>
+          ) : noCli ? (
+            <>
+              <Button
+                size="sm"
+                disabled={busy}
+                onClick={() => void run(chooseProgram, "use that program")}
+              >
+                {copy.action}
               </Button>
               {retry("outline")}
             </>

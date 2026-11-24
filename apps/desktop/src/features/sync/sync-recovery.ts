@@ -33,6 +33,7 @@ export function connectionState(status: SyncStatus): {
     case "storage_full":
       return { tone: "attention", label: "Storage full" };
     case "service_changed":
+    case "cli_unavailable":
     case "error":
       return { tone: "attention", label: "Not syncing" };
   }
@@ -98,6 +99,14 @@ export function recoveryCopy(status: SyncStatus): RecoveryCopy | null {
         // The core's sentence names both services and both ways out.
         description: `${status.recovery_message ?? "This profile now reaches another service than this Workspace's bucket was connected through."} Your work is saved on this computer.`,
         action: "Disconnect",
+        working: null,
+      };
+    case "cli_unavailable":
+      return {
+        label: "AWS CLI needed",
+        title: "Sync can't use the AWS CLI",
+        description: `${status.recovery_message ?? "The AWS CLI is missing or too old."} Your work is saved on this computer.`,
+        action: "Choose the aws program…",
         working: null,
       };
     case "error":

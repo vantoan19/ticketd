@@ -108,6 +108,7 @@ impl Error {
                 RemoteError::PreconditionFailed { .. } => FailureKind::Conflict,
                 RemoteError::RateLimited { .. }
                 | RemoteError::ServiceChanged(_)
+                | RemoteError::CliUnavailable(_)
                 | RemoteError::Other(_) => FailureKind::Failed,
             },
             Self::UploadLimit { .. } => FailureKind::TooLarge,

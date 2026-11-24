@@ -846,6 +846,39 @@ fn a_service_that_changed_stops_sync_with_its_own_state_and_the_way_out_is_disco
 }
 
 #[test]
+fn an_aws_program_that_cannot_be_used_stops_sync_and_the_way_out_is_choosing_it() {
+    let desks = desks();
+    let (mut a, _, _) = desks.uploaded("Desk A");
+    a.create_ticket("Saved meanwhile").unwrap();
+    let said =
+        "The AWS CLI was not found. Install AWS CLI version 2, or choose where the aws program is.";
+    desks
+        .remote
+        .fail(RemoteOp::List, 1, RemoteError::CliUnavailable(said.into()));
+
+    let status = a.sync_now(&desks.remote).unwrap();
+
+    assert_eq!(
+        recovered(&status),
+        (
+            Some(SyncRecovery::CliUnavailable),
+            SyncState::NeedsAttention
+        )
+    );
+    assert_eq!(status.recovery_message.as_deref(), Some(said));
+    assert_eq!(
+        SyncRecovery::CliUnavailable.action(),
+        SyncRecoveryAction::ChooseProgram
+    );
+    assert_eq!(
+        serde_json::to_value(&status).unwrap()["recovery"],
+        "cli_unavailable"
+    );
+    let status = a.sync_recover(&desks.remote).unwrap();
+    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
+}
+
+#[test]
 fn an_attachment_whose_bytes_are_gone_here_is_reported_and_holds_nothing_up() {
     let desks = desks();
     let (mut a, reference, _) = desks.uploaded("Desk A");

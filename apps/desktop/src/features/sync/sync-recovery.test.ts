@@ -56,3 +56,21 @@ test("a changed S3 service says what stopped, shows the message as written and o
     "This profile now points to another S3 service. Your work is saved on this computer.",
   );
 });
+
+test("a missing aws program says what stopped, shows the message as written and offers to choose it", () => {
+  const copy = recoveryCopy(
+    syncStatus({
+      provider: "s3",
+      recovery: "cli_unavailable",
+      recovery_message: "The AWS CLI was not found.",
+    }),
+  );
+  expect(copy).toMatchObject({
+    label: "AWS CLI needed",
+    title: "Sync can't use the AWS CLI",
+    action: "Choose the aws program…",
+  });
+  expect(copy?.description).toBe(
+    "The AWS CLI was not found. Your work is saved on this computer.",
+  );
+});

@@ -88,7 +88,11 @@ fn failure(tick: &Result<Option<SyncStatus>, Error>) -> Option<Failure> {
         Ok(Some(status))
             if matches!(
                 status.recovery,
-                Some(SyncRecovery::Error | SyncRecovery::ServiceChanged)
+                Some(
+                    SyncRecovery::Error
+                        | SyncRecovery::ServiceChanged
+                        | SyncRecovery::CliUnavailable
+                )
             ) =>
         {
             Some(Failure {

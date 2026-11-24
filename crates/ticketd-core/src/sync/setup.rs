@@ -204,6 +204,9 @@ pub enum SyncRecovery {
     /// through; the status carries the message. The way out is Disconnect (to move the bucket
     /// on purpose) or pointing the profile back.
     ServiceChanged,
+    /// The `aws` program is missing or too old; the status carries the message. The person
+    /// chooses where it is, or installs it.
+    CliUnavailable,
     /// Any other failure of a run; the status carries its message.
     Error,
 }
@@ -220,6 +223,8 @@ pub enum SyncRecoveryAction {
     /// Stop syncing here, then connect again; a retry only works once the profile is changed
     /// back.
     Disconnect,
+    /// Choose the `aws` program (or install one), then retry.
+    ChooseProgram,
 }
 
 impl SyncRecovery {
@@ -228,6 +233,7 @@ impl SyncRecovery {
             Self::FolderMissing => SyncRecoveryAction::Reupload,
             Self::AuthorizationExpired => SyncRecoveryAction::Reconnect,
             Self::ServiceChanged => SyncRecoveryAction::Disconnect,
+            Self::CliUnavailable => SyncRecoveryAction::ChooseProgram,
             Self::StorageFull | Self::Offline | Self::RateLimited | Self::Error => {
                 SyncRecoveryAction::Retry
             }
@@ -242,6 +248,7 @@ impl SyncRecovery {
             RemoteError::Offline => Some(Self::Offline),
             RemoteError::RateLimited { .. } => Some(Self::RateLimited),
             RemoteError::ServiceChanged(_) => Some(Self::ServiceChanged),
+            RemoteError::CliUnavailable(_) => Some(Self::CliUnavailable),
             RemoteError::PreconditionFailed { .. }
             | RemoteError::NotFound
             | RemoteError::BucketMissing(_)
@@ -1004,6 +1011,7 @@ impl Workspace {
                     | SyncRecovery::AuthorizationExpired
                     | SyncRecovery::StorageFull
                     | SyncRecovery::ServiceChanged
+                    | SyncRecovery::CliUnavailable
                     | SyncRecovery::Error
             )
         );
@@ -1064,7 +1072,11 @@ impl Workspace {
             recovery_message: state.recovery_message.filter(|_| {
                 matches!(
                     state.recovery,
-                    Some(SyncRecovery::Error | SyncRecovery::ServiceChanged)
+                    Some(
+                        SyncRecovery::Error
+                            | SyncRecovery::ServiceChanged
+                            | SyncRecovery::CliUnavailable
+                    )
                 )
             }),
             recovery: state.recovery,
@@ -1336,6 +1348,9 @@ impl Workspace {
                 // Its sentence is the whole message, and is kept to be shown.
                 Error::Remote(RemoteError::ServiceChanged(said)) => {
                     (Some(SyncRecovery::ServiceChanged), Some(said.clone()))
+                }
+                Error::Remote(RemoteError::CliUnavailable(said)) => {
+                    (Some(SyncRecovery::CliUnavailable), Some(said.clone()))
                 }
                 Error::Remote(remote) if SyncRecovery::of(remote).is_some() => {
                     (SyncRecovery::of(remote), None)

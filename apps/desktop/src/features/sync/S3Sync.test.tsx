@@ -25,7 +25,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/clipboard", () => ({ writeClipboard: vi.fn() }));
 vi.mock("@/lib/s3-api", async (original) => ({
   ...(await original<typeof import("@/lib/s3-api")>()),
-  s3Api: { folderLinks: vi.fn() },
+  s3Api: { folderLinks: vi.fn(), chooseCli: vi.fn() },
 }));
 vi.mock("@/lib/sync-api", async (original) => ({
   ...(await original<typeof import("@/lib/sync-api")>()),
@@ -378,6 +378,55 @@ test("the state of the connection agrees with the notice, and the notice sits be
   expect(
     label.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
+});
+
+const NO_CLI =
+  "The AWS CLI was not found. Install AWS CLI version 2, or choose where the aws program is.";
+const noCli = () =>
+  connected({
+    state: "needs_attention",
+    recovery: "cli_unavailable",
+    recovery_message: NO_CLI,
+  });
+
+test("sync stopped for want of the aws program offers to choose it, then tries again", async () => {
+  api.status.mockResolvedValue(noCli());
+  api.recover.mockResolvedValue(connected());
+  s3.chooseCli.mockResolvedValue(true);
+  show();
+  const notice = await screen.findByRole("alert");
+  expect(notice.textContent).toContain(NO_CLI);
+  expect(notice.textContent).not.toMatch(/sync storage|storage:/i);
+  expect(screen.queryByText("Connected")).toBeNull();
+  fireEvent.click(
+    within(notice).getByRole("button", { name: "Choose the aws program…" }),
+  );
+  await waitFor(() => expect(s3.chooseCli).toHaveBeenCalled());
+  await waitFor(() => expect(api.recover).toHaveBeenCalled());
+  expect(await screen.findByText("Connected")).toBeTruthy();
+});
+
+test("a cancelled picker changes nothing, and a refused program says why", async () => {
+  api.status.mockResolvedValue(noCli());
+  s3.chooseCli.mockResolvedValueOnce(false);
+  show();
+  const notice = await screen.findByRole("alert");
+  const choose = within(notice).getByRole("button", {
+    name: "Choose the aws program…",
+  });
+  fireEvent.click(choose);
+  await waitFor(() => expect(s3.chooseCli).toHaveBeenCalledTimes(1));
+  expect(api.recover).not.toHaveBeenCalled();
+
+  s3.chooseCli.mockRejectedValueOnce(
+    hostFailure("ticketd needs AWS CLI version 2.13 or later"),
+  );
+  fireEvent.click(choose);
+  await revealFailureDetails();
+  expect(
+    await screen.findByText(/ticketd needs AWS CLI version 2\.13 or later/),
+  ).toBeTruthy();
+  expect(api.recover).not.toHaveBeenCalled();
 });
 
 test("disconnecting from a bucket says what stays", async () => {

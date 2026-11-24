@@ -68,6 +68,11 @@ export const syncRecoveries = [
    * on purpose; pointing the profile back, then Retry, undoes the edit.
    */
   "service_changed",
+  /**
+   * The `aws` program is missing or too old; `recovery_message` says which. Choosing where
+   * it is (or installing it), then Retry, gets sync going again.
+   */
+  "cli_unavailable",
   /** Any other failed run; `recovery_message` says what went wrong. */
   "error",
 ] as const;
@@ -111,7 +116,7 @@ const statusSchema = z.object({
   }),
   needs_review: z.array(reviewItemSchema),
   recovery: z.enum(syncRecoveries).nullable(),
-  /** What went wrong, while `recovery` is `error` or `service_changed`. */
+  /** What went wrong, while `recovery` is `error`, `service_changed` or `cli_unavailable`. */
   recovery_message: z.string().nullable().optional(),
   /** Progress of the first upload or download after setup; `null` once it finished. */
   first_sync: z

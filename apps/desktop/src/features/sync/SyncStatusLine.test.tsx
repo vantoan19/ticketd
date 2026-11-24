@@ -351,6 +351,28 @@ test("a changed S3 service reads as a stop on the line, with Retry and the way t
   ).toBeTruthy();
 });
 
+test("a missing aws program reads as a stop on the line, with Retry and the way to choose it", async () => {
+  await footer(
+    syncStatus({
+      provider: "s3",
+      state: "needs_attention",
+      recovery: "cli_unavailable",
+      recovery_message: "The AWS CLI was not found.",
+    }),
+  );
+  expect((await line()).textContent).toBe(
+    "AWS CLI neededSaved on this computer",
+  );
+  const dialog = await popover("S3 sync");
+  expect(dialog.textContent).toContain("The AWS CLI was not found.");
+  expect(within(dialog).getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(
+    within(dialog).getByRole("button", {
+      name: "Choose the aws program in Settings",
+    }),
+  ).toBeTruthy();
+});
+
 test("a conflict waiting while offline: the popover offers Review and keeps Retry", async () => {
   const status = syncStatus({
     state: "needs_attention",

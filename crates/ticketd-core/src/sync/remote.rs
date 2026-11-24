@@ -136,6 +136,10 @@ pub enum RemoteError {
     /// connected through. The text says which, and the way out, written for people.
     #[error("{0}")]
     ServiceChanged(String),
+    /// The `aws` program is missing or too old. The text says which, and that the person can
+    /// choose where it is, written for people.
+    #[error("{0}")]
+    CliUnavailable(String),
     #[error("storage: {0}")]
     Other(String),
 }

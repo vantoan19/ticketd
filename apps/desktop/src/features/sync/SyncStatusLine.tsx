@@ -200,9 +200,11 @@ export function SyncStatusLine() {
   const line = describe(status, now);
   const recovery = recoveryCopy(status);
   // Offline mends itself, so it asks for nothing on the line; its popover still offers a retry.
-  const stopped = status.recovery === "service_changed";
-  // A changed S3 service is left by Disconnect, which is a Settings page choice; the line
-  // itself can only retry, for a person who pointed the profile back.
+  const stopped =
+    status.recovery === "service_changed" ||
+    status.recovery === "cli_unavailable";
+  // A changed S3 service is left by Disconnect, and a missing aws program is chosen, both on
+  // the Settings page; the line itself can only retry, for a person who put it right.
   const corrective =
     status.state === "needs_attention" && recovery
       ? stopped
@@ -328,7 +330,11 @@ export function SyncStatusLine() {
                   openSettings();
                 }}
               >
-                {stopped ? "Disconnect in Settings" : "Settings"}
+                {status.recovery === "service_changed"
+                  ? "Disconnect in Settings"
+                  : stopped
+                    ? "Choose the aws program in Settings"
+                    : "Settings"}
               </Button>
             </div>
           </div>
