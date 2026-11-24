@@ -1,8 +1,8 @@
 name: Package
 
 # Manual builds of the installable packages from main, and the Linux native smoke test on any
-# branch. Kept out of the Quality workflow so its required "CI result" check always runs the full
-# set of checks and never reports a skip. The Release workflow builds every green main commit.
+# branch. Kept out of the Quality workflow so its required "CI result" check only has to account
+# for the jobs of the change plan. The Release workflow builds every green main commit.
 on:
   workflow_dispatch:
     inputs:
@@ -27,20 +27,14 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      - uses: ./.github/actions/prepare
         with:
-          node-version: "22.23.4"
-      - name: Install desktop and WebDriver dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev webkit2gtk-driver xvfb
-      - run: rustup show active-toolchain
-      - name: Cache Rust build
-        uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - run: npm install --global npm@10.9.2
-      - run: npm ci
+          rust: true
+          desktop: true
+          cache: native-smoke
+          # The WebDriver dependencies go through the same package cache; xauth is what xvfb-run
+          # needs, which a plain install pulls in as a recommendation.
+          extra-packages: webkit2gtk-driver xvfb xauth
       - run: npm run build
       - run: npm run desktop -- build --debug --bundles deb -- --locked
       - name: Check the CLI in the Debian package
