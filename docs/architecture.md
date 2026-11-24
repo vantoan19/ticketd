@@ -880,9 +880,13 @@ repository while the issue's locator and URL stay the same. A changed location
 without a repository report clears the old observation. For an externally owned
 ticket, refresh can follow a GitHub repository transfer even if its REST ID changes.
 This requires a permanent redirect from the saved issue path within the same API
-and a destination response that corroborates the new issue's location. Refresh
+and a destination response that corroborates the new location and agrees with
+the saved issue's creation time. Missing or mismatched creation times leave the
+current link in place and report a refresh error. Matching creation times help discovery
+identify possible transfers between repository reads for a direct check. Refresh
 updates provenance on the same ticket before discovery can import the destination.
-An identity already held by another ticket is reported as a conflict. GitHub
+An identity already held by another ticket is reported as a conflict, and that
+ticket can still apply its own source observation. GitHub
 derives the web host from the API host. It maps `api.github.com` to `github.com` and
 `api.<tenant>.ghe.com` to `<tenant>.ghe.com`. GitHub Enterprise Server uses its
 configured host. Enterprise issue identities include the web host, so issues

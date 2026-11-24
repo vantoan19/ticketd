@@ -206,7 +206,12 @@ impl GithubConnector {
                     .header("location")
                     .ok_or_else(|| SourceError::Protocol("a redirect had no destination".into()))?;
                 url = if location.starts_with('/') {
-                    format!("{}{location}", self.api_url)
+                    url::Url::parse(&url)
+                        .and_then(|base| base.join(location))
+                        .map_err(|_| {
+                            SourceError::Protocol("a redirect had an invalid destination".into())
+                        })?
+                        .to_string()
                 } else {
                     location.to_owned()
                 };
