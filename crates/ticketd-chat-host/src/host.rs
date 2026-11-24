@@ -364,7 +364,7 @@ struct Inner {
     /// is, so every clone of the host refuses to start or reach a supervisor.
     restoring: AtomicBool,
     /// Set while Chat is switched off in Settings, for the same reason.
-    off: AtomicBool,
+    off: Arc<AtomicBool>,
 }
 
 impl ChatHost {
@@ -406,7 +406,7 @@ impl ChatHost {
                 unattended: Mutex::new(HashMap::new()),
                 quitting: AtomicBool::new(false),
                 restoring: AtomicBool::new(false),
-                off: AtomicBool::new(false),
+                off: Arc::new(AtomicBool::new(false)),
             }),
         })
     }
@@ -682,14 +682,22 @@ impl ChatHost {
         self.stop_all(StopReason::TurnedOff).await
     }
 
-    /// Chat was switched on again; requests are served.
+    /// Chat was switched on again. A pending permission restart still requires
+    /// confirmed exit of the previous harness before it can open a replacement.
     pub fn turn_on(&self) {
         self.inner.off.store(false, Ordering::SeqCst);
     }
 
     /// Stops every running Chat with bounded cleanup and keeps the host usable.
     pub async fn stop_all(&self, why: StopReason) -> Vec<UnconfirmedCleanup> {
-        let chats: Vec<_> = self.chats().drain().collect();
+        let turning_off = why == StopReason::TurnedOff;
+        let chats = if turning_off {
+            // A supervisor may still own an unresolved permission restart. Keep its
+            // entry through shutdown so a concurrent turn_on cannot replace it.
+            self.chats().clone()
+        } else {
+            std::mem::take(&mut *self.chats())
+        };
         let mut waiting = Vec::new();
         for (chat_id, commands) in chats {
             let (reply, done) = oneshot::channel();
@@ -702,6 +710,9 @@ impl ChatHost {
             if let Ok(Some(reason)) = done.await {
                 unconfirmed.push(UnconfirmedCleanup { chat_id, reason });
             }
+        }
+        if turning_off {
+            self.chats().retain(|_, commands| !commands.is_closed());
         }
         unconfirmed
     }
@@ -774,8 +785,8 @@ impl ChatHost {
         let chat = (self.inner.open_workspace)()?.chat(chat_id)?;
         let adapter = self.inner.adapters.get(chat.harness.as_str()).cloned();
         let mut chats = self.chats();
-        // Checked again under the lock `stop_all` drains with, so a request racing
-        // Quit or a restore cannot add a supervisor after the running ones were stopped.
+        // Checked again under the lock `stop_all` uses, so a request racing shutdown
+        // cannot add a supervisor after the running ones were stopped.
         self.closed()?;
         let commands = chats
             .entry(chat_id.to_owned())
@@ -842,6 +853,7 @@ impl ChatHost {
             self.inner.context.clone(),
             self.inner.board.clone(),
             unattended,
+            self.inner.off.clone(),
         )
     }
 
@@ -871,8 +883,8 @@ impl ChatHost {
         self.unattended().contains_key(chat_id)
     }
 
-    /// Whether the Chat has a supervisor in this host. Quit, a restore and turning
-    /// Chat off take every supervisor out.
+    /// Whether the Chat has a supervisor in this host, including one kept while
+    /// Chat is off to finish a permission restart.
     pub(crate) fn supervised(&self, chat_id: &str) -> bool {
         self.chats().contains_key(chat_id)
     }
