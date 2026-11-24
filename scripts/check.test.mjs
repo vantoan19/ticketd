@@ -33,7 +33,8 @@ echo "cargo $*" >> "${log}"`,
     "GITHUB_EVENT_NAME",
   ])
     delete inherited[name];
-  const result = spawnSync(check, args, {
+  // Through bash: native Node on Windows cannot start an extensionless script by its shebang.
+  const result = spawnSync("bash", [check, ...args], {
     encoding: "utf8",
     env: {
       ...inherited,
