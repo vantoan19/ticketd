@@ -3024,6 +3024,135 @@ async fn an_unconfirmed_permission_restart_rechecks_the_old_runtime_before_recov
 }
 
 #[tokio::test(start_paused = true)]
+async fn turning_chat_off_and_on_keeps_waiting_for_the_previous_permission_runtime() {
+    let f = Fixture::new(FakeAdapter::new(
+        &ticketd_core::harnesses::ANTIGRAVITY,
+        Capabilities {
+            steering: Capability::Unsupported {
+                reason: String::new(),
+            },
+        },
+    ));
+    let native_session = NativeSessionId::new("native-1");
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: native_session.clone(),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    let mut current = settings("full");
+    current.model.as_mut().unwrap().current = Some("gpt-b".to_owned());
+    current.effort.as_mut().unwrap().current = Some("high".to_owned());
+    f.emit(EventKind::SettingsState(current)).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    f.queue("before disabling").await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("late-approval"),
+        turn: Some(turn_1()),
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "Approve the previous runtime's request".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow],
+        },
+        detail: None,
+    }))
+    .await;
+    let interaction_id = f.live().await.interactions[0].interaction_id.clone();
+    let original = f.fake.opens()[0].generation;
+    let reason = "the exit could not be observed".to_owned();
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: reason.clone(),
+    });
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+
+    for _ in 0..2 {
+        assert_eq!(
+            f.host.turn_off().await,
+            [UnconfirmedCleanup {
+                chat_id: f.chat.id.clone(),
+                reason: reason.clone(),
+            }]
+        );
+        assert!(matches!(
+            f.host.resume(&f.chat.id, ResumeMode::Native).await,
+            Err(HostError::TurnedOff)
+        ));
+        f.host.turn_on();
+        assert!(matches!(
+            f.host.resume(&f.chat.id, ResumeMode::Native).await,
+            Err(HostError::PermissionRestartCleanupUnconfirmed)
+        ));
+    }
+
+    assert!(f.send("after enabling").await.queued);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(f.queued(), ["before disabling", "after enabling"]);
+    let view = f.host.attach(&f.chat.id).await.unwrap().0;
+    assert!(view.snapshot.chat.queue_paused);
+    assert!(!view.live.running);
+    assert!(view.live.interactions.is_empty());
+    assert!(matches!(
+        view.live.problem,
+        Some(ChatProblem::CleanupUnconfirmed { .. })
+    ));
+    assert!(view.snapshot.items.iter().any(|item| matches!(
+        item,
+        ChatItem::Interaction(saved)
+            if saved.id == interaction_id && saved.state == ChatInteractionState::Expired
+    )));
+    assert!(matches!(
+        f.host
+            .respond(
+                &f.chat.id,
+                &interaction_id,
+                InteractionAnswer::Approval(ApprovalDecision::Allow),
+            )
+            .await,
+        Err(HostError::InteractionExpired)
+    ));
+    assert_eq!(f.fake.respond_calls(), 0);
+
+    f.fake
+        .set_close_outcome(CloseOutcome::Confirmed { exit_code: Some(0) });
+    f.host.resume(&f.chat.id, ResumeMode::Native).await.unwrap();
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].session, SessionStart::Resume(native_session));
+    assert_ne!(opens[1].generation, original);
+    assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
+    assert_eq!(opens[1].settings.model.as_deref(), Some("gpt-b"));
+    assert_eq!(opens[1].settings.effort.as_deref(), Some("high"));
+    assert_eq!(f.live().await.problem, None);
+    assert_eq!(f.submits().len(), 1);
+
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    let submits = f.submits();
+    assert_eq!(submits.len(), 2);
+    assert_eq!(submits[1].text, "before disabling");
+    assert_eq!(submits[1].generation, opens[1].generation);
+    assert_eq!(f.queued(), ["after enabling"]);
+    let closed = f
+        .fake
+        .written()
+        .into_iter()
+        .filter_map(|written| match written {
+            Written::Close(generation) => Some(generation),
+            _ => None,
+        });
+    assert_eq!(closed.collect::<Vec<_>>(), [original; 6]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn native_only_recovery_opens_an_empty_session_when_native_history_is_missing() {
     let f = Fixture::new(FakeAdapter::new(
         &ticketd_core::harnesses::ANTIGRAVITY,
