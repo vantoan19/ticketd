@@ -582,6 +582,53 @@ test("switching from a command list to Codex turns commands off until the person
   );
 });
 
+test("the open agent editor can retry a failed harness catalog load and choose a harness", async () => {
+  const client = createMockChatClient();
+  const catalog = await client.harnessCatalog();
+  let fail = () => {};
+  const firstLoad = new Promise<typeof catalog>((_, reject) => {
+    fail = () => reject(new Error("test catalog request failed"));
+  });
+  let finishRetry = () => {};
+  const secondLoad = new Promise<typeof catalog>((resolve) => {
+    finishRetry = () => resolve(catalog);
+  });
+  client.harnessCatalog = vi
+    .fn(client.harnessCatalog)
+    .mockReturnValueOnce(firstLoad)
+    .mockReturnValueOnce(secondLoad);
+
+  await open(client, [
+    {
+      ...DEFAULTS,
+      id: "a1",
+      name: "Triage",
+      tools: { ...DEFAULTS.tools, allowed_commands: [] },
+      used_by: [],
+    },
+  ]);
+  fireEvent.click(screen.getByRole("button", { name: /Triage/ }));
+  const form = within(await screen.findByRole("region", { name: "Triage" }));
+  expect(form.queryByRole("radio", { name: /Codex/ })).toBeNull();
+
+  await act(async () => fail());
+  const failure = form.getByRole("alert");
+  expect(failure.textContent).toContain("Couldn't load harness choices");
+  expect(client.harnessCatalog).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(within(failure).getByRole("button", { name: "Retry" }));
+  expect(form.getByRole("status").textContent).toContain(
+    "Loading harness choices…",
+  );
+  await act(async () => finishRetry());
+
+  expect(form.queryByRole("alert")).toBeNull();
+  expect(form.getByRole("radio", { name: /Claude Code/ })).toBeTruthy();
+  fireEvent.click(form.getByRole("radio", { name: /Codex/ }));
+  await waitFor(() => expect(stored[0]?.harness).toBe("codex"));
+  expect(client.harnessCatalog).toHaveBeenCalledTimes(2);
+});
+
 test("an existing agent can turn commands off while its capability loads and explicitly enable them once it is known", async () => {
   const client = createMockChatClient();
   const catalog = await client.harnessCatalog();
