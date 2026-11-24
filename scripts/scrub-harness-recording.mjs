@@ -8,8 +8,10 @@ import {
   writeFileSync,
 } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { parseArgs } from "node:util";
 
-const header = Buffer.from("ticketd-harness-recording-v1\n");
+const headerV1 = Buffer.from("ticketd-harness-recording-v1\n");
+const headerV2 = Buffer.from("ticketd-harness-recording-v2\n");
 const maxCaptureBytes = 64 * 1024 * 1024;
 const maxFrameBytes = 8 * 1024 * 1024;
 const decoder = new TextDecoder("utf-8", { fatal: true });
@@ -43,12 +45,42 @@ function readCapture(input) {
   }
 }
 
+function captureRoot(value) {
+  if (
+    typeof value === "string" &&
+    value.startsWith("/") &&
+    !value.includes("\0")
+  ) {
+    const root = value.replace(/\/+$/, "");
+    if (root) return root;
+  }
+  throw new CaptureError(
+    "The recording capture root must be an absolute directory path.",
+  );
+}
+
 function framesFrom(input) {
   if (!input.endsWith(".wire")) {
     throw new CaptureError("Use a finalized .wire recording.");
   }
   const raw = readCapture(input);
-  if (!raw.subarray(0, header.length).equals(header)) {
+  let offset = headerV1.length;
+  let roots = [];
+  const format = raw.subarray(0, offset);
+  if (format.equals(headerV2)) {
+    const end = raw.indexOf(10, offset);
+    try {
+      if (end !== -1)
+        roots = JSON.parse(decoder.decode(raw.subarray(offset, end)));
+    } catch {
+      throw new CaptureError("Invalid recording capture root metadata.");
+    }
+    if (!Array.isArray(roots) || roots.length !== 2) {
+      throw new CaptureError("Invalid recording capture root metadata.");
+    }
+    roots = roots.map(captureRoot);
+    offset = end + 1;
+  } else if (!format.equals(headerV1)) {
     throw new CaptureError("Unknown recording format.");
   }
 
@@ -57,7 +89,7 @@ function framesFrom(input) {
     1: { direction: "client", chunks: [], size: 0, lines: 0 },
     2: { direction: "server", chunks: [], size: 0, lines: 0 },
   };
-  for (let offset = header.length; offset < raw.length;) {
+  while (offset < raw.length) {
     const stream = streams[raw[offset]];
     if (!stream || offset + 5 > raw.length) {
       throw new CaptureError("Invalid recording chunk header.");
@@ -76,7 +108,7 @@ function framesFrom(input) {
   if (frames.length === 0) {
     throw new CaptureError("The recording contains no frames.");
   }
-  return frames;
+  return { frames, roots };
 }
 
 function readChunk(bytes, stream, frames) {
@@ -256,7 +288,7 @@ function visit(value, scope, parent, scalar, key, wireFields = null) {
   return scalar(value, scope);
 }
 
-function scrub(frames, input) {
+function scrub(frames, captureDirectories) {
   const aliases = new Map();
   const accountAliases = new Map();
   const ambiguousSessionAliases = new Set();
@@ -294,13 +326,9 @@ function scrub(frames, input) {
     return replacement;
   };
 
-  // Match both the launch spelling and its physical path (for example /var and
-  // /private/var on macOS). Keep filenames, relative paths and tool arguments.
-  for (const directory of [
-    dirname(resolve(input)),
-    dirname(realpathSync(input)),
-  ]) {
-    if (dirname(directory) !== directory) remember(directory, () => "/fixture");
+  // Keep filenames, relative paths and tool arguments when masking a capture root.
+  for (const directory of captureDirectories) {
+    remember(directory, () => "/fixture");
   }
   // Collect aliases first so a reference before its structured definition, or
   // in a command, message, or path, can use the same replacement.
@@ -433,15 +461,42 @@ function scrub(frames, input) {
   });
 }
 
-try {
-  const [, , input, output, extra] = process.argv;
-  if (!input || !output || extra !== undefined) {
-    throw new CaptureError(
-      "Usage: node scripts/scrub-harness-recording.mjs RAW.wire FIXTURE.jsonl",
-    );
+function argumentsForScrubbing() {
+  const usage =
+    "Usage: node scripts/scrub-harness-recording.mjs [--capture-root DIR] RAW.wire FIXTURE.jsonl";
+  let args;
+  try {
+    args = parseArgs({
+      options: { "capture-root": { type: "string", multiple: true } },
+      allowPositionals: true,
+    });
+  } catch {
+    throw new CaptureError(usage);
   }
-  const frames = scrub(framesFrom(input), input);
-  const fixture = frames.map((frame) => JSON.stringify(frame) + "\n").join("");
+  if (args.positionals.length !== 2) throw new CaptureError(usage);
+  return args;
+}
+
+try {
+  const {
+    positionals: [input, output],
+    values,
+  } = argumentsForScrubbing();
+  const { frames, roots } = framesFrom(input);
+  // Legacy recordings made in place use the path supplied to the scrubber.
+  // The header and explicit origins survive a move of the wire file.
+  const captureDirectories = [
+    dirname(resolve(input)),
+    dirname(realpathSync(input)),
+  ].filter((directory) => dirname(directory) !== directory);
+  const scrubbed = scrub(frames, [
+    ...captureDirectories,
+    ...roots,
+    ...(values["capture-root"] ?? []).map(captureRoot),
+  ]);
+  const fixture = scrubbed
+    .map((frame) => JSON.stringify(frame) + "\n")
+    .join("");
   writeFileSync(output, fixture, { flag: "wx", mode: 0o600 });
 } catch (error) {
   // Parser and filesystem errors can quote capture bytes or private filenames.

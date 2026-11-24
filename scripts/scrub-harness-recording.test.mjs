@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
+  copyFileSync,
   existsSync,
   mkdtempSync,
   readFileSync,
@@ -8,7 +9,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -24,8 +25,10 @@ function capture(t) {
   return {
     directory,
     output,
-    scrub(chunks) {
-      const contents = [Buffer.from("ticketd-harness-recording-v1\n")];
+    scrub(chunks, { roots, destination, args = [] } = {}) {
+      const contents = roots
+        ? [Buffer.from("ticketd-harness-recording-v2\n"), line(roots)]
+        : [Buffer.from("ticketd-harness-recording-v1\n")];
       for (const [direction, bytes] of chunks) {
         const header = Buffer.alloc(5);
         header[0] = direction;
@@ -33,7 +36,11 @@ function capture(t) {
         contents.push(header, bytes);
       }
       writeFileSync(input, Buffer.concat(contents));
-      return spawnSync(process.execPath, [cli, input, output], {
+      const movedInput = destination
+        ? join(destination, basename(input))
+        : input;
+      if (destination) copyFileSync(input, movedInput);
+      return spawnSync(process.execPath, [cli, ...args, movedInput, output], {
         encoding: "utf8",
       });
     },
@@ -131,6 +138,63 @@ test("scrubs structured and embedded identities while keeping protocol and tool 
   assert.match(third.server.unixPath, /\/files\/example\.txt$/);
   assert.match(third.server.command, /^cat .*\/private\/example\.txt$/);
   assert.match(third.server.path, /\\files\\example\.txt$/);
+});
+
+test("scrubs both original root spellings after a recording is copied", (t) => {
+  const { directory, output, scrub } = capture(t);
+  const { directory: destination } = capture(t);
+  const origin = directory.startsWith("/")
+    ? directory
+    : "/tmp/" + basename(directory);
+  const alternate = "/tmp/synthetic-symlink/" + basename(directory);
+  const result = scrub(
+    [
+      [
+        1,
+        line({
+          method: "session/new",
+          params: { cwd: origin + "/work", path: alternate + "/work/file.txt" },
+        }),
+      ],
+    ],
+    { roots: [origin, alternate], destination },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const { client } = JSON.parse(readFileSync(output, "utf8"));
+  assert.deepEqual(client.params, {
+    cwd: "/fixture/work",
+    path: "/fixture/work/file.txt",
+  });
+});
+
+test("scrubs a copied legacy recording with an explicit original root", (t) => {
+  const { directory, output, scrub } = capture(t);
+  const { directory: destination } = capture(t);
+  const origin = directory.startsWith("/")
+    ? directory
+    : "/tmp/" + basename(directory);
+  const alternate = "/tmp/synthetic-symlink/" + basename(directory);
+  const result = scrub(
+    [
+      [
+        1,
+        line({
+          method: "session/new",
+          params: { cwd: origin + "/work", path: alternate + "/work/file.txt" },
+        }),
+      ],
+    ],
+    {
+      destination,
+      args: ["--capture-root", origin, "--capture-root", alternate],
+    },
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const { client } = JSON.parse(readFileSync(output, "utf8"));
+  assert.deepEqual(client.params, {
+    cwd: "/fixture/work",
+    path: "/fixture/work/file.txt",
+  });
 });
 
 test("rejects a recording that grows past 64 MiB after its size is checked", (t) => {

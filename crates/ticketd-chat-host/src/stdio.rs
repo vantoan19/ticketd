@@ -989,7 +989,11 @@ mod tests {
         let files = captures(directory.path());
         assert_eq!(files.len(), 2);
         for file in files {
-            let mut expected = b"ticketd-harness-recording-v1\n".to_vec();
+            let mut expected = b"ticketd-harness-recording-v2\n".to_vec();
+            let physical = directory.path().canonicalize().expect("capture root");
+            serde_json::to_writer(&mut expected, &[directory.path(), &physical])
+                .expect("capture root header");
+            expected.push(b'\n');
             for direction in [1, 2] {
                 expected.push(direction);
                 expected.extend((STIMULUS.len() as u32).to_le_bytes());
