@@ -1159,7 +1159,7 @@ fn connection_help_and_edits_use_the_connection_first() {
 }
 
 #[test]
-fn removing_a_connection_keeps_unresolved_publication_and_does_not_rebind_on_id_reuse() {
+fn removing_a_connection_keeps_unresolved_publication_and_reserves_its_id() {
     let cli = Cli::new();
     let reference = unresolved_ticket(&cli);
     let before = cli.run(&["show", &reference]);
@@ -1194,6 +1194,8 @@ fn removing_a_connection_keeps_unresolved_publication_and_does_not_rebind_on_id_
         "{}",
         String::from_utf8_lossy(&added.stderr)
     );
+    let replacement: Value = serde_json::from_slice(&added.stdout).unwrap();
+    assert_eq!(replacement["source"]["id"], "github-2");
     let review = cli.run(&["source", "resolve", &reference, "--no-search"]);
     assert!(
         review["actions"]
