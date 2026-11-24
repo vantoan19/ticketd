@@ -182,15 +182,14 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Experimental",
     description:
-      "Work with Claude Code or Codex from ticketd, using the copy installed on this computer.",
+      "Work in ticketd with the coding tools installed on this computer.",
     keywords:
       "beta preview not yet qualified against real subscriptions claude codex ai",
     section: "chat",
   },
   {
     title: "Harnesses",
-    description:
-      "Chat runs the copy of Claude Code or Codex installed on this computer, signed in as you.",
+    description: "Each harness runs on this computer with its own sign-in.",
     keywords:
       "harness claude code codex installed detected signed in check again copy command",
     section: "chat",

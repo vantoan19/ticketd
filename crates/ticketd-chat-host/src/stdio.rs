@@ -379,11 +379,15 @@ fn path_with(folder: &Path) -> Option<std::ffi::OsString> {
 }
 
 /// What `<executable> --version` printed.
-pub(crate) async fn version_output(executable: &Path) -> Result<String, String> {
+pub(crate) async fn version_output(
+    executable: &Path,
+    environment: &[(&str, &str)],
+) -> Result<String, String> {
     let mut command = Command::new(executable);
     command
         .arg("--version")
         .stdin(Stdio::null())
+        .envs(environment.iter().copied())
         .kill_on_drop(true);
     hide_console(&mut command);
     let output = timeout(VERSION_PROBE_TIMEOUT, command.output())

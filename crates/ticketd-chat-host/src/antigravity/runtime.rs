@@ -9,6 +9,7 @@ use async_trait::async_trait;
 use serde::Serialize;
 use serde_json::{Value, json};
 use ticketd_core::harnesses::ANTIGRAVITY;
+use tokio::sync::mpsc;
 
 use crate::json_rpc::{
     self, CallOutcome, Connection, Incoming, Peer, Reply, Response, WriteFailure,
@@ -19,9 +20,10 @@ use crate::{
     ADAPTER_CLOSE_TIMEOUT, ApprovalOption, CHECK_TIMEOUT, CloseOutcome, ContextUsage,
     DeliveryEvidence, DispatchOutcome, EventKind, FileChange, HarnessCommand, HarnessRuntime,
     InteractionAnswer, InteractionKind, InteractionRequest, InteractionResponse, InterruptOutcome,
-    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, OpenRequest,
-    OpenedRuntime, Plan, PlanStep, PlanStepStatus, Problem, ProblemKind, Refusal, RespondOutcome,
-    SessionStart, SettingChange, SettingKey, SettingOutcome, Submission, SubmissionId, TurnOutcome,
+    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
+    OpenRequest, OpenedRuntime, Plan, PlanStep, PlanStepStatus, Problem, ProblemKind,
+    ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, SessionStart, SettingChange, SettingKey,
+    SettingOutcome, Submission, SubmissionId, TurnOutcome,
 };
 
 use super::{capabilities, problem, settings, steps};
@@ -131,6 +133,7 @@ struct Session {
     prompt: Option<Prompt>,
     configs: Vec<acp::SessionConfigOption>,
     permission_policy: PermissionPolicy,
+    settings_confirmed: bool,
 }
 
 impl Session {
@@ -151,10 +154,7 @@ impl Session {
         let native_session = NativeSessionId::new(session.0.as_ref());
         self.id = Some(session);
         self.configs = configs.unwrap_or_default();
-        vec![
-            EventKind::SessionIdentified { native_session },
-            self.settings_report(),
-        ]
+        vec![EventKind::SessionIdentified { native_session }]
     }
 
     fn current_permission(&self) -> Option<&str> {
@@ -171,6 +171,13 @@ impl Session {
         EventKind::SettingsState(settings::reported(&self.configs, self.current_permission()))
     }
 
+    fn settings_update(&self) -> Vec<EventKind> {
+        self.settings_confirmed
+            .then(|| self.settings_report())
+            .into_iter()
+            .collect()
+    }
+
     fn configured(&mut self, setting: SettingKey, wanted: String, value: &Value) -> Vec<EventKind> {
         let Ok(reply) =
             serde_json::from_value::<acp::SetSessionConfigOptionResponse>(value.clone())
@@ -181,7 +188,7 @@ impl Session {
         if setting == SettingKey::Permission && confirmed(&self.configs, setting, &wanted) {
             self.permission_policy = PermissionPolicy::Native;
         }
-        vec![self.settings_report()]
+        self.settings_update()
     }
 
     fn updated(&mut self, value: Value) -> Vec<EventKind> {
@@ -207,11 +214,11 @@ impl Session {
             }
             acp::SessionUpdate::ConfigOptionUpdate(update) => {
                 self.configs = update.config_options;
-                return vec![self.settings_report()];
+                return self.settings_update();
             }
             acp::SessionUpdate::CurrentModeUpdate(update) => {
                 return if settings::update_mode(&mut self.configs, update.current_mode_id) {
-                    vec![self.settings_report()]
+                    self.settings_update()
                 } else {
                     Vec::new()
                 };
@@ -532,16 +539,28 @@ fn params(request: impl Serialize) -> Result<Value, Problem> {
 
 impl AcpRuntime {
     async fn request(&self, method: &str, value: Value, call: Call) -> Result<Value, Problem> {
+        let resumed_session = match &call {
+            Call::Open(SessionStart::Resume(session)) => Some(session.clone()),
+            _ => None,
+        };
         match self.connection.call(method, |_| Ok((value, call))).await {
             CallOutcome::Reply(value) => Ok(value),
             CallOutcome::Error(error) => {
-                let lower = error.message.to_ascii_lowercase();
-                let kind = if method == "session/resume"
-                    && (error.code == -32601
+                let kind = if resumed_session.is_some_and(|session| {
+                    let lower = error.message.to_ascii_lowercase();
+                    // agy uses the generic internal error code for this missing-history reply.
+                    let missing = error.code == -32603
+                        && error.message
+                            == format!(
+                                "Failed to read session {}; retry, or load it with session/load",
+                                session.0
+                            );
+                    error.code == -32601
+                        || missing
                         || ["not found", "does not exist", "no conversation"]
                             .iter()
-                            .any(|phrase| lower.contains(phrase)))
-                {
+                            .any(|phrase| lower.contains(phrase))
+                }) {
                     ProblemKind::NativeHistoryUnavailable
                 } else {
                     ProblemKind::Other
@@ -620,11 +639,17 @@ impl AcpRuntime {
         }
     }
 
-    async fn start(&self, request: OpenRequest, permission: String) -> Result<(), Problem> {
+    async fn start(
+        &self,
+        request: OpenRequest,
+        permission: String,
+        events: mpsc::Sender<RuntimeEvent>,
+    ) -> Result<(), Problem> {
+        let generation = request.generation;
         let initial = request.settings.clone();
         self.open_session(request).await?;
-        let native_permission =
-            (permission != settings::OWN && permission != settings::FULL).then_some(permission);
+        let native_permission = (permission != settings::OWN && permission != settings::FULL)
+            .then(|| permission.clone());
         let requested = [
             (SettingKey::Permission, native_permission),
             (SettingKey::Model, initial.model),
@@ -640,10 +665,16 @@ impl AcpRuntime {
         }
         // A later configuration reply can change an earlier choice. All requested
         // values must be in effect together before the host can send a Prompt.
-        let configs = &self.connection.state().peer.configs;
+        let mut state = self.connection.state();
+        if state.is_closed() {
+            return Err(problem(
+                ProblemKind::Other,
+                "Antigravity stopped before the session opened",
+            ));
+        }
         for (setting, value) in requested {
             if let Some(value) = value
-                && !confirmed(configs, setting, &value)
+                && !confirmed(&state.peer.configs, setting, &value)
             {
                 return Err(opening_setting_problem(
                     setting,
@@ -651,6 +682,29 @@ impl AcpRuntime {
                 ));
             }
         }
+        let record = params(settings::Record {
+            permission: Some(permission),
+        })?;
+        // Save the startup choice before exposing controls that can replace it.
+        let reports = [
+            EventKind::Notice {
+                turn: None,
+                kind: NoticeKind::EffectiveSettings,
+                message: "Antigravity confirmed the permission in effect".to_owned(),
+                detail: Some(ProviderDetail::new("session/settings", &record.to_string())),
+            },
+            state.peer.settings_report(),
+        ];
+        let permits = events.try_reserve_many(reports.len()).map_err(|_| {
+            problem(
+                ProblemKind::Other,
+                "Antigravity sent too many events before the session opened",
+            )
+        })?;
+        for (permit, kind) in permits.zip(reports) {
+            permit.send(RuntimeEvent { generation, kind });
+        }
+        state.peer.settings_confirmed = true;
         Ok(())
     }
 
@@ -725,7 +779,7 @@ pub(super) async fn open(
     request: OpenRequest,
     permission: String,
 ) -> Result<OpenedRuntime, Problem> {
-    let (connection, events) = Connection::start(
+    let (connection, events, sender) = Connection::start(
         io,
         Session {
             permission_policy: if permission == settings::FULL {
@@ -743,7 +797,7 @@ pub(super) async fn open(
         },
     );
     let runtime = AcpRuntime { connection };
-    if let Err(problem) = runtime.start(request, permission).await {
+    if let Err(problem) = runtime.start(request, permission, sender).await {
         runtime.close().await;
         return Err(problem);
     }
