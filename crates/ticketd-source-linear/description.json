@@ -2,7 +2,7 @@
   "provider": "linear",
   "name": "Linear",
   "contract_version": 2,
-  "capabilities": ["discover", "fetch", "comments"],
+  "capabilities": ["discover", "fetch", "comments", "publish"],
   "schema": {
     "fields": [
       {
