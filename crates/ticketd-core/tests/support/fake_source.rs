@@ -65,7 +65,7 @@ pub struct Remote {
     pub connection_error: Option<String>,
     pub account_from_assignee: bool,
     pub account_id: Option<String>,
-    pub rate_limited_account: Option<String>,
+    pub rate_limited_account: Option<(String, u64)>,
     pub checked_partitions: Option<Vec<String>>,
     pub publish_destinations: Option<Vec<String>>,
     pub after_check: Option<Hook>,
@@ -206,8 +206,10 @@ impl Connector for FakeSource {
         } else {
             "octo"
         };
-        if rate_limited_account.as_deref() == Some(account) {
-            return Err(Failure::RateLimited(Some(1800)).error());
+        if let Some((limited, seconds)) = rate_limited_account
+            && limited == account
+        {
+            return Err(Failure::RateLimited(Some(seconds)).error());
         }
         let partitions = checked_partitions.unwrap_or_else(|| {
             strings(config, "repositories")

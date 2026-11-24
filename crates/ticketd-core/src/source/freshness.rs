@@ -22,14 +22,53 @@
 
 use std::collections::{BTreeSet, HashSet};
 
+use chrono::{DateTime, Datelike, SecondsFormat, TimeDelta, Timelike, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use serde::{Deserialize, Serialize};
 
 use super::{FailureScope, RefreshFailure, SourceFailure, contract::FailureCode};
 use crate::{Error, Workspace};
 
-/// Used when a rate-limited source does not say how long to wait.
-pub(super) const DEFAULT_RATE_LIMIT_SECS: u64 = 300;
+/// Used when a rate-limited source does not give a usable deadline.
+const DEFAULT_RATE_LIMIT: TimeDelta = TimeDelta::minutes(5);
+
+pub(super) struct RateLimitHold {
+    until: String,
+    pub(super) seconds: u64,
+}
+
+impl RateLimitHold {
+    pub(super) fn new(received_at: Option<&str>, requested: Option<u64>) -> Self {
+        let received = match received_at {
+            Some(time) => DateTime::parse_from_rfc3339(time)
+                .ok()
+                .map(|time| time.with_timezone(&Utc)),
+            None => Some(Utc::now()),
+        };
+        let fallback = DEFAULT_RATE_LIMIT.num_seconds() as u64;
+        let seconds = requested.unwrap_or(fallback);
+        let (until, seconds) = received
+            .and_then(|received| {
+                retry_deadline(received, seconds)
+                    .map(|until| (until, seconds))
+                    .or_else(|| retry_deadline(received, fallback).map(|until| (until, fallback)))
+            })
+            .unwrap_or_else(|| (Utc::now() + DEFAULT_RATE_LIMIT, fallback));
+        Self {
+            until: until.to_rfc3339_opts(SecondsFormat::Millis, true),
+            seconds,
+        }
+    }
+}
+
+fn retry_deadline(received: DateTime<Utc>, seconds: u64) -> Option<DateTime<Utc>> {
+    let delay = TimeDelta::try_seconds(i64::try_from(seconds).ok()?)?;
+    received.checked_add_signed(delay).filter(|until| {
+        // SQLite's date functions need a four-digit year and do not accept leap
+        // seconds. The scheduler uses nonnegative seconds since the Unix epoch.
+        until.year() <= 9999 && until.timestamp() >= 0 && until.nanosecond() < 1_000_000_000
+    })
+}
 
 /// Why and since when a ticket cannot be refreshed. Present only while it can't.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -166,6 +205,8 @@ pub(crate) struct ProviderRun {
     pub provider: String,
     pub connection_id: String,
     pub failure: Option<SourceFailure>,
+    /// The hold visible when the run took its configuration snapshot.
+    pub retry_after_at_start: Option<String>,
     /// Discovery rules the run skipped because they could not be read.
     pub skipped: Vec<String>,
     /// The parts of the source the run read in full, and the ones it skipped.
@@ -202,10 +243,12 @@ pub(crate) fn record_run(
             connection.execute(
                 "INSERT INTO source_connection_status (connection_id, last_attempt_at, last_refreshed_at, partial_message, last_checked_tickets, read_partitions) VALUES (?1, ?2, ?2, ?3, ?4, ?5) \
                  ON CONFLICT(connection_id) DO UPDATE SET last_attempt_at = ?2, last_refreshed_at = ?2, \
-                 error_code = NULL, error_message = NULL, failing_since = NULL, retry_after = NULL, partial_message = ?3, last_checked_tickets = ?4, \
+                 error_code = NULL, error_message = NULL, failing_since = NULL, \
+                 retry_after = CASE WHEN source_connection_status.retry_after IS ?6 THEN NULL ELSE source_connection_status.retry_after END, \
+                 partial_message = ?3, last_checked_tickets = ?4, \
                  read_partitions = ?5 \
                  WHERE source_connection_status.last_attempt_at IS NULL OR source_connection_status.last_attempt_at <= ?2",
-                params![run.connection_id, now, partial, run.checked_tickets, read],
+                params![run.connection_id, now, partial, run.checked_tickets, read, run.retry_after_at_start],
             )?;
         }
         Some(failure) => {
@@ -225,15 +268,14 @@ pub(crate) fn record_run(
 pub(super) fn record_hold(
     connection: &Connection,
     id: &str,
-    now: &str,
-    seconds: u64,
+    hold: &RateLimitHold,
 ) -> Result<(), Error> {
     connection.execute(
         "INSERT INTO source_connection_status (connection_id, retry_after)
-         VALUES (?1, strftime('%Y-%m-%dT%H:%M:%fZ', ?2, '+' || ?3 || ' seconds'))
+         VALUES (?1, ?2)
          ON CONFLICT(connection_id) DO UPDATE SET retry_after = excluded.retry_after
          WHERE retry_after IS NULL OR retry_after < excluded.retry_after",
-        params![id, now, seconds],
+        params![id, hold.until],
     )?;
     Ok(())
 }

@@ -877,7 +877,7 @@ fn a_staggered_second_connection_runs_while_the_first_is_rate_limited() {
         .add_source_connection(&engine, "fake", None, None, &values("bob", "owner/bob"))
         .unwrap();
     drop(workspace);
-    remote.0.lock().unwrap().rate_limited_account = Some("alice".into());
+    remote.0.lock().unwrap().rate_limited_account = Some(("alice".into(), 1800));
 
     let clock = std::sync::Arc::new(TestClock::default());
     let coordinator = RefreshCoordinator::new(clock.clone(), RefreshPolicy::default());
@@ -904,6 +904,74 @@ fn a_staggered_second_connection_runs_while_the_first_is_rate_limited() {
         statuses[1].health,
         ticketd_core::source::SourceHealth::Synced
     );
+}
+
+#[test]
+fn an_unrepresentable_rate_limit_keeps_a_healthy_batch_and_allows_retry() {
+    use ticketd_core::source::SourceHealth;
+
+    // Also cover a delay that fits a signed integer but reaches the year 10000.
+    for seconds in [u64::MAX, i64::MAX as u64, 253_402_300_800] {
+        let remote = fake_source::FakeSource::default();
+        remote.0.lock().unwrap().account_from_assignee = true;
+        let mut engine = Engine::new();
+        engine.register(Box::new(remote.clone())).unwrap();
+        let folder = tempfile::tempdir().unwrap();
+        let path = folder.path().join("workspace.sqlite3");
+        let open = || Workspace::open(&path);
+        let mut workspace = open().unwrap();
+        for (account, repository) in [("alice", "owner/alice"), ("bob", "owner/bob")] {
+            workspace
+                .add_source_connection(&engine, "fake", None, None, &values(account, repository))
+                .unwrap();
+        }
+        drop(workspace);
+        {
+            let mut remote = remote.0.lock().unwrap();
+            remote.rate_limited_account = Some(("alice".into(), seconds));
+            remote.issues.insert(
+                1,
+                fake_source::issue_in("owner/bob", 1, "Healthy connection issue"),
+            );
+            remote.matching.push(1);
+        }
+        let clock = std::sync::Arc::new(TestClock::default());
+        let coordinator = RefreshCoordinator::new(clock.clone(), RefreshPolicy::default());
+
+        let report = coordinator.refresh_now(&engine, &open, None).unwrap();
+
+        assert_eq!(report.imported.len(), 1);
+        assert_eq!(report.failures.len(), 1);
+        assert_eq!(report.failures[0].connection_id.as_deref(), Some("fake"));
+        assert_eq!(report.failures[0].code, "rate_limited");
+        assert_eq!(report.failures[0].retry_after_secs, Some(300));
+        let reopened = open().unwrap();
+        let statuses = reopened.source_statuses().unwrap();
+        assert_eq!(statuses[0].health, SourceHealth::Delayed);
+        assert_eq!(
+            statuses[0].retry_after.as_deref(),
+            Some("1970-01-01T00:05:00.000Z")
+        );
+        assert_eq!(reopened.source_hold_until().unwrap(), Some(300));
+        assert_eq!(statuses[1].health, SourceHealth::Synced);
+        assert_eq!(
+            reopened.show_ticket(&report.imported[0]).unwrap().title,
+            "Healthy connection issue"
+        );
+        drop(reopened);
+
+        remote.0.lock().unwrap().rate_limited_account = None;
+        // Default failure backoff is ten minutes, including the fallback hold.
+        clock.0.store(600, std::sync::atomic::Ordering::Relaxed);
+        assert!(matches!(
+            coordinator.tick(&engine, &open).unwrap(),
+            Run::Ran(_)
+        ));
+        assert_eq!(
+            open().unwrap().source_statuses().unwrap()[0].health,
+            SourceHealth::Synced
+        );
+    }
 }
 
 #[derive(Default)]

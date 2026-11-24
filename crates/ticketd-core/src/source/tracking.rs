@@ -821,7 +821,7 @@ struct Found {
 /// An issue found by the connector, or the reason a tracked one could not be read.
 struct Gathered {
     conversation_engine: Option<Engine>,
-    retry_limit: Option<(String, u64)>,
+    retry_limit: Option<freshness::RateLimitHold>,
     configurations: HashMap<String, Option<CheckedConfiguration>>,
     discovery: Vec<(String, HashSet<String>)>,
     issues: Vec<ExternalIssue>,
@@ -882,15 +882,13 @@ pub(crate) fn failure_of(error: &SourceError) -> SourceFailure {
 fn rate_limit_hold(
     error: &SourceError,
     received_at: &dyn Fn() -> Option<String>,
-) -> Option<(String, u64)> {
+) -> Option<freshness::RateLimitHold> {
     let SourceError::RateLimited { retry_after_secs } = error else {
         return None;
     };
-    let now = received_at()
-        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
-    Some((
-        now,
-        retry_after_secs.unwrap_or(freshness::DEFAULT_RATE_LIMIT_SECS),
+    Some(freshness::RateLimitHold::new(
+        received_at().as_deref(),
+        *retry_after_secs,
     ))
 }
 
@@ -1347,11 +1345,14 @@ fn gather_connection(
         gathered.conversation_engine = scoped;
     }
     gathered.configurations.insert(provider.clone(), checked);
-    if options.ticket.is_none() && config.is_some() {
+    if options.ticket.is_none()
+        && let Some(configured) = configured
+    {
         gathered.runs.push(ProviderRun {
             provider: provider.clone(),
-            connection_id: source_id.unwrap_or(&provider).to_owned(),
+            connection_id: configured.saved.id.clone(),
             failure: discovery_failed.or(blocked),
+            retry_after_at_start: configured.retry_after.clone(),
             skipped,
             read_partitions,
             skipped_partitions,
@@ -1805,7 +1806,7 @@ impl Workspace {
                     code: found.failure.code.clone(),
                     message: found.failure.message.clone(),
                     retry_after_secs: (found.failure.code == FailureCode::RateLimited.as_str())
-                        .then(|| gathered.retry_limit.as_ref().map(|(_, seconds)| *seconds))
+                        .then(|| gathered.retry_limit.as_ref().map(|hold| hold.seconds))
                         .flatten(),
                     scope: found.scope,
                 });
@@ -1818,10 +1819,10 @@ impl Workspace {
                 let read = read_before.get(run.provider.as_str()).unwrap_or(&none);
                 freshness::record_run(transaction, run, read, now)?;
             }
-            if let (Some(id), Some((received, seconds))) = (source_id, gathered.retry_limit)
+            if let (Some(id), Some(hold)) = (source_id, gathered.retry_limit.as_ref())
                 && replaced.is_empty()
             {
-                freshness::record_hold(transaction, id, &received, seconds)?;
+                freshness::record_hold(transaction, id, hold)?;
             }
             Ok(RefreshReport {
                 imported: applied.imported,

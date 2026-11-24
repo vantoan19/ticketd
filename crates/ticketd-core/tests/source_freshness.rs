@@ -476,6 +476,46 @@ fn a_rate_limit_persists_a_hold_that_survives_a_restart() {
 }
 
 #[test]
+fn full_refresh_success_keeps_a_hold_recorded_during_the_run() {
+    let mut f = Fixture::new();
+    f.publish(issue(1, T0));
+    f.refresh_at(T0);
+    let path = f.dir.path().join("workspace.sqlite3");
+    let engine = f.engine.clone();
+    let fake = f.fake.clone();
+    f.remote(|r| {
+        r.before_discovery = Some(Arc::new(move || {
+            fake.0.lock().unwrap().outage = Some(Failure::RateLimited(Some(600)));
+            let report = Workspace::open(&path)
+                .unwrap()
+                .refresh_sources(
+                    &engine,
+                    &RefreshOptions {
+                        ticket: Some("T-KQ1".into()),
+                        now: Some(T2.into()),
+                    },
+                )
+                .unwrap();
+            assert_eq!(report.failures[0].code, "rate_limited");
+            fake.0.lock().unwrap().outage = None;
+        }));
+    });
+
+    assert!(f.refresh_at(T1).failures.is_empty());
+    let status = f.workspace.source_statuses().unwrap().remove(0);
+    assert_eq!(status.last_refreshed_at.as_deref(), Some(T1));
+    assert!(status.error.is_none());
+    assert_eq!(
+        f.workspace.source_hold_until().unwrap(),
+        Some(DAY + 30 * 60)
+    );
+
+    // An explicit successful run that observed the hold can still clear it.
+    assert!(f.refresh_at(T2).failures.is_empty());
+    assert_eq!(f.workspace.source_hold_until().unwrap(), None);
+}
+
+#[test]
 fn one_unreadable_issue_neither_stops_the_others_nor_backs_off_the_source() {
     let mut f = Fixture::new();
     for id in 1..=3 {
