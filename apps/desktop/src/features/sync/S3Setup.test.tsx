@@ -91,14 +91,29 @@ test("a missing AWS CLI says to install it, and Check again looks once more", as
   expect(s3.profiles).toHaveBeenCalledTimes(2);
 });
 
-test("an old AWS CLI names the version it found", async () => {
+test("an old AWS CLI names the version it found and the one needed", async () => {
   s3.profiles.mockResolvedValue({
-    cli: { state: "too_old", found: "aws-cli/1.27.0" },
+    cli: { state: "too_old", found: "1.27.0" },
     profiles: [],
   });
   show();
   expect(await screen.findByText("The AWS CLI is too old")).toBeTruthy();
-  expect(screen.getByText(/aws-cli\/1\.27\.0/)).toBeTruthy();
+  expect(
+    screen.getByText(
+      /AWS CLI 1\.27\.0 is too old\. ticketd needs 2\.13 or later\./,
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/aws-cli\//)).toBeNull();
+});
+
+test("an AWS CLI whose version cannot be read says so", async () => {
+  s3.profiles.mockResolvedValue({
+    cli: { state: "too_old", found: null },
+    profiles: [],
+  });
+  show();
+  await screen.findByText("The AWS CLI is too old");
+  expect(screen.getByText(/could not read the AWS CLI's version/)).toBeTruthy();
 });
 
 test("the install guide opens through the app", async () => {
@@ -115,7 +130,7 @@ test("the install guide opens through the app", async () => {
 
 test("a program chosen for a missing or old AWS CLI is checked, then the profiles are read again", async () => {
   s3.profiles.mockResolvedValueOnce({
-    cli: { state: "too_old", found: "aws-cli/1.27.0" },
+    cli: { state: "too_old", found: "1.27.0" },
     profiles: [],
   });
   show();
@@ -450,6 +465,26 @@ test("a bucket typed in can go back to the list when the profile lists buckets",
   expect(
     screen.queryByRole("button", { name: "Choose from the list" }),
   ).toBeNull();
+});
+
+test("the way back to the list sits beside the typed field, so the row keeps its height", async () => {
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(["alpha"]);
+  show();
+  await choose(
+    await screen.findByRole("combobox", { name: "Bucket" }),
+    "Another bucket…",
+  );
+  const input = (await screen.findByLabelText("Bucket")) as HTMLElement;
+  const back = screen.getByRole("button", { name: "Choose from the list" });
+  // jsdom has no layout, so this pins the structure that keeps the height: one flex row
+  // (not a column under the field) holding both, so the row is as tall as the 40px field.
+  expect(back.parentElement).toBe(input.parentElement);
+  const row = input.parentElement as HTMLElement;
+  expect(row.className).toContain("flex");
+  expect(row.className).not.toContain("flex-col");
+  expect(row.className).toContain("items-center");
 });
 
 test("a profile that may not list buckets has no list to go back to", async () => {

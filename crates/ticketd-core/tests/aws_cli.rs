@@ -193,21 +193,45 @@ fn choosing_a_program_checks_that_one_and_never_a_usual_location() {
 }
 
 #[test]
-fn a_cli_older_than_2_13_or_version_1_is_too_old() {
-    for output in [
-        "aws-cli/2.12.8 Python/3.11.4 Linux/6.1 exe/x86_64.ubuntu.22 prompt/off\n",
-        "aws-cli/1.32.100 Python/3.12.1 Darwin/23.2.0 botocore/1.34.100\n",
-        "something else entirely\n",
+fn a_cli_older_than_2_13_or_version_1_is_too_old_and_the_message_names_its_version() {
+    for (output, version) in [
+        (
+            "aws-cli/2.12.8 Python/3.11.4 Linux/6.1 exe/x86_64.ubuntu.22 prompt/off\n",
+            "2.12.8",
+        ),
+        (
+            "aws-cli/1.32.100 Python/3.12.1 Darwin/23.2.0 botocore/1.34.100\n",
+            "1.32.100",
+        ),
+        ("aws-cli/2.9.0 Python/3.9.11 Darwin/22.1.0\n", "2.9.0"),
     ] {
         let aws = StandIn::new().once("--version", ok(output));
         let error = AwsCli::locate_in(Some(&aws.install()), &[]).unwrap_err();
-        match error {
+        match &error {
             AwsCliError::UnsupportedVersion { found } => {
-                assert!(output.starts_with(found.as_str()), "{found}");
+                assert_eq!(found.as_deref(), Some(version));
             }
             other => panic!("expected UnsupportedVersion, got {other:?}"),
         }
+        assert_eq!(
+            error.to_string(),
+            format!("AWS CLI {version} is too old. ticketd needs 2.13 or later.")
+        );
     }
+}
+
+#[test]
+fn a_version_that_cannot_be_read_is_said_so_without_repeating_what_the_program_printed() {
+    let aws = StandIn::new().once("--version", ok("something else entirely\n"));
+    let error = AwsCli::locate_in(Some(&aws.install()), &[]).unwrap_err();
+    assert!(
+        matches!(&error, AwsCliError::UnsupportedVersion { found: None }),
+        "{error:?}"
+    );
+    let said = error.to_string();
+    assert!(said.contains("could not read"), "{said}");
+    assert!(said.contains("2.13 or later"), "{said}");
+    assert!(!said.contains("something else"), "{said}");
 }
 
 #[test]
