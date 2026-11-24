@@ -373,7 +373,12 @@ function Choose({
       })
       .catch((reason: unknown) => {
         if (current)
-          setReadFailure(describeFailure(reason, `read ${placeOf(provider)}`));
+          // The bucket check words its refusals for people: say what to fix.
+          setReadFailure(
+            describeFailure(reason, `read ${placeOf(provider)}`, {
+              readable: provider === "s3",
+            }),
+          );
       });
     return () => {
       current = false;
@@ -492,6 +497,18 @@ function Choose({
             setAttempt((count) => count + 1);
           },
         })}
+        {...(s3 &&
+          readFailure?.action === "choose_another" && {
+            actions: (
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => setSwitching(true)}
+              >
+                Use another bucket…
+              </Button>
+            ),
+          })}
       >
         {readFailure ?? failure}
       </Failure>

@@ -235,6 +235,7 @@ impl SyncRecovery {
             RemoteError::RateLimited { .. } => Some(Self::RateLimited),
             RemoteError::PreconditionFailed { .. }
             | RemoteError::NotFound
+            | RemoteError::BucketMissing(_)
             | RemoteError::Other(_) => None,
         }
     }

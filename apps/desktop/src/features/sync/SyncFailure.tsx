@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { FieldError } from "@/components/ui/field";
 import type { FailureDescription } from "@/lib/api/describe-failure";
@@ -9,9 +10,12 @@ import type { FailureDescription } from "@/lib/api/describe-failure";
 export function SyncFailure({
   children,
   onRetry,
+  actions,
 }: {
   children: FailureDescription | string | null;
   onRetry?: () => void;
+  /** The fix when Retry cannot help, such as "Use another bucket…". */
+  actions?: ReactNode;
 }) {
   if (!children) return null;
   return typeof children === "string" ? (
@@ -22,6 +26,7 @@ export function SyncFailure({
       failure={children}
       className="mt-3"
       {...(onRetry && { onRetry })}
+      {...(actions && { actions })}
     />
   );
 }

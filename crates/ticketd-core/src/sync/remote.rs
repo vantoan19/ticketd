@@ -128,6 +128,10 @@ pub enum RemoteError {
     /// The requested file or version is not in the storage.
     #[error("the remote file or version was not found")]
     NotFound,
+    /// The bucket (or its equivalent) the person chose is not there or not visible to them.
+    /// The text names the bucket and what to check, written for people.
+    #[error("{0}")]
+    BucketMissing(String),
     #[error("storage: {0}")]
     Other(String),
 }

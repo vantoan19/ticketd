@@ -209,6 +209,31 @@ test("a profile that may not list buckets gets a field to type the name", async 
   );
 });
 
+test("a refused bucket name says what to fix in the headline, not that the result is unknown", async () => {
+  s3.profiles.mockResolvedValue(ready("work"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(null);
+  sync.connectS3.mockRejectedValue(
+    hostFailure(
+      "that is not a valid S3 bucket name; use 3 to 63 lowercase letters, digits, hyphens and dots, starting and ending with a letter or digit",
+    ),
+  );
+  show();
+  const bucket = (await screen.findByLabelText("Bucket")) as HTMLInputElement;
+  await waitFor(() => expect(bucket.disabled).toBe(false));
+  fireEvent.change(bucket, { target: { value: "qa-2026-11-24/" } });
+  fireEvent.click(screen.getByRole("button", { name: "Connect S3" }));
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Couldn't connect S3.");
+  expect(alert.textContent).toContain(
+    "That is not a valid S3 bucket name; use 3 to 63 lowercase letters",
+  );
+  expect(alert.textContent).not.toContain("couldn't be confirmed");
+  expect(alert.textContent).not.toContain("saved state");
+  // Nothing was saved, so there is nothing to retry as it stands.
+  expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
+});
+
 test("a failed bucket listing is shown, and only a refusal to list says the profile may not", async () => {
   s3.profiles.mockResolvedValue(ready("work"));
   s3.identity.mockResolvedValue(signedIn);

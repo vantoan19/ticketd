@@ -38,6 +38,52 @@ describe("describeFailure", () => {
   });
 });
 
+describe("a message written for people", () => {
+  const refusal = {
+    code: "failed",
+    message:
+      "sync storage: storage: the bucket b does not exist; check the name",
+  };
+
+  it("stays out of the headline unless the caller knows the text is its own", () => {
+    expect(describeFailure(refusal, "read the bucket").sentence).toBe(
+      "The result couldn't be confirmed. Check the saved state before trying again.",
+    );
+  });
+
+  it("is the sentence when the caller says so, with the raw text kept for Details", () => {
+    const failure = describeFailure(refusal, "read the bucket", {
+      readable: true,
+    });
+    expect(failure.sentence).toBe(
+      "The bucket b does not exist; check the name.",
+    );
+    expect(failure.details).toBe(refusal.message);
+  });
+
+  it("is also the sentence of a not found failure the caller words itself, and offers another", () => {
+    const failure = describeFailure(
+      { code: "not_found", message: "sync storage: the bucket b is missing" },
+      "read the bucket",
+      { readable: true },
+    );
+    expect(failure.sentence).toBe("The bucket b is missing.");
+    expect(failure.action).toBe("choose_another");
+    expect(
+      describeFailure({ code: "not_found", message: "x" }, "read the bucket")
+        .sentence,
+    ).toBe("It was deleted or moved.");
+  });
+
+  it("never replaces what a classified failure already says", () => {
+    expect(
+      describeFailure({ code: "offline", message: "dns" }, "read the bucket", {
+        readable: true,
+      }).sentence,
+    ).toBe("ticketd can't reach the service. Check the connection.");
+  });
+});
+
 describe("sentence", () => {
   it("drops internal prefixes and CLI commands and ends with a period", () => {
     expect(
