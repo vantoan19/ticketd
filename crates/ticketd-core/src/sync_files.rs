@@ -75,9 +75,10 @@ pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 /// YAML reader bounds `[`-style nesting itself. ticketd writes two columns.
 const MAX_HEADER_INDENT: usize = 64;
 
-/// The format of sync files this version writes. A file that says a higher
-/// number is left alone until this desktop runs a ticketd that reads it.
-pub(crate) const FILE_FORMAT: i64 = 1;
+const FILE_FORMAT_WITH_SCOPED_GITHUB_ID: i64 = 2;
+/// The highest format this version reads. A file that says a higher number
+/// is left alone until this desktop runs a ticketd that reads it.
+const LATEST_FILE_FORMAT: i64 = FILE_FORMAT_WITH_SCOPED_GITHUB_ID;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -636,7 +637,16 @@ fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels
     };
     out.push_str("---\n");
     if let Block::Record(kind) = block {
-        out.push_str(&format!("kind: {}\nformat: {FILE_FORMAT}\n", kind.name()));
+        // Format 1 readers need numeric GitHub IDs to match discovered issues.
+        let format = if kind == SyncKind::Ticket
+            && text(fields, "source_provider") == Some("github")
+            && text(fields, "source_external_id").is_some_and(|id| id.starts_with('@'))
+        {
+            FILE_FORMAT_WITH_SCOPED_GITHUB_ID
+        } else {
+            1
+        };
+        out.push_str(&format!("kind: {}\nformat: {format}\n", kind.name()));
     }
     out.push_str(&format!("id: {}\n", quote(id)));
     for (name, kind, _) in schema {
@@ -873,7 +883,8 @@ pub(crate) fn from_newer_version(file: &str) -> bool {
         .collect();
     read_block(&record).is_ok_and(|(entries, _)| {
         entries.iter().any(|(name, value)| {
-            name == "format" && matches!(value, Raw::Integer(format) if *format > FILE_FORMAT)
+            name == "format"
+                && matches!(value, Raw::Integer(format) if *format > LATEST_FILE_FORMAT)
         })
     })
 }
@@ -1030,8 +1041,9 @@ impl SyncRecord {
                     match take("format") {
                         // Files from before the marker are format 1.
                         None | Some(Raw::Null) => {}
-                        Some(Raw::Integer(format)) if (1..=FILE_FORMAT).contains(&format) => {}
-                        Some(Raw::Integer(format)) if format > FILE_FORMAT => {
+                        Some(Raw::Integer(format))
+                            if (1..=LATEST_FILE_FORMAT).contains(&format) => {}
+                        Some(Raw::Integer(format)) if format > LATEST_FILE_FORMAT => {
                             return Err(bad(format!(
                                 "the file is in format {format}, which a newer ticketd wrote; update ticketd on this desktop to read it"
                             )));
@@ -1923,10 +1935,8 @@ mod tests {
         );
     }
 
-    /// What a file of format 1 holds after `kind`, `format` and `id`. Automations
-    /// and their agents joined without a new number: a ticketd from before them
-    /// does not look in their folders, so it never meets a kind it does not know.
-    const FORMAT_1: &str = "\
+    /// Formats 1 and 2 share the same fields after `kind`, `format` and `id`.
+    const FORMAT_2: &str = "\
 project: name
 document: title created_at tags origin_activity trashed kept pinned
 plan: name archived spec documents
@@ -1940,7 +1950,7 @@ automation: name trashed
     /// Pins field names and section markers only, not the forms their values
     /// take. A new value form in an existing field (such as the `<GUID> <n>` item
     /// of `parent_removed`) is rejected by a ticketd that does not
-    /// know it just the same, so it also requires raising FILE_FORMAT, with
+    /// know it just the same, so it also requires raising the format, with
     /// nothing here failing to say so.
     #[test]
     fn the_fields_and_section_markers_of_the_current_format_are_pinned() {
@@ -1964,9 +1974,9 @@ automation: name trashed
             written.push_str(&format!("{label}: {}\n", names.join(" ")));
         }
         assert_eq!(
-            (FILE_FORMAT, written.as_str()),
-            (1, FORMAT_1),
-            "The header fields or section markers of sync files changed. A ticketd that does not know a field rejects the whole file, and only a higher `format` tells it the file is from a newer ticketd: raise FILE_FORMAT in the same change, then pin the new list here under the new number."
+            (LATEST_FILE_FORMAT, written.as_str()),
+            (2, FORMAT_2),
+            "The header fields or section markers of sync files changed. A ticketd that does not know a field rejects the whole file, and only a higher `format` tells it the file is from a newer ticketd: raise the written format for affected files and LATEST_FILE_FORMAT in the same change, then pin the new list here under the new number."
         );
     }
 }
