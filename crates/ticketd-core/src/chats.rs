@@ -16,7 +16,7 @@ use uuid::Uuid;
 use crate::{Error, Workspace};
 
 mod receipt;
-pub use receipt::ChatRuntimeLossReceipt;
+pub use receipt::ChatTurnReceipt;
 #[cfg(test)]
 mod tests;
 
@@ -1269,6 +1269,7 @@ fn observe(
     connection: &Connection,
     chat_id: &str,
     observation: ChatObservation,
+    receipt: Option<&mut ChatTurnReceipt>,
 ) -> Result<(), Error> {
     match observation {
         ChatObservation::SubmissionNotDelivered { attempt_id, detail } => observe_delivery(
@@ -1339,11 +1340,20 @@ fn observe(
                 )));
             }
             let position = log(connection, chat_id, "turn", &turn_id)?;
-            connection.execute(
-                "INSERT INTO chat_turns (id, chat_id, position, native_turn_id, state) VALUES (?1, ?2, ?3, ?4, 'active')",
-                params![turn_id, chat_id, position, native_turn_id],
+            let started_at = receipt::record_turn_boundary(
+                connection,
+                chat_id,
+                receipt::Boundary::Start(&turn_id),
+                receipt,
             )?;
-            receipt::record_boundary(connection, chat_id, receipt::Boundary::Start(&turn_id))
+            connection.execute(
+                &format!(
+                    "INSERT INTO chat_turns (id, chat_id, position, native_turn_id, state, started_at)
+                     VALUES (?1, ?2, ?3, ?4, 'active', COALESCE(?5, {NOW}))"
+                ),
+                params![turn_id, chat_id, position, native_turn_id, started_at],
+            )?;
+            Ok(())
         }
         ChatObservation::TurnEnded {
             turn_id,
@@ -1374,16 +1384,31 @@ fn observe(
                 )));
             }
             log(connection, chat_id, "turn", &turn_id)?;
-            if !has_ended {
-                receipt::record_boundary(connection, chat_id, receipt::Boundary::End(&turn_id))?;
-            }
+            let ended_at = if has_ended {
+                None
+            } else {
+                receipt::record_turn_boundary(
+                    connection,
+                    chat_id,
+                    receipt::Boundary::End(&turn_id),
+                    receipt,
+                )?
+            };
             connection.execute(
                 &format!(
                     "UPDATE chat_turns SET state = ?2, detail = ?3, problem = ?4,
                      problem_resets_at = ?5, ending = ?6,
-                     ended_at = COALESCE(ended_at, {NOW}) WHERE id = ?1"
+                     ended_at = COALESCE(ended_at, ?7, {NOW}) WHERE id = ?1"
                 ),
-                params![turn_id, name(state)?, detail, problem, resets_at, ending],
+                params![
+                    turn_id,
+                    name(state)?,
+                    detail,
+                    problem,
+                    resets_at,
+                    ending,
+                    ended_at
+                ],
             )?;
             expire_interactions(connection, chat_id, Some(&turn_id))
         }
@@ -1403,6 +1428,7 @@ fn observe(
                     state: ChatToolState::Completed,
                     output: None,
                 },
+                None,
             )
         }
         ChatObservation::AssistantText {
@@ -1578,7 +1604,7 @@ fn lose_contact(
     chat_id: &str,
     detail: &str,
     ending: &str,
-    receipt: Option<&mut ChatRuntimeLossReceipt>,
+    receipt: Option<&mut ChatTurnReceipt>,
 ) -> Result<(), Error> {
     let ids = |sql: &str| -> Result<Vec<String>, Error> {
         let mut statement = connection.prepare(sql)?;
@@ -1589,16 +1615,12 @@ fn lose_contact(
     };
     let mut receipt = receipt;
     for id in ids("SELECT id FROM chat_turns WHERE chat_id = ?1 AND state = 'active'")? {
-        let ended_at = match receipt
-            .as_deref_mut()
-            .filter(|receipt| receipt.turn_id == id)
-        {
-            Some(receipt) => Some(receipt.record_end(connection, chat_id)?),
-            None => {
-                receipt::record_boundary(connection, chat_id, receipt::Boundary::End(&id))?;
-                None
-            }
-        };
+        let ended_at = receipt::record_turn_boundary(
+            connection,
+            chat_id,
+            receipt::Boundary::End(&id),
+            receipt.as_deref_mut(),
+        )?;
         log(connection, chat_id, "turn", &id)?;
         connection.execute(
             &format!("UPDATE chat_turns SET state = 'unknown', detail = ?2, ending = ?3, ended_at = COALESCE(?4, {NOW}) WHERE id = ?1"),
@@ -1611,6 +1633,7 @@ fn lose_contact(
                 connection,
                 chat_id,
                 ChatObservation::CaptureAgentChanges { turn_id: id },
+                None,
             )?;
         }
     }
@@ -2310,10 +2333,33 @@ impl Workspace {
         chat_id: &str,
         observations: Vec<ChatObservation>,
     ) -> Result<i64, Error> {
+        self.record_chat_observation_batch(chat_id, observations, None)
+    }
+
+    /// Record a batch for an observed Turn end, retaining the first readable
+    /// boundary even if the transaction fails and the batch needs to be retried.
+    pub fn record_chat_turn_observations(
+        &mut self,
+        chat_id: &str,
+        observations: Vec<ChatObservation>,
+        receipt: &mut ChatTurnReceipt,
+    ) -> Result<i64, Error> {
+        self.record_chat_observation_batch(chat_id, observations, Some(receipt))
+    }
+
+    fn record_chat_observation_batch(
+        &mut self,
+        chat_id: &str,
+        observations: Vec<ChatObservation>,
+        mut receipt: Option<&mut ChatTurnReceipt>,
+    ) -> Result<i64, Error> {
         self.chat_write(|connection| {
             read_chat(connection, chat_id)?;
+            if let Some(receipt) = receipt.as_deref_mut() {
+                receipt.capture_end(connection)?;
+            }
             for observation in observations {
-                observe(connection, chat_id, observation)?;
+                observe(connection, chat_id, observation, receipt.as_deref_mut())?;
             }
             trim(connection, chat_id)?;
             head(connection)
@@ -2341,7 +2387,7 @@ impl Workspace {
     pub fn mark_chat_runtime_lost(
         &mut self,
         chat_id: &str,
-        receipt: Option<&mut ChatRuntimeLossReceipt>,
+        receipt: Option<&mut ChatTurnReceipt>,
         detail: &str,
         ending: &str,
     ) -> Result<(), Error> {
@@ -2354,7 +2400,7 @@ impl Workspace {
         chat_id: Option<&str>,
         detail: &str,
         ending: &str,
-        mut receipt: Option<&mut ChatRuntimeLossReceipt>,
+        mut receipt: Option<&mut ChatTurnReceipt>,
     ) -> Result<Vec<String>, Error> {
         self.chat_write(|connection| {
             if let Some(id) = chat_id {
