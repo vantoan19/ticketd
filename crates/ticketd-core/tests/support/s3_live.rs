@@ -170,21 +170,46 @@ impl Live {
         S3Client::new(self.target(), &self.credentials, &self.admin)
     }
 
-    /// Creates the bucket if it is not there and turns Versioning on, which is what the
-    /// adapter requires of every bucket (ADR 0018).
+    /// Creates the bucket if it is not there and turns Versioning on if it is off, which is what
+    /// the adapter requires of every bucket (ADR 0018). An existing bucket is left as it is, so
+    /// the tests also run against a bucket on AWS that the profile may not create or configure.
     fn prepare_bucket(&self) {
         let client = self.client();
-        let created = client
-            .send(&S3Call {
-                method: "PUT",
-                key: "",
-                query: &[],
-                headers: &[],
-                body: &[],
-            })
-            .unwrap();
-        let owned = created.status < 300 || created.status == 409;
-        assert!(owned, "the bucket cannot be created: {created:?}");
+        let head = S3Call {
+            method: "HEAD",
+            key: "",
+            query: &[],
+            headers: &[],
+            body: &[],
+        };
+        let exists = matches!(client.send(&head), Ok(response) if response.status < 300);
+        if !exists {
+            // Outside us-east-1, AWS needs the bucket's region in the request.
+            let region = self.target.region();
+            let configuration = format!(
+                r#"<CreateBucketConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><LocationConstraint>{region}</LocationConstraint></CreateBucketConfiguration>"#
+            );
+            let body: &[u8] = if region == "us-east-1" {
+                &[]
+            } else {
+                configuration.as_bytes()
+            };
+            let created = client
+                .send(&S3Call {
+                    method: "PUT",
+                    key: "",
+                    query: &[],
+                    headers: &[],
+                    body,
+                })
+                .unwrap();
+            let owned = created.status < 300 || created.status == 409;
+            assert!(owned, "the bucket cannot be created: {created:?}");
+        }
+        let current = self.expect(&S3Call::get("", &[("versioning", "")]));
+        if String::from_utf8_lossy(&current.body).contains("<Status>Enabled</Status>") {
+            return;
+        }
         let versioning = br#"<VersioningConfiguration xmlns="http://s3.amazonaws.com/doc/2006-03-01/"><Status>Enabled</Status></VersioningConfiguration>"#;
         let enabled = client
             .send(&S3Call {
