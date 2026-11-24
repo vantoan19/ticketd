@@ -400,7 +400,8 @@ Every skipped check includes its reason. In strict mode, a check that could
 apply but needs data the suite didn't observe fails unless you provide that
 data or `--skip-check CHECK=REASON`. The option cannot turn a failed check into
 a pass. Capability inapplicability and read-only publication skips have
-automatic reasons.
+automatic reasons. A conversation whose membership changes between reads is
+inconclusive. Use a stable fixture to check entry IDs.
 
 Use `--past-end-cursor CURSOR` for a valid opaque cursor your fixture recognizes
 after its last page. Use `--closure-probes FILE` with a JSON object whose `open`,

@@ -9,9 +9,9 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Capability, ConfigValues, Connector, DiscoveryRequest, Engine, ErrorClass, ExternalIssue,
-    ExternalRef, FieldKind, OptionSource, PublicationSearch, PublishRequest, SourceError,
-    StateCategory, engine::verify_identity, publication::check_destination,
+    Capability, ConfigValues, Connector, Conversation, DiscoveryRequest, Engine, ErrorClass,
+    ExternalIssue, ExternalRef, FieldKind, OptionSource, PublicationSearch, PublishRequest,
+    SourceError, StateCategory, engine::verify_identity, publication::check_destination,
 };
 
 #[cfg(test)]
@@ -353,8 +353,13 @@ pub(super) fn run(
     } else {
         match first {
             Ok(issues) => match verify_conversation(connector, &config, &issues) {
-                Ok(true) => report.pass("conversation"),
-                Ok(false) => report.unobserved(
+                Ok(ConversationCheck::Stable) => report.pass("conversation"),
+                Ok(ConversationCheck::Changed) => report.skip(
+                    "conversation",
+                    "conversation membership changed between reads",
+                    false,
+                ),
+                Ok(ConversationCheck::Empty) => report.unobserved(
                     "conversation",
                     "no populated conversation was observed",
                     options,
@@ -531,11 +536,18 @@ fn verify_sample(
     Ok(observed_again)
 }
 
+enum ConversationCheck {
+    Stable,
+    Changed,
+    Empty,
+}
+
 fn verify_conversation(
     connector: &dyn Connector,
     config: &ConfigValues,
     issues: &[ExternalIssue],
-) -> Result<bool, SourceError> {
+) -> Result<ConversationCheck, SourceError> {
+    let mut observed = ConversationCheck::Empty;
     for issue in issues {
         let reference = &issue.reference;
         let initial = connector.conversation(config, reference)?;
@@ -543,36 +555,68 @@ fn verify_conversation(
             continue;
         }
         let repeated = connector.conversation(config, reference)?;
-        require(
-            conversation_ids(initial.comments.into_iter().map(|entry| entry.id))?
-                == conversation_ids(repeated.comments.into_iter().map(|entry| entry.id))?,
-            "the same conversation returned different comment IDs",
-        )?;
-        require(
-            conversation_ids(initial.events.into_iter().map(|entry| entry.id))?
-                == conversation_ids(repeated.events.into_iter().map(|entry| entry.id))?,
-            "the same conversation returned different event IDs",
-        )?;
-        return Ok(true);
+        if compare_conversation(&initial, &repeated)? {
+            return Ok(ConversationCheck::Stable);
+        }
+        observed = ConversationCheck::Changed;
     }
-    Ok(false)
+    Ok(observed)
 }
 
-fn conversation_ids(
-    entries: impl IntoIterator<Item = String>,
-) -> Result<HashSet<String>, SourceError> {
-    let mut ids = HashSet::new();
-    for id in entries {
+fn compare_conversation(
+    initial: &Conversation,
+    repeated: &Conversation,
+) -> Result<bool, SourceError> {
+    // Creation time and event kind belong to the original record. Body edits,
+    // current display names, and changed issue URLs can be legitimate.
+    let same_comments = compare_record_ids(
+        &initial.comments,
+        &repeated.comments,
+        |comment| (comment.id.as_str(), comment.created_at.as_str()),
+        "a conversation comment ID referred to a different record",
+    )?;
+    let same_events = compare_record_ids(
+        &initial.events,
+        &repeated.events,
+        |event| (event.id.as_str(), (event.created_at.as_str(), event.kind)),
+        "a conversation event ID referred to a different record",
+    )?;
+    Ok(same_comments && same_events)
+}
+
+fn compare_record_ids<'a, Record, Fact: Eq>(
+    initial: &'a [Record],
+    repeated: &'a [Record],
+    association: impl Fn(&'a Record) -> (&'a str, Fact),
+    changed: &'static str,
+) -> Result<bool, SourceError> {
+    let initial = conversation_records(initial.iter().map(&association))?;
+    let repeated = conversation_records(repeated.iter().map(association))?;
+    let mut same_membership = initial.len() == repeated.len();
+    for (id, record) in initial {
+        match repeated.get(id) {
+            Some(observed) => require(&record == observed, changed)?,
+            None => same_membership = false,
+        }
+    }
+    Ok(same_membership)
+}
+
+fn conversation_records<'a, Fact>(
+    entries: impl IntoIterator<Item = (&'a str, Fact)>,
+) -> Result<HashMap<&'a str, Fact>, SourceError> {
+    let mut records = HashMap::new();
+    for (id, fact) in entries {
         require(
             !id.trim().is_empty(),
             "a conversation record has no stable ID",
         )?;
         require(
-            ids.insert(id),
+            records.insert(id, fact).is_none(),
             "a conversation returned an ID more than once in the same record type",
         )?;
     }
-    Ok(ids)
+    Ok(records)
 }
 
 fn check_publication(
@@ -629,5 +673,76 @@ fn require(condition: bool, message: &'static str) -> Result<(), SourceError> {
         Ok(())
     } else {
         Err(SourceError::Protocol(message.into()))
+    }
+}
+
+#[cfg(test)]
+mod conversation_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::*;
+    use crate::source::{ExternalComment, ExternalEvent, ExternalEventKind};
+
+    fn comment(id: &str, time: &str) -> ExternalComment {
+        ExternalComment {
+            id: id.into(),
+            created_at: time.into(),
+            updated_at: time.into(),
+            author: "Author".into(),
+            body: "Original".into(),
+            url: "https://example.invalid/issue".into(),
+        }
+    }
+
+    fn event(id: &str, kind: ExternalEventKind) -> ExternalEvent {
+        ExternalEvent {
+            id: id.into(),
+            kind,
+            created_at: "2026-02-01T00:00:00Z".into(),
+            actor: None,
+            subject: None,
+        }
+    }
+
+    #[test]
+    fn live_membership_changes_are_inconclusive_and_edits_keep_the_same_record() {
+        let old = Conversation {
+            comments: vec![comment("1", "2026-02-01T00:00:00Z")],
+            ..Default::default()
+        };
+        let mut new = old.clone();
+        new.comments[0].body = "Edited".into();
+        assert!(compare_conversation(&old, &new).unwrap());
+
+        new.comments.push(comment("2", "2026-02-01T00:00:01Z"));
+        assert!(!compare_conversation(&old, &new).unwrap());
+
+        new.comments[1].id = "1".into();
+        assert!(compare_conversation(&old, &new).is_err());
+    }
+
+    #[test]
+    fn comments_and_events_cannot_swap_their_ids() {
+        let old = Conversation {
+            comments: vec![
+                comment("1", "2026-02-01T00:00:00Z"),
+                comment("2", "2026-02-01T00:00:01Z"),
+            ],
+            events: vec![
+                event("1", ExternalEventKind::Assigned),
+                event("2", ExternalEventKind::Unassigned),
+            ],
+        };
+        let mut new = old.clone();
+        new.events[0].id = "2".into();
+        new.events[1].id = "1".into();
+        let failure = compare_conversation(&old, &new).unwrap_err();
+        assert!(failure.to_string().contains("event ID"), "{failure}");
+
+        let mut new = old.clone();
+        new.comments[0].id = "2".into();
+        new.comments[1].id = "1".into();
+        let failure = compare_conversation(&old, &new).unwrap_err();
+        assert!(failure.to_string().contains("comment ID"), "{failure}");
     }
 }
