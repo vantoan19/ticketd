@@ -654,48 +654,88 @@ test("a missing folder keeps the Chat readable and offers another folder", async
   expect(button("Folder emails").textContent).toBe("emails");
 });
 
-test("lost native history resumes the same Chat in a fresh session with chosen history", async () => {
+test("a native-only Chat starts fresh without importing past messages", async () => {
   const client = await open(
     one(
       {
         id: "c1",
         title: "Limiter",
+        harness: { id: "antigravity", name: "Antigravity" },
         activity: "failed",
-        problem: { kind: "history_lost" },
+        problem: { kind: "history_lost", history_recovery: "start_fresh" },
       },
-      [
-        {
-          id: "u1",
-          at,
-          kind: "user",
-          text: "Add a limiter",
-          delivery: "delivered",
-        },
-        reply("r1", "Added the limiter."),
-      ],
+      [reply("r1", "Added the limiter.")],
     ),
   );
-  expect(screen.queryByLabelText("Message Codex")).toBeNull();
-  fireEvent.click(button("Resume in a fresh session…"));
-  const dialog = await screen.findByRole("dialog", {
-    name: "Resume in a fresh session",
-  });
-  const choices = within(dialog).getByRole("radiogroup", {
-    name: "History to give the new session",
-  });
+  const notice = screen.getByRole("alert");
+  expect(notice.textContent).toContain("without importing earlier messages");
+  expect(screen.queryByLabelText("Message Antigravity")).toBeNull();
+  noButton("Resume in a fresh session…");
+  const resume = vi.spyOn(client, "resume");
+  fireEvent.click(within(notice).getByRole("button", { name: "Start fresh" }));
+  expect(await screen.findByLabelText("Message Antigravity")).toBeTruthy();
+  expect(resume).toHaveBeenCalledWith("c1", { kind: "none" });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(conversation().getByText("Added the limiter.")).toBeTruthy();
   expect(
-    within(choices).getByRole("radio", { name: /The last response/ }),
-  ).toHaveProperty("checked", true);
-  expect(within(choices).getByText("2 messages")).toBeTruthy();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
-  expect(
-    await screen.findByText("Fresh session · started with the last response"),
+    screen.getByText("Fresh session · no earlier messages imported"),
   ).toBeTruthy();
-  expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
-  // Nothing was sent on the person's behalf.
-  const { items } = await client.openChat("c1");
-  expect(items.filter((item) => item.kind === "user")).toHaveLength(1);
+  expect(
+    (await client.openChat("c1")).items.some((item) => item.kind === "user"),
+  ).toBe(false);
 });
+
+test.each([
+  { id: "codex", name: "Codex" },
+  { id: "claude-code", name: "Claude Code" },
+])(
+  "$name resumes the same Chat in a fresh session with chosen history",
+  async (harness) => {
+    const client = await open(
+      one(
+        {
+          id: "c1",
+          title: "Limiter",
+          harness,
+          activity: "failed",
+          problem: { kind: "history_lost", history_recovery: "select_history" },
+        },
+        [
+          {
+            id: "u1",
+            at,
+            kind: "user",
+            text: "Add a limiter",
+            delivery: "delivered",
+          },
+          reply("r1", "Added the limiter."),
+        ],
+      ),
+    );
+    expect(screen.queryByLabelText(`Message ${harness.name}`)).toBeNull();
+    fireEvent.click(button("Resume in a fresh session…"));
+    const dialog = await screen.findByRole("dialog", {
+      name: "Resume in a fresh session",
+    });
+    const choices = within(dialog).getByRole("radiogroup", {
+      name: "History to give the new session",
+    });
+    expect(
+      within(choices).getByRole("radio", { name: /The last response/ }),
+    ).toHaveProperty("checked", true);
+    expect(within(choices).getByText("2 messages")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
+    expect(
+      await screen.findByText("Fresh session · started with the last response"),
+    ).toBeTruthy();
+    expect(
+      await screen.findByLabelText(`Message ${harness.name}`),
+    ).toBeTruthy();
+    // Nothing was sent on the person's behalf.
+    const { items } = await client.openChat("c1");
+    expect(items.filter((item) => item.kind === "user")).toHaveLength(1);
+  },
+);
 
 test("picking messages turns the transcript into the history picker", async () => {
   await open(
@@ -704,7 +744,7 @@ test("picking messages turns the transcript into the history picker", async () =
         id: "c1",
         title: "Limiter",
         activity: "failed",
-        problem: { kind: "history_lost" },
+        problem: { kind: "history_lost", history_recovery: "select_history" },
       },
       [
         {

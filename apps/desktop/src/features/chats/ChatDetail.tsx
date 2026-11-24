@@ -143,6 +143,7 @@ const ACTION_LABEL: Record<Exclude<NoticeAction, "help">, string> = {
   resend: "Send again",
   discard: "Don't send",
   "pick-folder": "Choose a folder…",
+  "start-fresh": "Start fresh",
   resume: "Resume in a fresh session…",
 };
 
@@ -606,6 +607,8 @@ function Conversation({
   const trashed = chat.retention === "trashed";
   const onNotice = (action: Exclude<NoticeAction, "help" | "copy-command">) => {
     if (action === "check") quietly(client.checkAgain(id), "check again");
+    else if (action === "start-fresh")
+      quietly(client.resume(id, { kind: "none" }), "start a fresh session");
     else if (action === "resume") setResuming(true);
     else if (action === "pick-folder")
       quietly(

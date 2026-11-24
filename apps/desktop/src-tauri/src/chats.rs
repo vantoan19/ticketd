@@ -17,6 +17,7 @@ use ticketd_chat_host::{
     QuestionAnswer, REGISTRATIONS, ResumeMode, SendMode, SettingKey, StartSettings, StopReason,
     Subscription, TurnEnding, UnconfirmedCleanup, WorkspaceOpener,
 };
+use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
     ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
@@ -160,6 +161,7 @@ pub enum UncertainDecision {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HistorySelection {
+    None,
     LastResponse,
     LastMessages { count: usize },
     All,
@@ -2205,15 +2207,25 @@ impl Chats {
         Ok(host.links_changed(chat_id).await?)
     }
 
-    /// Continues the same Chat in a fresh harness session started with the history the
-    /// person selected. Nothing is replayed, and uncertain submissions stay as they are.
+    /// Continues the same Chat in a fresh harness session, optionally with selected
+    /// history. Nothing is re-sent, and uncertain submissions stay as they are.
     pub async fn resume(&self, chat_id: &str, selection: HistorySelection) -> Outcome<()> {
         let host = self.host()?;
         let workspace = self.workspace()?;
-        if workspace.chat(chat_id)?.trashed {
+        let chat = workspace.chat(chat_id)?;
+        if chat.trashed {
             return Err(failed(
                 "Restore this Chat from the trash before resuming it.",
             ));
+        }
+        let import_history = selection != HistorySelection::None;
+        if import_history
+            && self.catalog().iter().any(|descriptor| {
+                descriptor.key.as_str() == chat.harness
+                    && descriptor.resume == ResumePolicy::NativeOnly
+            })
+        {
+            return Err(failed("This harness can only resume its own history"));
         }
         // Input that may never have arrived is history only when the person picks it.
         let unreceived = |message: &ChatMessage| {
@@ -2224,11 +2236,16 @@ impl Chats {
                     .is_some_and(|attempt| !attempt.received())
         };
         let picking = matches!(selection, HistorySelection::Picked { .. });
-        let sent: Vec<_> = messages(&workspace, chat_id)?
-            .into_iter()
-            .filter(|message| !message.queued && (picking || !unreceived(message)))
-            .collect();
+        let sent: Vec<_> = if import_history {
+            messages(&workspace, chat_id)?
+                .into_iter()
+                .filter(|message| !message.queued && (picking || !unreceived(message)))
+                .collect()
+        } else {
+            Vec::new()
+        };
         let (history, chosen): (&'static str, Vec<&ChatMessage>) = match &selection {
+            HistorySelection::None => ("none", Vec::new()),
             HistorySelection::LastResponse => (
                 "last_response",
                 sent.iter()

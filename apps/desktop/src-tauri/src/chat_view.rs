@@ -13,6 +13,7 @@ use ticketd_chat_host::{
     StepAction, StepOutcomeOverride, StopState, ToolEvidence, ToolStep, TurnEnding, WebAction,
     read_tool_steps,
 };
+use ticketd_core::harnesses::{ResumePolicy, descriptor};
 use ticketd_core::{
     Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
     ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
@@ -46,6 +47,8 @@ pub struct Problem {
     /// Observed now, it keeps the Chat from taking a new message.
     pub blocks_send: bool,
     pub message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub history_recovery: Option<HistoryRecovery>,
     pub command: Option<String>,
     pub help_url: Option<String>,
     pub path: Option<String>,
@@ -56,6 +59,21 @@ pub struct Problem {
     /// The problem is why the last turn stopped, not a condition observed now: it is
     /// told, and it does not stop the next message.
     pub past: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum HistoryRecovery {
+    StartFresh,
+    SelectHistory,
+}
+
+fn history_recovery(harness: &str) -> Option<HistoryRecovery> {
+    let policy = descriptor(harness)?.resume;
+    Some(match policy {
+        ResumePolicy::NativeOnly => HistoryRecovery::StartFresh,
+        ResumePolicy::NativeOrReplay => HistoryRecovery::SelectHistory,
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -1215,20 +1233,25 @@ pub fn item(
             if session.origin != ChatSessionOrigin::FreshSession {
                 return None;
             }
-            match fresh.filter(|fresh| session.position > fresh.after) {
-                Some(fresh) => Item::Session {
+            let history = fresh
+                .filter(|fresh| session.position > fresh.after)
+                .map(|fresh| (fresh.history, fresh.count))
+                .or_else(|| {
+                    (history_recovery(&chat.harness) == Some(HistoryRecovery::StartFresh))
+                        .then_some(("none", 0))
+                });
+            match history {
+                Some((history, count)) => Item::Session {
                     id: session.id.clone(),
                     at: session.started_at.clone(),
-                    history: fresh.history,
-                    count: fresh.count,
+                    history,
+                    count,
                 },
                 None => Item::Marker {
                     id: session.id.clone(),
                     at: session.started_at.clone(),
                     reason: "note",
-                    message: Some(format!(
-                        "Continued in a fresh {harness} session with history you selected."
-                    )),
+                    message: Some(format!("Continued in a fresh {harness} session.")),
                     turn_id: None,
                 },
             }
@@ -1468,6 +1491,11 @@ fn harness_problem(harness: &str, kind: ProblemKind, message: Option<String>) ->
     Problem {
         kind: kind.into(),
         message,
+        history_recovery: if kind == ProblemKind::NativeHistoryUnavailable {
+            history_recovery(harness)
+        } else {
+            None
+        },
         command: command.map(str::to_owned),
         help_url: help.map(str::to_owned),
         ..Problem::default()
