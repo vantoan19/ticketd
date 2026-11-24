@@ -775,6 +775,14 @@ enum SourceCommand {
         #[arg(long)]
         agent: Option<String>,
     },
+    /// Verify the original GitHub host of a legacy ticket using its full issue URL
+    ReconcileGithub {
+        /// The legacy ticket, for example T-KQ12
+        reference: String,
+        /// The original issue URL on the GitHub host configured for this command
+        #[arg(long)]
+        issue: String,
+    },
     /// Publish a local Todo, In progress or In review ticket as one ordinary issue.
     /// Use --preview first: it prints exactly what would be sent and sends nothing
     Publish {
@@ -2191,6 +2199,13 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             return Ok(());
         }
         Command::Source {
+            command: SourceCommand::ReconcileGithub { reference, issue },
+        } => serde_json::to_string(&workspace.reconcile_github_issue(
+            &ticketd_core::source::Engine::builtin(),
+            &reference,
+            &issue,
+        )?)?,
+        Command::Source {
             command:
                 SourceCommand::Publish {
                     ticket,
@@ -2412,6 +2427,7 @@ fn source_command(
             serde_json::to_string(&workspace.take_ownership(&reference, agent.as_deref())?)?
         }
         SourceCommand::Refresh { .. }
+        | SourceCommand::ReconcileGithub { .. }
         | SourceCommand::Publish { .. }
         | SourceCommand::Resolve { .. } => unreachable_refresh()?,
     })

@@ -34,6 +34,11 @@ These commands can contact the external service even though ticketd stores data
 locally. `source take-ownership` is an explicit authority change for an unavailable
 ticket, not a workaround for an ordinary edit rejection.
 
+If refresh asks for the original host of a legacy GitHub ticket, confirm its
+original issue URL with `source reconcile-github T-KQ1 --issue URL`. GitHub's
+reply must match the saved issue ID and location. The ticket keeps its current
+ownership, even after takeover.
+
 ## Connect a project to its source
 
 ```sh

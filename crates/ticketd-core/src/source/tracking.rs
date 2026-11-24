@@ -37,6 +37,7 @@ use super::{
     contract::FailureCode,
     conversation,
     freshness::{self, ProviderRun, SourceUnavailable},
+    github,
 };
 use crate::{Error, Status, Ticket, Workspace, duplicates, history};
 
@@ -237,7 +238,7 @@ pub enum FailureScope {
     Source,
     /// One tracked ticket could not be read.
     Ticket,
-    /// One part of the discovery rules (a repository) could not be read; the rest ran.
+    /// One part of discovery could not be read or applied in full; the rest ran.
     Partition,
     /// An issue was read but its comments and events were not.
     Conversation,
@@ -246,8 +247,7 @@ pub enum FailureScope {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct RefreshFailure {
     pub provider: String,
-    /// The ticket that could not be refreshed; absent when discovery itself failed
-    /// or the issue has no ticket yet.
+    /// The affected ticket, if there is one.
     pub reference: Option<String>,
     #[serde(default)]
     pub scope: FailureScope,
@@ -409,15 +409,21 @@ pub(crate) fn migrate_github_issue_hosts(connection: &Connection) -> Result<(), 
     }
 
     // Both records can retain an issue ID even after it is no longer fetchable.
-    for (table, key) in [
-        ("external_duplicate_targets", "ticket_id"),
-        ("publication_attempts", "id"),
+    for (select, update) in [
+        (
+            "SELECT r.ticket_id, r.external_id, r.locator, r.url, i.external_id
+             FROM external_duplicate_targets r LEFT JOIN external_identities i ON i.ticket_id = r.ticket_id AND i.provider = r.provider
+             WHERE r.provider = ?1 AND r.external_id IS NOT NULL",
+            "UPDATE external_duplicate_targets SET external_id = ?2 WHERE ticket_id = ?1",
+        ),
+        (
+            "SELECT r.id, r.external_id, r.locator, r.url, i.external_id
+             FROM publication_attempts r LEFT JOIN external_identities i ON i.ticket_id = r.ticket_id AND i.provider = r.provider
+             WHERE r.provider = ?1 AND r.external_id IS NOT NULL",
+            "UPDATE publication_attempts SET external_id = ?2 WHERE id = ?1",
+        ),
     ] {
-        let mut related = connection.prepare(&format!(
-            "SELECT r.{key}, r.external_id, r.locator, r.url, i.external_id
-             FROM {table} r LEFT JOIN external_identities i ON i.ticket_id = r.ticket_id AND i.provider = r.provider
-             WHERE r.provider = ?1 AND r.external_id IS NOT NULL"
-        ))?;
+        let mut related = connection.prepare(select)?;
         let rows = related
             .query_map([PROVIDER], |row| {
                 Ok((
@@ -439,10 +445,7 @@ pub(crate) fn migrate_github_issue_hosts(connection: &Connection) -> Result<(), 
                 .map(|(host, _)| host)
                 .or_else(|| owner.as_deref().and_then(issue_id_host));
             if let Some(scoped) = scope_legacy_issue_id(&id, host).filter(|scoped| scoped != &id) {
-                connection.execute(
-                    &format!("UPDATE {table} SET external_id = ?2 WHERE {key} = ?1"),
-                    params![record, scoped],
-                )?;
+                connection.execute(update, params![record, scoped])?;
             }
         }
     }
@@ -846,6 +849,36 @@ fn ticket_for_identity(
         .optional()?)
 }
 
+/// A legacy issue and a discovery result may describe the same issue. Hold
+/// imports until a person confirms the host, including for tickets now local.
+fn unverified_github_match(
+    connection: &Connection,
+    reference: &ExternalRef,
+) -> Result<Option<String>, Error> {
+    let identity = &reference.identity;
+    if identity.provider != github::PROVIDER || github::issue_id_host(&identity.id).is_none() {
+        return Ok(None);
+    }
+    let database_id = identity.id.rsplit(':').next().unwrap_or(&identity.id);
+    Ok(connection
+        .prepare_cached(
+            "SELECT t.reference FROM external_identities i JOIN tickets t ON t.id = i.ticket_id
+             WHERE i.provider = ?1 AND i.external_id = ?2 AND i.locator = ?3 COLLATE NOCASE
+             AND NOT EXISTS (SELECT 1 FROM external_identities WHERE provider = ?1 AND external_id = ?4)",
+        )?
+        .query_row(
+            params![github::PROVIDER, format!("@:{database_id}"), reference.locator, identity.id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
+fn github_host_confirmation(reference: &str) -> String {
+    format!(
+        "Confirm the GitHub issue URL for {reference} with `ticketd source reconcile-github {reference} --issue URL`"
+    )
+}
+
 /// The status an observed external state implies, given the state last observed
 /// and the ticket's current status. An observation that does not decide the status
 /// (open stays open, an unrecognized closure) returns `current` unchanged.
@@ -932,6 +965,118 @@ struct Applied {
 }
 
 impl Workspace {
+    /// Verifies the host of a legacy GitHub issue using a person-supplied issue
+    /// URL and the saved locator and ID. Only provenance is repaired.
+    pub fn reconcile_github_issue(
+        &mut self,
+        engine: &Engine,
+        reference: &str,
+        issue_url: &str,
+    ) -> Result<Ticket, Error> {
+        let invalid = |message: String| {
+            SourceError::InvalidConfiguration(vec![super::FieldIssue {
+                field: "issue".into(),
+                message,
+            }])
+        };
+        let ticket = self.show_ticket(reference)?;
+        if ticket.trashed {
+            return Err(Error::Trashed(reference.to_owned()));
+        }
+        let (source, database_id) = ticket
+            .source
+            .as_ref()
+            .filter(|source| source.provider == github::PROVIDER)
+            .and_then(|source| github::unverified_issue_id(&source.id).map(|id| (source, id)))
+            .ok_or_else(|| {
+                invalid(format!(
+                    "{reference} has no GitHub issue with an unverified host"
+                ))
+            })?;
+        let issue_url = issue_url.trim();
+        let repository =
+            github::repository_from_issue_url(&source.locator, issue_url).ok_or_else(|| {
+                invalid(format!(
+                    "use the full GitHub issue URL for {}",
+                    source.locator
+                ))
+            })?;
+        let (host, destination) = repository
+            .split_once('/')
+            .ok_or_else(|| invalid("the GitHub issue URL has no repository".into()))?;
+        let expected = github::scope_legacy_issue_id(database_id, Some(host))
+            .ok_or_else(|| invalid(format!("{reference} has an invalid saved GitHub issue ID")))?;
+        let saved = self.saved_source(github::PROVIDER)?.ok_or_else(|| {
+            invalid("connect the GitHub source on this host before confirming the issue".into())
+        })?;
+        let issue = engine.locate(github::PROVIDER, &saved.config, destination, issue_url)?;
+        if issue.reference.identity.id != expected
+            || !issue
+                .reference
+                .locator
+                .eq_ignore_ascii_case(&source.locator)
+        {
+            return Err(invalid(format!(
+                "GitHub did not confirm the saved issue ID and location for {reference}"
+            ))
+            .into());
+        }
+
+        crate::write_scope::run(&self.connection, |transaction| {
+            let id = transaction.editable(reference)?;
+            if let Some(owner) = ticket_for_identity(transaction, &issue.reference.identity)? {
+                if owner == id && id == ticket.id {
+                    // A second confirmation of the same issue finished first.
+                    return crate::read_ticket(transaction, reference);
+                }
+                let owner_ref: String = transaction.query_row(
+                    "SELECT reference FROM tickets WHERE id = ?1",
+                    [&owner],
+                    |row| row.get(0),
+                )?;
+                return Err(invalid(format!("this issue is already linked to {owner_ref}")).into());
+            }
+            if id != ticket.id
+                || transaction.execute(
+                    "UPDATE external_identities SET external_id = ?2, url = ?3, repository = ?4
+                     WHERE ticket_id = ?1 AND provider = ?5 AND external_id = ?6 AND locator = ?7",
+                    params![
+                        id,
+                        expected,
+                        issue_url,
+                        repository,
+                        github::PROVIDER,
+                        source.id,
+                        source.locator
+                    ],
+                )? == 0
+            {
+                return Err(invalid(format!(
+                    "{reference} changed while GitHub was being checked"
+                ))
+                .into());
+            }
+            // GitHub returned a canonical target on the same host as its duplicate.
+            // The confirmed host is evidence for this ticket's saved target only.
+            let target: Option<String> = transaction.query_row(
+                "SELECT external_id FROM external_duplicate_targets WHERE ticket_id = ?1 AND provider = ?2",
+                params![id, github::PROVIDER],
+                |row| row.get(0),
+            ).optional()?;
+            if let Some(scoped) = target
+                .as_deref()
+                .and_then(github::unverified_issue_id)
+                .and_then(|id| github::scope_legacy_issue_id(id, Some(host)))
+            {
+                transaction.execute(
+                    "UPDATE external_duplicate_targets SET external_id = ?2 WHERE ticket_id = ?1",
+                    params![id, scoped],
+                )?;
+            }
+            crate::read_ticket(transaction, reference)
+        })
+    }
+
     /// Imports issues matching each saved source's discovery rules and refreshes
     /// every externally owned ticket, whether or not it still matches them.
     ///
@@ -1124,7 +1269,16 @@ impl Workspace {
                 // Count an issue once whether it was discovered or fetched, and
                 // include attempted reads that returned a ticket-level failure.
                 seen.insert(ticket.external_id.clone());
-                match engine.fetch(&provider, &source.config, &external) {
+                let read = if provider == github::PROVIDER
+                    && github::unverified_issue_id(&ticket.external_id).is_some()
+                {
+                    Err(SourceError::NotFound(github_host_confirmation(
+                        &ticket.reference,
+                    )))
+                } else {
+                    engine.fetch(&provider, &source.config, &external)
+                };
+                match read {
                     Ok(issue) => gathered.issues.push(issue),
                     Err(error) => {
                         let failure = failure_of(&error);
@@ -1182,12 +1336,14 @@ impl Workspace {
         let due: Vec<ExternalIssue> = gathered.issues[first_issue..].to_vec();
         for issue in due {
             let identity = &issue.reference.identity;
-            if !conversation::needs_reading(
-                &self.connection,
-                &identity.provider,
-                &identity.id,
-                &issue.updated_at,
-            )? {
+            if unverified_github_match(&self.connection, &issue.reference)?.is_some()
+                || !conversation::needs_reading(
+                    &self.connection,
+                    &identity.provider,
+                    &identity.id,
+                    &issue.updated_at,
+                )?
+            {
                 continue;
             }
             match engine.conversation(&identity.provider, config, &issue.reference) {
@@ -1298,7 +1454,7 @@ impl Workspace {
 
     fn apply_refresh(
         &mut self,
-        gathered: Gathered,
+        mut gathered: Gathered,
         now: &str,
         tracked: &[Tracked],
     ) -> Result<RefreshReport, Error> {
@@ -1336,7 +1492,7 @@ impl Workspace {
             // arrive in a part already read, log as `sync`. The write scope folds the
             // events of an imported ticket into its one `ticket.created`.
             let own_actor = crate::events::actor(transaction)?;
-            let mut read_before: HashMap<&str, HashSet<String>> = HashMap::new();
+            let mut read_before: HashMap<String, HashSet<String>> = HashMap::new();
             for provider in gathered
                 .issues
                 .iter()
@@ -1349,13 +1505,38 @@ impl Workspace {
                         provider,
                         gathered.imported_partitions.get(provider),
                     )?;
-                    read_before.insert(provider, read);
+                    read_before.insert(provider.clone(), read);
                 }
             }
             for issue in &gathered.issues {
                 if replaced.contains(&issue.reference.identity.provider)
                     && ticket_for_identity(transaction, &issue.reference.identity)?.is_none()
                 {
+                    continue;
+                }
+                if let Some(reference) = unverified_github_match(transaction, &issue.reference)? {
+                    let message = github_host_confirmation(&reference);
+                    if let Some(run) = gathered
+                        .runs
+                        .iter_mut()
+                        .find(|run| run.provider == issue.reference.identity.provider)
+                    {
+                        run.skipped.push(message.clone());
+                    }
+                    if !gathered.failures.iter().any(|found| {
+                        found.reference.as_deref() == Some(&reference)
+                            && found.failure.message == message
+                    }) {
+                        gathered.failures.push(Found {
+                            provider: issue.reference.identity.provider.clone(),
+                            reference: Some(reference),
+                            scope: FailureScope::Partition,
+                            failure: SourceFailure {
+                                code: "github_host_unverified".into(),
+                                message,
+                            },
+                        });
+                    }
                     continue;
                 }
                 let key = (
@@ -1397,6 +1578,11 @@ impl Workspace {
                     })?
                     .collect::<Result<Vec<_>, _>>()?;
                 for (id, external_id) in identities {
+                    if provider == github::PROVIDER
+                        && github::unverified_issue_id(&external_id).is_some()
+                    {
+                        continue;
+                    }
                     transaction.execute("UPDATE source_sync SET discovery_matches = ?2 WHERE ticket_id = ?1 AND (last_attempt_at IS NULL OR last_attempt_at <= ?3)", params![id, seen.contains(&external_id), now])?;
                 }
             }
@@ -1409,6 +1595,20 @@ impl Workspace {
                 }
                 let ticket = found.reference.as_deref().and_then(|r| by_reference.get(r));
                 if let Some(ticket) = ticket {
+                    if ticket.provider == github::PROVIDER
+                        && github::unverified_issue_id(&ticket.external_id).is_some()
+                        && ticket_for_identity(
+                            transaction,
+                            &ExternalIdentity {
+                                provider: ticket.provider.clone(),
+                                id: ticket.external_id.clone(),
+                            },
+                        )?
+                        .is_none()
+                    {
+                        // The issue was reconciled while this refresh ran.
+                        continue;
+                    }
                     match found.scope {
                         FailureScope::Conversation => {
                             transaction.execute(

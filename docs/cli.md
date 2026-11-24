@@ -56,6 +56,19 @@ and `linked_tickets`. If the effect changed, get a new preview. If no GitHub sou
 is saved, connect it first with `ticketd source save github --set repositories=OWNER/NAME`
 using the preview's `repository`, then preview again.
 
+## Recover a legacy GitHub issue link
+
+If refresh asks you to confirm a legacy ticket's GitHub host, use the original
+issue URL with the GitHub source connected to that host.
+
+```sh
+ticketd source reconcile-github T-KQ12 --issue https://github.com/OWNER/NAME/issues/123
+```
+
+GitHub must confirm the saved issue ID, repository, and issue number. The command
+repairs the existing ticket's source link and keeps its current ownership. Run
+`ticketd source refresh --ticket T-KQ12` afterward if GitHub still owns the ticket.
+
 ## JSON output
 
 Most data commands print JSON on stdout. Direct commands usually return an

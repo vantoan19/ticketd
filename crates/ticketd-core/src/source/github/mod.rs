@@ -547,7 +547,7 @@ impl Connector for GithubConnector {
                             other => other.to_string(),
                         },
                         field: Some("repositories".to_owned()),
-                        partition: repository.to_lowercase(),
+                        partition: partition_name(self.web_host.as_deref(), repository),
                     }],
                 });
             }
@@ -590,19 +590,18 @@ impl Connector for GithubConnector {
         Self::repositories(config)
     }
 
-    // GitHub does not tell `Owner/Name` from `owner/name`, so neither do these.
     fn partition(&self, reference: &ExternalRef) -> String {
         let repository = reference
             .locator
             .rsplit_once('#')
             .map_or(reference.locator.as_str(), |(repository, _)| repository);
-        repository.to_lowercase()
+        partition_name(issue_id_host(&reference.identity.id), repository)
     }
 
     fn partitions(&self, config: &ConfigValues) -> Vec<String> {
         Self::repositories(config)
             .iter()
-            .map(|repository| repository.to_lowercase())
+            .map(|repository| partition_name(self.web_host.as_deref(), repository))
             .collect()
     }
 
@@ -653,17 +652,7 @@ impl Connector for GithubConnector {
         destination: &str,
         text: &str,
     ) -> Result<ExternalIssue, SourceError> {
-        let number = issue_number_in(text, destination)?;
-        if let Ok(url) = url::Url::parse(text.trim())
-            && url.host_str() != self.web_host.as_deref()
-        {
-            return Err(SourceError::InvalidConfiguration(vec![
-                super::schema::FieldIssue {
-                    field: "issue".into(),
-                    message: "use an issue link on the current GitHub host".into(),
-                },
-            ]));
-        }
+        let number = issue_number_in(text, destination, self.web_host.as_deref())?;
         let url = format!(
             "{}/repos/{}/issues/{number}",
             self.api_url,
@@ -861,8 +850,8 @@ fn not_in_destination(destination: &str) -> SourceError {
 }
 
 /// The issue number in `text`, which may be `12`, `#12`, `owner/name#12` or an
-/// issue link, provided it names `destination` (compared without case).
-fn issue_number_in(text: &str, destination: &str) -> Result<u64, SourceError> {
+/// issue link on the current host, provided it names `destination` (compared without case).
+fn issue_number_in(text: &str, destination: &str, host: Option<&str>) -> Result<u64, SourceError> {
     let text = text.trim();
     let invalid = || {
         SourceError::InvalidConfiguration(vec![super::schema::FieldIssue {
@@ -870,11 +859,26 @@ fn issue_number_in(text: &str, destination: &str) -> Result<u64, SourceError> {
             message: "must be an issue number, owner/name#number or an issue link".into(),
         }])
     };
-    let (repository, number) = if let Some((_, path)) = text
+    let (repository, number) = if let Some(rest) = text
         .strip_prefix("https://")
         .or_else(|| text.strip_prefix("http://"))
-        .and_then(|rest| rest.split_once('/'))
     {
+        let (authority, path) = rest.split_once('/').ok_or_else(invalid)?;
+        if authority.is_empty()
+            || authority.contains('@')
+            || text.contains(|c: char| c.is_whitespace() || c.is_control() || c == '\\')
+        {
+            return Err(invalid());
+        }
+        let url = url::Url::parse(text).map_err(|_| invalid())?;
+        if url.host_str().is_none() || url.host_str() != host {
+            return Err(SourceError::InvalidConfiguration(vec![
+                super::schema::FieldIssue {
+                    field: "issue".into(),
+                    message: "use an issue link on the current GitHub host".into(),
+                },
+            ]));
+        }
         let path = path.split(['?', '#']).next().unwrap_or_default();
         let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
         match parts.as_slice() {
@@ -999,6 +1003,15 @@ fn issue_id(id: &str, host: &str) -> String {
     }
 }
 
+fn partition_name(host: Option<&str>, repository: &str) -> String {
+    let repository = repository.to_lowercase();
+    match host {
+        // Keep the bare keys that public GitHub workspaces have already saved.
+        Some("github.com") => repository,
+        _ => format!("@{}/{repository}", host.unwrap_or_default()),
+    }
+}
+
 pub(super) fn issue_id_host(id: &str) -> Option<&str> {
     if id.parse::<u64>().is_ok() {
         return Some("github.com");
@@ -1012,6 +1025,12 @@ pub(super) fn issue_id_host(id: &str) -> Option<&str> {
 pub(super) fn scope_legacy_issue_id(id: &str, host: Option<&str>) -> Option<String> {
     id.parse::<u64>().ok()?;
     Some(issue_id(id, host.unwrap_or_default()))
+}
+
+pub(super) fn unverified_issue_id(id: &str) -> Option<&str> {
+    let database_id = id.strip_prefix("@:")?;
+    database_id.parse::<u64>().ok()?;
+    Some(database_id)
 }
 
 /// Recover a legacy issue's host only when the saved web URL corroborates its locator.
