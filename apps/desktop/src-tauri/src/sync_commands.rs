@@ -671,11 +671,15 @@ fn kept_here(
         .collect()
 }
 
+/// How many of the storage's revisions History reads to tell which are kept here.
+const MATCHED_REVISIONS: usize = 20;
+
 /// The storage's versions (newest first) that this desktop does not hold. No
 /// record says which storage version a kept one was uploaded as, so a revision
 /// that has the content of a kept version is taken to be it, once each.
-/// ponytail: this reads the revisions, newest first, until every kept version found
-/// its copy; a record edited again and again that was never uploaded reads them all.
+/// At most [`MATCHED_REVISIONS`] are read, newest first, and none once every kept
+/// version found its copy: each read is a paid request to the storage. Revisions
+/// beyond the cap are listed as they are, so one may repeat a kept version.
 fn unheld(
     bound: &Binding,
     kind: RecordKind,
@@ -684,12 +688,14 @@ fn unheld(
     revisions: Vec<RemoteRevision>,
     mut kept: Vec<Content>,
 ) -> Vec<RemoteRevision> {
+    let mut read = 0;
     revisions
         .into_iter()
         .filter(|revision| {
-            if kept.is_empty() {
+            if kept.is_empty() || read >= MATCHED_REVISIONS {
                 return true;
             }
+            read += 1;
             // A revision that cannot be read is listed; opening it says why.
             let Ok(content) = stored_content(bound, kind, id, storage, revision) else {
                 return true;
@@ -1767,6 +1773,33 @@ mod tests {
                 .unwrap()
                 .is_empty()
         );
+    }
+
+    #[test]
+    fn history_reads_at_most_a_capped_number_of_revisions_to_match_and_lists_the_rest() {
+        let mut desks = desks();
+        let ticket = desks.there.create_ticket("Edit 0").unwrap();
+        desks.sync_there();
+        desks.sync_here();
+        for edit in 1..=25 {
+            retitle(&mut desks.there, &ticket.reference, &format!("Edit {edit}"));
+            desks.sync_there();
+        }
+        desks.sync_here();
+        let bound = Some(&desks.bound);
+        let (kind, id) = (RecordKind::Ticket, ticket.id.as_str());
+        let calls = desks.remote.calls().len();
+
+        // 26 revisions, the newest held here. This desktop keeps "Edit 0", whose copy is the
+        // oldest revision: beyond the cap, so it stays listed.
+        let list = versions(&desks.here, bound, kind, id, Source::Drive).unwrap();
+        assert_eq!(list.len(), 25);
+        let downloads = desks.remote.calls()[calls..]
+            .iter()
+            .filter(|op| **op == RemoteOp::Download)
+            .count();
+        // One read tells whether the newest revision is held, then the cap for matching.
+        assert_eq!(downloads, 1 + MATCHED_REVISIONS);
     }
 
     #[test]
