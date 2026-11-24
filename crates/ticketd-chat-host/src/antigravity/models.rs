@@ -2,9 +2,7 @@
 use std::path::Path;
 use std::process::Stdio;
 
-use tokio::io::AsyncReadExt;
-
-use crate::stdio::{Serving, command};
+use crate::stdio::{Serving, command, read_probe_output};
 use crate::{CHECK_TIMEOUT, ModelChoice, SettingOption};
 
 const MAX_MODEL_LIST_BYTES: usize = 64 * 1024;
@@ -25,14 +23,10 @@ pub(super) async fn listed(executable: &Path) -> Vec<ModelChoice> {
         .env("AGY_CLI_DISABLE_AUTO_UPDATE", "1");
     let output = tokio::time::timeout(CHECK_TIMEOUT, async {
         let mut child = command.spawn().ok()?;
-        // Allow one extra byte to distinguish a complete list at the limit from overflow.
-        let mut stdout = child.stdout.take()?.take(MAX_MODEL_LIST_BYTES as u64 + 1);
-        let mut output = Vec::new();
-        stdout.read_to_end(&mut output).await.ok()?;
-        if output.len() > MAX_MODEL_LIST_BYTES {
-            // The command kills its child on drop, including when the probe times out.
-            return None;
-        }
+        // The command kills its child on drop if the read fails or times out.
+        let output = read_probe_output(child.stdout.take()?, "stdout", MAX_MODEL_LIST_BYTES)
+            .await
+            .ok()?;
         child.wait().await.ok()?.success().then_some(output)
     })
     .await;
