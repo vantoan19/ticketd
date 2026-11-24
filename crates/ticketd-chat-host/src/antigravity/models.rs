@@ -2,9 +2,7 @@
 use std::path::Path;
 use std::process::Stdio;
 
-use tokio::io::AsyncReadExt;
-
-use crate::stdio::{Serving, command};
+use crate::stdio::{Serving, command, read_probe_output};
 use crate::{CHECK_TIMEOUT, ModelChoice, SettingOption};
 
 const MAX_MODEL_LIST_BYTES: usize = 64 * 1024;
@@ -27,24 +25,14 @@ pub(super) async fn listed(executable: &Path) -> Result<Vec<ModelChoice>, String
         let mut child = command
             .spawn()
             .map_err(|error| format!("Could not start Antigravity to list models ({error})"))?;
-        // Allow one extra byte to distinguish a complete list at the limit from overflow.
-        let mut stdout = child
+        let stdout = child
             .stdout
             .take()
-            .ok_or_else(|| "Antigravity's model check has no output stream".to_owned())?
-            .take(MAX_MODEL_LIST_BYTES as u64 + 1);
-        let mut output = Vec::new();
-        stdout
-            .read_to_end(&mut output)
+            .ok_or_else(|| "Antigravity's model check has no output stream".to_owned())?;
+        // The command kills its child on drop if the read fails or times out.
+        let output = read_probe_output(stdout, "stdout", MAX_MODEL_LIST_BYTES)
             .await
             .map_err(|error| format!("Could not read Antigravity's model list ({error})"))?;
-        if output.len() > MAX_MODEL_LIST_BYTES {
-            // The command kills its child on drop, including when the probe times out.
-            return Err(format!(
-                "Antigravity's model output exceeded {} KiB",
-                MAX_MODEL_LIST_BYTES / 1024
-            ));
-        }
         let status = child.wait().await.map_err(|error| {
             format!("Could not get Antigravity's model check exit status ({error})")
         })?;
@@ -158,7 +146,7 @@ mod tests {
         output.push(b'\n');
         fs::write(&listing, &output).unwrap();
         let reason = super::listed(&executable).await.unwrap_err();
-        assert!(reason.contains("exceeded 64 KiB"));
+        assert!(reason.contains("exceeded 65536 bytes"));
         assert!(!reason.contains("Test Model") && !reason.contains("diagnostic-only"));
     }
 

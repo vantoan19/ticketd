@@ -305,10 +305,10 @@ esac
             .env("PATH", directory.path())
             .output()
             .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
-            output.status.success(),
-            "{}{}",
-            String::from_utf8_lossy(&output.stdout),
+            output.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
             String::from_utf8_lossy(&output.stderr)
         );
         return;

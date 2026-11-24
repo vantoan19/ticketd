@@ -72,6 +72,74 @@ async fn inspection_disables_auto_updates_for_its_version_probe() {
     );
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn inspection_rejects_oversized_version_output_on_either_stream() {
+    use std::fs::{self, Permissions};
+    use std::os::unix::fs::PermissionsExt;
+    use std::process::Command;
+
+    use crate::{HarnessAdapter, Inspection};
+
+    const CHILD: &str = "TICKETD_TEST_ANTIGRAVITY_VERSION_OUTPUT_DIRECTORY";
+    const TEST: &str =
+        "antigravity::tests::inspection_rejects_oversized_version_output_on_either_stream";
+    const BUDGET: usize = 64 * 1024;
+    if let Some(directory) = std::env::var_os(CHILD) {
+        let directory = PathBuf::from(directory);
+        let stdout = directory.join("stdout");
+        let stderr = directory.join("stderr");
+        let mut version = b"agy 1.5.15\n".to_vec();
+        version.resize(BUDGET, b' ');
+        fs::write(&stdout, &version).unwrap();
+        fs::write(&stderr, vec![b' '; BUDGET]).unwrap();
+        assert!(matches!(
+            super::Antigravity.inspect().await,
+            Inspection::Installed { version: Some(version), .. } if version == "agy 1.5.15"
+        ));
+
+        version.push(b' ');
+        fs::write(&stdout, &version).unwrap();
+        let oversized_stdout = super::Antigravity.inspect().await;
+        fs::write(&stdout, b"agy 1.5.15\n").unwrap();
+        fs::write(&stderr, vec![b' '; BUDGET + 1]).unwrap();
+        let oversized_stderr = super::Antigravity.inspect().await;
+        assert_eq!(
+            [oversized_stdout, oversized_stderr].map(|inspection| matches!(
+                inspection,
+                Inspection::ProbeFailed { reason } if reason.contains("exceeded 65536 bytes")
+            )),
+            [true, true],
+            "both streams must reject a byte beyond the budget"
+        );
+        return;
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    let executable = directory.path().join("agy");
+    fs::write(
+        &executable,
+        "#!/bin/sh\n[ \"$1\" = --version ] || exit 2\n\
+         /bin/cat \"${0%/*}/stderr\" >&2 || exit 3\n\
+         exec /bin/cat \"${0%/*}/stdout\"\n",
+    )
+    .unwrap();
+    fs::set_permissions(&executable, Permissions::from_mode(0o700)).unwrap();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args(["--exact", TEST])
+        .env("PATH", directory.path())
+        .env("HOME", directory.path())
+        .env(CHILD, directory.path())
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr),
+    );
+}
+
 fn recorded(fixture: &str) -> Vec<Value> {
     fixture
         .lines()
