@@ -1188,7 +1188,7 @@ fn workspace_refresh_follows_a_github_transfer_that_changes_the_issue_id() {
             continue;
         }
         assert!(report.failures.is_empty(), "{:#?}", report.failures);
-        assert_eq!(report.updated, [reference.clone()]);
+        assert_eq!(report.updated, std::slice::from_ref(&reference));
         assert_eq!(source.id, "99");
         assert_eq!(source.url, "https://github.com/o/two/issues/12");
         assert_eq!(source.discovery_matches, (!targeted).then_some(true));
