@@ -169,9 +169,11 @@ process. It closes the old generation, opens with the person's chosen mode
 and resumes the same native Session. If the restart fails, the queue pauses.
 If exit is unconfirmed, the old generation can only be used for cleanup. Its
 requests expire, new messages stay queued, and the next explicit recovery
-checks for exit before opening a replacement. Turning Chat off and back on in
-the same desktop process preserves that exit check. Tools the previous
-generation started may still be running after its own exit is confirmed.
+checks for exit before opening a replacement. Turning Chat off or restoring a
+Workspace in the same desktop process preserves that exit check for the same
+Chat. On restore, the next supervisor takes its settings and queue from the
+current Workspace. Tools the previous generation started may still be running
+after its own exit is confirmed.
 The descriptor enforces native-only history recovery and excludes unattended
 use.
 
