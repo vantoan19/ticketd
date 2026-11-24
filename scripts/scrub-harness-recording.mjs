@@ -192,6 +192,7 @@ function visit(value, scope, parent, scalar, key) {
 
 function scrub(frames, input) {
   const aliases = new Map();
+  const accountAliases = new Map();
   let accountCount = 0;
   let sessionCount = 0;
   let homeCount = 0;
@@ -211,12 +212,16 @@ function scrub(frames, input) {
   const replaceScoped = (value, scope) => {
     if (value === null || value === "") return value;
     if (typeof value !== "string") return null;
-    if (value.match(uuid)?.[0] === value) return replaceUuid(value);
-    return remember(value, () =>
-      scope === "session"
-        ? "fixture-session-" + ++sessionCount
-        : "fixture-account-" + ++accountCount,
-    );
+    const replacement =
+      value.match(uuid)?.[0] === value
+        ? replaceUuid(value)
+        : remember(value, () =>
+            scope === "session"
+              ? "fixture-session-" + ++sessionCount
+              : "fixture-account-" + ++accountCount,
+          );
+    if (scope === "account") accountAliases.set(value, replacement);
+    return replacement;
   };
 
   // Match both the launch spelling and its physical path (for example /var and
@@ -278,15 +283,17 @@ function scrub(frames, input) {
       "",
       (value, scope) =>
         scope === "label"
-          ? value
+          ? (accountAliases.get(value) ?? value)
           : scope
             ? replaceScoped(value, scope)
             : typeof value === "string"
               ? replaceText(value)
               : value,
-      // Plain property names belong to the protocol. Dictionary keys containing
-      // paths, email addresses and punctuated identifiers can carry private data.
-      (key) => (/^[A-Za-z_$][\w$]*$/.test(key) ? key : replaceText(key)),
+      // Dictionary keys can repeat an account alias or contain paths, email
+      // addresses and punctuated identifiers. Keep ordinary protocol keys.
+      (key) =>
+        accountAliases.get(key) ??
+        (/^[A-Za-z_$][\w$]*$/.test(key) ? key : replaceText(key)),
     ),
   );
 }

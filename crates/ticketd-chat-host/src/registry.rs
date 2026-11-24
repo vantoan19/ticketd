@@ -59,8 +59,13 @@ mod tests {
             .iter()
             .map(|entry| entry.descriptor.key.as_str())
             .collect();
+        let catalog: HashSet<_> = HARNESS_DESCRIPTORS
+            .iter()
+            .map(|descriptor| descriptor.key.as_str())
+            .collect();
         assert_eq!(registered.len(), REGISTRATIONS.len());
-        assert_eq!(registered.len(), HARNESS_DESCRIPTORS.len());
+        assert_eq!(catalog.len(), HARNESS_DESCRIPTORS.len());
+        assert_eq!(registered, catalog);
         for descriptor in HARNESS_DESCRIPTORS {
             let entry = registration(descriptor.key.as_str()).expect("registered harness");
             assert!(std::ptr::eq(*descriptor, entry.descriptor));

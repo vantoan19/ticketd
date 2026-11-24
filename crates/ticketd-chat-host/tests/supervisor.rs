@@ -2561,7 +2561,13 @@ async fn native_only_recovery_opens_an_empty_session_when_native_history_is_miss
     let opened = f.fake.opens();
     assert_eq!(opened.len(), 2);
     assert_eq!(opened[1].session, SessionStart::New);
+    assert_eq!(f.submits().len(), 1);
 
     f.send("next input").await;
-    assert_eq!(f.submits().last().unwrap().text, "next input");
+    let submits = f.submits();
+    let texts = submits
+        .iter()
+        .map(|submission| submission.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(texts, ["prior input", "next input"]);
 }

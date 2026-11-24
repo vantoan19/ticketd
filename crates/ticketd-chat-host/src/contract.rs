@@ -7,8 +7,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use tokio::sync::mpsc;
 
-/// Capacity of a runtime's event channel. A full channel backpressures the adapter's
-/// protocol reader, so the supervisor must keep receiving while commands are pending.
+/// Capacity of a runtime's event channel. The supervisor keeps receiving while
+/// commands are pending. Each adapter handles saturation in its transport.
 pub const EVENT_BUFFER: usize = 256;
 
 /// Upper bound for one [`ProviderDetail`] payload.
@@ -422,7 +422,7 @@ pub enum EventKind {
     /// The provider process or its transport is gone. Always the last event.
     RuntimeLost {
         exit_code: Option<i32>,
-        /// Bounded tail of stderr.
+        /// Diagnostic detail, which may include a bounded tail of stderr.
         diagnostics: String,
     },
     /// A non-terminal observation about the session or a turn. It never starts, ends
