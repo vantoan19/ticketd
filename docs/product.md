@@ -482,7 +482,7 @@ collect OAuth tokens, proxy model requests, or change billing.
   restart and resume. Antigravity is available for Chats a person drives.
   A Chat resumes through Antigravity's native history. If it is unavailable,
   the Chat starts a fresh session with no history carried over.
-  See [ADR 0023](adr/0023-antigravity-uses-acp-for-person-driven-chats.md).
+  See [ADR 0024](adr/0024-antigravity-uses-acp-for-person-driven-chats.md).
 - **Conversation.** The UI streams responses, tool activity, native approval requests,
   and questions. Observed activity is Idle, Working, Waiting for you, Interrupted, or
   Failed; a finished turn is not evidence that the task succeeded. Sending during a

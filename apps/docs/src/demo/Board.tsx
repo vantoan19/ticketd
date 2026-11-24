@@ -83,7 +83,7 @@ export function Board({
                   <span className="demo-blocker">
                     {t.blocker
                       ? "Blocked by " + t.blocker
-                      : t.reference === "T-LG14"
+                      : t.reference === "T-RL14"
                         ? "Subticket of " + featureRef
                         : "No project"}
                   </span>
