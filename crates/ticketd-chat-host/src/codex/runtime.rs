@@ -78,11 +78,8 @@ impl Peer for CodexPeer {
                     let called = params["tool"].as_str() == Some(ticket_tool::NAME)
                         && params["namespace"].is_null();
                     let response = if ours && called {
-                        let tool = Arc::clone(tool);
                         let input = params.get_mut("arguments").map_or(Value::Null, Value::take);
-                        Response::Deferred(Box::pin(async move {
-                            json!({"id": id, "result": tool.run(&input).await})
-                        }))
+                        tool.answer(id, input)
                     } else {
                         Response::Immediate(json!({"id": id, "error": {
                             "code": -32601,
@@ -115,6 +112,9 @@ impl Peer for CodexPeer {
     }
 
     fn disconnected(&mut self) {
+        if let Some(tool) = &self.ticket_tool {
+            tool.close();
+        }
         self.session.disconnected();
     }
 }
@@ -254,12 +254,12 @@ impl AppServer {
         if let Some(cli) = &request.ticketd_cli
             && (request.unattended.is_some() || request.taken_over)
         {
-            self.rpc.state().peer.ticket_tool = Some(Arc::new(TicketTool {
-                cli: cli.clone(),
-                working_directory: request.working_directory.clone(),
-                chat_id: request.chat_id.clone(),
-                run_id: request.unattended.as_ref().map(|run| run.run_id.clone()),
-            }));
+            self.rpc.state().peer.ticket_tool = Some(Arc::new(TicketTool::new(
+                cli.clone(),
+                request.working_directory.clone(),
+                request.chat_id.clone(),
+                request.unattended.as_ref().map(|run| run.run_id.clone()),
+            )));
         }
         let result = match self.call(method, |_| Ok((params, Call::OpenThread))).await {
             CallOutcome::Reply(result) => result,
@@ -713,5 +713,73 @@ impl HarnessRuntime for CodexRuntime {
 
     async fn close(&self) -> CloseOutcome {
         self.connection.close().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn an_admitted_ticketd_call_cannot_start_after_the_runtime_closes() {
+        let directory = tempfile::tempdir().unwrap();
+        for explicit_close in [true, false] {
+            let (mut app_server, io) = crate::scripted::pipes();
+            let (connection, _events) =
+                AppServer::start(io, RuntimeGeneration(1), Options::default());
+            let answer = {
+                let mut state = connection.rpc.state();
+                let peer = &mut state.peer;
+                peer.ticket_tool = Some(Arc::new(TicketTool::new(
+                    std::env::current_exe().unwrap(),
+                    directory.path().to_owned(),
+                    "chat-1".into(),
+                    None,
+                )));
+                peer.replied(
+                    Call::OpenThread,
+                    &Ok(json!({"thread": {"id": "thr_1"}})),
+                    false,
+                );
+                let (_, response) = peer.received(Incoming::Request {
+                    id: json!("call-1"),
+                    method: ticket_tool::CALL_METHOD.to_owned(),
+                    params: json!({"threadId": "thr_1", "tool": "ticketd",
+                        "arguments": {"arguments": ["--list"]}}),
+                });
+                let Some(Response::Deferred(answer)) = response else {
+                    panic!("the open runtime should admit the call");
+                };
+                answer
+            };
+            let runtime = CodexRuntime {
+                connection,
+                steering: false,
+            };
+            if explicit_close {
+                let (outcome, ()) = tokio::join!(runtime.close(), async {
+                    assert!(app_server.stdin_closed().await);
+                    app_server.exit(0);
+                });
+                assert_eq!(outcome, CloseOutcome::Confirmed { exit_code: Some(0) });
+            } else {
+                drop(runtime);
+                assert!(app_server.stdin_closed().await);
+            }
+            // The deferred work was admitted before shutdown, but its first poll
+            // happens after shutdown. Running the CLI would list this test binary's tests.
+            let reply = answer.await;
+            assert_eq!(reply["id"], "call-1");
+            assert_eq!(reply["result"]["success"], false);
+            assert!(
+                reply["result"]["contentItems"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("closed")
+            );
+            if !explicit_close {
+                app_server.exit(0);
+            }
+        }
     }
 }

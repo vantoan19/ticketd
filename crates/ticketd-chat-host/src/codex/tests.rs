@@ -1267,9 +1267,111 @@ async fn an_agent_with_run_and_edit_off_gets_no_shell_and_no_environment() {
     .await;
 }
 
+#[cfg(unix)]
+#[tokio::test]
+async fn excess_ticketd_calls_get_a_busy_result_while_rpc_stays_live() {
+    use std::{fs, os::unix::fs::PermissionsExt};
+
+    let directory = tempfile::tempdir().unwrap();
+    let working_directory = directory.path();
+    let cli = working_directory.join("fixture-cli");
+    fs::write(
+        &cli,
+        concat!(
+            "#!/bin/sh\n",
+            ": > \"started-$1\"\n",
+            "while [ ! -f release ]; do sleep 0.01; done\n",
+            "printf 'fixture output %s' \"$1\"\n",
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&cli, fs::Permissions::from_mode(0o700)).unwrap();
+    let (mut peer, opened) = open_with_ticketd_tool_at(
+        fixture!("unattended_ticket_tool"),
+        unattended(true, false),
+        working_directory,
+        cli,
+    )
+    .await;
+
+    let call = |id: u32| {
+        format!(
+            "{}\n",
+            json!({"id": format!("cli-{id}"), "method": "item/tool/call", "params": {
+                "threadId": "thr_1", "turnId": "turn_1", "callId": format!("call-{id}"),
+                "namespace": null, "tool": "ticketd", "arguments": {"arguments": [id.to_string()]},
+            }})
+        )
+    };
+    let (outcome, ()) = tokio::join!(opened.runtime.submit(start_turn("sub-1", "Go")), async {
+        let start = peer.written().await;
+        assert_eq!(start["method"], "turn/start");
+        for id in 1..=5 {
+            peer.send(&call(id)).await;
+        }
+        let busy = peer.written().await;
+        assert_eq!(busy["id"], "cli-5");
+        assert_eq!(busy["result"]["success"], false);
+        assert!(
+            busy["result"]["contentItems"][0]["text"]
+                .as_str()
+                .unwrap()
+                .contains("busy")
+        );
+        peer.send(&format!(
+            "{}\n",
+            json!({"id": start["id"], "result": {"turn": {"id": "turn_1", "status": "inProgress"}}})
+        ))
+        .await;
+    });
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+
+    fs::write(working_directory.join("release"), "").unwrap();
+    let mut completed = Vec::new();
+    for _ in 1..=4 {
+        let reply = peer.written().await;
+        assert_eq!(reply["result"]["success"], true, "{reply}");
+        let id = reply["id"].as_str().unwrap();
+        let number = id.strip_prefix("cli-").unwrap();
+        assert_eq!(
+            reply["result"]["contentItems"][0]["text"],
+            format!("fixture output {number}")
+        );
+        completed.push(number.to_owned());
+    }
+    completed.sort();
+    assert_eq!(completed, ["1", "2", "3", "4"]);
+    assert!(!working_directory.join("started-5").exists());
+
+    peer.send(&call(6)).await;
+    let retry = peer.written().await;
+    assert_eq!(retry["id"], "cli-6");
+    assert_eq!(retry["result"]["success"], true, "{retry}");
+}
+
 /// Opens an unattended thread for `agent` with the ticketd CLI over a fixture that
 /// holds `$CONFIG`, `$SPEC` and `$INSTRUCTIONS` where ticketd fills in what it sends.
 async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Peer, OpenedRuntime) {
+    open_with_ticketd_tool_at(
+        fixture,
+        agent,
+        Path::new("/work/chat-1"),
+        PathBuf::from("/bin/ticketd"),
+    )
+    .await
+}
+
+async fn open_with_ticketd_tool_at(
+    fixture: &str,
+    agent: crate::Unattended,
+    working_directory: &Path,
+    cli: PathBuf,
+) -> (Peer, OpenedRuntime) {
     let mut config = super::personal_tools_off(None);
     let switches = super::switch_overrides(&agent.tools);
     config
@@ -1277,6 +1379,7 @@ async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Pee
         .unwrap()
         .extend(switches.as_object().unwrap().clone());
     let script = fixture
+        .replace("\"/work/chat-1\"", &json!(working_directory).to_string())
         .replace("$CONFIG", &config.to_string())
         .replace("$SPEC", &super::ticket_tool::spec().to_string())
         .replace(
@@ -1288,10 +1391,10 @@ async fn open_with_ticketd_tool(fixture: &str, agent: crate::Unattended) -> (Pee
     let request = OpenRequest {
         generation: GENERATION,
         chat_id: "chat-1".into(),
-        working_directory: PathBuf::from("/work/chat-1"),
+        working_directory: working_directory.to_owned(),
         session: SessionStart::New,
         unattended: Some(agent),
-        ticketd_cli: Some(PathBuf::from("/bin/ticketd")),
+        ticketd_cli: Some(cli),
         taken_over: false,
         recorded_settings: None,
         settings: StartSettings::default(),

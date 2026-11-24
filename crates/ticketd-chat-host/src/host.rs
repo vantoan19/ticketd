@@ -52,9 +52,7 @@ pub type ContextSource = Arc<dyn Fn(&str) -> Result<Option<String>, String> + Se
 /// so the transcript shows what the agent was given apart from the person's words.
 pub const CONTEXT_RECORD_NAME: &str = "ticketd context";
 
-/// The name of the tool record that keeps, as JSON, what the agent changed in ticketd
-/// during a turn (`ChatAgentChange`s), so the transcript can show it after the turn.
-pub const AGENT_CHANGES_RECORD_NAME: &str = "ticketd changes";
+pub use ticketd_core::AGENT_CHANGES_RECORD_NAME;
 
 /// The detail recorded on a turn ticketd itself stopped on Quit (see [`crate::StopReason`]).
 pub const STOPPED_BY_TICKETD: &str = "ticketd stopped this Chat";
