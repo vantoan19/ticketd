@@ -28,6 +28,8 @@ use crate::{
 
 use super::{capabilities, problem, settings, steps};
 
+const MIN_THOUGHT_CHECKPOINT_BYTES: usize = 256;
+
 enum Call {
     Initialize,
     Open(SessionStart),
@@ -41,6 +43,7 @@ struct Prompt {
     message: String,
     message_number: usize,
     thought: String,
+    checkpointed_thought_bytes: usize,
     tools: HashMap<acp::ToolCallId, steps::Tool>,
     files: BTreeMap<String, FileChange>,
     denied: HashSet<acp::ToolCallId>,
@@ -55,6 +58,7 @@ impl Prompt {
             message: String::new(),
             message_number: 0,
             thought: String::new(),
+            checkpointed_thought_bytes: 0,
             tools: HashMap::new(),
             files: BTreeMap::new(),
             denied: HashSet::new(),
@@ -74,14 +78,36 @@ impl Prompt {
             self.message_number += 1;
         }
     }
-    fn thinking(&self, running: bool) -> EventKind {
+    fn add_thought(&mut self, text: &str, events: &mut Vec<EventKind>) {
+        self.thought.push_str(text);
+        // Checkpoints replace the whole report. Doubling their size keeps the
+        // bytes copied across an uninterrupted stream proportional to its length.
+        let next = self
+            .checkpointed_thought_bytes
+            .saturating_mul(2)
+            .max(MIN_THOUGHT_CHECKPOINT_BYTES);
+        if self.checkpointed_thought_bytes == 0 || self.thought.len() >= next {
+            self.flush_thought(events);
+        }
+    }
+    fn flush_thought(&mut self, events: &mut Vec<EventKind>) {
+        if self.thought.len() > self.checkpointed_thought_bytes {
+            self.checkpointed_thought_bytes = self.thought.len();
+            events.push(self.thinking(true, self.thought.clone()));
+        }
+    }
+    fn take_thought(&mut self, running: bool) -> EventKind {
+        let text = std::mem::take(&mut self.thought);
+        self.thinking(running, text)
+    }
+    fn thinking(&self, running: bool, text: String) -> EventKind {
         EventKind::ReasoningUpdated {
             turn: self.turn.clone(),
             item: NativeItemId::new(format!("{}:thought", self.turn.0)),
             running,
             started_at: None,
             ended_at: None,
-            text: Some(self.thought.clone()),
+            text: Some(text),
             heading: None,
         }
     }
@@ -274,6 +300,7 @@ impl Session {
             acp::SessionUpdate::AgentMessageChunk(ref chunk)
                 if let acp::ContentBlock::Text(text) = &chunk.content =>
             {
+                prompt.flush_thought(&mut events);
                 prompt.message.push_str(&text.text);
                 events.push(EventKind::TextDelta {
                     turn: prompt.turn.clone(),
@@ -285,11 +312,11 @@ impl Session {
                 if let acp::ContentBlock::Text(text) = &chunk.content =>
             {
                 prompt.flush_message(&mut events);
-                prompt.thought.push_str(&text.text);
-                events.push(prompt.thinking(true));
+                prompt.add_thought(&text.text, &mut events);
             }
             acp::SessionUpdate::ToolCall(tool) => {
                 prompt.flush_message(&mut events);
+                prompt.flush_thought(&mut events);
                 let id = tool.tool_call_id.clone();
                 prompt
                     .tools
@@ -297,9 +324,11 @@ impl Session {
                 prompt.report_tool(&id, &mut events);
             }
             acp::SessionUpdate::ToolCallUpdate(update) => {
+                prompt.flush_thought(&mut events);
                 prompt.tool_update(update, &mut events);
             }
             acp::SessionUpdate::Plan(plan) => {
+                prompt.flush_thought(&mut events);
                 events.push(EventKind::PlanUpdated {
                     turn: prompt.turn.clone(),
                     plan: Plan {
@@ -398,6 +427,7 @@ impl Session {
             .into_iter()
             .collect();
         prompt.flush_message(&mut events);
+        prompt.flush_thought(&mut events);
         if prompt.tool_update(request.tool_call, &mut events) {
             if !reason.is_empty() {
                 reason.insert(0, '\n');
@@ -444,7 +474,7 @@ impl Session {
         let mut events: Vec<_> = processing.into_iter().collect();
         prompt.flush_message(&mut events);
         if !prompt.thought.is_empty() {
-            events.push(prompt.thinking(false));
+            events.push(prompt.take_thought(false));
         }
         events.extend(
             self.runtime
@@ -533,6 +563,14 @@ impl Peer for Session {
                 refused(id, -32601, "This request is not supported in ticketd")
             }
             _ => (Vec::new(), None),
+        }
+    }
+
+    fn retain_on_loss(&mut self, events: &mut Vec<EventKind>) {
+        if let Some(prompt) = &mut self.prompt
+            && prompt.thought.len() > prompt.checkpointed_thought_bytes
+        {
+            events.push(prompt.take_thought(true));
         }
     }
 
