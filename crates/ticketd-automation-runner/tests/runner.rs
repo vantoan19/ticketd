@@ -1383,7 +1383,18 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
                     f.runner.stop_run(&run.id).await.unwrap();
                 }
                 _ => {
+                    // A person's input saved while the agent is starting survives even
+                    // in the same Chat. Only the run's first Prompt belongs to it.
+                    let person = f
+                        .core()
+                        .save_chat_input(None, &chat, "Kept for later")
+                        .unwrap();
                     f.host.turn_off().await;
+                    assert_eq!(
+                        f.core().chat_queue(&chat).unwrap().as_slice(),
+                        std::slice::from_ref(&person)
+                    );
+                    f.core().withdraw_chat_input(&chat, &person.id).unwrap();
                 }
             }
         };
@@ -1408,6 +1419,19 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
         } else {
             assert!(queued.is_empty(), "{how}: {queued:?}");
             assert!(submitted.is_empty(), "{how}: {submitted:?}");
+        }
+        if how == "chat turned off" {
+            assert_eq!(
+                f.needs_attention(),
+                "Chat was turned off while this run was going."
+            );
+            f.host.turn_on();
+            f.reply(&chat, "Hello").await;
+            let submitted: Vec<_> = written(&f)
+                .into_iter()
+                .filter(|w| w.starts_with("submit"))
+                .collect();
+            assert_eq!(submitted, ["submit: Hello"]);
         }
     }
 }
