@@ -1,7 +1,7 @@
-//! Tool observations retain ACP's shape after extracting any bulky output.
+//! Keep the ACP facts needed to report a Step across partial tool updates.
 use agent_client_protocol_schema::v1 as acp;
 use serde_json::{Value, json};
-use ticketd_core::ChatToolState;
+use ticketd_core::{CHAT_TOOL_OUTPUT_LIMIT, ChatToolState};
 
 use crate::tool_steps::{CommandFacts, shell_step};
 use crate::{
@@ -9,6 +9,27 @@ use crate::{
     NativeItemId, NativeTurnId, ProviderDetail, ReadAction, ReadTarget, RunAction, SearchScope,
     SearchTarget, StepAction, ToolEvidence, ToolStatus, ToolStep, WebAction,
 };
+
+const COMMAND: &[&str] = &["CommandLine", "command"];
+const WORKING_DIRECTORY: &[&str] = &["Cwd", "cwd", "WorkingDirectory"];
+const FILE_PATH: &[&str] = &[
+    "AbsolutePath",
+    "TargetFile",
+    "SourcePath",
+    "DestinationPath",
+    "path",
+];
+const QUERY: &[&str] = &["Query", "Pattern", "query"];
+const SEARCH_PATH: &[&str] = &["SearchPath", "path"];
+const URL: &[&str] = &["Url", "URL", "url"];
+const INPUT_FIELDS: &[&[&str]] = &[
+    COMMAND,
+    WORKING_DIRECTORY,
+    FILE_PATH,
+    QUERY,
+    SEARCH_PATH,
+    URL,
+];
 
 pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
     let Ok(tool) = serde_json::from_str::<acp::ToolCall>(evidence.input) else {
@@ -23,16 +44,10 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
     let text = |keys: &[&str]| keys.iter().find_map(|key| input[*key].as_str());
     let locations = || {
         if tool.locations.is_empty() {
-            [
-                "AbsolutePath",
-                "TargetFile",
-                "SourcePath",
-                "DestinationPath",
-                "path",
-            ]
-            .iter()
-            .filter_map(|key| input[*key].as_str().map(str::to_owned))
-            .collect::<Vec<_>>()
+            FILE_PATH
+                .iter()
+                .filter_map(|key| input[*key].as_str().map(str::to_owned))
+                .collect::<Vec<_>>()
         } else {
             tool.locations
                 .iter()
@@ -42,12 +57,12 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
     };
     let action = match tool.kind {
         acp::ToolKind::Execute => {
-            if let Some(command) = text(&["CommandLine", "command"]) {
+            if let Some(command) = text(COMMAND) {
                 return vec![shell_step(
                     evidence,
                     command,
                     CommandFacts {
-                        working_directory: text(&["Cwd", "cwd", "WorkingDirectory"]),
+                        working_directory: text(WORKING_DIRECTORY),
                         exit_code: tool
                             .raw_output
                             .as_ref()
@@ -79,11 +94,10 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
             }
         }
         acp::ToolKind::Search => StepAction::Search {
-            targets: text(&["Query", "Pattern", "query"])
+            targets: text(QUERY)
                 .map(|query| SearchTarget {
                     query: query.to_owned(),
-                    scope: text(&["SearchPath", "path"])
-                        .map(|path| SearchScope::Path(path.to_owned())),
+                    scope: text(SEARCH_PATH).map(|path| SearchScope::Path(path.to_owned())),
                 })
                 .into_iter()
                 .collect(),
@@ -127,7 +141,7 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
             paths: locations(),
             counts: LineCounts::default(),
         },
-        acp::ToolKind::Fetch => match text(&["Url", "URL", "url"]) {
+        acp::ToolKind::Fetch => match text(URL) {
             Some(url) => StepAction::Web(WebAction::Fetch {
                 url: url.to_owned(),
             }),
@@ -143,78 +157,66 @@ pub(crate) fn read_steps(evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
     vec![action.into()]
 }
 
-pub(super) fn merge(tool: &mut acp::ToolCall, update: acp::ToolCallUpdateFields) {
-    if let Some(title) = update.title {
-        tool.title = title;
-    }
-    if let Some(name) = update.name {
-        tool.name = Some(name);
-    }
-    if let Some(kind) = update.kind {
-        tool.kind = kind;
-    }
-    if let Some(status) = update.status {
-        tool.status = status;
-    }
-    if let Some(locations) = update.locations {
-        tool.locations = locations;
-    }
-    if let Some(content) = update.content {
-        tool.content = content;
-    }
-    if let Some(input) = update.raw_input {
-        match (tool.raw_input.as_mut(), input) {
-            (Some(Value::Object(known)), Value::Object(update)) => known.extend(update),
-            (_, input) => tool.raw_input = Some(input),
+pub(super) struct Tool {
+    native: acp::ToolCall,
+    raw_output: Option<String>,
+    content_output: Option<String>,
+    files: Vec<FileChange>,
+}
+
+impl Tool {
+    pub(super) fn new(id: acp::ToolCallId) -> Self {
+        Self {
+            native: acp::ToolCall::new(id, "Tool"),
+            raw_output: None,
+            content_output: None,
+            files: Vec::new(),
         }
     }
-    if update.raw_output.is_some() {
-        tool.raw_output = update.raw_output;
+
+    pub(super) fn from_call(call: acp::ToolCall) -> Self {
+        let update = acp::ToolCallUpdate::from(call);
+        let mut tool = Self::new(update.tool_call_id);
+        tool.merge(update.fields);
+        tool
     }
-}
 
-fn diffs(tool: &acp::ToolCall) -> impl Iterator<Item = &acp::Diff> {
-    tool.content.iter().filter_map(|item| match item {
-        acp::ToolCallContent::Diff(diff) => Some(diff),
-        _ => None,
-    })
-}
-
-pub(super) fn changes(tool: &acp::ToolCall) -> Vec<FileChange> {
-    if tool.status == acp::ToolCallStatus::Failed {
-        return Vec::new();
+    pub(super) fn title(&self) -> &str {
+        &self.native.title
     }
-    diffs(tool)
-        .map(|diff| FileChange {
-            path: diff.path.to_string_lossy().into_owned(),
-            kind: if diff.old_text.is_none() {
-                FileChangeKind::Added
-            } else {
-                FileChangeKind::Modified
-            },
-            added_lines: diff
-                .old_text
-                .is_none()
-                .then(|| u32::try_from(diff.new_text.lines().count()).unwrap_or(u32::MAX)),
-            removed_lines: diff.old_text.is_none().then_some(0),
-            confirmed: tool.status == acp::ToolCallStatus::Completed,
-        })
-        .collect()
-}
 
-pub(super) fn observed(tool: &acp::ToolCall, turn: NativeTurnId, declined: bool) -> EventKind {
-    let output = tool
-        .raw_output
-        .as_ref()
-        .and_then(|value| {
-            value
+    pub(super) fn status(&self) -> acp::ToolCallStatus {
+        self.native.status
+    }
+
+    pub(super) fn merge(&mut self, mut update: acp::ToolCallUpdateFields) {
+        if let Some(locations) = &mut update.locations {
+            // Location metadata is opaque. The reader only uses the path and line.
+            for location in locations {
+                location.meta = None;
+            }
+        }
+        if let Some(input) = update.raw_input.take() {
+            self.merge_input(input);
+        }
+        if let Some(output) = update.raw_output.take() {
+            self.raw_output = output
                 .as_str()
-                .or_else(|| value["output"].as_str())
-                .map(str::to_owned)
-        })
-        .or_else(|| {
-            let texts: Vec<_> = tool
-                .content
+                .or_else(|| output["output"].as_str())
+                .map(output_tail);
+            self.native.raw_output = output["exit_code"]
+                .as_i64()
+                .map(|code| json!({"exit_code": code}));
+        }
+        if let Some(content) = update.content.take() {
+            self.files = content
+                .iter()
+                .filter_map(|part| match part {
+                    acp::ToolCallContent::Diff(diff) => Some(file_change(diff)),
+                    _ => None,
+                })
+                .collect();
+            let texts: Vec<_> = content
                 .iter()
                 .filter_map(|part| match part {
                     acp::ToolCallContent::Content(content)
@@ -225,85 +227,135 @@ pub(super) fn observed(tool: &acp::ToolCall, turn: NativeTurnId, declined: bool)
                     _ => None,
                 })
                 .collect();
-            (!texts.is_empty()).then(|| texts.join("\n"))
-        });
-    let status = match tool.status {
-        _ if declined => ToolStatus::Declined,
-        acp::ToolCallStatus::Completed => ToolStatus::Succeeded,
-        acp::ToolCallStatus::Failed => ToolStatus::Failed,
-        _ => ToolStatus::Running,
-    };
-    let mut native = tool.clone();
-    native.raw_output = tool.raw_output.as_ref().and_then(|output| {
-        output["exit_code"]
-            .as_i64()
-            .map(|code| json!({"exit_code": code}))
-    });
-    native.content = diffs(tool)
-        .take(32)
-        .map(|diff| {
-            // File content is output. Only its path and creation semantics belong here.
-            let mut copy = acp::Diff::new(diff.path.clone(), "");
-            copy.old_text = diff.old_text.as_ref().map(|_| String::new());
-            acp::ToolCallContent::Diff(copy)
-        })
-        .collect();
-    if tool.raw_input.as_ref().is_none_or(Value::is_object)
-        && diffs(tool).next().is_some()
-        && diffs(tool).all(|diff| diff.old_text.is_none())
-    {
-        let added: usize = diffs(tool).map(|diff| diff.new_text.lines().count()).sum();
-        native.raw_input.get_or_insert_with(|| json!({}))["_ticketdAddedLines"] = json!(added);
+            self.content_output = (!texts.is_empty()).then(|| output_tail(&texts.join("\n")));
+        }
+        self.native.update(update);
     }
 
-    let original = serde_json::to_string(&native).unwrap_or_default();
-    let size = original.len();
-    let bounded = if size <= MAX_PROVIDER_DETAIL_BYTES {
-        original
-    } else {
-        if let Some(Value::Object(fields)) = &mut native.raw_input {
-            fields.retain(|key, value| {
-                key == "_ticketdAddedLines"
-                    || (key != "Content"
-                        && key != "ReplacementContent"
-                        && value.as_str().is_some_and(|text| text.len() <= 4096))
-            });
-        } else {
-            native.raw_input = None;
-        }
-        native.locations.truncate(32);
-        native.meta = None;
-        let compact = serde_json::to_string(&native).unwrap_or_default();
-        if compact.len() <= MAX_PROVIDER_DETAIL_BYTES {
-            compact
-        } else {
-            if native.kind == acp::ToolKind::Execute {
-                let input = tool.raw_input.as_ref().unwrap_or(&Value::Null);
-                let command = input["CommandLine"]
+    fn merge_input(&mut self, input: Value) {
+        let Value::Object(mut fields) = input else {
+            self.native.raw_input = None;
+            return;
+        };
+        fields.retain(|key, _| INPUT_FIELDS.iter().any(|keys| keys.contains(&key.as_str())));
+        let known = self.native.raw_input.get_or_insert_with(|| json!({}));
+        if let Value::Object(known) = known {
+            known.extend(fields);
+            known.retain(|_, value| {
+                value
                     .as_str()
-                    .or_else(|| input["command"].as_str())
-                    .unwrap_or(&tool.title);
-                native.raw_input = Some(json!({"CommandLine": command}));
-            }
+                    .is_some_and(|text| text.len() <= MAX_PROVIDER_DETAIL_BYTES)
+            });
+        }
+    }
+
+    pub(super) fn changes(&self) -> impl Iterator<Item = FileChange> + '_ {
+        self.files.iter().cloned().map(|mut file| {
+            file.confirmed = self.status() == acp::ToolCallStatus::Completed;
+            file
+        })
+    }
+
+    pub(super) fn observed(&self, turn: NativeTurnId, declined: bool) -> EventKind {
+        let status = match self.status() {
+            _ if declined => ToolStatus::Declined,
+            acp::ToolCallStatus::Completed => ToolStatus::Succeeded,
+            acp::ToolCallStatus::Failed => ToolStatus::Failed,
+            _ => ToolStatus::Running,
+        };
+        EventKind::ToolUpdated {
+            turn,
+            item: NativeItemId::new(self.native.tool_call_id.0.as_ref()),
+            title: self.title().to_owned(),
+            status,
+            output: self
+                .raw_output
+                .as_ref()
+                .or(self.content_output.as_ref())
+                .cloned(),
+            detail: Some(self.detail()),
+        }
+    }
+
+    fn detail(&self) -> ProviderDetail {
+        let mut native = self.native.clone();
+        native.content = self
+            .files
+            .iter()
+            .take(32)
+            .map(|file| {
+                let mut diff = acp::Diff::new(&file.path, "");
+                diff.old_text = (file.kind != FileChangeKind::Added).then(String::new);
+                acp::ToolCallContent::Diff(diff)
+            })
+            .collect();
+
+        if !self.files.is_empty()
+            && self
+                .files
+                .iter()
+                .all(|file| file.kind == FileChangeKind::Added)
+        {
+            let added = self
+                .files
+                .iter()
+                .filter_map(|file| file.added_lines)
+                .fold(0, u32::saturating_add);
+            native.raw_input.get_or_insert_with(|| json!({}))["_ticketdAddedLines"] = json!(added);
+        }
+
+        let mut detail = serde_json::to_string(&native).unwrap_or_default();
+        let size = detail.len();
+        if detail.len() > MAX_PROVIDER_DETAIL_BYTES {
+            // The event has the title already. Give the reader's evidence this space.
             native.title.clear();
+            native.name = native
+                .name
+                .filter(|name| name.len() <= MAX_PROVIDER_DETAIL_BYTES);
+            native.locations.truncate(32);
+            detail = serde_json::to_string(&native).unwrap_or_default();
+        }
+        if detail.len() > MAX_PROVIDER_DETAIL_BYTES {
             native.locations.clear();
             native.content.clear();
-            serde_json::to_string(&native)
-                .ok()
-                .filter(|text| text.len() <= MAX_PROVIDER_DETAIL_BYTES)
-                .unwrap_or_default()
+            detail = serde_json::to_string(&native).unwrap_or_default();
         }
-    };
-    EventKind::ToolUpdated {
-        turn,
-        item: NativeItemId::new(tool.tool_call_id.0.as_ref()),
-        title: tool.title.clone(),
-        status,
-        output,
-        detail: Some(ProviderDetail::from_compacted_tool_input(
-            "tool_call",
-            bounded,
-            size,
-        )),
+        if detail.len() > MAX_PROVIDER_DETAIL_BYTES {
+            detail.clear();
+        }
+        ProviderDetail::from_compacted_tool_input("tool_call", detail, size)
     }
+}
+
+fn diffs(tool: &acp::ToolCall) -> impl Iterator<Item = &acp::Diff> {
+    tool.content.iter().filter_map(|item| match item {
+        acp::ToolCallContent::Diff(diff) => Some(diff),
+        _ => None,
+    })
+}
+
+fn file_change(diff: &acp::Diff) -> FileChange {
+    let created = diff.old_text.is_none();
+    FileChange {
+        path: diff.path.to_string_lossy().into_owned(),
+        kind: if created {
+            FileChangeKind::Added
+        } else {
+            FileChangeKind::Modified
+        },
+        added_lines: created
+            .then(|| u32::try_from(diff.new_text.lines().count()).unwrap_or(u32::MAX)),
+        removed_lines: created.then_some(0),
+        confirmed: false,
+    }
+}
+
+fn output_tail(output: &str) -> String {
+    // Keep the preceding character so the workspace still records a truncated
+    // output and cuts it at the same UTF-8 boundary as the unabridged output.
+    let mut start = output.len().saturating_sub(CHAT_TOOL_OUTPUT_LIMIT + 1);
+    while !output.is_char_boundary(start) {
+        start -= 1;
+    }
+    output[start..].to_owned()
 }
