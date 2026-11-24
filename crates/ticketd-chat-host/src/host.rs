@@ -70,6 +70,10 @@ pub enum HostError {
     InteractionExpired,
     #[error("contact with the harness was lost; whether the answer arrived is unknown")]
     ContactLost,
+    #[error(
+        "The permission restart is waiting for the previous harness to exit. Tools it started may still be running."
+    )]
+    PermissionRestartCleanupUnconfirmed,
     #[error("{}", .0.message)]
     Harness(Problem),
     #[error("no adapter is available for harness '{0}'")]

@@ -2852,6 +2852,178 @@ async fn a_permission_restart_retry_keeps_waiting_for_the_same_native_session() 
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_unconfirmed_permission_restart_rechecks_the_old_runtime_before_recovery() {
+    let f = Fixture::new(FakeAdapter::new(
+        &ticketd_core::harnesses::ANTIGRAVITY,
+        Capabilities {
+            steering: Capability::Unsupported {
+                reason: String::new(),
+            },
+        },
+    ));
+    f.send("first").await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    f.emit(recorded("full")).await;
+    f.emit(EventKind::SettingsState(settings("full"))).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let answer = f.fake.hold_next_setting();
+    f.host
+        .change_setting(&f.chat.id, SettingKey::Permission, "ask")
+        .await
+        .unwrap();
+    let queued = f.queue("next").await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("late-approval"),
+        turn: Some(turn_1()),
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "Approve the previous runtime's request".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow],
+        },
+        detail: None,
+    }))
+    .await;
+    let interaction = f.live().await.interactions[0].interaction_id.clone();
+    let original = f.fake.opens()[0].generation;
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: "the exit could not be observed".to_owned(),
+    });
+    answer.send(SettingOutcome::ReopenSession).unwrap();
+    settle().await;
+    assert!(!f.live().await.running);
+    assert!(f.live().await.interactions.is_empty());
+    let response = f
+        .host
+        .respond(
+            &f.chat.id,
+            &interaction,
+            InteractionAnswer::Approval(ApprovalDecision::Allow),
+        )
+        .await;
+    assert!(matches!(response, Err(HostError::InteractionExpired)));
+    assert_eq!(f.fake.respond_calls(), 0);
+    assert!(f.items().iter().any(|item| matches!(
+        item,
+        ChatItem::Interaction(saved)
+            if saved.id == interaction && saved.state == ChatInteractionState::Expired
+    )));
+    assert_eq!(
+        f.core()
+            .chat(&f.chat.id)
+            .unwrap()
+            .effective_settings
+            .as_deref(),
+        Some(r#"{"permission":"ask"}"#)
+    );
+
+    assert!(f.send("also queued").await.queued);
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(f.queued(), ["next", "also queued"]);
+    assert_eq!(written_kinds(&f), ["submit", "setting"]);
+
+    let native_retry = f.host.resume(&f.chat.id, ResumeMode::Native).await;
+    assert!(matches!(
+        native_retry,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    let fresh_retry = f
+        .host
+        .resume(
+            &f.chat.id,
+            ResumeMode::FreshSession {
+                history: String::new(),
+            },
+        )
+        .await;
+    assert!(matches!(
+        fresh_retry,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert!(matches!(
+        f.host.send_queued_now(&f.chat.id, &queued.id).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert!(matches!(
+        f.host.resume_queue(&f.chat.id).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.queued(), ["next", "also queued"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert!(matches!(
+        f.live().await.problem,
+        Some(ChatProblem::CleanupUnconfirmed { reason })
+            if reason.contains("Tools it started may still be running")
+    ));
+    let close_attempts = || {
+        f.fake
+            .written()
+            .into_iter()
+            .filter_map(|command| match command {
+                Written::Close(generation) => Some(generation),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(close_attempts(), [original; 5]);
+
+    f.fake
+        .set_close_outcome(CloseOutcome::Confirmed { exit_code: Some(0) });
+    let missing_history = Problem {
+        kind: ProblemKind::NativeHistoryUnavailable,
+        message: "the session is missing".to_owned(),
+        detail: None,
+        resets_at: None,
+    };
+    f.fake.fail_next_open(missing_history.clone());
+    let result = f.host.resume(&f.chat.id, ResumeMode::Native).await;
+    assert!(matches!(result, Err(HostError::Harness(problem)) if problem == missing_history));
+    assert!(matches!(
+        f.live().await.problem,
+        Some(ChatProblem::OpenFailed {
+            native_resume: true,
+            ..
+        })
+    ));
+    assert_eq!(f.fake.opens().len(), 1);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+
+    f.host
+        .resume(
+            &f.chat.id,
+            ResumeMode::FreshSession {
+                history: String::new(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(close_attempts(), [original; 6]);
+    assert_eq!(f.submits().len(), 1);
+    assert!(f.items().iter().any(|item| matches!(
+        item,
+        ChatItem::Notice(notice) if notice.text.contains("Tools it started may still be running")
+    )));
+
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert_eq!(opens[1].session, SessionStart::New);
+    assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
+    let submits = f.submits();
+    assert_eq!(submits.len(), 2);
+    assert_eq!(submits[1].text, "next");
+    assert_eq!(submits[1].generation, opens[1].generation);
+    assert_eq!(f.queued(), ["also queued"]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn native_only_recovery_opens_an_empty_session_when_native_history_is_missing() {
     let f = Fixture::new(FakeAdapter::new(
         &ticketd_core::harnesses::ANTIGRAVITY,
