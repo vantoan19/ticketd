@@ -410,6 +410,19 @@ export function createBridge(deps: BridgeDeps) {
       // Claude Code switches into it later only for a process started with this.
       // It makes the mode available, never the mode in effect.
       ...(!command.unattended && { allowDangerouslySkipPermissions: true }),
+      // Claude Code leaves Artifacts off for a session an SDK host starts unless
+      // CLAUDE_CODE_ARTIFACT is set, so a Chat would have no Artifact tool and
+      // could not publish an artifact. A Chat is the person's own session, as in
+      // the terminal, so it is turned on; a value the person set themselves is
+      // kept, and `enableArtifact: false` in their settings still turns it off.
+      // The SDK replaces the environment when `env` is given, so the bridge's own
+      // (with the ticketd CLI's folder on PATH) is passed on whole.
+      ...(!command.unattended && {
+        env: {
+          ...process.env,
+          CLAUDE_CODE_ARTIFACT: process.env.CLAUDE_CODE_ARTIFACT ?? "1",
+        },
+      }),
       // Last, so nothing above changes how an unattended session runs.
       ...(command.unattended && {
         permissionMode: "dontAsk" as const,

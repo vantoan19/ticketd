@@ -8,7 +8,7 @@ import type {
   PermissionUpdate,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createBridge, type QueryFn } from "./bridge";
 import {
   SDK_CLAUDE_CODE_VERSION,
@@ -339,15 +339,30 @@ describe("open", () => {
       "tools",
       "allowedTools",
       "disallowedTools",
-      "env",
     ]) {
       expect(fake.options).not.toHaveProperty(untouched);
     }
+    // Artifacts are on, as in the terminal: Claude Code leaves them off for an
+    // SDK host otherwise. The rest of the environment is the bridge's own.
+    expect(fake.options.env).toEqual({
+      ...process.env,
+      CLAUDE_CODE_ARTIFACT: process.env.CLAUDE_CODE_ARTIFACT ?? "1",
+    });
     expect(h.named("session_opened")).toHaveLength(1);
     expect(h.named("session_initialized")[0]).toMatchObject({
       generation: 1,
       claude_code_version: "2.1.322",
     });
+  });
+
+  it("keeps the person's own CLAUDE_CODE_ARTIFACT", async () => {
+    vi.stubEnv("CLAUDE_CODE_ARTIFACT", "0");
+    try {
+      const fake = await harness().open(1);
+      expect(fake.options.env?.CLAUDE_CODE_ARTIFACT).toBe("0");
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it("never runs an unattended session in full access", async () => {
