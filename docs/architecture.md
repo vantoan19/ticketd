@@ -712,8 +712,12 @@ authorizes a workspace UUID and attachment ID, opens only a complete managed loc
 snapshot, and classifies bounded header evidence against a passive-media allowlist.
 It returns a read handle, never a filesystem path to React. PNG, JPEG, GIF, WebP,
 BMP, WAV, MP3, recognized Ogg, MP4 and WebM containers can be attempted; container
-recognition is not a codec guarantee. HTML, SVG, PDF, office files, playlists and
+recognition is not a codec guarantee. SVG, PDF, office files, playlists and
 unrecognized content retain metadata and explicit export/open fallback actions.
+A `.html` or `.htm` snapshot that is UTF-8 text of at most 8 MiB reports `html` in
+its preview and is read whole through the same checked snapshot by
+`Workspace::attachment_html` (a Tauri command returning the text over IPC); it is
+never added to the media allowlist, so the `attachment-media` route still refuses it.
 External references use the same preview entry point with cached provider details,
 current-source wording and explicit Open in Drive. They never enter the local media
 route or offer an original-byte export; unknown provider size remains unknown.
@@ -754,6 +758,25 @@ claim until that reader unmounts; ordinary reading creates no claim. Cancellatio
 and failed protection leave the selected reference unchanged. Preview usage is a
 display projection of `attachment_usage`, with the full count and at most 20 labeled
 entries, including drafts, Undo and Trash; the display subset never decides cleanup.
+
+### HTML reports
+
+The viewer renders an HTML report read-only in a `<iframe sandbox="">` whose
+`srcdoc` is built from the text that `attachment_html` returns. Isolation has four
+independent layers: the empty sandbox (no scripts, forms, popups or app origin: the
+frame has an opaque origin and no access to IPC or the application); the app CSP
+that a srcdoc frame inherits (no inline script, no network, `connect-src` limited
+to IPC); a leading `<meta>` CSP of `default-src 'none'; style-src 'unsafe-inline';
+img-src data:; font-src data:`, which intersects with the app policy so a report
+cannot read another attachment through `attachment-media:` (the app allows that
+scheme for images); and a parse with `DOMParser` that removes scripts, event
+handlers, links, forms, frames, `<base>` and `<meta http-equiv>` before the document
+is handed to the frame, so links do nothing. `frame-src 'none'` stays: WebKit does
+not apply it to `about:srcdoc` frames (verified in WKWebView; WebView2 and WebKitGTK
+are checked in the platform matrix). Reports keep inline styles and `data:` images;
+`data:` fonts are blocked by the app CSP's `font-src`. Keyboard events inside a
+sandboxed frame do not reach the viewer, so Escape closes the viewer from the stage
+and header, and Shift+Tab leaves the frame.
 
 ## Document editing
 

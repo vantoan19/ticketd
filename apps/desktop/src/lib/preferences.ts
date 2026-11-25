@@ -16,6 +16,8 @@ const preferencesSchema = z.object({
   chat: z.boolean().catch(false),
   /** Settings > Chat > Notify me about Chats. On by default. */
   notifyChats: z.boolean().catch(true),
+  /** The viewer's Details panel (I, or "…" > Show details), kept between files. */
+  attachmentDetails: z.boolean().catch(false),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -33,6 +35,7 @@ const DEFAULTS: Preferences = {
   notifyReminders: false,
   chat: false,
   notifyChats: true,
+  attachmentDetails: false,
 };
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

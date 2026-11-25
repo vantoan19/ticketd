@@ -10,6 +10,41 @@
 .attachment-preview-text {
   white-space: pre-wrap;
 }
+.attachment-preview-stage:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.attachment-report-note {
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-report-frame {
+  background: transparent;
+}
+.attachment-state-tile {
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
+}
+.attachment-state-title {
+  color: var(--foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  font-weight: 500;
+}
+.attachment-state-sentence,
+.attachment-state-progress {
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
+.attachment-preview-details {
+  background: var(--surface);
+  box-shadow: inset 1px 0 0 var(--group-hairline);
+}
 .attachment-preview-text:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;

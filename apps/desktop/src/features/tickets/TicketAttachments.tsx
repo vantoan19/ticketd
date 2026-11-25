@@ -1,7 +1,7 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useState } from "react";
 import { File } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
 import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
@@ -54,6 +54,7 @@ export function AttachmentDialogs({
   onPickerChange,
   selected,
   onSelected,
+  fallbackFocus,
 }: {
   ticket: Ticket;
   state: TicketAttachmentsState;
@@ -61,6 +62,8 @@ export function AttachmentDialogs({
   onPickerChange: (open: boolean) => void;
   selected: Attachment | null;
   onSelected: (file: Attachment | null) => void;
+  /** Where focus goes when the file that was open is gone (the Files heading). */
+  fallbackFocus?: () => HTMLElement | null;
 }) {
   const [busy, setBusy] = useState(false);
   const statusLine = useStatusLine();
@@ -130,19 +133,17 @@ export function AttachmentDialogs({
                   changed();
                 }
           }
-          actions={
-            <>
-              {error && <FailureAlert size="compact" failure={error} />}
-              {!ticket.trashed && (
-                <Button
-                  variant="ghost"
-                  disabled={busy}
-                  onClick={() => void detach(selected)}
-                >
-                  Detach from ticket
-                </Button>
-              )}
-            </>
+          {...(fallbackFocus && { fallbackFocus })}
+          notice={error && <FailureAlert size="compact" failure={error} />}
+          menuItems={
+            !ticket.trashed && (
+              <DropdownMenuItem
+                disabled={busy}
+                onSelect={() => void detach(selected)}
+              >
+                Detach from ticket
+              </DropdownMenuItem>
+            )
           }
         />
       )}

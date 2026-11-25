@@ -166,6 +166,7 @@ export const SHORTCUTS = [
       ["attachments-add", [["Mod", "Shift", "U"]], "Add files"],
       ["attachments-open", [["O"]], "Open file"],
       ["attachments-more", [["."]], "More file actions"],
+      ["attachments-details", [["I"]], "Show file details"],
       ["attachments-back", [["Esc"]], "Back to Attachments"],
     ] as const
   ).map(([id, keys, label]) => ({

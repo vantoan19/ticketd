@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useState } from "react";
 // @vitest-environment jsdom
 import {
   act,
@@ -8,17 +8,23 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentPreview } from "./AttachmentPreview";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { TicketNavigation } from "@/features/tickets/navigation";
+import { setPreference } from "@/lib/preferences";
+import reportSource from "@/test/fixtures/attachment-report.html?raw";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   convertFileSrc: (path: string, protocol: string) =>
     `${protocol}://localhost/${path}`,
 }));
+beforeEach(() => {
+  // These tests read the facts; the viewer keeps them behind "…" until asked.
+  setPreference("attachmentDetails", true);
+});
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -169,19 +175,17 @@ test("preview exposes Added, same-identity rename and a reusable workspace link"
       screen.getByText("Added").nextElementSibling?.querySelector("time")
         ?.dateTime,
     ).toBe("2026-11-04T10:00:00Z");
-    fireEvent.click(screen.getByRole("button", { name: "Copy link" }));
+    // Copy link lives under "…" in the viewer.
+    expect(screen.queryByRole("button", { name: "Copy link" })).toBeNull();
+    const more = screen.getByRole("button", { name: "More actions" });
+    fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Copy link" }));
     await waitFor(() =>
       expect(writeText).toHaveBeenCalledWith(
         "<ticketd://attachment/workspace/file-1>",
       ),
     );
-    fireEvent.pointerDown(
-      screen.getByRole("button", { name: "More actions" }),
-      {
-        button: 0,
-        ctrlKey: false,
-      },
-    );
+    fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
     fireEvent.click(await screen.findByRole("menuitem", { name: "Rename…" }));
     const name = await screen.findByRole("textbox", { name: "Display name" });
     fireEvent.change(name, { target: { value: "Renamed screenshot" } });
@@ -552,4 +556,145 @@ test("viewer retains its media and owner until the closing animation completes",
   } finally {
     vi.unstubAllGlobals();
   }
+});
+
+const reportFile = {
+  ...file,
+  id: "report-1",
+  display_name: "E2E report",
+  original_filename: "e2e-report.html",
+  size_bytes: 4320,
+};
+const reportPreview = {
+  attachment: reportFile,
+  status: "unsupported",
+  media_type: null,
+  message: "Preview unavailable for this format.",
+  can_open: true,
+  html: true,
+  text_excerpt: { text: "<!doctype html>", truncated: true },
+  usage: { total: 0, entries: [], legacy_drafts_pending: false },
+};
+function serveReport(html: () => Promise<string> | string) {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_preview") return reportPreview;
+    if (command === "attachment_html") return html();
+    return null;
+  });
+}
+
+test("an HTML report renders read-only in an isolated frame, with scripts and network off", async () => {
+  serveReport(() => reportSource);
+  render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  const frame = await screen.findByLabelText("Report: E2E report");
+  expect(invoke).toHaveBeenCalledWith("attachment_html", {
+    workspace: "workspace",
+    id: "report-1",
+  });
+  // An empty sandbox: no scripts, forms, popups or app origin.
+  expect(frame.getAttribute("sandbox")).toBe("");
+  expect(frame.getAttribute("referrerpolicy")).toBe("no-referrer");
+  const srcdoc = frame.getAttribute("srcdoc") ?? "";
+  expect(srcdoc).toContain("default-src 'none'");
+  expect(srcdoc).toContain("<table>");
+  expect(srcdoc).not.toContain("<script");
+  expect(
+    screen.getByText("Scripts and online images are off in this preview."),
+  ).toBeTruthy();
+  // It never goes through the passive-media protocol.
+  expect(screen.queryByRole("img")).toBeNull();
+  // The facts say how it is shown.
+  expect(screen.getByText(/Read-only, offline/)).toBeTruthy();
+});
+
+test("a report that needs scripts or files that are not attached can't show here", async () => {
+  serveReport(() => '<div id="app"></div><script>render()</script>');
+  render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  expect(await screen.findByText("This report can't show here")).toBeTruthy();
+  expect(screen.queryByLabelText("Report: E2E report")).toBeNull();
+  // Open stays in the header as the way to the full report.
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
+      .disabled,
+  ).toBe(false);
+});
+
+test("a report that can't be read says so and retries", async () => {
+  let attempt = 0;
+  serveReport(() => {
+    attempt += 1;
+    if (attempt === 1) throw new Error("This report is not UTF-8 text.");
+    return reportSource;
+  });
+  render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  expect(await screen.findByLabelText("Report: E2E report")).toBeTruthy();
+});
+
+test("Details stay behind … until asked, then I toggles them and the choice is kept", async () => {
+  setPreference("attachmentDetails", false);
+  serveReport(() => reportSource);
+  const view = render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  await screen.findByLabelText("Report: E2E report");
+  expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull();
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "i" });
+  expect(screen.getByRole("complementary", { name: "Details" })).toBeTruthy();
+  view.unmount();
+  render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  await screen.findByLabelText("Report: E2E report");
+  expect(screen.getByRole("complementary", { name: "Details" })).toBeTruthy();
+});
+
+test("closing with Escape puts the ticket back where it was", async () => {
+  function Ticket() {
+    const [open, setOpen] = useState(false);
+    return (
+      <div data-testid="pane">
+        <button onClick={() => setOpen(true)}>Open report</button>
+        {open && (
+          <AttachmentPreview
+            target={{ id: reportFile.id }}
+            onClose={() => setOpen(false)}
+          />
+        )}
+      </div>
+    );
+  }
+  serveReport(() => reportSource);
+  render(<Ticket />);
+  // jsdom has no layout: a scroll position the test controls.
+  const pane = screen.getByTestId("pane");
+  let top = 320;
+  Object.defineProperty(pane, "scrollTop", {
+    get: () => top,
+    set: (value: number) => {
+      top = value;
+    },
+  });
+  const opener = screen.getByRole("button", { name: "Open report" });
+  opener.focus();
+  fireEvent.click(opener);
+  const viewer = await screen.findByRole("dialog");
+  // The stage takes focus, named by its file and type.
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("group", { name: "E2E report, HTML" }),
+    ),
+  );
+  top = 0; // the page moved while it was open
+  fireEvent.keyDown(viewer, { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(top).toBe(320);
+  expect(document.activeElement).toBe(opener);
 });

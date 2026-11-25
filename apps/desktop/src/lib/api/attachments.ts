@@ -93,6 +93,8 @@ const previewSchema = lazySchema(() =>
       .object({ text: z.string(), truncated: z.boolean() })
       .nullable()
       .optional(),
+    /** A UTF-8 HTML report the viewer renders read-only; its text comes from `html()`. */
+    html: z.boolean().optional(),
     usage: z.object({
       total: z.number().int().nonnegative(),
       legacy_drafts_pending: z.boolean(),
@@ -334,6 +336,10 @@ export const attachments = {
     return previewSchema.parse(
       await invoke("attachment_preview", { workspace, id }),
     );
+  },
+  /** The whole text of a stored HTML report, for the isolated read-only frame. */
+  async html(workspace: string, id: string) {
+    return z.string().parse(await invoke("attachment_html", { workspace, id }));
   },
   mediaUrl(workspace: string, id: string) {
     return `${convertFileSrc(workspace, "attachment-media")}/${encodeURIComponent(id)}`;

@@ -47,6 +47,7 @@ export function TicketFiles({
   const [picker, setPicker] = useState(false);
   const [choosing, setChoosing] = useState(false);
   const [selected, setSelected] = useState<Attachment | null>(null);
+  const section = useRef<HTMLDivElement>(null);
   // Choosing "Document…" closes the menu and opens the picker in its place;
   // the menu must not hand focus back to its trigger on the way out.
   const toPicker = useRef(false);
@@ -119,7 +120,7 @@ export function TicketFiles({
           ),
           emptyTarget,
         )}
-      <div hidden={empty && Boolean(emptyTarget)}>
+      <div ref={section} hidden={empty && Boolean(emptyTarget)}>
         <RailSection
           label="Files"
           count={
@@ -180,6 +181,12 @@ export function TicketFiles({
             onPickerChange={setPicker}
             selected={selected}
             onSelected={setSelected}
+            fallbackFocus={() => {
+              // The file that opened the viewer was detached: land on the heading.
+              const heading = section.current?.querySelector<HTMLElement>("h3");
+              heading?.setAttribute("tabindex", "-1");
+              return heading ?? null;
+            }}
           />
         </RailSection>
       </div>

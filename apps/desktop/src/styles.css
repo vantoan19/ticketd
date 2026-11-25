@@ -3104,6 +3104,10 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   max-width: 100%;
   height: auto;
 }
+/* The viewer size is taller than the diagram needs: keep its rows together. */
+.mermaid-expanded {
+  align-content: start;
+}
 .mermaid-expanded .mermaid-viewer {
   max-height: 70vh;
 }
@@ -3315,11 +3319,18 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   width: min(920px, calc(100vw - 32px));
 }
 .ui-dialog[data-size="viewer"] {
-  --dialog-top: 96px;
+  --dialog-top: 40px;
   top: var(--dialog-top);
   translate: -50% 0;
-  width: min(1120px, calc(100vw - 64px));
-  height: min(800px, calc(100dvh - var(--dialog-top) - 16px));
+  width: min(1200px, calc(100vw - 48px));
+  height: calc(100dvh - 64px);
+}
+@media (max-width: 879px) {
+  .ui-dialog[data-size="viewer"] {
+    --dialog-top: 12px;
+    width: calc(100vw - 24px);
+    height: calc(100dvh - 24px);
+  }
 }
 
 /* The tooltip chip (DESIGN.md section 4): 12/16 text, 4px 8px, wrapping at
@@ -4252,7 +4263,7 @@ kbd,
   border-radius: var(--radius-segment);
 }
 .attachment-preview[data-layout="viewer"] .attachment-preview-stage {
-  box-shadow: inset -1px 0 0 var(--group-hairline);
+  border-radius: 0;
 }
 .attachment-preview-image {
   background: repeating-conic-gradient(

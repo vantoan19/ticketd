@@ -139,23 +139,23 @@ test("a ticket's attached files say whether they are downloaded", async () => {
 
 test("the preview of a file that is not downloaded offers Download in place of the file", async () => {
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
-  expect((await screen.findAllByText("Not downloaded")).length).toBe(2);
+  expect(await screen.findByText("Not downloaded")).toBeTruthy();
   expect(
     screen
       .getByText("This file is in your Google Drive.")
       .closest('[role="status"]'),
   ).toBeTruthy();
-  expect(screen.getByText("193 B")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Download · 193 B" })).toBeTruthy();
   expect(
     screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
       .disabled,
   ).toBe(true);
-  fireEvent.click(screen.getByRole("button", { name: "Download" }));
+  fireEvent.click(screen.getByRole("button", { name: /^Download/ }));
   await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
   expect((await screen.findAllByText("Downloading…")).length).toBeGreaterThan(
     0,
   );
-  expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Download/ })).toBeNull();
 });
 
 test("the preview of a file waiting in S3 names S3, not Google Drive", async () => {
@@ -187,13 +187,13 @@ test("with Attachments downloaded when opened, opening one that is not here down
   expect((await screen.findAllByText("Downloading…")).length).toBeGreaterThan(
     0,
   );
-  expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+  expect(screen.queryByRole("button", { name: /^Download/ })).toBeNull();
   expect(syncReview.download).toHaveBeenCalledTimes(1);
 });
 
 test("with automatic downloads, a file that did not arrive waits for Download", async () => {
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
-  await screen.findByRole("button", { name: "Download" });
+  await screen.findByRole("button", { name: /^Download/ });
   await waitFor(() => expect(invoke).toHaveBeenCalledWith("sync_settings"));
   expect(syncReview.download).not.toHaveBeenCalled();
 });
@@ -204,7 +204,7 @@ test("a download on open that fails says why and leaves Download", async () => {
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
   await revealFailureDetails();
   expect(screen.getByText("offline")).toBeTruthy();
-  expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(syncReview.download).toHaveBeenCalledTimes(1);
 });
 

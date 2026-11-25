@@ -70,10 +70,24 @@
   min-height: 0;
   overflow-y: auto;
 }
+/* The viewer: the stage fills everything under the header; the Details panel
+   (280px) sits beside it when it is shown. */
 .attachment-preview[data-layout="viewer"] .attachment-preview-body {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 280px;
+  position: relative;
+  flex-direction: row;
   overflow: hidden;
+}
+.attachment-preview-main {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.attachment-preview-details {
+  flex: none;
+  width: 280px;
+  overflow-y: auto;
 }
 
 /* The stage: a recessed band under a hairline; the file sits in it. */
@@ -89,8 +103,85 @@
   overflow: auto;
 }
 .attachment-preview[data-layout="viewer"] .attachment-preview-stage {
+  flex: 1 1 0;
+  height: auto;
   min-height: 0;
+  margin: 0;
+  padding: 0;
   overflow: auto;
+}
+.attachment-preview[data-layout="viewer"] .attachment-preview-canvas {
+  padding: 20px;
+}
+.attachment-preview-stage[data-report] .attachment-preview-canvas {
+  padding: 0;
+  align-items: stretch;
+  justify-content: stretch;
+}
+
+/* A stored HTML report: a 36px line when it had scripts or online references,
+   then the frame, edge to edge. */
+.attachment-report {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.attachment-report-note {
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 36px;
+  margin: 0;
+  padding-inline: 16px;
+}
+.attachment-report-frame {
+  flex: 1 1 0;
+  width: 100%;
+  min-height: 0;
+  border: 0;
+}
+
+/* One block for every state: a 112 × 72 tile, a title, one sentence and a
+   reserved 32px row, so a file moving between states never shifts it. */
+.attachment-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  max-width: 360px;
+  text-align: center;
+}
+.attachment-state-tile {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 112px;
+  height: 72px;
+  margin-bottom: 4px;
+}
+.attachment-state-tile svg {
+  width: 22px;
+  height: 22px;
+}
+.attachment-state p {
+  margin: 0;
+}
+.attachment-state-sentence {
+  min-height: calc(2 * var(--text-ui-line));
+}
+.attachment-state-action {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+}
+.attachment-state-progress {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
 }
 .attachment-preview-canvas {
   display: flex;
@@ -199,14 +290,17 @@
 }
 
 @media (max-width: 720px) {
-  .attachment-preview[data-layout="viewer"] .attachment-preview-body {
-    display: flex;
-    overflow-y: auto;
-  }
-  .attachment-preview[data-layout="viewer"] .attachment-preview-stage {
-    flex: none;
-  }
   .attachment-preview-facts {
     padding: 20px 16px;
+  }
+}
+/* In a compact window Details is a sheet over the stage's right edge. */
+@media (max-width: 879px) {
+  .attachment-preview-details {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-end: 0;
+    z-index: 1;
+    max-width: calc(100% - 24px);
   }
 }
