@@ -2430,6 +2430,34 @@ async fn an_unadopted_queue_edit_keeps_original_snapshots_through_host_restart()
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_unadopted_queue_edit_reports_its_hold_and_resume_sends_the_original() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let queued = f.send_file("Unadopted edit", SendMode::Queue).await;
+    f.queue("Next").await;
+
+    // The request reached the host, but its reply never reached a composer.
+    drop(
+        f.host
+            .prepare_queue_edit(&f.chat.id, &queued.id)
+            .await
+            .unwrap(),
+    );
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.submits().len(), 1);
+    assert!(f.live().await.prepared_queue_edits.contains(&queued.id));
+
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert!(f.live().await.prepared_queue_edits.is_empty());
+    let submissions = f.submits();
+    assert_eq!(submissions.len(), 2);
+    assert_eq!(submissions[1].text, "Unadopted edit");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    assert_eq!(f.queued(), ["Next"]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn removing_an_abandoned_edit_releases_the_following_queue_entry() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;

@@ -380,6 +380,16 @@ test("editing a queued message appends its text and saved files to the current d
   await waitFor(() =>
     expect(button("Steer")).toHaveProperty("disabled", false),
   );
+  const edited = box();
+  expect(document.activeElement).toBe(edited);
+  expect(edited).toHaveProperty(
+    "selectionStart",
+    "Existing draft\n\nQueued text".length,
+  );
+  expect(edited).toHaveProperty(
+    "selectionEnd",
+    "Existing draft\n\nQueued text".length,
+  );
   fireEvent.click(button("Steer"));
   expect(send).toHaveBeenCalledWith(
     "c1",
@@ -456,14 +466,13 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
   fireEvent.click(button(/^Limiter/));
   await screen.findByRole("heading", { name: "Limiter" });
 
-  expect(
-    await screen.findByRole("button", { name: "Retry queue edit" }),
-  ).toBeTruthy();
+  const retry = await screen.findByRole("button", { name: "Retry queue edit" });
   expect((await client.openChat("c1")).chat.queue).toHaveLength(0);
   expect(composer()).toHaveProperty("value", "Draft caption\n\nQueued caption");
   expect(composer()).toHaveProperty("readOnly", true);
   expect(button("Send")).toHaveProperty("disabled", true);
-  fireEvent.click(button("Retry queue edit"));
+  act(() => retry.focus());
+  fireEvent.click(retry);
 
   await waitFor(() => {
     expect(composer()).toHaveProperty(
@@ -473,6 +482,7 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
     expect(button("Remove notes.txt")).toBeTruthy();
     expect(button("Send")).toHaveProperty("disabled", false);
   });
+  expect(document.activeElement).toBe(composer());
   expect(confirm.mock.calls[1]).toEqual(confirm.mock.calls[0]);
   expect(
     (await client.openChat("c1")).items.filter((item) => item.kind === "user"),

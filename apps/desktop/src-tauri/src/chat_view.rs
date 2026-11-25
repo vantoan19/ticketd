@@ -1801,7 +1801,11 @@ pub fn chat_state(
         ),
         links: around.links.clone(),
         queue: around.queue.clone(),
-        queue_paused: chat.queue_paused,
+        queue_paused: chat.queue_paused
+            || around
+                .queue
+                .first()
+                .is_some_and(|message| live.prepared_queue_edits.contains(&message.id)),
         context: chat_reports::context(live),
         settings: chat_reports::settings(live),
         unseen: chat.marked_unread

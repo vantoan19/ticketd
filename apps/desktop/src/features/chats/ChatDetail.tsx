@@ -644,13 +644,17 @@ function Conversation({
         "stale",
         "The message is no longer available to edit.",
       );
-    if (result) {
-      messageBox.current?.focus();
-      const box = messageBox.current;
-      box?.setSelectionRange(box.value.length, box.value.length);
-    }
+  };
+  const focusEdit = () => {
+    // Edit and Retry own focus only when invoked. Confirmation may finish after
+    // the person moves elsewhere, even in a different mount of the composer.
+    const box = messageBox.current;
+    box?.focus();
+    box?.setSelectionRange(box.value.length, box.value.length);
   };
   const edit = (queuedId: string) => {
+    if (draft.snapshot().transfer) return;
+    focusEdit();
     const transferId = crypto.randomUUID();
     quietly(
       draft.editQueued(
@@ -961,13 +965,14 @@ function Conversation({
                           type="button"
                           variant="outline"
                           size="compact"
-                          onClick={() =>
+                          onClick={() => {
+                            focusEdit();
                             quietly(
                               draft.retryTransfer()?.then(finishEdit) ??
                                 Promise.resolve(),
                               "edit the queued message",
-                            )
-                          }
+                            );
+                          }}
                         >
                           Retry queue edit
                         </Button>

@@ -1,7 +1,7 @@
 //! The host-facing Chat interface: one supervisor per Chat behind a small set of
 //! commands and a subscription. A later step maps it onto Tauri commands and events.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
@@ -196,6 +196,8 @@ pub struct ChatLive {
     /// Input the person sent that is held to go out as soon as the session can take it,
     /// in order. It waits for no queue; see `ChatMessage::standing_while`.
     pub sending: Vec<String>,
+    /// Queued input IDs held from automatic dispatch until their edits are adopted.
+    pub prepared_queue_edits: HashSet<String>,
     pub interactions: Vec<LiveInteraction>,
     pub stop: Option<StopState>,
     pub problem: Option<ChatProblem>,
@@ -219,6 +221,7 @@ impl ChatLive {
             steering_images_refused: false,
             delivery_unconfirmed: false,
             sending: Vec::new(),
+            prepared_queue_edits: HashSet::new(),
             interactions: Vec::new(),
             stop: None,
             problem: None,

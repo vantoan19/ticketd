@@ -2960,6 +2960,7 @@ impl Supervisor {
             steering_images_refused: self.active.is_some() && self.images_refused(true),
             delivery_unconfirmed: self.unconfirmed_start.is_some(),
             sending: self.direct.iter().cloned().collect(),
+            prepared_queue_edits: self.prepared_queue_edits.clone(),
             interactions: self
                 .interactions
                 .iter()
