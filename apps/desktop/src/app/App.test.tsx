@@ -5672,7 +5672,7 @@ test("Document sync metadata survives floating Saved feedback and waits for Driv
     name: "Document sync status",
   });
   expect(metadata.textContent).toBe("Saved on this computer");
-  const stateRow = metadata.parentElement!;
+  const stateRow = metadata.closest(".document-meta") as HTMLElement;
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByRole("textbox", { name: "Title" }), {
     target: { value: "Sync safety revised" },
@@ -5699,7 +5699,9 @@ test("Document sync metadata survives floating Saved feedback and waits for Driv
     timeout: 4000,
   });
   expect(
-    screen.getByRole("status", { name: "Document sync status" }).parentElement,
+    screen
+      .getByRole("status", { name: "Document sync status" })
+      .closest(".document-meta"),
   ).toBe(stateRow);
   fireEvent.click(within(bar).getByRole("button", { name: "Done editing" }));
   expect(within(stateRow).getByText("Synced to Drive")).toBeTruthy();
@@ -7463,24 +7465,20 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
         return stored();
       if (command === "document_version") return [timestamp, trashed];
       if (command === "document_tags") return [];
-      if (command === "document_context_links" && args.id === summary.id)
-        return [
-          [],
-          [
+      if (command === "document_summary" && args.id === summary.id)
+        return {
+          ...summary,
+          plans: [
             {
-              source_id: "guide-plan",
-              target_id: summary.id,
-              source_kind: "plan",
-              target_kind: "document",
-              passage: "",
-              source_label: "Guide launch",
-              target_label: summary.heading,
-              source_trashed: false,
-              target_trashed: trashed,
-              explicit: true,
+              id: "guide-plan",
+              name: "Guide launch",
+              archived: false,
+              spec: false,
             },
           ],
-        ];
+          tickets: [],
+          tags: [],
+        };
       if (command === "show_plan")
         return {
           plan: {
@@ -7519,9 +7517,11 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   const linked = within(reader).getByRole("complementary", {
     name: "Document details",
   });
-  expect(within(linked).getByRole("heading", { name: "Linked" })).toBeTruthy();
   expect(
-    await within(linked).findByRole("button", { name: "Guide launch" }),
+    await within(linked).findByRole("heading", { name: "Linked" }),
+  ).toBeTruthy();
+  expect(
+    await within(linked).findByRole("button", { name: /Guide launch/ }),
   ).toBeTruthy();
   fireEvent.click(within(reader).getByRole("button", { name: "Restore" }));
   await vi.waitFor(() =>
@@ -7563,7 +7563,7 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   await vi.waitFor(() =>
     expect(order()).toEqual(["Linked guide", "Other guide"]),
   );
-  fireEvent.click(within(linked).getByRole("button", { name: "Guide launch" }));
+  fireEvent.click(within(linked).getByRole("button", { name: /Guide launch/ }));
   expect(
     await screen.findByRole("heading", { name: "Guide launch" }),
   ).toBeTruthy();

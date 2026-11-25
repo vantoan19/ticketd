@@ -165,3 +165,29 @@ fn recent_all_pinned_and_search_rows_carry_the_same_context() {
     };
     assert_eq!(tagged[0].plans, expected.plans);
 }
+
+#[test]
+fn one_document_reads_the_same_row_the_list_shows_trashed_ones_included() {
+    let (_dir, mut workspace) = open_workspace();
+    let old = workspace.create_plan("Old launch").unwrap();
+    let doc = workspace.create_document(Some("Brief"), "body").unwrap();
+    workspace.set_plan_document(&old.id, &doc.id, true).unwrap();
+    workspace.set_plan_spec(&old.id, Some(&doc.id)).unwrap();
+    workspace.change_plan(&old.id, None, Some(true)).unwrap();
+    let ticket = workspace.create_ticket("Ship").unwrap();
+    workspace
+        .set_ticket_document(&ticket.reference, &doc.id, true)
+        .unwrap();
+    workspace.set_document_tag(&doc.id, "launch", true).unwrap();
+
+    let listed = row(workspace.all_documents_page(50, 0, false).unwrap(), &doc.id);
+    let single = workspace.document_summary(&doc.id).unwrap();
+    assert_eq!(single, listed);
+    assert!(single.plans[0].archived && single.plans[0].spec);
+    assert_eq!(single.plans[0].id, old.id);
+    assert_eq!(single.tags, vec!["launch".to_owned()]);
+
+    workspace.set_document_trashed(&doc.id, true).unwrap();
+    assert_eq!(workspace.document_summary(&doc.id).unwrap().id, doc.id);
+    assert!(workspace.document_summary("missing").is_err());
+}

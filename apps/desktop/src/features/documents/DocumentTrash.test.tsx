@@ -6,13 +6,20 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Documents } from "./Documents";
 import { documents } from "./api";
 
 vi.mock("./api", () => ({
   documents: {
     links: vi.fn().mockResolvedValue([[], []]),
+    summary: vi.fn().mockResolvedValue({
+      id: "d1",
+      heading: "",
+      plans: [],
+      tickets: [],
+      tags: [],
+    }),
     recent: vi.fn(),
     pins: vi.fn(),
     tags: vi.fn(),
@@ -27,6 +34,16 @@ vi.mock("./api", () => ({
 vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
   LazyMarkdownEditor: ({ value }: { value: string }) => <p>{value}</p>,
 }));
+beforeEach(() => {
+  vi.mocked(documents.links).mockResolvedValue([[], []]);
+  vi.mocked(documents.summary).mockResolvedValue({
+    id: "d1",
+    heading: "",
+    plans: [],
+    tickets: [],
+    tags: [],
+  });
+});
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
