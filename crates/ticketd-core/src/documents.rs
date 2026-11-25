@@ -34,6 +34,33 @@ pub struct DocumentSummary {
     pub tags: Vec<String>,
     #[serde(default)]
     pub updated_at: String,
+    /// The Plans the Document is attached to, the one it is the spec of first, then Active
+    /// before Archived, then by name.
+    #[serde(default)]
+    pub plans: Vec<DocumentPlanContext>,
+    /// The tickets (not in Trash) whose Documents include this one, by ticket number.
+    #[serde(default)]
+    pub tickets: Vec<DocumentTicketContext>,
+    /// Whether the Document has been opened on this computer.
+    #[serde(default)]
+    pub opened: bool,
+}
+
+/// A Plan a Document is attached to, as a list row names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentPlanContext {
+    pub name: String,
+    pub archived: bool,
+    /// The Document is this Plan's spec.
+    pub spec: bool,
+}
+
+/// A ticket whose Documents include this one, as a list row names it.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DocumentTicketContext {
+    pub reference: String,
+    pub title: String,
+    pub status: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +73,28 @@ pub struct DocumentSearchResult {
     pub tags: Vec<String>,
     #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
+    pub plans: Vec<DocumentPlanContext>,
+    #[serde(default)]
+    pub tickets: Vec<DocumentTicketContext>,
+    #[serde(default)]
+    pub opened: bool,
+}
+
+impl From<DocumentSummary> for DocumentSearchResult {
+    fn from(summary: DocumentSummary) -> Self {
+        Self {
+            id: summary.id,
+            heading: summary.heading,
+            snippet: summary.snippet,
+            origin_ticket: summary.origin_ticket,
+            tags: summary.tags,
+            updated_at: summary.updated_at,
+            plans: summary.plans,
+            tickets: summary.tickets,
+            opened: summary.opened,
+        }
+    }
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -102,7 +151,20 @@ pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200),
 /// Columns read by every Document list query; see `summary_from_row`.
 fn summary_columns() -> String {
     format!(
-        "d.id, {HEADING}, (SELECT t.reference FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id), d.body, d.updated_at, (SELECT group_concat(tag_name, char(31)) FROM (SELECT tag_name FROM document_tags WHERE document_id = d.id ORDER BY tag_name))"
+        "d.id, {HEADING}, (SELECT t.reference FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id), d.body, d.updated_at, (SELECT group_concat(tag_name, char(31)) FROM (SELECT tag_name FROM document_tags WHERE document_id = d.id ORDER BY tag_name)), {PLANS_JSON}, {tickets}, EXISTS (SELECT 1 FROM document_opens WHERE document_id = d.id)",
+        tickets = tickets_json()
+    )
+}
+
+/// A row's Plans (Archived included) as a JSON array, the one it is the spec of first.
+const PLANS_JSON: &str = "(SELECT json_group_array(json_object('name', name, 'archived', json(CASE archived WHEN 0 THEN 'false' ELSE 'true' END), 'spec', json(CASE spec WHEN 0 THEN 'false' ELSE 'true' END))) FROM (SELECT p.name AS name, p.archived AS archived, coalesce(p.spec_document_id = d.id, 0) AS spec FROM plan_documents pd JOIN plans p ON p.id = pd.plan_id WHERE pd.document_id = d.id ORDER BY spec DESC, p.archived, p.name, p.id))";
+
+/// A row's tickets, in Trash excluded, as a JSON array: those whose description mentions the
+/// Document and those it is attached to.
+fn tickets_json() -> String {
+    format!(
+        "(SELECT json_group_array(json_object('reference', reference, 'title', title, 'status', status)) FROM (SELECT t.reference AS reference, t.title AS title, t.status AS status FROM tickets t WHERE t.trashed = 0 AND t.id IN (SELECT m.source_id FROM {} m WHERE m.target_id = d.id) ORDER BY t.number))",
+        crate::document_links::DOCUMENT_MENTIONS
     )
 }
 
@@ -122,6 +184,19 @@ fn summary_from_row(
             .map(|value| value.split('\u{1f}').map(str::to_owned).collect())
             .unwrap_or_default(),
         updated_at: row.get(4)?,
+        plans: json_column(row, 6)?,
+        tickets: json_column(row, 7)?,
+        opened: row.get(8)?,
+    })
+}
+
+fn json_column<T: serde::de::DeserializeOwned>(
+    row: &rusqlite::Row<'_>,
+    index: usize,
+) -> rusqlite::Result<Vec<T>> {
+    let json: String = row.get(index)?;
+    serde_json::from_str(&json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(index, rusqlite::types::Type::Text, error.into())
     })
 }
 
@@ -393,17 +468,7 @@ impl Workspace {
                         offset,
                         include_support
                     ],
-                    |row| {
-                        let summary = summary_from_row(row, None)?;
-                        Ok(DocumentSearchResult {
-                            id: summary.id,
-                            heading: summary.heading,
-                            snippet: summary.snippet,
-                            origin_ticket: summary.origin_ticket,
-                            tags: summary.tags,
-                            updated_at: summary.updated_at,
-                        })
-                    },
+                    |row| summary_from_row(row, None).map(Into::into),
                 )?
                 .collect::<Result<_, _>>()?);
         }
@@ -439,15 +504,7 @@ impl Workspace {
         values.extend(words.into_iter().map(rusqlite::types::Value::from));
         Ok(statement
             .query_map(rusqlite::params_from_iter(values), |row| {
-                let summary = summary_from_row(row, Some(query))?;
-                Ok(DocumentSearchResult {
-                    id: summary.id,
-                    heading: summary.heading,
-                    snippet: summary.snippet,
-                    origin_ticket: summary.origin_ticket,
-                    tags: summary.tags,
-                    updated_at: summary.updated_at,
-                })
+                summary_from_row(row, Some(query)).map(Into::into)
             })?
             .collect::<Result<_, _>>()?)
     }

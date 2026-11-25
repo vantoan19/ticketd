@@ -402,7 +402,10 @@ heading. The JSON result includes the ID; `--request-id` makes a retry safe.
 `--title`, `--clear-title`, `--body`, or `--body-file`. Find Documents with
 `document recent`, `document search QUERY`, `document pins`, and the trash with
 `document trash`, `trash-list`, and `restore`. `document pin` and `document tag`
-take `--remove` to undo.
+take `--remove` to undo. Each row of `recent`, `search` and `pins` also says where the
+Document belongs: `plans` (name, `archived`, and `spec` when it is that Plan's spec),
+`tickets` (reference, title and status of the tickets, not in Trash, that mention or
+attach it) and `opened` (whether this computer has opened it).
 
 An Activity's details become a Document too: `activity add T-KQ1 --brief TEXT
 --details-file details.md` saves one, and `--document ID` attaches an existing one.

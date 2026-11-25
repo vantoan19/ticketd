@@ -701,3 +701,44 @@ fn restore_takes_the_workspace_from_a_warm_session_in_another_process() {
         .collect();
     assert_eq!(titles, ["Before"]);
 }
+
+#[test]
+fn document_lists_carry_each_rows_plans_tickets_and_unopened_state() {
+    let dir = tempfile::tempdir().unwrap();
+    let json = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&run(dir.path(), args)).unwrap()
+    };
+    let plan = json(&["plan", "create", "Launch"]);
+    let plan = plan["id"].as_str().unwrap();
+    run(dir.path(), &["create", "Ship it"]);
+    let created = json(&[
+        "document",
+        "create",
+        "--title",
+        "Launch notes",
+        "--body",
+        "steps",
+    ]);
+    let id = created["id"].as_str().unwrap();
+    run(dir.path(), &["plan", "spec", plan, id]);
+    run(dir.path(), &["document", "link-ticket", id, "T-KQ1"]);
+    run(dir.path(), &["document", "pin", id]);
+
+    for rows in [
+        json(&["document", "recent"]),
+        json(&["document", "pins"]),
+        json(&["document", "search", "steps"]),
+    ] {
+        let row = &rows[0];
+        assert_eq!(row["id"], id);
+        assert_eq!(
+            row["plans"],
+            serde_json::json!([{"name": "Launch", "archived": false, "spec": true}])
+        );
+        assert_eq!(
+            row["tickets"],
+            serde_json::json!([{"reference": "T-KQ1", "title": "Ship it", "status": "Todo"}])
+        );
+        assert_eq!(row["opened"], true);
+    }
+}

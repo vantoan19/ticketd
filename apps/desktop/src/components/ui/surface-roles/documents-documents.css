@@ -4,7 +4,7 @@
   list-style: none;
 }
 .documents-page .document-list-open {
-  white-space: nowrap;
+  white-space: normal;
   text-align: start;
 }
 .document-list-meta {

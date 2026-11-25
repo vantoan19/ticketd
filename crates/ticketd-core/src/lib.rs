@@ -23,7 +23,10 @@ pub use context_graph::{
 mod document_links;
 pub use document_links::{ContextLink, DocumentBacklink, derive_brief_heading, derive_heading};
 mod documents;
-pub use documents::{Document, DocumentPatch, DocumentSearchResult, DocumentSummary};
+pub use documents::{
+    Document, DocumentPatch, DocumentPlanContext, DocumentSearchResult, DocumentSummary,
+    DocumentTicketContext,
+};
 mod duplicates;
 pub use duplicates::{
     DependencyChoice, DependencyDecision, DependencyEdge, DuplicateDependencyPreview,
