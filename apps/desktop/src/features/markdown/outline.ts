@@ -149,3 +149,28 @@ export function currentHeading(
   });
   return current;
 }
+
+/**
+ * What the outline lists for the heading the reader is at: every section, and
+ * under the section the reader is in, its subsections. The popover and the
+ * full-width rail list the same.
+ */
+export function outlineView(
+  headings: readonly OutlineHeading[],
+  here: string | null,
+) {
+  const at = headings.findIndex((heading) => heading.id === here);
+  // The section the reader is in: the last section at or above the current heading.
+  let sectionAt = -1;
+  headings.forEach((heading, index) => {
+    if (heading.section && index <= at) sectionAt = index;
+  });
+  const next = headings.findIndex(
+    (heading, index) => heading.section && index > sectionAt,
+  );
+  const shown = headings.filter((heading, index) =>
+    heading.section ? true : index > sectionAt && (next === -1 || index < next),
+  );
+  const subsections = shown.filter((heading) => !heading.section).length;
+  return { sectionAt, shown, subsections };
+}

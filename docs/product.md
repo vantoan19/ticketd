@@ -268,6 +268,12 @@ change`; an empty value clears it). ticketd never writes one.
   each h2 and h3 can be folded to its first sentence, one at a time or with Fold all
   in the outline. Folds are kept per Document on this computer, never change the
   Markdown, and editing shows everything.
+- A Document can be read at full width: the reader's button hides the list, and the
+  choice is remembered on this computer. The header then shows "N of M" with Previous
+  and Next Document buttons that follow the list as it shows (the chosen view and its
+  order), and the outline becomes a rail beside the text with the sections, Fold all,
+  Back to top and the Document's Linked Plans and tickets. Narrow windows keep taking
+  turns between the list and the reader.
 - Documents use recoverable trash; permanent deletion is not supported. A Document can
   create a ticket and be linked to several tickets and Plans.
 - CLI: the `document` command group (`create`, `show`, `read`, `change`, `recent`,

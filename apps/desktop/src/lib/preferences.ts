@@ -7,6 +7,8 @@ import { z } from "zod";
 const preferencesSchema = z.object({
   theme: z.enum(["system", "light", "dark"]).catch("system"),
   openTickets: z.enum(["split", "expanded"]).catch("split"),
+  /** Read a Document beside the list ("split") or at full width ("expanded"); the reader's toggle sets it. */
+  openDocuments: z.enum(["split", "expanded"]).catch("split"),
   ticketLayout: z.enum(["list", "board"]).catch("list"),
   sidebarCollapsed: z.boolean().catch(false),
   ticketRows: z.enum(["detailed", "simple"]).catch("simple"),
@@ -26,6 +28,7 @@ const STORAGE_KEY = "ticketd.preferences";
 const DEFAULTS: Preferences = {
   theme: "system",
   openTickets: "split",
+  openDocuments: "split",
   ticketLayout: "list",
   sidebarCollapsed: false,
   ticketRows: "simple",

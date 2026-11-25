@@ -201,7 +201,12 @@
    16px in narrow panes, where the column is the pane). */
 .document-workspace
   > .document-main
-  > :not(.document-body, .document-trash-notice, .floating-edit-position) {
+  > :not(
+    .document-body,
+    .document-trash-notice,
+    .floating-edit-position,
+    .document-rail-track
+  ) {
   width: 100%;
   max-width: var(--reading-column);
   margin-inline: auto;
@@ -585,4 +590,223 @@
 /* One pane, no list beside it: the full-width reader has its own outline. */
 :where([data-width~="max-879"]) .document-outline {
   display: none;
+}
+
+/* Read full width (DESIGN.md section 8): the list steps aside while a Document is open and the
+   outline becomes a rail. Only the reader's width changes: its scroll position and the text's
+   wrapping stay as they are, because the column keeps its width. */
+.documents-page[data-expanded][data-reading] {
+  grid-template-columns: minmax(0, 1fr);
+}
+.documents-page[data-expanded][data-reading] > .documents-list-view {
+  display: none;
+}
+.document-show-list {
+  display: flex;
+  flex: none;
+}
+.document-bar[data-expanded] .document-return {
+  display: none;
+}
+.document-position {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+/* A fixed width, so the buttons never move between Documents (8 of 50, 12 of 120). */
+.document-position-text {
+  min-width: 8ch;
+  padding-right: 4px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+  font-variant-numeric: tabular-nums;
+  text-align: end;
+  white-space: nowrap;
+}
+/* The rail hangs from a zero-height track that sticks to the top of the reader. The reader keeps
+   the room for it on its right, so the column sits left of centre, and the rail stands 64px from
+   the column wherever the column is. */
+.document-main[data-rail] {
+  --rail-reserve: 264px;
+  --rail-column: min(600px, calc(100% - var(--rail-reserve)));
+  padding-inline: 32px calc(24px + var(--rail-reserve));
+}
+/* A wide table keeps the reader's width but stops at the column's right edge, short of the
+   rail, and grows to the left instead; one as wide as the column lines up with the text. */
+.document-workspace
+  .document-main[data-rail]
+  .document-body
+  .markdown-table-scroll {
+  margin-left: auto;
+  margin-right: calc((100% - var(--rail-column)) / 2);
+  max-width: calc((100% + var(--rail-column)) / 2);
+}
+.document-rail-track {
+  /* The reader's padding insets the sticky edge: 0 keeps the rail level with the title. */
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  flex: none;
+  width: calc(100% + var(--rail-reserve));
+  height: 0;
+  /* The flex gap would otherwise leave 20px above the title. */
+  margin-bottom: -20px;
+}
+.document-rail {
+  position: absolute;
+  top: 0;
+  left: calc(
+    (100% - var(--rail-reserve) - var(--rail-column)) / 2 + var(--rail-column) +
+      64px
+  );
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 200px;
+  max-height: calc(100vh - 140px);
+  overflow-y: auto;
+  font-size: var(--text-preview);
+  line-height: var(--text-preview-line);
+}
+.document-rail-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.document-rail-title {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.document-rail-actions {
+  display: flex;
+  gap: 2px;
+}
+.document-rail-actions button {
+  height: 20px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: var(--radius-segment);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-caption);
+}
+.document-rail-actions button:hover {
+  background: var(--hover);
+  color: var(--foreground);
+}
+.document-rail ul {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  box-shadow: inset 1px 0 0 var(--group-hairline);
+}
+.document-rail li {
+  margin: 0;
+}
+.document-rail a {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 0 4px 12px;
+  color: var(--muted-foreground);
+  text-decoration: none;
+}
+.document-rail a[data-level="subsection"] {
+  padding-left: 24px;
+}
+.document-rail a:hover,
+.document-rail a[data-section-current] {
+  color: var(--foreground);
+}
+.document-rail a[data-current] {
+  color: var(--foreground);
+  box-shadow: inset 2px 0 0 var(--foreground);
+}
+.document-rail-actions button:focus-visible,
+.document-rail a:focus-visible,
+.document-rail-top:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.document-rail-linked h2 {
+  margin: 0 0 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: 16px;
+}
+.document-rail-linked .document-linked-items {
+  padding: 0;
+  margin: 0;
+  list-style: none;
+}
+.document-rail-linked li > button {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  height: auto;
+  min-height: 24px;
+  margin-left: -8px;
+  padding: 2px 8px;
+  text-align: start;
+}
+.document-rail-linked li > button svg {
+  flex: none;
+  margin-top: 2px;
+}
+.document-rail-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+}
+.document-rail-top:hover {
+  color: var(--foreground);
+}
+.document-rail-top svg {
+  width: 14px;
+  height: 14px;
+}
+/* The rail's Linked list takes the end of the Document's place while the rail is there. */
+.document-main[data-rail] .document-end [aria-label="Linked"] {
+  display: none;
+}
+
+/* Below an 880px panel the list and reader keep taking turns, as they always have: no toggle,
+   no rail, and the Back button returns to the list. */
+:where([data-width~="max-879"]) .document-expand,
+:where([data-width~="max-879"]) .document-show-list,
+:where([data-width~="max-879"]) .document-position,
+:where([data-width~="max-879"]) .document-rail-track {
+  display: none;
+}
+:where([data-width~="max-879"]) .document-bar[data-expanded] .document-return {
+  display: flex;
+}
+:where([data-width~="max-879"]) .document-main[data-rail] {
+  --rail-reserve: 0px;
+  --rail-column: 100%;
+  padding: 44px 24px 96px;
+}
+:where([data-width~="max-879"])
+  .document-main[data-rail]
+  .document-end
+  [aria-label="Linked"] {
+  display: block;
+}
+:where([data-width~="max-479"]) .document-main[data-rail] {
+  padding-inline: 16px;
 }

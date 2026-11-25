@@ -1,6 +1,6 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
-import type { OutlineHeading } from "@/features/markdown/outline";
+import { outlineView, type OutlineHeading } from "@/features/markdown/outline";
 
 /**
  * The ticks the outline shows beside the list: a section's tick is long, a
@@ -32,19 +32,7 @@ export function DocumentOutline({
   const skipFocusOpen = useRef(false);
   const listId = useId();
   const here = current;
-  const at = headings.findIndex((heading) => heading.id === here);
-  // The section the reader is in: the last section at or above the current heading.
-  let sectionAt = -1;
-  headings.forEach((heading, index) => {
-    if (heading.section && index <= at) sectionAt = index;
-  });
-  const next = headings.findIndex(
-    (heading, index) => heading.section && index > sectionAt,
-  );
-  const shown = headings.filter((heading, index) =>
-    heading.section ? true : index > sectionAt && (next === -1 || index < next),
-  );
-  const subsections = shown.filter((heading) => !heading.section).length;
+  const { sectionAt, shown, subsections } = outlineView(headings, here);
 
   const links = () =>
     Array.from(nav.current?.querySelectorAll<HTMLAnchorElement>("a") ?? []);

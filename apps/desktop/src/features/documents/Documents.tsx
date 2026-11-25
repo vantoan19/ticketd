@@ -51,8 +51,9 @@ import {
   type DocumentSummary,
   type DocumentSearchResult,
 } from "./api";
-import { DocumentEditor } from "./DocumentEditor";
+import { DocumentEditor, type DocumentReading } from "./DocumentEditor";
 import { useWorkspaceChange } from "@/lib/workspace-change";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import "./documents.css";
 
 /**
@@ -124,6 +125,10 @@ export function Documents({
   listRequest?: number;
 }) {
   const openGraph = useContext(ContextGraphNavigation);
+  const { openDocuments } = usePreferences();
+  const expanded = openDocuments === "expanded";
+  // The button a step used, so the Document it opens takes focus on the same one.
+  const steppedWith = useRef<"previous" | "next" | null>(null);
   const [readerCloseRequest, setReaderCloseRequest] = useState(0);
   const page = useRef<HTMLDivElement>(null);
   const navigator = useRef<HTMLDivElement>(null);
@@ -496,6 +501,27 @@ export function Documents({
     visibleRows.find((doc) => doc.id === focusedRow)?.id ??
     visibleRows.find((doc) => doc.id === selected?.id)?.id ??
     visibleRows[0]?.id;
+  // The reader's place in the list as it shows now: a step goes to the neighbour in that order.
+  const placeAt = selected
+    ? visibleRows.findIndex((doc) => doc.id === selected.id)
+    : -1;
+  const reading: DocumentReading | null = selected && {
+    expanded,
+    onExpandedChange: (value) =>
+      setPreference("openDocuments", value ? "expanded" : "split"),
+    place:
+      placeAt < 0 ? null : { index: placeAt + 1, total: visibleRows.length },
+    previous: (placeAt > 0 && visibleRows[placeAt - 1]?.id) || null,
+    next: (placeAt >= 0 && visibleRows[placeAt + 1]?.id) || null,
+    focus: steppedWith.current,
+    onFocused: () => {
+      steppedWith.current = null;
+    },
+    onStep: (id, direction) => {
+      steppedWith.current = direction;
+      open(id);
+    },
+  };
   const commandId =
     visibleRows.find((doc) => doc.id === focusedRow)?.id ??
     selected?.id ??
@@ -721,6 +747,7 @@ export function Documents({
       className="documents-page"
       data-own-entrance=""
       data-reading={selected !== null || opening !== null || undefined}
+      data-expanded={expanded || undefined}
       ref={page}
     >
       <div
@@ -1074,6 +1101,7 @@ export function Documents({
         <DocumentEditor
           key={selected.id}
           initial={selected}
+          {...(reading && { reading })}
           active={active}
           pinned={pins.some((p) => p.id === selected.id)}
           onTogglePin={() => {
