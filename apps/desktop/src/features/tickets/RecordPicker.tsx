@@ -23,7 +23,12 @@ export type PickRecord =
     };
 
 /** A titled group of records: "Linked to this ticket", "Recent", or results. */
-export type RecordGroup = { heading?: string; records: PickRecord[] };
+type RecordGroup<Record> = { heading?: string; records: Record[] };
+
+type SearchResult<Record> = {
+  groups: RecordGroup<Record>[];
+  empty?: ReactNode;
+};
 
 const DELAY_MS = 150;
 
@@ -39,7 +44,7 @@ const DELAY_MS = 150;
  * The caller owns the data: `search` is the host's record search, the
  * Documents API, or anything that answers a query with groups.
  */
-export function RecordPicker({
+export function RecordPicker<Record extends PickRecord>({
   search,
   onPick,
   things,
@@ -47,20 +52,26 @@ export function RecordPicker({
   empty,
   autoFocus = true,
   rows = 6,
+  revision = 0,
 }: {
-  search: (query: string) => Promise<RecordGroup[]>;
-  onPick: (record: PickRecord) => void;
+  search: (query: string) => Promise<SearchResult<Record>>;
+  onPick: (record: Record) => void;
   /** What is searched, for the placeholder and the list name: "Documents". */
   things: string;
   /** Keys already chosen; they are not offered again. */
   exclude?: readonly string[];
   /** The empty row's words for a query ("" while nothing is typed). */
-  empty?: (query: string) => ReactNode;
+  empty?: (query: string, hasMatches: boolean) => ReactNode;
   autoFocus?: boolean;
   rows?: number;
+  revision?: number;
 }) {
   const [query, setQuery] = useState("");
-  const [groups, setGroups] = useState<RecordGroup[]>([]);
+  const [answer, setAnswer] = useState<{
+    query: string;
+    revision: number;
+    result: SearchResult<Record>;
+  }>();
   const [error, setError] = useState("");
   const find = useEffectEvent(search);
   useEffect(() => {
@@ -70,7 +81,7 @@ export function RecordPicker({
         find(query.trim()).then(
           (found) => {
             if (!current) return;
-            setGroups(found);
+            setAnswer({ query, revision, result: found });
             setError("");
           },
           (reason: unknown) => {
@@ -84,7 +95,12 @@ export function RecordPicker({
       current = false;
       window.clearTimeout(timer);
     };
-  }, [query, things]);
+  }, [query, revision, things]);
+  const result =
+    answer?.query === query && answer.revision === revision
+      ? answer.result
+      : undefined;
+  const groups = result?.groups ?? [];
   const byKey = new Map(
     groups.flatMap((group) => group.records).map((r) => [r.key, r]),
   );
@@ -122,9 +138,10 @@ export function RecordPicker({
         if (record) onPick(record);
       }}
       {...(error && { notice: error })}
-      empty={
-        empty ??
-        ((text) => (text ? `No ${things} match “${text}”` : `No ${things} yet`))
+      empty={(text) =>
+        result?.empty ??
+        empty?.(text, byKey.size > 0) ??
+        (text ? `No ${things} match “${text}”` : `No ${things} yet`)
       }
     />
   );

@@ -176,6 +176,56 @@ test("archives, undoes and reactivates from the Archived view", async () => {
   expect(screen.getByText("Reactivated Original")).toBeTruthy();
 });
 
+test("archiving a Project keeps its expanded controls disabled while saving", async () => {
+  let finish!: (value: typeof project & { archived: boolean }) => void;
+  vi.spyOn(client, "setProjectArchived").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  render(<Projects {...props} onOpenTickets={vi.fn()} />);
+  expand();
+  await chooseAction("Archive project");
+  expect(await screen.findByText("Archiving…")).toBeTruthy();
+  for (const name of [
+    /^Original/,
+    "Open tickets of Original",
+    "Actions for Original",
+    "Copy path /other/checkout",
+    "Remove checkout",
+    /^Show in /,
+  ]) {
+    const buttons = screen.getAllByRole("button", { name });
+    for (const button of buttons)
+      expect(button).toHaveProperty("disabled", true);
+  }
+  await act(async () => finish({ ...project, archived: true }));
+});
+
+test.each(["Edit project", "Register checkout"])(
+  "an external archive closes %s and reactivation leaves it closed",
+  async (name) => {
+    const { rerender } = render(<Projects {...props} />);
+    await chooseAction(String(name) + "…");
+    await screen.findByRole("dialog", { name });
+    rerender(
+      <Projects {...props} projects={[{ ...project, archived: true }]} />,
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name })).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: "Projects" }),
+      ),
+    );
+    rerender(<Projects {...props} />);
+    await screen.findByRole("button", { name: "Actions for Original" });
+    expect(screen.queryByRole("dialog", { name })).toBeNull();
+  },
+);
+
 test("a new project waits for a folder, fills its name from it, then saves", async () => {
   vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue(
     "/Users/me/src/mobile-app",

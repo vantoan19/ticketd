@@ -34,6 +34,7 @@ import {
 } from "@/features/chats/ChatFolderChoices";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { Composer } from "@/features/chats/Composer";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Token } from "@/features/chats/composer-mentions";
 import { useCodexCommands } from "@/features/chats/composer-settings";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
@@ -233,6 +234,7 @@ export function NewChat({
       current = false;
     };
   }, [client, probe]);
+  const workspaceChange = useWorkspaceChange();
   // The folder's Project, for its icon on the folder button.
   const [projectOf, setProjectOf] = useState<{
     folder: string;
@@ -248,7 +250,7 @@ export function NewChat({
     return () => {
       current = false;
     };
-  }, [client, folder]);
+  }, [client, folder, workspaceChange]);
   const project = projectOf?.folder === folder ? projectOf.project : null;
   // A Project's folder that is not on this computer gives way to a ticketd folder.
   useEffect(() => {

@@ -19,6 +19,21 @@ pub struct Project {
     pub archived: bool,
 }
 
+impl Project {
+    /// The first active Project, in list order, that holds this folder.
+    pub fn for_folder<'a>(projects: &'a [Self], folder: &Path) -> Option<&'a Self> {
+        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        projects
+            .iter()
+            .filter(|project| !project.archived)
+            .find(|project| {
+                std::iter::once(&project.path)
+                    .chain(&project.paths)
+                    .any(|path| !path.is_empty() && folder.starts_with(path))
+            })
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ProjectRemoteChange<'a> {
     Keep,
@@ -269,16 +284,7 @@ impl Workspace {
     /// The Project one of whose checkouts holds `folder`. Checkout paths are stored
     /// canonical, so the folder is resolved first when it exists.
     pub fn project_for_folder(&self, folder: &std::path::Path) -> Result<Option<Project>, Error> {
-        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        Ok(self
-            .list_projects()?
-            .into_iter()
-            .filter(|project| !project.archived)
-            .find(|project| {
-                std::iter::once(&project.path)
-                    .chain(&project.paths)
-                    .any(|path| !path.is_empty() && folder.starts_with(path))
-            }))
+        Ok(Project::for_folder(&self.list_projects()?, folder).cloned())
     }
 
     pub fn list_projects(&self) -> Result<Vec<Project>, Error> {
