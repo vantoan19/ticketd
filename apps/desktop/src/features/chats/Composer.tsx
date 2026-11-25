@@ -217,7 +217,7 @@ export function Composer({
           event.isTrusted &&
           redactedLinuxPaste(clipboard)
         ) {
-          event.preventDefault();
+          // An empty DOM payload can also be text left to WebKit's native paste.
           attachments.addClipboardImage(
             readLinuxClipboardImage(clipboardImagePicker.current),
           );

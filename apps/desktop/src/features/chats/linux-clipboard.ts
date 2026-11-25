@@ -16,7 +16,9 @@ export function redactedLinuxPaste(clipboard: DataTransfer) {
   return (
     clipboard.types.length === 0 &&
     clipboard.files.length === 0 &&
-    (clipboard.items?.length ?? 0) === 0
+    (clipboard.items?.length ?? 0) === 0 &&
+    !clipboard.getData("text/plain") &&
+    !clipboard.getData("text/html")
   );
 }
 

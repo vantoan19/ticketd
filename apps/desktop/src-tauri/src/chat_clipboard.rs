@@ -55,21 +55,33 @@ fn clipboard_image(
         return;
     };
     let png = gtk::gdk::Atom::intern("image/png");
-    clipboard.request_contents(&png, move |_, selection| {
-        let result = (|| {
-            let length = selection.length();
-            if length <= 0 {
-                return Ok(None);
+    clipboard.request_contents(
+        &gtk::gdk::Atom::intern("TARGETS"),
+        move |clipboard, selection| {
+            if !selection
+                .targets()
+                .is_some_and(|targets| targets.contains(&png))
+            {
+                finish(Ok(None));
+                return;
             }
-            let limit = crate::open_workspace()?.attachment_upload_limit()?;
-            if length as u64 > limit {
-                return Err(ticketd_core::Error::UploadLimit { limit });
-            }
-            ticketd_core::ChatAttachmentContent::from_clipboard_png(selection.data(), limit)
-                .map(Some)
-        })();
-        finish(result);
-    });
+            clipboard.request_contents(&png, move |_, selection| {
+                let result = (|| {
+                    let length = selection.length();
+                    if length <= 0 || selection.data_type() != png {
+                        return Ok(None);
+                    }
+                    let limit = crate::open_workspace()?.attachment_upload_limit()?;
+                    if length as u64 > limit {
+                        return Err(ticketd_core::Error::UploadLimit { limit });
+                    }
+                    ticketd_core::ChatAttachmentContent::from_clipboard_png(selection.data(), limit)
+                        .map(Some)
+                })();
+                finish(result);
+            });
+        },
+    );
 }
 
 pub(crate) fn install(view: &WebView, dev_url: Option<tauri::Url>) {
