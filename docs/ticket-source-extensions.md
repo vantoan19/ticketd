@@ -212,8 +212,8 @@ forced shutdown. A crash fails the call. The host restarts the process on the
 next call until the connection reaches five crashes within three minutes.
 **Retry** clears that crash limit.
 
-The handshake has five seconds. An ordinary request has a 30-second inactivity
-timeout and a five-minute hard deadline. To keep a long call active, send a
+The handshake, including the process's start, has 15 seconds. An ordinary
+request has a 30-second inactivity timeout and a five-minute hard deadline. To keep a long call active, send a
 `progress` notification with the active request's ID and the amount of work
 completed within that request. Omit `total` when unknown.
 

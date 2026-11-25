@@ -349,21 +349,24 @@ fn an_extension_credential_is_resolved_for_each_cli_invocation() {
             .output()
             .unwrap()
     };
-    assert!(
-        run(
-            &["source", "extension", "link", example.to_str().unwrap()],
-            &[]
-        )
-        .status
-        .success()
-    );
+    let succeeded = |output: &std::process::Output| {
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    succeeded(&run(
+        &["source", "extension", "link", example.to_str().unwrap()],
+        &[],
+    ));
     let synthetic = "qz85-not-a-live-api-key";
     let from_env = [("TICKETD_SOURCE_EXAMPLE_TRACKER_API_KEY", synthetic)];
     let added = run(
         &["source", "add", "example-tracker", "--set", "board=Sign-in"],
         &from_env,
     );
-    assert!(added.status.success(), "{:?}", added.stderr);
+    succeeded(&added);
     assert!(!String::from_utf8_lossy(&added.stdout).contains(synthetic));
     let refresh = ["source", "example-tracker", "refresh"];
     let missing = run(&refresh, &[]);
@@ -376,18 +379,14 @@ fn an_extension_credential_is_resolved_for_each_cli_invocation() {
         command.as_str(),
     )];
     let refreshed = run(&refresh, &from_command);
-    assert!(refreshed.status.success(), "{:?}", refreshed.stderr);
+    succeeded(&refreshed);
     assert!(!String::from_utf8_lossy(&refreshed.stdout).contains(synthetic));
     assert!(!String::from_utf8_lossy(&std::fs::read(&workspace).unwrap()).contains(synthetic));
     let backup = directory.path().join("backup.sqlite3");
-    assert!(
-        run(&["backup", backup.to_str().unwrap()], &[])
-            .status
-            .success()
-    );
+    succeeded(&run(&["backup", backup.to_str().unwrap()], &[]));
     assert!(!String::from_utf8_lossy(&std::fs::read(&backup).unwrap()).contains(synthetic));
     let export = run(&["export"], &[]);
-    assert!(export.status.success());
+    succeeded(&export);
     assert!(!String::from_utf8_lossy(&export.stdout).contains(synthetic));
 }
 
