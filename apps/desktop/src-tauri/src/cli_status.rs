@@ -345,26 +345,30 @@ fn make_admin_link(bundled: &Path, link: &Path, previous: Option<&Path>) -> io::
 }
 
 #[cfg(windows)]
-fn install(bundled: &Path) -> io::Result<CliInstallation> {
+const WINDOWS_USER_PATH_SCRIPT: &str = include_str!("cli_user_path.ps1");
+
+#[cfg(windows)]
+fn windows_path_command(script: &str, directory: &Path) -> io::Result<std::process::Command> {
     use std::{os::windows::process::CommandExt, process::Command};
 
-    let directory = bundled
-        .parent()
-        .ok_or_else(|| io::Error::other("The app folder is unavailable."))?;
     let system_root = std::env::var_os("SystemRoot")
         .ok_or_else(|| io::Error::other("Windows SystemRoot is unavailable."))?;
     let powershell =
         PathBuf::from(system_root).join(r"System32\WindowsPowerShell\v1.0\powershell.exe");
-    let output = Command::new(powershell)
-        .args([
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            include_str!("cli_user_path.ps1"),
-        ])
+    let mut command = Command::new(powershell);
+    command
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
         .env("TICKETD_CLI_DIRECTORY", directory)
-        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
-        .output()?;
+        .creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    Ok(command)
+}
+
+#[cfg(windows)]
+fn install(bundled: &Path) -> io::Result<CliInstallation> {
+    let directory = bundled
+        .parent()
+        .ok_or_else(|| io::Error::other("The app folder is unavailable."))?;
+    let output = windows_path_command(WINDOWS_USER_PATH_SCRIPT, directory)?.output()?;
     if !output.status.success() {
         return Err(io::Error::other(format!(
             "Could not update your Windows PATH: {}",
@@ -382,6 +386,53 @@ fn install(_bundled: &Path) -> io::Result<CliInstallation> {
     Err(io::Error::other(
         "The Linux Debian package installs ticketd in /usr/bin.",
     ))
+}
+
+#[cfg(all(windows, test))]
+mod windows_tests {
+    use super::*;
+
+    #[test]
+    fn installs_with_unusable_temp_and_preserves_the_expandable_user_path() {
+        // A file cannot serve as the compiler's temporary directory.
+        let blocked_temp = tempfile::NamedTempFile::new().unwrap();
+        let script = format!(
+            r#"
+$ErrorActionPreference = 'Stop'
+$registry = [Microsoft.Win32.Registry]::CurrentUser
+$testKey = 'Software\TicketdCliPathTest-' + [Guid]::NewGuid().ToString('N')
+$key = $registry.CreateSubKey($testKey)
+try {{
+    $original = '%SystemRoot%\Tools'
+    $key.SetValue('Path', $original, 'ExpandString')
+    $install = {{
+{WINDOWS_USER_PATH_SCRIPT}
+    }}
+    & $install -EnvironmentKey $testKey
+    & $install -EnvironmentKey $testKey
+    $path = $key.GetValue('Path', $null, 'DoNotExpandEnvironmentNames')
+    if ($path -cne "$original;$env:TICKETD_CLI_DIRECTORY" -or
+        $key.GetValueKind('Path') -ne 'ExpandString') {{
+        throw 'Expected the original expandable PATH with the app folder appended once.'
+    }}
+}} finally {{
+    $key.Dispose()
+    $registry.DeleteSubKeyTree($testKey)
+}}
+"#
+        );
+        let output = windows_path_command(&script, Path::new(r"C:\Program Files\ticketd"))
+            .unwrap()
+            .env("TEMP", blocked_temp.path())
+            .env("TMP", blocked_temp.path())
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
 }
 
 #[cfg(all(target_os = "macos", test))]

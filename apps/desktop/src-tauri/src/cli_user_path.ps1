@@ -1,19 +1,29 @@
+param([string]$environmentKey = 'Environment')
+
 $ErrorActionPreference = 'Stop'
 
-# Prepare the notification before editing the registry. Explorer uses it to
-# refresh the environment inherited by newly opened terminals.
-Add-Type -Namespace Ticketd -Name EnvironmentChange -MemberDefinition @'
-[System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)]
-public static extern System.IntPtr SendMessageTimeout(
-    System.IntPtr window, uint message, System.UIntPtr wParam, string lParam,
-    uint flags, uint timeout, out System.UIntPtr result);
-'@
+# Prepare the Explorer notification in memory. Windows PowerShell's Add-Type
+# compiles through TEMP, which can fail before the PATH write.
+$name = [Reflection.AssemblyName]::new('Ticketd.EnvironmentChange')
+$assembly = [AppDomain]::CurrentDomain.DefineDynamicAssembly(
+    $name, [Reflection.Emit.AssemblyBuilderAccess]::Run)
+$module = $assembly.DefineDynamicModule($name.Name)
+$type = $module.DefineType('Ticketd.EnvironmentChange', 'Public')
+$parameterTypes = [Type[]]@(
+    [IntPtr], [uint32], [UIntPtr], [string], [uint32], [uint32], [UIntPtr].MakeByRefType()
+)
+$method = $type.DefinePInvokeMethod(
+    'SendMessageTimeoutW', 'user32.dll', 'Public, Static, PinvokeImpl', 'Standard',
+    [IntPtr], $parameterTypes, 'Winapi', 'Unicode')
+$method.SetImplementationFlags(
+    $method.GetMethodImplementationFlags() -bor [Reflection.MethodImplAttributes]::PreserveSig)
+$environmentChange = $type.CreateType()
 
 $directory = $env:TICKETD_CLI_DIRECTORY
 if ([string]::IsNullOrEmpty($directory) -or $directory.Contains(';')) {
     throw 'The app folder cannot be added to PATH.'
 }
-$key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+$key = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey($environmentKey)
 try {
     $path = $key.GetValue('Path', $null, 'DoNotExpandEnvironmentNames')
     $kind = [Microsoft.Win32.RegistryValueKind]::ExpandString
@@ -44,5 +54,5 @@ try {
 }
 
 $result = [UIntPtr]::Zero
-[void][Ticketd.EnvironmentChange]::SendMessageTimeout(
+[void]$environmentChange::SendMessageTimeoutW(
     [IntPtr]0xffff, 0x001a, [UIntPtr]::Zero, 'Environment', 0x0002, 1000, [ref]$result)
