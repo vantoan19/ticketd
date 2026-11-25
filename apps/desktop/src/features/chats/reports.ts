@@ -5,7 +5,7 @@ import type {
   TranscriptItem,
   ItemOf,
 } from "@/features/chats/client";
-import { duration, reasoningShown } from "@/features/chats/model";
+import { diffstat, duration, reasoningShown } from "@/features/chats/model";
 import { formatTime } from "@/lib/format";
 
 export { reasoningShown };
@@ -83,14 +83,14 @@ export function filesSummary(files: ChangedFile[]) {
   const unconfirmed = files.length - confirmed.length;
   return {
     text: `${files.length} ${files.length === 1 ? "file" : "files"} changed`,
-    counts: counted.length > 0 ? `+${added} −${removed}` : null,
+    counts: counted.length > 0 ? diffstat(added, removed) : null,
     unconfirmed: unconfirmed > 0 ? `${unconfirmed} not confirmed` : null,
   };
 }
 
 export const fileCounts = (file: ChangedFile) =>
   file.added_lines != null && file.removed_lines != null
-    ? `+${file.added_lines} −${file.removed_lines}`
+    ? diffstat(file.added_lines, file.removed_lines)
     : "—";
 
 export function fileKind(file: ChangedFile): string | null {
@@ -115,14 +115,6 @@ export function fileLabel(file: ChangedFile): string {
   if (file.added_lines) parts.push(`${file.added_lines} lines added`);
   if (file.removed_lines) parts.push(`${file.removed_lines} lines removed`);
   return parts.join(", ");
-}
-
-/** A long path shortened in the shortenedPath, keeping its file name whole. */
-export function shortenedPath(path: string, max = 48): string {
-  if (path.length <= max) return path;
-  const name = path.slice(path.lastIndexOf("/") + 1);
-  const keep = Math.max(max - name.length - 1, 8);
-  return `${path.slice(0, keep)}…/${name}`;
 }
 
 /** "124k", "1.2M"; small counts as they are. */

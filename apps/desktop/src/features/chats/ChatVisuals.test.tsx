@@ -128,7 +128,12 @@ test("each step kind has its own icon; a running step shows the spinner instead"
       chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
       items: steps(
         { kind: "read", target: "a.ts", targets: [{ text: "a.ts" }] },
-        { kind: "search", target: "x", targets: [{ text: "x" }] },
+        {
+          kind: "search",
+          target: "x",
+          targets: [{ text: "x" }],
+          no_matches: true,
+        },
         {
           kind: "run",
           target: "npm test",
@@ -144,6 +149,130 @@ test("each step kind has its own icon; a running step shows the spinner instead"
   expect(icon(rows[0])).toContain("lucide-eye");
   expect(icon(rows[1])).toContain("lucide-search");
   expect(icon(rows[2])).toContain("chat-spin");
+});
+
+test("a described command reads its description and opens to the exact command", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        {
+          kind: "run",
+          target: "gh pr create --fill",
+          command: "gh pr create --fill",
+          description: "Create the PR with gh",
+          output: "https://example.test/pull/1",
+        },
+        {
+          kind: "run",
+          target: "gh pr create --web",
+          command: "gh pr create --web",
+          description: "Open the PR in a browser",
+          state: "failed",
+          exit_code: 1,
+        },
+      ),
+    },
+  ]);
+  const row = button("Create the PR with gh");
+  expect(row.textContent).toBe("Create the PR with gh");
+  expect(row.textContent).not.toContain("gh pr create");
+  fireEvent.click(row);
+  expect(
+    screen.getByRole("region", { name: "Output of gh pr create --fill" })
+      .textContent,
+  ).toBe("$ gh pr create --fill\n\nhttps://example.test/pull/1");
+  // A failed one keeps the description, then says it.
+  expect(button("Open the PR in a browser, Failed").textContent).toBe(
+    "Open the PR in a browser · Failed",
+  );
+});
+
+test("a command with no description is one muted mono line", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps({
+        kind: "run",
+        target: "gh pr create --fill --title 'a long title'",
+        command: "gh pr create --fill --title 'a long title'\n--body x",
+        state: "failed",
+      }),
+    },
+  ]);
+  const row = screen.getByRole("button", { name: /^Run gh pr create/ });
+  // Only the command's first line, set apart so a long one can end in an ellipsis.
+  const command = row.querySelector(".chat-step-command");
+  expect(command?.textContent).toBe(
+    "gh pr create --fill --title 'a long title'",
+  );
+  expect(row.querySelector(".chat-step-words")?.hasAttribute("data-line")).toBe(
+    true,
+  );
+  expect(row.textContent).toBe(
+    "Run gh pr create --fill --title 'a long title' · Failed",
+  );
+});
+
+test("a path in a step row is its folder, muted, then its name", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        {
+          kind: "edit",
+          target: "src/auth/limiter.ts",
+          targets: [{ text: "src/auth/limiter.ts" }],
+          added_lines: 13,
+          removed_lines: 0,
+        },
+        {
+          kind: "read",
+          variant: "list",
+          target: "src/auth",
+          targets: [{ text: "src/auth" }],
+          output: "limiter.ts",
+        },
+      ),
+    },
+  ]);
+  const file = button("Open src/auth/limiter.ts");
+  expect(file.querySelector(".chat-path-dir")?.textContent).toBe("src/auth/");
+  expect(file.textContent).toBe("src/auth/limiter.ts");
+  // The row's count reads "+13" alone.
+  expect(document.querySelector(".chat-file-counts")?.textContent).toBe("+13");
+  // A folder in a row that opens is the same.
+  const folder = document.querySelector(".chat-steps code.chat-path");
+  expect(folder?.textContent).toBe("src/auth");
+  expect(folder?.querySelector(".chat-path-dir")?.textContent).toBe("src/");
+});
+
+test("reads and searches in a row are one 'Explored' row that opens to what they named", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        { kind: "read", target: "a.ts", targets: [{ text: "src/a.ts" }] },
+        {
+          kind: "search",
+          target: "limiter",
+          targets: [{ text: "limiter", scope: "src" }],
+        },
+        {
+          kind: "read",
+          target: "b.ts",
+          targets: [{ text: "src/b.ts" }, { text: "c.ts" }],
+        },
+      ),
+    },
+  ]);
+  const row = button("Explored 3 files · 1 search");
+  expect(row.textContent).toBe("Explored 3 files · 1 search");
+  fireEvent.click(row);
+  expect(button("Open src/a.ts")).toBeTruthy();
+  expect(button("Open src/b.ts")).toBeTruthy();
+  expect(button("Open c.ts")).toBeTruthy();
+  expect(screen.getByText("limiter", { selector: "code" })).toBeTruthy();
 });
 
 test("a file name opens the file; one that is gone becomes plain text and says so", async () => {
@@ -167,8 +296,9 @@ test("a file name opens the file; one that is gone becomes plain text and says s
     { goneFiles: ["old.ts"] },
   );
   const first = button("Open src/auth/index.ts");
-  // A repeated name gains its folder.
-  expect(first.textContent).toBe("auth/index.ts");
+  // Its folder comes before the name, muted, so two files of one name stay apart.
+  expect(first.textContent).toBe("src/auth/index.ts");
+  expect(first.querySelector(".chat-path-dir")?.textContent).toBe("src/auth/");
   fireEvent.click(first);
   await waitFor(() =>
     expect(client.openedFiles).toEqual(["src/auth/index.ts"]),
@@ -213,7 +343,7 @@ test("a bounded patch shows omitted paths and qualifies its line counts", async 
   expect(
     screen.getByText("Applied the patch.", { selector: "pre" }),
   ).toBeTruthy();
-  expect(screen.getByText("+3 −0")).toBeTruthy();
+  expect(screen.getByText("+3")).toBeTruthy();
 });
 
 test("an opened bounded patch shows its full failure output with the named paths", async () => {

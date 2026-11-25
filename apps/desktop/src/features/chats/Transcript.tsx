@@ -73,16 +73,17 @@ import {
   type TranscriptPart,
   type Turn,
   type TurnRow,
+  type ViewStep,
   goneWords,
   sentence,
   turnClock,
   turnSpanText,
 } from "@/features/chats/model";
-import { FileName } from "@/features/chats/FileName";
+import { FileName, PathCode } from "@/features/chats/FileName";
 import {
   ChatFilesContext,
   SentLinksContext,
-  shownNames,
+  scopeIsPath,
 } from "@/features/chats/files";
 import { sentParts } from "@/features/chats/composer-mentions";
 import { TicketNavigation } from "@/features/tickets/navigation";
@@ -357,7 +358,7 @@ const TICKETD_ICONS: Record<TicketdCall["verb"], LucideIcon> = {
 };
 
 /** Whether a step's targets are files that can still be opened. */
-const opensFiles = (step: Step) =>
+const opensFiles = (step: ViewStep) =>
   (step.kind === "read" && step.variant !== "list") ||
   step.kind === "edit" ||
   step.kind === "create";
@@ -369,7 +370,7 @@ function StepDetail({
   harness,
 }: {
   id: string;
-  step: Step;
+  step: ViewStep;
   harness: string;
 }) {
   const targets = step.targets ?? [];
@@ -378,7 +379,10 @@ function StepDetail({
   const command = step.kind === "run" ? step.command : undefined;
   const { folder, output: readOutput } = useContext(ChatFilesContext);
   const [failure, setFailure] = useState("");
-  const files = opensFiles(step);
+  const files = opensFiles(step) || (step.explored?.files.length ?? 0) > 0;
+  // The targets of these are folders and files: the folder muted, the name in ink.
+  const pathKind =
+    (step.kind === "read" && step.variant === "list") || step.kind === "delete";
   // A step carries only its output's end; opened, it reads the whole of it.
   const toolId = step.full_output?.tool_id;
   const [whole, setWhole] = useState<{ toolId: string; text: string }>();
@@ -412,30 +416,64 @@ function StepDetail({
         />
       ) : (
         <>
-          {(targets.length > 2 ||
-            (step.omitted_files && targets.length > 0)) && (
+          {step.explored ? (
             <ul>
-              {targets.map((target, index) => (
-                <li key={index}>
+              {step.explored.files.map((target, index) => (
+                <li key={`file-${index}`}>
                   {files ? (
-                    <FileName
-                      path={target.text}
-                      shown={target.text}
-                      onFailed={setFailure}
-                    />
+                    <FileName path={target.text} onFailed={setFailure} />
                   ) : (
-                    <code>{target.text}</code>
-                  )}
-                  {target.scope && (
-                    <>
-                      {" "}
-                      in <code>{target.scope}</code>
-                    </>
+                    <PathCode path={target.text} />
                   )}
                   {target.lines && <small>{targetLines(target)}</small>}
                 </li>
               ))}
+              {step.explored.searches.map((target, index) => (
+                <li key={`search-${index}`}>
+                  Searched for <code>{target.text}</code>
+                  {target.scope && (
+                    <>
+                      {" "}
+                      in{" "}
+                      {scopeIsPath(target.scope) ? (
+                        <PathCode path={target.scope} />
+                      ) : (
+                        <code>{target.scope}</code>
+                      )}
+                    </>
+                  )}
+                </li>
+              ))}
             </ul>
+          ) : (
+            (targets.length > 2 ||
+              (step.omitted_files && targets.length > 0)) && (
+              <ul>
+                {targets.map((target, index) => (
+                  <li key={index}>
+                    {files ? (
+                      <FileName path={target.text} onFailed={setFailure} />
+                    ) : pathKind ? (
+                      <PathCode path={target.text} />
+                    ) : (
+                      <code>{target.text}</code>
+                    )}
+                    {target.scope && (
+                      <>
+                        {" "}
+                        in{" "}
+                        {scopeIsPath(target.scope) ? (
+                          <PathCode path={target.scope} />
+                        ) : (
+                          <code>{target.scope}</code>
+                        )}
+                      </>
+                    )}
+                    {target.lines && <small>{targetLines(target)}</small>}
+                  </li>
+                ))}
+              </ul>
+            )
           )}
           {output && <pre className="chat-out">{plainOutput(output)}</pre>}
         </>
@@ -461,9 +499,12 @@ function StepDetail({
 /** One 28px line: `[icon] words`, then a chevron when it opens. */
 function RowLine({
   icon,
+  line,
   children,
 }: {
   icon?: ReactNode;
+  /** A command with no description: one muted line, cut with an ellipsis. */
+  line?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -471,7 +512,9 @@ function RowLine({
       <span className="chat-row-icon" aria-hidden="true">
         {icon}
       </span>
-      <span className="chat-step-words">{children}</span>
+      <span className="chat-step-words" data-line={line ? "" : undefined}>
+        {children}
+      </span>
     </>
   );
 }
@@ -488,7 +531,7 @@ export const StepRow = memo(function StepRow({
   decision,
   live,
 }: {
-  step: Step;
+  step: ViewStep;
   harness: string;
   decision?: string | undefined;
   live: boolean;
@@ -522,6 +565,7 @@ export const StepRow = memo(function StepRow({
     running && now - started >= 1000 ? duration(now - started) : undefined;
   const [failure, setFailure] = useState("");
   const detail =
+    Boolean(step.explored) ||
     (step.kind === "run" && Boolean(step.command)) ||
     Boolean(step.output) ||
     (step.targets?.length ?? 0) > 2 ||
@@ -529,11 +573,13 @@ export const StepRow = memo(function StepRow({
     Boolean(words.detail || step.result || step.truncated);
   // A row that opens is a button already, so its names cannot be buttons too.
   const files = !detail && opensFiles(step) ? (step.targets ?? []) : [];
-  const names = shownNames(files.map((target) => target.text));
   const call = step.kind === "run" ? step.ticketd?.[0] : undefined;
-  const Icon = call ? TICKETD_ICONS[call.verb] : STEP_ICONS[step.kind];
+  const Icon = call
+    ? TICKETD_ICONS[call.verb]
+    : STEP_ICONS[step.explored ? "read" : step.kind];
   const line = (
     <RowLine
+      line={words.parts.some((part) => part.command)}
       icon={
         running ? (
           <LoaderCircle size={12} className="chat-spin" />
@@ -566,11 +612,11 @@ export const StepRow = memo(function StepRow({
           <Fragment key={index}>
             {index > 0 && part.text !== "," && " "}
             {file >= 0 ? (
-              <FileName
-                path={part.text}
-                shown={names[file] ?? part.text}
-                onFailed={setFailure}
-              />
+              <FileName path={part.text} onFailed={setFailure} />
+            ) : part.path ? (
+              <PathCode path={part.text} />
+            ) : part.command ? (
+              <code className="chat-step-command">{part.text}</code>
             ) : part.code ? (
               <code>{part.text}</code>
             ) : (

@@ -317,6 +317,15 @@ button.chat-file-name:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+.chat-steps .chat-step-command {
+  color: var(--muted-foreground);
+}
+button.chat-steps:hover .chat-step-command {
+  color: var(--foreground);
+}
+.chat-path-dir {
+  color: var(--muted-foreground);
+}
 .chat-steps [data-outcome] {
   color: var(--foreground);
   font-weight: 500;

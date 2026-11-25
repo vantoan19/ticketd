@@ -12,6 +12,7 @@ import type {
   TranscriptItem,
   ItemOf,
 } from "@/features/chats/client";
+import { scopeIsPath } from "@/features/chats/files";
 import { formatTime } from "@/lib/format";
 
 /**
@@ -165,9 +166,25 @@ const OUTCOME_WORDS = {
   unknown: "Not confirmed",
 } as const;
 
+/**
+ * A step as a row shows it. A row that merges a run of reads and searches ("Explored 6
+ * files · 2 searches") keeps what each kind named, for when it opens.
+ */
+export type ViewStep = Step & {
+  explored?: { files: StepTarget[]; searches: StepTarget[] };
+};
+
+/** "+57", or "+19 −1" once something was removed: a count of nothing is not said. */
+export const diffstat = (added: number, removed: number) =>
+  removed > 0 ? `+${added} −${removed}` : `+${added}`;
+
 export type StepWords = {
-  /** The row's words in order; `code` ones are targets, shown in mono. */
-  parts: { text: string; code?: boolean }[];
+  /**
+   * The row's words in order; `code` ones are targets, shown in mono. A `path` is a
+   * file or folder (its folder muted, its name in ink); the `command` of a command
+   * with no description is one muted line.
+   */
+  parts: { text: string; code?: boolean; path?: boolean; command?: boolean }[];
   /** At most one: an outcome word, a muted result such as "No matches", or a diffstat (12px mono). */
   suffix?: { text: string; outcome: boolean; diffstat?: boolean };
   /** The row's accessible name: "Run npm run test:limiter, Failed". */
@@ -203,7 +220,7 @@ export function targetLines(target: StepTarget): string {
  * is in the past tense; any other outcome keeps the plain verb and says its word.
  */
 export function stepWords(
-  step: Step,
+  step: ViewStep,
   name: RecordName = () => undefined,
 ): StepWords {
   const state = step.state ?? "done";
@@ -219,9 +236,12 @@ export function stepWords(
   const verb =
     state === "running" ? running : state === "done" ? done : otherwise;
   const code = (text: string) => ({ text, code: true });
+  // The targets of these steps are files and folders.
+  const paths = ["read", "list", "edit", "create", "delete"].includes(key);
   const quoted = (text: string) => ({
     text: key === "web" ? `“${text}”` : text,
     code: key !== "web",
+    ...(paths && { path: true }),
   });
   let parts: StepWords["parts"];
   if (step.ticketd?.length) {
@@ -237,6 +257,16 @@ export function stepWords(
         text: `${state === "running" ? "Writing" : state === "done" ? "Wrote" : "Write"} its plan`,
       },
     ];
+  } else if (step.explored) {
+    const { files, searches } = step.explored;
+    parts = [
+      {
+        text: `Explored ${count(files.length, "file")} · ${count(searches.length, "search", "searches")}`,
+      },
+    ];
+  } else if (step.kind === "run" && step.description) {
+    // The harness's own account of the command; opened, the row shows what ran.
+    parts = [{ text: step.description }];
   } else if (step.kind === "other" && targets.length === 0) {
     parts = [{ text: step.target }];
   } else if (step.kind === "run" && step.variant === "script") {
@@ -248,7 +278,10 @@ export function stepWords(
   } else if (step.kind === "run") {
     // `target` is the command as shown (ticketd without its path); `command` is what ran.
     const command = step.target || step.command || "";
-    parts = [{ text: verb }, code(command.split("\n")[0] ?? command)];
+    parts = [
+      { text: verb },
+      { ...code(command.split("\n")[0] ?? command), command: true },
+    ];
   } else if (omitted) {
     const files =
       omitted.count === null
@@ -272,7 +305,13 @@ export function stepWords(
     parts = [{ text: verb }, quoted(first?.text ?? "")];
     if (second) parts.push({ text: "and" }, quoted(second.text));
     else if (first?.scope && key === "search")
-      parts.push({ text: "in" }, code(first.scope));
+      parts.push(
+        { text: "in" },
+        {
+          ...code(first.scope),
+          ...(scopeIsPath(first.scope) && { path: true }),
+        },
+      );
   }
   const suffix =
     state === "failed" && step.timed_out
@@ -288,7 +327,7 @@ export function stepWords(
               step.added_lines != null &&
               step.removed_lines != null
             ? {
-                text: `${omitted ? "At least " : ""}+${step.added_lines} −${step.removed_lines}`,
+                text: `${omitted ? "At least " : ""}${diffstat(step.added_lines, step.removed_lines)}`,
                 outcome: false,
                 diffstat: true,
               }
@@ -297,7 +336,9 @@ export function stepWords(
   const spoken = suffix?.diffstat
     ? omitted
       ? `at least ${count(step.added_lines ?? 0, "line")} added and ${count(step.removed_lines ?? 0, "line")} removed`
-      : `${step.added_lines} lines added, ${step.removed_lines} removed`
+      : step.removed_lines
+        ? `${step.added_lines} lines added, ${step.removed_lines} removed`
+        : `${step.added_lines} lines added`
     : suffix?.text;
   const single = targets.length === 1 && !step.command ? targets[0] : undefined;
   const took = step.duration_ms ? duration(step.duration_ms) : "";
@@ -324,31 +365,47 @@ export function stepWords(
 
 /**
  * Consecutive steps of the same kind and outcome as one row ("Read 6 files"), which
- * opens to its targets. Commands never merge, so each one's output stays one level
- * down. Steps with a different outcome word ("No matches", "Timed out") never merge.
+ * opens to its targets. A run of reads and searches that finished merges into one
+ * row, "Explored 6 files · 2 searches". Commands never merge, so each one's output
+ * stays one level down. Steps with a different outcome word ("No matches", "Timed
+ * out", "Failed") never merge, so the word stays on a row of its own.
  */
 const sum = (a: number | null | undefined, b: number | null | undefined) =>
   a != null && b != null ? a + b : null;
 
-export function mergeSteps(steps: Step[]): Step[] {
-  const rows: Step[] = [];
+/** A read of files, or a search that found something, which finished. */
+const exploring = (step: ViewStep) =>
+  ((step.kind === "read" && step.variant !== "list") ||
+    (step.kind === "search" && !step.no_matches)) &&
+  (step.state ?? "done") === "done" &&
+  !step.omitted_files;
+
+export function mergeSteps(steps: Step[]): ViewStep[] {
+  const rows: ViewStep[] = [];
   for (const step of steps) {
     const last = rows.at(-1);
+    const explore =
+      last &&
+      exploring(last) &&
+      exploring(step) &&
+      (last.explored !== undefined || last.kind !== step.kind);
     const same =
       last &&
-      step.kind !== "run" &&
-      last.kind === step.kind &&
-      (last.variant ?? null) === (step.variant ?? null) &&
-      (last.state ?? "done") === (step.state ?? "done") &&
-      // A different outcome word ("No matches") keeps its own row.
-      Boolean(last.no_matches) === Boolean(step.no_matches) &&
-      Boolean(last.timed_out) === Boolean(step.timed_out);
-    if (!same) {
+      (explore ||
+        (step.kind !== "run" &&
+          !last.explored &&
+          last.kind === step.kind &&
+          (last.variant ?? null) === (step.variant ?? null) &&
+          (last.state ?? "done") === (step.state ?? "done") &&
+          // A different outcome word ("No matches") keeps its own row.
+          Boolean(last.no_matches) === Boolean(step.no_matches) &&
+          Boolean(last.timed_out) === Boolean(step.timed_out)));
+    if (!last || !same) {
       rows.push(step);
       continue;
     }
     // A merged row opens to its targets, so no one step's output comes with it.
-    const merged: Step = { ...last };
+    const merged: ViewStep = { ...last };
     delete merged.output;
     delete merged.full_output;
     delete merged.result;
@@ -363,9 +420,29 @@ export function mergeSteps(steps: Step[]): Step[] {
               (step.omitted_files?.count ?? 0),
       };
     }
+    const targets = [...(last.targets ?? []), ...(step.targets ?? [])];
+    if (explore) {
+      // What each kind named, so the opened row lists files apart from searches.
+      const kindOf = (each: ViewStep) => ({
+        files: each.kind === "read" ? (each.targets ?? []) : [],
+        searches: each.kind === "search" ? (each.targets ?? []) : [],
+      });
+      const before = last.explored ?? kindOf(last);
+      const next = kindOf(step);
+      rows[rows.length - 1] = {
+        ...merged,
+        targets,
+        no_matches: false,
+        explored: {
+          files: [...before.files, ...next.files],
+          searches: [...before.searches, ...next.searches],
+        },
+      };
+      continue;
+    }
     rows[rows.length - 1] = {
       ...merged,
-      targets: [...(last.targets ?? []), ...(step.targets ?? [])],
+      targets,
       no_matches: Boolean(last.no_matches && step.no_matches),
       // Diffstats add up only when every merged step has one.
       added_lines: sum(last.added_lines, step.added_lines),
@@ -394,7 +471,7 @@ export type TurnRow =
   | {
       kind: "step";
       key: string;
-      step: Step;
+      step: ViewStep;
       /** The answered approval this step waited on: "You allowed this for this session". */
       decision?: string;
       kept?: false;

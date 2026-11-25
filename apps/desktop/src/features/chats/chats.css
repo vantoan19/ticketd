@@ -483,6 +483,23 @@
 .chat-step-words {
   min-width: 0;
 }
+/* A command with no description: `Ran` and the first line of the command on one
+   line; the command gives way with an ellipsis, the outcome stays. */
+.chat-step-words[data-line] {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+}
+.chat-step-words[data-line] > * {
+  flex: none;
+}
+.chat-step-words[data-line] > .chat-step-command {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* A step's verb; one that finished in view eases from its running width to its
    own (MOTION-8). */
 .chat-step-verb {
@@ -632,6 +649,13 @@
 }
 .chat-file-tail {
   flex: none;
+}
+/* A path's folder gives way before its name does. */
+.chat-file-name .chat-path-dir {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex-shrink: 4;
 }
 .chat-step-alert {
   margin: 0 0 4px 24px;
