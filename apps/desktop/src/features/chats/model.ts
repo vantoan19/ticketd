@@ -1023,10 +1023,15 @@ export function requestLabel(request: PendingRequest, name?: RecordName) {
 }
 
 /** What the message box says it will do with what is typed. */
-export function composerPlaceholder(chat: ChatState, answering: boolean) {
+export function composerPlaceholder(
+  chat: ChatState,
+  answering: boolean,
+  afterDeny = false,
+) {
   const harness = chat.harness.name;
   if (!isLive(chat) || chat.stopping) return `Message ${harness}`;
   if (answering) return "Answer, or pick above";
+  if (afterDeny) return `Tell ${harness} what to do instead`;
   return chat.steering.available ? `Steer ${harness}` : `Queue for ${harness}`;
 }
 

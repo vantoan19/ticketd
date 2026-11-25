@@ -105,6 +105,7 @@ export function EffortGlyph({
 // ticketd holds a change made during a turn until the turn ends, so whatever the
 // harness's own timing, it applies from the person's next message.
 const NEXT_MESSAGE = "Applies from your next message.";
+const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
 /** The segment that leaves effort to the harness when it names no default. */
 const OWN = "";
 /** Rows shown before "More models": the default, the current one, then the harness's order. */
@@ -112,6 +113,12 @@ const SHORT_LIST = 6;
 
 /** "Default (recommended)" reads as "Default" in the trigger; the menu says it all. */
 const shortName = (label: string) => label.replace(/\s*\([^)]*\)$/, "");
+
+/** The model a row names for the trigger; empty when it only says "Default". */
+function modelNameOf(option: ModelRow) {
+  const name = option.runs_as ?? shortName(option.label);
+  return squash(name) === "default" ? "" : name;
+}
 
 /** One harness as the picker's tabs show it. */
 export type PickerHarness = {
@@ -132,8 +139,6 @@ const pickerHarness = (status: HarnessStatus): PickerHarness => ({
 });
 
 type ModelRow = SettingOption & { runs_as?: string | null | undefined };
-
-const squash = (text: string) => text.toLowerCase().replace(/[^a-z0-9]/g, "");
 
 /**
  * A row as the list names it: an alias row by the model it runs ("Opus 5.5"),
@@ -189,9 +194,10 @@ function shortList(
 
 /**
  * The composer's one picker for harness, model and effort (#368, after T3
- * Code): the trigger shows the harness's mark, the model, the effort bars and
- * its word; its popover has the harness tabs, the effort row, then the
- * models. The popover keeps one height whatever the tab or loading state, so
+ * Code): the trigger shows the harness's mark, the model's name when the
+ * harness reports which model runs, and the effort's word, which gives way to
+ * its bars when the composer is narrow ("✳ Medium ⌄"); its popover has the
+ * harness tabs, the effort row, then the models. The popover keeps one height whatever the tab or loading state, so
  * nothing moves under the pointer. A Chat keeps its harness: only its tab
  * shows. Cmd/Ctrl+Shift+M opens it.
  */
@@ -310,23 +316,19 @@ export function HarnessPicker({
   const defaultEffort = efforts.find((option) => option.is_default);
   const effortId = effort ?? defaultEffort?.id ?? null;
   const bars = effortBars(efforts, effortId);
-  // The trigger names what will run: an alias row by the model it runs.
-  const modelLabel = shown
-    ? (shown.runs_as ?? shortName(shown.label))
-    : loading
-      ? ""
-      : "Default model";
-  // A model that takes effort always says which: "Default" when none was chosen.
-  const effortLabel =
-    efforts.find((option) => option.id === effortId)?.label ??
-    (efforts.length > 0 && !effortId ? "Default" : "");
+  // The trigger names a model only when the harness says which one runs: an
+  // alias row by the model it runs, a chosen row by its name. "Default" names
+  // nothing, so it is left out; the popover says it (LOOK-10).
+  const modelLabel = shown ? modelNameOf(shown) : "";
+  const effortLabel = efforts.find((option) => option.id === effortId)?.label;
   const name = [
     harness?.name,
-    `model ${modelLabel.replace(/ model$/, "") || "Default"}`,
+    modelLabel && `model ${modelLabel}`,
     effortLabel && `effort ${effortLabel}`,
   ]
     .filter(Boolean)
     .join(", ");
+  const heldWords = [modelLabel, effortLabel].filter(Boolean).join(" · ");
   // A Chat keeps its harness: only its own tab (STATIC-14).
   const tabs = locked
     ? harnesses.filter((item) => item.id === harnessId)
@@ -373,9 +375,7 @@ export function HarnessPicker({
       <Tooltip
         shortcut={shortcutLabel("chat-model")}
         content={
-          held
-            ? `${modelLabel} · ${effortLabel || "Default"} from your next message`
-            : name
+          held ? `${heldWords || harness?.name} from your next message` : name
         }
       >
         <PopoverTrigger asChild>
@@ -397,11 +397,14 @@ export function HarnessPicker({
             {modelLabel ? (
               <span className="chat-control-label">{modelLabel}</span>
             ) : (
-              <span
-                className="chat-skeleton chat-control-skeleton"
-                aria-hidden
-              />
+              loading && (
+                <span
+                  className="chat-skeleton chat-control-skeleton"
+                  aria-hidden
+                />
+              )
             )}
+            {/* The bars stand in for the word only when the composer is narrow. */}
             {bars && <EffortGlyph {...bars} />}
             {effortLabel && (
               <span className="chat-control-effort">{effortLabel}</span>
@@ -624,7 +627,8 @@ function OptionLine({ option }: { option: Option }) {
  * The small Permissions trigger beside the picker. It always names the mode
  * that applies ("Ask before edits"), never a bare "Default" (STATIC-13). Full
  * access, where the harness never asks, trades the shield for a struck one, so
- * it reads at a glance. Below a 460px composer only the shield shows.
+ * it reads at a glance. It gives way before the picker does: below a 600px
+ * composer only the shield shows.
  */
 function PermissionPicker({
   setting,
