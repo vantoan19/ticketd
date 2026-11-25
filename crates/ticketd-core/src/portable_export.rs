@@ -71,6 +71,18 @@ pub struct MarkdownExport {
     pub attachments: Vec<ExportAttachment>,
 }
 
+/// A Document's summary as the first paragraph of its export, after a leading `# ` heading.
+fn with_summary(body: &str, summary: Option<&str>) -> String {
+    let Some(summary) = summary else {
+        return body.to_owned();
+    };
+    if body.starts_with("# ") {
+        let (heading, rest) = body.split_once('\n').unwrap_or((body, ""));
+        return format!("{heading}\n\n{summary}\n\n{}", rest.trim_start());
+    }
+    format!("{summary}\n\n{body}")
+}
+
 impl Workspace {
     /// Create a fresh bundle in an existing output folder. No existing file is
     /// replaced; failed output is removed and missing inputs become manifest omissions.
@@ -101,7 +113,13 @@ impl Workspace {
             MarkdownExportSource::Selection { body, context } => {
                 (selection_with_definitions(&body, &context), Vec::new())
             }
-            MarkdownExportSource::Document { id } => (self.show_document(&id)?.body, Vec::new()),
+            MarkdownExportSource::Document { id } => {
+                let document = self.show_document(&id)?;
+                (
+                    with_summary(&document.body, document.summary.as_deref()),
+                    Vec::new(),
+                )
+            }
             MarkdownExportSource::Ticket { reference } => {
                 let ticket = self.show_ticket(&reference)?;
                 let mut query = tx.prepare("SELECT attachment_id FROM ticket_attachments WHERE ticket_id=?1 ORDER BY attachment_id")?;
