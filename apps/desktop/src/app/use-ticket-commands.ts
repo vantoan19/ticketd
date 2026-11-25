@@ -204,11 +204,14 @@ export function useTicketCommands({
     options.push({ value: query.trim(), label: `Create “${query.trim()}”` });
   if (scope === "Project" && query.trim()) {
     const needle = query.trim().toLowerCase();
-    options = options.filter((option) => option.label.toLowerCase().includes(needle));
+    options = options.filter((option) =>
+      option.label.toLowerCase().includes(needle),
+    );
   }
-  const archivedMatch = scope === "Project" && options.length === 0
-    ? archivedProjectMatch(projects, query)
-    : undefined;
+  const archivedMatch =
+    scope === "Project" && options.length === 0
+      ? archivedProjectMatch(projects, query)
+      : undefined;
   async function apply(
     value: string,
     confirmed = false,

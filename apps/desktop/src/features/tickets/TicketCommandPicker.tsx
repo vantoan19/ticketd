@@ -184,7 +184,12 @@ export function TicketCommandPicker({
               query={query}
               onQueryChange={setQuery}
               {...(actions.projectHint && {
-                empty: <span>No matches<span className="block text-xs">{actions.projectHint}</span></span>,
+                empty: (
+                  <span>
+                    No matches
+                    <span className="block text-xs">{actions.projectHint}</span>
+                  </span>
+                ),
               })}
             />
           )}
