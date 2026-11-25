@@ -245,6 +245,7 @@ function UpdateShell() {
 function AppContent() {
   const updateNotice = useUpdateNotice();
   const workspaceReplaced = useReplaced();
+  const [chatWorkspace, setChatWorkspace] = useState(0);
   const pageZoom = usePageZoom();
   useEffect(keepWebviewInStep, []);
   const recoveryGeneration = useDraftRecoveryGeneration();
@@ -761,6 +762,11 @@ function AppContent() {
   // selection, the opened pages and a failed bulk change describe the old one.
   // The report reloads the list through the shared version.
   const replaceWorkspace = async () => {
+    chat.replaceWorkspace?.();
+    setSeenChatOpen(0);
+    setSeenChatRequest(0);
+    setChatWorkspace((generation) => generation + 1);
+    setNewChatRequest(0);
     setProjectSource(null);
     setSelected(null);
     clearOpened();
@@ -1583,6 +1589,7 @@ function AppContent() {
                                         }
                                       >
                                         <ChatsView
+                                          key={chatWorkspace}
                                           newChatRequest={newChatRequest}
                                         />
                                       </div>

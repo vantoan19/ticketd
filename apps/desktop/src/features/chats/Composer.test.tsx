@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -385,6 +386,31 @@ test("Backspace removes a mention whole, and a deleted mention links nothing", a
   expect(box.value).toBe(" fix");
   fireEvent.keyDown(box, { key: "Enter" });
   expect(onSend).toHaveBeenCalledWith("fix", []);
+});
+
+test("a locked save blocks token deletion until the composer is editable", async () => {
+  const { box, onSend } = setup();
+  let fail!: (error: Error) => void;
+  const saving = new Promise<void>((_, reject) => {
+    fail = reject;
+  });
+  onSend.mockReturnValueOnce(saving);
+  type(box, "#rate");
+  await screen.findByRole("option", { name: /T-KQ12/ });
+  fireEvent.keyDown(box, { key: "Tab" });
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(box).toHaveProperty("readOnly", true);
+  box.setSelectionRange(6, 6);
+  fireEvent.keyDown(box, { key: "Backspace" });
+  expect(box.value).toBe("T-KQ12 ");
+  expect(screen.queryByText("Removed T-KQ12.")).toBeNull();
+
+  await act(async () => fail(new Error("Send failed")));
+  expect(box).toHaveProperty("readOnly", false);
+  box.setSelectionRange(6, 6);
+  fireEvent.keyDown(box, { key: "Backspace" });
+  expect(box.value).toBe(" ");
+  expect(screen.getByText("Removed T-KQ12.")).toBeTruthy();
 });
 
 test("@ lists files in the folder, Escape closes the menu and keeps the text, and / opens only when the harness lists commands", async () => {

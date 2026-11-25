@@ -34,6 +34,7 @@ export type ChatFeature = {
   chatRequest: { request: ChatRequest; n: number } | null;
   /** Shows a Chat, or New Chat about a ticket, on the Chats screen. */
   requestChat: (request: ChatRequest) => void;
+  replaceWorkspace?: () => void;
 };
 
 export const NO_CHAT_OVERVIEW: ChatOverview = {

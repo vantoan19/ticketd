@@ -1,6 +1,10 @@
 import type { RequestAnswer } from "@/features/chats/client";
 
-export type AnswerDraft = { text: string; pending: RequestAnswer | null };
+export type AnswerDraft = {
+  text: string;
+  pending: RequestAnswer | null;
+  inComposer?: boolean;
+};
 
 /** Answers in the dock belong to the Chat and request, across pane mounts. */
 export class QuestionDrafts {
@@ -26,10 +30,10 @@ export class QuestionDrafts {
     }
   }
 
-  begin(id: string, answer: RequestAnswer) {
+  begin(id: string, answer: RequestAnswer, inComposer = false) {
     const current = this.drafts.get(id);
     if (current?.pending) return false;
-    this.update(id, { text: current?.text ?? "", pending: answer });
+    this.update(id, { text: current?.text ?? "", pending: answer, inComposer });
     return true;
   }
 

@@ -6,14 +6,14 @@ import type {
   QueueEditStatus,
 } from "@/features/chats/client";
 import type { Pick as HarnessPick } from "@/features/chats/harness-pick";
-import type { Quote } from "@/features/chats/quotes";
+import { clearQuoteDrafts, type Quote } from "@/features/chats/quotes";
 import type { FailureDescription } from "@/lib/api/describe-failure";
 import {
   ComposerAttachments,
   NO_ATTACHMENTS,
   type ChatAttachmentInput,
 } from "@/features/chats/composer-attachments";
-import type { Token } from "@/features/chats/composer-mentions";
+import { linksOf, type Token } from "@/features/chats/composer-mentions";
 import { QuestionDrafts } from "@/features/chats/question-drafts";
 
 type Action = "send" | "queue";
@@ -44,6 +44,15 @@ type QueuedDraft = {
   attachments: ChatAttachmentInput[];
 };
 
+type QueueSave = {
+  key: string;
+  edit: QueueEditSave;
+  text: string;
+  linkKey: string;
+  attachmentIds: Set<number>;
+  quotes: Quote[];
+};
+
 /** One draft and its in-flight operations, independent of the mounted pane. */
 export class ComposerDraft {
   readonly questions = new QuestionDrafts();
@@ -51,6 +60,7 @@ export class ComposerDraft {
   private view: Snapshot;
   private listeners = new Set<() => void>();
   private saving: Promise<void> | undefined;
+  private current = true;
   private staged:
     | {
         queuedId: string;
@@ -60,7 +70,7 @@ export class ComposerDraft {
       }
     | undefined;
   private attempt = { id: "", request: "" };
-  private queueSaves = new Map<string, { key: string; edit: QueueEditSave }>();
+  private queueSaves = new Map<string, QueueSave>();
   private queueRemovals = new Set<string>();
   private prefilled: string | null = null;
 
@@ -107,7 +117,14 @@ export class ComposerDraft {
     for (const listener of this.listeners) listener();
   }
 
-  locked = () => this.state.saving || this.state.transfer !== null;
+  belongsToWorkspace = () => this.current;
+
+  discard() {
+    this.current = false;
+  }
+
+  locked = () =>
+    !this.current || this.state.saving || this.state.transfer !== null;
 
   canPrefill() {
     const { text } = this.state;
@@ -128,6 +145,10 @@ export class ComposerDraft {
 
   setPendingCreate(pendingCreate: PendingCreate | null) {
     this.update({ pendingCreate });
+  }
+
+  repeatsRequest(request: string) {
+    return request === this.attempt.request;
   }
 
   requestId(request: string) {
@@ -181,7 +202,7 @@ export class ComposerDraft {
   /** A first message that could not be delivered joins its new Chat's draft. */
   async recover(payload: QueuedDraft) {
     await this.saving;
-    this.append(payload);
+    if (this.current) this.append(payload);
   }
 
   private append({ text, attachments }: QueuedDraft) {
@@ -203,8 +224,21 @@ export class ComposerDraft {
     };
   }
 
-  rememberQueueSave(edit: QueueEditSave, key: string) {
-    this.queueSaves.set(edit.commandId, { key, edit });
+  rememberQueueSave(
+    edit: QueueEditSave,
+    key: string,
+    submitted: Snapshot,
+    quotes: Quote[],
+  ) {
+    const { text, tokens, items } = submitted;
+    this.queueSaves.set(edit.commandId, {
+      key,
+      edit,
+      text: text.trim(),
+      linkKey: JSON.stringify(linksOf(tokens)),
+      attachmentIds: new Set(items.map((item) => item.id)),
+      quotes,
+    });
   }
 
   rememberQueueRemoval(queuedId: string) {
@@ -215,11 +249,23 @@ export class ComposerDraft {
   settleQueueEdits({ saved, removed }: QueueEditStatus, key?: string) {
     const consumed = new Set(removed);
     let sameDraft = false;
+    const acknowledgedQuotes: Quote[] = [];
     for (const commandId of saved) {
       const pending = this.queueSaves.get(commandId);
       if (!pending) continue;
       sameDraft ||= pending.key === key;
       for (const id of pending.edit.messageIds) consumed.add(id);
+      acknowledgedQuotes.push(...pending.quotes);
+      // A changed draft keeps its new words and files, but has already sent
+      // the unchanged text and the original attachment cards.
+      if (
+        this.state.text.trim() === pending.text &&
+        JSON.stringify(linksOf(this.state.tokens)) === pending.linkKey
+      ) {
+        this.state = { ...this.state, text: "", tokens: [], restored: false };
+      }
+      if (pending.attachmentIds.size)
+        this.attachments.remove(pending.attachmentIds);
     }
     if (consumed.size > 0) {
       for (const [commandId, { edit }] of this.queueSaves) {
@@ -229,21 +275,33 @@ export class ComposerDraft {
       for (const id of consumed) this.queueRemovals.delete(id);
       this.update({
         queueEdits: this.state.queueEdits.filter((id) => !consumed.has(id)),
+        ...(saved.length && { failedAction: null }),
       });
     }
-    return sameDraft;
+    return { sameDraft, acknowledgedQuotes };
   }
 
   async editQueued(
     queuedId: string,
-    read: () => Promise<QueuedDraft>,
+    read: () => Promise<QueuedDraft | undefined>,
     confirm: () => Promise<boolean>,
   ) {
-    if (this.state.transfer || this.state.queueEdits.includes(queuedId)) return;
+    if (
+      !this.current ||
+      this.state.transfer ||
+      this.state.queueEdits.includes(queuedId)
+    )
+      return;
     this.update({ transfer: "preparing" });
     try {
       await this.saving;
+      if (!this.current) return;
       const payload = await read();
+      if (!this.current) return;
+      if (!payload) {
+        this.update({ transfer: null });
+        return;
+      }
       this.staged = {
         queuedId,
         payload,
@@ -273,7 +331,7 @@ export class ComposerDraft {
   }
 
   private async confirmTransfer() {
-    if (!this.staged) return;
+    if (!this.current || !this.staged) return;
     const { queuedId, payload, confirm } = this.staged;
     this.update({ transfer: "confirming" });
     let held: boolean;
@@ -283,6 +341,7 @@ export class ComposerDraft {
       this.update({ transfer: "unconfirmed" });
       return;
     }
+    if (!this.current) return;
     this.staged = undefined;
     if (held) {
       this.state = {
@@ -297,6 +356,13 @@ export class ComposerDraft {
 }
 
 const drafts = new WeakMap<ChatClient, Map<string, ComposerDraft>>();
+
+export function discardChatDrafts(client: ChatClient) {
+  for (const draft of drafts.get(client)?.values() ?? []) draft.discard();
+  drafts.delete(client);
+  arrivals.clear();
+  clearQuoteDrafts();
+}
 
 export function draftOf(client: ChatClient, id: string): ComposerDraft {
   let chats = drafts.get(client);

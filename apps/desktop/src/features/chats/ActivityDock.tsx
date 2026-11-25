@@ -83,10 +83,7 @@ function Request({
   useEffect(() => {
     if (focusTitle) title.current?.focus();
   }, [focusTitle]);
-  const [sendingChoice, setSendingChoice] = useState<RequestAnswer | null>(
-    null,
-  );
-  const sending = answerDraft?.pending ?? sendingChoice;
+  const sending = answerDraft?.pending;
   const text = answerDraft?.text ?? "";
   const [error, setError] = useState<FailureDescription | null>(null);
   const [showCommand, setShowCommand] = useState(false);
@@ -96,26 +93,17 @@ function Request({
   const exact =
     request.command ?? (request.ticketd?.length ? request.subject : undefined);
   const submit = (answer: RequestAnswer) => {
-    if (sending) return;
+    if (!questionDrafts.begin(request.id, answer, answerInComposer)) return;
     const origin = document.activeElement;
-    if (showAnswerField) {
-      if (!questionDrafts.begin(request.id, answer)) return;
-    } else {
-      setSendingChoice(answer);
-    }
-    const settle = (completed: boolean) => {
-      if (showAnswerField) questionDrafts.settle(request.id, answer, completed);
-      else setSendingChoice(null);
-    };
     setError(null);
     onAnswer(answer).then(
       () => {
-        settle(true);
+        questionDrafts.settle(request.id, answer, true);
         if (onAnswered) onAnswered(request.id, origin);
         else onLeave();
       },
       (reason: unknown) => {
-        settle(false);
+        questionDrafts.settle(request.id, answer, false);
         const failure = describeFailure(reason, "send your answer");
         // Picking again is the retry.
         setError({
@@ -387,6 +375,7 @@ function QueueCard({
   queued,
   canSendNow,
   adopted,
+  canRemove,
   onSendNow,
   onEdit,
   onRemove,
@@ -394,6 +383,7 @@ function QueueCard({
   queued: Queued;
   canSendNow: boolean;
   adopted: boolean;
+  canRemove: boolean;
   onSendNow: () => Promise<void>;
   onEdit: () => void;
   onRemove: () => void;
@@ -448,6 +438,7 @@ function QueueCard({
             )}
             <IconButton
               label="Remove from queue"
+              disabled={!canRemove}
               aria-describedby={textId}
               onClick={onRemove}
             >
@@ -478,6 +469,7 @@ export function ActivityDock({
   onAnswered,
   onSendNow,
   queueEdits,
+  draftLocked,
   onEdit,
   onRemove,
   onResume,
@@ -499,6 +491,7 @@ export function ActivityDock({
   onAnswered?: (requestId: string, origin: Element | null) => void;
   onSendNow: (queuedId: string) => Promise<void>;
   queueEdits: readonly string[];
+  draftLocked: boolean;
   onEdit: (queuedId: string) => void;
   onRemove: (queuedId: string) => void;
   onResume: () => void;
@@ -562,6 +555,7 @@ export function ActivityDock({
                     key={queued.id}
                     queued={queued}
                     adopted={queueEdits.includes(queued.id)}
+                    canRemove={!draftLocked}
                     canSendNow={
                       !queued.editing &&
                       (!live ||

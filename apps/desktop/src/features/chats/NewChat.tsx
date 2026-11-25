@@ -74,6 +74,12 @@ import { notificationClient } from "@/lib/api/notifications";
 import { withoutVerbatim } from "@/lib/paths";
 import { loadPreferences } from "@/lib/preferences";
 
+const pickParameters = ({ model, effort, permission }: Pick) => ({
+  ...(model && { model }),
+  ...(effort && { effort }),
+  ...(permission && { permission }),
+});
+
 /**
  * Starts a Chat: a first message, the harness (chosen only here), the folder
  * it works in, and any records to link. A folder is required; a Project or
@@ -274,11 +280,7 @@ export function NewChat({
     found[0];
   const ready = harness?.usable ?? false;
   // What each usable harness offers, asked once per harness version by the host.
-  const [options, setOptions] = useState<Record<string, HarnessOptions>>(() =>
-    pendingCreate?.options
-      ? { [pendingCreate.request.harness_id]: pendingCreate.options }
-      : {},
-  );
+  const [options, setOptions] = useState<Record<string, HarnessOptions>>({});
   const harnessKey = harness?.usable ? harness.id : null;
   useEffect(() => {
     if (!harnessKey) return;
@@ -313,10 +315,13 @@ export function NewChat({
         pick: pendingCreate.pick,
       },
   );
+  const restored =
+    restoredPick?.harnessId === harness?.id ? restoredPick?.pick : undefined;
   const pick = harness
-    ? restoredPick?.harnessId === harness.id
-      ? restoredPick.pick
-      : startPick(offered, picks[harness.id] ?? rememberedPick(harness.id))
+    ? startPick(
+        offered,
+        restored ?? picks[harness.id] ?? rememberedPick(harness.id),
+      )
     : NO_PICK;
   const choosePick = (next: Pick) => {
     if (!harness) return;
@@ -356,6 +361,7 @@ export function NewChat({
       void notificationClient.requestPermission().catch(() => {});
     try {
       const created = await client.createChat(request);
+      if (!draft.belongsToWorkspace()) return;
       if (options) rememberStart(created.chat_id, options, pick);
       if (request.folder) rememberFolder(request.folder);
       clearQuotes(NEW_CHAT, quotes);
@@ -365,6 +371,7 @@ export function NewChat({
           text: request.message,
           attachments: request.attachments ?? [],
         });
+        if (!draft.belongsToWorkspace()) return;
         arrivals.set(
           created.chat_id,
           `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
@@ -372,7 +379,8 @@ export function NewChat({
       }
       draft.setPendingCreate(null);
       setFailure(null);
-      onCreated(created.chat_id);
+      if (input.current?.isConnected && !input.current.closest("[hidden]"))
+        onCreated(created.chat_id);
     } catch (reason) {
       draft.setPendingCreate({
         ...pending,
@@ -516,14 +524,31 @@ export function NewChat({
                     ),
                     message,
                     ...(attachments && { attachments }),
-                    // The first turn runs on what the picker shows (LIVE-7).
-                    ...(pick.model && { model: pick.model }),
-                    ...(pick.effort && { effort: pick.effort }),
-                    ...(pick.permission && { permission: pick.permission }),
+                  };
+                  const previous = draft.snapshot().pendingCreate;
+                  // An unchanged request can reconcile its original create after
+                  // a probe changes the choices. Edited requests use today's pick.
+                  if (
+                    previous &&
+                    restored &&
+                    draft.repeatsRequest(
+                      JSON.stringify({
+                        ...requestInput,
+                        ...pickParameters(restored),
+                      }),
+                    )
+                  ) {
+                    await create(previous);
+                    return;
+                  }
+                  // The first turn runs on what the picker shows (LIVE-7).
+                  const selectedInput = {
+                    ...requestInput,
+                    ...pickParameters(pick),
                   };
                   const request = {
-                    command_id: draft.requestId(JSON.stringify(requestInput)),
-                    ...requestInput,
+                    command_id: draft.requestId(JSON.stringify(selectedInput)),
+                    ...selectedInput,
                   };
                   const { text, tokens, items } = draft.snapshot();
                   const pending: PendingCreate = {

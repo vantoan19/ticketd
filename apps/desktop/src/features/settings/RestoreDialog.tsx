@@ -268,8 +268,11 @@ export function RestoreDialog({
     }
     let reloadFailure: FailureDescription | null = null;
     try {
-      await recovery.reloadAfterRestore();
-      await onRestored();
+      try {
+        await recovery.reloadAfterRestore();
+      } finally {
+        await onRestored();
+      }
     } catch (reason) {
       reloadFailure = {
         ...describeFailure(reason, "reload open views"),

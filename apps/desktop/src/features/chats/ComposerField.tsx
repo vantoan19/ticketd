@@ -470,7 +470,7 @@ export function ComposerField({
     const collapsed = caret === textarea.selectionEnd;
     const plain = !event.shiftKey && !event.metaKey && !event.altKey;
     if (collapsed && plain && !event.ctrlKey) {
-      if (event.key === "Backspace" || event.key === "Delete") {
+      if (!readOnly && (event.key === "Backspace" || event.key === "Delete")) {
         const removal = removeToken(
           text,
           tokens,

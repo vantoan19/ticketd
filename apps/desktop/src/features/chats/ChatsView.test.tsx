@@ -584,6 +584,103 @@ test.each([false, true])(
   },
 );
 
+test.each([false, true])(
+  "editing the next queued message reconciles a committed save first (later edits: %s)",
+  async (edited) => {
+    const client = await open(
+      one({ id: "c1", title: "Limiter", queue_paused: true }),
+    );
+    const firstFile = {
+      name: "first.txt",
+      dataUrl: "data:text/plain;base64,b25l",
+    };
+    const nextFile = {
+      name: "next.txt",
+      dataUrl: "data:text/plain;base64,dHdv",
+    };
+    await act(async () => {
+      await client.queue("c1", "First caption", [], [firstFile]);
+      await client.queue("c1", "Next caption", [], [nextFile]);
+    });
+    const [editFirst] = screen.getAllByRole("button", {
+      name: "Edit in the message box",
+    });
+    if (!editFirst) throw new Error("Missing first queue edit.");
+    fireEvent.click(editFirst);
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    const save = client.send;
+    const send = vi
+      .spyOn(client, "send")
+      .mockImplementationOnce(async (...args) => {
+        await save(...args);
+        throw new Error("Save acknowledgement lost");
+      });
+    fireEvent.click(button("Send"));
+    await screen.findByRole("button", { name: "Retry" });
+    if (edited) type("Revised caption", "Steer Codex");
+
+    const check = client.checkQueueEdits;
+    const checkReceipts = vi.spyOn(client, "checkQueueEdits");
+    if (!edited) {
+      checkReceipts.mockResolvedValueOnce({ saved: [], removed: [] });
+      fireEvent.click(button("Edit in the message box"));
+      expect(
+        await screen.findByText(
+          "Send the previous edit before editing another queued message.",
+        ),
+      ).toBeTruthy();
+      expect(composer("Steer Codex")).toHaveProperty("value", "First caption");
+    }
+    let finish!: () => void;
+    const checking = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    checkReceipts.mockImplementationOnce(async (...args) => {
+      await checking;
+      return check(...args);
+    });
+    fireEvent.click(button("Edit in the message box"));
+    expect(button("Remove from queue")).toHaveProperty("disabled", true);
+    await act(async () => finish());
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: "Remove first.txt" }),
+    ).toBeNull();
+
+    if (edited) {
+      expect(
+        await screen.findByText(
+          "The earlier message was already saved. Your edited draft is ready to send.",
+        ),
+      ).toBeTruthy();
+      expect(composer("Steer Codex")).toHaveProperty(
+        "value",
+        "Revised caption",
+      );
+      const [next] = (await client.openChat("c1")).chat.queue;
+      expect(next?.text).toBe("Next caption");
+      expect(next?.editing).toBeFalsy();
+      fireEvent.click(button("Edit in the message box"));
+    }
+    const nextText = edited
+      ? "Revised caption\n\nNext caption"
+      : "Next caption";
+    await waitFor(() =>
+      expect(composer("Steer Codex")).toHaveProperty("value", nextText),
+    );
+    await waitFor(() =>
+      expect(button("Steer")).toHaveProperty("disabled", false),
+    );
+    expect(button("Remove from queue")).toHaveProperty("disabled", false);
+    fireEvent.click(button("Steer"));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    expect(send.mock.calls[1]?.[1]).toBe(nextText);
+    expect(send.mock.calls[1]?.[3]).toEqual([nextFile]);
+  },
+);
+
 test("a saved queue edit reopens and a lost Remove reply leaves its draft usable", async () => {
   const client = await open(one({ id: "c1", title: "Limiter" }));
   const file = {
@@ -759,6 +856,76 @@ test("New Chat keeps a pending first message and its retry identity across navig
   fireEvent.click(button("New Chat"));
   expect(box()).toHaveProperty("value", "");
   noButton("Remove first.txt");
+});
+
+test("an edited New Chat uses current harness picks after reopening the draft", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  const harness = (await client.harnesses()).find((item) => item.usable);
+  if (!harness) throw new Error("Missing a usable harness.");
+  const initialOptions = client.harnessOptions;
+  const { models } = await initialOptions(harness.id);
+  const firstModel = models.find((model) => model.is_default);
+  if (!firstModel) throw new Error("Missing the starting model.");
+  let modelChanged = false;
+  let freshOptionsRead = false;
+  vi.spyOn(client, "harnessOptions").mockImplementation(async (harness) => {
+    const original = await initialOptions(harness);
+    freshOptionsRead ||= modelChanged;
+    return modelChanged
+      ? {
+          ...original,
+          models: [{ ...firstModel, id: "updated", label: "Updated model" }],
+        }
+      : original;
+  });
+  const create = vi
+    .spyOn(client, "createChat")
+    .mockRejectedValueOnce(new Error("Create failed"));
+  fireEvent.click(button("New Chat"));
+  await screen.findByRole("button", {
+    name: new RegExp(harness.name + ", model"),
+  });
+  type("First attempt", "Describe a task or ask a question");
+  fireEvent.click(button("Send"));
+  await screen.findByRole("button", { name: "Retry" });
+  expect(create.mock.calls[0]?.[0].model).toBe(firstModel.id);
+
+  modelChanged = true;
+  fireEvent.click(button(/^Limiter/));
+  await screen.findByRole("heading", { name: "Limiter" });
+  fireEvent.click(button("New Chat"));
+  await waitFor(() => expect(freshOptionsRead).toBe(true));
+  await act(async () => {});
+  type("Edited attempt", "Describe a task or ask a question");
+  fireEvent.click(button("Send"));
+  expect(create.mock.calls[1]?.[0].model).toBe("updated");
+  expect(create.mock.calls[1]?.[0].command_id).not.toBe(
+    create.mock.calls[0]?.[0].command_id,
+  );
+});
+
+test("a late New Chat success keeps the Chat selected since then", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  const save = client.createChat;
+  let finish!: () => void;
+  const creating = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  vi.spyOn(client, "createChat").mockImplementationOnce(async (request) => {
+    await creating;
+    return save(request);
+  });
+  fireEvent.click(button("New Chat"));
+  type("Create later", "Describe a task or ask a question");
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.click(button("Send"));
+  fireEvent.click(button(/^Limiter/));
+  await screen.findByRole("heading", { name: "Limiter" });
+  await act(async () => finish());
+  expect(
+    await screen.findByRole("button", { name: /^Create later/ }),
+  ).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Limiter" })).toBeTruthy();
 });
 
 test("Retry after navigation opens the Chat whose create reply was lost", async () => {
@@ -1043,6 +1210,47 @@ test("a question takes an option by key inside the request, or a typed answer", 
   const { items } = await client.openChat("c1");
   expect(items.filter((item) => item.kind === "user")).toEqual([]);
 });
+
+test.each(["composer", "dock"])(
+  "composer and dock share one in-flight answer (started in %s)",
+  async (from) => {
+    const client = await open(
+      one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
+    );
+    const answer = client.answer;
+    const send = vi.spyOn(client, "send");
+    let finish!: () => void;
+    const pending = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const submit = vi
+      .spyOn(client, "answer")
+      .mockImplementationOnce(async (...args) => {
+        await pending;
+        return answer(...args);
+      });
+    type("Fail open for five minutes", "Answer, or pick above");
+    const choice = button("Fail closed");
+    fireEvent.click(from === "dock" ? choice : button("Send"));
+    const box = composer("Answer, or pick above");
+    expect(box).toHaveProperty("value", "Fail open for five minutes");
+    expect(button("Send")).toHaveProperty("disabled", true);
+    expect(choice).toHaveProperty("disabled", true);
+    fireEvent.keyDown(box, { key: "Enter" });
+    fireEvent.click(choice);
+    fireEvent.keyDown(choice, { key: "2" });
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(send).not.toHaveBeenCalled();
+    await act(async () => finish());
+    expect(
+      await screen.findByText(
+        from === "dock"
+          ? "Answered · Fail closed"
+          : "Answered · Fail open for five minutes",
+      ),
+    ).toBeTruthy();
+  },
+);
 
 test("digits pick a question's option only while focus is inside the request", async () => {
   await open(

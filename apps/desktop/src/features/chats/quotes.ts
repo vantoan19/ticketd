@@ -31,6 +31,16 @@ export function addQuote(chatId: string, quote: Omit<Quote, "id">) {
   changed();
 }
 
+export function quoteDraft(chatId: string) {
+  return store.get(chatId) ?? NONE;
+}
+
+export function clearQuoteDrafts() {
+  if (!store.size) return;
+  store.clear();
+  changed();
+}
+
 export function clearQuotes(chatId: string, sent?: Quote[]) {
   const current = store.get(chatId);
   if (!current) return;
@@ -48,7 +58,7 @@ export function useQuotes(chatId: string) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    () => store.get(chatId) ?? NONE,
+    () => quoteDraft(chatId),
   );
   const remove = useCallback(
     (id: string) => {

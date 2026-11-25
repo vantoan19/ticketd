@@ -59,6 +59,7 @@ import {
   type LinkedRecord,
   type Problem,
   type QueueEditSave,
+  type QueueEditStatus,
   type RequestAnswer,
   type TranscriptItem,
 } from "@/features/chats/client";
@@ -74,13 +75,20 @@ import {
   type AskedChange,
 } from "@/features/chats/composer-settings";
 import { HarnessMark } from "@/features/chats/HarnessMark";
+import { linksOf } from "@/features/chats/composer-mentions";
 import { Composer } from "@/features/chats/Composer";
 import type { ChatAttachmentInput } from "@/features/chats/composer-attachments";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
-import { arrivals, draftOf, type SaveResult } from "@/features/chats/drafts";
+import {
+  arrivals,
+  draftOf,
+  type ComposerDraft,
+  type SaveResult,
+} from "@/features/chats/drafts";
 import {
   clearQuotes,
+  quoteDraft,
   quoteLinks,
   quotedMessage,
   useQuotes,
@@ -334,6 +342,23 @@ function LinkedRecords({
   );
 }
 
+const queueRequestKey = (
+  outgoingText: string,
+  outgoingLinks: LinkRef[],
+  draft: ReturnType<ComposerDraft["snapshot"]>,
+  messageIds = draft.queueEdits,
+) =>
+  JSON.stringify({
+    outgoingText,
+    outgoingLinks,
+    // A ready attachment's item ID owns its immutable captured bytes.
+    attachmentIds: draft.items.map((item) => item.id),
+    messageIds,
+  });
+
+const previousSave =
+  "The earlier message was already saved. Your edited draft is ready to send.";
+
 const isMessage = (item: TranscriptItem) =>
   item.kind === "user" || item.kind === "response";
 
@@ -551,7 +576,8 @@ function Conversation({
     questionDrafts.subscribe,
     questionDrafts.snapshot,
   );
-  const independentAnswer = question && answerDrafts.has(question.id);
+  const questionDraft = question && answerDrafts.get(question.id);
+  const independentAnswer = questionDraft && !questionDraft.inComposer;
   useEffect(() => {
     if (!questionDrafts.snapshot().size) return;
     for (const item of items) {
@@ -563,9 +589,11 @@ function Conversation({
     text: draftText,
     items: draftFiles,
     restored,
+    saving: savingDraft,
     transfer,
     queueEdits,
   } = useSyncExternalStore(draft.subscribe, draft.snapshot);
+  const draftLocked = savingDraft || transfer !== null;
   const hasAttachments = draftFiles.length > 0;
   const hasImages = draftFiles.some(
     (file) =>
@@ -659,18 +687,57 @@ function Conversation({
     box?.focus();
     box?.setSelectionRange(box.value.length, box.value.length);
   };
+  const applyQueueReceipts = (status: QueueEditStatus, key?: string) => {
+    const { sameDraft, acknowledgedQuotes } = draft.settleQueueEdits(
+      status,
+      key,
+    );
+    if (acknowledgedQuotes.length) clearQuotes(id, acknowledgedQuotes);
+    return sameDraft;
+  };
   const edit = (queuedId: string) => {
     if (draft.snapshot().transfer) return;
     focusEdit();
     const transferId = crypto.randomUUID();
-    quietly(
+    let notice: string | undefined;
+    void run(
       draft.editQueued(
         queuedId,
-        () => client.editQueued(id, queuedId),
+        async () => {
+          const { saves, removals } = draft.queueEditsToCheck();
+          if (saves.length || removals.length) {
+            const status = await client.checkQueueEdits(id, saves, removals);
+            if (!draft.belongsToWorkspace()) return;
+            const current = draft.snapshot();
+            const currentQuotes = quoteDraft(id);
+            const sameDraft = applyQueueReceipts(
+              status,
+              queueRequestKey(
+                quotedMessage(currentQuotes, current.text.trim()),
+                [...linksOf(current.tokens), ...quoteLinks(currentQuotes)],
+                current,
+              ),
+            );
+            if (status.saved.length && !sameDraft) {
+              notice = previousSave;
+              return;
+            }
+            if (draft.queueEditsToCheck().saves.length) {
+              notice =
+                "Send the previous edit before editing another queued message.";
+              return;
+            }
+          }
+          return client.editQueued(id, queuedId);
+        },
         () => client.confirmQueueEdit(id, queuedId, transferId),
       ),
       "edit the queued message",
-    );
+    )
+      .then(() => {
+        if (notice && draft.belongsToWorkspace()) setArrival(notice);
+      })
+      .catch(() => {});
   };
   // Placed once when the Chat opens; it stays until the person sends or leaves.
   // After what the person read through, which the host keeps (#365); a Chat
@@ -688,11 +755,11 @@ function Conversation({
     const pending = readThrough.current;
     return () => {
       window.clearTimeout(pending.timer);
-      if (pending.item)
+      if (pending.item && draft.belongsToWorkspace())
         void client.readThrough(id, pending.item).catch(() => {});
       pending.item = undefined;
     };
-  }, [client, id]);
+  }, [client, draft, id]);
   const { root, content, marker, following, reading, follow, onScroll } =
     useTranscriptScroll(id, (itemId) => {
       const pending = readThrough.current;
@@ -700,7 +767,8 @@ function Conversation({
       window.clearTimeout(pending.timer);
       pending.timer = window.setTimeout(() => {
         pending.item = undefined;
-        void client.readThrough(id, itemId).catch(() => {});
+        if (draft.belongsToWorkspace())
+          void client.readThrough(id, itemId).catch(() => {});
       }, READ_THROUGH_MS);
     });
   /** Sending resumes following and clears the New marker. */
@@ -720,34 +788,38 @@ function Conversation({
     const outgoingLinks = [...links, ...quoteLinks(quotes)];
     const submitted = draft.snapshot();
     const requestKey = (messageIds: string[]) =>
-      JSON.stringify({
-        outgoingText,
-        outgoingLinks,
-        // A ready attachment's item ID owns its immutable captured bytes.
-        attachmentIds: submitted.items.map((item) => item.id),
-        messageIds,
-      });
+      queueRequestKey(outgoingText, outgoingLinks, submitted, messageIds);
     let queueEdit: QueueEditSave | undefined;
     let attemptedDraft = submitted;
+    let notice: string | undefined;
     const send = async (): Promise<SaveResult> => {
+      notice = undefined;
       const { saves, removals } = draft.queueEditsToCheck();
       if (saves.length || removals.length) {
         const status = await client.checkQueueEdits(id, saves, removals);
-        const sameDraft = draft.settleQueueEdits(
+        if (!draft.belongsToWorkspace()) return "keep_draft";
+        const sameDraft = applyQueueReceipts(
           status,
           requestKey(queueEdit?.messageIds ?? submitted.queueEdits),
         );
         if (status.saved.length) {
-          if (sameDraft) clearQuotes(id, quotes);
+          if (!sameDraft) notice = previousSave;
           return sameDraft ? undefined : "keep_draft";
         }
       }
       const messageIds = draft.snapshot().queueEdits;
+      if (
+        queueEdit?.messageIds.some((queuedId) => !messageIds.includes(queuedId))
+      ) {
+        notice =
+          "A queued message from the earlier edit is gone. Your draft is ready to send.";
+        return "keep_draft";
+      }
       if (!queueEdit && messageIds.length) {
         attemptedDraft = draft.snapshot();
         const key = requestKey(messageIds);
         queueEdit = { commandId: draft.requestId(key), messageIds };
-        draft.rememberQueueSave(queueEdit, key);
+        draft.rememberQueueSave(queueEdit, key, attemptedDraft, quotes);
       }
       if (queueEdit) {
         await client[action](
@@ -757,13 +829,14 @@ function Conversation({
           attachments,
           queueEdit,
         );
-        draft.settleQueueEdits({ saved: [queueEdit.commandId], removed: [] });
+        if (draft.belongsToWorkspace())
+          applyQueueReceipts({ saved: [queueEdit.commandId], removed: [] });
       } else if (attachments) {
         await client[action](id, outgoingText, outgoingLinks, attachments);
       } else {
         await client[action](id, outgoingText, outgoingLinks);
       }
-      clearQuotes(id, quotes);
+      if (draft.belongsToWorkspace()) clearQuotes(id, quotes);
     };
     const save = (): Promise<SaveResult> =>
       run(
@@ -777,10 +850,7 @@ function Conversation({
         },
         action === "send" && submitted.queueEdits.length === 0,
       ).then((result) => {
-        if (result === "keep_draft")
-          setArrival(
-            "The earlier message was already saved. Your edited draft is ready to send.",
-          );
+        if (notice && draft.belongsToWorkspace()) setArrival(notice);
         return result;
       });
     return save();
@@ -992,6 +1062,7 @@ function Conversation({
                     ).then(() => {})
                   }
                   queueEdits={queueEdits}
+                  draftLocked={draftLocked}
                   onEdit={edit}
                   onRemove={(queuedId) => {
                     const remove = () => {
@@ -1004,6 +1075,7 @@ function Conversation({
                         remove,
                       )
                         .then(() => {
+                          if (!draft.belongsToWorkspace()) return;
                           draft.settleQueueEdits({
                             saved: [],
                             removed: [queuedId],
@@ -1075,23 +1147,35 @@ function Conversation({
                     <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
                   </>
                 }
-                controls={(text, hasAttachments) =>
-                  composerControls(
+                controls={(text, hasAttachments) => {
+                  const controls = composerControls(
                     chat,
                     text,
                     answering,
                     hasAttachments,
                     hasImages,
-                  )
-                }
-                onSend={(text, links, attachments) =>
-                  answering && question && !attachments?.length
-                    ? run(
-                        sent(client.answer(id, question.id, { text })),
-                        "send your answer",
-                      )
-                    : submitMessage("send", text, links, attachments)
-                }
+                  );
+                  return answering && questionDraft?.pending
+                    ? { ...controls, enabled: false }
+                    : controls;
+                }}
+                onSend={async (text, links, attachments) => {
+                  if (!answering || !question || attachments?.length)
+                    return submitMessage("send", text, links, attachments);
+                  const response = { text };
+                  if (!questionDrafts.begin(question.id, response, true))
+                    return "keep_draft";
+                  try {
+                    await run(
+                      sent(client.answer(id, question.id, response)),
+                      "send your answer",
+                    );
+                    questionDrafts.settle(question.id, response, true);
+                  } catch (reason) {
+                    questionDrafts.settle(question.id, response, false);
+                    throw reason;
+                  }
+                }}
                 onQueue={(text, links, attachments) =>
                   submitMessage("queue", text, links, attachments)
                 }
