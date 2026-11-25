@@ -57,8 +57,10 @@ import { DialogShell } from "@/components/ui/dialog-shell";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { outlineOf, showsOutline } from "@/features/markdown/outline";
+import { flushSync } from "react-dom";
 import { DocumentOutline } from "./DocumentOutline";
-import { useCurrentHeading } from "./use-current-heading";
+import { useSectionFolds } from "./section-folds";
+import { headingElement, useCurrentHeading } from "./use-current-heading";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
@@ -902,7 +904,21 @@ function RecoveredDocumentEditor({
   const readSource = withoutOpeningTitle(body, title, savedDocument?.heading);
   const outline = useMemo(() => outlineOf(readSource), [readSource]);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
-  const { current: currentAnchor, goTo } = useCurrentHeading(scroller, outline);
+  const folds = useSectionFolds(initial?.id ?? null, outline);
+  const { current: currentAnchor, goTo } = useCurrentHeading(
+    scroller,
+    outline,
+    folds.folded,
+  );
+  /** Changes the folds and keeps the heading the reader is at where it was on screen. */
+  const keepPlace = (change: () => void) => {
+    const here =
+      scroller && currentAnchor && headingElement(scroller, currentAnchor);
+    const before = here ? here.getBoundingClientRect().top : 0;
+    flushSync(change);
+    const moved = here ? here.getBoundingClientRect().top - before : 0;
+    if (scroller && moved !== 0) scroller.scrollBy(0, moved);
+  };
   // The heading line left out of the editor, while the body still starts with it.
   const head =
     writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
@@ -1697,6 +1713,7 @@ function RecoveredDocumentEditor({
                   }
                   source={readSource}
                   headings={outline}
+                  folding={initial ? folds : undefined}
                   select={
                     onOpenTicket
                       ? (reference) => navigate(() => onOpenTicket(reference))
@@ -1776,7 +1793,17 @@ function RecoveredDocumentEditor({
         <DocumentOutline
           headings={outline}
           current={currentAnchor}
-          onChoose={(heading) => goTo(heading.id)}
+          folds={{
+            folded: folds.folded.size,
+            allFolded: folds.allFolded,
+            foldAll: () => keepPlace(folds.foldAll),
+            unfoldAll: () => keepPlace(folds.unfoldAll),
+          }}
+          onChoose={(heading) => {
+            // A folded section has nothing to scroll to until it is open.
+            flushSync(() => folds.reveal(heading.id));
+            goTo(heading.id);
+          }}
         />
       )}
     </DocumentSurface>
