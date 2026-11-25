@@ -1,34 +1,57 @@
 import { failureText } from "@/lib/api/describe-failure";
 import { useContext, useState } from "react";
 import { ChatError } from "@/features/chats/client";
-import { ChatFilesContext } from "@/features/chats/files";
+import { ChatFilesContext, splitPath } from "@/features/chats/files";
 import { Tooltip } from "@/components/ui/tooltip";
 
 /** How many characters of a name always show, so its extension survives. */
 const TAIL = 12;
 
+/** A path as its muted folder, cut from the start, then its name in ink. */
+export function PathText({ path, max }: { path: string; max?: number }) {
+  const { folder, name } = splitPath(path, max);
+  return (
+    <>
+      {folder && <span className="chat-path-dir">{folder}</span>}
+      {name}
+    </>
+  );
+}
+
+/** A folder or file a step named, in mono, with its full path in the tooltip. */
+export function PathCode({ path }: { path: string }) {
+  return (
+    <Tooltip content={path}>
+      <code className="chat-path">
+        <PathText path={path} />
+      </code>
+    </Tooltip>
+  );
+}
+
 /**
  * A file a step named, in mono. The name is the button: it opens the file in the
- * system's default app. Short of room it truncates in the middle and keeps its
- * end, so the extension stays. A file that is gone is plain text.
+ * system's default app. Its folder, cut from the start, is muted before it. Short of
+ * room the folder gives way first, then the name truncates in the middle and keeps
+ * its end, so the extension stays. A file that is gone is plain text.
  */
 export function FileName({
   path,
-  shown,
   onFailed,
 }: {
   /** Relative to the Chat's folder. */
   path: string;
-  shown: string;
   onFailed: (message: string) => void;
 }) {
   const { open } = useContext(ChatFilesContext);
   const [gone, setGone] = useState(false);
-  const split = Math.max(0, shown.length - TAIL);
+  const { folder, name } = splitPath(path);
+  const split = Math.max(0, name.length - TAIL);
   const text = (
     <>
-      <span className="chat-file-head">{shown.slice(0, split)}</span>
-      <span className="chat-file-tail">{shown.slice(split)}</span>
+      {folder && <span className="chat-path-dir">{folder}</span>}
+      <span className="chat-file-head">{name.slice(0, split)}</span>
+      <span className="chat-file-tail">{name.slice(split)}</span>
     </>
   );
   if (!open || gone)
@@ -49,8 +72,8 @@ export function FileName({
             (reason: unknown) => {
               if (reason instanceof ChatError && reason.code === "gone") {
                 setGone(true);
-                onFailed(`${shown} is no longer in this folder.`);
-              } else onFailed(failureText(reason, `open ${shown}`));
+                onFailed(`${name} is no longer in this folder.`);
+              } else onFailed(failureText(reason, `open ${name}`));
             },
           )
         }

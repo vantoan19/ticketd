@@ -245,6 +245,130 @@ test("a command shows its first line, and its name says its outcome", () => {
   expect(words.label).toBe("Run python3 -c ', Failed");
 });
 
+test("a command with a description reads the description, and one without reads its first line", () => {
+  const run = (over: Partial<Step>) =>
+    step({ kind: "run", target: "npm test", command: "npm test", ...over });
+  const described = run({ description: "Run the unit tests" });
+  expect(line(described)).toBe("Run the unit tests");
+  expect(stepWords(described).label).toBe("Run the unit tests");
+  // Running: the same words (the row adds the clock); failed: the outcome follows.
+  expect(line({ ...described, state: "running" })).toBe("Run the unit tests");
+  expect(line({ ...described, state: "failed" })).toBe(
+    "Run the unit tests · Failed",
+  );
+  expect(stepWords({ ...described, state: "failed" }).label).toBe(
+    "Run the unit tests, Failed",
+  );
+  // No description: the command's first line, set apart as one muted line.
+  const plain = stepWords(run({ command: "npm test\n--watch" }));
+  expect(plain.parts).toEqual([
+    { text: "Ran" },
+    { text: "npm test", code: true, command: true },
+  ]);
+  // ticketd calls keep their sentences, and a script reads the description too.
+  const ticketd = run({
+    description: "Move the ticket",
+    ticketd: [{ verb: "set", words: [{ text: "T-1", code: true }] }],
+  });
+  expect(line(ticketd)).not.toContain("Move the ticket");
+  expect(line(run({ variant: "script", description: "Check the icons" }))).toBe(
+    "Check the icons",
+  );
+});
+
+test("a path in a row is a path part, and a glob scope is not", () => {
+  const parts = (s: Step) => stepWords(s).parts;
+  expect(
+    parts(step({ kind: "read", targets: paths("gen/icons.py") }))[1],
+  ).toEqual({
+    text: "gen/icons.py",
+    code: true,
+    path: true,
+  });
+  expect(
+    parts(step({ kind: "search", targets: [{ text: "x", scope: "src" }] }))[3],
+  ).toEqual({ text: "src", code: true, path: true });
+  expect(
+    parts(
+      step({ kind: "search", targets: [{ text: "x", scope: "src/**/*.ts" }] }),
+    )[3],
+  ).toEqual({ text: "src/**/*.ts", code: true });
+  // A search's pattern is not a path.
+  expect(parts(step({ kind: "search", targets: paths("a/b") }))[1]).toEqual({
+    text: "a/b",
+    code: true,
+  });
+});
+
+test("nothing removed is not said as a count of zero", () => {
+  const edit = step({
+    kind: "create",
+    targets: paths("gen/icons.py"),
+    added_lines: 57,
+    removed_lines: 0,
+  });
+  const words = stepWords(edit);
+  expect(words.suffix?.text).toBe("+57");
+  expect(words.label).toBe("Created gen/icons.py, 57 lines added");
+  expect(stepWords({ ...edit, removed_lines: 2 }).suffix?.text).toBe("+57 −2");
+});
+
+test("a run of reads and searches is one row, 'Explored 6 files · 2 searches'", () => {
+  const read = (...files: string[]) =>
+    step({ kind: "read", targets: paths(...files), output: "x" });
+  const search = (query: string, over: Partial<Step> = {}) =>
+    step({ kind: "search", targets: [{ text: query, scope: "src" }], ...over });
+  const merged = mergeSteps([
+    read("a.ts", "b.ts"),
+    search("x"),
+    read("c.ts"),
+    read("d.ts", "e.ts", "f.ts"),
+    search("y"),
+    step({ kind: "run", command: "npm test", target: "npm test" }),
+    read("g.ts"),
+  ]);
+  expect(merged.map(line)).toEqual([
+    "Explored 6 files · 2 searches",
+    "Ran `npm test`",
+    "Read `g.ts`",
+  ]);
+  expect(merged[0]?.output).toBeUndefined();
+  // Opened, it lists what each kind named.
+  expect(merged[0]?.explored?.files.map((target) => target.text)).toEqual([
+    "a.ts",
+    "b.ts",
+    "c.ts",
+    "d.ts",
+    "e.ts",
+    "f.ts",
+  ]);
+  expect(merged[0]?.explored?.searches).toHaveLength(2);
+  // One of each is already an exploration; its words count the singular.
+  expect(mergeSteps([read("a.ts"), search("x")]).map(line)).toEqual([
+    "Explored 1 file · 1 search",
+  ]);
+  // A failure, a search that found nothing, and a folder listing keep their own rows.
+  expect(
+    mergeSteps([
+      read("a.ts"),
+      step({ kind: "read", targets: paths("b.ts"), state: "failed" }),
+      search("x", { no_matches: true }),
+      read("c.ts"),
+      step({ kind: "read", variant: "list", targets: paths("src") }),
+    ]).map(line),
+  ).toEqual([
+    "Read `a.ts`",
+    "Read `b.ts` · Failed",
+    "Searched for `x` in `src` · No matches",
+    "Read `c.ts`",
+    "Listed `src`",
+  ]);
+  // Only reads, or only searches, keep the words they had.
+  expect(
+    mergeSteps([read("a.ts"), read("b.ts"), read("c.ts")]).map(line),
+  ).toEqual(["Read 3 files"]);
+});
+
 test("a file step ends in its diffstat, and merged steps add theirs up only when each has one", () => {
   const edit = (file: string, added?: number, removed?: number) =>
     step({

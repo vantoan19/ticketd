@@ -237,6 +237,12 @@ test("changed files sit below the response, open in their app, and say why one d
   );
   expect(screen.getByText("—")).toBeTruthy();
   expect(screen.getByText("Not confirmed")).toBeTruthy();
+  // A file with nothing removed says "+48" alone; its folder is muted before its name.
+  expect(screen.getByText("+48")).toBeTruthy();
+  expect(screen.getByText("+5 −7")).toBeTruthy();
+  const path = row.parentElement?.querySelector(".chat-file-path");
+  expect(path?.textContent).toBe("src/limiter.ts");
+  expect(path?.querySelector(".chat-path-dir")?.textContent).toBe("src/");
 });
 
 test("the context count sits before Stop, reads as tokens, and turns to a percentage from 80%", async () => {
