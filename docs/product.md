@@ -260,8 +260,12 @@ core workflows for Documents, Activities, Plans, tags, and links
   type. Without a title, its heading is the first nonempty line (or, for activity
   details, the Activity's brief).
 - Capture opens an editor at once with no required field, autosaves, and creates
-  nothing if left empty. Documents opens on Recently opened with pinned items above;
-  tags, pins, and links are optional.
+  nothing if left empty. Documents opens on **Current work** with pinned items above:
+  the Documents of Active Plans and open tickets, one group per Plan, each Plan's spec
+  first, then "Open tickets", with "Finished work" and "No Plan or ticket" closed below
+  and read when opened. Recent (by recently opened, recently updated, or title) stays one
+  click away; the view and which groups are open are remembered on this computer. Tags,
+  pins, and links are optional.
 - Documents use recoverable trash; permanent deletion is not supported. A Document can
   create a ticket and be linked to several tickets and Plans.
 - CLI: the `document` command group (`create`, `show`, `read`, `change`, `recent`,

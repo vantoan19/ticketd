@@ -91,8 +91,39 @@ const summary = z.object({
 const searchResult = summary;
 export type DocumentSummary = z.infer<typeof summary>;
 export type DocumentSearchResult = z.infer<typeof searchResult>;
+const currentWorkSchema = z.object({
+  /** Active Plans by their newest Document, then the Documents of open tickets with no Plan. */
+  groups: z.array(
+    z.object({
+      plan: z.object({ id: z.string(), name: z.string() }).nullable(),
+      documents: z.array(summary),
+    }),
+  ),
+  /** Linked Documents with no Active Plan and no open ticket; read them with `finished`. */
+  finished: z.number(),
+  /** Documents with no Plan and no ticket; read them with `unlinked`. */
+  unlinked: z.number(),
+  trashed: z.number(),
+});
+export type CurrentWork = z.infer<typeof currentWorkSchema>;
 export const documents = {
   ...linkDocuments,
+  currentWork: async (includeSupport = false) =>
+    currentWorkSchema.parse(
+      await invoke("current_work_documents", { includeSupport }),
+    ),
+  finished: async (offset: number, includeSupport = false) =>
+    z
+      .array(summary)
+      .parse(await invoke("finished_documents", { offset, includeSupport })),
+  unlinked: async (offset: number, includeSupport = false) =>
+    z
+      .array(summary)
+      .parse(await invoke("unlinked_documents", { offset, includeSupport })),
+  byTitle: async (offset: number, includeSupport = false) =>
+    z
+      .array(summary)
+      .parse(await invoke("documents_by_title", { offset, includeSupport })),
   recent: async (offset: number, includeSupport = false) =>
     z
       .array(summary)

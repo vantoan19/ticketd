@@ -16,6 +16,12 @@ const preferencesSchema = z.object({
   chat: z.boolean().catch(false),
   /** Settings > Chat > Notify me about Chats. On by default. */
   notifyChats: z.boolean().catch(true),
+  /** What Documents opens on: the work in progress, or the Documents opened lately. */
+  documentsView: z.enum(["current", "recent"]).catch("current"),
+  /** The order of Recent. */
+  documentsSort: z.enum(["opened", "updated", "title"]).catch("opened"),
+  /** Which Current work groups are open, by Plan id or `finished`; unset follows the default. */
+  documentGroups: z.record(z.string(), z.boolean()).catch({}),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -33,6 +39,9 @@ const DEFAULTS: Preferences = {
   notifyReminders: false,
   chat: false,
   notifyChats: true,
+  documentsView: "current",
+  documentsSort: "opened",
+  documentGroups: {},
 };
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

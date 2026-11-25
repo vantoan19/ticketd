@@ -149,6 +149,9 @@ An automatic event or authored update attached to exactly one ticket. Authored a
 **Document**:
 Reusable context: a thought, draft, spec, knowledge, or supporting detail. A Document has stable identity, an optional title, Markdown content, and recoverable trash state. It can be linked from multiple tickets, Plans, and Documents without duplication. A ticket's Documents are those its description mentions plus those attached explicitly (the rail's Add, or `document link-ticket`); detaching removes only an explicit reference and never edits the description.
 
+**Current work**:
+The Documents view that opens first: a Document is current when it is attached to an Active Plan or is mentioned by or attached to a ticket in Todo, In progress or In review (a ticket in Trash does not count). It is grouped under its own Active Plan, else its open ticket's Active Plan, else "Open tickets"; within a group the Plan's spec comes first, then the most recently updated, and groups run by their newest Document. **Finished work** is what is linked but has no Active Plan or open ticket; **No Plan or ticket** is what is linked to nothing. Both are counted and read only when opened. Recent is the other view.
+
 **Activity details**:
 A Document created as the supporting detail of an authored Activity. Its originating Activity initially excludes it from ordinary browsing. Keep in Documents or designation as a Plan spec makes it visible without changing identity or provenance; an AI tag does not control visibility. Linking an existing standalone Document does not change its visibility. Deleting the originating Activity leaves the Document intact and discoverable in ordinary browsing.
 

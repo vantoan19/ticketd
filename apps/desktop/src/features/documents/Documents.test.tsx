@@ -6,12 +6,13 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { Documents } from "./Documents";
 import { documents } from "./api";
 
 vi.mock("./api", () => ({
   documents: {
+    currentWork: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
     recent: vi.fn(),
     trash: vi.fn(),
@@ -29,6 +30,26 @@ vi.mock("./api", () => ({
 vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
   LazyMarkdownEditor: ({ value }: { value: string }) => <p>{value}</p>,
 }));
+beforeEach(() => {
+  // These tests browse Recent; Current work has its own file.
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent" }),
+  );
+  vi.mocked(documents.currentWork).mockResolvedValue({
+    groups: [],
+    finished: 0,
+    unlinked: 0,
+    trashed: 0,
+  });
+});
+const openTrash = async () => {
+  fireEvent.pointerDown(await screen.findByRole("button", { name: "More" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Trash/ }));
+};
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
@@ -81,14 +102,14 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Context" })).toBeNull(),
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
+  await openTrash();
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   expect(await screen.findByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
   await screen.findByRole("button", { name: "Document actions" });
 });
 
-it("arranges its own entrance: the header, then the toolbar, then the list, a stagger step apart", async () => {
+it("arranges its own entrance: the header, then the list, a stagger step apart", async () => {
   vi.mocked(documents.recent).mockResolvedValue([
     { id: "d1", heading: "Context" },
   ]);
@@ -112,12 +133,11 @@ it("arranges its own entrance: the header, then the toolbar, then the list, a st
   const steps = [...container.querySelectorAll<HTMLElement>("[data-enter]")];
   expect(
     steps.map((step) => step.style.getPropertyValue("--enter-step")),
-  ).toEqual(["0", "1", "2"]);
+  ).toEqual(["0", "1"]);
   // The header keeps its place at the top of the scrolling list.
   expect(steps[0]?.className).toBe("documents-list-head");
   expect(steps[0]?.querySelector('[data-slot="pane-header"]')).not.toBeNull();
-  expect(steps[1]?.className).toBe("documents-toolbar");
-  expect(steps[2]?.textContent).toContain("Context");
+  expect(steps[1]?.textContent).toContain("Context");
 });
 
 it("searches and opens a result using keyboard accessible controls", async () => {
@@ -274,9 +294,6 @@ it("disables tagging and ticket creation for a trashed Document", async () => {
 it("offers Browse Documents from an empty Trash", async () => {
   vi.mocked(documents.recent).mockResolvedValue([]);
   vi.mocked(documents.trash).mockResolvedValue([]);
-  (documents as unknown as { all: ReturnType<typeof vi.fn> }).all = vi
-    .fn()
-    .mockResolvedValue([]);
   render(
     <Documents
       active
@@ -288,12 +305,12 @@ it("offers Browse Documents from an empty Trash", async () => {
       target={null}
     />,
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
+  await openTrash();
   fireEvent.click(
     await screen.findByRole("button", { name: "Browse Documents" }),
   );
   expect(
-    screen.getByRole("radio", { name: "All" }).getAttribute("aria-checked"),
+    screen.getByRole("radio", { name: "Recent" }).getAttribute("aria-checked"),
   ).toBe("true");
 });
 

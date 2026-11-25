@@ -7504,7 +7504,13 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
   );
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Documents" }));
-  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
+  const list = () =>
+    within(document.querySelector<HTMLElement>(".documents-list-view")!);
+  fireEvent.pointerDown(await list().findByRole("button", { name: "More" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Trash/ }));
   fireEvent.click(await screen.findByRole("button", { name: "Linked guide" }));
   expect(
     await screen.findByRole("heading", { name: "Linked guide" }),
@@ -7530,7 +7536,8 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
       false,
     ),
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Recent" }));
+  fireEvent.click(list().getByRole("button", { name: "Back to Documents" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Recent" }));
   const row = await screen.findByRole("button", { name: "Linked guide" });
   const navigator = row.closest(".documents-list-view") as HTMLElement;
   const order = () =>
