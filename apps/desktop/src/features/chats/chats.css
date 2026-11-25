@@ -1077,8 +1077,7 @@
 .chat-new > div + div {
   padding-top: 20px;
 }
-/* New Chat's folder button and menu: "Folder: repo", recent folders with
-   where they are, and the scratch folder. */
+/* Folder choices show the name, its path and a check on the current choice. */
 .chat-folder-option {
   display: flex;
   flex: 1;

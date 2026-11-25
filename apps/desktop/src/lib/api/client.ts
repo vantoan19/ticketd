@@ -341,7 +341,7 @@ export type DependencyDecision = {
   choice: "replace" | "remove" | "retain";
 };
 
-const projectSchema = lazySchema(() =>
+export const projectSchema = lazySchema(() =>
   z.object({
     id: z.string(),
     name: z.string(),

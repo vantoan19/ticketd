@@ -24,6 +24,7 @@ import {
   projectRefSchema,
 } from "@/features/chats/client";
 import { loadPreferences, setPreference } from "@/lib/preferences";
+import { projectSchema } from "@/lib/api/client";
 import { typedReference } from "@/features/tickets/ticket-references";
 
 /** The fields of `show_ticket`'s reply a linked ticket needs. */
@@ -140,6 +141,8 @@ export function createHostChatClient(
   const run = async (command: string, args?: Record<string, unknown>) => {
     await call(command, args);
   };
+  const listProjects = async () =>
+    z.array(projectSchema).parse(await call("list_projects"));
   function subscribeTo<T>(
     event: string,
     schema: z.ZodType<T>,
@@ -233,11 +236,14 @@ export function createHostChatClient(
         .array(harnessSkillSchema)
         .parse(await call("chat_harness_skills", { harnessId, folder })),
     pickFolder: () => bridge.pickFolder(),
+    listProjectFolders: async () =>
+      (await listProjects()).flatMap(({ id, name, paths }) => {
+        const project = { id, title: name };
+        return paths.filter(Boolean).map((path) => ({ project, path }));
+      }),
     projectFolder: async (projectId) =>
-      z
-        .array(z.object({ id: z.string(), path: z.string() }))
-        .parse(await call("list_projects"))
-        .find((project) => project.id === projectId)?.path || null,
+      (await listProjects()).find((project) => project.id === projectId)
+        ?.path || null,
     folderProject: async (path) =>
       projectRefSchema
         .nullable()

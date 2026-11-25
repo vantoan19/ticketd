@@ -79,6 +79,32 @@ const opened = (subscription = 7) => ({
 });
 
 describe("the desktop Chat client", () => {
+  it("offers registered checkouts and skips Projects without one", async () => {
+    const stub = stubBridge({
+      list_projects: [
+        {
+          id: "p1",
+          name: "Storefront",
+          path: "/work/storefront",
+          paths: ["/work/storefront", "/worktrees/storefront"],
+        },
+        { id: "p2", name: "On another computer", path: "", paths: [] },
+      ],
+    });
+    const client = createHostChatClient(stub.bridge);
+
+    expect(await client.listProjectFolders()).toEqual([
+      {
+        project: { id: "p1", title: "Storefront" },
+        path: "/work/storefront",
+      },
+      {
+        project: { id: "p1", title: "Storefront" },
+        path: "/worktrees/storefront",
+      },
+    ]);
+  });
+
   it("delivers changes that arrived before the view subscribed, in order", async () => {
     const stub = stubBridge(opened());
     const client = createHostChatClient(stub.bridge);
