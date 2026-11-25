@@ -397,14 +397,17 @@ test("editing queued input waits for the draft submission that is still saving",
       queue_paused: true,
     }),
   );
-  const saved = Promise.withResolvers<void>();
-  vi.spyOn(client, "send").mockReturnValueOnce(saved.promise);
+  let finishSaving!: () => void;
+  const saving = new Promise<void>((resolve) => {
+    finishSaving = resolve;
+  });
+  vi.spyOn(client, "send").mockReturnValueOnce(saving);
   type("Sending this draft");
   fireEvent.click(button("Send"));
   await act(async () => {
     fireEvent.click(button("Edit in the message box"));
   });
-  await act(async () => saved.resolve());
+  await act(async () => finishSaving());
   expect(composer()).toHaveProperty("value", "Edit this message");
 });
 
