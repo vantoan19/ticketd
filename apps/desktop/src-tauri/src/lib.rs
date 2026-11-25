@@ -544,6 +544,13 @@ fn edit_project(
 }
 
 #[tauri::command(async)]
+fn set_project_archived(id: String, archived: bool) -> Result<Project, BridgeFailure> {
+    open_workspace()
+        .and_then(|mut w| w.set_project_archived(&id, archived))
+        .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
 fn project_source_candidates(
     project_id: String,
     sources: tauri::State<'_, SourceRegistry>,
@@ -2466,6 +2473,7 @@ pub fn run() -> Result<(), tauri::Error> {
             detect_project_remote,
             create_project,
             edit_project,
+            set_project_archived,
             project_source_candidates,
             preview_connect_source,
             connect_source_match_count,

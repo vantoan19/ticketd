@@ -565,10 +565,18 @@ fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, tick
                 id: record.id,
                 title: record.title,
             },
-            (ChatLinkKind::Project, _) => LinkedRecord::Project {
-                id: record.id,
-                title: record.title,
-            },
+            (ChatLinkKind::Project, _) => {
+                let project = workspace.show_project(&record.id)?;
+                let title = if project.archived {
+                    format!("{} (archived)", project.name)
+                } else {
+                    project.name
+                };
+                LinkedRecord::Project {
+                    id: record.id,
+                    title,
+                }
+            }
         });
     }
     Ok(links)

@@ -1157,3 +1157,6 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 
 ## 99
 + column sync_state.s3_endpoint
+
+## 100
++ column projects.archived

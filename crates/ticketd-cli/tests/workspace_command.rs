@@ -407,6 +407,33 @@ fn linking_activity_details_to_a_ticket_keeps_them_through_cli() {
 }
 
 #[test]
+fn archived_projects_remain_addressable_but_are_hidden_from_the_default_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let checkout = dir.path().to_str().unwrap();
+    let json = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&run(dir.path(), args)).unwrap()
+    };
+    let project = json(&["project", "create", "Package", checkout, "--no-remote"]);
+    let id = project["id"].as_str().unwrap();
+    let ticket = json(&["create", "Open ticket", "--project", id]);
+    assert_eq!(project["archived"], false);
+    let archived = json(&["project", "archive", id]);
+    assert_eq!(archived["archived"], true);
+    assert_eq!(json(&["project", "list"]), serde_json::json!([]));
+    assert_eq!(
+        json(&["project", "list", "--all"]),
+        serde_json::json!([archived])
+    );
+    assert_eq!(json(&["project", "show", id]), archived);
+    assert_eq!(
+        json(&["list", "--project", id])[0]["reference"],
+        ticket["reference"]
+    );
+    assert_eq!(json(&["project", "reactivate", id]), project);
+    assert_eq!(json(&["project", "list"]), serde_json::json!([project]));
+}
+
+#[test]
 fn project_create_detects_the_remote_and_show_and_list_include_it() {
     let dir = tempfile::tempdir().unwrap();
     let checkout = dir.path().join("checkout");

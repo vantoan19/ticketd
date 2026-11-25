@@ -172,6 +172,7 @@ impl Error {
             | Self::DependencyReviewChanged
             | Self::SyncReviewChanged
             | Self::DependencyReviewMode(_)
+            | Self::ProjectArchived(_)
             | Self::PlanArchived
             | Self::EmptyTag
             | Self::InvalidTag { .. }

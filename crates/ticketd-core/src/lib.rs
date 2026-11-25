@@ -316,6 +316,8 @@ pub enum Error {
     SourceRepositoryNotListed(String),
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
+    #[error("{0} is archived. Reactivate it, or choose another project.")]
+    ProjectArchived(String),
     #[error("Set a Project remote on {0} before connecting its ticket source.")]
     ProjectRemoteRequired(String),
     #[error(

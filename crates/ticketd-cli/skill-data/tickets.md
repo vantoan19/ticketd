@@ -92,7 +92,12 @@ project; `unregister` removes a registration. Discover existing projects before
 creating one. `project create` saves a detected Project remote from `upstream` or `origin`,
 with `--remote host/owner/name` to override it or `--no-remote` to skip detection.
 `project edit ID NAME PATH` accepts `--remote host/owner/name` or
-`--clear-remote`. `project show` and `project list` include the `remote` field.
+`--clear-remote`. Project results include `remote` and `archived`.
+
+Use `ticketd project archive ID` to keep existing links and settings while
+setting a project aside. Use `ticketd project reactivate ID` to resume active use
+and change its settings. `ticketd project list --all` includes both states.
+`ticketd project show ID` and `ticketd list --project ID` work in either state.
 Registering a checkout with a different detected remote still succeeds and
 prints a warning to stderr. Paths are native to the OS; WSL interoperability is not validated.
 

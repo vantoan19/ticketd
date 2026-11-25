@@ -34,6 +34,14 @@ projects produce an error; an unmatched directory creates an unlinked ticket.
 Paths are interpreted by the native operating system; interoperability with WSL
 has not been validated.
 
+`ticketd project list` lists active projects. Use `ticketd project list --all`
+to include archived projects. `ticketd project archive ID` moves a project out
+of active navigation while keeping its ticket and Chat links, checkouts, and
+remote. Use `ticketd project reactivate ID` to resume work or edit settings.
+Both commands are safe to repeat. `ticketd project show ID` and
+`ticketd list --project ID` work in either state. Project results include the
+boolean `archived` field.
+
 `ticketd project create NAME PATH` saves the checkout's detected Project remote,
 preferring a valid `upstream` over `origin`. Use `--remote host/owner/name` to
 choose it explicitly or `--no-remote` to skip detection. `project edit ID NAME

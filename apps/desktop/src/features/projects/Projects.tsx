@@ -1,5 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { m } from "motion/react";
+import { Presence } from "@/components/ui/motion";
 import {
+  Archive,
+  ArchiveRestore,
   ChevronRight,
   Copy,
   Folder,
@@ -17,6 +21,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -25,6 +30,9 @@ import { IconButton } from "@/components/ui/icon-button";
 import { enter } from "@/components/ui/enter";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
 import { PathText } from "@/components/ui/path-text";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { arrival, departure, rowTokens } from "@/components/ui/row-motion";
+import { useProjectLifecycle } from "./useProjectLifecycle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCopy } from "@/components/ui/use-copy";
 import {
@@ -100,7 +108,7 @@ function CheckoutRow({
 }: {
   path: string;
   first: boolean;
-  onRemove: () => void;
+  onRemove?: () => void;
 }) {
   const manager = fileManagerName();
   const statusLine = useStatusLine();
@@ -126,9 +134,11 @@ function CheckoutRow({
         <IconButton label={`Show in ${manager}`} onClick={reveal}>
           <FolderOpen />
         </IconButton>
-        <IconButton label="Remove checkout" onClick={onRemove}>
-          <X />
-        </IconButton>
+        {onRemove && (
+          <IconButton label="Remove checkout" onClick={onRemove}>
+            <X />
+          </IconButton>
+        )}
       </span>
     </li>
   );
@@ -142,6 +152,8 @@ function CheckoutRow({
  */
 export function Projects({
   projects,
+  archived = false,
+  onArchivedChange,
   loading,
   onChange,
   onOpenTickets,
@@ -149,6 +161,8 @@ export function Projects({
   onConnectSource,
 }: {
   projects: Project[];
+  archived?: boolean;
+  onArchivedChange?: (archived: boolean) => void;
   loading: boolean;
   onChange: () => Promise<void>;
   /** Shows that project's tickets. */
@@ -159,6 +173,31 @@ export function Projects({
 }) {
   const statusLine = useStatusLine();
   const { copy } = useCopy();
+  const shown = projects.filter(
+    (project) => Boolean(project.archived) === archived,
+  );
+  const rowActions = useRef(new Map<string, HTMLButtonElement>());
+  const focusAfterChange = useRef<{
+    id: string;
+    archived: boolean;
+    target?: string;
+  } | null>(null);
+  const lastArchive = useRef(0);
+  const lifecycle = useProjectLifecycle(onChange);
+  const tokens = rowTokens();
+  const page = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const focus = focusAfterChange.current;
+    if (!focus) return;
+    const project = projects.find((project) => project.id === focus.id);
+    if (!project || Boolean(project.archived) !== focus.archived) return;
+    focusAfterChange.current = null;
+    if (page.current?.closest("[hidden]")) return;
+    (
+      rowActions.current.get(focus.target ?? "") ??
+      page.current?.querySelector<HTMLElement>("#projects-heading")
+    )?.focus();
+  }, [projects]);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -203,10 +242,12 @@ export function Projects({
     };
   }, [projects]);
 
-  const editing = projects.find((item) => item.id === editingId);
+  const editing = projects.find(
+    (item) => item.id === editingId && !item.archived,
+  );
   const checkoutProject =
     dialog?.kind === "checkout"
-      ? projects.find((item) => item.id === dialog.id)
+      ? projects.find((item) => item.id === dialog.id && !item.archived)
       : undefined;
   const checkoutPath = checkoutProject
     ? (checkoutDrafts[checkoutProject.id] ?? "")
@@ -288,6 +329,28 @@ export function Projects({
       );
     }
   }
+  function changeArchiveState(project: Project) {
+    if (!archived && !allowRemoval(lastArchive)) return;
+    const index = shown.findIndex(({ id }) => id === project.id);
+    const neighbor = shown[index + 1] ?? shown[index - 1];
+    void lifecycle.change(project, !archived, {
+      beforeRefresh: () => {
+        focusAfterChange.current = {
+          id: project.id,
+          archived: !archived,
+          ...(neighbor && { target: neighbor.id }),
+        };
+      },
+      beforeUndoRefresh: () => {
+        focusAfterChange.current = {
+          id: project.id,
+          archived,
+          target: project.id,
+        };
+      },
+    });
+  }
+
   async function copyId(project: Project) {
     const done = await copy("Project ID", project.id);
     statusLine.show(
@@ -312,16 +375,33 @@ export function Projects({
     // The page stays mounted while another is shown; its entrance (enter.ts)
     // plays again each time it comes back from `hidden`.
     <ManagementPage ownEntrance aria-labelledby="projects-heading">
-      <div {...enter(0)}>
+      <div ref={page} {...enter(0)}>
         <PageHeader
           title="Projects"
           titleId="projects-heading"
           {...(projects.length > 0 && {
-            count: <Count>{projects.length}</Count>,
-            actions: newProject,
-          })}
-          {...(projects.length > 0 && {
-            lede: "A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in.",
+            count: <Count>{shown.length}</Count>,
+            actions: (
+              <>
+                {onArchivedChange && (
+                  <SegmentedControl
+                    aria-label="Which projects"
+                    value={archived ? "archived" : "active"}
+                    onValueChange={(value) =>
+                      onArchivedChange(value === "archived")
+                    }
+                    options={[
+                      { value: "active", label: "Active" },
+                      { value: "archived", label: "Archived" },
+                    ]}
+                  />
+                )}
+                {newProject}
+              </>
+            ),
+            lede: archived
+              ? "Archived projects keep their tickets, links and checkouts. Reactivate one to assign new work to it."
+              : "A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in.",
           })}
         />
       </div>
@@ -343,125 +423,195 @@ export function Projects({
           action={newProject}
         />
       ) : (
-        <ul className="project-list" aria-label="Projects">
-          {projects.map((item, index) => {
-            const isOpen = expanded[item.id] ?? false;
-            const checkouts = `project-${item.id}-checkouts`;
-            return (
-              <li
-                key={item.id}
-                className="project-row"
-                data-open={isOpen || undefined}
-              >
-                <div {...enter(index + 1)}>
-                  <div className="project-row-main">
-                    <h2 className="project-row-heading">
-                      <button
-                        type="button"
-                        className="project-row-toggle"
-                        aria-expanded={isOpen}
-                        aria-controls={checkouts}
-                        onClick={() =>
-                          setExpanded((old) => ({ ...old, [item.id]: !isOpen }))
-                        }
-                      >
-                        <ChevronRight
-                          aria-hidden="true"
-                          className="project-row-chevron"
-                        />
-                        <ProjectIcon
-                          project={{ id: item.id, title: item.name }}
-                          size={20}
-                        />
-                        <span className="project-row-text">
-                          <span className="project-row-name">{item.name}</span>
-                          <span className="project-row-meta">
-                            {projectMeta(item, counts[item.id])}
-                          </span>
-                        </span>
-                      </button>
-                    </h2>
-                    <span className="project-row-actions">
-                      {onOpenTickets && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-label={`Open tickets of ${item.name}`}
-                          onClick={() => onOpenTickets(item)}
-                        >
-                          Open tickets
-                        </Button>
-                      )}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <IconButton label={`Actions for ${item.name}`}>
-                            <MoreHorizontal />
-                          </IconButton>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onSelect={() => open({ kind: "edit", id: item.id })}
-                          >
-                            <Pencil /> Edit project…
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => void copyId(item)}>
-                            <Copy /> Copy project ID
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() =>
-                              open({ kind: "checkout", id: item.id })
+        <>
+          <ul className="project-list" aria-label="Projects">
+            <Presence key={String(archived)} initial={false}>
+              {shown.map((item, index) => {
+                const changing = lifecycle.pending.has(item.id);
+                const keepAction = (button: HTMLButtonElement | null) => {
+                  if (button) rowActions.current.set(item.id, button);
+                  else rowActions.current.delete(item.id);
+                };
+                const isOpen = expanded[item.id] ?? false;
+                const checkouts = `project-${item.id}-checkouts`;
+                return (
+                  <m.li
+                    key={item.id}
+                    className="project-row"
+                    data-open={isOpen || undefined}
+                    data-archived={archived || undefined}
+                    {...arrival(0, { space: true }, tokens)}
+                    {...departure({ space: true }, tokens)}
+                  >
+                    <div {...enter(index + 1)}>
+                      <div className="project-row-main">
+                        <h2 className="project-row-heading">
+                          <button
+                            type="button"
+                            className="project-row-toggle"
+                            aria-expanded={isOpen}
+                            aria-controls={checkouts}
+                            onClick={() =>
+                              setExpanded((old) => ({
+                                ...old,
+                                [item.id]: !isOpen,
+                              }))
                             }
                           >
-                            <Plus /> Register checkout…
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </span>
-                  </div>
-                  <div
-                    id={checkouts}
-                    className="project-checkouts"
-                    hidden={!isOpen}
-                  >
-                    {item.paths.length === 0 ? (
-                      <p className="project-checkouts-empty">
-                        No checkouts. Register one so the command line finds{" "}
-                        {item.name} from its folder.{" "}
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="inline"
-                          onClick={() =>
-                            open({ kind: "checkout", id: item.id })
-                          }
-                        >
-                          Register checkout…
-                        </Button>
-                      </p>
-                    ) : (
-                      <ul
-                        className="checkout-list"
-                        aria-label={`Checkouts of ${item.name}`}
+                            <ChevronRight
+                              aria-hidden="true"
+                              className="project-row-chevron"
+                            />
+                            <ProjectIcon
+                              project={{ id: item.id, title: item.name }}
+                              size={20}
+                            />
+                            <span className="project-row-text">
+                              <span className="project-row-name">
+                                {item.name}
+                              </span>
+                              <span className="project-row-meta">
+                                {changing && !archived
+                                  ? "Archiving…"
+                                  : projectMeta(item, counts[item.id])}
+                              </span>
+                            </span>
+                          </button>
+                        </h2>
+                        <span className="project-row-actions">
+                          {onOpenTickets && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Open tickets of ${item.name}`}
+                              disabled={changing}
+                              onClick={() => onOpenTickets(item)}
+                            >
+                              Open tickets
+                            </Button>
+                          )}
+                          {archived ? (
+                            <Button
+                              ref={keepAction}
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="project-reactivate"
+                              disabled={changing}
+                              aria-label={`Reactivate ${item.name}`}
+                              onClick={() => changeArchiveState(item)}
+                            >
+                              <ArchiveRestore aria-hidden />
+                              {changing ? "Reactivating…" : "Reactivate"}
+                            </Button>
+                          ) : (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <IconButton
+                                  ref={keepAction}
+                                  disabled={changing}
+                                  label={`Actions for ${item.name}`}
+                                >
+                                  <MoreHorizontal />
+                                </IconButton>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    open({ kind: "edit", id: item.id })
+                                  }
+                                >
+                                  <Pencil /> Edit project…
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() => void copyId(item)}
+                                >
+                                  <Copy /> Copy project ID
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    open({ kind: "checkout", id: item.id })
+                                  }
+                                >
+                                  <Plus /> Register checkout…
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onSelect={() => changeArchiveState(item)}
+                                >
+                                  <Archive /> Archive project
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </span>
+                      </div>
+                      <div
+                        id={checkouts}
+                        className="project-checkouts"
+                        hidden={!isOpen}
                       >
-                        {item.paths.map((path) => (
-                          <CheckoutRow
-                            key={path}
-                            path={path}
-                            first={path === item.path}
-                            onRemove={() => void removeCheckout(item, path)}
-                          />
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                        {item.paths.length === 0 && archived ? (
+                          <p className="project-checkouts-empty">
+                            No checkouts.
+                          </p>
+                        ) : item.paths.length === 0 ? (
+                          <p className="project-checkouts-empty">
+                            No checkouts. Register one so the command line finds{" "}
+                            {item.name} from its folder.{" "}
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="inline"
+                              onClick={() =>
+                                open({ kind: "checkout", id: item.id })
+                              }
+                            >
+                              Register checkout…
+                            </Button>
+                          </p>
+                        ) : (
+                          <ul
+                            className="checkout-list"
+                            aria-label={`Checkouts of ${item.name}`}
+                          >
+                            {item.paths.map((path) => (
+                              <CheckoutRow
+                                key={path}
+                                path={path}
+                                first={path === item.path}
+                                {...(!archived && {
+                                  onRemove: () =>
+                                    void removeCheckout(item, path),
+                                })}
+                              />
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </m.li>
+                );
+              })}
+            </Presence>
+          </ul>
+          {shown.length === 0 && (
+            <EmptyState
+              icon={<Folder aria-hidden />}
+              title={
+                emptyCopy(archived ? "projects-archived" : "projects-active")
+                  .title
+              }
+              description={
+                emptyCopy(archived ? "projects-archived" : "projects-active")
+                  .sentence
+              }
+            />
+          )}
+        </>
       )}
-      {unassigned > 0 && onShowUnassigned && (
+      {!archived && unassigned > 0 && onShowUnassigned && (
         <p className="projects-unassigned">
           {plural(unassigned, "ticket")} {unassigned === 1 ? "has" : "have"} no
           project.{" "}

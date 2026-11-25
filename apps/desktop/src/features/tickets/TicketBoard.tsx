@@ -518,6 +518,7 @@ export function TicketBoard({
                     {onAdd && status !== "Duplicate" && (
                       <IconButton
                         label={`Add ${status} ticket`}
+                        data-project-add=""
                         onClick={(event) => onAdd(status, event.currentTarget)}
                       >
                         <Plus />

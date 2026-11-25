@@ -9,6 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { client } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
@@ -123,6 +124,56 @@ test("empty state explains and offers New project", () => {
   ).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   expect(screen.getByRole("dialog", { name: "New project" })).toBeTruthy();
+});
+
+test("archives, undoes and reactivates from the Archived view", async () => {
+  let saved = project as typeof project & { archived?: boolean };
+  vi.spyOn(client, "setProjectArchived").mockImplementation(
+    async (_id, archived) => {
+      saved = { ...project, archived };
+      return saved;
+    },
+  );
+  function Page() {
+    const [projects, setProjects] = useState([saved]);
+    const [archived, setArchived] = useState(false);
+    return (
+      <Projects
+        {...props}
+        projects={projects}
+        archived={archived}
+        onArchivedChange={setArchived}
+        onChange={async () => setProjects([saved])}
+      />
+    );
+  }
+  render(
+    <StatusLineRegion>
+      <Page />
+    </StatusLineRegion>,
+  );
+
+  await chooseAction("Archive project");
+  expect(await screen.findByText("No active projects")).toBeTruthy();
+  const undo = screen.getByRole("button", { name: "Undo" });
+  undo.focus();
+  fireEvent.click(undo);
+  const actions = await screen.findByRole("button", {
+    name: "Actions for Original",
+  });
+  expect(document.activeElement).toBe(actions);
+  vi.spyOn(Date, "now").mockReturnValue(Date.now() + 401);
+  await chooseAction("Archive project");
+  await screen.findByText("No active projects");
+  fireEvent.click(screen.getByText("Archived", { exact: true }));
+  expand();
+  expect(screen.queryByRole("button", { name: "Remove checkout" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Copy path /other/checkout" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reactivate Original" }));
+  expect(await screen.findByText("No archived projects")).toBeTruthy();
+  expect(screen.getByText("Reactivated Original")).toBeTruthy();
 });
 
 test("a new project waits for a folder, fills its name from it, then saves", async () => {

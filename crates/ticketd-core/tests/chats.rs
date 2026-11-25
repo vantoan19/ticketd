@@ -151,6 +151,94 @@ fn a_chat_links_to_several_records_without_belonging_to_them() {
 }
 
 #[test]
+fn archiving_a_project_preserves_its_tickets_chats_and_settings() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let checkout = dir.path().to_str().unwrap();
+    let project = workspace
+        .create_project_with_remote("App", checkout, Some("github.com/team/app"))
+        .unwrap();
+    let active = workspace
+        .create_ticket_in_project("Open", Some(&project.id))
+        .unwrap();
+    let trashed = workspace
+        .create_ticket_in_project("Future restoration", Some(&project.id))
+        .unwrap();
+    let plan = workspace.create_plan("Release").unwrap();
+    workspace
+        .set_plan(&active.reference, Some(&plan.id), None)
+        .unwrap();
+    workspace
+        .add_dependency(&active.reference, &trashed.reference, None)
+        .unwrap();
+    let trashed = workspace
+        .set_trashed(&trashed.reference, true, None)
+        .unwrap();
+    let active = workspace.show_ticket(&active.reference).unwrap();
+    let link = ChatLink {
+        kind: ChatLinkKind::Project,
+        id: project.id.clone(),
+    };
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                links: vec![link],
+                ..new_chat()
+            },
+        )
+        .unwrap();
+
+    assert!(!project.archived);
+    let before = workspace.change_token().unwrap();
+    let archived = workspace.set_project_archived(&project.id, true).unwrap();
+    assert!(archived.archived);
+    assert_eq!(workspace.show_project(&project.id).unwrap(), archived);
+    assert_eq!(workspace.list_projects().unwrap(), [archived.clone()]);
+    assert_eq!(workspace.list_tickets().unwrap().len(), 1);
+    assert_eq!(workspace.show_ticket(&active.reference).unwrap(), active);
+    assert_eq!(
+        workspace.chat_snapshot(&chat.id, 1).unwrap().chat.links,
+        chat.links
+    );
+    let token = workspace.change_token().unwrap();
+    assert!(token > before);
+    assert_eq!(
+        workspace.set_project_archived(&project.id, true).unwrap(),
+        archived
+    );
+    assert_eq!(workspace.change_token().unwrap(), token);
+
+    assert!(matches!(
+        workspace.edit_project(&project.id, "Rename", checkout),
+        Err(Error::ProjectArchived(name)) if name == "App"
+    ));
+    assert!(matches!(
+        workspace.register_checkout(&project.id, checkout),
+        Err(Error::ProjectArchived(_))
+    ));
+    assert!(matches!(
+        workspace.remove_checkout(&project.id, checkout),
+        Err(Error::ProjectArchived(_))
+    ));
+    let restored = workspace
+        .set_trashed(&trashed.reference, false, None)
+        .unwrap();
+    assert_eq!(restored.project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(restored.id, trashed.id);
+    assert_eq!(restored.status, trashed.status);
+    assert!(!restored.trashed);
+    assert_eq!(
+        workspace.set_project_archived(&project.id, false).unwrap(),
+        project
+    );
+    assert_eq!(
+        workspace.set_project_archived(&project.id, false).unwrap(),
+        project
+    );
+}
+
+#[test]
 fn a_repeated_command_id_returns_the_first_result_instead_of_a_second_record() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
