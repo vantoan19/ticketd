@@ -181,6 +181,26 @@ function withoutDerivedHeading(body: string, title: string, heading?: string) {
     .join("\n")
     .replace(/^\s*\n/, "");
 }
+/**
+ * What Read renders: the body without an opening heading the title already
+ * shows. Beyond the equal heading Edit also hides, an opening H1 that is only
+ * the start of the title is dropped, so the title is never seen twice. Edit and
+ * the stored Markdown keep that H1.
+ */
+function withoutOpeningTitle(body: string, title: string, heading?: string) {
+  const shown = withoutDerivedHeading(body, title, heading);
+  if (shown !== body) return shown;
+  const lines = body.split("\n");
+  const first = lines.findIndex((line) => line.trim());
+  const opening = /^#\s+(.*)$/.exec(first < 0 ? "" : (lines[first] ?? ""));
+  const start = plain(opening?.[1] ?? "");
+  const full = plain(title.trim() || heading || "");
+  if (!start || !full.startsWith(start)) return body;
+  return lines
+    .slice(first + 1)
+    .join("\n")
+    .replace(/^\s*\n/, "");
+}
 /** The core stores a whitespace-only title as NULL; the saved baseline must match what it stored. */
 const storedTitle = (title: string) => (title.trim() ? title : "");
 type Pending = {
@@ -1446,7 +1466,7 @@ function RecoveredDocumentEditor({
                     locked
                       ? undefined
                       : (value) => {
-                          const shown = withoutDerivedHeading(
+                          const shown = withoutOpeningTitle(
                             body,
                             title,
                             savedDocument?.heading,
@@ -1457,7 +1477,7 @@ function RecoveredDocumentEditor({
                           setBody(next);
                         }
                   }
-                  source={withoutDerivedHeading(
+                  source={withoutOpeningTitle(
                     body,
                     title,
                     savedDocument?.heading,

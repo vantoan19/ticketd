@@ -778,6 +778,61 @@ it("shows the title once in Read: a body heading that repeats it is not rendered
   expect(screen.getByText("See the flow.")).toBeTruthy();
 });
 
+it("shows the title once in Read when the body's opening heading is the start of it", () => {
+  const doc = {
+    ...base,
+    title: "Attachment review UI design",
+    body: "# Attachment review UI\n\nSee the flow.",
+  };
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  expect(
+    screen.getByRole("heading", {
+      level: 1,
+      name: "Attachment review UI design",
+    }),
+  ).toBeTruthy();
+  expect(screen.getByText("See the flow.")).toBeTruthy();
+});
+
+it("keeps the opening heading in the editor, and the saved Markdown whole, when it only starts the title", async () => {
+  const doc = {
+    ...base,
+    title: "Attachment review UI design",
+    body: "# Attachment review UI\n\nSee the flow.",
+  };
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const editor = screen.getByLabelText("Your thought") as HTMLTextAreaElement;
+  expect(editor.value).toBe("# Attachment review UI\n\nSee the flow.");
+});
+
+it("keeps a later body heading that starts the title, and an opening heading longer than it", () => {
+  renderEditor(
+    <DocumentEditor
+      initial={{
+        ...base,
+        title: "Checkout spec",
+        body: "Intro\n\n# Checkout\n\nText",
+      }}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Checkout" })).toBeTruthy();
+  cleanup();
+  renderEditor(
+    <DocumentEditor
+      initial={{
+        ...base,
+        title: "Checkout",
+        body: "# Checkout spec\n\nText",
+      }}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Checkout spec" })).toBeTruthy();
+});
+
 it("keeps a body heading that differs from the explicit title", () => {
   const doc = { ...base, title: "Checkout spec", body: "# Overview\n\nText" };
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
