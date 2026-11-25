@@ -1194,7 +1194,8 @@ it("shows the summary under the meta line, and nothing when there is none", () =
   const line = screen.getByText("Ship the reader on Friday.");
   const meta = container.querySelector(".document-meta");
   expect(
-    meta && meta.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
+    meta &&
+      meta.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
   ).toBeTruthy();
   expect(screen.queryByRole("textbox", { name: "Summary" })).toBeNull();
   unmount();
@@ -1287,7 +1288,10 @@ it("takes in a summary written elsewhere when nothing of the summary is unsaved"
 });
 it("keeps showing the summary of a Document in Trash", () => {
   renderEditor(
-    <DocumentEditor initial={{ ...summarized, trashed: true }} onClose={vi.fn()} />,
+    <DocumentEditor
+      initial={{ ...summarized, trashed: true }}
+      onClose={vi.fn()}
+    />,
   );
   expect(screen.getByText("Ship the reader on Friday.")).toBeTruthy();
 });
