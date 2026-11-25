@@ -164,6 +164,10 @@ pub struct Step {
     pub omitted_files: Option<OmittedFilesView>,
     /// The command without its shell wrappers, for a command step.
     pub command: Option<String>,
+    /// The harness's own one-line account of a command, when it gave one. Absent from
+    /// the record, so a view that predates it reads the same row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub exit_code: Option<i64>,
     /// Where the command ran, when that is not the Chat's folder.
     pub folder: Option<String>,
@@ -1179,6 +1183,7 @@ fn word_tool_step(action: ToolStep, base: &Step, folder: &str, home: Option<&str
             .as_deref()
             .and_then(chat_ticketd::sentences);
         step.command = Some(command.display);
+        step.description = action.description;
         step.folder = command
             .working_directory
             .map(|folder| path(&folder))
@@ -1208,6 +1213,7 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         targets: vec![target(&tool.name)],
         omitted_files: None,
         command: None,
+        description: None,
         exit_code: None,
         folder: None,
         timed_out: false,
@@ -2213,6 +2219,34 @@ mod tests {
             None,
         ));
         assert_eq!(untold.added_lines, None);
+    }
+
+    /// A Claude Code command's own description reaches the view; one without it, and
+    /// every other tool, carries none, and serializes without the field.
+    #[test]
+    fn a_commands_description_reaches_the_step() {
+        let done = ChatToolState::Completed;
+        let described = claude_step(&tool(
+            "Bash",
+            r#"{"command":"npm test","description":"Run the unit tests"}"#,
+            done,
+            None,
+        ));
+        assert_eq!(described.description.as_deref(), Some("Run the unit tests"));
+        assert_eq!(described.command.as_deref(), Some("npm test"));
+        assert_eq!(
+            serde_json::to_value(&described).expect("a step serializes")["description"],
+            "Run the unit tests"
+        );
+        let plain = claude_step(&tool("Bash", r#"{"command":"npm test"}"#, done, None));
+        assert_eq!(plain.description, None);
+        assert!(
+            serde_json::to_value(&plain)
+                .expect("a step serializes")
+                .get("description")
+                .is_none(),
+            "an older record still parses without it"
+        );
     }
 
     #[test]
