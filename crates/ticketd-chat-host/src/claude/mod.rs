@@ -129,6 +129,10 @@ impl HarnessAdapter for ClaudeAdapter {
         &ticketd_core::harnesses::CLAUDE_CODE
     }
 
+    fn attachment_refusal(&self, attachments: &[ChatAttachmentContent]) -> Option<Refusal> {
+        attachment_refusal(attachments)
+    }
+
     async fn inspect(&self) -> Inspection {
         let Some(executable) = self.executable() else {
             return Inspection::NotInstalled;

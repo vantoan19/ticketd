@@ -13,7 +13,7 @@ use tokio::io::{AsyncWriteExt, BufReader};
 use tokio::time::{sleep, timeout};
 
 use super::runtime::{Options, open_over, probe, probe_options};
-use super::{BRIDGE_SIDECAR_NAME, candidates, locate, verdict};
+use super::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, candidates, locate, verdict};
 use crate::conformance::{NewTurn, Provider};
 use crate::install::{LaunchEnvironment, Os};
 use crate::outcome::read_end;
@@ -21,10 +21,11 @@ use crate::scripted::{Peer, brief, pipes};
 use crate::stdio::{Line, read_line, spawn};
 use crate::{
     ApprovalDecision, Capability, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
-    EventStream, HarnessRuntime, Inspection, InteractionAnswer, InteractionResponse,
-    InterruptOutcome, InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId,
-    OpenRequest, OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
-    RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
+    EventStream, HarnessAdapter, HarnessRuntime, Inspection, InteractionAnswer,
+    InteractionResponse, InterruptOutcome, InterruptRequest, LoginState, NativeRequestId,
+    NativeSessionId, NativeTurnId, OpenRequest, OpenedRuntime, Problem, ProblemKind,
+    QuestionAnswer, Refusal, RespondOutcome, RuntimeGeneration, SessionStart, StartSettings,
+    Submission, SubmissionId, SubmissionKind,
 };
 
 const GENERATION: RuntimeGeneration = RuntimeGeneration(7);
@@ -166,6 +167,42 @@ async fn a_file_only_message_keeps_the_snapshot_readable_until_claude_closes() {
     });
     assert!(matches!(closed, CloseOutcome::Confirmed { .. }));
     assert!(!path.exists());
+}
+
+#[tokio::test(start_paused = true)]
+async fn claude_checks_image_size_before_queuing_or_sending_a_chat_attachment() {
+    let adapter = ClaudeAdapter::new("ticketd-chat-bridge-claude");
+    let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+    let image = ticketd_core::ChatAttachmentContent::from_image_data_url(
+        "screenshot.png",
+        &format!("data:image/png;base64,{png}"),
+    )
+    .unwrap();
+    assert_eq!(adapter.attachment_refusal(&[image]), None);
+
+    let png_header = &png[..24];
+    let oversized = format!(
+        "data:image/png;base64,{png_header}{}",
+        "A".repeat(10_000_004 - png_header.len())
+    );
+    let image =
+        ticketd_core::ChatAttachmentContent::from_image_data_url("large.png", &oversized).unwrap();
+    assert_eq!(
+        adapter.attachment_refusal(std::slice::from_ref(&image)),
+        Some(Refusal::ImageInputTooLarge)
+    );
+    let (mut peer, runtime, _events) = open().await;
+    let outcome = runtime
+        .submit(Submission {
+            attachments: vec![image],
+            ..start_turn("sub-1", "Look at this")
+        })
+        .await;
+    assert_eq!(
+        outcome,
+        DispatchOutcome::NotSent(Refusal::ImageInputTooLarge)
+    );
+    peer.assert_nothing_written().await;
 }
 
 #[tokio::test(start_paused = true)]
