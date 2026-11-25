@@ -270,8 +270,9 @@ fn queued_edit_replacement_is_atomic_and_replays_after_its_originals_are_consume
     assert_eq!(
         workspace
             .chat_message_attachment_contents(&chat.id, &original.id)
-            .unwrap(),
-        [file.clone()]
+            .unwrap()
+            .as_slice(),
+        edited
     );
     assert!(
         workspace
@@ -302,13 +303,17 @@ fn queued_edit_replacement_is_atomic_and_replays_after_its_originals_are_consume
     let saved = workspace
         .save_chat_input_replacing(Some("save-edit"), &chat.id, "Edited", edited, &replaces)
         .unwrap();
-    assert_eq!(workspace.chat_queue(&chat.id).unwrap(), [saved.clone()]);
+    assert_eq!(
+        workspace.chat_queue(&chat.id).unwrap().as_slice(),
+        std::slice::from_ref(&saved)
+    );
     assert!(!saved.editing);
     assert_eq!(
         workspace
             .chat_message_attachment_contents(&chat.id, &saved.id)
-            .unwrap(),
-        [file.clone()]
+            .unwrap()
+            .as_slice(),
+        edited
     );
     assert!(
         workspace
