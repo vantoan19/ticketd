@@ -56,6 +56,9 @@ export function stretchesOf(rows: TurnRow[], running: boolean): TurnBlock[] {
 const count = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
 
+/** A ticket's reference, "T-12" or "T-AX76". */
+const RECORD_REFERENCE = /^[A-Z]+-[A-Z0-9]+$/;
+
 /** The ticketd calls that only look something up. */
 const LOOKUPS = new Set(["read", "list", "search"]);
 
@@ -99,9 +102,13 @@ export function stretchWords(rows: TurnRow[]): string {
       if (step.ticketd?.length) {
         step.ticketd.forEach((call, index) => {
           const reference = call.words.find((word) => word.code)?.text;
-          if (LOOKUPS.has(call.verb))
-            add("lookup", [`${row.key}:${index}:${reference ?? ""}`]);
-          else note(reference ?? `${row.key}:${index}`, reference);
+          // Only a call on a record is a change or a look-up; any other (a setting,
+          // an attachment destination) is just a command that ran.
+          if (!reference || !RECORD_REFERENCE.test(reference))
+            add("run", [`${row.key}:${index}`]);
+          else if (LOOKUPS.has(call.verb))
+            add("lookup", [`${row.key}:${index}:${reference}`]);
+          else note(reference, reference);
         });
         continue;
       }

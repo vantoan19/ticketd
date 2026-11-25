@@ -1402,6 +1402,18 @@ test("a stretch says what changed in ticketd and how many steps failed", () => {
   expect(words(set("T-12"))).toBe("Changed T-12");
   expect(words(set("T-12"), set("T-12"))).toBe("Changed T-12");
   expect(words(set("T-12"), set("T-13"))).toBe("Changed 2 records");
+  // A call that names no record is a command like any other.
+  expect(
+    words({
+      ...ran("ticketd attachment destination"),
+      ticketd: [
+        {
+          verb: "set",
+          words: [{ text: "attachment destination", code: true }],
+        },
+      ],
+    }),
+  ).toBe("Ran 1 command");
   expect(words(ran("ls"), ran("npm test", "failed"))).toBe(
     "Ran 2 commands · 1 failed",
   );
