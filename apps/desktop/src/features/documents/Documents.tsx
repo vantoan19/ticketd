@@ -1,15 +1,27 @@
 import { emptyCopy } from "@/lib/empty-copy";
-import { PaneHeader } from "@/components/ui/list-header";
+import { PaneHeader, ReturnCrumb } from "@/components/ui/list-header";
 import { Count } from "@/components/ui/count";
 import { NavigatorSearch } from "@/components/ui/navigator";
 import { focusNavigatorRow } from "@/lib/navigator";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { Switch } from "@/components/ui/switch";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import { Pager } from "@/components/ui/pager";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/status-dot";
-import { documentRowContext } from "./row-context";
+import { documentRowContext, groupRowContext } from "./row-context";
 import { Item } from "@/components/ui/item";
 import { formatDateTime, listTime } from "@/lib/format";
 import {
@@ -31,8 +43,11 @@ import { Button } from "@/components/ui/button";
 import { enter } from "@/components/ui/enter";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Clock,
   FileText,
+  MoreHorizontal,
   Pin,
   Plus,
   Search,
@@ -47,13 +62,13 @@ import {
 } from "@/lib/api/describe-failure";
 import {
   documents,
+  type CurrentWork,
   type Document,
   type DocumentSummary,
   type DocumentSearchResult,
 } from "./api";
 import { DocumentEditor, type DocumentReading } from "./DocumentEditor";
 import { useWorkspaceChange } from "@/lib/workspace-change";
-import { setPreference, usePreferences } from "@/lib/preferences";
 import "./documents.css";
 
 /**
@@ -125,8 +140,6 @@ export function Documents({
   listRequest?: number;
 }) {
   const openGraph = useContext(ContextGraphNavigation);
-  const { openDocuments } = usePreferences();
-  const expanded = openDocuments === "expanded";
   // The button a step used, so the Document it opens takes focus on the same one.
   const steppedWith = useRef<"previous" | "next" | null>(null);
   const [readerCloseRequest, setReaderCloseRequest] = useState(0);
@@ -147,6 +160,7 @@ export function Documents({
   const pendingBrowse = useRef<{
     recent: DocumentSummary[];
     pins: DocumentSummary[];
+    work: CurrentWork;
   } | null>(null);
   const releaseBrowse = (
     nextFocus: EventTarget | null = document.activeElement,
@@ -160,6 +174,7 @@ export function Documents({
     if (pending) {
       setRecent(pending.recent);
       setGroupPins(pending.pins);
+      setWork(pending.work);
       pendingBrowse.current = null;
     }
   };
@@ -167,8 +182,33 @@ export function Documents({
   const [pins, setPins] = useState<DocumentSummary[]>([]);
   const [trash, setTrash] = useState<DocumentSummary[]>([]);
   const [trashOffset, setTrashOffset] = useState(0);
-  const [view, setView] = useState<"recent" | "all" | "trash">("recent");
-  const showTrash = view === "trash";
+  // What Documents opens on, and the order of Recent, are kept on this computer.
+  const {
+    documentsView: view,
+    documentsSort: sort,
+    documentGroups,
+    openDocuments,
+  } = usePreferences();
+  const expanded = openDocuments === "expanded";
+  const [showTrash, setShowTrash] = useState(false);
+  const sorted = view === "recent" && sort !== "opened";
+  const [work, setWork] = useState<CurrentWork | null>(null);
+  const [finished, setFinished] = useState<DocumentSummary[]>([]);
+  const [finishedOffset, setFinishedOffset] = useState(0);
+  const [finishedLoaded, setFinishedLoaded] = useState(false);
+  const [unlinked, setUnlinked] = useState<DocumentSummary[]>([]);
+  const [unlinkedOffset, setUnlinkedOffset] = useState(0);
+  const [unlinkedLoaded, setUnlinkedLoaded] = useState(false);
+  /** Plan groups and Open tickets start open; the two folds of old work start closed. */
+  const groupOpen = (key: string, fallback = true) =>
+    documentGroups[key] ?? fallback;
+  const toggleGroup = (key: string, fallback = true) =>
+    setPreference("documentGroups", {
+      ...documentGroups,
+      [key]: !groupOpen(key, fallback),
+    });
+  const finishedOpen = groupOpen("finished", false);
+  const unlinkedOpen = groupOpen("unlinked", false);
   const [all, setAll] = useState<DocumentSummary[]>([]);
   const [allOffset, setAllOffset] = useState(0);
   const [allLoaded, setAllLoaded] = useState(false);
@@ -283,18 +323,20 @@ export function Documents({
     return Promise.all([
       upTo(recentOffset, (at) => documents.recent(at, includeSupport)),
       upTo(pinOffset, (at) => documents.pins(at)),
+      documents.currentWork(includeSupport),
     ])
-      .then(([r, p]) => {
+      .then(([r, p, w]) => {
         setPins(p);
         if (
           navigator.current?.querySelector("[data-document-row]") &&
           (engaged.current ||
             navigator.current?.contains(document.activeElement))
         ) {
-          pendingBrowse.current = { recent: r, pins: p };
+          pendingBrowse.current = { recent: r, pins: p, work: w };
         } else {
           setRecent(r);
           setGroupPins(p);
+          setWork(w);
         }
         setBrowseLoaded(true);
         setListError(null);
@@ -357,9 +399,10 @@ export function Documents({
     )?.focus();
   }, [trash, active, showTrash]);
   useEffect(() => {
-    if (!active || view !== "all") return;
+    if (!active || !sorted) return;
+    const read = sort === "title" ? documents.byTitle : documents.all;
     const load = () =>
-      void upTo(allOffset, (at) => documents.all(at, includeSupport))
+      void upTo(allOffset, (at) => read(at, includeSupport))
         .then((items) => {
           setAll(items);
           setAllLoaded(true);
@@ -369,8 +412,41 @@ export function Documents({
     load();
   }, [
     active,
-    view,
+    sorted,
+    sort,
     allOffset,
+    includeSupport,
+    changeVersion,
+    attempt,
+    failLoad,
+  ]);
+  // The two folds of old work read their Documents only while open.
+  useEffect(() => {
+    if (!active || view !== "current" || showTrash) return;
+    if (finishedOpen)
+      void upTo(finishedOffset, (at) => documents.finished(at, includeSupport))
+        .then((items) => {
+          setFinished(items);
+          setFinishedLoaded(true);
+          setListError(null);
+        })
+        .catch((reason: unknown) => failLoad(reason, "Finished work"));
+    if (unlinkedOpen)
+      void upTo(unlinkedOffset, (at) => documents.unlinked(at, includeSupport))
+        .then((items) => {
+          setUnlinked(items);
+          setUnlinkedLoaded(true);
+          setListError(null);
+        })
+        .catch((reason: unknown) => failLoad(reason, "Documents"));
+  }, [
+    active,
+    view,
+    showTrash,
+    finishedOpen,
+    unlinkedOpen,
+    finishedOffset,
+    unlinkedOffset,
     includeSupport,
     changeVersion,
     attempt,
@@ -485,34 +561,73 @@ export function Documents({
     );
   };
   const searching = Boolean(query.trim() || filter.trim());
+  // Current work: the Plan groups in order, then Open tickets, with the two folds last.
+  const groups = work?.groups ?? [];
+  const groupKey = (plan: { id: string } | null) => plan?.id ?? "open-tickets";
+  const currentCount = groups.reduce(
+    (sum, group) => sum + group.documents.length,
+    0,
+  );
+  /** Everything the arrow keys visit, in order: Documents, and the headers that fold them. */
+  const rovingItems: string[] = [];
   const visibleRows = showTrash
     ? trash
     : searching
       ? results
-      : view === "all"
-        ? all
-        : [
+      : view === "current"
+        ? [
             ...groupPins,
-            ...recent.filter(
-              (doc) => !groupPins.some((pin) => pin.id === doc.id),
+            ...groups.flatMap((group) =>
+              groupOpen(groupKey(group.plan)) ? group.documents : [],
             ),
-          ];
+            ...(finishedOpen ? finished : []),
+            ...(unlinkedOpen ? unlinked : []),
+          ]
+        : sorted
+          ? all
+          : [
+              ...groupPins,
+              ...recent.filter(
+                (doc) => !groupPins.some((pin) => pin.id === doc.id),
+              ),
+            ];
+  if (!showTrash && !searching && view === "current") {
+    rovingItems.push(...groupPins.map((doc) => doc.id));
+    for (const group of groups) {
+      const key = groupKey(group.plan);
+      rovingItems.push(`group:${key}`);
+      if (groupOpen(key)) rovingItems.push(...group.documents.map((d) => d.id));
+    }
+    if (work && work.finished > 0) {
+      rovingItems.push("group:finished");
+      if (finishedOpen) rovingItems.push(...finished.map((doc) => doc.id));
+    }
+    if (work && work.unlinked > 0) {
+      rovingItems.push("group:unlinked");
+      if (unlinkedOpen) rovingItems.push(...unlinked.map((doc) => doc.id));
+    }
+  } else rovingItems.push(...visibleRows.map((doc) => doc.id));
   const tabRow =
-    visibleRows.find((doc) => doc.id === focusedRow)?.id ??
-    visibleRows.find((doc) => doc.id === selected?.id)?.id ??
-    visibleRows[0]?.id;
+    rovingItems.find((item) => item === focusedRow) ??
+    rovingItems.find((item) => item === selected?.id) ??
+    rovingItems[0];
+  // A Document can show twice (pinned, and in its group); only its first row is a tab stop.
+  let tabRowClaimed = false;
   // The reader's place in the list as it shows now: a step goes to the neighbour in that order.
+  // A Document the list shows twice (pinned, and in its Plan group) counts once, at its first row.
+  const walkable = visibleRows.filter(
+    (doc, index) => visibleRows.findIndex((d) => d.id === doc.id) === index,
+  );
   const placeAt = selected
-    ? visibleRows.findIndex((doc) => doc.id === selected.id)
+    ? walkable.findIndex((doc) => doc.id === selected.id)
     : -1;
   const reading: DocumentReading | null = selected && {
     expanded,
     onExpandedChange: (value) =>
       setPreference("openDocuments", value ? "expanded" : "split"),
-    place:
-      placeAt < 0 ? null : { index: placeAt + 1, total: visibleRows.length },
-    previous: (placeAt > 0 && visibleRows[placeAt - 1]?.id) || null,
-    next: (placeAt >= 0 && visibleRows[placeAt + 1]?.id) || null,
+    place: placeAt < 0 ? null : { index: placeAt + 1, total: walkable.length },
+    previous: (placeAt > 0 && walkable[placeAt - 1]?.id) || null,
+    next: (placeAt >= 0 && walkable[placeAt + 1]?.id) || null,
     focus: steppedWith.current,
     onFocused: () => {
       steppedWith.current = null;
@@ -529,7 +644,7 @@ export function Documents({
   const commandPinned = pins.some((doc) => doc.id === commandId);
   const searchCommand = useCallback(() => {
     setSearchOpen(true);
-    setView((current) => (current === "trash" ? "recent" : current));
+    setShowTrash(false);
     queueMicrotask(() =>
       navigator.current
         ?.querySelector<HTMLInputElement>("input[type=search]")
@@ -569,12 +684,33 @@ export function Documents({
     onCommandsChange?.(active ? commands : null);
     return () => onCommandsChange?.(null);
   }, [active, commands, onCommandsChange]);
-  const list = (items: DocumentSummary[], mark = "", inTrash = false) => (
+  /** Moves focus along the roving order: Documents and group headers together. */
+  const moveFocus = (current: HTMLElement, key: string) =>
+    focusNavigatorRow(
+      [
+        ...(navigator.current?.querySelectorAll<HTMLButtonElement>(
+          "[data-document-row], [data-group-header]",
+        ) ?? []),
+      ],
+      current,
+      key,
+    );
+  /** `grouped` rows sit under a header that names their Plan, so they do not repeat it. */
+  const list = (
+    items: DocumentSummary[],
+    mark = "",
+    inTrash = false,
+    grouped = false,
+  ) => (
     <ul className="document-list">
       {items.map((doc, index) => {
         const pinned = pins.some((p) => p.id === doc.id);
         const date = doc.updated_at ? listTime(doc.updated_at) : "";
-        const context = documentRowContext(doc);
+        const context = grouped
+          ? groupRowContext(doc)
+          : documentRowContext(doc);
+        const tabStop = tabRow === doc.id && !tabRowClaimed;
+        if (tabStop) tabRowClaimed = true;
         const snippet =
           mark && doc.snippet && !sameText(doc.snippet, doc.heading)
             ? doc.snippet
@@ -593,7 +729,7 @@ export function Documents({
                   className="document-list-open"
                   aria-current={selected?.id === doc.id || undefined}
                   data-document-row={doc.id}
-                  tabIndex={tabRow === doc.id ? 0 : -1}
+                  tabIndex={tabStop ? 0 : -1}
                   onFocus={() => setFocusedRow(doc.id)}
                   aria-keyshortcuts={
                     ariaKeyShortcuts("documents-move") + " Enter"
@@ -602,12 +738,7 @@ export function Documents({
                     if (matchesShortcut(event, "documents-move")) {
                       event.preventDefault();
                       event.stopPropagation();
-                      const rows = [
-                        ...(navigator.current?.querySelectorAll<HTMLButtonElement>(
-                          "[data-document-row]",
-                        ) ?? []),
-                      ];
-                      focusNavigatorRow(rows, event.currentTarget, event.key);
+                      moveFocus(event.currentTarget, event.key);
                     } else if (
                       matchesShortcut(event, "documents-pin") &&
                       !inTrash
@@ -726,20 +857,230 @@ export function Documents({
       })}
     </ul>
   );
-  const shownCount = showTrash
-    ? trash.length
-    : searching
-      ? results.length
-      : view === "all"
-        ? all.length
-        : recent.length;
   const countKnown = showTrash
     ? trashLoaded
     : searching
       ? searchKey === JSON.stringify([query, filter, offset, includeSupport])
-      : view === "all"
-        ? allLoaded
-        : browseLoaded;
+      : view === "current"
+        ? work !== null
+        : sorted
+          ? allLoaded
+          : browseLoaded;
+  const chooseSort = (value: string) => {
+    if (value !== "opened" && value !== "updated" && value !== "title") return;
+    if (value === sort) return;
+    setAll([]);
+    setAllLoaded(false);
+    setAllOffset(0);
+    setPreference("documentsSort", value);
+  };
+  /** A header that folds a group: a button naming the group, its count, and open or closed. */
+  const groupHeader = (
+    key: string,
+    label: string,
+    count: number,
+    open: boolean,
+    fallback = true,
+  ) => {
+    const item = `group:${key}`;
+    return (
+      <h2 className="documents-group-header">
+        <button
+          type="button"
+          className="documents-group-toggle"
+          aria-expanded={open}
+          data-group-header={key}
+          tabIndex={tabRow === item ? 0 : -1}
+          aria-keyshortcuts={ariaKeyShortcuts("documents-move")}
+          onFocus={() => setFocusedRow(item)}
+          onClick={() => toggleGroup(key, fallback)}
+          onKeyDown={(event) => {
+            if (matchesShortcut(event, "documents-move")) {
+              event.preventDefault();
+              event.stopPropagation();
+              moveFocus(event.currentTarget, event.key);
+            }
+          }}
+        >
+          {open ? (
+            <ChevronDown aria-hidden="true" />
+          ) : (
+            <ChevronRight aria-hidden="true" />
+          )}
+          <span className="truncate">{label}</span> <Count>{count}</Count>
+        </button>
+      </h2>
+    );
+  };
+  const pinnedSection = !showTrash &&
+    !searching &&
+    groupPins.length > 0 &&
+    (view === "current" || !sorted) && (
+      <section aria-label="Pinned">
+        <h2 className="documents-group">
+          <Pin aria-hidden="true" />
+          Pinned
+          <Count>{groupPins.length}</Count>
+        </h2>
+        {list(groupPins)}
+        {pins.length >= pinOffset + 50 && (
+          <Pager
+            noun="pinned Documents"
+            onMore={() => setPinOffset(pinOffset + 50)}
+          />
+        )}
+      </section>
+    );
+  const currentWorkSection = (
+    <section aria-label="Current work">
+      {work === null ? (
+        <EmptyState
+          size="inline"
+          role="status"
+          description="Loading Documents…"
+        />
+      ) : (
+        currentCount + work.finished + work.unlinked === 0 && (
+          <EmptyState
+            icon={<FileText />}
+            title={emptyCopy("documents-all").title}
+            description={emptyCopy("documents-all").sentence}
+          />
+        )
+      )}
+      {groups.map((group) => {
+        const key = groupKey(group.plan);
+        const open = groupOpen(key);
+        return (
+          <div key={key} className="documents-group-block">
+            {groupHeader(
+              key,
+              group.plan?.name ?? "Open tickets",
+              group.documents.length,
+              open,
+            )}
+            {open && list(group.documents, "", false, true)}
+          </div>
+        );
+      })}
+      {work !== null && (work.finished > 0 || work.unlinked > 0) && (
+        <div className="documents-folds">
+          {work.finished > 0 && (
+            <div className="documents-group-block">
+              {groupHeader(
+                "finished",
+                "Finished work",
+                work.finished,
+                finishedOpen,
+                false,
+              )}
+              {finishedOpen &&
+                (finishedLoaded ? (
+                  list(finished)
+                ) : (
+                  <EmptyState
+                    size="inline"
+                    role="status"
+                    description="Loading Documents…"
+                  />
+                ))}
+              {finishedOpen && finished.length >= finishedOffset + 50 && (
+                <Pager
+                  noun="Documents of finished work"
+                  onMore={() => setFinishedOffset(finishedOffset + 50)}
+                />
+              )}
+            </div>
+          )}
+          {work.unlinked > 0 && (
+            <div className="documents-group-block">
+              {groupHeader(
+                "unlinked",
+                "No Plan or ticket",
+                work.unlinked,
+                unlinkedOpen,
+                false,
+              )}
+              {unlinkedOpen &&
+                (unlinkedLoaded ? (
+                  list(unlinked)
+                ) : (
+                  <EmptyState
+                    size="inline"
+                    role="status"
+                    description="Loading Documents…"
+                  />
+                ))}
+              {unlinkedOpen && unlinked.length >= unlinkedOffset + 50 && (
+                <Pager
+                  noun="Documents with no Plan or ticket"
+                  onMore={() => setUnlinkedOffset(unlinkedOffset + 50)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+  const optionsMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton label="More">
+          <MoreHorizontal />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={4}>
+        {view === "recent" && (
+          <>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={sort} onValueChange={chooseSort}>
+                <DropdownMenuRadioItem value="opened">
+                  Recently opened
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="updated">
+                  Recently updated
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="title">
+                  Title
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuCheckboxItem
+          keepOpen={false}
+          checked={includeSupport}
+          onCheckedChange={(checked) => {
+            setIncludeSupport(checked);
+            setOffset(0);
+            setRecentOffset(0);
+            setAllOffset(0);
+            setFinishedOffset(0);
+            setUnlinkedOffset(0);
+          }}
+        >
+          Show update details
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={() => {
+            setQuery("");
+            setFilter("");
+            setSearchOpen(false);
+            setRestored(null);
+            setShowTrash(true);
+          }}
+        >
+          <Trash2 aria-hidden="true" />
+          Trash
+          {work && <Count className="ml-auto">{work.trashed}</Count>}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
   return (
     // The page stays mounted while another is shown; its entrance (enter.ts)
     // plays again each time it comes back from `hidden`.
@@ -790,8 +1131,19 @@ export function Documents({
       >
         <div className="documents-list-head" {...enter(0)}>
           <PaneHeader
-            title="Documents"
-            count={countKnown ? <Count>{shownCount}</Count> : undefined}
+            title={showTrash ? "Trash" : "Documents"}
+            hideTitle={!showTrash && !searchOpen}
+            leading={
+              showTrash ? (
+                <ReturnCrumb
+                  origin="Documents"
+                  onReturn={() => {
+                    setShowTrash(false);
+                    setRestored(null);
+                  }}
+                />
+              ) : undefined
+            }
             titleEditor={
               searchOpen ? (
                 <NavigatorSearch
@@ -815,7 +1167,7 @@ export function Documents({
                     aria-keyshortcuts={ariaKeyShortcuts("documents-search")}
                     onClick={() => {
                       setSearchOpen(true);
-                      if (showTrash) setView("recent");
+                      setShowTrash(false);
                     }}
                   >
                     <Search />
@@ -831,29 +1183,30 @@ export function Documents({
                     <Plus />
                   </IconButton>
                 )}
+                {!showTrash && optionsMenu}
               </>
             }
-          />
-        </div>
-        {/* One toolbar in every view: it never collapses or moves (DL-01, DL-02). */}
-        <div className="documents-toolbar" {...enter(1)}>
-          <SegmentedControl
-            aria-label="Documents view"
-            value={searching && !showTrash ? ("" as typeof view) : view}
-            onValueChange={(value) => {
-              setView(value);
-              setRestored(null);
-              if (value === "trash") {
-                setQuery("");
-                setFilter("");
-              }
-            }}
-            options={[
-              { value: "recent", label: "Recent" },
-              { value: "all", label: "All" },
-              { value: "trash", label: "Trash" },
-            ]}
-          />
+          >
+            {!showTrash && !searchOpen && (
+              <SegmentedControl
+                aria-label="Documents view"
+                className="auto-cols-auto"
+                value={view}
+                onValueChange={(value) => {
+                  setPreference("documentsView", value);
+                  setRestored(null);
+                }}
+                options={[
+                  {
+                    value: "current",
+                    label: "Current work",
+                    ...(work ? { count: currentCount } : {}),
+                  },
+                  { value: "recent", label: "Recent" },
+                ]}
+              />
+            )}
+          </PaneHeader>
         </div>
         {filter.trim() && (
           <div className="documents-filters">
@@ -888,7 +1241,7 @@ export function Documents({
             onRetry={listError.retry}
           />
         )}
-        <div {...enter(2)}>
+        <div {...enter(1)}>
           {listError?.kind === "load" && !countKnown ? (
             <FailureState
               failure={listError.failure}
@@ -912,7 +1265,7 @@ export function Documents({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setView("all")}
+                        onClick={() => setShowTrash(false)}
                       >
                         Browse Documents
                       </Button>
@@ -941,7 +1294,7 @@ export function Documents({
                   title={`No Documents match ${query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}`}
                   description={
                     !includeSupport && hiddenMatches
-                      ? "Update details are hidden; turn on Show update details to search them."
+                      ? "Update details are hidden; turn on Show update details from the … menu to search them."
                       : "Try another word, or clear the search."
                   }
                 />
@@ -961,23 +1314,10 @@ export function Documents({
             </section>
           ) : (
             <>
-              {view === "recent" && groupPins.length > 0 && (
-                <section aria-label="Pinned">
-                  <h2 className="documents-group">
-                    <Pin aria-hidden="true" />
-                    Pinned
-                    <Count>{groupPins.length}</Count>
-                  </h2>
-                  {list(groupPins)}
-                  {pins.length >= pinOffset + 50 && (
-                    <Pager
-                      noun="pinned Documents"
-                      onMore={() => setPinOffset(pinOffset + 50)}
-                    />
-                  )}
-                </section>
-              )}
-              {view === "all" ? (
+              {pinnedSection}
+              {view === "current" ? (
+                currentWorkSection
+              ) : sorted ? (
                 <section aria-label="All Documents">
                   {!allLoaded ? (
                     <EmptyState
@@ -1049,23 +1389,6 @@ export function Documents({
             </>
           )}
         </div>
-        <label
-          className="documents-include"
-          data-hidden={showTrash || undefined}
-        >
-          <Switch
-            aria-label="Show update details"
-            checked={includeSupport}
-            disabled={showTrash}
-            onCheckedChange={(checked) => {
-              setIncludeSupport(checked);
-              setOffset(0);
-              setRecentOffset(0);
-              setAllOffset(0);
-            }}
-          />
-          Show update details
-        </label>
       </div>
       {opening && (
         <article className="document-workspace" aria-label="Document reader">

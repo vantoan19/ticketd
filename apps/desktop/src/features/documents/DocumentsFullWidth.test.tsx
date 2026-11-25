@@ -35,6 +35,10 @@ vi.mock("./api", () => ({
     summary: vi.fn(),
     recent: vi.fn(),
     all: vi.fn(),
+    byTitle: vi.fn(),
+    currentWork: vi.fn(),
+    finished: vi.fn(),
+    unlinked: vi.fn(),
     trash: vi.fn().mockResolvedValue([]),
     pins: vi.fn().mockResolvedValue([]),
     tags: vi.fn().mockResolvedValue([]),
@@ -72,8 +76,21 @@ const read = (id: string) => ({
 });
 const row = (id: string) => ({ id, heading: `Doc ${id}` });
 
+/** Stores personal choices; the Documents list opens on Recent unless a test says otherwise. */
+const choose = (choices: Record<string, string> = {}) =>
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent", ...choices }),
+  );
 beforeEach(() => {
   localStorage.clear();
+  choose();
+  vi.mocked(documents.currentWork).mockResolvedValue({
+    groups: [],
+    finished: 0,
+    unlinked: 0,
+    trashed: 0,
+  });
   vi.mocked(documents.summary).mockResolvedValue({
     id: "x",
     heading: "",
@@ -136,10 +153,7 @@ it("hides the list while a Document is read at full width and brings it back, re
 });
 
 it("shows the list as it is when no Document is open, even at full width", async () => {
-  localStorage.setItem(
-    "ticketd.preferences",
-    JSON.stringify({ openDocuments: "expanded" }),
-  );
+  choose({ openDocuments: "expanded" });
   vi.mocked(documents.recent).mockResolvedValue([row("a")]);
   const { container } = renderDocuments();
   await screen.findByRole("button", { name: "Doc a" });
@@ -153,10 +167,7 @@ const position = () =>
   within(screen.getByRole("group", { name: "Position in the list" }));
 
 it("says where the Document is in the list and steps through it in the list's order, pinned first", async () => {
-  localStorage.setItem(
-    "ticketd.preferences",
-    JSON.stringify({ openDocuments: "expanded" }),
-  );
+  choose({ openDocuments: "expanded" });
   vi.mocked(documents.recent).mockResolvedValue([row("a"), row("b"), row("c")]);
   vi.mocked(documents.pins).mockResolvedValue([row("c")]);
   renderDocuments();
@@ -186,16 +197,39 @@ it("says where the Document is in the list and steps through it in the list's or
   expect(position().getByText("1 of 3")).toBeTruthy();
 });
 
-it("steps through the All view in its own order", async () => {
-  localStorage.setItem(
-    "ticketd.preferences",
-    JSON.stringify({ openDocuments: "expanded" }),
-  );
-  vi.mocked(documents.recent).mockResolvedValue([row("a"), row("b")]);
-  vi.mocked(documents.all).mockResolvedValue([row("z"), row("y"), row("x")]);
+it("steps through Current work by its Plan groups, counting a pinned Document once", async () => {
+  choose({ openDocuments: "expanded", documentsView: "current" });
+  vi.mocked(documents.pins).mockResolvedValue([row("c")]);
+  vi.mocked(documents.currentWork).mockResolvedValue({
+    groups: [
+      {
+        plan: { id: "p1", name: "Checkout" },
+        documents: [row("a"), row("c")],
+      },
+      { plan: null, documents: [row("b")] },
+    ],
+    finished: 0,
+    unlinked: 0,
+    trashed: 0,
+  });
   renderDocuments();
-  await screen.findByRole("button", { name: "Doc a" });
-  fireEvent.click(screen.getByRole("radio", { name: "All" }));
+  // The list reads c (pinned), a, c again in its group, then b: three Documents.
+  await openRow("Doc a");
+  expect(position().getByText("2 of 3")).toBeTruthy();
+  fireEvent.click(position().getByRole("button", { name: "Next Document" }));
+  await screen.findByRole("heading", { name: "Doc b" });
+  expect(position().getByText("3 of 3")).toBeTruthy();
+});
+
+it("steps through Recent sorted by title in the sorted order", async () => {
+  choose({ openDocuments: "expanded", documentsSort: "title" });
+  vi.mocked(documents.recent).mockResolvedValue([row("a"), row("b")]);
+  vi.mocked(documents.byTitle).mockResolvedValue([
+    row("z"),
+    row("y"),
+    row("x"),
+  ]);
+  renderDocuments();
   await openRow("Doc y");
   expect(position().getByText("2 of 3")).toBeTruthy();
   fireEvent.click(position().getByRole("button", { name: "Next Document" }));
@@ -203,10 +237,7 @@ it("steps through the All view in its own order", async () => {
 });
 
 it("keeps the position slot when the Document is not in the list, so nothing moves", async () => {
-  localStorage.setItem(
-    "ticketd.preferences",
-    JSON.stringify({ openDocuments: "expanded" }),
-  );
+  choose({ openDocuments: "expanded" });
   vi.mocked(documents.recent).mockResolvedValue([row("a")]);
   render(
     <TickingChanges>
@@ -229,11 +260,7 @@ it("keeps the position slot when the Document is not in the list, so nothing mov
     ).toBe(true);
 });
 
-const expandedAlready = () =>
-  localStorage.setItem(
-    "ticketd.preferences",
-    JSON.stringify({ openDocuments: "expanded" }),
-  );
+const expandedAlready = () => choose({ openDocuments: "expanded" });
 const outlineNav = () =>
   screen.getByRole("navigation", { name: "On this page, 6 headings" });
 

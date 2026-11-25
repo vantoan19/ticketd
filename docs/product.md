@@ -262,8 +262,12 @@ core workflows for Documents, Activities, Plans, tags, and links
   plain line written by its author (`--summary` on `document create` and `document
 change`; an empty value clears it). ticketd never writes one.
 - Capture opens an editor at once with no required field, autosaves, and creates
-  nothing if left empty. Documents opens on Recently opened with pinned items above;
-  tags, pins, and links are optional.
+  nothing if left empty. Documents opens on **Current work** with pinned items above:
+  the Documents of Active Plans and open tickets, one group per Plan, each Plan's spec
+  first, then "Open tickets", with "Finished work" and "No Plan or ticket" closed below
+  and read when opened. Recent (by recently opened, recently updated, or title) stays one
+  click away; the view and which groups are open are remembered on this computer. Tags,
+  pins, and links are optional.
 - Reading a long Document: an outline of its headings opens from the right edge, and
   each h2 and h3 can be folded to its first sentence, one at a time or with Fold all
   in the outline. Folds are kept per Document on this computer, never change the
