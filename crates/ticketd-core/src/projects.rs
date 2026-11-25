@@ -19,6 +19,13 @@ pub struct Project {
     pub archived: bool,
 }
 
+#[derive(Debug, Serialize)]
+pub struct ProjectArchiveOutcome {
+    pub project: Project,
+    /// Identifies a transition this write made, so Undo can check it later.
+    pub change: Option<String>,
+}
+
 impl Project {
     /// The first active Project, in list order, that holds this folder.
     pub fn for_folder<'a>(projects: &'a [Self], folder: &Path) -> Option<&'a Self> {
@@ -79,7 +86,10 @@ pub(crate) fn migrate_remote(tx: &Transaction<'_>) -> Result<(), Error> {
 }
 
 pub(crate) fn migrate_archived(tx: &Transaction<'_>) -> Result<(), Error> {
-    tx.execute_batch("ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0")?;
+    tx.execute_batch(
+        "ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+         ALTER TABLE projects ADD COLUMN archive_change TEXT;",
+    )?;
     Ok(())
 }
 
@@ -264,16 +274,35 @@ impl Workspace {
     }
 
     pub fn set_project_archived(&mut self, id: &str, archived: bool) -> Result<Project, Error> {
+        Ok(self.change_project_archive(id, archived, None)?.project)
+    }
+
+    /// With an expected change, apply Undo only if the same transition is still current.
+    pub fn change_project_archive(
+        &mut self,
+        id: &str,
+        archived: bool,
+        expected_change: Option<&str>,
+    ) -> Result<ProjectArchiveOutcome, Error> {
         crate::write_scope::run(&self.connection, |tx| {
             let mut project = find(tx, id)?;
-            if project.archived != archived {
-                tx.execute(
-                    "UPDATE projects SET archived = ?1 WHERE id = ?2",
-                    params![archived, id],
+            let change = if project.archived == archived {
+                None
+            } else {
+                let change = Uuid::new_v4().to_string();
+                let updated = tx.execute(
+                    "UPDATE projects SET archived = ?1, archive_change = ?2
+                     WHERE id = ?3 AND (?4 IS NULL OR archive_change = ?4)",
+                    params![archived, change, id, expected_change],
                 )?;
-                project.archived = archived;
-            }
-            Ok(project)
+                if updated == 1 {
+                    project.archived = archived;
+                    Some(change)
+                } else {
+                    None
+                }
+            };
+            Ok(ProjectArchiveOutcome { project, change })
         })
     }
 

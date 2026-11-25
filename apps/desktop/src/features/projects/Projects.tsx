@@ -171,6 +171,7 @@ export function Projects({
   onArchivedChange,
   loading,
   onChange,
+  onProjectCommitted,
   onOpenTickets,
   onShowUnassigned,
   onConnectSource,
@@ -180,6 +181,7 @@ export function Projects({
   onArchivedChange?: (archived: boolean) => void;
   loading: boolean;
   onChange: () => Promise<void>;
+  onProjectCommitted?: (project: Project) => void;
   /** Shows that project's tickets. */
   onOpenTickets?: (project: Project) => void;
   /** Opens the tickets that belong to no project. */
@@ -192,28 +194,49 @@ export function Projects({
     (project) => Boolean(project.archived) === archived,
   );
   const rowActions = useRef(new Map<string, HTMLButtonElement>());
-  const focusAfterChange = useRef<{
-    id: string;
-    archived: boolean;
-    target?: string;
-  } | null>(null);
+  const focusAfterChange = useRef(
+    new Map<
+      string,
+      {
+        archived: boolean;
+        target?: string;
+        owner: Element | null;
+        trigger: Element | null;
+      }
+    >(),
+  );
   const lastArchive = useRef(0);
-  const lifecycle = useProjectLifecycle(onChange);
+  const lifecycle = useProjectLifecycle(onChange, onProjectCommitted);
   const tokens = rowTokens();
   const page = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    const focus = focusAfterChange.current;
-    if (!focus) return;
-    const project = projects.find((project) => project.id === focus.id);
-    if (!project || Boolean(project.archived) !== focus.archived) return;
-    focusAfterChange.current = null;
-    if (page.current?.closest("[hidden]")) return;
-    (
-      rowActions.current.get(focus.target ?? "") ??
-      page.current?.querySelector<HTMLElement>("#projects-heading")
-    )?.focus();
+    for (const [id, focus] of focusAfterChange.current) {
+      const project = projects.find((item) => item.id === id);
+      if (!project || Boolean(project.archived) !== focus.archived) continue;
+      focusAfterChange.current.delete(id);
+      if (page.current?.closest("[hidden]")) continue;
+
+      const active = document.activeElement;
+      if (
+        active !== document.body &&
+        active !== focus.owner &&
+        active !== focus.trigger
+      )
+        continue;
+      const action = rowActions.current.get(focus.target ?? "");
+
+      const target =
+        action && !action.disabled
+          ? action
+          : page.current?.querySelector<HTMLElement>("#projects-heading");
+      target?.focus();
+    }
   }, [projects]);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
+  const activeDialog = useRef<OpenDialog | null>(null);
+  useLayoutEffect(() => {
+    activeDialog.current = dialog;
+  }, [dialog]);
   const [closedForArchive, setClosedForArchive] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -274,60 +297,51 @@ export function Projects({
     closeDialog();
   }
 
-  function closeDialog() {
-    setDialog(null);
+  function closeDialog(owner = dialog) {
+    setDialog((current) => (current === owner ? null : current));
   }
 
   function open(next: OpenDialog) {
+    sourceReview.current = null;
     setClosedForArchive(false);
     setError(null);
+    setPending(false);
     if (next.kind !== "checkout")
       setEditingId(next.kind === "edit" ? next.id : null);
     setDialog(next);
   }
-  /** Runs a dialog's write, refreshes, and reports whether it all succeeded. */
-  async function save(fn: () => Promise<unknown>, action: string) {
-    setPending(true);
-    setError(null);
-    try {
-      await fn();
-      await onChange();
-      return true;
-    } catch (reason) {
-      setError(describeFailure(reason, action));
-      return false;
-    } finally {
-      setPending(false);
-    }
-  }
-  function drop(
-    setter: (
-      fn: (old: Record<string, string>) => Record<string, string>,
-    ) => void,
-    key: string,
-  ) {
-    setter((old) => {
-      const next = { ...old };
-      delete next[key];
-      return next;
-    });
-  }
   function projectSaved(project: Project) {
     void onChange();
-    if (project.remote && project.remote !== editing?.remote)
+    if (
+      activeDialog.current === dialog &&
+      project.remote &&
+      project.remote !== editing?.remote
+    )
       sourceReview.current = project.id;
   }
 
   async function registerCheckout() {
-    if (!checkoutProject) return;
-    const saved = await save(
-      () => client.registerCheckout(checkoutProject.id, checkoutPath),
-      "register the checkout",
-    );
-    if (!saved) return;
-    drop(setCheckoutDrafts, checkoutProject.id);
-    setExpanded((old) => ({ ...old, [checkoutProject.id]: true }));
-    setDialog(null);
+    const owner = dialog;
+    if (owner?.kind !== "checkout" || !checkoutProject) return;
+    setPending(true);
+    setError(null);
+    try {
+      await client.registerCheckout(checkoutProject.id, checkoutPath);
+      await onChange();
+      if (activeDialog.current !== owner) return;
+      setCheckoutDrafts((old) => {
+        const next = { ...old };
+        delete next[checkoutProject.id];
+        return next;
+      });
+      setExpanded((old) => ({ ...old, [checkoutProject.id]: true }));
+      closeDialog(owner);
+    } catch (reason) {
+      if (activeDialog.current === owner)
+        setError(describeFailure(reason, "register the checkout"));
+    } finally {
+      if (activeDialog.current === owner) setPending(false);
+    }
   }
   /** Removing a checkout is reversible (register it again): act, then Undo. */
   async function removeCheckout(project: Project, path: string) {
@@ -359,20 +373,29 @@ export function Projects({
     if (!archived && !allowRemoval(lastArchive)) return;
     const index = shown.findIndex(({ id }) => id === project.id);
     const neighbor = shown[index + 1] ?? shown[index - 1];
+    const owner = document.activeElement;
+    const trigger = rowActions.current.get(project.id) ?? null;
     void lifecycle.change(project, !archived, {
       beforeRefresh: () => {
-        focusAfterChange.current = {
-          id: project.id,
+        focusAfterChange.current.set(project.id, {
           archived: !archived,
           ...(neighbor && { target: neighbor.id }),
-        };
+          owner,
+          trigger,
+        });
       },
       beforeUndoRefresh: () => {
-        focusAfterChange.current = {
-          id: project.id,
+        const neighborAction = rowActions.current.get(neighbor?.id ?? "");
+        focusAfterChange.current.set(project.id, {
           archived,
           target: project.id,
-        };
+          owner: document.activeElement,
+          // Dismissing the status line can return focus here before the list commits.
+          trigger:
+            neighborAction && !neighborAction.disabled
+              ? neighborAction
+              : (page.current?.querySelector("#projects-heading") ?? null),
+        });
       },
     });
   }
@@ -471,7 +494,7 @@ export function Projects({
                     key={item.id}
                     className="project-row"
                     data-open={isOpen || undefined}
-                    data-archived={archived || undefined}
+
                     {...arrival(0, { space: true }, tokens)}
                     {...departure({ space: true }, tokens)}
                   >
@@ -500,7 +523,13 @@ export function Projects({
                               size={20}
                             />
                             <span className="project-row-text">
-                              <span className="project-row-name">
+                              <span
+                                className={
+                                  archived
+                                    ? "project-row-name text-muted-foreground"
+                                    : "project-row-name"
+                                }
+                              >
                                 {item.name}
                               </span>
                               <span className="project-row-meta">

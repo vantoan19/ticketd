@@ -61,9 +61,6 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.project-row[data-archived] .project-row-name {
-  color: var(--muted-foreground);
-}
 .project-row-meta {
   overflow: hidden;
   color: var(--muted-foreground);

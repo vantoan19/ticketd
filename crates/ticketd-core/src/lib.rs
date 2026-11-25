@@ -165,7 +165,10 @@ pub use chats::{
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};
 pub use project_remote::{ProjectRemoteCandidate, ProjectRemoteDetection, detect_project_remote};
-pub use projects::{CheckoutRegistration, CheckoutRemoteMismatch, Project, ProjectRemoteChange};
+pub use projects::{
+    CheckoutRegistration, CheckoutRemoteMismatch, Project, ProjectArchiveOutcome,
+    ProjectRemoteChange,
+};
 pub use readiness::Readiness;
 
 mod format;

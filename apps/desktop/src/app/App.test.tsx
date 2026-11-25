@@ -3483,6 +3483,46 @@ test("the palette keeps the ticket's archived Project selected", async () => {
   ).toBe(false);
 });
 
+test("the Project palette checks the current assignment before treating the selected Project as unchanged", async () => {
+  const listed = bulkTicket(1, {
+    reference: "T-FV1",
+    title: "Project palette target",
+    project_id: "original",
+  });
+  const projects = [
+    { id: "original", name: "Original Project", path: "", paths: [] },
+    { id: "other", name: "Another Project", path: "", paths: [] },
+  ];
+  let current = { ...listed, project_id: "original" };
+  const change = vi.fn().mockReturnValue(listed);
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "find_tickets") return [listed];
+    if (command === "show_ticket") return current;
+    if (command === "list_projects") return projects;
+    if (command === "change_ticket") return change(args);
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  const row = await screen.findByRole("button", {
+    name: /Project palette target/,
+  });
+  row.focus();
+  fireEvent.keyDown(row, { key: "p" });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  expect(
+    screen.getByRole("option", { name: "Original Project", selected: true }),
+  ).toBeTruthy();
+  current = { ...listed, project_id: "other" };
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() =>
+    expect(change).toHaveBeenCalledWith(
+      expect.objectContaining({ patch: { project_id: "original" } }),
+    ),
+  );
+});
+
 test("a palette status change shows on the list row at once, before the list is read again", async () => {
   vi.useFakeTimers();
   let current = bulkTicket(1, { reference: "T-FV1", title: "Palette target" });
@@ -13107,15 +13147,19 @@ async function renderReviewApp(handlers: Record<string, unknown>) {
   await act(async () => {});
 }
 
-test("archived projects leave navigation and their ticket scope can reactivate them", async () => {
+test("an archived Project's scope reflects reactivation even if the catalog refresh fails", async () => {
   let archived = true;
   const project = { id: "smoke", name: "Smoke project", path: "", paths: [] };
+  const listProjects = vi.fn(() => {
+    if (!archived) throw new Error("Project list unavailable");
+    return [{ ...project, archived }];
+  });
   await renderReviewApp({
-    list_projects: () => [{ ...project, archived }],
+    list_projects: listProjects,
     set_project_archived: (args: { id: string; archived: boolean }) => {
       expect(args.id).toBe(project.id);
       archived = args.archived;
-      return { ...project, archived };
+      return { project: { ...project, archived }, change: "reactivated" };
     },
   });
   const scopes = within(
@@ -13141,6 +13185,11 @@ test("archived projects leave navigation and their ticket scope can reactivate t
   const restored = await scopes.findByRole("button", { name: project.name });
   expect(restored.getAttribute("aria-current")).toBe("page");
   expect(list.queryByText("Archived")).toBeNull();
+  await waitFor(() =>
+    expect(listProjects.mock.results.some(({ type }) => type === "throw")).toBe(
+      true,
+    ),
+  );
   expect(document.activeElement).toBe(
     list.getByRole("button", { name: "Filters" }),
   );

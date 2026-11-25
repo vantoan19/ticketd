@@ -2639,6 +2639,46 @@ test("linking a Project with a folder in New Chat starts the Chat there", async 
   ).toBeTruthy();
 });
 
+test("New Chat keeps its Project link and removes it from mentions when the Project is archived", async () => {
+  const project = { id: "p1", name: "Storefront", path: "", paths: [] };
+  const client = createMockChatClient({
+    enabled: true,
+    records: [
+      { kind: "project", id: project.id, title: project.name },
+      { kind: "document", id: "d1", title: "Deployment notes" },
+    ],
+  });
+  function Draft({ archived }: { archived: boolean }) {
+    return (
+      <ChatClientContext value={client}>
+        <ChatProvider>
+          <StatusLineRegion>
+            <ChatsView projects={[{ ...project, archived }]} />
+          </StatusLineRegion>
+        </ChatProvider>
+      </ChatClientContext>
+    );
+  }
+  const { rerender } = render(<Draft archived={false} />);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.click(button("Link a ticket, Document or Project"));
+  fireEvent.click(await screen.findByRole("option", { name: /Storefront/ }));
+  type("", "Describe a task or ask a question");
+  fireEvent.change(composer("Describe a task or ask a question"), {
+    target: { value: "#", selectionStart: 1 },
+  });
+  expect(
+    await screen.findByRole("option", { name: /Storefront/ }),
+  ).toBeTruthy();
+
+  rerender(<Draft archived />);
+  await waitFor(() =>
+    expect(screen.queryByRole("option", { name: /Storefront/ })).toBeNull(),
+  );
+  expect(button("Remove the link to the Project Storefront")).toBeTruthy();
+  type("", "Describe a task or ask a question");
+});
+
 test("New Chat on Claude Code sends the shown default model and permission mode, untouched", async () => {
   localStorage.clear();
   const client = await open([]);

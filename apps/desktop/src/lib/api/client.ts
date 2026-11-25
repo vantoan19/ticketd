@@ -352,6 +352,9 @@ export const projectSchema = lazySchema(() =>
   }),
 );
 export type Project = z.infer<typeof projectSchema>;
+const projectArchiveOutcomeSchema = lazySchema(() =>
+  z.object({ project: projectSchema, change: z.string().nullable() }),
+);
 const projectRemoteDetectionSchema = lazySchema(() =>
   z.object({
     suggested: z.string().nullable(),
@@ -747,9 +750,13 @@ export const client = {
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
   },
-  async setProjectArchived(id: string, archived: boolean) {
-    return projectSchema.parse(
-      await invoke("set_project_archived", { id, archived }),
+  async setProjectArchived(
+    id: string,
+    archived: boolean,
+    expectedChange?: string,
+  ) {
+    return projectArchiveOutcomeSchema.parse(
+      await invoke("set_project_archived", { id, archived, expectedChange }),
     );
   },
   async linkSourceRepositoryProject(

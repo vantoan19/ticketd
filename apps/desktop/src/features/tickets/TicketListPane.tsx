@@ -164,11 +164,21 @@ function TicketListBody({
       : undefined;
   const archivedProject = scopedProject?.archived ? scopedProject : undefined;
   const addDisabled = scopedPlan?.archived === true || Boolean(archivedProject);
-  const projectLifecycle = useProjectLifecycle(refresh);
-  const focusFilter = useRef<string | null>(null);
+  const projectLifecycle = useProjectLifecycle(
+    workspace.refreshCurrentScope,
+    workspace.patchProject,
+  );
+  const focusFilter = useRef<{ id: string; owner: HTMLElement } | null>(null);
   const lastFocused = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
     const list = listRef.current;
+    const activation = focusFilter.current;
+    const reactivated =
+      activation &&
+      projects.some(
+        (project) => project.id === activation.id && !project.archived,
+      );
+    if (reactivated) focusFilter.current = null;
     if (!list || list.closest("[hidden]")) return;
     if (
       archivedProject &&
@@ -178,19 +188,19 @@ function TicketListBody({
     ) {
       list.focus();
     }
-    if (
-      focusFilter.current &&
-      scopedProject?.id === focusFilter.current &&
-      !archivedProject
-    ) {
-      focusFilter.current = null;
+    if (reactivated && scopedProject?.id === activation.id) {
+      if (
+        document.activeElement !== activation.owner &&
+        document.activeElement !== document.body
+      )
+        return;
       (
         list.querySelector<HTMLButtonElement>(
           "[data-ticket-filters-trigger]",
         ) ?? list
       ).focus();
     }
-  }, [archivedProject, listRef, scopedProject]);
+  }, [archivedProject, listRef, projects, scopedProject]);
   const filtered =
     navigation.plan !== plan ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
@@ -440,13 +450,14 @@ function TicketListBody({
                   icon={<ArchiveRestore />}
                   label="Reactivate"
                   disabled={projectLifecycle.pending.has(archivedProject.id)}
-                  onClick={() =>
+                  onClick={(event) => {
+                    const owner = event.currentTarget;
                     void projectLifecycle.change(archivedProject, false, {
                       beforeRefresh: () => {
-                        focusFilter.current = archivedProject.id;
+                        focusFilter.current = { id: archivedProject.id, owner };
                       },
-                    })
-                  }
+                    });
+                  }}
                 />
               )}
               {configuredSources.length > 0 && (

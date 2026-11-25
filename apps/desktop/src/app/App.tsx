@@ -1455,7 +1455,12 @@ function AppContent() {
                                             )
                                           }
                                           loading={loading}
-                                          onChange={refresh}
+                                          onChange={
+                                            workspace.refreshCurrentScope
+                                          }
+                                          onProjectCommitted={
+                                            workspace.patchProject
+                                          }
                                           onConnectSource={reviewProjectSource}
                                           onOpenTickets={(item) => {
                                             navigate({});
@@ -1620,6 +1625,7 @@ function AppContent() {
                                       >
                                         <ChatsView
                                           newChatRequest={newChatRequest}
+                                          projects={projects}
                                         />
                                       </div>
                                     )}

@@ -229,9 +229,10 @@ export function useTicketCommands({
     )
       return;
     if (
-      scope === "Status" &&
-      subject.status === value &&
-      (value !== "Duplicate" || externalSource(subject))
+      (scope === "Status" &&
+        subject.status === value &&
+        (value !== "Duplicate" || externalSource(subject))) ||
+      (scope === "Project" && value === (subject.project_id ?? ""))
     ) {
       // Only a read made now says it is already set (the ADR's check before a
       // write); a copy from before a change elsewhere would close without writing.
@@ -241,7 +242,10 @@ export function useTicketCommands({
         try {
           current = await client.showTicket(subject.reference);
         } catch (reason) {
-          const message = failureText(reason, "check the status");
+          const message = failureText(
+            reason,
+            `check the ${scope.toLowerCase()}`,
+          );
           setError(message);
           line.show({ message, tone: "error" });
           return;
@@ -253,10 +257,7 @@ export function useTicketCommands({
       close();
       return;
     }
-    if (scope === "Project" && value === (subject.project_id ?? "")) {
-      close();
-      return;
-    }
+
     if (scope === "Status" && value === "Duplicate") {
       setFlowTicket(subject);
       close();

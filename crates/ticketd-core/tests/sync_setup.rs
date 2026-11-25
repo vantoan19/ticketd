@@ -2164,7 +2164,7 @@ fn a_format_97_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and
     }
     fixture
         .execute_batch(&format!(
-            "{columns} ALTER TABLE projects DROP COLUMN archived; PRAGMA user_version = 97;"
+            "{columns} ALTER TABLE projects DROP COLUMN archived; ALTER TABLE projects DROP COLUMN archive_change; PRAGMA user_version = 97;"
         ))
         .unwrap();
     drop(fixture);
@@ -2206,6 +2206,7 @@ fn a_format_98_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one
         .execute_batch(
             "ALTER TABLE sync_state DROP COLUMN s3_endpoint;
              ALTER TABLE projects DROP COLUMN archived;
+             ALTER TABLE projects DROP COLUMN archive_change;
              PRAGMA user_version = 98;",
         )
         .unwrap();

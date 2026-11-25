@@ -28,9 +28,10 @@ use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
     ContextGraphPage, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
     DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
-    MetadataSelection, Plan, PlanView, Project, ProjectRemoteChange, SafetyBackup, SidebarCounts,
-    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
-    WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
+    MetadataSelection, Plan, PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange,
+    SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
+    TicketPatch, Workspace, WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest,
+    WriteResult,
     source::{ExtensionRegistry, RefreshControl, RefreshProgress},
 };
 
@@ -544,9 +545,13 @@ fn edit_project(
 }
 
 #[tauri::command(async)]
-fn set_project_archived(id: String, archived: bool) -> Result<Project, BridgeFailure> {
+fn set_project_archived(
+    id: String,
+    archived: bool,
+    expected_change: Option<String>,
+) -> Result<ProjectArchiveOutcome, BridgeFailure> {
     open_workspace()
-        .and_then(|mut w| w.set_project_archived(&id, archived))
+        .and_then(|mut w| w.change_project_archive(&id, archived, expected_change.as_deref()))
         .map_err(BridgeFailure::from)
 }
 

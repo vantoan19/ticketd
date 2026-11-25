@@ -128,12 +128,12 @@ test("empty state explains and offers New project", () => {
 
 test("archives, undoes and reactivates from the Archived view", async () => {
   let saved = project as typeof project & { archived?: boolean };
-  vi.spyOn(client, "setProjectArchived").mockImplementation(
-    async (_id, archived) => {
+  const update = vi
+    .spyOn(client, "setProjectArchived")
+    .mockImplementation(async (_id, archived) => {
       saved = { ...project, archived };
-      return saved;
-    },
-  );
+      return { project: saved, change: archived ? "archived" : "reactivated" };
+    });
   function Page() {
     const [projects, setProjects] = useState([saved]);
     const [archived, setArchived] = useState(false);
@@ -158,6 +158,7 @@ test("archives, undoes and reactivates from the Archived view", async () => {
   const undo = screen.getByRole("button", { name: "Undo" });
   undo.focus();
   fireEvent.click(undo);
+  expect(update).toHaveBeenLastCalledWith(project.id, false, "archived");
   const actions = await screen.findByRole("button", {
     name: "Actions for Original",
   });
@@ -181,7 +182,7 @@ test("archiving a Project keeps its expanded controls disabled while saving", as
   vi.spyOn(client, "setProjectArchived").mockImplementation(
     () =>
       new Promise((resolve) => {
-        finish = resolve;
+        finish = (saved) => resolve({ project: saved, change: "archived" });
       }),
   );
   render(<Projects {...props} onOpenTickets={vi.fn()} />);
@@ -512,6 +513,40 @@ test("registers a checkout by choosing a folder", async () => {
   await waitFor(() =>
     expect(register).toHaveBeenCalledWith("p1", "/work/tree"),
   );
+});
+
+test("a completed registration cannot close a different checkout dialog", async () => {
+  const other = { ...project, id: "p2", name: "Another" };
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue("/work/tree");
+  let finish!: (saved: typeof project) => void;
+  const register = vi.spyOn(client, "registerCheckout").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const { rerender } = render(
+    <Projects {...props} projects={[project, other]} />,
+  );
+  await chooseAction("Register checkout…");
+  const dialog = () =>
+    screen.getByRole("dialog", { name: "Register checkout" });
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Choose…" }));
+  const submit = within(dialog()).getByRole("button", {
+    name: "Register checkout",
+  });
+  await waitFor(() => expect(submit).toHaveProperty("disabled", false));
+  fireEvent.click(submit);
+  expect(register).toHaveBeenCalledWith("p1", "/work/tree");
+
+  rerender(
+    <Projects {...props} projects={[{ ...project, archived: true }, other]} />,
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await chooseAction("Register checkout…", "Another");
+  expect(dialog().textContent).toContain("Another");
+  await act(async () => finish(project));
+  expect(dialog().textContent).toContain("Another");
 });
 
 test("removing a checkout acts at once and Undo registers it again", async () => {

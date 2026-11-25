@@ -35,8 +35,10 @@ ticketd remove-tag T-KQ1 research
 ```
 
 Creation requires only a title. Direct `create` can also take `--plan`; without an
-explicit project it checks registered checkout paths, including parent directories.
-Ambiguous matches fail; no match creates an unlinked ticket. JSON creation and
+explicit project it checks active Projects' registered checkout paths, including
+parent directories. Archived Projects keep their registrations and are skipped
+during inference. Ambiguous matches fail, and no active match creates an unlinked
+ticket. JSON creation and
 batches require explicit `project_id` to link a project.
 
 A title is one non-empty line of at most 1000 characters; put detail in the body. A

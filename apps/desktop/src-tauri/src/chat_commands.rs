@@ -223,7 +223,10 @@ fn watch_overview(app: &AppHandle) {
         let (mut seen, mut shown) = (None, None);
         let mut notifier = Notifier::default();
         let mut workspace_changed = crate::wake::CHANGED.subscribe();
-        let _ = chats.refresh_projects();
+        let mut project_retry = chats
+            .refresh_projects()
+            .err()
+            .map(|_| Instant::now() + OVERVIEW_INTERVAL);
         // The first reading sets what is already there; nothing in it is announced.
         if let Ok((overview, rows, trashed)) = chats.overview_digest() {
             notify(&app, &chats, &mut notifier, &rows);
@@ -233,20 +236,30 @@ fn watch_overview(app: &AppHandle) {
         loop {
             // A quiet window that ends is a reason to read again, like a change.
             let quiet = notifier.deadline();
-            let mut projects_changed = false;
-            let woke = tokio::select! {
-                changed = changed.changed() => changed.is_ok(),
-                Ok(()) = workspace_changed.changed() => {
-                    projects_changed = chats.refresh_projects().unwrap_or(false);
-                    if !projects_changed {
-                        continue;
+            let refresh_projects = tokio::select! {
+                changed = changed.changed() => {
+                    if changed.is_err() {
+                        break;
                     }
-                    true
+                    false
                 }
-                () = sleep_until(quiet) => true,
+                Ok(()) = workspace_changed.changed() => true,
+                () = sleep_until(project_retry) => true,
+                () = sleep_until(quiet) => false,
             };
-            if !woke {
-                break;
+            let projects_changed = refresh_projects
+                && match chats.refresh_projects() {
+                    Ok(changed) => {
+                        project_retry = None;
+                        changed
+                    }
+                    Err(_) => {
+                        project_retry = Some(Instant::now() + OVERVIEW_INTERVAL);
+                        false
+                    }
+                };
+            if refresh_projects && !projects_changed {
+                continue;
             }
             if quiet.is_none_or(|at| at > Instant::now()) {
                 tokio::time::sleep(OVERVIEW_INTERVAL).await;

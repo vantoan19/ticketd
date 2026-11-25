@@ -1817,6 +1817,14 @@ impl Apply<'_> {
             (SyncKind::Ticket, "body") => put(c, table, field, id, &value.unwrap_or(""))?,
             (SyncKind::Plan, "body") => put(c, table, "purpose", id, &value.unwrap_or(""))?,
             (_, "name" | "title" | "status" | "created_at") => put(c, table, field, id, &value)?,
+            (SyncKind::Project, "archived") => {
+                // An incoming transition invalidates a desktop's pending Undo.
+                c.execute(
+                    "UPDATE projects SET archived = ?2, archive_change = NULL
+                     WHERE id = ?1 AND archived != ?2",
+                    params![id, flag],
+                )?;
+            }
             (_, "trashed" | "kept" | "archived") => put(c, table, field, id, &flag)?,
             (SyncKind::Document, "pinned") => {
                 c.execute(

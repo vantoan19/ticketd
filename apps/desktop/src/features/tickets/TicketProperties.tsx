@@ -360,7 +360,7 @@ export function TicketProperties({
   }, [tagQuery]);
   async function save(
     key: string,
-    action: () => Promise<Ticket>,
+    action: () => Promise<Ticket | undefined>,
     attemptedMove?: string,
   ) {
     const returnFocus =
@@ -397,7 +397,7 @@ export function TicketProperties({
     }
     setPending(key);
     setErrors((old) => ({ ...old, [key]: null }));
-    let updated: Ticket;
+    let updated: Ticket | undefined;
     try {
       updated = await action();
     } catch (reason) {
@@ -419,7 +419,7 @@ export function TicketProperties({
     try {
       // The report shows the saved Ticket and refreshes what follows from it.
       // It never rejects, so a saved change has no "not refreshed" state.
-      await onSaved(updated);
+      if (updated) await onSaved(updated);
     } finally {
       setPending("");
       restoreFocus();
@@ -652,16 +652,20 @@ export function TicketProperties({
         return name && archivedProjectHint(name);
       }}
       onChoose={(value) => {
-        if (value === (ticket.project_id ?? "")) return;
         const name =
           projects.find((project) => project.id === value)?.name ??
           "No project";
         void save(
           "Project",
-          () =>
-            client.changeTicket(ticket.reference, {
+          async () => {
+            if (value === (ticket.project_id ?? "")) {
+              const current = await client.showTicket(ticket.reference);
+              if (value === (current.project_id ?? "")) return;
+            }
+            return client.changeTicket(ticket.reference, {
               project_id: value || null,
-            }),
+            });
+          },
           `move ${ticket.reference} to ${name}`,
         );
       }}
