@@ -49,6 +49,7 @@ pub struct DocumentSummary {
 /// A Plan a Document is attached to, as a list row names it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DocumentPlanContext {
+    pub id: String,
     pub name: String,
     pub archived: bool,
     /// The Document is this Plan's spec.
@@ -157,7 +158,7 @@ fn summary_columns() -> String {
 }
 
 /// A row's Plans (Archived included) as a JSON array, the one it is the spec of first.
-const PLANS_JSON: &str = "(SELECT json_group_array(json_object('name', name, 'archived', json(CASE archived WHEN 0 THEN 'false' ELSE 'true' END), 'spec', json(CASE spec WHEN 0 THEN 'false' ELSE 'true' END))) FROM (SELECT p.name AS name, p.archived AS archived, coalesce(p.spec_document_id = d.id, 0) AS spec FROM plan_documents pd JOIN plans p ON p.id = pd.plan_id WHERE pd.document_id = d.id ORDER BY spec DESC, p.archived, p.name, p.id))";
+const PLANS_JSON: &str = "(SELECT json_group_array(json_object('id', id, 'name', name, 'archived', json(CASE archived WHEN 0 THEN 'false' ELSE 'true' END), 'spec', json(CASE spec WHEN 0 THEN 'false' ELSE 'true' END))) FROM (SELECT p.id AS id, p.name AS name, p.archived AS archived, coalesce(p.spec_document_id = d.id, 0) AS spec FROM plan_documents pd JOIN plans p ON p.id = pd.plan_id WHERE pd.document_id = d.id ORDER BY spec DESC, p.archived, p.name, p.id))";
 
 /// A row's tickets, in Trash excluded, as a JSON array: those whose description mentions the
 /// Document and those it is attached to.
@@ -358,6 +359,20 @@ impl Workspace {
                 "SELECT updated_at, trashed FROM documents WHERE id = ?1",
                 [id],
                 |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| Error::DocumentNotFound(id.to_owned()))
+    }
+
+    /// One Document's list row (Plans, tickets, tags, opened), for a reader that needs the
+    /// same context a list row carries. A Document in Trash has a row too.
+    pub fn document_summary(&self, id: &str) -> Result<DocumentSummary, Error> {
+        let columns = summary_columns();
+        self.connection
+            .query_row(
+                &format!("SELECT {columns} FROM documents d WHERE d.id = ?1"),
+                [id],
+                |row| summary_from_row(row, None),
             )
             .optional()?
             .ok_or_else(|| Error::DocumentNotFound(id.to_owned()))
