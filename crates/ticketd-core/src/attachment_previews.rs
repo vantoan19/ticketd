@@ -14,6 +14,9 @@ use crate::{Attachment, AttachmentKind, Error, Workspace};
 pub const MAX_PREVIEW_BYTES: u64 = 100 * 1024 * 1024;
 /// The most of a plain-text file a preview shows: the start, never the whole file.
 pub const TEXT_EXCERPT_BYTES: usize = 64 * 1024;
+/// The most of one HTML report the viewer reads whole. It crosses to the WebView as
+/// one string, so this stays well under the media limit.
+pub const HTML_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -37,6 +40,9 @@ pub struct AttachmentPreview {
     pub usage: PreviewUsage,
     /// The start of a plain-text file that is not media, shown as text.
     pub text_excerpt: Option<TextExcerpt>,
+    /// A UTF-8 HTML report small enough to read whole with `attachment_html`. The
+    /// viewer shows it read-only in an isolated frame; it is never media.
+    pub html: bool,
 }
 
 /// The first bytes of a UTF-8 text file, cut on a character boundary.
@@ -119,7 +125,7 @@ impl Workspace {
         id: &str,
     ) -> Result<AttachmentPreview, Error> {
         let attachment = self.preview_attachment(workspace, id)?;
-        let (status, media_type, message) = match self.open_media(&attachment) {
+        let (mut status, media_type, mut message) = match self.open_media(&attachment) {
             Ok(media) => (
                 PreviewStatus::Available,
                 Some(media.media_type.into()),
@@ -135,6 +141,24 @@ impl Workspace {
         } else {
             None
         };
+        let mut html = false;
+        if status == PreviewStatus::Unsupported
+            && attachment.kind == AttachmentKind::LocalSnapshot
+            && is_html_name(&attachment.original_filename)
+        {
+            if attachment
+                .size_bytes
+                .is_some_and(|size| size > HTML_PREVIEW_BYTES)
+            {
+                status = PreviewStatus::TooLarge;
+                message = Some(
+                    "This report is larger than the 8 MiB preview limit. Open it in its app."
+                        .into(),
+                );
+            } else {
+                html = text_excerpt.is_some();
+            }
+        }
         Ok(AttachmentPreview {
             uploaded_copy: self.drive_uploaded_copy(id)?.is_some(),
             attachment,
@@ -144,6 +168,33 @@ impl Workspace {
             can_open,
             usage: self.preview_usage(id)?,
             text_excerpt,
+            html,
+        })
+    }
+
+    /// The whole text of a stored HTML report, for the viewer to render in an isolated,
+    /// read-only frame. It reads through the checked snapshot (never a path) and only a
+    /// `.html` or `.htm` file up to `HTML_PREVIEW_BYTES` that is valid UTF-8.
+    pub fn attachment_html(&self, workspace: &str, id: &str) -> Result<String, Error> {
+        let attachment = self.preview_attachment(workspace, id)?;
+        if !is_html_name(&attachment.original_filename) {
+            return Err(Error::Attachment("This file is not an HTML report.".into()));
+        }
+        let (_, file) = open_snapshot(&self.connection, &attachment)
+            .map_err(|failure| Error::Attachment(failure.message))?;
+        if file.metadata()?.len() > HTML_PREVIEW_BYTES {
+            return Err(Error::Attachment(
+                "This report is larger than the 8 MiB preview limit. Open it in its app.".into(),
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.take(HTML_PREVIEW_BYTES).read_to_end(&mut bytes)?;
+        let text = String::from_utf8(bytes).map_err(|_| {
+            Error::Attachment("This report is not UTF-8 text. Open it in its app.".into())
+        })?;
+        Ok(match text.strip_prefix('\u{feff}') {
+            Some(rest) => rest.to_owned(),
+            None => text,
         })
     }
 
@@ -286,6 +337,12 @@ impl Workspace {
             length,
         })
     }
+}
+
+fn is_html_name(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(_, extension)| {
+        extension.eq_ignore_ascii_case("html") || extension.eq_ignore_ascii_case("htm")
+    })
 }
 
 /// Text when the bytes are UTF-8 without NUL or control characters other than

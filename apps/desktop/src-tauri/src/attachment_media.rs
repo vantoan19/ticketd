@@ -221,6 +221,12 @@ mod tests {
             assert_eq!(response.status(), StatusCode::NOT_FOUND);
             assert!(response.body().is_empty());
         }
+        // The viewer renders an HTML report from text over IPC, never through this scheme.
+        let report = workspace
+            .import_attachment_bytes("report", "report.html", b"<p>hi</p>", |_, _| true)
+            .unwrap();
+        let response = respond(&workspace, &request(&report.id, None));
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
     }
     use tauri::http::{Request, StatusCode};
     use ticketd_core::Workspace;

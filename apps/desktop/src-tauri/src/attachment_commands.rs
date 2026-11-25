@@ -79,6 +79,18 @@ pub fn restore_attachment(id: String, request_id: String) -> Result<Attachment, 
     }
 }
 
+/// The whole text of a stored HTML report, for the viewer's isolated frame.
+#[tauri::command]
+pub async fn attachment_html(workspace: String, id: String) -> Result<String, BridgeFailure> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_workspace()
+            .and_then(|w| w.attachment_html(&workspace, &id))
+            .map_err(BridgeFailure::from)
+    })
+    .await
+    .map_err(BridgeFailure::from)?
+}
+
 #[tauri::command]
 pub async fn attachment_preview(
     workspace: String,
