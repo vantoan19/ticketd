@@ -2231,7 +2231,7 @@ async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_li
     assert_eq!(records["item"]["changes"], json!([status]));
     let rows = f.chats.list(ChatListFilter::Active).unwrap();
     assert_eq!(
-        serde_json::to_value(&rows[0]).unwrap()["last_change"],
+        serde_json::to_value(&rows[0]).unwrap()["first_change"],
         status
     );
 

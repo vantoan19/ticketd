@@ -157,3 +157,40 @@ test("quitting stops working Chats and says why in their history", async () => {
   expect(items.at(-1)).toMatchObject({ kind: "marker", reason: "quit" });
   expect(client.quit).toBe(true);
 });
+
+test("an idle row says its latest turn's first record change, not the last", async () => {
+  const records = (id: string, turn: string, changes: ChatChange[]) =>
+    ({ id, at, kind: "records", turn_id: turn, changes }) as TranscriptItem;
+  const moved: ChatChange = {
+    kind: "status",
+    reference: "T-12",
+    title: "Demo",
+    from: "Todo",
+    to: "In review",
+  };
+  const posted: ChatChange = {
+    kind: "update",
+    reference: "T-12",
+    excerpt: "Done",
+  };
+  const next: ChatChange = { kind: "update", reference: "T-13", excerpt: "Hi" };
+  const client = createMockChatClient({
+    chats: [
+      {
+        chat: chatState({ id: "c1", title: "One turn" }),
+        items: [records("r1", "t1", [moved, posted])],
+      },
+      {
+        chat: chatState({ id: "c2", title: "Two turns" }),
+        items: [
+          records("r1", "t1", [moved]),
+          records("r2", "t2", [next, moved]),
+        ],
+      },
+    ],
+  });
+  const rows = await client.listChats("active");
+  const line = (id: string) => rows.find((row) => row.id === id)?.status.word;
+  expect(line("c1")).toBe("Moved T-12 to In review");
+  expect(line("c2")).toBe("Posted an update on T-13");
+});

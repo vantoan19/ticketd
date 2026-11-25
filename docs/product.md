@@ -642,7 +642,7 @@ collect OAuth tokens, proxy model requests, or change billing.
   past 80 characters. A Chat started from a ticket takes the ticket's title instead of
   repeating "Work on T-12:", and the linked chip then shows the reference alone.
   Existing Chats read the same way; nothing stored is rewritten. A row's second line
-  says what the Chat last did (a record it changed, the files it changed, or the first
+  says what the Chat last did (the first record it changed in its last turn, the files it changed, or the first
   words of its reply), and "Working" while it runs.
 - **Folder choice.** New Chat offers locally registered Project checkouts,
   recent folders, a Scratch folder, and the system folder chooser. If a Chat's

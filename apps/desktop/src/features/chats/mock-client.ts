@@ -171,6 +171,19 @@ function settled(chat: ChatState): ChatState {
   };
 }
 
+/** The latest turn's first record change, which says the most about it. */
+function firstChange(items: TranscriptItem[]) {
+  const records = items.filter(
+    (item): item is Extract<TranscriptItem, { kind: "records" }> =>
+      item.kind === "records",
+  );
+  const latest = records.at(-1);
+  const turn = latest?.turn_id
+    ? records.find((item) => item.turn_id === latest.turn_id)
+    : latest;
+  return turn?.changes.at(0);
+}
+
 /**
  * The host's ranked status (spec 21.3), simplified for fixtures: the mock has no
  * turns, so a Failed or finished Chat is unseen until it is opened.
@@ -233,13 +246,7 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     );
   const condition = problem && !problem.past && CONDITION_WORDS[problem.kind];
   if (condition) return make("idle", condition);
-  const change = items
-    .filter(
-      (item): item is Extract<TranscriptItem, { kind: "records" }> =>
-        item.kind === "records",
-    )
-    .at(-1)
-    ?.changes.at(-1);
+  const change = firstChange(items);
   const response = items
     .filter(
       (item): item is Extract<TranscriptItem, { kind: "response" }> =>
@@ -570,7 +577,7 @@ export function createMockChatClient(
             : marker?.reason === "stop_unconfirmed"
               ? "unconfirmed"
               : null,
-      last_change: last("records")?.changes.at(-1) ?? null,
+      first_change: firstChange(items) ?? null,
       preview: last("response")?.text.slice(0, 120) ?? null,
       updated_at: entry.updated_at,
     });

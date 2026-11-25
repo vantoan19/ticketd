@@ -51,7 +51,7 @@ fn facts<'a>(chat: &'a Chat, live: &'a ChatLive, last_turn: Option<&'a ChatTurn>
         failure: None,
         activity: "idle",
         opening: false,
-        last_change: None,
+        first_change: None,
         files_changed: None,
         last_response: Some("All **done**. See `x`."),
     }
@@ -77,7 +77,7 @@ fn a_seen_idle_row_says_its_last_outcome_by_priority() {
     };
     // A record the agent changed comes first, then the files, then the reply.
     let mut all = facts(&chat, &live, Some(&ended));
-    all.last_change = Some(&change);
+    all.first_change = Some(&change);
     all.files_changed = Some(3);
     assert_eq!(seen_words(all), "Moved T-12 to In review");
     let mut files = facts(&chat, &live, Some(&ended));

@@ -80,7 +80,8 @@ pub struct Facts<'a> {
     pub failure: Option<&'a str>,
     pub activity: &'a str,
     pub opening: bool,
-    pub last_change: Option<&'a ChatAgentChange>,
+    /// The first record the agent changed in the last turn.
+    pub first_change: Option<&'a ChatAgentChange>,
     /// How many files the last turn changed.
     pub files_changed: Option<usize>,
     pub last_response: Option<&'a str>,
@@ -240,7 +241,7 @@ pub fn status(facts: &Facts<'_>) -> Status {
     // changed, then the first words of its reply.
     let done = || {
         facts
-            .last_change
+            .first_change
             .map(change_line)
             .or_else(|| facts.files_changed.filter(|n| *n > 0).map(files_line))
             .or_else(|| facts.last_response.and_then(first_words))

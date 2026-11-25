@@ -513,8 +513,8 @@ pub struct Summary {
     /// `problem` is why the last turn stopped, not a condition observed now.
     pub problem_past: bool,
     pub interruption: Option<&'static str>,
-    /// The latest change the agent made in ticketd.
-    pub last_change: Option<ChatAgentChange>,
+    /// The first change the agent made in ticketd in its latest turn.
+    pub first_change: Option<ChatAgentChange>,
     pub preview: Option<String>,
     pub updated_at: String,
     /// The ranked status every Chat surface shows (spec 21.3).
@@ -574,9 +574,9 @@ pub struct Tracker {
     /// Assistant messages that are not complete; they stop streaming when their turn ends.
     open: HashMap<String, ChatMessage>,
     last_response: Option<String>,
-    last_change: Option<ChatAgentChange>,
-    /// The turn `last_change` was made in.
-    last_change_turn: Option<String>,
+    first_change: Option<ChatAgentChange>,
+    /// The turn `first_change` was made in.
+    first_change_turn: Option<String>,
     updated_at: Option<String>,
     /// Reasoning, plan and files records of the latest turn: how they read depends on
     /// whether it still runs.
@@ -654,8 +654,8 @@ impl Tracker {
                     self.open.insert(message.id.clone(), message.clone());
                 }
                 // A change from an earlier turn is not what the Chat last did.
-                if message.turn_id != self.last_change_turn {
-                    self.last_change = None;
+                if message.turn_id != self.first_change_turn {
+                    self.first_change = None;
                 }
                 self.last_response = Some(message.text.clone());
             }
@@ -692,11 +692,14 @@ impl Tracker {
             }
             ChatItem::Tool(tool) => {
                 self.touch(tool.started_at.as_deref());
+                // A turn is worded by its first change, which says the most: it moved
+                // a ticket, then posted an update, and the row says it moved it.
                 if let Some(changes) = agent_changes(tool)
-                    && let Some(change) = changes.last()
+                    && let Some(change) = changes.first()
+                    && self.first_change_turn.as_ref() != Some(&tool.turn_id)
                 {
-                    self.last_change = Some(change.clone());
-                    self.last_change_turn = Some(tool.turn_id.clone());
+                    self.first_change = Some(change.clone());
+                    self.first_change_turn = Some(tool.turn_id.clone());
                 }
                 // Only the latest turn's calls can still be asked about.
                 self.turn_tools
@@ -1985,7 +1988,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
             .and_then(|problem| problem.message.as_deref()),
         activity,
         opening: opening(activity, live.opening).is_some(),
-        last_change: tracker.last_change.as_ref(),
+        first_change: tracker.first_change.as_ref(),
         files_changed: tracker.files_changed(),
         last_response: tracker.last_response.as_deref(),
     });
@@ -2028,7 +2031,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         problem_past: problem.as_ref().is_some_and(|problem| problem.past),
         problem: problem.map(|problem| problem.kind),
         interruption,
-        last_change: tracker.last_change.clone(),
+        first_change: tracker.first_change.clone(),
         preview: tracker
             .last_response
             .as_ref()
@@ -3330,6 +3333,45 @@ mod tests {
         assert_eq!(stored.chars().count(), 79);
         let line = format!("{stored} and the rest of the line");
         assert_eq!(shown(&stored, &[], Some(&line)), format!("{stored}…"));
+    }
+
+    #[test]
+    fn a_turn_is_worded_by_the_first_record_the_agent_changed() {
+        let changes = |id: &str, turn: &str, input: &str| {
+            ChatItem::Tool(ChatTool {
+                id: id.to_owned(),
+                turn_id: turn.to_owned(),
+                ..tool(
+                    ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
+                    input,
+                    ChatToolState::Completed,
+                    None,
+                )
+            })
+        };
+        let moved = r#"{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"In review"}"#;
+        let posted = r#"{"kind":"update","reference":"T-12","excerpt":"Done"}"#;
+        let later = r#"{"kind":"update","reference":"T-13","excerpt":"Next"}"#;
+        let wording = |tracker: &Tracker| {
+            tracker
+                .first_change
+                .as_ref()
+                .map(ticketd_chat_host::attention::change_line)
+        };
+        // Moved, then posted an update: in one call, and across two.
+        let one_call = Tracker::from_items(&[changes("a", "t1", &format!("[{moved},{posted}]"))]);
+        assert_eq!(wording(&one_call).as_deref(), Some("Moved T-12 to In review"));
+        let two_calls = Tracker::from_items(&[
+            changes("a", "t1", &format!("[{moved}]")),
+            changes("b", "t1", &format!("[{posted}]")),
+        ]);
+        assert_eq!(wording(&two_calls).as_deref(), Some("Moved T-12 to In review"));
+        // The next turn is worded by its own first change.
+        let next = Tracker::from_items(&[
+            changes("a", "t1", &format!("[{moved}]")),
+            changes("b", "t2", &format!("[{later}]")),
+        ]);
+        assert_eq!(wording(&next).as_deref(), Some("Posted an update on T-13"));
     }
 
     #[test]

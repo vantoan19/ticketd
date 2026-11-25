@@ -162,7 +162,8 @@ export const chatSummarySchema = z.object({
   /** `problem` is why the last turn stopped, not a condition observed now. */
   problem_past: z.boolean().nullish(),
   interruption: interruptionSchema.nullish(),
-  last_change: recordChangeSchema.nullish(),
+  /** The first record the agent changed in its latest turn. */
+  first_change: recordChangeSchema.nullish(),
   /** The start of the last response. */
   preview: z.string().nullish(),
   updated_at: z.string(),
