@@ -82,7 +82,7 @@ async function open(chat: MockChat) {
 
 test("reasoning reads how long it took and opens its text; one without text leaves", async () => {
   await open({
-    chat: chatState({ id: "c1", title: "Limiter" }),
+    chat: chatState({ id: "reasoning-fold", title: "Limiter" }),
     items: [
       you,
       {
@@ -118,6 +118,7 @@ test("reasoning reads how long it took and opens its text; one without text leav
   });
   // Reasoning folds with the turn's steps.
   fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+  fireEvent.click(document.querySelector<HTMLElement>(".chat-stretch-row")!);
   const row = screen.getByRole("button", {
     name: "Show reasoning, thought for 12 seconds",
   });
@@ -127,7 +128,7 @@ test("reasoning reads how long it took and opens its text; one without text leav
   expect(screen.getByText("no").tagName).toBe("STRONG");
   // Cut off, it says so; finished with nothing shown, it is gone.
   expect(screen.getByText("Not finished")).toBeTruthy();
-  expect(screen.getAllByText(/^Thought/)).toHaveLength(2);
+  expect(screen.getAllByText(/^Thought for/)).toHaveLength(2);
 });
 
 test("a running plan lives in the dock; an unfinished one becomes a card that saves as a checklist", async () => {
@@ -160,7 +161,7 @@ test("a running plan lives in the dock; an unfinished one becomes a card that sa
 
 test("a finished plan is one row in its turn", async () => {
   await open({
-    chat: chatState({ id: "c1", title: "Limiter" }),
+    chat: chatState({ id: "plan-fold", title: "Limiter" }),
     items: [
       you,
       {
@@ -171,6 +172,7 @@ test("a finished plan is one row in its turn", async () => {
     ],
   });
   fireEvent.click(screen.getByRole("button", { name: /^Worked/ }));
+  fireEvent.click(document.querySelector<HTMLElement>(".chat-stretch-row")!);
   expect(screen.getByText("Plan · 2 of 2 done")).toBeTruthy();
   expect(screen.queryByRole("region", { name: /^Plan/ })).toBeNull();
 });

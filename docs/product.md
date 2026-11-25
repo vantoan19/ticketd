@@ -675,8 +675,8 @@ collect OAuth tokens, proxy model requests, or change billing.
   the newest line moves. What the person opens or closes stays that way for the
   session. When the turn ends its work line folds the notes and stretches together;
   opened, it shows the notes and stretch rows, and a stretch opens to its steps. A
-  harness that writes no notes has one stretch per turn, which opens straight to
-  its steps.
+  harness that writes no notes has one stretch per turn, shown as its one stretch
+  row, which opens to its steps.
 - **Steps.** Each tool call reads as one line in the words of what it did. When Claude
   Code describes a command, the row reads that description and opens to the exact
   command and its output; any other command reads as its first line, muted and cut to

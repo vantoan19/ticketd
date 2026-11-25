@@ -1447,9 +1447,13 @@ test("a turn still running offers no reply actions", async () => {
   noButton("Save as Document");
 });
 
+/** Opens the turn's one stretch row, which a turn with no progress notes still has. */
+const openStretch = () =>
+  fireEvent.click(document.querySelector<HTMLElement>(".chat-stretch-row")!);
+
 test("a finished turn folds under one row, its final response outside, and opens to each step's output", async () => {
   await open(
-    one({ id: "c1", title: "Limiter" }, [
+    one({ id: "finished-fold", title: "Limiter" }, [
       youSaid,
       turnTiming("completed", "2026-11-10T10:02:13Z"),
       inTurn({
@@ -1479,6 +1483,7 @@ test("a finished turn folds under one row, its final response outside, and opens
     name: "Worked for 2m 13s · 1 failed",
   });
   expect(row.getAttribute("aria-controls")).toBe(body.id);
+  openStretch();
   // A row with nothing to open is not a control; its file name is.
   expect(
     within(body)
@@ -1506,7 +1511,7 @@ test("a finished turn folds under one row, its final response outside, and opens
 
 test("a stopped turn folds too, with its stop marker below the response", async () => {
   await open(
-    one({ id: "c1", title: "Migrate" }, [
+    one({ id: "stopped-fold", title: "Migrate" }, [
       youSaid,
       turnTiming("stopped", "2026-11-10T10:00:40Z"),
       inTurn({
@@ -1520,6 +1525,7 @@ test("a stopped turn folds too, with its stop marker below the response", async 
     "Migrate",
   );
   fireEvent.click(button("Stopped after 40s · 1 not finished"));
+  openStretch();
   expect(button("Run npm run test:all, Not finished")).toBeTruthy();
   expect(
     screen.getByText("You stopped this turn. Edits already made are kept."),
@@ -1675,7 +1681,7 @@ test("an answered approval folds into its step row, which says the decision", as
 
 test("what the agent changed in ticketd is a step row, verb first", async () => {
   await open(
-    one({ id: "c1", title: "Limiter" }, [
+    one({ id: "records-step", title: "Limiter" }, [
       youSaid,
       turnTiming("completed", "2026-11-10T10:00:30Z"),
       inTurn({
@@ -1696,6 +1702,7 @@ test("what the agent changed in ticketd is a step row, verb first", async () => 
     ]),
   );
   fireEvent.click(button("Worked for 30s"));
+  openStretch();
   const body = screen.getByRole("group", { name: "Worked for 30s" });
   expect(body.textContent).toContain("Moved T-12 to In review");
   expect(body.textContent).toContain("Posted an update on T-12");
@@ -1811,6 +1818,7 @@ test("a finished turn's record changes are one receipt row under it, whose more 
     "Moved T-12 to In review · Posted an update on T-12",
   );
   fireEvent.click(button("1 more"));
+  openStretch();
   expect(
     screen.getByRole("group", { name: "Worked for 30s" }).textContent,
   ).toContain("Created the Document Reset email copy");
@@ -3343,7 +3351,7 @@ test("a finished turn opens to its notes and stretch rows, and a stretch opens t
   ).toBeTruthy();
 });
 
-test("a turn with no progress notes opens straight to its steps, with no stretch row between", async () => {
+test("a turn with no progress notes shows its one stretch as a row when opened", async () => {
   await open(
     one({ id: "stretch-single", title: "Limiter" }, [
       youSaid,
@@ -3354,7 +3362,9 @@ test("a turn with no progress notes opens straight to its steps, with no stretch
     ]),
   );
   fireEvent.click(button("Worked for 30s"));
-  expect(stretchRows()).toEqual([]);
+  expect(stretchRows()).toEqual(["Read 1 file and ran 1 command"]);
+  expect(screen.queryByRole("button", { name: "Ran npm test" })).toBeNull();
+  fireEvent.click(button("Read 1 file and ran 1 command"));
   expect(button("Ran npm test")).toBeTruthy();
 });
 

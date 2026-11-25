@@ -1074,11 +1074,6 @@ const TurnView = memo(function TurnView({
       live={rowLive}
     />
   );
-  // A turn with no notes is one stretch, and its work line already says what it
-  // holds: it opens straight to its steps.
-  const single =
-    turn.blocks.filter((block) => block.kind === "stretch").length === 1 &&
-    !turn.blocks.some((block) => block.kind === "progress");
   const blocks = turn.blocks.map((block) =>
     block.kind === "stretch" ? (
       <StretchView
@@ -1089,7 +1084,7 @@ const TurnView = memo(function TurnView({
         readOnly={readOnly}
         actions={actions}
         live={rowLive}
-        open={single || turn.unconfirmed}
+        open={turn.unconfirmed}
       />
     ) : (
       row(block)
