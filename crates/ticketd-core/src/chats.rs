@@ -15,6 +15,8 @@ use uuid::Uuid;
 
 use crate::{Error, Workspace};
 
+pub(crate) mod attachments;
+pub use attachments::{ChatAttachment, ChatAttachmentContent};
 mod receipt;
 pub use receipt::ChatTurnReceipt;
 #[cfg(test)]
@@ -393,6 +395,8 @@ pub struct ChatMessage {
     pub position: i64,
     pub role: ChatRole,
     pub text: String,
+    #[serde(default)]
+    pub attachments: Vec<ChatAttachment>,
     /// False for assistant text still streaming or cut short by a crash.
     pub complete: bool,
     pub turn_id: Option<String>,
@@ -923,6 +927,7 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
                     position: row.get(1)?,
                     role: named(row, 2)?,
                     text: row.get(3)?,
+                    attachments: Vec::new(),
                     complete: row.get(4)?,
                     turn_id: row.get(5)?,
                     created_at: row.get(6)?,
@@ -935,6 +940,9 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
     let Some(mut message) = message else {
         return Ok(None);
     };
+    if message.role == ChatRole::User {
+        message.attachments = attachments::list(connection, id)?;
+    }
     let mut statement = connection.prepare(
         "SELECT id, intent, delivery, turn_id, detail, recorded_at, decision FROM chat_submission_attempts WHERE message_id = ?1 ORDER BY rowid",
     )?;
@@ -2079,11 +2087,31 @@ impl Workspace {
         chat_id: &str,
         text: &str,
     ) -> Result<ChatMessage, Error> {
-        if text.trim().is_empty() {
+        self.save_chat_input_with_attachments(command_id, chat_id, text, &[])
+    }
+
+    pub fn save_chat_input_with_attachments(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+    ) -> Result<ChatMessage, Error> {
+        if text.trim().is_empty() && files.is_empty() {
             return Err(invalid("Chat input must not be empty"));
         }
+        if !files.is_empty() {
+            let limit = self.attachment_upload_limit()?;
+            for file in files {
+                file.ensure_fits(limit)?;
+            }
+        }
         self.chat_write(|connection| {
-            let request = json!({"operation": "save_chat_input", "chat_id": chat_id, "text": text});
+            let mut request = json!({"operation": "save_chat_input", "chat_id": chat_id, "text": text});
+            if command_id.is_some() && !files.is_empty() {
+                request["attachments"] =
+                    Value::Array(files.iter().map(ChatAttachmentContent::identity).collect());
+            }
             let id = once(connection, command_id, request, || {
                 if read_chat(connection, chat_id)?.trashed {
                     return Err(Error::ChatTrashed(chat_id.to_owned()));
@@ -2094,6 +2122,9 @@ impl Workspace {
                     "INSERT INTO chat_messages (id, chat_id, position, role, text, complete) VALUES (?1, ?2, ?3, 'user', ?4, 1)",
                     params![id, chat_id, position, text],
                 )?;
+                if !files.is_empty() {
+                    attachments::save(connection, &id, files)?;
+                }
                 trim(connection, chat_id)?;
                 Ok(id)
             })?;

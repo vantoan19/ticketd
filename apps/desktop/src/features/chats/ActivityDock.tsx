@@ -350,7 +350,12 @@ function QueueCard({
       <Rise className="flex w-full items-center min-h-8">
         <span className="chat-queue-main">
           <span id={textId} className="chat-queue-text">
-            {queued.text}
+            {[
+              queued.text,
+              ...(queued.attachments?.map((file) => file.name) ?? []),
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </span>
           {queued.refused_steer && (
             <span className="chat-queue-note">
@@ -375,13 +380,15 @@ function QueueCard({
                 <CornerUpRight aria-hidden />
               </IconButton>
             )}
-            <IconButton
-              label="Edit in the message box"
-              aria-describedby={textId}
-              onClick={onEdit}
-            >
-              <Pencil aria-hidden />
-            </IconButton>
+            {!queued.attachments?.length && (
+              <IconButton
+                label="Edit in the message box"
+                aria-describedby={textId}
+                onClick={onEdit}
+              >
+                <Pencil aria-hidden />
+              </IconButton>
+            )}
             <IconButton
               label="Remove from queue"
               aria-describedby={textId}

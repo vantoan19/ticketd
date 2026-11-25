@@ -983,8 +983,9 @@ export function composerControls(
   chat: ChatState,
   text: string,
   answering = false,
+  hasAttachments = false,
 ): ComposerControls {
-  const typed = text.trim() !== "";
+  const typed = text.trim() !== "" || hasAttachments;
   const blocked = blocksSend(chat.problem);
   if (!isLive(chat)) return { send: "send", enabled: typed && !blocked };
   // Stopping: Send waits for the turn to end; queueing stays possible.

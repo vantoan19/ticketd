@@ -1,10 +1,96 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import type { LinkedRecord } from "@/features/chats/client";
 import { Composer } from "@/features/chats/Composer";
+import {
+  ComposerAttachments,
+  captureClipboardImage,
+} from "@/features/chats/composer-attachments";
 
 afterEach(cleanup);
+
+test("pastes a removable screenshot and sends the image without text", async () => {
+  const image = new File(["clipboard bytes"], "image.png", {
+    type: "image/png",
+  });
+  const attachment = {
+    name: "image.png",
+    dataUrl: "data:image/png;base64,Y2xpcGJvYXJkIGJ5dGVz",
+  };
+  const capture = vi.fn(async () => attachment);
+  const onSend = vi.fn(async () => {});
+  render(
+    <Composer
+      placeholder="Message"
+      controls={(text, hasAttachments) => ({
+        send: "send",
+        enabled: text.trim() !== "" || hasAttachments,
+      })}
+      onSend={onSend}
+      attachments={new ComposerAttachments(capture)}
+    />,
+  );
+  const box = screen.getByRole("textbox", { name: "Message" });
+  const paste = () =>
+    fireEvent.paste(box, { clipboardData: { files: [image] } });
+  expect(paste()).toBe(false);
+  await screen.findByRole("img", { name: "image.png" });
+  fireEvent.click(screen.getByRole("button", { name: "Remove image.png" }));
+  expect(screen.queryByRole("img", { name: "image.png" })).toBeNull();
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Send" }).disabled,
+  ).toBe(true);
+
+  paste();
+  await waitFor(() =>
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name: "Send" }).disabled,
+    ).toBe(false),
+  );
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(capture).toHaveBeenCalledWith(image);
+  expect(onSend).toHaveBeenCalledWith("", [], [attachment]);
+});
+
+test("an oversized pasted image blocks sending until it is removed", async () => {
+  const onSend = vi.fn(async () => {});
+  const draft = new ComposerAttachments((file) =>
+    captureClipboardImage(file, 10),
+  );
+  render(
+    <Composer
+      placeholder="Message"
+      controls={(text, hasAttachments) => ({
+        send: "send",
+        enabled: text.trim() !== "" || hasAttachments,
+      })}
+      initialText="Keep this sentence"
+      onSend={onSend}
+      attachments={draft}
+    />,
+  );
+  const box = screen.getByRole("textbox", { name: "Message" });
+  const image = new File(["clipboard bytes"], "image.png", {
+    type: "image/png",
+  });
+  fireEvent.paste(box, { clipboardData: { files: [image] } });
+  expect((await screen.findByRole("alert")).textContent).toMatch(
+    /upload limit/i,
+  );
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onSend).not.toHaveBeenCalled();
+  expect(box).toHaveProperty("value", "Keep this sentence");
+  fireEvent.click(screen.getByRole("button", { name: "Remove image.png" }));
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onSend).toHaveBeenCalledWith("Keep this sentence", []);
+});
 
 const ticket: LinkedRecord = {
   kind: "ticket",

@@ -309,7 +309,7 @@ fn text_of(bytes: &[u8], truncated: bool) -> Option<String> {
 }
 
 // Only passive media containers with header evidence. This is not a codec guarantee.
-fn classify(header: &[u8]) -> Option<&'static str> {
+pub(crate) fn classify(header: &[u8]) -> Option<&'static str> {
     if header.starts_with(b"\x89PNG\r\n\x1a\n") && header.get(12..16) == Some(b"IHDR") {
         return Some("image/png");
     }

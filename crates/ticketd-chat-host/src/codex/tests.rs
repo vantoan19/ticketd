@@ -308,6 +308,36 @@ fn start_turn(id: &str, text: &str) -> Submission {
         generation: GENERATION,
         kind: SubmissionKind::StartTurn,
         text: text.to_owned(),
+        attachments: Vec::new(),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_screenshot_is_native_visual_input_with_or_without_text() {
+    let url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+    let image =
+        ticketd_core::ChatAttachmentContent::from_image_data_url("Screenshot.png", url).unwrap();
+    for (text, expected) in [
+        ("", json!([{"type": "image", "url": url}])),
+        (
+            "Which color?",
+            json!([
+                {"type": "text", "text": "Which color?", "text_elements": []},
+                {"type": "image", "url": url},
+            ]),
+        ),
+    ] {
+        let (mut peer, runtime, _events) = open().await;
+        let submission = Submission {
+            attachments: vec![image.clone()],
+            ..start_turn("sub-1", text)
+        };
+        let (outcome, ()) = tokio::join!(runtime.submit(submission), async {
+            let written = peer.written().await;
+            assert_eq!(written["method"], "turn/start");
+            assert_eq!(written["params"]["input"], expected);
+        });
+        assert_eq!(outcome, DispatchOutcome::Written);
     }
 }
 

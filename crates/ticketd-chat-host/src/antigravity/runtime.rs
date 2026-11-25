@@ -925,6 +925,9 @@ pub(super) async fn open(
 #[async_trait]
 impl HarnessRuntime for AcpRuntime {
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        if !submission.attachments.is_empty() {
+            return DispatchOutcome::NotSent(Refusal::Unsupported);
+        }
         let rpc = &self.connection;
         if let Err(refusal) = rpc.check_generation(submission.generation) {
             return DispatchOutcome::NotSent(refusal);

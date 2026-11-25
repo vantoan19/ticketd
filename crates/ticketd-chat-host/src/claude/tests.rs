@@ -84,6 +84,7 @@ fn start_turn(id: &str, text: &str) -> Submission {
         generation: GENERATION,
         kind: SubmissionKind::StartTurn,
         text: text.to_owned(),
+        attachments: Vec::new(),
     }
 }
 

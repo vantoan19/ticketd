@@ -64,6 +64,7 @@ import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
 import {
   arrivals,
+  attachmentsOf,
   drafts,
   draftTokens,
   tokensOf,
@@ -397,6 +398,7 @@ function Conversation({
           plan: true,
         }),
       openFile: (path) => client.openFile(id, path),
+      exportAttachment: (file) => client.exportAttachment(id, file),
     }),
     [client, id],
   );
@@ -836,6 +838,7 @@ function Conversation({
                 placeholder={composerPlaceholder(chat, answering)}
                 initialText={drafts.get(id) ?? ""}
                 initialTokens={tokensOf(id)}
+                attachments={attachmentsOf(client, id)}
                 onText={(text, tokens) => {
                   drafts.set(id, text);
                   draftTokens.set(id, { text, tokens });
@@ -845,31 +848,50 @@ function Conversation({
                 above={
                   <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
                 }
-                controls={(text) => composerControls(chat, text, answering)}
-                onSend={(text, links) =>
-                  run(
+                controls={(text, hasAttachments) => {
+                  if (hasAttachments && (isLive(chat) || chat.stopping))
+                    return {
+                      send: "send",
+                      enabled: false,
+                      effect:
+                        "Wait for this turn to finish before sending a screenshot.",
+                    };
+                  return composerControls(
+                    chat,
+                    text,
+                    answering,
+                    hasAttachments,
+                  );
+                }}
+                onSend={(text, links, images) => {
+                  const answerQuestion =
+                    answering && question && !images?.length;
+                  const outgoingText = quotedMessage(quotes, text);
+                  const outgoingLinks = [...links, ...quoteLinks(quotes)];
+                  return run(
                     sent(
-                      answering && question
+                      answerQuestion
                         ? client.answer(id, question.id, { text })
-                        : client
-                            .send(id, quotedMessage(quotes, text), [
-                              ...links,
-                              ...quoteLinks(quotes),
-                            ])
-                            .then(() => clearQuotes(id)),
+                        : (images
+                            ? client.send(
+                                id,
+                                outgoingText,
+                                outgoingLinks,
+                                images,
+                              )
+                            : client.send(id, outgoingText, outgoingLinks)
+                          ).then(() => clearQuotes(id)),
                     ),
-                    answering && question
-                      ? "send your answer"
-                      : "send the message",
-                    answering
+                    answerQuestion ? "send your answer" : "send the message",
+                    answerQuestion
                       ? undefined
                       : () => {
                           messageBox.current?.focus();
                           retrySend.current?.();
                         },
                     true,
-                  )
-                }
+                  );
+                }}
                 onQueue={(text, links) =>
                   run(
                     sent(

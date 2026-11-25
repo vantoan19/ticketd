@@ -1,5 +1,11 @@
-import { useImperativeHandle, useState, type ReactNode, type Ref } from "react";
-import { Square } from "lucide-react";
+import {
+  useImperativeHandle,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+  type Ref,
+} from "react";
+import { Square, X } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import type { LinkRef } from "@/features/chats/client";
 import { linksOf, type Token } from "@/features/chats/composer-mentions";
@@ -9,6 +15,17 @@ import {
 } from "@/features/chats/ComposerField";
 import type { ComposerControls } from "@/features/chats/model";
 import { SendButton } from "@/features/chats/SendButton";
+import {
+  NO_ATTACHMENTS,
+  type ChatImage,
+  type ComposerAttachments,
+} from "@/features/chats/composer-attachments";
+
+type Submit = (
+  text: string,
+  links: LinkRef[],
+  images?: ChatImage[],
+) => Promise<void>;
 
 /**
  * The message box and its control row. The send button's word comes from
@@ -36,6 +53,7 @@ export function Composer({
   autoFocus = false,
   framed = true,
   retryRef,
+  attachments = NO_ATTACHMENTS,
 }: {
   /**
    * Draws its own ring. In a Chat the composer is the last part of the tray,
@@ -46,7 +64,7 @@ export function Composer({
   retryRef?: Ref<() => void>;
   placeholder: string;
   /** Computed from the text the composer reports through `onText`. */
-  controls: (text: string) => ComposerControls;
+  controls: (text: string, hasAttachments: boolean) => ComposerControls;
   initialText?: string;
   initialTokens?: Token[];
   onText?: (text: string, tokens: Token[]) => void;
@@ -58,8 +76,9 @@ export function Composer({
    * Send, steer or answer. Resolve to clear the box; reject to keep the text.
    * `links` are the records mentioned with `#`, linked as the message is sent.
    */
-  onSend: (text: string, links: LinkRef[]) => Promise<void>;
-  onQueue?: (text: string, links: LinkRef[]) => Promise<void>;
+  onSend: Submit;
+  onQueue?: Submit;
+  attachments?: ComposerAttachments;
   /** Pass only while a turn is in progress. */
   onStop?: () => void;
   /** Stop was asked for and has not finished: Stop waits. */
@@ -84,16 +103,31 @@ export function Composer({
     setTokens(nextTokens);
     onText?.(next, nextTokens);
   };
-  const state = controls(text);
-  const submit = (
-    action: ((text: string, links: LinkRef[]) => Promise<void>) | undefined,
-  ) => {
+  const items = useSyncExternalStore(
+    attachments.subscribe,
+    attachments.snapshot,
+  );
+  const images = items.flatMap((item) =>
+    item.state === "ready" ? [item.image] : [],
+  );
+  const waiting = items.length !== images.length;
+  const available = controls(text, items.length > 0);
+  const state = waiting
+    ? { ...available, enabled: false, queues: false }
+    : available;
+  const submit = (action: Submit | undefined) => {
     const message = text.trim();
-    if (!action || !message || busy) return;
+    if (!action || (!message && !images.length) || waiting || busy) return;
     setBusy(true);
-    action(message, linksOf(tokens)).then(
+    const links = linksOf(tokens);
+    const sent = images.length
+      ? action(message, links, images)
+      : action(message, links);
+    sent.then(
       () => {
         setText("");
+        if (items.length)
+          attachments.remove(new Set(items.map((item) => item.id)));
         setFailedAction(null);
         setBusy(false);
       },
@@ -124,8 +158,61 @@ export function Composer({
         event.preventDefault();
         if (state.enabled) submit(primary);
       }}
+      onPaste={(event) => {
+        if (attachments === NO_ATTACHMENTS) return;
+        const image =
+          Array.from(event.clipboardData.files).find((file) =>
+            file.type.startsWith("image/"),
+          ) ??
+          Array.from(event.clipboardData.items ?? [])
+            .find(
+              (item) => item.kind === "file" && item.type.startsWith("image/"),
+            )
+            ?.getAsFile();
+        if (!image) return;
+        event.preventDefault();
+        void attachments.paste(image);
+      }}
     >
       {above}
+      {items.length > 0 && (
+        <ul
+          className="flex flex-wrap gap-2 px-3 pt-2"
+          aria-label="Message attachments"
+        >
+          {items.map((item) => (
+            <li
+              key={item.id}
+              className="flex min-w-0 items-center gap-2 rounded-md border px-2 py-1 text-xs"
+            >
+              {item.state === "ready" && (
+                <img
+                  className="h-12 w-16 rounded-sm object-contain"
+                  src={item.image.dataUrl}
+                  alt={item.image.name}
+                />
+              )}
+              <span className="truncate">{item.name}</span>
+              {item.state === "capturing" && (
+                <span role="status">Capturing…</span>
+              )}
+              {item.state === "failed" && (
+                <span role="alert">{item.error}</span>
+              )}
+              <IconButton
+                type="button"
+                variant="ghost"
+                size="icon-compact"
+                label={`Remove ${item.name}`}
+                disabled={busy}
+                onClick={() => attachments.remove(new Set([item.id]))}
+              >
+                <X aria-hidden />
+              </IconButton>
+            </li>
+          ))}
+        </ul>
+      )}
       <ComposerField
         inputRef={inputRef}
         placeholder={placeholder}

@@ -504,6 +504,19 @@ impl Reports {
         }
     }
 
+    pub fn supports_image_input(&self) -> Option<bool> {
+        let model = self.overrides.model.as_deref().or(self.model.as_deref())?;
+        let modalities = self
+            .model_entry(model)?
+            .get("inputModalities")?
+            .as_array()?;
+        Some(
+            modalities
+                .iter()
+                .any(|modality| modality.as_str() == Some("image")),
+        )
+    }
+
     pub fn settings(&self) -> EventKind {
         let model = self.overrides.model.clone().or(self.model.clone());
         let model_setting = Setting {

@@ -204,6 +204,7 @@ pub struct Submission {
     pub generation: RuntimeGeneration,
     pub kind: SubmissionKind,
     pub text: String,
+    pub attachments: Vec<ticketd_core::ChatAttachmentContent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,6 +282,8 @@ pub enum Refusal {
     UnknownRequest,
     /// The effective capabilities do not include this operation.
     Unsupported,
+    /// The selected model explicitly excludes image input.
+    ImageInputUnsupported,
     /// The runtime was closed, replaced or lost before the write.
     RuntimeClosed,
 }
@@ -294,6 +297,7 @@ impl Refusal {
             Self::StartUnconfirmed => "the harness has not confirmed the previous message",
             Self::UnknownRequest => "the request was no longer open",
             Self::Unsupported => "the harness can't do that here",
+            Self::ImageInputUnsupported => "the selected Codex model does not accept images",
             Self::RuntimeClosed => "the harness session had closed",
         }
     }
@@ -984,6 +988,11 @@ pub struct OpenedRuntime {
 /// concurrently and must not block the adapter's protocol reader.
 #[async_trait]
 pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
+    /// Whether the selected model accepts image input, if the harness reported it.
+    fn supports_image_input(&self) -> Option<bool> {
+        None
+    }
+
     /// Hands input to the harness after rechecking generation and expected turn
     /// immediately before the write.
     async fn submit(&self, submission: Submission) -> DispatchOutcome;

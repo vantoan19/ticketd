@@ -15,9 +15,10 @@ use ticketd_chat_host::{
 };
 use ticketd_core::harnesses::{ResumePolicy, descriptor};
 use ticketd_core::{
-    Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
-    ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
-    ChatSuggestion, ChatTool, ChatToolState, ChatTurn, ChatTurnState, SuggestedTicket,
+    Chat, ChatAgentChange, ChatAttachment, ChatDelivery, ChatInputStanding, ChatInteraction,
+    ChatInteractionKind, ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin,
+    ChatSubmissionIntent, ChatSuggestion, ChatTool, ChatToolState, ChatTurn, ChatTurnState,
+    SuggestedTicket,
 };
 
 use crate::chat_reports::{self, ContextView, FileView, PlanStepView, Report, SettingsView};
@@ -244,6 +245,8 @@ pub enum Item {
         id: String,
         at: String,
         text: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<ChatAttachment>,
         delivery: &'static str,
         /// The turn that took this message, once one did.
         turn_id: Option<String>,
@@ -440,6 +443,8 @@ pub struct Steering {
 pub struct Queued {
     pub id: String,
     pub text: String,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<ChatAttachment>,
     /// It was sent to steer the running turn and the harness did not take it: why, as
     /// the host recorded it. The card says "Couldn't steer; queued".
     pub refused_steer: Option<String>,
@@ -705,6 +710,7 @@ impl Tracker {
             position: 0,
             role: ChatRole::Assistant,
             text: String::new(),
+            attachments: Vec::new(),
             complete: false,
             turn_id: Some(turn_id.to_owned()),
             queued: false,
@@ -1308,6 +1314,7 @@ pub fn item(
             id: message.id.clone(),
             at: message.created_at.clone(),
             text: message.text.clone(),
+            attachments: message.attachments.clone(),
             delivery: delivery(message, live)?,
             turn_id: message
                 .attempts

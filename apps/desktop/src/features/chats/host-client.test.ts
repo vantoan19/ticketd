@@ -56,6 +56,7 @@ function stubBridge(replies: Record<string, unknown> = {}) {
     },
     channel: (onMessage) => channels.push(onMessage),
     pickFolder: async () => null,
+    saveFile: async () => null,
     stored: {
       get: () => stored,
       set: (value) => {

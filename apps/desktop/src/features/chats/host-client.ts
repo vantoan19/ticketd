@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 import {
   ChatError,
@@ -24,6 +24,7 @@ import {
 } from "@/features/chats/client";
 import { loadPreferences, setPreference } from "@/lib/preferences";
 import { typedReference } from "@/features/tickets/ticket-references";
+import { captureClipboardImage } from "@/features/chats/composer-attachments";
 
 /** The fields of `show_ticket`'s reply a linked ticket needs. */
 const exactTicketSchema = z.object({
@@ -66,6 +67,7 @@ export type HostBridge = {
   /** A value to pass as a command argument; the backend sends messages to it. */
   channel(onMessage: (message: unknown) => void): unknown;
   pickFolder(): Promise<string | null>;
+  saveFile(name: string): Promise<string | null>;
   /** The person's Experimental choice, kept on this computer. */
   stored: { get(): boolean; set(enabled: boolean): boolean };
 };
@@ -84,6 +86,8 @@ export function tauriBridge(): HostBridge {
       const picked = await open({ directory: true, multiple: false });
       return typeof picked === "string" ? picked : null;
     },
+    saveFile: (name) =>
+      save({ title: "Save Chat attachment", defaultPath: name }),
     stored: {
       get: () => loadPreferences().chat,
       set: (enabled) => setPreference("chat", enabled),
@@ -294,8 +298,31 @@ export function createHostChatClient(
         close(feed);
       };
     },
-    send: (id, text, links = []) =>
-      run("chat_send", { chatId: id, text, queue: false, links }),
+    send: (id, text, links = [], images) =>
+      run("chat_send", {
+        chatId: id,
+        text,
+        queue: false,
+        links,
+        ...(images && { images }),
+      }),
+    async captureImage(file) {
+      const limit = z
+        .number()
+        .int()
+        .positive()
+        .parse(await bridge.invoke("attachment_upload_limit"));
+      return captureClipboardImage(file, limit);
+    },
+    async exportAttachment(id, file) {
+      const destination = await bridge.saveFile(file.name);
+      if (destination)
+        await run("chat_export_attachment", {
+          chatId: id,
+          id: file.id,
+          destination,
+        });
+    },
     queue: (id, text, links = []) =>
       run("chat_send", { chatId: id, text, queue: true, links }),
     linkedTo: async (link) =>

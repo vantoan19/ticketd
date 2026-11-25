@@ -1,4 +1,5 @@
 import { renderedLines } from "@/components/ui/rendered-lines";
+import { failureText } from "@/lib/api/describe-failure";
 import {
   Fragment,
   createContext,
@@ -19,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Download,
   Eye,
   FilePlus2,
   FileText,
@@ -45,6 +47,7 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   useChatClient,
+  type ChatAttachment,
   type ChatState,
   type RecordChange,
   type Step,
@@ -105,6 +108,7 @@ export type TranscriptActions = {
   savePlan: (plan: ItemOf<"plan">) => void;
   /** Opens a file the turn changed; rejects with the reason it could not. */
   openFile: (path: string) => Promise<void>;
+  exportAttachment: (file: ChatAttachment) => Promise<void>;
 };
 
 const DELIVERY_CAPTION = {
@@ -194,7 +198,13 @@ function SentText({ text }: { text: string }) {
   );
 }
 
-function UserMessage({ item }: { item: ItemOf<"user"> }) {
+function UserMessage({
+  item,
+  exportAttachment,
+}: {
+  item: ItemOf<"user">;
+  exportAttachment: TranscriptActions["exportAttachment"];
+}) {
   const opening = useContext(OpeningContext);
   const caption =
     opening && item.delivery === "sending"
@@ -203,6 +213,7 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
+  const [saveError, setSaveError] = useState("");
   // Measured again whenever the message's width changes: a pane narrowed after
   // the message was shown clamps it, and then it needs Show more. Decided by
   // rendered lines, not pixels: a mention chip overflows its line by 2px and
@@ -224,12 +235,43 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
         {item.images && item.images.length > 0 && (
           <ImageTiles images={item.images} />
         )}
-        <div className="chat-you">
-          <div ref={text} data-clamped={more ? undefined : ""}>
-            <span className="sr-only">You: </span>
-            <SentText text={item.text} />
+        {item.text && (
+          <div className="chat-you">
+            <div ref={text} data-clamped={more ? undefined : ""}>
+              <span className="sr-only">You: </span>
+              <SentText text={item.text} />
+            </div>
           </div>
-        </div>
+        )}
+        {!!item.attachments?.length && (
+          <ul
+            className="flex max-w-full flex-wrap justify-end gap-1"
+            aria-label="Sent attachments"
+          >
+            {item.attachments.map((file) => (
+              <li key={file.id}>
+                <Button
+                  variant="secondary"
+                  size="xs"
+                  aria-label={`Save ${file.name}`}
+                  onClick={() => {
+                    setSaveError("");
+                    void exportAttachment(file).catch((error: unknown) =>
+                      setSaveError(failureText(error, "save the attachment")),
+                    );
+                  }}
+                >
+                  <Download aria-hidden /> {file.name}
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {saveError && (
+          <p role="alert" className="chat-caption">
+            {saveError}
+          </p>
+        )}
         {long && (
           <Button
             variant="ghost"
@@ -245,7 +287,7 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
         <div className="chat-you-actions">
           {time && <span className="chat-fine">{time}</span>}
           {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
-          <CopyButton text={item.text} label="Copy message" />
+          {item.text && <CopyButton text={item.text} label="Copy message" />}
         </div>
       </Arrives>
     </div>
@@ -1141,7 +1183,9 @@ const Item = memo(function Item({
         />
       );
     case "user":
-      return <UserMessage item={item} />;
+      return (
+        <UserMessage item={item} exportAttachment={actions.exportAttachment} />
+      );
     case "response":
       return (
         <Response

@@ -59,6 +59,7 @@ pub(crate) fn start_turn(id: &str) -> Submission {
         generation: GENERATION,
         kind: SubmissionKind::StartTurn,
         text: "hello".to_owned(),
+        attachments: Vec::new(),
     }
 }
 

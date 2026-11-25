@@ -11,10 +11,11 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
+use ticketd_core::harnesses::CODEX;
 use ticketd_core::{
-    Chat, ChatInteractionKind, ChatInteractionState, ChatMessage, ChatObservation,
-    ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnReceipt, ChatTurnState, Error,
-    Workspace,
+    Chat, ChatAttachmentContent, ChatInteractionKind, ChatInteractionState, ChatMessage,
+    ChatObservation, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnReceipt,
+    ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
@@ -65,6 +66,7 @@ pub(crate) enum Command {
         command_id: Option<String>,
         text: String,
         mode: SendMode,
+        attachments: Vec<ChatAttachmentContent>,
         reply: Reply<ChatMessage>,
     },
     SendUnattended {
@@ -670,7 +672,7 @@ impl Supervisor {
                     return;
                 };
                 let command_id = format!("{}:first", self.chat_id);
-                let result = self.send(Some(&command_id), &text, SendMode::Auto);
+                let result = self.send(Some(&command_id), &text, SendMode::Auto, &[]);
                 if let Ok(message) = &result {
                     let _ = unattended.first_message.set(message.id.clone());
                 }
@@ -680,9 +682,10 @@ impl Supervisor {
                 command_id,
                 text,
                 mode,
+                attachments,
                 reply,
             } => {
-                let _ = reply.send(self.send(command_id.as_deref(), &text, mode));
+                let _ = reply.send(self.send(command_id.as_deref(), &text, mode, &attachments));
             }
             Command::Stop(reply) => {
                 let _ = reply.send(self.request_stop());
@@ -925,10 +928,34 @@ impl Supervisor {
         command_id: Option<&str>,
         text: &str,
         mode: SendMode,
+        attachments: &[ChatAttachmentContent],
     ) -> Result<ChatMessage, HostError> {
         self.recover_storage()?;
         let chat = self.chat_id.clone();
-        let message = self.write(|core| core.save_chat_input(command_id, &chat, text))?;
+        if !attachments.is_empty() {
+            if self.core(|core| core.chat(&chat))?.harness != CODEX.key.as_str() {
+                return Err(Error::Chat("Screenshots can only be sent to Codex.".into()).into());
+            }
+            if mode == SendMode::Queue || self.active.is_some() || self.dispatching.is_some() {
+                return Err(Error::Chat(
+                    "Wait for this turn to finish before sending a screenshot.".into(),
+                )
+                .into());
+            }
+            if self
+                .runtime
+                .as_ref()
+                .and_then(|runtime| runtime.handle.supports_image_input())
+                == Some(false)
+            {
+                return Err(
+                    Error::Chat("The selected Codex model does not accept images.".into()).into(),
+                );
+            }
+        }
+        let message = self.write(|core| {
+            core.save_chat_input_with_attachments(command_id, &chat, text, attachments)
+        })?;
         let immediate = self.active.is_none() || self.steering().is_some();
         if mode == SendMode::Auto
             && !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
@@ -1780,16 +1807,18 @@ impl Supervisor {
         let attempt = Uuid::new_v4().to_string();
         let chat = self.chat_id.clone();
         let recorded = self.write(|core| {
-            if resend {
+            let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
+            let message = if resend {
                 core.record_chat_resubmission(&chat, message_id, &attempt)
             } else if from_queue {
                 core.record_chat_queue_submission(&chat, message_id, &attempt, intent)
             } else {
                 core.record_chat_submission(&chat, message_id, &attempt, intent)
-            }
+            }?;
+            Ok((message, attachments))
         });
-        let message = match recorded {
-            Ok(message) => message,
+        let (message, attachments) = match recorded {
+            Ok(recorded) => recorded,
             Err(error) => {
                 // Storage failure is reported by `write`; a refusal is said here.
                 // The queue is paused so the same refusal is not met again unasked.
@@ -1822,7 +1851,7 @@ impl Supervisor {
         let text = [
             context.as_deref(),
             preamble.as_deref(),
-            Some(&*message.text),
+            (!message.text.is_empty()).then_some(message.text.as_str()),
         ]
         .into_iter()
         .flatten()
@@ -1833,6 +1862,7 @@ impl Supervisor {
             generation,
             kind,
             text,
+            attachments,
         };
         self.dispatching = Some(Dispatch {
             attempt,

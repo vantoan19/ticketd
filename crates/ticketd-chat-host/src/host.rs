@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_core::{ChatMessage, ChatSnapshot, Error, WorkspaceGuard};
+use ticketd_core::{ChatAttachmentContent, ChatMessage, ChatSnapshot, Error, WorkspaceGuard};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor, bounded_close};
@@ -110,6 +110,7 @@ pub(crate) fn is_refusal(error: &Error) -> bool {
             | Error::ChatTrashed(_)
             | Error::ChatSubmissionUnresolved(_)
             | Error::RequestConflict(_)
+            | Error::UploadLimit { .. }
     )
 }
 
@@ -520,6 +521,18 @@ impl ChatHost {
         text: &str,
         mode: SendMode,
     ) -> Result<ChatMessage, HostError> {
+        self.send_with_attachments(chat_id, command_id, text, mode, Vec::new())
+            .await
+    }
+
+    pub async fn send_with_attachments(
+        &self,
+        chat_id: &str,
+        command_id: Option<&str>,
+        text: &str,
+        mode: SendMode,
+        attachments: Vec<ChatAttachmentContent>,
+    ) -> Result<ChatMessage, HostError> {
         // A reply sent to wait behind the agent's turn (a harness that cannot steer)
         // waits for nothing once the take-over ended that turn: it is the resumed
         // Chat's first turn (#387 M2).
@@ -527,7 +540,15 @@ impl ChatHost {
             Some(_) => SendMode::Auto,
             None => mode,
         };
-        self.submit(chat_id, command_id, text, mode).await
+        let (command_id, text) = (command_id.map(str::to_owned), text.to_owned());
+        self.ask(chat_id, |reply| Command::Send {
+            command_id,
+            text,
+            mode,
+            attachments,
+            reply,
+        })
+        .await
     }
 
     /// The person replied in (`replied`) or stopped a Chat. When that takes an
@@ -555,24 +576,6 @@ impl ChatHost {
                 && step == chat_id;
         }
         Ok(Some(closed))
-    }
-
-    /// Sends input to the Chat's supervisor, starting one when it has none.
-    async fn submit(
-        &self,
-        chat_id: &str,
-        command_id: Option<&str>,
-        text: &str,
-        mode: SendMode,
-    ) -> Result<ChatMessage, HostError> {
-        let (command_id, text) = (command_id.map(str::to_owned), text.to_owned());
-        self.ask(chat_id, |reply| Command::Send {
-            command_id,
-            text,
-            mode,
-            reply,
-        })
-        .await
     }
 
     /// The person's Stop: pauses queue dispatch and asks the harness to interrupt the

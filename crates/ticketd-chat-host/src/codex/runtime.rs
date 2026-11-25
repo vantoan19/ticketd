@@ -592,22 +592,48 @@ impl Drop for CodexRuntime {
 
 #[async_trait]
 impl HarnessRuntime for CodexRuntime {
+    fn supports_image_input(&self) -> Option<bool> {
+        self.connection
+            .rpc
+            .state()
+            .peer
+            .session
+            .reports
+            .supports_image_input()
+    }
+
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
         let Submission {
             submission: id,
             generation,
             kind,
             text,
+            attachments,
         } = submission;
         let method = match kind {
             SubmissionKind::StartTurn => "turn/start",
             SubmissionKind::Steer { .. } => "turn/steer",
         };
-        let prepare = |peer: &mut CodexPeer| {
+        let has_images = !attachments.is_empty();
+        if has_images && !matches!(kind, SubmissionKind::StartTurn) {
+            return DispatchOutcome::NotSent(Refusal::Unsupported);
+        }
+        let mut input = Vec::new();
+        if !text.is_empty() || !has_images {
+            input.push(json!({"type": "text", "text": text, "text_elements": []}));
+        }
+        input.extend(
+            attachments
+                .into_iter()
+                .map(|image| json!({"type": "image", "url": image.image_data_url()})),
+        );
+        let prepare = move |peer: &mut CodexPeer| {
             let session = &mut peer.session;
             let thread = session.thread().ok_or(Refusal::RuntimeClosed)?.to_owned();
             session.runtime.check_submission(&kind, self.steering)?;
-            let input = json!([{"type": "text", "text": text, "text_elements": []}]);
+            if has_images && session.reports.supports_image_input() == Some(false) {
+                return Err(Refusal::ImageInputUnsupported);
+            }
             let prepared = match kind {
                 SubmissionKind::StartTurn => {
                     let mut params =

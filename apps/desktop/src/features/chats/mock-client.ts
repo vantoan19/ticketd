@@ -28,6 +28,7 @@ import {
 } from "@/features/chats/client";
 import { changeLine } from "@/features/chats/model";
 import { plainText } from "@/features/documents/graph-text";
+import { captureClipboardImage } from "@/features/chats/composer-attachments";
 
 /** Words for a condition that holds now and is not a failure; as the host says them. */
 const CONDITION_WORDS: Partial<Record<string, string>> = {
@@ -843,10 +844,14 @@ export function createMockChatClient(
       entry.listeners.add(listener);
       return () => entry.listeners.delete(listener);
     },
-    async send(id, text, links = []) {
+    async send(id, text, links = [], images) {
+      if (images?.length)
+        throw new ChatError("failed", "This preview cannot send screenshots.");
       linkAll(id, links);
       await send(id, text);
     },
+    captureImage: (file) => captureClipboardImage(file, 100 * 1024 * 1024),
+    async exportAttachment() {},
     async queue(id, text, links = []) {
       linkAll(id, links);
       await queue(id, text);

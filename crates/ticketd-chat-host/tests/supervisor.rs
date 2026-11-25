@@ -251,6 +251,50 @@ async fn input_is_recorded_as_possibly_submitted_before_the_write_and_acknowledg
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_host_dispatches_a_saved_screenshot_as_one_message() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let reply = f.fake.hold_next_submit();
+    let image = ticketd_core::ChatAttachmentContent::from_image_data_url(
+        "Screenshot.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+    )
+    .unwrap();
+
+    let saved = f
+        .host
+        .send_with_attachments(&f.chat.id, None, "", SendMode::Auto, vec![image.clone()])
+        .await
+        .unwrap();
+    settle().await;
+
+    let retained = f.message(&saved.id);
+    let submissions = f.submits();
+    let [sent] = submissions.as_slice() else {
+        panic!("expected one submission, got {submissions:?}");
+    };
+    assert_eq!(retained.attempts[0].delivery, ChatDelivery::Possible);
+    assert_eq!(
+        sent.submission,
+        SubmissionId(retained.attempts[0].id.clone())
+    );
+    assert_eq!(sent.text, "");
+    assert_eq!(sent.attachments, [image.clone()]);
+    assert_eq!(
+        f.core()
+            .chat_attachment_content(&f.chat.id, &retained.attachments[0].id)
+            .unwrap(),
+        image
+    );
+
+    reply.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+    assert_eq!(
+        f.message(&saved.id).standing(),
+        ticketd_core::ChatInputStanding::Delivered
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn new_chats_picks_open_the_first_session() {
     let f = Fixture::new(FakeAdapter::codex());
     let picks = StartSettings {

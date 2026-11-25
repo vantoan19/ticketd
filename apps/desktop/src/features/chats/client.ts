@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { z } from "zod";
 import { attachmentSchema } from "@/lib/api/attachments";
+import type { ChatImage } from "@/features/chats/composer-attachments";
 
 /**
  * What the desktop host tells the Chat screens, and what they may ask of it.
@@ -382,6 +383,12 @@ const changedFileSchema = z.object({
   confirmed: z.boolean(),
 });
 export type ChangedFile = z.infer<typeof changedFileSchema>;
+const chatAttachmentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  media_type: z.string(),
+});
+export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
 export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
@@ -400,6 +407,7 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     steer: z.boolean().optional(),
     /** Images sent with the message, kept as Attachments. */
     images: z.array(attachmentSchema).optional(),
+    attachments: z.array(chatAttachmentSchema).optional(),
   }),
   z.object({
     ...item,
@@ -664,6 +672,7 @@ export const chatStateSchema = z.object({
     z.object({
       id: z.string(),
       text: z.string(),
+      attachments: z.array(chatAttachmentSchema).optional(),
       /** Sent to steer, and the harness did not take it: the host's reason. */
       refused_steer: z.string().nullish(),
     }),
@@ -856,7 +865,14 @@ export interface ChatClient {
    * Starts a turn, or steers the one in progress; the host queues it when steering is known not to have been accepted.
    * `links` are the records the message mentions or quotes: linked as it is sent (spec 21.4).
    */
-  send(id: string, text: string, links?: LinkRef[]): Promise<void>;
+  send(
+    id: string,
+    text: string,
+    links?: LinkRef[],
+    images?: ChatImage[],
+  ): Promise<void>;
+  captureImage(file: File): Promise<ChatImage>;
+  exportAttachment(id: string, file: ChatAttachment): Promise<void>;
   queue(id: string, text: string, links?: LinkRef[]): Promise<void>;
   /** The Chats outside the trash linked to one record. Refetch on `revision`. */
   linkedTo(link: LinkRef): Promise<ChatSummary[]>;

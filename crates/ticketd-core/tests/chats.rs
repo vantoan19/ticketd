@@ -87,6 +87,59 @@ fn message(workspace: &Workspace, chat: &Chat, id: &str) -> ChatMessage {
 }
 
 #[test]
+fn a_complete_backup_restores_the_exact_image_in_sent_chat_history() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let other = workspace.create_chat(None, new_chat()).unwrap();
+    let image = ticketd_core::ChatAttachmentContent::from_image_data_url(
+        "Screenshot.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+    )
+    .unwrap();
+    let sent = workspace
+        .save_chat_input_with_attachments(None, &chat.id, "", std::slice::from_ref(&image))
+        .unwrap();
+    let attachment = &sent.attachments[0];
+    workspace
+        .record_chat_submission(
+            &chat.id,
+            &sent.id,
+            "attempt-image",
+            ChatSubmissionIntent::NewTurn,
+        )
+        .unwrap();
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::SubmissionAcknowledged {
+                attempt_id: "attempt-image".into(),
+            }],
+        )
+        .unwrap();
+    assert!(workspace.attachments(50, 0).unwrap().is_empty());
+    assert!(
+        workspace
+            .chat_attachment_content(&other.id, &attachment.id)
+            .is_err()
+    );
+
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let target = dir.path().join("restored.sqlite3");
+    Workspace::restore(&target, &backup).unwrap();
+    let restored = Workspace::open(&target).unwrap();
+    let restored_message = message(&restored, &chat, &sent.id);
+    assert_eq!(restored_message.standing(), ChatInputStanding::Delivered);
+    assert_eq!(restored_message.attachments, sent.attachments);
+    assert_eq!(
+        restored
+            .chat_attachment_content(&chat.id, &attachment.id)
+            .unwrap(),
+        image
+    );
+}
+
+#[test]
 fn a_chat_links_to_several_records_without_belonging_to_them() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

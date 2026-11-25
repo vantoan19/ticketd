@@ -995,6 +995,9 @@ impl Drop for ClaudeRuntime {
 #[async_trait]
 impl HarnessRuntime for ClaudeRuntime {
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        if !submission.attachments.is_empty() {
+            return DispatchOutcome::NotSent(Refusal::Unsupported);
+        }
         if let Some(refusal) = self.stale(submission.generation) {
             return DispatchOutcome::NotSent(refusal);
         }

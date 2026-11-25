@@ -22,9 +22,9 @@ use tauri_plugin_opener::OpenerExt;
 use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
-    Answer, ChatFailure, Chats, CloseAction, Created, FolderFile, HarnessStatus, HistorySelection,
-    LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention, Stopping,
-    UncertainDecision, close_action, quit_action, tray_tooltip,
+    Answer, ChatFailure, Chats, ClipboardImage, CloseAction, Created, FolderFile, HarnessStatus,
+    HistorySelection, LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention,
+    Stopping, UncertainDecision, close_action, quit_action, tray_tooltip,
 };
 use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
@@ -451,6 +451,7 @@ pub async fn chat_send(
     text: String,
     queue: bool,
     links: Option<Vec<LinkRef>>,
+    images: Option<Vec<ClipboardImage>>,
 ) -> Outcome<()> {
     let mode = if queue {
         SendMode::Queue
@@ -460,8 +461,18 @@ pub async fn chat_send(
     let links = links.unwrap_or_default();
     bridge
         .chats
-        .send_linking(&chat_id, &text, mode, &links)
+        .send_linking(&chat_id, &text, mode, &links, images.unwrap_or_default())
         .await
+}
+
+#[tauri::command(async)]
+pub fn chat_export_attachment(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    id: String,
+    destination: PathBuf,
+) -> Outcome<()> {
+    bridge.chats.export_attachment(&chat_id, &id, &destination)
 }
 
 /// Files and folders for the composer's `@` menu.

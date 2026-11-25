@@ -2541,6 +2541,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_open,
             chat_commands::chat_close,
             chat_commands::chat_send,
+            chat_commands::chat_export_attachment,
             chat_commands::chat_linked_to,
             chat_commands::chat_files,
             chat_commands::chat_step_output,

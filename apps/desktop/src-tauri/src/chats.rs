@@ -19,9 +19,9 @@ use ticketd_chat_host::{
 };
 use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
-    BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
-    ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
-    ChatTurnState, NewChat, Workspace, WorkspaceGuard,
+    BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatDelivery, ChatInputStanding,
+    ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
+    ChatSubmissionIntent, ChatTurnState, NewChat, Workspace, WorkspaceGuard,
 };
 use tokio::sync::oneshot;
 
@@ -81,6 +81,13 @@ impl From<HostError> for ChatFailure {
 }
 
 type Outcome<T> = Result<T, ChatFailure>;
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipboardImage {
+    name: String,
+    data_url: String,
+}
 
 /// Work nothing waits on, such as marking a Chat seen while a view opens: a failure
 /// does not stop the caller, and it is written to the log rather than lost. The failure's
@@ -706,6 +713,7 @@ fn surroundings(
                     }),
                 id: message.id,
                 text: message.text,
+                attachments: message.attachments,
             })
             .collect(),
     })
@@ -1878,9 +1886,27 @@ impl Chats {
         text: &str,
         mode: SendMode,
         links: &[LinkRef],
+        images: Vec<ClipboardImage>,
     ) -> Outcome<()> {
-        text_argument(text, "The message")?;
+        if images.is_empty() || !text.is_empty() {
+            text_argument(text, "The message")?;
+        }
         let host = self.host()?;
+        let attachments = if images.is_empty() {
+            Vec::new()
+        } else {
+            let limit = self.workspace()?.attachment_upload_limit()?;
+            images
+                .into_iter()
+                .map(|image| {
+                    // Base64 is four bytes per three source bytes, plus the data URL prefix.
+                    if image.data_url.len() as u64 > limit.div_ceil(3) * 4 + 32 {
+                        return Err(ticketd_core::Error::UploadLimit { limit });
+                    }
+                    ChatAttachmentContent::from_image_data_url(&image.name, &image.data_url)
+                })
+                .collect::<Result<Vec<_>, _>>()?
+        };
         let present = self.workspace()?.chat(chat_id)?.links;
         let mut added = false;
         for link in links {
@@ -1897,7 +1923,20 @@ impl Chats {
         if added {
             host.links_changed(chat_id).await?;
         }
-        self.send(chat_id, text, mode).await
+        if attachments.is_empty() {
+            self.send(chat_id, text, mode).await
+        } else {
+            host.send_with_attachments(chat_id, None, text, mode, attachments)
+                .await?;
+            Ok(())
+        }
+    }
+
+    pub fn export_attachment(&self, chat_id: &str, id: &str, destination: &Path) -> Outcome<()> {
+        self.host()?;
+        self.workspace()?
+            .export_chat_attachment(chat_id, id, destination)?;
+        Ok(())
     }
 
     /// What the composer's `@` menu offers from a Chat's folder.

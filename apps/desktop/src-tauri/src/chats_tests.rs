@@ -2537,7 +2537,7 @@ async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_i
     assert!(f.chats.linked_to(&link()).unwrap().is_empty());
 
     f.chats
-        .send_linking(&id, "Look at it", SendMode::Queue, &[link()])
+        .send_linking(&id, "Look at it", SendMode::Queue, &[link()], Vec::new())
         .await
         .unwrap();
     let linked = f.chats.linked_to(&link()).unwrap();
@@ -2555,7 +2555,7 @@ async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_i
     };
     let refused = f
         .chats
-        .send_linking(&other, "And this", SendMode::Queue, &[gone])
+        .send_linking(&other, "And this", SendMode::Queue, &[gone], Vec::new())
         .await;
     assert!(refused.is_err());
     let (opened, _) = f.open(&other).await;
