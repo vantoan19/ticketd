@@ -301,13 +301,20 @@ impl Refusal {
             Self::StartUnconfirmed => "the harness has not confirmed the previous message",
             Self::UnknownRequest => "the request was no longer open",
             Self::Unsupported => "the harness can't do that here",
-            Self::ImageInputUnsupported => "the selected Codex model does not accept images",
+            Self::ImageInputUnsupported => "the selected model does not accept images",
             Self::ImageInputTooLarge => "an attached image is too large for the harness",
             Self::AttachmentUnavailable => {
                 "the Chat could not prepare an attachment file for the harness"
             }
             Self::RuntimeClosed => "the harness session had closed",
         }
+    }
+
+    pub(crate) fn attachment_error(&self) -> ticketd_core::Error {
+        ticketd_core::Error::Chat(format!(
+            "Chat attachments could not be sent: {}.",
+            self.reason()
+        ))
     }
 }
 
@@ -946,6 +953,15 @@ impl ProviderDetail {
 #[async_trait]
 pub trait HarnessAdapter: Send + Sync {
     fn harness(&self) -> Harness;
+
+    /// Static attachment constraints. The live runtime rechecks the current model and
+    /// permissions when it prepares the saved input for delivery.
+    fn attachment_refusal(
+        &self,
+        attachments: &[ticketd_core::ChatAttachmentContent],
+    ) -> Option<Refusal> {
+        (!attachments.is_empty()).then_some(Refusal::Unsupported)
+    }
 
     /// Probes the installation, login and capabilities without starting a session.
     async fn inspect(&self) -> Inspection;

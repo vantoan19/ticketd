@@ -30,9 +30,9 @@ use serde_json::{Value, json};
 use crate::stdio::{Serving, spawn, version_output};
 use crate::{
     Harness, HarnessAdapter, HarnessOptions, Inspection, OpenRequest, OpenedRuntime, Problem,
-    ProblemKind, ProviderDetail, Setting, Unattended,
+    ProblemKind, ProviderDetail, Refusal, Setting, Unattended,
 };
-use ticketd_core::AutomationAgentTools;
+use ticketd_core::{AutomationAgentTools, ChatAttachmentContent};
 
 use discovery::{LaunchEnvironment, Os};
 use runtime::Options;
@@ -196,6 +196,10 @@ fn too_old(reported: &str) -> Option<Problem> {
 impl HarnessAdapter for CodexAdapter {
     fn harness(&self) -> Harness {
         &ticketd_core::harnesses::CODEX
+    }
+
+    fn attachment_refusal(&self, _: &[ChatAttachmentContent]) -> Option<Refusal> {
+        None
     }
 
     async fn inspect(&self) -> Inspection {
