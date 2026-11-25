@@ -48,7 +48,9 @@ pub(super) struct Limits {
 impl Default for Limits {
     fn default() -> Self {
         Self {
-            handshake: Duration::from_secs(5),
+            // The handshake includes the process's cold start. Five seconds was
+            // too little for Node with TypeScript stripping on a busy Windows machine.
+            handshake: Duration::from_secs(15),
             request: Duration::from_secs(30),
             hard: Duration::from_secs(5 * 60),
             grace: Duration::from_secs(2),
