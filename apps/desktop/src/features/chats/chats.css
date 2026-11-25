@@ -26,6 +26,11 @@
   visibility: hidden;
 }
 .chat-pane {
+  /* One reading column (DESIGN 15): 600px of content, so 680px with its
+     gutters, about 87 characters a line at 15/24. The transcript, the linked
+     records, the tray and the composer all take these two. */
+  --chat-column: 600px;
+  --chat-gutter: 40px;
   /* Measured by lib/width-queries (data-width), not a query container: WebKit
      restyles a container's whole subtree each time it resizes. */
   contain: inline-size layout style;
@@ -46,8 +51,10 @@
   min-height: 0;
   margin: 0;
   padding: 4px 0;
-  /* Rows never scroll sideways: a row's visually hidden words sit past its end. */
-  overflow: hidden auto;
+  /* Rows never scroll sideways: `clip` has no scrollport, so nothing a row
+     paints past its end (its visually hidden words) can be scrolled to. */
+  overflow-x: clip;
+  overflow-y: auto;
 }
 /* The row's ⋯ sits over the time on line 1 and shows on hover or focus. */
 .chat-row-item {
@@ -78,6 +85,10 @@
   height: 52px;
   margin: 0 8px;
   padding: 8px 10px;
+  /* The row's visually hidden words are absolutely placed; clip them to it so
+     they never add to the list's scroll width. */
+  position: relative;
+  overflow: clip;
 }
 .chat-row-mark {
   display: inline-flex;
@@ -254,7 +265,7 @@
   display: flex;
   flex-direction: column;
   min-height: 0;
-  padding: 16px 40px 0;
+  padding: 16px var(--chat-gutter) 0;
   overflow-y: auto;
   overflow-anchor: none;
 }
@@ -284,7 +295,7 @@
   flex-direction: column;
   gap: 20px;
   width: 100%;
-  max-width: 760px;
+  max-width: var(--chat-column);
   margin: 0 auto;
 }
 .chat-dock {
@@ -292,11 +303,11 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 16px 40px 18px;
+  padding: 16px var(--chat-gutter) 18px;
 }
 .chat-dock > * {
   width: 100%;
-  max-width: 760px;
+  max-width: var(--chat-column);
   margin: 0 auto;
 }
 /* A dock part whose height glides (DockSlot) on the smooth spring, clipped only
@@ -1113,7 +1124,7 @@
   position: relative;
   z-index: 1;
   flex: none;
-  padding: 6px 20px;
+  padding: 6px var(--chat-gutter);
 }
 /* Once the transcript is scrolled under the strip, its edge shows (CH-10). */
 .chat-linked > div {
@@ -1121,7 +1132,7 @@
   align-items: center;
   gap: 6px;
   width: 100%;
-  max-width: 760px;
+  max-width: var(--chat-column);
   margin: 0 auto;
 }
 /* One line of chips: those that wrap below it are clipped and counted into
@@ -1431,29 +1442,22 @@
 .chat-skel-short {
   width: 56%;
 }
-@media (max-width: 640px) {
-  .chat-scroll,
-  .chat-dock,
-  .chat-linked,
-  .chat-new {
-    padding-inline: 16px;
-  }
-}
-
-/* Expanded: one centred 720px reading column, gutters of at least 48px, and
-   messages at 16/24. */
-.chat-pane[data-expanded] .chat-scroll {
-  padding-inline: 48px;
-}
-.chat-pane[data-expanded] .chat-dock {
-  padding-inline: 48px;
-}
-.chat-pane[data-expanded] .chat-col,
-.chat-pane[data-expanded] .chat-dock > * {
-  max-width: 760px;
+/* Expanded: the column is 680px of content at 16/26 (about 91 characters),
+   with gutters of at least 48px. */
+.chat-pane[data-expanded] {
+  --chat-column: 680px;
+  --chat-gutter: 48px;
 }
 .chat-pane[data-expanded] .chat-you {
   max-width: min(82%, 560px);
+}
+/* Below a 640px pane (not window) the column takes the pane. This follows the
+   expanded rule, so a narrow expanded Chat has the narrow gutters too. */
+.chat-pane[data-width~="max-640"] {
+  --chat-gutter: 16px;
+}
+.chat-pane[data-width~="max-640"] .chat-new {
+  padding-inline: 16px;
 }
 /* New Chat's suggestions: up to three 36px rows under "Suggested". */
 .chat-suggestions {
