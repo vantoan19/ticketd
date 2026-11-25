@@ -72,6 +72,20 @@
   --text-reading-heading: 18px;
   --text-reading-heading-line: 28px;
   --text-reading-heading-tracking: -0.2px;
+  /* The Document reader's heading ladder (DESIGN.md section 3): sections,
+     subsections, and a body-size bold for lower levels. */
+  --text-reading-section: 22px;
+  --text-reading-section-line: 30px;
+  --text-reading-section-tracking: -0.44px;
+  --text-reading-subsection: 17px;
+  --text-reading-subsection-line: 26px;
+  --text-reading-subsection-tracking: -0.2px;
+  --reading-space-section: 44px;
+  --reading-space-subsection: 28px;
+  --reading-space-minor: 20px;
+  --reading-space-after-heading: 8px;
+  --reading-space-item: 6px;
+  --reading-column: 600px;
   --text-doc: 15px;
   --text-doc-line: 24px;
   --text-doc-title: 28px;
@@ -4156,14 +4170,92 @@ kbd,
   font-size: var(--text-reading);
   line-height: var(--text-reading-line);
 }
+/* The heading ladder: 22/30, 17/26, then the body size in bold, with room
+   above each and a short step below. Reading and rich editing share it. */
 .document-workspace
   .document-body
   :is(.markdown-document, .rich-document)
-  :is(h2, h3, h4, h5, h6) {
-  font-size: var(--text-reading-heading);
-  line-height: var(--text-reading-heading-line);
+  :is(h1, h2, h3, h4, h5, h6) {
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
   font-weight: 600;
-  letter-spacing: var(--text-reading-heading-tracking);
+  letter-spacing: normal;
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  :is(h1, h2) {
+  font-size: var(--text-reading-section);
+  line-height: var(--text-reading-section-line);
+  letter-spacing: var(--text-reading-section-tracking);
+}
+.document-workspace .document-body :is(.markdown-document, .rich-document) h3 {
+  font-size: var(--text-reading-subsection);
+  line-height: var(--text-reading-subsection-line);
+  letter-spacing: var(--text-reading-subsection-tracking);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > *
+  + :is(h4, h5, h6) {
+  margin-top: var(--reading-space-minor);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > *
+  + h3 {
+  margin-top: var(--reading-space-subsection);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > *
+  + :is(h1, h2) {
+  margin-top: var(--reading-space-section);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > :is(h1, h2, h3, h4, h5, h6) {
+  margin-bottom: var(--reading-space-after-heading);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  > :is(h1, h2, h3, h4, h5, h6)
+  + * {
+  margin-top: var(--reading-space-after-heading);
+}
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  li
+  + li,
+.document-workspace
+  .document-body
+  :is(.markdown-document, .rich-document)
+  li
+  > :is(ul, ol) {
+  margin-top: var(--reading-space-item);
+}
+/* The column holds the text; a wide table may use the reader's width inside
+   its gutters, centred on the column, and scrolls only beyond that. */
+.document-workspace
+  .document-body
+  .markdown-document
+  > :not(.markdown-table-scroll),
+.document-workspace .document-body > .markdown-editor {
+  width: 100%;
+  max-width: var(--reading-column);
+  margin-inline: auto;
+}
+.document-workspace .document-body .markdown-table-scroll {
+  width: max-content;
+  min-width: min(100%, var(--reading-column));
+  max-width: 100%;
+  margin-inline: auto;
 }
 .document-workspace .document-body .markdown-editor {
   margin: 0;
