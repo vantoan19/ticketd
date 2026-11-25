@@ -1003,8 +1003,12 @@ test("Retry after navigation opens the Chat whose create reply was lost", async 
     "New work after the failed reply",
   );
   expect(button("Remove next.txt")).toBeTruthy();
+  noButton("Remove first.txt");
   await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
   fireEvent.click(button("Send"));
+  expect(create.mock.calls[2]?.[0].attachments).toEqual([
+    { name: "next.txt", dataUrl: "data:text/plain;base64,dHdv" },
+  ]);
   expect(create.mock.calls[2]?.[0].command_id).not.toBe(
     create.mock.calls[0]?.[0].command_id,
   );
@@ -1231,6 +1235,51 @@ test("a question takes an option by key inside the request, or a typed answer", 
   const { items } = await client.openChat("c1");
   expect(items.filter((item) => item.kind === "user")).toEqual([]);
 });
+
+test.each([false, true])(
+  "Chat navigation keeps text on its original answer or message route (typed before the question: %s)",
+  async (beforeQuestion) => {
+    const client = await open([
+      ...one(
+        {
+          id: "c1",
+          title: "Limiter",
+          activity: beforeQuestion ? "idle" : "waiting",
+        },
+        beforeQuestion ? [] : [question],
+      ),
+      ...one({ id: "c2", title: "Other" }),
+    ]);
+    const answer = vi.spyOn(client, "answer");
+    const send = vi.spyOn(client, "send");
+    const text = "Keep these words";
+    type(text, beforeQuestion ? "Message Codex" : "Answer, or pick above");
+    if (beforeQuestion) {
+      act(() => {
+        client.push("c1", question);
+        client.patch("c1", { activity: "waiting" });
+      });
+    }
+    fireEvent.click(button(/^Other/));
+    await screen.findByRole("heading", { name: "Other" });
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+
+    if (beforeQuestion) {
+      expect(composer("Steer Codex")).toHaveProperty("value", text);
+      expect(screen.getByRole("textbox", { name: "Answer" })).toBeTruthy();
+      fireEvent.click(button("Steer"));
+      expect(send).toHaveBeenCalledWith("c1", text, []);
+      expect(answer).not.toHaveBeenCalled();
+    } else {
+      expect(composer("Answer, or pick above")).toHaveProperty("value", text);
+      fireEvent.click(button("Send"));
+      expect(await screen.findByText(`Answered · ${text}`)).toBeTruthy();
+      expect(answer).toHaveBeenCalledWith("c1", question.id, { text });
+      expect(send).not.toHaveBeenCalled();
+    }
+  },
+);
 
 test.each(["composer", "dock"])(
   "composer and dock share one in-flight answer (started in %s)",
@@ -3081,72 +3130,101 @@ test("a first message that was not sent opens the Chat with the text, and New Ch
   expect(asked[3]?.command_id).not.toBe(asked[2]?.command_id);
 });
 
-test("a first-message save failure carries picked files and a screenshot into the created Chat", async () => {
-  const mock = createMockChatClient({
-    enabled: true,
-    chats: one({ id: "c1", title: "Recovered Chat" }),
-  });
-  const createChat = vi.fn(async () => ({
-    chat_id: "c1",
-    send_error: "storage failed",
-  }));
-  const send = vi.fn(async () => {});
-  render(
-    <ChatClientContext value={{ ...mock, createChat, send }}>
-      <ChatProvider>
-        <ChatsView />
-      </ChatProvider>
-    </ChatClientContext>,
-  );
-  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  const describe = "Describe a task or ask a question";
-  const file = new File(["old bytes"], "details.txt", { type: "text/plain" });
-  const wrongImage = new File(["plain text"], "wrong.png", {
-    type: "image/png",
-  });
-  const screenshot = new File([screenshotBytes], "Screen.png", {
-    type: "image/png",
-  });
-  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
-    target: { files: [file, wrongImage] },
-  });
-  fireEvent.paste(composer(describe), {
-    clipboardData: { files: [screenshot] },
-  });
-  expect((await screen.findByRole("alert")).textContent).toMatch(
-    /image or|GIF image/i,
-  );
-  fireEvent.click(button("Remove wrong.png"));
-  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
-  fireEvent.click(button("Send"));
-  const captured = [
-    { name: "details.txt", dataUrl: "data:text/plain;base64,b2xkIGJ5dGVz" },
-    { name: "Screen.png", dataUrl: `data:image/png;base64,${png}` },
-  ];
-  expect(createChat).toHaveBeenCalledWith(
-    expect.objectContaining({ message: "", attachments: captured }),
-  );
-  await screen.findByRole("heading", { name: "Recovered Chat" });
-  expect(screen.getByRole("alert").textContent).toContain("Storage failed.");
-  expect(button("Remove details.txt")).toBeTruthy();
-  expect(screen.getByRole("img", { name: "Screen.png" })).toBeTruthy();
+test.each([false, true])(
+  "a first-message save failure carries picked files and a screenshot into the created Chat (retried: %s)",
+  async (retry) => {
+    const mock = createMockChatClient({
+      enabled: true,
+      chats: one({ id: "c1", title: "Recovered Chat" }),
+    });
+    const createChat = vi.fn(async () => ({
+      chat_id: "c1",
+      send_error: "storage failed",
+    }));
+    if (retry)
+      createChat.mockRejectedValueOnce(new Error("The create reply was lost"));
+    const send = vi.fn(async () => {});
+    render(
+      <ChatClientContext value={{ ...mock, createChat, send }}>
+        <ChatProvider>
+          <ChatsView />
+        </ChatProvider>
+      </ChatClientContext>,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+    const describe = "Describe a task or ask a question";
+    const file = new File(["old bytes"], "details.txt", { type: "text/plain" });
+    const wrongImage = new File(["plain text"], "wrong.png", {
+      type: "image/png",
+    });
+    const screenshot = new File([screenshotBytes], "Screen.png", {
+      type: "image/png",
+    });
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: { files: [file, wrongImage] },
+    });
+    fireEvent.paste(composer(describe), {
+      clipboardData: { files: [screenshot] },
+    });
+    expect((await screen.findByRole("alert")).textContent).toMatch(
+      /image or|GIF image/i,
+    );
+    fireEvent.click(button("Remove wrong.png"));
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    const captured = [
+      { name: "details.txt", dataUrl: "data:text/plain;base64,b2xkIGJ5dGVz" },
+      { name: "Screen.png", dataUrl: `data:image/png;base64,${png}` },
+    ];
+    expect(createChat).toHaveBeenCalledWith(
+      expect.objectContaining({ message: "", attachments: captured }),
+    );
+    if (retry) {
+      await screen.findByRole("button", { name: "Retry" });
+      type("A later draft", describe);
+      fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+        target: {
+          files: [new File(["new"], "next.txt", { type: "text/plain" })],
+        },
+      });
+      await waitFor(() =>
+        expect(button("Send")).toHaveProperty("disabled", false),
+      );
+      fireEvent.click(button("Retry"));
+      expect(createChat.mock.calls[1]).toEqual(createChat.mock.calls[0]);
+    }
+    await screen.findByRole("heading", { name: "Recovered Chat" });
+    expect(screen.getByRole("alert").textContent).toContain("Storage failed.");
+    expect(button("Remove details.txt")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Screen.png" })).toBeTruthy();
 
-  fireEvent.click(button("New Chat"));
-  expect(
-    screen.queryByRole("button", { name: "Remove details.txt" }),
-  ).toBeNull();
-  fireEvent.click(screen.getByText("Recovered Chat"));
-  await screen.findByRole("button", { name: "Remove details.txt" });
-  type("Read the original file");
-  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
-  fireEvent.click(button("Send"));
-  expect(send).toHaveBeenCalledWith(
-    "c1",
-    "Read the original file",
-    [],
-    captured,
-  );
-});
+    fireEvent.click(button("New Chat"));
+    expect(
+      screen.queryByRole("button", { name: "Remove details.txt" }),
+    ).toBeNull();
+    expect(composer(describe)).toHaveProperty(
+      "value",
+      retry ? "A later draft" : "",
+    );
+    if (retry) expect(button("Remove next.txt")).toBeTruthy();
+    expect(screen.queryByRole("img", { name: "Screen.png" })).toBeNull();
+    fireEvent.click(screen.getByText("Recovered Chat"));
+    await screen.findByRole("button", { name: "Remove details.txt" });
+    type("Read the original file");
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    expect(send).toHaveBeenCalledWith(
+      "c1",
+      "Read the original file",
+      [],
+      captured,
+    );
+  },
+);
 
 test("New Chat says how the harness is signed in before the first message is sent", async () => {
   const client = await open([]);

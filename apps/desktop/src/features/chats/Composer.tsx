@@ -50,6 +50,7 @@ export function Composer({
   initialText = "",
   initialTokens = [],
   onText,
+  answeringQuestion,
   mentions,
   above,
   onSend,
@@ -78,6 +79,7 @@ export function Composer({
   controls: (text: string, hasAttachments: boolean) => ComposerControls;
   initialText?: string;
   initialTokens?: Token[];
+  answeringQuestion?: string | undefined;
   onText?: (text: string, tokens: Token[]) => void;
   /** The `#`, `@` and `/` menus; without it the box is plain text. */
   mentions?: ComposerMentions | undefined;
@@ -134,7 +136,8 @@ export function Composer({
   const linuxDesktop =
     "__TAURI_INTERNALS__" in window && /^linux/i.test(navigator.platform);
   const setText = (next: string, nextTokens: Token[] = []) => {
-    if (draft.setText(next, nextTokens)) onText?.(next, nextTokens);
+    if (draft.setText(next, nextTokens, { answeringQuestion }))
+      onText?.(next, nextTokens);
   };
   const files = items.flatMap((item) =>
     item.state === "ready" ? [item.content] : [],

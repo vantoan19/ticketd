@@ -587,6 +587,7 @@ function Conversation({
   }, [items, questionDrafts]);
   const {
     text: draftText,
+    answeringQuestion,
     items: draftFiles,
     restored,
     saving: savingDraft,
@@ -599,21 +600,10 @@ function Conversation({
     (file) =>
       file.state === "ready" && file.content.dataUrl.startsWith("data:image/"),
   );
-  // A draft typed before a question arrived keeps its meaning: only a box that
-  // was empty (or emptied since) answers it.
-  const draftHeld = draftText.trim() !== "";
-  const [seenQuestion, setSeenQuestion] = useState(question?.id);
-  const [heldFor, setHeldFor] = useState(() =>
-    question && draftHeld ? question.id : undefined,
-  );
-  if (question?.id !== seenQuestion) {
-    setSeenQuestion(question?.id);
-    setHeldFor(question && draftHeld ? question.id : undefined);
-  }
-  if (!draftHeld && heldFor) setHeldFor(undefined);
+  // Keep answer text tied to the request it was typed for, even after reopening.
   const answering =
     Boolean(question) &&
-    (!draftHeld || heldFor !== question?.id) &&
+    (!draftText.trim() || answeringQuestion === question?.id) &&
     !hasAttachments &&
     queueEdits.length === 0 &&
     !independentAnswer &&
@@ -1102,10 +1092,7 @@ function Conversation({
                 inputRef={messageBox}
                 placeholder={composerPlaceholder(chat, answering, hasImages)}
                 draft={draft}
-                onText={(text) => {
-                  if (!text.trim()) setHeldFor(undefined);
-                  else if (!answering && question) setHeldFor(question.id);
-                }}
+                answeringQuestion={answering ? question?.id : undefined}
                 mentions={mentions}
                 above={
                   <>

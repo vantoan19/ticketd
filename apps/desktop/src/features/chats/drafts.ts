@@ -21,6 +21,7 @@ export type SaveResult = void | "keep_draft";
 type Snapshot = {
   text: string;
   tokens: Token[];
+  answeringQuestion: string | undefined;
   items: ReturnType<ComposerAttachments["snapshot"]>;
   saving: boolean;
   transfer: "preparing" | "adopting" | "confirming" | "unconfirmed" | null;
@@ -82,6 +83,7 @@ export class ComposerDraft {
     this.state = {
       text,
       tokens,
+      answeringQuestion: undefined,
       items: attachments.snapshot(),
       saving: false,
       transfer: null,
@@ -127,17 +129,32 @@ export class ComposerDraft {
     !this.current || this.state.saving || this.state.transfer !== null;
 
   canPrefill() {
-    const { text } = this.state;
-    return !this.locked() && (!text.trim() || text === this.prefilled);
+    const { text, items } = this.state;
+    return (
+      !this.locked() &&
+      items.length === 0 &&
+      (!text.trim() || text === this.prefilled)
+    );
   }
 
-  setText(text: string, tokens: Token[], prefilled = false) {
+  setText(
+    text: string,
+    tokens: Token[],
+    {
+      prefilled = false,
+      answeringQuestion,
+    }: {
+      prefilled?: boolean;
+      answeringQuestion?: string | undefined;
+    } = {},
+  ) {
     if (this.locked()) return false;
     if (prefilled) this.prefilled = text;
     else if (text !== this.prefilled) this.prefilled = null;
     this.update({
       text,
       tokens,
+      answeringQuestion: text.trim() ? answeringQuestion : undefined,
       restored: Boolean(text.trim()) && this.state.restored,
     });
     return true;
@@ -183,20 +200,23 @@ export class ComposerDraft {
           ...this.state,
           text: "",
           tokens: [],
+          answeringQuestion: undefined,
           restored: false,
           failedAction: null,
           queueEdits: [],
         };
-        if (this.state.items.length)
-          this.attachments.remove(
-            new Set(this.state.items.map((item) => item.id)),
-          );
+        this.removeAttachmentCards(this.state.items);
       } catch {
         this.update({ failedAction: action });
       } finally {
         this.update({ saving: false });
       }
     })();
+  }
+
+  removeAttachmentCards(items: Snapshot["items"]) {
+    if (items.length)
+      this.attachments.remove(new Set(items.map((item) => item.id)));
   }
 
   /** A first message that could not be delivered joins its new Chat's draft. */
@@ -213,7 +233,11 @@ export class ComposerDraft {
   private appendedText(text: string) {
     const before = this.state.text;
     return text
-      ? { text: before.trim() ? `${before}\n\n${text}` : text, restored: true }
+      ? {
+          text: before.trim() ? `${before}\n\n${text}` : text,
+          answeringQuestion: undefined,
+          restored: true,
+        }
       : {};
   }
 
@@ -262,7 +286,13 @@ export class ComposerDraft {
         this.state.text.trim() === pending.text &&
         JSON.stringify(linksOf(this.state.tokens)) === pending.linkKey
       ) {
-        this.state = { ...this.state, text: "", tokens: [], restored: false };
+        this.state = {
+          ...this.state,
+          text: "",
+          tokens: [],
+          answeringQuestion: undefined,
+          restored: false,
+        };
       }
       if (pending.attachmentIds.size)
         this.attachments.remove(pending.attachmentIds);

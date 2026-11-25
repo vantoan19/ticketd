@@ -123,7 +123,7 @@ export function NewChat({
     if (!start) return null;
     const next = ticketPrompt(start.ticket);
     const kept = !draft.canPrefill();
-    if (!kept) draft.setText(next.text, next.tokens, true);
+    if (!kept) draft.setText(next.text, next.tokens, { prefilled: true });
     return { ...next, kept };
   });
   const {
@@ -354,7 +354,7 @@ export function NewChat({
     }),
     [client, links, folder, folderName, harness?.name, commands, canListSkills],
   );
-  const create = async (pending: PendingCreate) => {
+  const create = async (pending: PendingCreate, keepDraft = false) => {
     const { request, options, pick, quotes } = pending;
     // Notifications are asked for with the first Chat message.
     if (loadPreferences().notifyChats)
@@ -377,6 +377,7 @@ export function NewChat({
           `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
         );
       }
+      if (keepDraft) draft.removeAttachmentCards(pending.submitted.items);
       draft.setPendingCreate(null);
       setFailure(null);
       if (
@@ -403,7 +404,7 @@ export function NewChat({
       current.tokens !== submitted.tokens ||
       current.items !== submitted.items;
     // The host may already have committed this exact command.
-    draft.save("send", () => create(pending), keepDraft);
+    draft.save("send", () => create(pending, keepDraft), keepDraft);
   };
   const shownFailure = pendingCreate?.failure ?? failure?.failure;
   return (
@@ -657,7 +658,11 @@ export function NewChat({
                   size="xs"
                   disabled={saving}
                   onClick={() => {
-                    if (draft.setText(prompt.text, prompt.tokens, true)) {
+                    if (
+                      draft.setText(prompt.text, prompt.tokens, {
+                        prefilled: true,
+                      })
+                    ) {
                       setComposerKey((count) => count + 1);
                     }
                   }}
