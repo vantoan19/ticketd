@@ -22,6 +22,8 @@ pub use context_graph::{
 };
 mod document_links;
 pub use document_links::{ContextLink, DocumentBacklink, derive_brief_heading, derive_heading};
+mod current_work;
+pub use current_work::{CurrentWork, CurrentWorkGroup, CurrentWorkPlan};
 mod documents;
 pub use documents::{
     Document, DocumentPatch, DocumentPlanContext, DocumentSearchResult, DocumentSummary,
