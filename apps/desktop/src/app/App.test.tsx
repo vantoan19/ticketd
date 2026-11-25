@@ -6561,7 +6561,7 @@ test.each([
         expect(box).toHaveProperty("value", "1j23");
         expect(answer).not.toHaveBeenCalled();
         await user.clear(box);
-        screen.getByRole("button", { name: /^Codex, model/ }).focus();
+        screen.getByRole("button", { name: /^Codex(, effort .*)?$/ }).focus();
         await user.keyboard("{Enter}");
         await screen.findByRole("dialog", { name: "Harness and model" });
         await user.keyboard("123");
@@ -7655,7 +7655,7 @@ test.each([false, true])(
       fireEvent.change(input, { target: { value: "Edited words" } });
       fireEvent.click(
         screen.getByRole("button", {
-          name: "Claude Code, model Opus 5.5, effort Default",
+          name: "Claude Code, model Opus 5.5",
         }),
       );
       fireEvent.click(screen.getByRole("radio", { name: "High" }));
@@ -7686,7 +7686,7 @@ test("New Chat exposes its complete current pick before the first message", asyn
   );
   fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
   const trigger = await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   expect(client.created).toHaveLength(0);
   fireEvent.click(trigger);

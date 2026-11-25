@@ -660,8 +660,8 @@
   gap: 4px;
   margin-left: auto;
 }
-/* The model and permission triggers (#368). Below a 420px composer the model
-   keeps its name and drops the bars; Permissions always keeps its label. */
+/* The model and permission triggers (#368): "✳ Medium ⌄" and "⊘ Full access ⌄",
+   the model named only when the harness reports which one runs. */
 .chat-controls {
   display: flex;
   flex: 0 1 auto;
@@ -702,29 +702,35 @@
   width: 10px;
   height: 10px;
 }
-/* Below a 460px composer Permissions keeps only its shield and the effort
-   only its bars, so one row holds picker, Permissions, Stop and Send. The
-   composer is measured by the Chat tray (a query container) or, outside one,
-   by its pane (data-width). */
+/* As the composer narrows the controls give way in order: first Permissions
+   drops its label and keeps its shield; then, below 460px, the effort's word
+   gives way to its bars ("✳ ▂▄▆ ⌄"), so one row holds picker, Permissions,
+   Stop and Send. The composer is measured by the Chat tray (a query container)
+   or, outside one, by its pane (data-width). */
+[data-control] .effort-glyph {
+  display: none;
+}
+@container (max-width: 599px) {
+  .chat-permission-label {
+    display: none;
+  }
+}
+:where([data-width~="max-599"]) .chat-permission-label {
+  display: none;
+}
 @container (max-width: 459px) {
-  .chat-permission-label,
   [data-control] .chat-control-effort {
     display: none;
   }
+  [data-control] .effort-glyph {
+    display: block;
+  }
 }
-:where([data-width~="max-459"]) .chat-permission-label,
 :where([data-width~="max-459"]) [data-control] .chat-control-effort {
   display: none;
 }
-@container (max-width: 419px) {
-  [data-control] .effort-glyph,
-  [data-control] > .lucide-chevron-down {
-    display: none;
-  }
-}
-:where([data-width~="max-419"]) [data-control] .effort-glyph,
-:where([data-width~="max-419"]) [data-control] > .lucide-chevron-down {
-  display: none;
+:where([data-width~="max-459"]) [data-control] .effort-glyph {
+  display: block;
 }
 .chat-pick-option {
   display: flex;

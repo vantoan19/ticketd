@@ -2389,7 +2389,7 @@ test("New Chat picks harness, model and effort in one composer picker and starts
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   // No radios: the harness is the picker's, beside Send.
   const trigger = await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   expect(screen.queryByRole("radiogroup", { name: "Harness" })).toBeNull();
   fireEvent.click(trigger);
@@ -2437,9 +2437,7 @@ test("New Chat shows why the Antigravity model check failed beside Default", asy
     { id: "antigravity", name: "Antigravity", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Antigravity, model Default" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Antigravity" }));
 
   const picker = await screen.findByRole("dialog", {
     name: "Harness and model",
@@ -2505,7 +2503,7 @@ test("a Chat started in New Chat keeps its picks on the triggers until the sessi
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Claude Code, model Opus 5.5, effort Default",
+      name: "Claude Code, model Opus 5.5",
     }),
   );
   fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
@@ -2590,9 +2588,7 @@ test("LIVE2-4: only the harness's default is tagged Default, and only once", asy
     { id: "claude-code", name: "Claude Code", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: /^Claude Code, model/ }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Claude Code" }));
   const radios = await screen.findAllByRole("radio", {
     name: /Default|Fable|Opus/,
   });
@@ -2659,7 +2655,7 @@ test("New Chat on Claude Code sends the shown default model and permission mode,
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   // The permission trigger names the mode, not "Default".
   expect(button("Permissions: Ask before edits")).toBeTruthy();
@@ -2940,7 +2936,7 @@ test("a change held for the turn's end shows the new value with a clock, never s
 test("before its session reports, a Chat's picker shows its harness and says why there is no choice", async () => {
   // Not made in New Chat during this run, so no start of its own to show.
   await open(one({ id: "reopened", title: "Limiter" }));
-  fireEvent.click(button("Codex, model Default"));
+  fireEvent.click(button("Codex"));
   expect(
     await screen.findByText(
       "Codex lists its models once the Chat's session starts.",

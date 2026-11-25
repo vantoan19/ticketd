@@ -33,7 +33,10 @@ import {
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useStatusLine } from "@/components/ui/use-status-line";
+import {
+  useStatusLine,
+  useStatusLineAbove,
+} from "@/components/ui/use-status-line";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { ofTotal } from "@/lib/format";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
@@ -429,6 +432,10 @@ function Conversation({
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const retrySend = useRef<(() => void) | null>(null);
   const dock = useRef<HTMLDivElement>(null);
+  // The pane's status line rises from the transcript, 8px above the tray, so
+  // it never covers the composer's controls (DESIGN.md section 12).
+  const [tray, setTray] = useState<HTMLDivElement | null>(null);
+  useStatusLineAbove(tray);
   // Opening a Chat whose opener left (a list row re-sorted, a pane swapped)
   // must not strand the keyboard on the page: the message box takes it.
   useEffect(() => {
@@ -580,9 +587,19 @@ function Conversation({
     event.preventDefault();
     stop();
   };
+  /** Deny was answered: the box invites what to do instead, until the next send. */
+  const [denied, setDenied] = useState(false);
+  // The turn the Deny was in has ended: the next one starts from a plain box.
+  if (denied && !isLive(chat)) setDenied(false);
   const answer = (requestId: string, optionId: string) =>
     client.answer(id, requestId, { option_id: optionId }).then(
-      () => setFailure(null),
+      () => {
+        setFailure(null);
+        if (optionId !== "deny") return;
+        // The box takes focus as for any answer (the dock's onLeave); an
+        // answer made from Inbox still goes on to the next request there.
+        setDenied(true);
+      },
       (reason: unknown) => {
         // The request left the dock; say why the pick did nothing.
         if (reason instanceof ChatError && reason.code === "stale")
@@ -644,6 +661,7 @@ function Conversation({
     });
   /** Sending resumes following and clears the New marker. */
   const sent = <T,>(action: Promise<T>) => {
+    setDenied(false);
     follow();
     setNewFrom(undefined);
     setAsked(null);
@@ -818,7 +836,7 @@ function Conversation({
             // plan pill and the queue sit inside the composer's one ring, as
             // sections split by hairlines on one 16px inner edge. The top part
             // glides as one block when something arrives or leaves.
-            <div className="chat-tray">
+            <div className="chat-tray" ref={setTray}>
               <DockSlot className="chat-tray-top">
                 {problem && (
                   <ProblemNotice
@@ -881,7 +899,11 @@ function Conversation({
                 framed={false}
                 inputRef={messageBox}
                 autoFocus={edits > 0}
-                placeholder={composerPlaceholder(chat, answering)}
+                placeholder={composerPlaceholder(
+                  chat,
+                  answering,
+                  denied && pending.length === 0,
+                )}
                 initialText={drafts.get(id) ?? ""}
                 initialTokens={tokensOf(id)}
                 onText={(text, tokens) => {

@@ -482,6 +482,11 @@ test("the placeholder says what sending will do", () => {
   expect(
     composerPlaceholder({ ...working, steering: { available: false } }, false),
   ).toBe("Queue for Codex");
+  // After Deny, while the turn runs; an ended turn has nothing to redirect.
+  expect(composerPlaceholder(working, false, true)).toBe(
+    "Tell Codex what to do instead",
+  );
+  expect(composerPlaceholder(idle, false, true)).toBe("Message Codex");
 });
 
 test("only a problem observed now disables Send; why the last turn stopped does not", () => {

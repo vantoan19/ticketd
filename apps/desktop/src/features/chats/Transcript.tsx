@@ -84,6 +84,10 @@ import {
   scopeIsPath,
 } from "@/features/chats/files";
 import { sentParts } from "@/features/chats/composer-mentions";
+import {
+  steerCaption,
+  steersAwaitingRead,
+} from "@/features/chats/steer-caption";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { ProjectNavigation } from "@/features/documents/navigation";
 import { ImageTiles } from "@/features/chats/ImageTiles";
@@ -118,10 +122,16 @@ const DELIVERY_CAPTION = {
 } as const;
 
 /**
- * The session is opening: its working line says "Starting…", so a message's
- * own "Sending…" is not said too (LIVE-6, one status row).
+ * What a sent message asks of its Chat. `opening`: the session is opening, its
+ * working line says "Starting…", so a message's own "Sending…" is not said too
+ * (LIVE-6, one status row). `waiting`: steers the harness has taken and not
+ * yet acted on, which say when they will be read.
  */
-const OpeningContext = createContext(false);
+const UserMessageContext = createContext<{
+  opening: boolean;
+  waiting: ReadonlySet<string>;
+  harness: string;
+}>({ opening: false, waiting: new Set(), harness: "" });
 
 /** "10:44": when your message was sent, as the hover line says it. */
 const sentAt = (stamp: string) => {
@@ -196,11 +206,13 @@ function SentText({ text }: { text: string }) {
 }
 
 function UserMessage({ item }: { item: ItemOf<"user"> }) {
-  const opening = useContext(OpeningContext);
+  const { opening, waiting, harness } = useContext(UserMessageContext);
   const caption =
     opening && item.delivery === "sending"
       ? ""
-      : DELIVERY_CAPTION[item.delivery];
+      : waiting.has(item.id)
+        ? steerCaption(harness)
+        : DELIVERY_CAPTION[item.delivery];
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
@@ -1438,6 +1450,16 @@ export function Transcript({
     ),
     chat.catching_up,
   );
+  const working = chat.activity === "working";
+  const opening = working && Boolean(chat.opening);
+  const waiting = useMemo(
+    () => steersAwaitingRead(items, working),
+    [items, working],
+  );
+  const userMessages = useMemo(
+    () => ({ opening, waiting, harness }),
+    [opening, waiting, harness],
+  );
   if (picked)
     return (
       <div className="chat-col" ref={contentRef}>
@@ -1479,7 +1501,6 @@ export function Transcript({
           (row.kind === "reasoning" && row.item.state === "running"),
       ),
   );
-  const working = chat.activity === "working";
   const empty = items.length === 0 && !chat.catching_up && !isLive(chat);
   const asking = items.some(
     (item) => item.kind === "request" && item.state === "pending",
@@ -1488,7 +1509,7 @@ export function Transcript({
     <ArrivalsContext value={arrivals}>
       <ChatFilesContext.Provider value={files}>
         <SentLinksContext.Provider value={sentLinks}>
-          <OpeningContext.Provider value={working && Boolean(chat.opening)}>
+          <UserMessageContext.Provider value={userMessages}>
             <div className="chat-col" ref={contentRef}>
               {empty && !readOnly && (
                 <p className="chat-empty">Say what you want done.</p>
@@ -1585,7 +1606,7 @@ export function Transcript({
                 working && <WorkingSlot />
               )}
             </div>
-          </OpeningContext.Provider>
+          </UserMessageContext.Provider>
         </SentLinksContext.Provider>
       </ChatFilesContext.Provider>
     </ArrivalsContext>
