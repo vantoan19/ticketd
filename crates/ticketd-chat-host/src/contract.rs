@@ -548,6 +548,13 @@ pub struct HarnessCommand {
     pub description: Option<String>,
 }
 
+/// A skill the harness can invoke by name in the Chat's folder.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+pub struct HarnessSkill {
+    pub name: String,
+    pub description: String,
+}
+
 /// The settings a harness reports for the session. `None` is a setting it did not
 /// report, which is never offered as a choice.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -946,6 +953,11 @@ pub trait HarnessAdapter: Send + Sync {
     /// sending anything to a model. `Err` says why it could not tell.
     async fn options(&self) -> Result<HarnessOptions, String> {
         Err("this harness does not report its options before a session".to_owned())
+    }
+
+    /// Lists enabled skills for a folder without starting a session.
+    async fn skills(&self, _folder: &std::path::Path) -> Result<Vec<HarnessSkill>, String> {
+        Ok(Vec::new())
     }
 
     /// The permission a session opened for a person's Chat would start with, shown

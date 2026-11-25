@@ -1,9 +1,9 @@
 import type { LinkRef, LinkedRecord } from "@/features/chats/client";
 
 /**
- * The composer's `#`, `@` and `/` mentions over plain text. A token is a range
+ * The composer's mentions and commands over plain text. A token is a range
  * of the message that was inserted from a menu: a record (linked when the
- * message is sent), a path or a command. Typing inside a token makes it plain
+ * message is sent), a path, a skill or a command. Typing inside a token makes it plain
  * text again; Backspace and Delete remove it whole; the arrows step over it.
  */
 export type Token =
@@ -14,17 +14,26 @@ export type Token =
       text: string;
       record: LinkedRecord;
     }
-  | { kind: "path" | "command"; start: number; end: number; text: string };
+  | {
+      kind: "path" | "command" | "skill";
+      start: number;
+      end: number;
+      text: string;
+    };
 
 /** What a menu pick inserts: a token without its place yet. */
 export type Insert =
   | { kind: "record"; text: string; record: LinkedRecord }
-  | { kind: "path" | "command"; text: string };
+  | { kind: "path" | "command" | "skill"; text: string };
 
-export type Trigger = { char: "#" | "@" | "/"; start: number; query: string };
+export type Trigger = {
+  char: "#" | "@" | "/" | "$";
+  start: number;
+  query: string;
+};
 
 /**
- * The menu the caret is in, if any. `#` and `@` open at the start of a word,
+ * The menu the caret is in, if any. `#`, `@` and `$` open at the start of a word,
  * never inside one or a URL; `/` only at the very start of the message. A space
  * ends the query, so `# ` (a heading) never opens the menu.
  */
@@ -32,7 +41,7 @@ export function triggerAt(text: string, caret: number): Trigger | null {
   let start = caret;
   while (start > 0 && !/\s/.test(text.charAt(start - 1))) start -= 1;
   const char = text.charAt(start);
-  if (char !== "#" && char !== "@" && char !== "/") return null;
+  if (char !== "#" && char !== "@" && char !== "/" && char !== "$") return null;
   if (char === "/" && start !== 0) return null;
   const query = text.slice(start + 1, caret);
   if (query.includes(char)) return null;

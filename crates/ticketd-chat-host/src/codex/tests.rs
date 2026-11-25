@@ -13,15 +13,15 @@ use tokio::time::{sleep, timeout};
 
 use super::CodexAdapter;
 use super::mapping::Session;
-use super::runtime::{Options, login_state, open_over, probe_login, probe_options};
+use super::runtime::{Options, login_state, open_over, probe_login, probe_options, probe_skills};
 use crate::conformance::{NewTurn, Provider};
 use crate::outcome::read_end;
 use crate::scripted::{Peer, brief, pipes};
 use crate::{
     ApprovalDecision, CloseOutcome, DispatchOutcome, EventKind, EventStream, HarnessAdapter,
-    HarnessRuntime, InteractionAnswer, InteractionResponse, InterruptOutcome, InterruptRequest,
-    LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
-    OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
+    HarnessRuntime, HarnessSkill, InteractionAnswer, InteractionResponse, InterruptOutcome,
+    InterruptRequest, LoginState, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
+    OpenRequest, OpenedRuntime, Problem, ProblemKind, QuestionAnswer, Refusal, RespondOutcome,
     RuntimeGeneration, SessionStart, StartSettings, Submission, SubmissionId, SubmissionKind,
     TurnOutcome,
 };
@@ -969,6 +969,28 @@ async fn the_options_probe_lists_every_page_of_models_with_their_efforts_and_clo
         .map(|o| (o.id.as_str(), o.is_default, o.allowed))
         .collect();
     assert_eq!(choices, [("own", true, true), ("full-access", false, true)]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_skills_probe_lists_enabled_skills_for_the_chat_folder_and_closes() {
+    let (mut peer, io) = pipes();
+    peer.load(fixture!("skills"));
+
+    let (skills, ()) = tokio::join!(
+        probe_skills(io, options(), Path::new("/work/chat-1")),
+        async {
+            peer.play().await;
+            assert!(peer.stdin_closed().await);
+            peer.exit(0);
+        }
+    );
+    assert_eq!(
+        skills.expect("Codex listed its skills"),
+        [HarnessSkill {
+            name: "check-logs".to_owned(),
+            description: "Inspect logs".to_owned(),
+        }]
+    );
 }
 
 #[tokio::test(start_paused = true)]

@@ -64,6 +64,8 @@ import { ComposerControls } from "@/features/chats/ComposerControls";
 import {
   labelOf,
   settingLine,
+  shownOf,
+  useCodexCommands,
   type AskedChange,
 } from "@/features/chats/composer-settings";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -448,6 +450,12 @@ function Conversation({
     quoteCount.current = quotes.length;
   }, [quotes.length]);
   const folder = chat.folder;
+  const codex = chat.harness.id === "codex";
+  const permission = chat.settings?.permission;
+  const { commands, openers } = useCodexCommands(
+    codex,
+    Boolean(permission?.changeable && shownOf(permission)),
+  );
   const mentions = useMemo<ComposerMentions>(
     () => ({
       records: (query) => client.searchRecords(query),
@@ -458,13 +466,22 @@ function Conversation({
           files: (query: string) => client.folderFiles(folder.path, query),
         },
       }),
-      commands: chat.commands,
+      commands: chat.commands.length ? chat.commands : commands,
+      skills:
+        codex && !folder.missing
+          ? {
+              folder: folder.path,
+              load: () => client.harnessSkills("codex", folder.path),
+            }
+          : undefined,
       harness,
     }),
     [
       client,
       chat.links,
       chat.commands,
+      commands,
+      codex,
       folder.missing,
       folder.name,
       folder.path,
@@ -924,6 +941,7 @@ function Conversation({
                   <ComposerControls
                     chat={chat}
                     inputRef={messageBox}
+                    openers={openers}
                     onChange={(setting, value) =>
                       void client.changeSetting(id, setting, value).then(
                         (outcome) => {
