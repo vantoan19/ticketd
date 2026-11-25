@@ -23,6 +23,7 @@ import {
   type OpenRequest,
   type Problem,
   type ProblemKind,
+  type ProjectFolder,
   type ProjectRef,
   type TranscriptItem,
 } from "@/features/chats/client";
@@ -348,6 +349,8 @@ export type MockChatClient = ChatClient & {
   folderProjects: Map<string, ProjectRef>;
   /** Each Project's folder, by Project id. */
   projectFolders: Map<string, string>;
+  /** The registered checkouts offered by the folder menu. */
+  projectCheckouts: ProjectFolder[];
   /** Paths opened through a changed-files row or a step's file name, in order. */
   openedFiles: string[];
   /** What the next folder dialog returns. */
@@ -741,6 +744,7 @@ export function createMockChatClient(
     readThroughs: [],
     folderProjects: new Map(),
     projectFolders: new Map(),
+    projectCheckouts: [],
     nextFolder: null,
     push,
     patch,
@@ -824,7 +828,9 @@ export function createMockChatClient(
         },
       );
     },
+    harnessSkills: async () => [],
     pickFolder: async () => client.nextFolder,
+    listProjectFolders: async () => client.projectCheckouts,
     folderProject: async (path) => client.folderProjects.get(path) ?? null,
     projectFolder: async (id) => client.projectFolders.get(id) ?? null,
     folderUse: async (path) =>

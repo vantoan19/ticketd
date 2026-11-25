@@ -12,7 +12,11 @@ import {
 import { File, FileText, Folder, FolderKanban } from "lucide-react";
 import { Reference } from "@/components/ui/reference";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import type { FolderFile, LinkedRecord } from "@/features/chats/client";
+import type {
+  FolderFile,
+  HarnessSkill,
+  LinkedRecord,
+} from "@/features/chats/client";
 import {
   insertToken,
   mentionText,
@@ -25,7 +29,13 @@ import {
   type Trigger,
 } from "@/features/chats/composer-mentions";
 
-/** Where the composer's `#`, `@` and `/` menus find what they offer. */
+export type ComposerCommand = {
+  name: string;
+  description?: string | null | undefined;
+  run?: (() => void) | undefined;
+};
+
+/** Where the composer's mention and command menus find what they offer. */
 export type ComposerMentions = {
   /** Tickets, Documents and Projects by name. */
   records: (query: string) => Promise<LinkedRecord[]>;
@@ -33,12 +43,19 @@ export type ComposerMentions = {
   linked: LinkedRecord[];
   /** The folder `@` lists; absent when there is none to read yet. */
   folder?: { name: string; files: (query: string) => Promise<FolderFile[]> };
-  /** The harness's own commands, when it lists them; `/` opens only then. */
-  commands?: { name: string; description?: string | null | undefined }[];
+  /** Commands the harness or Chat supports. */
+  commands?: ComposerCommand[] | undefined;
+  skills?:
+    { folder: string | null; load: () => Promise<HarnessSkill[]> } | undefined;
   harness: string;
 };
 
-type Option = { id: string; insert: Insert; group: string };
+type Option = {
+  id: string;
+  insert: Insert;
+  group: string;
+  run?: (() => void) | undefined;
+};
 /** A search's answer, for the trigger `key` it was asked for. */
 type Answer = {
   key: string;
@@ -211,6 +228,12 @@ export function ComposerField({
       : null;
   const openKey = open ? `${open.char}${open.start}:${open.query}` : "";
   const query = open?.query.trim() ?? "";
+  const skillSearch = open?.char === "$" ? mentions?.skills : undefined;
+  const searchingSkills = skillSearch !== undefined;
+  // One folder lookup supplies every query until the skill menu closes.
+  const searchKey = skillSearch
+    ? `skills:${skillSearch.folder ?? ""}`
+    : openKey;
   // Linked records and the harness's commands are at hand; only searches wait.
   const atHand: Option[] | null =
     !open || !mentions
@@ -224,6 +247,7 @@ export function ComposerField({
               id: command.name,
               group: command.description ?? "",
               insert: { kind: "command", text: `/${command.name}` },
+              run: command.run,
             }))
         : null;
   // `#` with nothing typed: the linked records at once, then the recently
@@ -232,10 +256,20 @@ export function ComposerField({
     open?.char === "#" && !query && mentions
       ? recordOptions(mentions.linked, "Linked to this Chat")
       : null;
-  const searches = Boolean(open && atHand === null);
-  // What the open trigger asks for, read when the trigger changes (`openKey`).
+  const searches = Boolean(
+    open && atHand === null && (open.char !== "$" || searchingSkills),
+  );
+  // What the open trigger asks for, read when its search changes.
   const search = useEffectEvent(() => {
     if (!open || !mentions) return null;
+    if (open.char === "$")
+      return skillSearch?.load().then((skills) =>
+        skills.map((skill): Option => ({
+          id: skill.name,
+          group: skill.description,
+          insert: { kind: "skill", text: `$${skill.name}` },
+        })),
+      );
     const folder = mentions.folder;
     return open.char === "#"
       ? mentions.records(query).then((found) =>
@@ -277,20 +311,23 @@ export function ComposerField({
     let current = true;
     search()?.then(
       (options) =>
-        current && setAnswer({ key: openKey, options, state: "ready" }),
+        current && setAnswer({ key: searchKey, options, state: "ready" }),
       (reason: unknown) =>
         current &&
         setAnswer({
-          key: openKey,
+          key: searchKey,
           options: [],
           state: "failed",
-          error: failureText(reason, "search"),
+          error: failureText(
+            reason,
+            searchingSkills ? "load skills" : "search",
+          ),
         }),
     );
     return () => {
       current = false;
     };
-  }, [openKey, searches]);
+  }, [searchKey, searches, searchingSkills]);
   // A new trigger starts at its first option.
   const [activeFor, setActiveFor] = useState(openKey);
   if (activeFor !== openKey) {
@@ -298,16 +335,21 @@ export function ComposerField({
     setActive(0);
   }
 
-  // `/` opens only when the harness lists commands; with none it is plain text.
   const commandsListed = (mentions?.commands?.length ?? 0) > 0;
-  const answered = answer?.key === openKey ? answer : null;
+  const answered = answer?.key === searchKey ? answer : null;
+  const matches = searchingSkills
+    ? answered?.options.filter((option) =>
+        option.id.toLowerCase().includes(query.toLowerCase()),
+      )
+    : answered?.options;
   const shown =
     open &&
     !(open.char === "/" && !commandsListed) &&
+    !(open.char === "$" && !searchingSkills) &&
     !(open.char === "@" && !mentions?.folder)
       ? {
           trigger: open,
-          options: atHand ?? answered?.options ?? linkedFirst ?? [],
+          options: atHand ?? matches ?? linkedFirst ?? [],
           state:
             atHand || (!answered && linkedFirst?.length)
               ? "ready"
@@ -344,6 +386,15 @@ export function ComposerField({
     const textarea = box.current;
     if (!textarea || !open) return;
     const caret = textarea.selectionStart;
+    if (option.run) {
+      replaceRange(textarea, open.start, caret, "", () => {
+        caretAfter.current = open.start;
+        changed(text.slice(0, open.start) + text.slice(caret), open.start);
+      });
+      setTrigger(null);
+      option.run();
+      return;
+    }
     const after = text.slice(caret);
     const spaced = /^\s/.test(after)
       ? option.insert.text
@@ -456,7 +507,7 @@ export function ComposerField({
       name:
         shown.trigger.char === "@"
           ? `Files in ${mentions?.folder?.name ?? "this folder"}`
-          : `${mentions?.harness ?? "Harness"} commands`,
+          : `${mentions?.harness ?? "Harness"} ${shown.trigger.char === "$" ? "skills" : "commands"}`,
       items: options.map((option, index) => ({ option, index })),
     });
   const empty =
@@ -471,7 +522,11 @@ export function ComposerField({
             ? query
               ? "No ticket, Document or Project has that in its name."
               : "Type part of a name to find it."
-            : `No ${mentions?.harness ?? "harness"} command matches “${query}”.`
+            : shown.trigger.char === "$"
+              ? query
+                ? `No skill matches “${query}”.`
+                : "No skills are available in this folder."
+              : `No ${mentions?.harness ?? "harness"} command matches “${query}”.`
       : "";
 
   // The layer behind the text draws record tokens as links.
@@ -511,9 +566,13 @@ export function ComposerField({
                       onMouseEnter={() => setActive(index)}
                     >
                       <OptionLabel option={option} />
-                      {option.insert.kind === "command" && option.group && (
-                        <span className="chat-menu-detail">{option.group}</span>
-                      )}
+                      {(option.insert.kind === "command" ||
+                        option.insert.kind === "skill") &&
+                        option.group && (
+                          <span className="chat-menu-detail">
+                            {option.group}
+                          </span>
+                        )}
                     </li>
                   ))}
                 </ul>

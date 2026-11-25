@@ -753,6 +753,19 @@ impl ChatHost {
         Ok(adapter.options().await)
     }
 
+    pub async fn skills(
+        &self,
+        harness: &str,
+        folder: &std::path::Path,
+    ) -> Result<Result<Vec<crate::HarnessSkill>, String>, HostError> {
+        let adapter = self
+            .inner
+            .adapters
+            .get(harness)
+            .ok_or_else(|| HostError::HarnessUnavailable(harness.to_owned()))?;
+        Ok(adapter.skills(folder).await)
+    }
+
     /// Sends input again although its first delivery is uncertain, because the person
     /// asked for exactly that. Only that input is dispatched, as a new submission, and
     /// the queue is left paused. Refused while the Chat is working.

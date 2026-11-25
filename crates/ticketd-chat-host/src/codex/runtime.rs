@@ -525,22 +525,73 @@ async fn list_options(connection: &AppServer) -> Result<HarnessOptions, String> 
         .initialize(false)
         .await
         .map_err(|problem| problem.message)?;
-    let models = list_all(connection, "model/list").await?;
+    let models = list_all(connection, "model/list", json!({})).await?;
     // Profiles are optional: an older Codex has no such list.
-    let profiles = list_all(connection, "permissionProfile/list").await.ok();
+    let profiles = list_all(connection, "permissionProfile/list", json!({}))
+        .await
+        .ok();
     Ok(report::listed_options(&models, profiles.as_deref()))
 }
 
+/// Probes the installed Codex's skill catalog without opening a thread.
+pub(super) async fn probe_skills(
+    io: Io,
+    options: Options,
+    folder: &std::path::Path,
+) -> Result<Vec<crate::HarnessSkill>, String> {
+    let (connection, _events) = AppServer::start(io, RuntimeGeneration(0), options);
+    let listed = async {
+        connection
+            .initialize(false)
+            .await
+            .map_err(|problem| problem.message)?;
+        let entries = list_all(
+            &connection,
+            "skills/list",
+            json!({"cwds": [folder.to_string_lossy()]}),
+        )
+        .await?;
+        let skills = entries
+            .first()
+            .and_then(|entry| entry["skills"].as_array())
+            .ok_or_else(|| "Codex answered skills/list without skills for the folder".to_owned())?;
+        let mut names = std::collections::HashSet::new();
+        Ok(skills
+            .iter()
+            .filter_map(|skill| {
+                let name = skill["name"].as_str()?;
+                if skill["enabled"].as_bool() != Some(true)
+                    || name.is_empty()
+                    || !names.insert(name)
+                {
+                    return None;
+                }
+                Some(crate::HarnessSkill {
+                    name: name.to_owned(),
+                    description: skill["shortDescription"]
+                        .as_str()
+                        .or_else(|| skill["description"].as_str())
+                        .unwrap_or_default()
+                        .to_owned(),
+                })
+            })
+            .collect())
+    }
+    .await;
+    connection.close().await;
+    listed
+}
+
 /// Every page of a `*/list` request, following `nextCursor`.
-async fn list_all(connection: &AppServer, method: &str) -> Result<Vec<Value>, String> {
+async fn list_all(
+    connection: &AppServer,
+    method: &str,
+    mut params: Value,
+) -> Result<Vec<Value>, String> {
     let mut all = Vec::new();
     let mut cursor: Option<String> = None;
     loop {
-        let params = match &cursor {
-            Some(cursor) => json!({"cursor": cursor}),
-            None => json!({}),
-        };
-        let reply = match connection.request(method, params).await {
+        let reply = match connection.request(method, params.clone()).await {
             CallOutcome::Reply(reply) => reply,
             CallOutcome::Error(error) => return Err(rejection_reason(&error)),
             CallOutcome::TimedOut => return Err(format!("Codex did not answer {method}")),
@@ -554,7 +605,10 @@ async fn list_all(connection: &AppServer, method: &str) -> Result<Vec<Value>, St
             .ok_or_else(|| format!("Codex answered {method} without a list"))?;
         all.extend(page.iter().cloned());
         match reply.get("nextCursor").and_then(Value::as_str) {
-            Some(next) if cursor.as_deref() != Some(next) => cursor = Some(next.to_owned()),
+            Some(next) if cursor.as_deref() != Some(next) => {
+                params["cursor"] = json!(next);
+                cursor = Some(next.to_owned());
+            }
             _ => return Ok(all),
         }
     }

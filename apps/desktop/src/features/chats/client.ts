@@ -139,6 +139,7 @@ export type ChatStatus = z.infer<typeof chatStatusSchema>;
 /** A Project as a Chat names it: the folder's Project, else a linked one. */
 export const projectRefSchema = z.object({ id: z.string(), title: z.string() });
 export type ProjectRef = z.infer<typeof projectRefSchema>;
+export type ProjectFolder = { project: ProjectRef; path: string };
 
 export const chatSummarySchema = z.object({
   id: z.string(),
@@ -619,6 +620,12 @@ export const harnessOptionsSchema = z.object({
 });
 export type HarnessOptions = z.infer<typeof harnessOptionsSchema>;
 
+export const harnessSkillSchema = z.object({
+  name: z.string().min(1),
+  description: z.string(),
+});
+export type HarnessSkill = z.infer<typeof harnessSkillSchema>;
+
 export const chatStateSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -831,8 +838,14 @@ export interface ChatClient {
   harnessCatalog(): Promise<HarnessInfo[]>;
   /** What a harness offers before a session; asked of the harness once per version. */
   harnessOptions(harnessId: string): Promise<HarnessOptions>;
+  harnessSkills(
+    harnessId: string,
+    folder: string | null,
+  ): Promise<HarnessSkill[]>;
   /** The native folder dialog; null when dismissed. */
   pickFolder(): Promise<string | null>;
+  /** Registered Project checkouts on this computer. */
+  listProjectFolders(): Promise<ProjectFolder[]>;
   /** How many Chats already run in the folder. */
   folderUse(path: string): Promise<number>;
   /** The Project whose checkout holds `path`, for New Chat's folder button. */

@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -12,6 +13,7 @@ import {
 import {
   ArrowLeft,
   ArrowUpRight,
+  ChevronDown,
   Maximize2,
   Minimize2,
   Trash2,
@@ -26,6 +28,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { ofTotal } from "@/lib/format";
@@ -53,11 +60,14 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
+import { ChatFolderChoices } from "@/features/chats/ChatFolderChoices";
 import { ChatContext, ContextCount } from "@/features/chats/ChatContext";
 import { ComposerControls } from "@/features/chats/ComposerControls";
 import {
   labelOf,
   settingLine,
+  shownOf,
+  useCodexCommands,
   type AskedChange,
 } from "@/features/chats/composer-settings";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -136,12 +146,13 @@ function NoticeText({ text, path }: { text: string; path?: string }) {
   return nodes;
 }
 
-const ACTION_LABEL: Record<Exclude<NoticeAction, "help">, string> = {
+type ButtonAction = Exclude<NoticeAction, "help" | "pick-folder">;
+
+const ACTION_LABEL: Record<ButtonAction, string> = {
   check: "Check again",
   "copy-command": "Copy command",
   resend: "Send again",
   discard: "Don't send",
-  "pick-folder": "Choose a folder…",
   "start-fresh": "Start fresh",
   resume: "Resume in a fresh session…",
 };
@@ -155,11 +166,13 @@ export function ProblemNotice({
   problem,
   harness,
   onAction,
+  folderPicker,
   flat = false,
 }: {
   problem: Problem;
   harness: string;
-  onAction: (action: Exclude<NoticeAction, "help" | "copy-command">) => void;
+  onAction: (action: Exclude<ButtonAction, "copy-command">) => void;
+  folderPicker?: ReactNode;
   flat?: boolean;
 }) {
   const notice = problemNotice(
@@ -204,6 +217,8 @@ export function ProblemNotice({
             >
               {copied ? "Copied" : ACTION_LABEL[action]}
             </Button>
+          ) : action === "pick-folder" ? (
+            <Fragment key={action}>{folderPicker}</Fragment>
           ) : (
             <Button
               key={action}
@@ -433,6 +448,12 @@ function Conversation({
     quoteCount.current = quotes.length;
   }, [quotes.length]);
   const folder = chat.folder;
+  const codex = chat.harness.id === "codex";
+  const permission = chat.settings?.permission;
+  const { commands, openers } = useCodexCommands(
+    codex,
+    Boolean(permission?.changeable && shownOf(permission)),
+  );
   const mentions = useMemo<ComposerMentions>(
     () => ({
       records: (query) => client.searchRecords(query),
@@ -443,13 +464,22 @@ function Conversation({
           files: (query: string) => client.folderFiles(folder.path, query),
         },
       }),
-      commands: chat.commands,
+      commands: chat.commands.length ? chat.commands : commands,
+      skills:
+        codex && !folder.missing
+          ? {
+              folder: folder.path,
+              load: () => client.harnessSkills("codex", folder.path),
+            }
+          : undefined,
       harness,
     }),
     [
       client,
       chat.links,
       chat.commands,
+      commands,
+      codex,
       folder.missing,
       folder.name,
       folder.path,
@@ -647,20 +677,13 @@ function Conversation({
   // Pickers and menus opened in the conversation stay below the pane header.
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const trashed = chat.retention === "trashed";
-  const onNotice = (action: Exclude<NoticeAction, "help" | "copy-command">) => {
+  const onNotice = (action: Exclude<ButtonAction, "copy-command">) => {
     if (action === "check") quietly(client.checkAgain(id), "check again");
     else if (action === "start-fresh") {
       void run(client.resume(id, { kind: "none" }), "start a fresh session")
         .then(() => setFreshStarts((count) => count + 1))
         .catch(() => {});
     } else if (action === "resume") setResuming(true);
-    else if (action === "pick-folder")
-      quietly(
-        client
-          .pickFolder()
-          .then((path) => (path ? client.setFolder(id, path) : undefined)),
-        "change the folder",
-      );
     else if (chat.problem?.message_id)
       quietly(
         client.resolveUncertain(
@@ -671,6 +694,26 @@ function Conversation({
         action === "resend" ? "send it again" : "discard it",
       );
   };
+  const folderPicker = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm">
+          Choose a folder… <ChevronDown aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <ChatFolderChoices
+          unavailableFolder={chat.folder.path}
+          onPick={(path) =>
+            quietly(client.setFolder(id, path), "change the folder")
+          }
+          onBrowseError={(reason) =>
+            setFailure(chatFailure(reason, "change the folder"))
+          }
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
   return (
     <OverlayBoundary element={body}>
       <div ref={setBody} className="chat-body" onKeyDown={onPaneKey}>
@@ -789,6 +832,7 @@ function Conversation({
                 problem={problem}
                 harness={harness}
                 onAction={onNotice}
+                folderPicker={folderPicker}
               />
             )
           ) : (
@@ -804,6 +848,7 @@ function Conversation({
                     problem={problem}
                     harness={harness}
                     onAction={onNotice}
+                    folderPicker={folderPicker}
                   />
                 )}
                 <ActivityDock
@@ -958,6 +1003,7 @@ function Conversation({
                   <ComposerControls
                     chat={chat}
                     inputRef={messageBox}
+                    openers={openers}
                     onChange={(setting, value) =>
                       void client.changeSetting(id, setting, value).then(
                         (outcome) => {

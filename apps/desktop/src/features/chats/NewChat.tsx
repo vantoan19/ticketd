@@ -11,7 +11,6 @@ import {
 } from "react";
 import {
   ArrowLeft,
-  Check,
   ChevronDown,
   Folder,
   Maximize2,
@@ -22,8 +21,6 @@ import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
@@ -38,9 +35,14 @@ import {
   type ProjectRef,
 } from "@/features/chats/client";
 import { ProblemNotice } from "@/features/chats/ChatDetail";
+import {
+  ChatFolderChoices,
+  SCRATCH_FOLDER,
+} from "@/features/chats/ChatFolderChoices";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { Composer } from "@/features/chats/Composer";
 import type { Token } from "@/features/chats/composer-mentions";
+import { useCodexCommands } from "@/features/chats/composer-settings";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
 import { arrivals, draftOf } from "@/features/chats/drafts";
@@ -69,25 +71,8 @@ import {
   type Pick,
 } from "@/features/chats/harness-pick";
 import { notificationClient } from "@/lib/api/notifications";
+import { withoutVerbatim } from "@/lib/paths";
 import { loadPreferences } from "@/lib/preferences";
-
-/** The folder ticketd makes for a Chat when none is chosen. */
-const SCRATCH = "Scratch folder";
-
-/** A recent folder: its name, where it is, and a check on the current one. */
-function FolderLine({ path, current }: { path: string; current: boolean }) {
-  const name = path.split(/[\\/]/).filter(Boolean).at(-1) ?? path;
-  const parent = path.slice(0, path.lastIndexOf(name)).replace(/[\\/]$/, "");
-  return (
-    <span className="chat-folder-option">
-      <span className="chat-folder-option-line">
-        <span>{name}</span>
-        {current && <Check aria-hidden />}
-      </span>
-      <small>{parent || path}</small>
-    </span>
-  );
-}
 
 /**
  * Starts a Chat: a first message, the harness (chosen only here), the folder
@@ -328,6 +313,12 @@ export function NewChat({
     rememberPick(harness.id, next);
   };
   const folderName = folder?.split(/[\\/]/).filter(Boolean).at(-1);
+  const codex = harness?.id === "codex";
+  const canListSkills = codex && ready;
+  const { commands, openers } = useCodexCommands(
+    codex,
+    Boolean(offered?.permission?.changeable),
+  );
   const mentions = useMemo<ComposerMentions>(
     () => ({
       records: (query) => client.searchRecords(query),
@@ -338,9 +329,13 @@ export function NewChat({
           files: (query: string) => client.folderFiles(folder, query),
         },
       }),
+      commands,
+      skills: canListSkills
+        ? { folder, load: () => client.harnessSkills("codex", folder) }
+        : undefined,
       harness: harness?.name ?? "Harness",
     }),
-    [client, links, folder, folderName, harness?.name],
+    [client, links, folder, folderName, harness?.name, commands, canListSkills],
   );
   return (
     <section className="ticket-detail chat-pane" aria-labelledby="chat-heading">
@@ -438,6 +433,7 @@ export function NewChat({
                     }}
                     onOpenChange={setPickerOpen}
                     inputRef={input}
+                    openers={openers}
                   />
                 }
                 retryRef={retrySend}
@@ -514,8 +510,8 @@ export function NewChat({
                   content={
                     folder
                       ? project
-                        ? `${project.title} · ${folder}`
-                        : folder
+                        ? `${project.title} · ${withoutVerbatim(folder)}`
+                        : withoutVerbatim(folder)
                       : "A new empty folder kept by ticketd"
                   }
                 >
@@ -523,7 +519,11 @@ export function NewChat({
                     <Button
                       variant="ghost"
                       size="xs"
-                      aria-label={folder ? `Folder: ${folder}` : SCRATCH}
+                      aria-label={
+                        folder
+                          ? `Folder: ${withoutVerbatim(folder)}`
+                          : SCRATCH_FOLDER
+                      }
                     >
                       {project ? (
                         <ProjectIcon project={project} />
@@ -537,7 +537,7 @@ export function NewChat({
                             {folderName}
                           </>
                         ) : (
-                          SCRATCH
+                          SCRATCH_FOLDER
                         )}
                       </span>
                       <ChevronDown aria-hidden />
@@ -545,37 +545,13 @@ export function NewChat({
                   </DropdownMenuTrigger>
                 </Tooltip>
                 <DropdownMenuContent align="start" className="w-72">
-                  {[...new Set([...(folder ? [folder] : []), ...recent])].map(
-                    (path) => (
-                      <DropdownMenuItem
-                        key={path}
-                        onSelect={() => setFolder(path)}
-                      >
-                        <FolderLine path={path} current={path === folder} />
-                      </DropdownMenuItem>
-                    ),
-                  )}
-                  <DropdownMenuItem onSelect={() => setFolder(null)}>
-                    <span className="chat-folder-option">
-                      <span className="chat-folder-option-line">
-                        <span>{SCRATCH}</span>
-                        {folder === null && <Check aria-hidden />}
-                      </span>
-                      <small>A new empty folder kept by ticketd</small>
-                    </span>
-                  </DropdownMenuItem>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem
-                    onSelect={() =>
-                      void client.pickFolder().then(
-                        (path) => path && setFolder(path),
-                        (reason: unknown) =>
-                          setFailure(chatFailure(reason, "choose the folder")),
-                      )
+                  <ChatFolderChoices
+                    draft={{ folder, recent, onScratch: () => setFolder(null) }}
+                    onPick={setFolder}
+                    onBrowseError={(reason) =>
+                      setFailure(chatFailure(reason, "choose the folder"))
                     }
-                  >
-                    Choose a folder…
-                  </DropdownMenuItem>
+                  />
                 </DropdownMenuContent>
               </DropdownMenu>
               {links.map((record) => (
@@ -644,7 +620,7 @@ export function NewChat({
                 ? linkedNote
                 : "Checking which harnesses are installed…"}
             </p>
-            {folderMissing && (
+            {folderMissing && folder === null && (
               <p className="chat-fine">
                 Project folder isn’t on this computer; using a scratch folder.
               </p>

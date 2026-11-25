@@ -12,6 +12,7 @@ import {
   folderFileSchema,
   harnessInfoSchema,
   harnessOptionsSchema,
+  harnessSkillSchema,
   harnessStatusSchema,
   linkedRecordSchema,
   settingChangeSchema,
@@ -23,6 +24,7 @@ import {
   projectRefSchema,
 } from "@/features/chats/client";
 import { loadPreferences, setPreference } from "@/lib/preferences";
+import { projectSchema } from "@/lib/api/client";
 import { typedReference } from "@/features/tickets/ticket-references";
 import {
   CaptureError,
@@ -150,6 +152,8 @@ export function createHostChatClient(
   const run = async (command: string, args?: Record<string, unknown>) => {
     await call(command, args);
   };
+  const listProjects = async () =>
+    z.array(projectSchema).parse(await call("list_projects"));
   function subscribeTo<T>(
     event: string,
     schema: z.ZodType<T>,
@@ -238,12 +242,19 @@ export function createHostChatClient(
       harnessOptionsSchema.parse(
         await call("chat_harness_options", { harnessId }),
       ),
-    pickFolder: () => bridge.pickFolder(),
-    projectFolder: async (projectId) =>
+    harnessSkills: async (harnessId, folder) =>
       z
-        .array(z.object({ id: z.string(), path: z.string() }))
-        .parse(await call("list_projects"))
-        .find((project) => project.id === projectId)?.path || null,
+        .array(harnessSkillSchema)
+        .parse(await call("chat_harness_skills", { harnessId, folder })),
+    pickFolder: () => bridge.pickFolder(),
+    listProjectFolders: async () =>
+      (await listProjects()).flatMap(({ id, name, paths }) => {
+        const project = { id, title: name };
+        return paths.filter(Boolean).map((path) => ({ project, path }));
+      }),
+    projectFolder: async (projectId) =>
+      (await listProjects()).find((project) => project.id === projectId)
+        ?.path || null,
     folderProject: async (path) =>
       projectRefSchema
         .nullable()

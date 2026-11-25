@@ -394,6 +394,13 @@ fn folder_argument(path: &str) -> Outcome<String> {
     Ok(path.to_owned())
 }
 
+fn managed_chat_folders(workspace: &Workspace) -> Outcome<PathBuf> {
+    Ok(PathBuf::from(format!(
+        "{}.chats",
+        workspace.workspace_info()?.path
+    )))
+}
+
 /// The number in a harness's version output ("codex-cli 0.150.0", "2.1.322 (Claude Code)"),
 /// which names the tool itself; the whole text when no number is found.
 fn version_number(output: &str) -> &str {
@@ -1460,7 +1467,25 @@ impl Chats {
         Ok(view)
     }
 
-    /// How many Chats outside the trash already use the folder.
+    pub async fn skills(
+        &self,
+        harness_id: &str,
+        folder: Option<&str>,
+    ) -> Outcome<Vec<ticketd_chat_host::HarnessSkill>> {
+        let host = self.host()?;
+        let folder = if let Some(folder) = folder {
+            PathBuf::from(folder_argument(folder)?)
+        } else {
+            let workspace = self.workspace()?;
+            let folder = managed_chat_folders(&workspace)?;
+            std::fs::create_dir_all(&folder).map_err(|error| {
+                failed(format!("could not prepare the scratch folder: {error}"))
+            })?;
+            folder
+        };
+        host.skills(harness_id, &folder).await?.map_err(failed)
+    }
+
     /// The Project whose checkout holds `path`, for New Chat's folder button.
     pub fn folder_project(&self, path: &str) -> Outcome<Option<ProjectRef>> {
         Ok(self
@@ -1472,6 +1497,7 @@ impl Chats {
             }))
     }
 
+    /// How many Chats outside the trash already use the folder.
     pub fn folder_use(&self, path: &str) -> Outcome<usize> {
         let workspace = self.workspace()?;
         let mut count = 0;
@@ -1499,7 +1525,7 @@ impl Chats {
             // Beside the Workspace, one folder per Chat, named by the request.
             let execution_folder = match &input.folder {
                 Some(path) => path.clone(),
-                None => PathBuf::from(format!("{}.chats", workspace.workspace_info()?.path))
+                None => managed_chat_folders(&workspace)?
                     .join(&command_id)
                     .to_string_lossy()
                     .into_owned(),

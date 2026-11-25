@@ -29,8 +29,8 @@ use serde_json::{Value, json};
 
 use crate::stdio::{Serving, spawn, version_output};
 use crate::{
-    Harness, HarnessAdapter, HarnessOptions, Inspection, OpenRequest, OpenedRuntime, Problem,
-    ProblemKind, ProviderDetail, Refusal, Setting, Unattended,
+    Harness, HarnessAdapter, HarnessOptions, HarnessSkill, Inspection, OpenRequest, OpenedRuntime,
+    Problem, ProblemKind, ProviderDetail, Refusal, Setting, Unattended,
 };
 use ticketd_core::{AutomationAgentTools, ChatAttachmentContent};
 
@@ -251,6 +251,21 @@ impl HarnessAdapter for CodexAdapter {
         )
         .map_err(|error| error.to_string())?;
         runtime::probe_options(io, Options::default()).await
+    }
+
+    async fn skills(&self, folder: &Path) -> Result<Vec<HarnessSkill>, String> {
+        let executable = self
+            .executable()
+            .ok_or_else(|| "Codex was not found".to_owned())?;
+        let io = spawn(
+            &executable,
+            ARGUMENTS,
+            Serving::Nothing,
+            self.harness(),
+            Some(folder),
+        )
+        .map_err(|error| error.to_string())?;
+        runtime::probe_skills(io, Options::default(), folder).await
     }
 
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {

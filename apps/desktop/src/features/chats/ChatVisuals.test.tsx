@@ -346,6 +346,59 @@ const box = () =>
     "Describe a task or ask a question",
   );
 
+test("New Codex Chat offers slash commands before its first message", async () => {
+  const client = await show([], {
+    harnesses: [{ id: "codex", name: "Codex", status: "ready" }],
+  });
+  await screen.findByRole("button", { name: /Codex.*model/i });
+  fireEvent.change(box(), { target: { value: "/mod" } });
+  expect(await screen.findByRole("option", { name: /\/model/ })).toBeTruthy();
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(
+    await screen.findByRole("dialog", { name: "Harness and model" }),
+  ).toBeTruthy();
+  expect(box().value).toBe("");
+  fireEvent.keyDown(screen.getByRole("dialog", { name: "Harness and model" }), {
+    key: "Escape",
+  });
+  await screen.findByRole("button", { name: /^Permissions:/ });
+  fireEvent.change(box(), { target: { value: "/perm" } });
+  expect(
+    await screen.findByRole("option", { name: /\/permissions/ }),
+  ).toBeTruthy();
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(await screen.findByRole("menu")).toBeTruthy();
+  expect(await client.listChats("active")).toEqual([]);
+});
+
+test("New Codex Chat offers enabled skills and inserts a mention without sending", async () => {
+  const client = await show([], {
+    harnesses: [{ id: "codex", name: "Codex", status: "ready" }],
+  });
+  const skills = vi.fn(async () => [
+    { name: "check-logs", description: "Inspect application logs" },
+  ]);
+  client.harnessSkills = skills;
+  await screen.findByRole("button", { name: /Codex.*model/i });
+  fireEvent.change(box(), { target: { value: "Use $" } });
+  expect(
+    await screen.findByRole("option", { name: /\$check-logs/ }),
+  ).toBeTruthy();
+  fireEvent.change(box(), { target: { value: "Use $ch" } });
+  expect(
+    await screen.findByRole("option", { name: /\$check-logs/ }),
+  ).toBeTruthy();
+  fireEvent.keyDown(box(), { key: "Tab" });
+  expect(box().value).toBe("Use $check-logs ");
+  expect(skills).toHaveBeenCalledWith("codex", null);
+  expect(skills).toHaveBeenCalledTimes(1);
+  expect(await client.listChats("active")).toEqual([]);
+  fireEvent.keyDown(box(), { key: "Enter" });
+  await waitFor(() => {
+    expect(client.created[0]?.message).toBe("Use $check-logs");
+  });
+});
+
 test("a suggestion fills the box and links its record, never sends, and undoes as one step", async () => {
   const client = await show([], { suggestions });
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));

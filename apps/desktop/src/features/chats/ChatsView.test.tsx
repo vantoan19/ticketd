@@ -1041,42 +1041,66 @@ test("failures say exactly what stopped the Chat and how to recover", async () =
   await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
 });
 
-test("a missing folder keeps the Chat readable and offers another folder", async () => {
-  const client = await open(
-    one(
-      {
-        id: "c1",
-        title: "Reset email",
-        activity: "failed",
-        folder: {
-          missing: true,
-          path: "~/ticketd/chats/reset-email",
-          name: "reset-email",
+test.each(["Checkout", "Choose a folder…"])(
+  "a missing folder keeps the Chat readable and can be replaced via %s",
+  async (choice) => {
+    const client = await open(
+      one(
+        {
+          id: "c1",
+          title: "Reset email",
+          activity: "failed",
+          folder: {
+            missing: true,
+            path: "~/ticketd/chats/reset-email",
+            name: "reset-email",
+          },
+          problem: {
+            kind: "folder_missing",
+            path: "~/ticketd/chats/reset-email",
+          },
         },
-        problem: {
-          kind: "folder_missing",
+        [reply("r1", "Drafted the copy.")],
+      ),
+    );
+    expect(screen.getAllByText("Drafted the copy.").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("Message Codex")).toBeNull();
+    // The FolderX icon says missing; the accessible name says it in words.
+    expect(button("Folder reset-email, missing").textContent).toBe(
+      "reset-email",
+    );
+    // The path reads like the folder popover's: one line, not a code block.
+    const notice = screen.getByRole("alert");
+    expect(notice.querySelector('[data-slot="path-text"]')?.textContent).toBe(
+      "~/ticketd/chats/reset-email",
+    );
+    expect(notice.querySelector("code")).toBeNull();
+    expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
+    const path = "/work/emails";
+    if (choice === "Checkout") {
+      client.projectCheckouts = [
+        {
+          project: { id: "missing", title: "Missing checkout" },
           path: "~/ticketd/chats/reset-email",
         },
-      },
-      [reply("r1", "Drafted the copy.")],
-    ),
-  );
-  expect(screen.getAllByText("Drafted the copy.").length).toBeGreaterThan(0);
-  expect(screen.queryByLabelText("Message Codex")).toBeNull();
-  // The FolderX icon says missing; the accessible name says it in words.
-  expect(button("Folder reset-email, missing").textContent).toBe("reset-email");
-  // The path reads like the folder popover's: one line, not a code block.
-  const notice = screen.getByRole("alert");
-  expect(notice.querySelector('[data-slot="path-text"]')?.textContent).toBe(
-    "~/ticketd/chats/reset-email",
-  );
-  expect(notice.querySelector("code")).toBeNull();
-  expect(notice.textContent).toContain("wasn't found. Nothing was re-run.");
-  client.nextFolder = "~/code/emails";
-  fireEvent.click(button("Choose a folder…"));
-  expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
-  expect(button("Folder emails").textContent).toBe("emails");
-});
+        { project: { id: "p1", title: "Checkout" }, path },
+      ];
+    }
+    client.nextFolder = path;
+    const browse = vi.spyOn(client, "pickFolder");
+    fireEvent.keyDown(button("Choose a folder…"), { key: "Enter" });
+    const replacement = await screen.findByRole("menuitem", {
+      name: choice === "Checkout" ? "Checkout /work/emails" : choice,
+    });
+    expect(
+      screen.queryByRole("menuitem", { name: /Missing checkout/ }),
+    ).toBeNull();
+    fireEvent.click(replacement);
+    expect(browse).toHaveBeenCalledTimes(choice === "Checkout" ? 0 : 1);
+    expect(await screen.findByLabelText("Message Codex")).toBeTruthy();
+    expect(button("Folder emails").textContent).toBe("emails");
+  },
+);
 
 const nativeHistoryLost = {
   id: "c1",
@@ -2947,6 +2971,38 @@ test("LIVE2-4: only the harness's default is tagged Default, and only once", asy
     "Opus 5.5",
   ]);
   localStorage.clear();
+});
+
+test("New Chat starts in the Project checkout chosen from the folder menu", async () => {
+  const client = await open([]);
+  const project = { id: "p1", title: "Storefront" };
+  const checkout = String.raw`\\?\C:\Worktrees\storefront`;
+  client.projectCheckouts = [
+    { project, path: String.raw`\\?\C:\Projects\storefront` },
+    { project, path: checkout },
+  ];
+  const browse = vi.spyOn(client, "pickFolder");
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.keyDown(button("Scratch folder"), { key: "Enter" });
+  expect(
+    await screen.findByRole("menuitem", {
+      name: String.raw`Storefront C:\Projects\storefront`,
+    }),
+  ).toBeTruthy();
+  fireEvent.click(
+    screen.getByRole("menuitem", {
+      name: String.raw`Storefront C:\Worktrees\storefront`,
+    }),
+  );
+  expect(browse).not.toHaveBeenCalled();
+  expect(button(String.raw`Folder: C:\Worktrees\storefront`)).toBeTruthy();
+
+  type("Review the checkout", "Describe a task or ask a question");
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.click(button("Send"));
+  await screen.findByRole("heading", { name: "Review the checkout" });
+  const { chat } = await client.openChat("chat-1");
+  expect(chat.folder.path).toBe(checkout);
 });
 
 test("linking a Project with a folder in New Chat starts the Chat there", async () => {

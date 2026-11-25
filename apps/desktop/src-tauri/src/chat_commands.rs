@@ -408,6 +408,15 @@ pub async fn chat_harness_options(
 }
 
 #[tauri::command]
+pub async fn chat_harness_skills(
+    bridge: State<'_, ChatBridge>,
+    harness_id: String,
+    folder: Option<String>,
+) -> Outcome<Vec<ticketd_chat_host::HarnessSkill>> {
+    bridge.chats.skills(&harness_id, folder.as_deref()).await
+}
+
+#[tauri::command]
 pub async fn chat_folder_use(bridge: State<'_, ChatBridge>, path: String) -> Outcome<usize> {
     bridge.chats.folder_use(&path)
 }
