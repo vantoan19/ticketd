@@ -220,3 +220,17 @@ test("renders both Markdown hard breaks as line breaks", () => {
   for (const paragraph of paragraphs)
     expect(paragraph.querySelectorAll("br")).toHaveLength(1);
 });
+
+test("marks a paragraph that is only bold so a Chat can set it as a heading", () => {
+  const { container } = render(
+    <MarkdownDocument
+      source={
+        "**What the plan does:**\n\n- First\n\nA **bold** word inside prose.\n\n**Lead-in** followed by prose.\n\n**One** **two**\n\n__Underscored__\n\n- **Item** alone\n\n- Second"
+      }
+    />,
+  );
+  const marked = [...container.querySelectorAll("p[data-bold-only]")].map(
+    (paragraph) => paragraph.textContent,
+  );
+  expect(marked).toEqual(["What the plan does:", "Underscored"]);
+});
