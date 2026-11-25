@@ -85,6 +85,7 @@ fn editing_a_document_saves_the_previous_version() {
                 title: Some(None),
                 body: Some("Two".into()),
                 expected_updated_at: None,
+                ..Default::default()
             },
         )
         .unwrap();
@@ -154,6 +155,7 @@ fn restoring_a_document_version_is_a_new_edit_that_appears_in_history() {
                 title: Some(None),
                 body: Some("Two".into()),
                 expected_updated_at: None,
+                ..Default::default()
             },
         )
         .unwrap();
