@@ -215,21 +215,48 @@
   padding: 0;
   margin: 0;
 }
-.document-state-row {
+/* The line under the title: one line that wraps, its parts joined by dots. */
+.document-meta {
   display: flex;
   flex: none;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
-  height: 32px;
-  margin: -16px 0 8px;
+  gap: 6px 8px;
+  margin: -10px 0 8px;
   min-width: 0;
 }
-.document-subtitle {
-  margin: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.document-meta-item,
+.document-meta-part {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
 }
-.document-state-row .document-status {
+.document-meta-item {
+  gap: 8px;
+}
+.document-meta .document-status {
+  flex: none;
+}
+.document-meta-name {
+  color: var(--foreground);
+}
+.document-meta .document-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+}
+.document-meta .document-tags li {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 24px;
+  padding-left: 8px;
+  max-width: 100%;
+}
+.document-status {
   flex: none;
   margin-left: auto;
 }
@@ -252,97 +279,65 @@
   left: 24px;
   min-height: 32px;
 }
-.document-rail {
+/* The end of a Document: what it belongs to, then the mentions behind one closed line. */
+.document-end {
   display: flex;
   flex-direction: column;
-  gap: 20px;
-  margin-top: 20px;
-}
-.document-linked-header {
-  display: flex;
-  align-items: center;
   gap: 8px;
-  height: 32px;
+  margin-top: 28px;
 }
-.document-rail h2 {
+.document-end section > h2 {
   margin: 0 0 4px;
 }
-.document-rail ul {
+.document-end ul {
   padding: 0;
   margin: 0;
 }
-.document-rail li {
-  margin: 0 0 4px;
+.document-end li {
+  margin: 0;
 }
-.document-rail li > button {
+.document-end li > button {
   display: flex;
   align-items: flex-start;
   gap: 8px;
   height: auto;
+  min-height: 28px;
   margin-left: -8px;
-  padding: 6px 8px;
+  padding: 4px 8px;
 }
-.document-rail li > button svg {
+.document-end li > button svg {
   flex: none;
   margin-top: 2px;
 }
-.document-rail .connected-label {
+.document-end .connected-label {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.document-rail dt {
-  margin-top: 12px;
-}
-.document-rail dd {
-  margin: 2px 0 0;
-  overflow-wrap: anywhere;
-}
-.document-rail p {
+.document-end p {
   margin: 4px 0 0;
 }
-.document-rail .document-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin: 8px 0;
-}
-.document-rail .document-tags:empty {
-  display: none;
-}
-.document-rail .document-tags li {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
+.document-details {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 8px 16px;
   margin: 0;
-  padding-left: 8px;
-  max-width: 100%;
 }
-.document-tag-form,
-.document-create-ticket {
+.document-details dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.document-panel-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.document-create-ticket[hidden] {
-  display: none;
-}
-.document-rail-actions {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 4px;
-}
-.document-rail-actions > button {
-  justify-content: flex-start;
-  margin-left: -8px;
-}
 .document-passage {
   overflow-wrap: anywhere;
 }
-.document-rail .document-passage-caption .document-passage,
-.document-rail .document-passage-caption .document-passage * {
+.document-end .document-passage-caption .document-passage,
+.document-end .document-passage-caption .document-passage * {
   display: inline;
   margin: 0;
   padding: 0;
@@ -364,9 +359,6 @@
 }
 :where([data-width~="max-479"]) .document-main {
   padding-inline: 16px;
-}
-:where([data-width~="max-479"]) .document-state-row {
-  gap: 4px;
 }
 :where([data-width~="max-479"]) .document-actions {
   gap: 2px;

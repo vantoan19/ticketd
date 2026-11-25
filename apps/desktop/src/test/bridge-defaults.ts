@@ -31,6 +31,14 @@ export function bridgeDefault(
       return null;
     case "document_context_links":
       return [[], []];
+    case "document_summary":
+      return {
+        id: args?.id ?? "",
+        heading: "",
+        plans: [],
+        tickets: [],
+        tags: [],
+      };
     case "automation_run_taken_over_in":
       return null;
     case "automation_agent_list":

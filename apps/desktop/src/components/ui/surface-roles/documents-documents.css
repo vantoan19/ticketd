@@ -28,13 +28,13 @@
 .document-crumb-title {
   white-space: nowrap;
 }
-.document-subtitle {
+.document-meta-part {
   white-space: nowrap;
 }
-.document-rail ul {
+.document-end ul {
   list-style: none;
 }
-.document-rail li > button {
+.document-end li > button {
   white-space: normal;
   text-align: left;
 }

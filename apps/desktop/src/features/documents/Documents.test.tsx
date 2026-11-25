@@ -13,6 +13,13 @@ import { documents } from "./api";
 vi.mock("./api", () => ({
   documents: {
     links: vi.fn().mockResolvedValue([[], []]),
+    summary: vi.fn().mockResolvedValue({
+      id: "d1",
+      heading: "",
+      plans: [],
+      tickets: [],
+      tags: [],
+    }),
     recent: vi.fn(),
     trash: vi.fn(),
     pins: vi.fn().mockResolvedValue([]),
@@ -236,7 +243,7 @@ it("shows snippet, tags and date per row, highlights matches and refocuses searc
   );
 });
 
-it("disables tagging and ticket creation for a trashed Document", async () => {
+it("disables tagging, linking and ticket creation for a trashed Document", async () => {
   vi.mocked(documents.recent).mockResolvedValue([]);
   vi.mocked(documents.open).mockResolvedValue({
     id: "1",
@@ -258,17 +265,20 @@ it("disables tagging and ticket creation for a trashed Document", async () => {
     />,
   );
   await screen.findByText("In Trash");
-  expect(
-    (screen.getByRole("button", { name: "Add tags" }) as HTMLButtonElement)
-      .disabled,
-  ).toBe(true);
-  expect(
-    (
-      screen.getByRole("button", {
-        name: "Create ticket from this",
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Document actions" }),
+    { button: 0, ctrlKey: false },
+  );
+  for (const name of [
+    "Add tags…",
+    "Link a Document…",
+    "Create ticket from this",
+  ])
+    expect(
+      (await screen.findByRole("menuitem", { name })).getAttribute(
+        "aria-disabled",
+      ),
+    ).toBe("true");
 });
 
 it("offers Browse Documents from an empty Trash", async () => {
@@ -336,6 +346,7 @@ const renderDocuments = () =>
 
 it("says on each row where the Document belongs and never asks for links per row", async () => {
   const plan = (name: string, archived = false, spec = false) => ({
+    id: `plan-${name}`,
     name,
     archived,
     spec,

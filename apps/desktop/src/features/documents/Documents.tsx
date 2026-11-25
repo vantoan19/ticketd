@@ -28,7 +28,6 @@ import {
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { enter } from "@/components/ui/enter";
 import {
   ArrowLeft,
@@ -38,7 +37,6 @@ import {
   Plus,
   Search,
   SearchX,
-  Tag,
   Trash2,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -182,12 +180,11 @@ export function Documents({
     const request = ++openGeneration.current;
     setOpening({ id, failure: null });
     setSelected(null);
-    return Promise.all([documents.open(id), documents.tags(id)]).then(
-      ([doc, values]) => {
+    return documents.open(id).then(
+      (doc) => {
         setOpenedHere((seen) => new Set(seen).add(id));
         if (request !== openGeneration.current) return false;
         setSelected(doc);
-        setTags(values);
         setOpening(null);
         setReaderError(null);
         return true;
@@ -228,9 +225,6 @@ export function Documents({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [active, selected, opening, onDocumentClose]);
-  const [tags, setTags] = useState<string[]>([]);
-  const [newTag, setNewTag] = useState("");
-  const [addingTag, setAddingTag] = useState(false);
   const [browseLoaded, setBrowseLoaded] = useState(false);
   const [searchKey, setSearchKey] = useState("");
   const [trashLoaded, setTrashLoaded] = useState(false);
@@ -1118,6 +1112,13 @@ export function Documents({
         >
           {({ trashed }) => (
             <>
+              {readerError && (
+                <FailureAlert
+                  size="compact"
+                  failure={readerError.failure}
+                  onRetry={readerError.retry}
+                />
+              )}
               {!trashed && selected.origin_brief && !selected.kept && (
                 <Button
                   onClick={() =>
@@ -1141,79 +1142,6 @@ export function Documents({
                   Kept in Documents.
                 </p>
               )}
-              <section aria-label="Document tags">
-                <h2>Tags</h2>
-                {readerError && (
-                  <FailureAlert
-                    size="compact"
-                    failure={readerError.failure}
-                    onRetry={readerError.retry}
-                  />
-                )}
-                <ul className="document-tags">
-                  {tags.map((tag) => (
-                    <li key={tag}>
-                      {tag}{" "}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Remove tag ${tag}`}
-                        disabled={trashed}
-                        onClick={() =>
-                          readerAction(`remove the tag ${tag}`, () =>
-                            documents
-                              .tag(selected.id, tag, false)
-                              .then(() =>
-                                setTags(tags.filter((value) => value !== tag)),
-                              ),
-                          )
-                        }
-                      >
-                        ×
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-                {!addingTag ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={trashed}
-                    onClick={() => setAddingTag(true)}
-                  >
-                    <Tag data-icon="inline-start" aria-hidden="true" />
-                    Add tags
-                  </Button>
-                ) : (
-                  <form
-                    className="document-tag-form"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (!newTag.trim()) return;
-                      const tag = newTag;
-                      readerAction(`add the tag ${tag.trim()}`, () =>
-                        documents
-                          .tag(selected.id, tag, true)
-                          .then(() => documents.tags(selected.id))
-                          .then((values) => {
-                            setTags(values);
-                            setNewTag("");
-                            setAddingTag(false);
-                          }),
-                      );
-                    }}
-                  >
-                    <label htmlFor="new-document-tag">Add tag</label>
-                    <Input
-                      id="new-document-tag"
-                      autoFocus
-                      value={newTag}
-                      onChange={(e) => setNewTag(e.target.value)}
-                    />
-                    <Button type="submit">Add tag</Button>
-                  </form>
-                )}
-              </section>
             </>
           )}
         </DocumentEditor>

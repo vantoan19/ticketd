@@ -73,7 +73,12 @@ const summary = z.object({
   /** Where the Document belongs, read with the row so a list never asks per row. */
   plans: z
     .array(
-      z.object({ name: z.string(), archived: z.boolean(), spec: z.boolean() }),
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        archived: z.boolean(),
+        spec: z.boolean(),
+      }),
     )
     .optional(),
   tickets: z
@@ -113,6 +118,9 @@ export const documents = {
         includeSupport,
       }),
     ),
+  /** One Document's row: the same Plans, tickets and tags a list row carries. */
+  summary: async (id: string) =>
+    summary.parse(await invoke("document_summary", { id })),
   keep: async (id: string, requestId: string) =>
     schema.parse(await invoke("keep_document", { id, requestId })),
   pin: async (id: string, pinned: boolean) =>
