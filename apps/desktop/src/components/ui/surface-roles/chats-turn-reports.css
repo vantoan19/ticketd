@@ -6,7 +6,8 @@
   color: var(--foreground);
   font-weight: 500;
 }
-.chat-reasoning {
+.chat-reasoning,
+.chat-reasoning .markdown-document {
   color: var(--muted-foreground);
 }
 .chat-plan {

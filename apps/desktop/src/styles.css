@@ -2743,16 +2743,46 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   font-size: var(--text-doc);
   line-height: var(--text-doc-line);
 }
-.chat-ai .markdown-document :is(h1, h2, h3, h4, h5, h6) {
+/* Reply headings (DESIGN 15): h1-h3 at the reading size, h4-h6 and a paragraph
+   that is only bold (boldOnly) at the body size; both 600 on the body's line
+   height. A heading groups with what follows: space above, little below. */
+.chat-ai .markdown-document :where(h1, h2, h3, h4, h5, h6, p[data-bold-only]) {
   color: var(--foreground);
   font-size: var(--text-doc);
   font-weight: 600;
   line-height: var(--text-doc-line);
   letter-spacing: normal;
 }
+.chat-ai .markdown-document :is(h1, h2, h3) {
+  font-size: var(--text-reading);
+}
+.chat-ai .markdown-document > * + :is(h1, h2, h3) {
+  margin-top: 24px;
+}
+.chat-ai .markdown-document > * + :is(h4, h5, h6, p[data-bold-only]) {
+  margin-top: 20px;
+}
+.chat-ai .markdown-document > :is(h1, h2, h3) + * {
+  margin-top: 6px;
+}
+.chat-ai .markdown-document > :is(h4, h5, h6, p[data-bold-only]) + * {
+  margin-top: 4px;
+}
 .chat-pane[data-expanded] .chat-ai .markdown-document {
   font-size: var(--text-reading);
   line-height: var(--text-reading-line);
+}
+/* Headings scale with the body in expanded Chat. */
+.chat-pane[data-expanded]
+  .chat-ai
+  .markdown-document
+  :is(h4, h5, h6, p[data-bold-only]) {
+  font-size: var(--text-reading);
+  line-height: var(--text-reading-line);
+}
+.chat-pane[data-expanded] .chat-ai .markdown-document :is(h1, h2, h3) {
+  font-size: var(--text-reading-heading);
+  line-height: var(--text-reading-heading-line);
 }
 .markdown-document > * + * {
   margin-top: 12px;

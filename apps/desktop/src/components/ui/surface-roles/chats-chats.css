@@ -121,8 +121,7 @@
   transition: none;
 }
 .chat-you {
-  border-radius: var(--radius-panel) var(--radius-panel) var(--radius-segment)
-    var(--radius-panel);
+  border-radius: var(--radius-panel);
   background: var(--accent);
   color: var(--foreground);
   font-size: var(--text-doc);
