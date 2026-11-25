@@ -2784,6 +2784,23 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
   font-size: var(--text-reading-heading);
   line-height: var(--text-reading-heading-line);
 }
+/* A progress note is the agent talking while it works: the working size, ink,
+   not the answer's. Its headings and expanded-pane sizes follow it. */
+.chat-turn-response .chat-ai,
+.chat-turn-response .chat-ai .markdown-document,
+.chat-pane[data-expanded] .chat-turn-response .chat-ai .markdown-document,
+.chat-turn-response
+  .chat-ai
+  .markdown-document
+  :where(h1, h2, h3, h4, h5, h6, p[data-bold-only]),
+.chat-pane[data-expanded]
+  .chat-turn-response
+  .chat-ai
+  .markdown-document
+  :is(h1, h2, h3, h4, h5, h6, p[data-bold-only]) {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+}
 .markdown-document > * + * {
   margin-top: 12px;
 }

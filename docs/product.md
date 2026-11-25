@@ -666,6 +666,17 @@ collect OAuth tokens, proxy model requests, or change billing.
   turn steers it where the harness supports that, otherwise the message is visibly
   queued. ticketd owns the queue. Stop pauses it and requests interruption without
   claiming every tool stopped.
+- **Working turns.** A turn's progress notes (what the harness says while it
+  works) stay in the transcript as lines of its story, and the steps between two
+  notes fold into one row each, such as "Read 6 files and ran 3 commands", with
+  "· 1 failed" when a step failed. A stretch already done when the Chat opens
+  starts folded. The stretch in progress stays open, and one that finishes while
+  someone is looking at it folds only after it has left the view, so nothing above
+  the newest line moves. What the person opens or closes stays that way for the
+  session. When the turn ends its work line folds the notes and stretches together;
+  opened, it shows the notes and stretch rows, and a stretch opens to its steps. A
+  harness that writes no notes has one stretch per turn, which opens straight to
+  its steps.
 - **Steps.** Each tool call reads as one line in the words of what it did. When Claude
   Code describes a command, the row reads that description and opens to the exact
   command and its output; any other command reads as its first line, muted and cut to
