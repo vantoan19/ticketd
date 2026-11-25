@@ -2,6 +2,7 @@ import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import {
   useEffect,
   useEffectEvent,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -52,6 +53,9 @@ import { Input } from "@/components/ui/input";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { outlineOf, showsOutline } from "@/features/markdown/outline";
+import { DocumentOutline } from "./DocumentOutline";
+import { useCurrentHeading } from "./use-current-heading";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
@@ -890,6 +894,11 @@ function RecoveredDocumentEditor({
     savedDocument?.heading ||
     initial?.origin_brief?.trim() ||
     "Document";
+  // What Read renders, and the outline of it: the headings people can jump to.
+  const readSource = withoutOpeningTitle(body, title, savedDocument?.heading);
+  const outline = useMemo(() => outlineOf(readSource), [readSource]);
+  const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  const { current: currentAnchor, goTo } = useCurrentHeading(scroller, outline);
   // The heading line left out of the editor, while the body still starts with it.
   const head =
     writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
@@ -1329,7 +1338,7 @@ function RecoveredDocumentEditor({
           onRestored={refreshStored}
         />
       )}
-      <div className="document-main">
+      <div className="document-main" ref={setScroller}>
         {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
         {trashed && (
           <div className="document-trash-notice">
@@ -1466,22 +1475,15 @@ function RecoveredDocumentEditor({
                     locked
                       ? undefined
                       : (value) => {
-                          const shown = withoutOpeningTitle(
-                            body,
-                            title,
-                            savedDocument?.heading,
-                          );
                           const next =
-                            body.slice(0, body.length - shown.length) + value;
+                            body.slice(0, body.length - readSource.length) +
+                            value;
                           draft.current = { ...draft.current, body: next };
                           setBody(next);
                         }
                   }
-                  source={withoutOpeningTitle(
-                    body,
-                    title,
-                    savedDocument?.heading,
-                  )}
+                  source={readSource}
+                  headings={outline}
                   select={
                     onOpenTicket
                       ? (reference) => navigate(() => onOpenTicket(reference))
@@ -1685,6 +1687,13 @@ function RecoveredDocumentEditor({
           </aside>
         )}
       </div>
+      {initial && !writing && scroller && showsOutline(outline) && (
+        <DocumentOutline
+          headings={outline}
+          current={currentAnchor}
+          onChoose={(heading) => goTo(heading.id)}
+        />
+      )}
     </DocumentSurface>
   );
 }
