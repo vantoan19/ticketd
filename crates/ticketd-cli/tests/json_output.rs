@@ -180,3 +180,63 @@ fn reminders_backups_and_restores_print_json() {
     assert!(restored["restored"].is_string());
     assert!(restored["safety_backup"].is_string());
 }
+
+#[test]
+fn a_documents_one_line_summary_is_set_changed_and_cleared_and_shown_in_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path();
+    let plain = json(path, &["document", "create", "--body", "Hello"]);
+    assert!(plain["summary"].is_null());
+
+    let created = json(
+        path,
+        &[
+            "document",
+            "create",
+            "--title",
+            "Report",
+            "--summary",
+            "Shipped in a1b2c3d.\nOne open question.",
+            "--body",
+            "# Report\n\nA long body.",
+        ],
+    );
+    let id = created["id"].as_str().unwrap();
+    // A line break is collapsed to a space.
+    assert_eq!(created["summary"], "Shipped in a1b2c3d. One open question.");
+
+    let summary_of = |rows: serde_json::Value| rows[0]["summary"].clone();
+    assert_eq!(
+        json(path, &["document", "show", id])["summary"],
+        "Shipped in a1b2c3d. One open question."
+    );
+    assert_eq!(
+        summary_of(json(path, &["document", "search", "Report"])),
+        "Shipped in a1b2c3d. One open question."
+    );
+    let recent = json(path, &["document", "recent"]);
+    let row = recent
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == id)
+        .unwrap();
+    assert_eq!(row["summary"], "Shipped in a1b2c3d. One open question.");
+    assert_eq!(
+        json(path, &["document", "read", id])["summary"],
+        "Shipped in a1b2c3d. One open question."
+    );
+
+    // A change of summary alone is a change; the body stays.
+    let changed = json(path, &["document", "change", id, "--summary", "Done."]);
+    assert_eq!(changed["summary"], "Done.");
+    assert_eq!(changed["body"], "# Report\n\nA long body.");
+    // A change of body alone keeps the summary.
+    let edited = json(path, &["document", "change", id, "--body", "New."]);
+    assert_eq!(edited["summary"], "Done.");
+
+    // An empty value clears it.
+    let cleared = json(path, &["document", "change", id, "--summary", ""]);
+    assert!(cleared["summary"].is_null());
+    assert!(json(path, &["document", "show", id])["summary"].is_null());
+}

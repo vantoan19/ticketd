@@ -327,3 +327,32 @@ const LEGACY_ISSUES: [(&str, &str, &str, Option<&str>); 8] = [
         Some("git.example.test/acme/site"),
     ),
 ];
+
+/// Documents written before the summary column existed read as having none, and take one.
+#[test]
+fn documents_in_an_older_workspace_file_have_no_summary_and_can_take_one() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = copy_of(89, dir.path());
+    let restored = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored, &backup).unwrap();
+    let mut workspace = Workspace::open(&restored).unwrap();
+
+    let documents = workspace.all_documents_page(100, 0, true).unwrap();
+    assert!(!documents.is_empty());
+    assert!(documents.iter().all(|document| document.summary.is_none()));
+    let id = &documents[0].id;
+    assert_eq!(workspace.show_document(id).unwrap().summary, None);
+    let changed = workspace
+        .change_document(
+            id,
+            ticketd_core::DocumentPatch {
+                summary: Some(Some("Read before the column existed.".into())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(
+        changed.summary.as_deref(),
+        Some("Read before the column existed.")
+    );
+}

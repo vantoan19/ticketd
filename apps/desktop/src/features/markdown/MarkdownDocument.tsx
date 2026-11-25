@@ -34,6 +34,7 @@ import { CopyButton } from "@/components/ui/copy-button";
 import { Check } from "lucide-react";
 import { AttachmentImage as InlineAttachmentImage } from "./InlineImage";
 import { BlockHeader } from "./BlockHeader";
+import type { OutlineHeading } from "./outline";
 import type { ReferenceReplacement } from "@/features/attachments/AttachmentPreview";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
@@ -79,6 +80,8 @@ const urlTransform = (url: string) =>
 /** The passage to mark, and the element that describes it to assistive technology. */
 type MentionMark = MentionSpan & { describedBy: string };
 const MentionTarget = createContext<MentionMark | null>(null);
+/** Anchors for the outlined headings, by the source offset each starts at. */
+const HeadingAnchors = createContext<ReadonlyMap<number, string> | null>(null);
 const TicketNavigation = createContext<{
   select: ((reference: string) => void) | undefined;
   revision: number | undefined;
@@ -279,18 +282,25 @@ function mentionBlock(tag: string) {
     ...props
   }: Record<string, unknown> & ExtraProps) {
     const mark = useContext(MentionTarget);
+    const anchors = useContext(HeadingAnchors);
+    const offset = (node as PositionedNode | undefined)?.position?.start.offset;
+    const anchor =
+      anchors && offset !== undefined && /^h[1-4]$/.test(tag)
+        ? anchors.get(offset)
+        : undefined;
+    const attributes = anchor === undefined ? props : { ...props, id: anchor };
     const marked =
       mark !== null && isMentionBlock(node as PositionedNode, mark);
     return createElement(
       tag,
       marked
         ? {
-            ...props,
+            ...attributes,
             "data-mention-target": "",
             tabIndex: -1,
             "aria-describedby": mark.describedBy,
           }
-        : props,
+        : attributes,
       tag === "li" && String(props.className ?? "").includes("task-list-item")
         ? Children.map(children as React.ReactNode, (child) => {
             const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
@@ -430,6 +440,7 @@ export function MarkdownDocument({
   mention,
   onChange,
   chunkStarts,
+  headings,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
@@ -440,6 +451,8 @@ export function MarkdownDocument({
     ((source: string, signal: AbortSignal) => void | Promise<void>) | undefined;
   /** Streamed text: source offsets where each newly arrived chunk began; each fades in. */
   chunkStarts?: readonly number[] | undefined;
+  /** The Document's outline: each of these headings is rendered with its anchor as its `id`. */
+  headings?: readonly OutlineHeading[] | undefined;
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
@@ -503,15 +516,21 @@ export function MarkdownDocument({
     ),
     [source, chunkStarts],
   );
+  const anchors = useMemo(
+    () => headings && new Map(headings.map((h) => [h.offset, h.id])),
+    [headings],
+  );
   return (
     <div className="markdown-document">
       <TicketNavigation.Provider value={{ select, revision }}>
         <MentionTarget.Provider value={mention ?? null}>
-          <MarkdownSource.Provider value={source}>
-            <AttachmentReplacement.Provider value={replacement}>
-              {rendered}
-            </AttachmentReplacement.Provider>
-          </MarkdownSource.Provider>
+          <HeadingAnchors.Provider value={anchors ?? null}>
+            <MarkdownSource.Provider value={source}>
+              <AttachmentReplacement.Provider value={replacement}>
+                {rendered}
+              </AttachmentReplacement.Provider>
+            </MarkdownSource.Provider>
+          </HeadingAnchors.Provider>
         </MentionTarget.Provider>
       </TicketNavigation.Provider>
     </div>

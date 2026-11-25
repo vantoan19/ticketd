@@ -53,7 +53,7 @@ Reproduced with an expired session cookie.
 
 The same record always produces the same bytes, so a file changes only when its record does.
 
-- `kind` comes first, then `format`, then `id`. A ticket with an external source uses format 3. Other records use format 1.
+- `kind` comes first, then `format`, then `id`. A ticket with an external source uses format 3. A Document with a `summary` uses format 4, so a ticketd that does not know the field leaves its file alone. Other records use format 1.
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
 - Every text value is a double-quoted YAML string on one line. A whole number is written bare. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
@@ -183,15 +183,16 @@ Starts with the line `<!-- ticketd:evidence -->`, then a header only.
 
 ### Document
 
-| Field             | Value                                                        |
-| ----------------- | ------------------------------------------------------------ |
-| `title`           | The explicit title, when the Document has one.               |
-| `created_at`      | Required.                                                    |
-| `tags`            | Lowercase tag names.                                         |
-| `origin_activity` | GUID of the Activity whose details created the Document.     |
-| `trashed`         | Whether the Document is in Trash.                            |
-| `kept`            | Whether Activity details were kept as a standalone Document. |
-| `pinned`          | Whether the Document is pinned.                              |
+| Field             | Value                                                         |
+| ----------------- | ------------------------------------------------------------- |
+| `title`           | The explicit title, when the Document has one.                |
+| `summary`         | The author's one-line summary (format 4); left out when none. |
+| `created_at`      | Required.                                                     |
+| `tags`            | Lowercase tag names.                                          |
+| `origin_activity` | GUID of the Activity whose details created the Document.      |
+| `trashed`         | Whether the Document is in Trash.                             |
+| `kept`            | Whether Activity details were kept as a standalone Document.  |
+| `pinned`          | Whether the Document is pinned.                               |
 
 The text after the header is the Document body.
 

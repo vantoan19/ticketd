@@ -86,6 +86,14 @@
   --reading-space-after-heading: 8px;
   --reading-space-item: 6px;
   --reading-column: 600px;
+  /* The Document outline's ticks (DESIGN.md section 8). */
+  --outline-tick-section: 16px;
+  --outline-tick-subsection: 10px;
+  --outline-tick-thickness: 2px;
+  --outline-tick-gap: 9px;
+  --outline-hit: 10px;
+  --outline-popover-width: 288px;
+  --outline-scroll-margin: 24px;
   --text-doc: 15px;
   --text-doc-line: 24px;
   --text-doc-title: 28px;
