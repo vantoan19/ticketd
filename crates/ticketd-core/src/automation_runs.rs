@@ -526,6 +526,7 @@ pub(crate) fn take_over_chat(
     if !replied && status != AutomationRunStatus::Running {
         return Ok(None);
     }
+    crate::chats::set_aside_taken_over_prompt(connection, chat_id)?;
     connection.execute(
         "UPDATE chats SET automation_run_id = NULL WHERE id = ?1",
         [chat_id],

@@ -1086,13 +1086,13 @@ impl Chats {
     /// harness keeps working against records that are about to change, and refuses new
     /// work until `finish_restore`. Returns the Chats whose harness could not be
     /// confirmed stopped.
-    pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
+    pub async fn begin_restore(&self) -> Result<Vec<UnconfirmedCleanup>, UnconfirmedCleanup> {
         self.restoring.store(true, Ordering::SeqCst);
         match self.started_host() {
             // The host refuses on every clone of it, including one a command took
             // before this point.
             Some(host) => host.begin_restore().await,
-            None => Vec::new(),
+            None => Ok(Vec::new()),
         }
     }
 
@@ -1129,11 +1129,15 @@ impl Chats {
         // Views read a new snapshot: their cursors belong to the replaced records.
         lock(&self.feeds).clear();
         lock(&self.checked).clear();
+        self.end_restore_admission();
+        reconciled
+    }
+
+    fn end_restore_admission(&self) {
         if let Some(host) = self.started_host() {
             host.finish_restore();
         }
         self.restoring.store(false, Ordering::SeqCst);
-        reconciled
     }
 
     /// Replaces the workspace with a backup through `replace`, which returns the safety
@@ -1151,7 +1155,16 @@ impl Chats {
         if let Ok(Err(refused)) = check {
             return Err(refused);
         }
-        let unconfirmed = self.begin_restore().await;
+        let unconfirmed = match self.begin_restore().await {
+            Ok(warnings) => warnings,
+            Err(blocked) => {
+                self.end_restore_admission();
+                return Err(format!(
+                    "The workspace could not be restored because {}.",
+                    blocked.reason,
+                ));
+            }
+        };
         let restored = tokio::task::spawn_blocking(move || replace(backup))
             .await
             .map_err(|error| error.to_string())

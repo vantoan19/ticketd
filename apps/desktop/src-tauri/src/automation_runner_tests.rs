@@ -188,7 +188,7 @@ async fn the_runner_is_told_why_there_is_no_chat_host() {
     ));
     let _ = f.chats.set_enabled(true).await;
     assert!(f.chats.automation_host().is_ok());
-    f.chats.begin_restore().await;
+    f.chats.begin_restore().await.unwrap();
     assert!(matches!(
         f.chats.automation_host(),
         Err(HostError::Restoring)

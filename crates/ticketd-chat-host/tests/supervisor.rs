@@ -1619,7 +1619,7 @@ async fn a_host_handle_taken_before_a_restore_can_start_nothing_during_it() {
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     let held = f.host.clone();
 
-    assert_eq!(f.host.begin_restore().await, Vec::new());
+    assert_eq!(f.host.begin_restore().await.unwrap(), Vec::new());
     assert_eq!(f.fake.opens().len(), 1);
     let refused = held.send(&f.chat.id, None, "during", SendMode::Auto).await;
     assert!(matches!(refused, Err(HostError::Restoring)));
@@ -3272,7 +3272,7 @@ async fn a_turn_ticketd_stops_records_why_for_each_reason() {
 
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;
-    f.host.begin_restore().await;
+    f.host.begin_restore().await.unwrap();
     assert_eq!(f.first_ending(), stopped(StopReason::Restore));
 
     let f = Fixture::new(FakeAdapter::codex());
@@ -3906,7 +3906,10 @@ async fn a_restore_keeps_only_the_unconfirmed_permission_cleanup() {
         chat_id: f.chat.id.clone(),
         reason,
     };
-    assert_eq!(unconfirmed.as_slice(), std::slice::from_ref(&warning));
+    assert_eq!(
+        unconfirmed.unwrap().as_slice(),
+        std::slice::from_ref(&warning)
+    );
     assert!(f.host.live().is_empty());
 
     // A failed replacement also releases the restore gate.
@@ -3915,7 +3918,7 @@ async fn a_restore_keeps_only_the_unconfirmed_permission_cleanup() {
         f.host.resume(&f.chat.id, ResumeMode::Native).await,
         Err(HostError::PermissionRestartCleanupUnconfirmed)
     ));
-    assert_eq!(f.host.begin_restore().await, [warning]);
+    assert_eq!(f.host.begin_restore().await.unwrap(), [warning]);
     Workspace::restore(&f.path, &backup).unwrap();
     f.host.finish_restore();
 

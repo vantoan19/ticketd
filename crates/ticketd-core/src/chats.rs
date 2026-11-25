@@ -1261,6 +1261,16 @@ fn previous_outcome(
     Ok(None)
 }
 
+fn automation_prompt_command_id(chat_id: &str) -> String {
+    format!("{chat_id}:first")
+}
+
+enum InputSource<'a> {
+    Person,
+    AutomationReply,
+    AutomationPrompt(&'a str),
+}
+
 fn save_input_request(
     chat_id: &str,
     text: &str,
@@ -1711,6 +1721,90 @@ fn require_input(
     read_message(connection, message_id)?
         .filter(|message| message.role == ChatRole::User)
         .ok_or_else(not_input)
+}
+
+fn owns_running_chat(connection: &Connection, chat_id: &str, run_id: &str) -> Result<bool, Error> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM chats JOIN automation_runs
+              ON automation_runs.id = chats.automation_run_id
+              WHERE chats.id = ?1 AND automation_runs.id = ?2
+              AND automation_runs.status = 'running')",
+        params![chat_id, run_id],
+        |row| row.get(0),
+    )?)
+}
+
+fn set_aside_input(
+    connection: &Connection,
+    chat_id: &str,
+    message_id: &str,
+    move_from_queue: bool,
+) -> Result<(), Error> {
+    connection.execute(
+        "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, decision) VALUES (?1, ?2, ?3, ?4, 'not_delivered', 'discarded')",
+        params![
+            uuid::Uuid::new_v4().to_string(),
+            chat_id,
+            message_id,
+            name(ChatSubmissionIntent::NewTurn)?
+        ],
+    )?;
+    let sequence = log(connection, chat_id, "message", message_id)?;
+    if move_from_queue {
+        connection.execute(
+            "UPDATE chat_messages SET position = ?1 WHERE id = ?2",
+            params![sequence, message_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// The reserved save receipt identifies the Prompt even before its supervisor
+/// returns the save outcome. Late delivery evidence still takes precedence.
+pub(crate) fn set_aside_taken_over_prompt(
+    connection: &Connection,
+    chat_id: &str,
+) -> Result<(), Error> {
+    let command_id = automation_prompt_command_id(chat_id);
+    let prompt: Option<String> = connection
+        .query_row(
+            "SELECT json_extract(outcome, '$') FROM request_outcomes
+         WHERE id = ?1 AND json_extract(request, '$.operation') = 'save_chat_input'
+             AND json_extract(request, '$.chat_id') = ?2",
+            params![command_id, chat_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    let Some(id) = prompt else {
+        return Ok(());
+    };
+    let Some(message) = read_message(connection, &id)? else {
+        return Ok(());
+    };
+    match message.standing() {
+        ChatInputStanding::Delivered | ChatInputStanding::SetAside => return Ok(()),
+        ChatInputStanding::AwaitsDecision => {
+            decide(
+                connection,
+                chat_id,
+                &message,
+                ChatDeliveryDecision::Discarded,
+            )?;
+        }
+        ChatInputStanding::Queued => set_aside_input(connection, chat_id, &id, true)?,
+        ChatInputStanding::Sending => set_aside_input(connection, chat_id, &id, false)?,
+    }
+    observe(
+        connection,
+        chat_id,
+        ChatObservation::Notice {
+            notice_id: Uuid::new_v4().to_string(),
+            text: "You took this run over.".to_owned(),
+            from_harness: false,
+        },
+        None,
+    )?;
+    trim(connection, chat_id)
 }
 
 /// Records the person's decision on the submission of `message` whose delivery is
@@ -2268,11 +2362,18 @@ impl Workspace {
         files: &[ChatAttachmentContent],
         replaces: &[String],
     ) -> Result<ChatInputReceipt, Error> {
-        let (receipt, _) = self.save_input(command_id, chat_id, text, files, replaces, false)?;
+        let (receipt, _) = self.save_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            replaces,
+            InputSource::Person,
+        )?;
         Ok(receipt)
     }
 
-    /// Saves a person's reply before ending the run that owns the Chat.
+    /// Saves a person's reply with the takeover of the run that owns the Chat.
     /// Both writes succeed together. Replaying an existing save leaves ownership alone.
     pub fn save_automation_chat_reply(
         &mut self,
@@ -2282,7 +2383,34 @@ impl Workspace {
         files: &[ChatAttachmentContent],
         replaces: &[String],
     ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
-        self.save_input(command_id, chat_id, text, files, replaces, true)
+        self.save_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            replaces,
+            InputSource::AutomationReply,
+        )
+    }
+
+    /// The run's first Prompt may only be created while it still owns this Chat.
+    pub fn save_automation_chat_prompt(
+        &mut self,
+        chat_id: &str,
+        run_id: &str,
+        text: &str,
+    ) -> Result<ChatMessage, Error> {
+        let command_id = automation_prompt_command_id(chat_id);
+        self.save_input(
+            Some(&command_id),
+            chat_id,
+            text,
+            &[],
+            &[],
+            InputSource::AutomationPrompt(run_id),
+        )?
+        .0
+        .into_message()
     }
 
     fn save_input(
@@ -2292,7 +2420,7 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
         replaces: &[String],
-        automation_reply: bool,
+        source: InputSource<'_>,
     ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
         if !replaces.is_empty() && command_id.is_none() {
             return Err(invalid("Editing queued input requires a command ID"));
@@ -2302,6 +2430,11 @@ impl Workspace {
         });
         self.chat_write(|connection| {
             let mut run = None;
+            if let InputSource::AutomationPrompt(run_id) = source
+                && !owns_running_chat(connection, chat_id, run_id)?
+            {
+                return Err(invalid("the run no longer owns this Chat"));
+            }
             let id = once(connection, command_id, request, || {
                 if text.trim().is_empty() && files.is_empty() {
                     return Err(invalid("Chat input must not be empty"));
@@ -2322,6 +2455,9 @@ impl Workspace {
                     }
                     delete_queued_input(connection, original)?;
                 }
+                if matches!(source, InputSource::AutomationReply) {
+                    run = crate::automation_runs::take_over_chat(connection, chat_id, true)?;
+                }
                 let id = Uuid::new_v4().to_string();
                 let position = log(connection, chat_id, "message", &id)?;
                 connection.execute(
@@ -2334,9 +2470,6 @@ impl Workspace {
                 if !replaces.is_empty() {
                     // Older cursors may already contain a row just replaced.
                     advance_change_floor(connection, chat_id, position)?;
-                }
-                if automation_reply {
-                    run = crate::automation_runs::take_over_chat(connection, chat_id, true)?;
                 }
                 trim(connection, chat_id)?;
                 Ok(id)
@@ -2464,20 +2597,7 @@ impl Workspace {
             if !message.queued || message.editing {
                 return Err(invalid("this input is not in the queue"));
             }
-            connection.execute(
-                "INSERT INTO chat_submission_attempts (id, chat_id, message_id, intent, delivery, decision) VALUES (?1, ?2, ?3, ?4, 'not_delivered', 'discarded')",
-                params![
-                    uuid::Uuid::new_v4().to_string(),
-                    chat_id,
-                    message_id,
-                    name(ChatSubmissionIntent::NewTurn)?
-                ],
-            )?;
-            let sequence = log(connection, chat_id, "message", message_id)?;
-            connection.execute(
-                "UPDATE chat_messages SET position = ?1 WHERE id = ?2",
-                params![sequence, message_id],
-            )?;
+            set_aside_input(connection, chat_id, message_id, true)?;
             trim(connection, chat_id)?;
             read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
         })
@@ -2559,18 +2679,10 @@ impl Workspace {
         run_id: Option<&str>,
     ) -> Result<Option<ChatMessage>, Error> {
         self.chat_write(|connection| {
-            if let Some(run_id) = run_id {
-                let still_owned: bool = connection.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM chats JOIN automation_runs
-                          ON automation_runs.id = chats.automation_run_id
-                          WHERE chats.id = ?1 AND automation_runs.id = ?2
-                          AND automation_runs.status = 'running')",
-                    params![chat_id, run_id],
-                    |row| row.get(0),
-                )?;
-                if !still_owned {
-                    return Ok(None);
-                }
+            if let Some(run_id) = run_id
+                && !owns_running_chat(connection, chat_id, run_id)?
+            {
+                return Ok(None);
             }
             if read_chat(connection, chat_id)?.trashed {
                 return Err(Error::ChatTrashed(chat_id.to_owned()));

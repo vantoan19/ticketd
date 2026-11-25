@@ -371,7 +371,7 @@ struct Inner {
     /// The settings of each Chat that is running unattended, read when its
     /// supervisor starts.
     unattended: Mutex<HashMap<String, Arc<UnattendedChat>>>,
-    taking_over: Mutex<HashSet<String>>,
+    taking_over: Mutex<HashMap<String, watch::Receiver<bool>>>,
     closing_agents: Mutex<HashMap<String, watch::Receiver<Option<Closed>>>>,
     lifecycle: Arc<HostLifecycle>,
 }
@@ -379,12 +379,20 @@ struct Inner {
 struct TakeOver {
     host: ChatHost,
     chat_id: String,
+    finished: watch::Sender<bool>,
 }
 
 impl Drop for TakeOver {
     fn drop(&mut self) {
-        self.host.taking_over().remove(&self.chat_id);
+        let mut taking_over = self.host.taking_over();
+        self.finished.send_replace(true);
+        taking_over.remove(&self.chat_id);
     }
+}
+
+struct RetiredRuntime {
+    handle: Arc<dyn HarnessRuntime>,
+    blocks_restore: bool,
 }
 
 /// Eligibility and process cleanup outlive any one supervisor.
@@ -398,8 +406,8 @@ pub(crate) struct HostLifecycle {
     off: AtomicBool,
     // Only the old process handle survives Restore. The next supervisor reads
     // the Chat, its settings and its queue from the current Workspace.
-    retired_permission_runtimes: Mutex<HashMap<String, Arc<dyn HarnessRuntime>>>,
-    orphaned_agent_opens: Mutex<HashSet<String>>,
+    retired_permission_runtimes: Mutex<HashMap<String, RetiredRuntime>>,
+    pending_open_cleanup: Mutex<HashSet<String>>,
 }
 
 impl HostLifecycle {
@@ -420,23 +428,21 @@ impl HostLifecycle {
         Ok(())
     }
 
-    fn orphaned_agent_opens(&self) -> MutexGuard<'_, HashSet<String>> {
-        self.orphaned_agent_opens
+    fn pending_open_cleanup(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.pending_open_cleanup
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub(crate) fn hold_orphaned_agent_open(&self, chat_id: &str) {
-        self.orphaned_agent_opens().insert(chat_id.to_owned());
+    pub(crate) fn hold_pending_open_cleanup(&self, chat_id: &str) {
+        self.pending_open_cleanup().insert(chat_id.to_owned());
     }
 
-    pub(crate) fn release_orphaned_agent_open(&self, chat_id: &str) {
-        self.orphaned_agent_opens().remove(chat_id);
+    pub(crate) fn release_pending_open_cleanup(&self, chat_id: &str) {
+        self.pending_open_cleanup().remove(chat_id);
     }
 
-    fn retired_permission_runtimes(
-        &self,
-    ) -> MutexGuard<'_, HashMap<String, Arc<dyn HarnessRuntime>>> {
+    fn retired_permission_runtimes(&self) -> MutexGuard<'_, HashMap<String, RetiredRuntime>> {
         self.retired_permission_runtimes
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
@@ -446,23 +452,66 @@ impl HostLifecycle {
         self.retired_permission_runtimes().contains_key(chat_id)
     }
 
-    pub(crate) fn retire_permission_runtime(
+    pub(crate) fn retire_runtime(
         &self,
         chat_id: &str,
-        runtime: Arc<dyn HarnessRuntime>,
+        handle: Arc<dyn HarnessRuntime>,
+        blocks_restore: bool,
     ) {
-        self.retired_permission_runtimes()
-            .insert(chat_id.to_owned(), runtime);
+        self.retired_permission_runtimes().insert(
+            chat_id.to_owned(),
+            RetiredRuntime {
+                handle,
+                blocks_restore,
+            },
+        );
+    }
+
+    async fn confirm_restore_cleanup(&self) -> Result<Vec<String>, UnconfirmedCleanup> {
+        let mut retired = {
+            // A late startup retires a live handle before clearing its open
+            // marker. This snapshot sees unfinished cleanup in either place.
+            let opens = self.pending_open_cleanup();
+            if let Some(chat_id) = opens.iter().min() {
+                return Err(UnconfirmedCleanup {
+                    chat_id: chat_id.clone(),
+                    reason: "a harness is still opening or stopping".to_owned(),
+                });
+            }
+            self.retired_permission_runtimes()
+                .iter()
+                .filter(|(_, runtime)| runtime.blocks_restore)
+                .map(|(chat_id, _)| chat_id.clone())
+                .collect::<Vec<_>>()
+        };
+        retired.sort_unstable();
+        for chat_id in &retired {
+            if let Some(reason) = self.close_retired_permission_runtime(chat_id).await {
+                return Err(UnconfirmedCleanup {
+                    chat_id: chat_id.clone(),
+                    reason,
+                });
+            }
+        }
+        Ok(retired)
+    }
+
+    fn stopping_for_workspace(&self) -> bool {
+        self.restoring.load(Ordering::SeqCst) || self.quitting.load(Ordering::SeqCst)
     }
 
     pub(crate) async fn close_retired_permission_runtime(&self, chat_id: &str) -> Option<String> {
-        let handle = self.retired_permission_runtimes().get(chat_id).cloned()?;
+        let handle = self
+            .retired_permission_runtimes()
+            .get(chat_id)?
+            .handle
+            .clone();
         let unconfirmed = bounded_close(handle.as_ref()).await;
         if unconfirmed.is_none() {
             let mut retired = self.retired_permission_runtimes();
             if retired
                 .get(chat_id)
-                .is_some_and(|current| Arc::ptr_eq(current, &handle))
+                .is_some_and(|current| Arc::ptr_eq(&current.handle, &handle))
             {
                 retired.remove(chat_id);
             }
@@ -508,7 +557,7 @@ impl ChatHost {
                     .collect(),
                 chats: Mutex::new(HashMap::new()),
                 unattended: Mutex::new(HashMap::new()),
-                taking_over: Mutex::new(HashSet::new()),
+                taking_over: Mutex::new(HashMap::new()),
                 closing_agents: Mutex::new(HashMap::new()),
                 lifecycle: Arc::new(HostLifecycle::default()),
             }),
@@ -709,12 +758,17 @@ impl ChatHost {
     fn begin_take_over(&self, chat_id: &str) -> Result<TakeOver, HostError> {
         // Admission and supervisor routing use the same lock.
         let _chats = self.chats();
-        if !self.taking_over().insert(chat_id.to_owned()) {
+        self.serving()?;
+        let mut taking_over = self.taking_over();
+        if taking_over.contains_key(chat_id) {
             return Err(HostError::Working);
         }
+        let (finished, done) = watch::channel(false);
+        taking_over.insert(chat_id.to_owned(), done);
         Ok(TakeOver {
             host: self.clone(),
             chat_id: chat_id.to_owned(),
+            finished,
         })
     }
 
@@ -952,12 +1006,19 @@ impl ChatHost {
     /// Stops every running Chat with bounded cleanup and keeps the host usable.
     pub async fn stop_all(&self, why: StopReason) -> Vec<UnconfirmedCleanup> {
         let turning_off = why == StopReason::TurnedOff;
-        let chats = if turning_off {
-            // A supervisor may still hold pending recovery. Keep its entry through
-            // shutdown so a concurrent turn_on cannot replace it.
-            self.chats().clone()
-        } else {
-            std::mem::take(&mut *self.chats())
+        let (chats, closing, taking_over) = {
+            // Detachment and takeover admission also take this lock. A worker
+            // is either still routed here or has a receipt in this snapshot.
+            let mut chats = self.chats();
+            let closing = self.closing_agents().clone();
+            let taking_over = self.taking_over().clone();
+            let active = if turning_off {
+                // Keep actors with pending recovery through a concurrent turn_on.
+                chats.clone()
+            } else {
+                std::mem::take(&mut *chats)
+            };
+            (active, closing, taking_over)
         };
         let mut waiting = Vec::new();
         for (chat_id, commands) in chats {
@@ -971,6 +1032,20 @@ impl ChatHost {
             if let Ok(Some(reason)) = done.await {
                 unconfirmed.push(UnconfirmedCleanup { chat_id, reason });
             }
+        }
+        for (chat_id, mut done) in closing {
+            let reason = match done.wait_for(Option::is_some).await {
+                Ok(closed) => closed
+                    .as_ref()
+                    .and_then(|closed| closed.unconfirmed.clone()),
+                Err(_) => Some("the Automation cleanup did not report completion".to_owned()),
+            };
+            if let Some(reason) = reason {
+                unconfirmed.push(UnconfirmedCleanup { chat_id, reason });
+            }
+        }
+        for (_, mut done) in taking_over {
+            let _ = done.wait_for(|finished| *finished).await;
         }
         if turning_off {
             self.chats().retain(|_, commands| !commands.is_closed());
@@ -993,9 +1068,16 @@ impl ChatHost {
     /// Before the workspace is replaced by a backup: refuses every request that would
     /// reach or start a supervisor, on every clone of this host, then stops every
     /// running Chat. Nothing runs until `finish_restore`.
-    pub async fn begin_restore(&self) -> Vec<UnconfirmedCleanup> {
+    pub async fn begin_restore(&self) -> Result<Vec<UnconfirmedCleanup>, UnconfirmedCleanup> {
         self.inner.lifecycle.restoring.store(true, Ordering::SeqCst);
-        self.stop_all(StopReason::Restore).await
+        let mut warnings = self.stop_all(StopReason::Restore).await;
+        let confirmed = self.inner.lifecycle.confirm_restore_cleanup().await?;
+        let mut closing = self.closing_agents();
+        for chat_id in &confirmed {
+            closing.remove(chat_id);
+        }
+        warnings.retain(|warning| !confirmed.contains(&warning.chat_id));
+        Ok(warnings)
     }
 
     /// The restore is over, whether or not it replaced anything; requests are served again.
@@ -1156,6 +1238,9 @@ impl ChatHost {
         // A cleanup beginning after this check sees the registration. A run
         // already ended cannot register later and remove an ordinary supervisor.
         let _chats = self.chats();
+        if self.inner.lifecycle.stopping_for_workspace() {
+            self.serving()?;
+        }
         if self
             .workspace()?
             .automation_run(&unattended.settings.run_id)?
@@ -1195,7 +1280,8 @@ impl ChatHost {
                 };
                 // Chat Off already shut down this run's supervisor. The entry now
                 // may hold a person-driven supervisor or pending storage recovery.
-                if *unattended.turned_off.borrow() {
+                if *unattended.turned_off.borrow() || self.inner.lifecycle.stopping_for_workspace()
+                {
                     return (true, Some(Closed { unconfirmed: None }));
                 }
                 let commands = chats.remove(chat_id);
@@ -1231,7 +1317,7 @@ impl ChatHost {
         (started, result.ok().and_then(|closed| closed.clone()))
     }
 
-    fn taking_over(&self) -> MutexGuard<'_, HashSet<String>> {
+    fn taking_over(&self) -> MutexGuard<'_, HashMap<String, watch::Receiver<bool>>> {
         self.inner
             .taking_over
             .lock()
@@ -1246,7 +1332,7 @@ impl ChatHost {
     }
 
     fn check_agent_cleanup(&self, chat_id: &str) -> Result<(), HostError> {
-        if self.taking_over().contains(chat_id)
+        if self.taking_over().contains_key(chat_id)
             || self
                 .closing_agents()
                 .get(chat_id)
@@ -1257,7 +1343,7 @@ impl ChatHost {
         if self
             .inner
             .lifecycle
-            .orphaned_agent_opens()
+            .pending_open_cleanup()
             .contains(chat_id)
         {
             return Err(HostError::PermissionRestartCleanupUnconfirmed);

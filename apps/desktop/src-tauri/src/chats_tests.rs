@@ -1452,7 +1452,7 @@ async fn restoring_the_workspace_stops_chats_reconciles_and_dispatches_nothing()
     let (_, seen) = f.open(&id).await;
     assert_eq!(f.chats.working(), 1);
 
-    let unconfirmed = f.chats.begin_restore().await;
+    let unconfirmed = f.chats.begin_restore().await.unwrap();
     assert!(unconfirmed.is_empty());
     assert_eq!(f.chats.working(), 0, "no harness runs across a restore");
     assert!(matches!(f.fake.written().last(), Some(Written::Close(_))));
@@ -2353,6 +2353,31 @@ async fn a_refused_resend_asks_the_person_again_and_says_what_happened() {
     assert_eq!(f.submitted(), ["first", "first"]);
     let said = opened.snapshot.chat.problem.and_then(|p| p.message);
     assert!(!said.unwrap_or_default().contains("back in the queue"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn restore_does_not_replace_the_workspace_while_a_harness_is_still_opening() {
+    let f = Fixture::new().await;
+    let open = f.fake.hold_next_open();
+    let chat = f.chat().await;
+    let backup = f.dir.path().join("valid.ticketd-backup");
+    assert!(f.core().backup(&backup).unwrap());
+
+    let refused = f
+        .chats
+        .restore(backup, |_| panic!("restore replaced the workspace"))
+        .await
+        .unwrap_err();
+    assert!(refused.contains("still opening or stopping"), "{refused}");
+    assert!(f.fake.opens().is_empty());
+    assert_eq!(f.core().chat_queue(&chat).unwrap()[0].text, "first");
+
+    open.send(()).unwrap();
+    settle().await;
+    assert!(matches!(f.fake.written().as_slice(), [Written::Close(_)]));
+    f.chats.resume_queue(&chat).await.unwrap();
+    settle().await;
+    assert_eq!(f.submitted(), ["first"]);
 }
 
 #[tokio::test(start_paused = true)]

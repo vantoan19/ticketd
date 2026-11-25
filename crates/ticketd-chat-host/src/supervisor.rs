@@ -128,7 +128,7 @@ enum Done {
     Opened {
         generation: RuntimeGeneration,
         result: Result<OpenedRuntime, Problem>,
-        accepted: Option<oneshot::Sender<()>>,
+        accepted: oneshot::Sender<()>,
         /// The ticketd context read for the new session, or why it could not be.
         context: Result<Option<String>, String>,
     },
@@ -690,12 +690,20 @@ impl Supervisor {
                     let _ = reply.send(Err(HostError::Quitting));
                     return;
                 };
-                let command_id = format!("{}:first", self.chat_id);
-                let result = self
-                    .send(Some(&command_id), &text, SendMode::Auto, &[], &[])
-                    .and_then(|receipt| receipt.into_message().map_err(HostError::from));
+                let result = self.recover_storage().and_then(|()| {
+                    let chat_id = self.chat_id.clone();
+                    self.write(|core| {
+                        core.save_automation_chat_prompt(
+                            &chat_id,
+                            &unattended.settings.run_id,
+                            &text,
+                        )
+                    })
+                    .map_err(HostError::from)
+                });
                 if let Ok(message) = &result {
                     let _ = unattended.first_message.set(message.id.clone());
+                    self.schedule_saved(message, self.active.is_none());
                 }
                 let _ = reply.send(result);
             }
@@ -1596,7 +1604,7 @@ impl Supervisor {
         });
         let (done, chat_id) = (self.done.clone(), chat.id.clone());
         let chat_span = self.span.clone();
-        let agent_lifecycle = self.unattended.as_ref().map(|_| self.lifecycle.clone());
+        let lifecycle = self.lifecycle.clone();
         tokio::spawn(
             async move {
                 // Reading the context runs the CLI and can take seconds: off the async threads.
@@ -1612,14 +1620,8 @@ impl Supervisor {
                     .flatten();
                 let chat_id = request.chat_id.clone();
                 let result = adapter.open(request).await;
-                let (accepted, cleanup) = match agent_lifecycle {
-                    Some(lifecycle) => {
-                        let (accepted, received) = oneshot::channel();
-                        let runtime = result.as_ref().ok().map(|opened| opened.runtime.clone());
-                        (Some(accepted), Some((lifecycle, received, runtime)))
-                    }
-                    None => (None, None),
-                };
+                let (accepted, received) = oneshot::channel();
+                let runtime = result.as_ref().ok().map(|opened| opened.runtime.clone());
                 let _ = done.send(Done::Opened {
                     generation,
                     result,
@@ -1628,15 +1630,13 @@ impl Supervisor {
                 });
                 // The old worker may have timed out waiting for this open. Close a
                 // late process before allowing a replacement worker to start.
-                if let Some((lifecycle, received, runtime)) = cleanup
-                    && received.await.is_err()
-                {
+                if received.await.is_err() {
                     if let Some(runtime) = runtime
                         && bounded_close(runtime.as_ref()).await.is_some()
                     {
-                        lifecycle.retire_permission_runtime(&chat_id, runtime);
+                        lifecycle.retire_runtime(&chat_id, runtime, true);
                     }
-                    lifecycle.release_orphaned_agent_open(&chat_id);
+                    lifecycle.release_pending_open_cleanup(&chat_id);
                 }
             }
             .instrument(chat_span),
@@ -1703,9 +1703,7 @@ impl Supervisor {
             }
         }
         if let Some(opening) = self.opening.take() {
-            if self.unattended.is_some() {
-                self.lifecycle.hold_orphaned_agent_open(&self.chat_id);
-            }
+            self.lifecycle.hold_pending_open_cleanup(&self.chat_id);
             if let Some(reply) = opening.reply {
                 let _ = reply.send(Err(HostError::Quitting));
             }
@@ -1742,18 +1740,19 @@ impl Supervisor {
         let permission_restart =
             why == StopReason::ExplicitResume && self.permission_restart_pending;
         // Losing the event stream does not prove that the previous process exited.
-        let unconfirmed = if permission_restart || self.runtime.is_some() {
-            self.drive(bounded_close(handle.as_ref())).await
-        } else {
-            None
-        };
+        let unconfirmed =
+            if permission_restart || self.unattended.is_some() || self.runtime.is_some() {
+                self.drive(bounded_close(handle.as_ref())).await
+            } else {
+                None
+            };
         self.keep_unanswered_permission();
         self.runtime = None;
         self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
             if permission_restart || self.unattended.is_some() {
                 self.lifecycle
-                    .retire_permission_runtime(&self.chat_id, handle);
+                    .retire_runtime(&self.chat_id, handle, self.unattended.is_some());
             }
             if permission_restart {
                 self.notice(
@@ -1862,7 +1861,14 @@ impl Supervisor {
                 && !self.setting_on_its_way());
         self.keep_unanswered_permission();
         self.record(Vec::new());
-        self.runtime = None;
+        if let Some(runtime) = self.runtime.take()
+            && self.unattended.is_some()
+            && !self.closing
+        {
+            // Shutdown still needs to confirm the agent exited after event loss.
+            self.lifecycle
+                .retire_runtime(&self.chat_id, runtime.handle, true);
+        }
         if self.closing {
             // `stop_runtime` settles what was open, with its own reason.
             return;
@@ -2262,7 +2268,7 @@ impl Supervisor {
         &mut self,
         generation: RuntimeGeneration,
         result: Result<OpenedRuntime, Problem>,
-        accepted: Option<oneshot::Sender<()>>,
+        accepted: oneshot::Sender<()>,
         context: Result<Option<String>, String>,
     ) {
         let Some(opening) = self
@@ -2271,9 +2277,7 @@ impl Supervisor {
         else {
             return;
         };
-        if let Some(accepted) = accepted {
-            let _ = accepted.send(());
-        }
+        let _ = accepted.send(());
         let result = match result {
             Ok(opened) => {
                 self.start_settings = StartSettings::default();
