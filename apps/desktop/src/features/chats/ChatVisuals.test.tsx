@@ -8,6 +8,8 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 import {
   ChatClientContext,
@@ -36,6 +38,12 @@ window.ResizeObserver = class {
   unobserve() {}
   disconnect() {}
 };
+
+// jsdom has no cascade or layout, so a rule that keeps a row to one line is read as text.
+const css = readFileSync(join(__dirname, "chats.css"), "utf8").replace(
+  /\/\*[\s\S]*?\*\//g,
+  "",
+);
 
 afterEach(() => {
   cleanup();
@@ -211,6 +219,37 @@ test("a command with no description is one muted mono line", async () => {
   );
   expect(row.textContent).toBe(
     "Run gh pr create --fill --title 'a long title' · Failed",
+  );
+});
+
+test("a row naming two long files keeps to one line, its outcome outside the cut", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        {
+          kind: "read",
+          target: "host.rs",
+          targets: [
+            { text: "crates/ticketd-core/src/source/extension/host.rs" },
+            { text: "docs/ticket-source-extensions-and-their-contracts.md" },
+          ],
+          state: "failed",
+        },
+      ),
+    },
+  ]);
+  const words = document.querySelector(".chat-step-words");
+  // The cascade is read as text (jsdom has none): a line row never wraps, and
+  // its names, not its verb or outcome, are what give way.
+  expect(words?.hasAttribute("data-line")).toBe(true);
+  expect(words?.querySelectorAll(".chat-file-name")).toHaveLength(2);
+  expect(words?.lastElementChild?.textContent).toBe("Failed");
+  expect(css).toMatch(
+    /\.chat-step-words\[data-line\] \{[^}]*white-space: nowrap/,
+  );
+  expect(css).toMatch(
+    /\.chat-step-words\[data-line\] > :is\(code, \.chat-file-name\) \{[^}]*flex: 0 1 auto/,
   );
 });
 

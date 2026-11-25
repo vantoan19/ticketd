@@ -518,7 +518,7 @@ function RowLine({
   children,
 }: {
   icon?: ReactNode;
-  /** A command with no description: one muted line, cut with an ellipsis. */
+  /** A command, or a row that names files or patterns: one line, the names cut with an ellipsis. */
   line?: boolean;
   children: ReactNode;
 }) {
@@ -594,7 +594,12 @@ export const StepRow = memo(function StepRow({
     : STEP_ICONS[step.explored ? "read" : step.kind];
   const line = (
     <RowLine
-      line={words.parts.some((part) => part.command)}
+      line={
+        words.parts.some((part) => part.command) ||
+        // A file or a pattern the step named: its row keeps to one line, and the
+        // names give way before the verb and the outcome do.
+        (!step.ticketd?.length && words.parts.some((part) => part.code))
+      }
       icon={
         running ? (
           <LoaderCircle size={12} className="chat-spin" />
