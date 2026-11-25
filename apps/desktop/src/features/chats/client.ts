@@ -310,6 +310,8 @@ const stepSchema = z.object({
     .optional(),
   /** The command without its shell wrappers. */
   command: z.string().nullish(),
+  /** The harness's own one-line account of the command. Absent from older hosts and records. */
+  description: z.string().nullish(),
   exit_code: z.number().int().nullish(),
   /** Where the command ran, when that is not the Chat's folder. */
   folder: z.string().nullish(),

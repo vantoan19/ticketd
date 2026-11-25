@@ -660,6 +660,14 @@ collect OAuth tokens, proxy model requests, or change billing.
   turn steers it where the harness supports that, otherwise the message is visibly
   queued. ticketd owns the queue. Stop pauses it and requests interruption without
   claiming every tool stopped.
+- **Steps.** Each tool call reads as one line in the words of what it did. When Claude
+  Code describes a command, the row reads that description and opens to the exact
+  command and its output; any other command reads as its first line, muted and cut to
+  one line. Paths show their folder muted before the file name, and a long path is cut
+  from its start, never its name. A run of reads and searches is one row, "Explored 6
+  files · 2 searches". The Chat host reads the description from the stored tool input
+  each time the view is built, so existing Chats read this way with no migration
+  ([ADR 0022](adr/0022-harnesses-plug-into-ticketds-chat-vocabulary.md)).
 - **Lifetime.** Execution belongs to the desktop backend, not the view: navigating away
   keeps work running, and explicit Quit stops it. One ranked status per Chat drives
   the list, sidebar count, app-icon count, and system notifications, which can be
