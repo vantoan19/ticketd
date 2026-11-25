@@ -111,6 +111,9 @@ A Todo ticket that is not in the trash and has unresolved blocking dependencies.
 A repository associated with tickets, with an explicit identity preserved across repository moves and renames. Multiple local checkouts of the same repository represent the same project. A Project remote can identify its hosted repository.
 _Avoid_: Work grouping
 
+**Archived Project**:
+A Project set aside from active use that can be restored to Active. It keeps its identity and existing links.
+
 **Project remote**:
 The hosted repository a project corresponds to, identified as `host/owner/name`. A project can have at most one Project remote, and each Project remote can belong to at most one project in a workspace. Matching ignores case.
 _Avoid_: origin, git link

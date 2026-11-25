@@ -165,7 +165,9 @@ function RecoveredCreateTicketDialog({
       body: "",
       status: initialStatus ?? "Todo",
       project:
-        navigation.project === "all" || navigation.project === "unlinked"
+        navigation.project === "all" ||
+        navigation.project === "unlinked" ||
+        projects.find((project) => project.id === navigation.project)?.archived
           ? ""
           : navigation.project,
       plan: navigation.plan,

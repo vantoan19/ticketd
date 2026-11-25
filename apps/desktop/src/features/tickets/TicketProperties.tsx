@@ -418,7 +418,9 @@ export function TicketProperties({
   // The core says which statuses may be chosen; the current one is always shown.
   const statusChoices = ticketStatusChoices(ticket);
   const project = projects.find((p) => p.id === ticket.project_id);
-  const projectName = project?.name ?? (ticket.project_id || "No project");
+  const projectName = project
+    ? `${project.name}${project.archived ? " (archived)" : ""}`
+    : ticket.project_id || "No project";
   const plan = plans.find((e) => e.id === ticket.plan_id);
   const planName = plan
     ? `${plan.name}${plan.archived ? " (archived)" : ""}`

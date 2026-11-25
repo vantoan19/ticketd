@@ -13041,6 +13041,45 @@ async function renderReviewApp(handlers: Record<string, unknown>) {
   await act(async () => {});
 }
 
+test("archived projects leave navigation and their ticket scope can reactivate them", async () => {
+  let archived = true;
+  const project = { id: "smoke", name: "Smoke project", path: "", paths: [] };
+  await renderReviewApp({
+    list_projects: () => [{ ...project, archived }],
+    set_project_archived: (args: { id: string; archived: boolean }) => {
+      expect(args.id).toBe(project.id);
+      archived = args.archived;
+      return { ...project, archived };
+    },
+  });
+  const scopes = within(
+    await screen.findByRole("navigation", { name: "Project scopes" }),
+  );
+  expect(scopes.queryByRole("button", { name: project.name })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Archived" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: `Open tickets of ${project.name}`,
+    }),
+  );
+
+  const list = within(
+    await screen.findByRole("region", { name: project.name }),
+  );
+  expect(list.getByText("Archived")).toBeTruthy();
+  expect(await list.findByText("No tickets in Smoke project")).toBeTruthy();
+  expect(list.queryByRole("button", { name: "New ticket" })).toBeNull();
+  fireEvent.click(list.getByRole("button", { name: "Reactivate" }));
+
+  const restored = await scopes.findByRole("button", { name: project.name });
+  expect(restored.getAttribute("aria-current")).toBe("page");
+  expect(list.queryByText("Archived")).toBeNull();
+  expect(document.activeElement).toBe(
+    list.getByRole("button", { name: "Filters" }),
+  );
+});
+
 const reviewSource = {
   provider: "github",
   provider_name: "GitHub",

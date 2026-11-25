@@ -35,6 +35,11 @@ const COPY = {
     title: "No tickets without a project",
     sentence: "Every ticket belongs to a project.",
   },
+  "tickets-project-archived": {
+    title: "No tickets in {name}",
+    sentence:
+      "It's archived. Tickets that belong to it keep the link, including tickets in Trash.",
+  },
   "tickets-project": {
     title: "No tickets in {name}",
     sentence: "Tickets you create in this project appear here.",
@@ -86,6 +91,15 @@ const COPY = {
   "plans-archived": {
     title: "No archived Plans",
     sentence: "Plans you archive wait here.",
+  },
+  "projects-active": {
+    title: "No active projects",
+    sentence:
+      "Archived projects wait under Archived. Projects you create or reactivate appear here.",
+  },
+  "projects-archived": {
+    title: "No archived projects",
+    sentence: "Projects you archive wait here.",
   },
   projects: {
     title: "No projects yet",

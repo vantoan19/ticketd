@@ -200,6 +200,7 @@ function useVisited(value: boolean) {
 const VIEW_NAMES = {
   tickets: "tickets",
   projects: "Projects",
+  "archived-projects": "Projects",
   plans: "Plans",
   "archived-plans": "Archived Plans",
   settings: "Settings",
@@ -866,7 +867,8 @@ function AppContent() {
     useTicket(paletteOpen ? paletteReference : null).value ?? undefined;
   // Hidden views mount on their first visit, then stay to keep their state.
   const paletteMounted = useVisited(paletteOpen);
-  const projectsMounted = useVisited(view === "projects");
+  const projectsShown = view === "projects" || view === "archived-projects";
+  const projectsMounted = useVisited(projectsShown);
   const documentsMounted = useVisited(view === "documents" || capture);
   const chatsMounted = useVisited(view === "chats");
   return (
@@ -1308,33 +1310,35 @@ function AppContent() {
                                     plans={plans}
                                     create={createTicket}
                                   />
-                                  {projectSource?.mode === "review" && (
-                                    <ConnectProjectSource
-                                      projectId={projectSource.projectId}
-                                      {...(sourceProject?.remote && {
-                                        projectRemote: sourceProject.remote,
-                                      })}
-                                      {...(projectSource.connection && {
-                                        connection: projectSource.connection,
-                                      })}
-                                      resumeAfterSetup={
-                                        projectSource.resumed ?? false
-                                      }
-                                      onClose={() => setProjectSource(null)}
-                                      onSetup={setupProjectSource}
-                                      onConnected={() => void reportChange()}
-                                      fallbackFocus={() => contentPanel}
-                                      {...(sourceProject && {
-                                        onEditRemote: () =>
-                                          setProjectSource({
-                                            mode: "edit_remote",
-                                            projectId: sourceProject.id,
-                                          }),
-                                      })}
-                                    />
-                                  )}
+                                  {projectSource?.mode === "review" &&
+                                    !sourceProject?.archived && (
+                                      <ConnectProjectSource
+                                        projectId={projectSource.projectId}
+                                        {...(sourceProject?.remote && {
+                                          projectRemote: sourceProject.remote,
+                                        })}
+                                        {...(projectSource.connection && {
+                                          connection: projectSource.connection,
+                                        })}
+                                        resumeAfterSetup={
+                                          projectSource.resumed ?? false
+                                        }
+                                        onClose={() => setProjectSource(null)}
+                                        onSetup={setupProjectSource}
+                                        onConnected={() => void reportChange()}
+                                        fallbackFocus={() => contentPanel}
+                                        {...(sourceProject && {
+                                          onEditRemote: () =>
+                                            setProjectSource({
+                                              mode: "edit_remote",
+                                              projectId: sourceProject.id,
+                                            }),
+                                        })}
+                                      />
+                                    )}
                                   {projectSource?.mode === "edit_remote" &&
-                                    sourceProject && (
+                                    sourceProject &&
+                                    !sourceProject.archived && (
                                       <ProjectFormDialog
                                         project={sourceProject}
                                         open={!projectSource.exit}
@@ -1412,12 +1416,21 @@ function AppContent() {
                                       <div
                                         className="management-host"
                                         hidden={
-                                          view !== "projects" ||
-                                          graphOrigin !== null
+                                          !projectsShown || graphOrigin !== null
                                         }
                                       >
                                         <Projects
                                           projects={projects}
+                                          archived={
+                                            view === "archived-projects"
+                                          }
+                                          onArchivedChange={(archived) =>
+                                            setView(
+                                              archived
+                                                ? "archived-projects"
+                                                : "projects",
+                                            )
+                                          }
                                           loading={loading}
                                           onChange={refresh}
                                           onConnectSource={reviewProjectSource}
@@ -1630,16 +1643,20 @@ function AppContent() {
                                             workspace={workspace}
                                             bulk={bulk}
                                             projectNotice={
-                                              <ProjectRemoteNote
-                                                project={scopedProject}
-                                                sourceRevision={sourceRevision}
-                                                onConnectSource={
-                                                  reviewProjectSource
-                                                }
-                                                onProjectChange={() =>
-                                                  void reportChange()
-                                                }
-                                              />
+                                              !scopedProject?.archived && (
+                                                <ProjectRemoteNote
+                                                  project={scopedProject}
+                                                  sourceRevision={
+                                                    sourceRevision
+                                                  }
+                                                  onConnectSource={
+                                                    reviewProjectSource
+                                                  }
+                                                  onProjectChange={() =>
+                                                    void reportChange()
+                                                  }
+                                                />
+                                              )
                                             }
                                             hidden={
                                               ((firstRun || firstRunPending) &&

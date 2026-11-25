@@ -348,6 +348,7 @@ export const projectSchema = lazySchema(() =>
     path: z.string(),
     paths: z.array(z.string()),
     remote: z.string().nullish(),
+    archived: z.boolean().optional(),
   }),
 );
 export type Project = z.infer<typeof projectSchema>;
@@ -745,6 +746,11 @@ export const client = {
   },
   async listProjects() {
     return z.array(projectSchema).parse(await invoke("list_projects"));
+  },
+  async setProjectArchived(id: string, archived: boolean) {
+    return projectSchema.parse(
+      await invoke("set_project_archived", { id, archived }),
+    );
   },
   async linkSourceRepositoryProject(
     connection: string,

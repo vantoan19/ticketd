@@ -54,6 +54,11 @@ See [in-app updates](install.md#in-app-updates).
   refer to it. Registered checkout paths locate projects and can suggest a Project
   remote from Git configuration. Git is optional. A ticket optionally links to
   one project ("No project" is valid).
+- **Archived Projects** leave active navigation and stay visible under Projects
+  → Archived. Archive works with open tickets and keeps the Project's identity,
+  settings, and links, including links on tickets in Trash. Open tickets from the
+  Archived view to continue work on existing tickets. Reactivate a Project to
+  change its settings. Both desktop actions offer Undo.
 - **Project context** is local to each UI or CLI interaction. An explicit selection
   takes precedence; the CLI otherwise infers the project from a registered checkout
   that contains the current directory. With neither, new tickets stay unlinked.
