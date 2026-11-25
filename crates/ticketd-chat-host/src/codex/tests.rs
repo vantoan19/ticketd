@@ -407,6 +407,60 @@ fn turn(id: &str) -> NativeTurnId {
     NativeTurnId::new(id)
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_steer_carries_text_native_images_and_readable_file_snapshots_in_order() {
+    let (mut peer, runtime, _events) = open().await;
+    peer.load(fixture!("steer"));
+    submit(&mut peer, &runtime, start_turn("sub-1", "Start")).await;
+    let url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+    let image =
+        ticketd_core::ChatAttachmentContent::from_image_data_url("Screenshot.png", url).unwrap();
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "details.txt",
+        "data:text/plain;base64,c2F2ZWQgYnl0ZXM=",
+        100,
+    )
+    .unwrap();
+    let submission = Submission {
+        attachments: vec![file, image],
+        ..steer("sub-2", "turn_1", "Read both")
+    };
+    let sending = runtime.submit(submission);
+    tokio::pin!(sending);
+    let written = tokio::select! {
+        outcome = &mut sending => panic!("steer finished before writing: {outcome:?}"),
+        written = peer.written() => written,
+    };
+    let reply = json!({"id": written["id"], "result": {"turnId": "turn_1"}});
+    peer.send(&format!("{reply}\n")).await;
+    let outcome = sending.await;
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+    assert_eq!(written["method"], "turn/steer");
+    assert_eq!(written["params"]["expectedTurnId"], "turn_1");
+    let input = written["params"]["input"].as_array().unwrap();
+    assert_eq!(input.len(), 3);
+    assert_eq!(input[0]["text"], "Read both");
+    assert_eq!(input[2], json!({"type": "image", "url": url}));
+    let reference: Value = serde_json::from_str(
+        input[1]["text"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("Read this Chat attachment snapshot: ")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reference["name"], "details.txt");
+    assert_eq!(
+        std::fs::read(reference["path"].as_str().unwrap()).unwrap(),
+        b"saved bytes"
+    );
+}
+
 fn answer(request: &str, answer: InteractionAnswer) -> InteractionResponse {
     InteractionResponse {
         generation: GENERATION,

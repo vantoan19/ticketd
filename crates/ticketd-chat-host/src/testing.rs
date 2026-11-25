@@ -335,6 +335,10 @@ impl HarnessAdapter for FakeAdapter {
         self.harness
     }
 
+    fn attachment_refusal(&self, _: &[ticketd_core::ChatAttachmentContent]) -> Option<Refusal> {
+        None
+    }
+
     async fn inspect(&self) -> Inspection {
         self.state().inspection.clone()
     }
