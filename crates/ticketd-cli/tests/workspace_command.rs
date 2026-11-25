@@ -733,7 +733,7 @@ fn document_lists_carry_each_rows_plans_tickets_and_unopened_state() {
         assert_eq!(row["id"], id);
         assert_eq!(
             row["plans"],
-            serde_json::json!([{"name": "Launch", "archived": false, "spec": true}])
+            serde_json::json!([{"id": plan, "name": "Launch", "archived": false, "spec": true}])
         );
         assert_eq!(
             row["tickets"],
