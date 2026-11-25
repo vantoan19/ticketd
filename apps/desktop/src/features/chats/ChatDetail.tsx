@@ -520,6 +520,7 @@ function Conversation({
     setSeenQuestion(question?.id);
     setHeldFor(question && draftHeld ? question.id : undefined);
   }
+  if (!draftHeld && heldFor) setHeldFor(undefined);
   const answering =
     Boolean(question) &&
     (!draftHeld || heldFor !== question?.id) &&
@@ -918,7 +919,7 @@ function Conversation({
                                 attachments,
                               )
                             : client.send(id, outgoingText, outgoingLinks)
-                          ).then(() => clearQuotes(id)),
+                          ).then(() => clearQuotes(id, quotes)),
                     ),
                     answerQuestion ? "send your answer" : "send the message",
                     answerQuestion
@@ -938,7 +939,7 @@ function Conversation({
                     ? client.queue(id, outgoingText, outgoingLinks, attachments)
                     : client.queue(id, outgoingText, outgoingLinks);
                   const submission = run(
-                    sent(queued.then(() => clearQuotes(id))),
+                    sent(queued.then(() => clearQuotes(id, quotes))),
                     "queue the message",
                     () => {
                       messageBox.current?.focus();

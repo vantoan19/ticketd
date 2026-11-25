@@ -633,6 +633,7 @@ export const fixtureChatClient = () =>
         status: "not_signed_in",
         command: "codex login",
       },
+      { id: "antigravity", name: "Antigravity", status: "ready" },
     ],
     now: new Date().toISOString(),
     records: [

@@ -29,7 +29,7 @@ export class ComposerDraft {
   private staged:
     { payload: QueuedDraft; confirm: () => Promise<boolean> } | undefined;
   private attempt = { id: "", request: "" };
-  prefilled: string | null = null;
+  private prefilled: string | null = null;
 
   constructor(
     readonly attachments: ComposerAttachments,
@@ -65,8 +65,15 @@ export class ComposerDraft {
 
   locked = () => this.state.saving || this.state.transfer !== null;
 
-  setText(text: string, tokens: Token[]) {
+  canPrefill() {
+    const { text } = this.state;
+    return !this.locked() && (!text.trim() || text === this.prefilled);
+  }
+
+  setText(text: string, tokens: Token[], prefilled = false) {
     if (this.locked()) return false;
+    if (prefilled) this.prefilled = text;
+    else if (text !== this.prefilled) this.prefilled = null;
     this.update({
       text,
       tokens,
@@ -108,7 +115,13 @@ export class ComposerDraft {
     })();
   }
 
-  append({ text, attachments }: QueuedDraft) {
+  /** A first message that could not be delivered joins its new Chat's draft. */
+  async recover(payload: QueuedDraft) {
+    await this.saving;
+    this.append(payload);
+  }
+
+  private append({ text, attachments }: QueuedDraft) {
     if (text) {
       const before = this.state.text;
       this.state = {

@@ -413,6 +413,104 @@ test("editing queued input waits for the draft submission that is still saving",
   expect(composer()).toHaveProperty("value", "Edit this message");
 });
 
+test("a queued edit is recovered after navigation and a lost acknowledgement", async () => {
+  const client = await open([
+    ...one({ id: "c1", title: "Limiter", queue_paused: true }),
+    ...one({ id: "c2", title: "Other" }),
+  ]);
+  const files = [
+    { name: "notes.txt", dataUrl: "data:text/plain;base64,c2F2ZWQ=" },
+  ];
+  await act(async () => client.queue("c1", "Queued caption", [], files));
+  const prepare = client.editQueued;
+  let finishPreparing!: () => void;
+  const preparing = new Promise<void>((resolve) => {
+    finishPreparing = resolve;
+  });
+  vi.spyOn(client, "editQueued").mockImplementationOnce(async (...args) => {
+    const payload = await prepare(...args);
+    await preparing;
+    return payload;
+  });
+  const acknowledge = client.confirmQueueEdit;
+  const confirm = vi
+    .spyOn(client, "confirmQueueEdit")
+    .mockImplementationOnce(async (...args) => {
+      await acknowledge(...args);
+      throw new Error("Acknowledgement lost");
+    });
+  type("Draft caption");
+  fireEvent.click(button("Edit in the message box"));
+  fireEvent.click(button(/^Other/));
+  await screen.findByRole("heading", { name: "Other" });
+  expect((await client.openChat("c1")).chat.queue).toHaveLength(1);
+  fireEvent.click(button(/^Limiter/));
+  await screen.findByRole("heading", { name: "Limiter" });
+  expect(composer()).toHaveProperty("readOnly", true);
+
+  await act(async () => finishPreparing());
+  expect(
+    await screen.findByRole("button", { name: "Retry queue edit" }),
+  ).toBeTruthy();
+  expect((await client.openChat("c1")).chat.queue).toHaveLength(0);
+  expect(composer()).toHaveProperty("value", "Draft caption");
+  expect(button("Send")).toHaveProperty("disabled", true);
+  fireEvent.click(button("Retry queue edit"));
+
+  await waitFor(() => {
+    expect(composer()).toHaveProperty(
+      "value",
+      "Draft caption\n\nQueued caption",
+    );
+    expect(button("Remove notes.txt")).toBeTruthy();
+  });
+  expect(confirm.mock.calls[1]).toEqual(confirm.mock.calls[0]);
+  expect(
+    (await client.openChat("c1")).items.filter((item) => item.kind === "user"),
+  ).toHaveLength(0);
+  const send = vi.spyOn(client, "send");
+  fireEvent.click(button("Send"));
+  expect(send).toHaveBeenCalledWith(
+    "c1",
+    "Draft caption\n\nQueued caption",
+    [],
+    files,
+  );
+});
+
+test("a pending queue edit does not duplicate a queued message sent before confirmation", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", queue_paused: true }),
+  );
+  const file = {
+    name: "notes.txt",
+    dataUrl: "data:text/plain;base64,c2F2ZWQ=",
+  };
+  await act(async () => client.queue("c1", "Queued caption", [], [file]));
+  const confirm = client.confirmQueueEdit;
+  let finishConfirming!: () => void;
+  const waiting = new Promise<void>((resolve) => {
+    finishConfirming = resolve;
+  });
+  const pending = vi
+    .spyOn(client, "confirmQueueEdit")
+    .mockImplementationOnce(async (...args) => {
+      await waiting;
+      return confirm(...args);
+    });
+  type("Draft caption");
+  fireEvent.click(button("Edit in the message box"));
+  await waitFor(() => expect(pending).toHaveBeenCalledOnce());
+  fireEvent.click(button("Send now"));
+  await screen.findByText("Queued caption", { selector: ".chat-you *" });
+  await act(async () => finishConfirming());
+  expect(composer("Steer Codex")).toHaveProperty("value", "Draft caption");
+  noButton("Remove notes.txt");
+  expect(
+    (await client.openChat("c1")).items.filter((item) => item.kind === "user"),
+  ).toHaveLength(1);
+});
+
 test.each(["send", "queue"] as const)(
   "a pending %s keeps one locked draft across Chat navigation and clears it together",
   async (submit) => {
@@ -462,6 +560,44 @@ test.each(["send", "queue"] as const)(
     expect(screen.queryByText("original.txt")).toBeNull();
   },
 );
+
+test("New Chat keeps a pending first message and its retry identity across navigation", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  let rejectCreate!: (reason: Error) => void;
+  const creating = new Promise<never>((_, reject) => {
+    rejectCreate = reject;
+  });
+  const create = vi.spyOn(client, "createChat").mockReturnValueOnce(creating);
+  fireEvent.click(button("New Chat"));
+  const description = "Describe a task or ask a question";
+  const box = () => composer(description);
+  type("First caption", description);
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [new File(["one"], "first.txt", { type: "text/plain" })] },
+  });
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(create).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(button(/^Limiter/));
+  await screen.findByRole("heading", { name: "Limiter" });
+  fireEvent.click(button("New Chat"));
+  await screen.findByRole("heading", { name: "What should we work on?" });
+  expect(box()).toHaveProperty("readOnly", true);
+  expect(box()).toHaveProperty("value", "First caption");
+  expect(button("Remove first.txt")).toHaveProperty("disabled", true);
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(create).toHaveBeenCalledTimes(1);
+  await act(async () => rejectCreate(new Error("The first reply was lost")));
+
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.keyDown(box(), { key: "Enter" });
+  expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+  await screen.findByRole("heading", { name: "First caption" });
+  fireEvent.click(button("New Chat"));
+  expect(box()).toHaveProperty("value", "");
+  noButton("Remove first.txt");
+});
 
 test("an image that the running turn cannot take can be queued for the next turn", async () => {
   await open(
@@ -2378,15 +2514,22 @@ test("a first-message save failure carries picked files and a screenshot into th
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   const describe = "Describe a task or ask a question";
   const file = new File(["old bytes"], "details.txt", { type: "text/plain" });
+  const wrongImage = new File(["plain text"], "wrong.png", {
+    type: "image/png",
+  });
   const screenshot = new File([screenshotBytes], "Screen.png", {
     type: "image/png",
   });
   fireEvent.change(screen.getByLabelText("Choose files to attach"), {
-    target: { files: [file] },
+    target: { files: [file, wrongImage] },
   });
   fireEvent.paste(composer(describe), {
     clipboardData: { files: [screenshot] },
   });
+  expect((await screen.findByRole("alert")).textContent).toMatch(
+    /image or|GIF image/i,
+  );
+  fireEvent.click(button("Remove wrong.png"));
   await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
   fireEvent.click(button("Send"));
   const captured = [

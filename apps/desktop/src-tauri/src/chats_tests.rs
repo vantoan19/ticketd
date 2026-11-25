@@ -1570,6 +1570,42 @@ async fn repeating_a_new_chat_request_sends_its_first_message_once() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn capture_uses_the_workspace_filename_media_and_size_rules() {
+    let f = Fixture::new().await;
+    let input = |name: &str, data_url: &str| AttachmentInput {
+        name: name.into(),
+        data_url: data_url.into(),
+    };
+    let png = "data:application/octet-stream;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+    assert_eq!(
+        f.chats
+            .capture_attachment(input("transfer.png", png))
+            .unwrap(),
+        "image/png"
+    );
+    let mismatched = f
+        .chats
+        .capture_attachment(input("screen.png", "data:image/png;base64,bm90ZQ=="))
+        .unwrap_err();
+    assert!(mismatched.message.contains("file bytes"));
+    assert!(
+        f.chats
+            .capture_attachment(input("bad\0name.png", png))
+            .unwrap_err()
+            .message
+            .contains("invalid file name")
+    );
+    f.core().set_attachment_upload_limit(4).unwrap();
+    assert!(
+        f.chats
+            .capture_attachment(input("transfer.png", png))
+            .unwrap_err()
+            .message
+            .contains("limit")
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
     let f = Fixture::new().await;
     let input: NewChatInput = serde_json::from_value(json!({

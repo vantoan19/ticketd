@@ -1518,14 +1518,14 @@ impl Chats {
                 links: input.links.into_iter().map(ChatLink::from).collect(),
             };
             let existing = workspace.replay_chat_creation(&create, &new_chat)?;
-            let limit = workspace.attachment_upload_limit()?;
-            let decode_limit = if existing.is_some() {
-                MAX_BACKUP_FILE_BYTES
-            } else {
-                limit
-            };
-            let attachments =
-                Self::decode_message_attachments(&input.message, input.attachments, decode_limit)?;
+            let new_limit = (existing.is_none() && !input.attachments.is_empty())
+                .then(|| workspace.attachment_upload_limit())
+                .transpose()?;
+            let attachments = Self::decode_message_attachments(
+                &input.message,
+                input.attachments,
+                new_limit.unwrap_or(MAX_BACKUP_FILE_BYTES),
+            )?;
             if let Some(chat) = existing
                 && workspace
                     .replay_chat_input(&first, &chat.id, &input.message, &attachments)?
@@ -1536,11 +1536,14 @@ impl Chats {
                     send_error: None,
                 });
             }
-            if attachments
-                .iter()
-                .any(|file| file.bytes().len() as u64 > limit)
-            {
-                return Err(ticketd_core::Error::UploadLimit { limit }.into());
+            if new_limit.is_none() && !attachments.is_empty() {
+                let limit = workspace.attachment_upload_limit()?;
+                if attachments
+                    .iter()
+                    .any(|file| file.bytes().len() as u64 > limit)
+                {
+                    return Err(ticketd_core::Error::UploadLimit { limit }.into());
+                }
             }
             if !new_chat.folder_managed {
                 folder_argument(&new_chat.execution_folder)?;
@@ -1997,7 +2000,11 @@ impl Chats {
 
     pub fn capture_attachment(&self, file: AttachmentInput) -> Outcome<String> {
         let limit = self.workspace()?.attachment_upload_limit()?;
-        let content = ChatAttachmentContent::from_data_url(&file.name, &file.data_url, limit)?;
+        let content = ChatAttachmentContent::from_data_url(&file.name, &file.data_url, limit)
+            .map_err(|error| ChatFailure {
+                code: "invalid_attachment",
+                message: error.to_string(),
+            })?;
         Ok(content.media_type().to_owned())
     }
 

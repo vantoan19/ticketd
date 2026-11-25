@@ -102,6 +102,10 @@ const failureSchema = z.object({
   code: z.enum(["stale", "gone", "failed"]),
   message: z.string(),
 });
+const invalidAttachment = z.object({
+  code: z.literal("invalid_attachment"),
+  message: z.string(),
+});
 const stoppingSchema = z.object({
   chats: z.number().int().nonnegative(),
   runs: z.number().int().nonnegative(),
@@ -322,7 +326,7 @@ export function createHostChatClient(
             attachment,
           });
         } catch (reason) {
-          const failure = failureSchema.safeParse(reason);
+          const failure = invalidAttachment.safeParse(reason);
           if (failure.success) throw new CaptureError(failure.data.message);
           throw reason;
         }

@@ -131,11 +131,8 @@ export function NewChat({
   const [prompt] = useState(() => {
     if (!start) return null;
     const next = ticketPrompt(start.ticket);
-    const { text } = draft.snapshot();
-    const kept =
-      draft.locked() || (text.trim() !== "" && text !== draft.prefilled);
-    if (!kept && draft.setText(next.text, next.tokens))
-      draft.prefilled = next.text;
+    const kept = !draft.canPrefill();
+    if (!kept) draft.setText(next.text, next.tokens, true);
     return { ...next, kept };
   });
   const { text: typed, saving } = useSyncExternalStore(
@@ -193,7 +190,6 @@ export function NewChat({
   }, [refilled]);
   const refill = (text: string, tokens: Token[]) => {
     if (!draft.setText(text, tokens)) return;
-    draft.prefilled = null;
     setComposerKey((count) => count + 1);
     setRefilled((count) => count + 1);
   };
@@ -406,7 +402,6 @@ export function NewChat({
                 placeholder="Describe a task or ask a question"
                 draft={draft}
                 onText={(text) => {
-                  if (text !== draft.prefilled) draft.prefilled = null;
                   if (before && text !== before.prompt) setBefore(null);
                 }}
                 mentions={mentions}
@@ -485,11 +480,11 @@ export function NewChat({
                     });
                     if (offered) rememberStart(created.chat_id, offered, pick);
                     if (folder) rememberFolder(folder);
-                    clearQuotes(NEW_CHAT);
+                    clearQuotes(NEW_CHAT, quotes);
                     // The Chat exists but holds no message. Open it with the
                     // captured draft so a retry sends to the same Chat.
                     if (created.send_error) {
-                      draftOf(client, created.chat_id).append({
+                      await draftOf(client, created.chat_id).recover({
                         text: message,
                         attachments: attachments ?? [],
                       });
@@ -621,8 +616,7 @@ export function NewChat({
                   size="xs"
                   disabled={saving}
                   onClick={() => {
-                    if (draft.setText(prompt.text, prompt.tokens)) {
-                      draft.prefilled = prompt.text;
+                    if (draft.setText(prompt.text, prompt.tokens, true)) {
                       setComposerKey((count) => count + 1);
                     }
                   }}

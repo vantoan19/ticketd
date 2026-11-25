@@ -834,6 +834,14 @@ export function createMockChatClient(
       const harness = harnesses.find((item) => item.id === input.harness_id);
       if (!harness?.usable)
         throw new ChatError("failed", "The harness is not ready.");
+      if (
+        input.attachments?.length &&
+        !["codex", "claude-code", "antigravity"].includes(harness.id)
+      )
+        throw new ChatError(
+          "failed",
+          "This harness can't take Chat attachments.",
+        );
       // A repeated request finds the Chat the first try created.
       const existing = requests.get(input.command_id);
       if (existing) return { chat_id: existing };

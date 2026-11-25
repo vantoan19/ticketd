@@ -2357,9 +2357,22 @@ async fn send_now_on_a_paused_queue_sends_only_that_input() {
     f.host.stop(&f.chat.id).await.unwrap();
     f.queue("older").await;
     let now = f.send_file("this one now", SendMode::Queue).await;
+    assert_eq!(
+        f.host
+            .prepare_queue_edit(&f.chat.id, &now.id)
+            .await
+            .unwrap(),
+        ("this one now".to_owned(), vec![saved_file()])
+    );
 
     f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
     settle().await;
+    assert!(
+        !f.host
+            .confirm_queue_edit(&f.chat.id, &now.id, "late-edit")
+            .await
+            .unwrap()
+    );
 
     let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
     assert_eq!(texts(&f), ["this one now"]);

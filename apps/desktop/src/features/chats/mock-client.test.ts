@@ -54,6 +54,26 @@ test.each(["claude-code", "antigravity"])(
   },
 );
 
+test("an unsupported fixture harness still refuses an attachment", async () => {
+  const client = createMockChatClient({
+    harnesses: [
+      { id: "fixture-harness", name: "Fixture Harness", status: "ready" },
+    ],
+  });
+  await expect(
+    client.createChat({
+      command_id: "first-message",
+      harness_id: "fixture-harness",
+      folder: null,
+      links: [],
+      message: "",
+      attachments: [
+        { name: "notes.txt", dataUrl: "data:text/plain;base64,bm90ZXM=" },
+      ],
+    }),
+  ).rejects.toThrow("can't take Chat attachments");
+});
+
 test("a request takes one answer; a second is refused as stale", async () => {
   const client = working({ activity: "waiting" });
   await client.answer("c1", "req-1", { option_id: "once" });
