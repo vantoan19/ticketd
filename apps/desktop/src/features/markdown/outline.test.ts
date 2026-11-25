@@ -54,3 +54,55 @@ it("makes the first heading current above all of them, and none when there are n
   expect(currentHeading([100, 400], 20)).toBe(0);
   expect(currentHeading([], 20)).toBeNull();
 });
+
+it("marks h2 and h3 blocks as foldable, and nothing nested in a quote or list", () => {
+  const headings = outlineOf(
+    "# Top\n\n## A\n\n### B\n\n#### C\n\n> ## Quoted\n\n- ### Listed",
+  );
+  expect(headings.map((h) => [h.text, h.foldable])).toEqual([
+    ["Top", false],
+    ["A", true],
+    ["B", true],
+    ["C", false],
+    ["Quoted", false],
+    ["Listed", false],
+  ]);
+});
+
+it("takes the first sentence under a heading as its summary", () => {
+  const headings = outlineOf(
+    [
+      "## Plain",
+      "",
+      "It works.  It is *fast* and `small`. More.",
+      "",
+      "## No full stop",
+      "",
+      "Just a line",
+      "",
+      "## Code first",
+      "",
+      "```",
+      "ignored. text",
+      "```",
+      "",
+      "- Item one. Item two.",
+      "",
+      "## Empty",
+      "",
+      "### Next",
+      "",
+      "## Version",
+      "",
+      "Version 1.2 shipped. Done.",
+    ].join("\n"),
+  );
+  expect(headings.map((h) => h.summary)).toEqual([
+    "It works.",
+    "Just a line",
+    "Item one.",
+    "",
+    "",
+    "Version 1.2 shipped.",
+  ]);
+});

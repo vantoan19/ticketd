@@ -264,6 +264,10 @@ change`; an empty value clears it). ticketd never writes one.
 - Capture opens an editor at once with no required field, autosaves, and creates
   nothing if left empty. Documents opens on Recently opened with pinned items above;
   tags, pins, and links are optional.
+- Reading a long Document: an outline of its headings opens from the right edge, and
+  each h2 and h3 can be folded to its first sentence, one at a time or with Fold all
+  in the outline. Folds are kept per Document on this computer, never change the
+  Markdown, and editing shows everything.
 - Documents use recoverable trash; permanent deletion is not supported. A Document can
   create a ticket and be linked to several tickets and Plans.
 - CLI: the `document` command group (`create`, `show`, `read`, `change`, `recent`,

@@ -18,6 +18,13 @@ export type OutlineHeading = {
   section: boolean;
   /** Source offset where the heading starts. */
   offset: number;
+  /**
+   * Whether the section can be folded: an h2 or h3 that is a block of its own in
+   * the Document (not one inside a quote or a list).
+   */
+  foldable: boolean;
+  /** The first sentence under the heading, shown on its line while it is folded. */
+  summary: string;
 };
 
 /** An outline appears from three headings; a shorter Document is plain. */
@@ -50,30 +57,63 @@ function slug(text: string): string {
   );
 }
 
+const SENTENCE = /^.*?[.!?](?=\s|$)/s;
+const SUMMARY_LENGTH = 200;
+
+/** The text of a block that reads as a sentence, or "" for code, tables and rules. */
+function blockText(node: Node): string {
+  if (node.type === "paragraph") return plainText(node);
+  if (node.type === "blockquote" || node.type === "list")
+    return node.children?.map(blockText).find(Boolean) ?? "";
+  if (node.type === "listItem") return plainText(node);
+  return "";
+}
+
+/**
+ * The first sentence of the section that starts at `siblings[index]`: the first
+ * paragraph (or quote or list) before the next heading, cut at its first full stop.
+ */
+function summaryAfter(siblings: readonly Node[], index: number): string {
+  for (const node of siblings.slice(index + 1)) {
+    if (node.type === "heading") return "";
+    const text = blockText(node).replace(/\s+/g, " ").trim();
+    if (!text) continue;
+    const sentence = SENTENCE.exec(text)?.[0] ?? text;
+    return sentence.length > SUMMARY_LENGTH
+      ? `${sentence.slice(0, SUMMARY_LENGTH).trimEnd()}…`
+      : sentence;
+  }
+  return "";
+}
+
 /**
  * The headings of what Read renders (h1 to h4), in order, each with an anchor.
  * A repeated heading gets "-1", "-2" and so on, so anchors never collide.
  */
 export function outlineOf(source: string): OutlineHeading[] {
   const tree = parser.parse(source) as Node;
-  const found: { level: 1 | 2 | 3 | 4; text: string; offset: number }[] = [];
-  const walk = (node: Node) => {
+  const found: Omit<OutlineHeading, "id" | "section">[] = [];
+  const walk = (node: Node, siblings: readonly Node[], index: number) => {
     if (
       node.type === "heading" &&
       node.depth !== undefined &&
       node.depth <= 4 &&
       node.position?.start.offset !== undefined
     ) {
+      const top = siblings === tree.children;
+      const foldable = top && (node.depth === 2 || node.depth === 3);
       found.push({
         level: node.depth as 1 | 2 | 3 | 4,
         text: plainText(node).trim(),
         offset: node.position.start.offset,
+        foldable,
+        summary: foldable ? summaryAfter(siblings, index) : "",
       });
       return;
     }
-    node.children?.forEach(walk);
+    node.children?.forEach((child, at, all) => walk(child, all, at));
   };
-  walk(tree);
+  tree.children?.forEach((child, at, all) => walk(child, all, at));
   // A Document that only has h3s and h4s still has sections: its shallowest level.
   const shallowest = Math.max(2, Math.min(4, ...found.map((h) => h.level)));
   const used = new Map<string, number>();

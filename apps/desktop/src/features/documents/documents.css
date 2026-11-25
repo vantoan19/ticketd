@@ -486,6 +486,106 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
+.document-outline-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.document-outline-actions {
+  display: flex;
+  gap: 2px;
+  padding-right: 2px;
+}
+.document-outline-actions button {
+  height: 24px;
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--radius-segment);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-caption);
+}
+.document-outline-actions button:hover {
+  background: var(--hover);
+  color: var(--foreground);
+}
+.document-outline-actions button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+/* Section folding. The chevron sits in the gutter left of the column, so
+   folding never moves the text; a folded heading reads as one line with its
+   first sentence after it. */
+.markdown-document > [hidden] {
+  display: none;
+}
+.markdown-document > [data-foldable] {
+  position: relative;
+}
+.markdown-document .fold {
+  position: absolute;
+  top: calc((var(--text-reading-section-line) - 20px) / 2);
+  left: -28px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-segment);
+  background: none;
+  color: var(--muted-foreground);
+  opacity: 0;
+}
+.markdown-document h3 .fold {
+  top: calc((var(--text-reading-subsection-line) - 20px) / 2);
+}
+.markdown-document .fold svg {
+  width: 14px;
+  height: 14px;
+}
+.markdown-document [data-foldable]:hover .fold,
+.markdown-document .fold:focus-visible,
+.markdown-document [data-folded] .fold {
+  opacity: 1;
+}
+.markdown-document .fold:hover {
+  background: var(--hover);
+  color: var(--foreground);
+}
+.markdown-document .fold:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 0;
+}
+.document-workspace .document-body .markdown-document > [data-folded] {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin-bottom: 0;
+  white-space: nowrap;
+}
+.document-workspace .document-body .markdown-document > [data-after-folded] {
+  margin-top: 6px;
+}
+.markdown-document [data-folded] .fold-title {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.markdown-document .folded-summary {
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted-foreground);
+  font-size: var(--text-reading);
+  font-weight: 400;
+  letter-spacing: normal;
+}
 /* Headings brought to the top keep room above, so the reading line passes them. */
 .document-body [id] {
   scroll-margin-top: var(--outline-scroll-margin);
