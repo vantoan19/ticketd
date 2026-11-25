@@ -17,7 +17,7 @@ use ticketd_chat_host::{
     QuestionAnswer, REGISTRATIONS, ResumeMode, SendMode, SettingKey, StartSettings, StopReason,
     Subscription, TurnEnding, UnconfirmedCleanup, WorkspaceOpener,
 };
-use ticketd_core::harnesses::{CODEX, ResumePolicy};
+use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatDelivery, ChatInputStanding,
     ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
@@ -82,11 +82,17 @@ impl From<HostError> for ChatFailure {
 
 type Outcome<T> = Result<T, ChatFailure>;
 
-#[derive(Clone, PartialEq, Eq, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentInput {
     name: String,
     data_url: String,
+}
+
+#[derive(Serialize)]
+pub struct QueuedDraft {
+    text: String,
+    attachments: Vec<AttachmentInput>,
 }
 
 /// Work nothing waits on, such as marking a Chat seen while a view opens: a failure
@@ -1491,9 +1497,7 @@ impl Chats {
         if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
             return Err(failed(self.unavailable(&input.harness_id)));
         }
-        if !attachments.is_empty() && input.harness_id != CODEX.key.as_str() {
-            return Err(failed("Chat attachments can only be sent to Codex."));
-        }
+        host.check_attachment_input(&input.harness_id, &attachments)?;
         let picks = StartSettings {
             model: input.model.clone(),
             effort: input.effort.clone(),
@@ -1997,6 +2001,21 @@ impl Chats {
         // A withdrawn message that was tried before has a transcript row to remove.
         self.resync(chat_id);
         Ok(())
+    }
+
+    pub async fn edit_queued(&self, chat_id: &str, message_id: &str) -> Outcome<QueuedDraft> {
+        let (text, attachments) = self.host()?.take_queued(chat_id, message_id).await?;
+        self.resync(chat_id);
+        Ok(QueuedDraft {
+            text,
+            attachments: attachments
+                .into_iter()
+                .map(|file| AttachmentInput {
+                    name: file.name().to_owned(),
+                    data_url: file.data_url(),
+                })
+                .collect(),
+        })
     }
 
     pub async fn resume_queue(&self, chat_id: &str) -> Outcome<()> {

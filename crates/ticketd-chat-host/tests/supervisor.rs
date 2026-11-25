@@ -28,9 +28,9 @@ use ticketd_chat_host::{
     SettingOption, SettingOutcome, StartSettings,
 };
 use ticketd_core::{
-    Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
-    ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurn,
-    ChatTurnState, Error, NewChat, Workspace, WorkspaceSession,
+    Chat, ChatAttachmentContent, ChatDelivery, ChatDeliveryDecision, ChatInteractionState,
+    ChatItem, ChatMessage, ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
+    ChatToolState, ChatTurn, ChatTurnState, Error, NewChat, Workspace, WorkspaceSession,
 };
 
 struct Fixture {
@@ -40,6 +40,11 @@ struct Fixture {
     fake: FakeAdapter,
     host: ChatHost,
     chat: Chat,
+}
+
+fn saved_file() -> ChatAttachmentContent {
+    ChatAttachmentContent::from_data_url("saved.txt", "data:text/plain;base64,c25hcHNob3Q=", 100)
+        .unwrap()
 }
 
 fn new_chat(workspace: &mut Workspace, harness: &str) -> Chat {
@@ -137,6 +142,16 @@ impl Fixture {
     async fn queue(&self, text: &str) -> ChatMessage {
         let message = self.host.send(&self.chat.id, None, text, SendMode::Queue);
         let message = message.await.unwrap();
+        settle().await;
+        message
+    }
+
+    async fn send_file(&self, text: &str, mode: SendMode) -> ChatMessage {
+        let message = self
+            .host
+            .send_with_attachments(&self.chat.id, None, text, mode, vec![saved_file()])
+            .await
+            .unwrap();
         settle().await;
         message
     }
@@ -342,7 +357,13 @@ async fn a_crash_between_recording_and_writing_is_uncertain_after_restart_and_no
     let input = core.save_chat_input(None, &f.chat.id, "hello").unwrap();
     core.record_chat_submission(&f.chat.id, &input.id, "a1", ChatSubmissionIntent::NewTurn)
         .unwrap();
-    core.save_chat_input(None, &f.chat.id, "queued before the crash")
+    let queued = core
+        .save_chat_input_with_attachments(
+            None,
+            &f.chat.id,
+            "queued before the crash",
+            &[saved_file()],
+        )
         .unwrap();
     drop(core);
 
@@ -365,7 +386,10 @@ async fn a_crash_between_recording_and_writing_is_uncertain_after_restart_and_no
     after.await.unwrap();
     settle().await;
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
-    let sent: Vec<_> = f.submits().into_iter().map(|sent| sent.text).collect();
+    let submits = f.submits();
+    assert_eq!(submits[0].attachments, [saved_file()]);
+    assert_eq!(f.message(&queued.id).attachments, queued.attachments);
+    let sent: Vec<_> = submits.into_iter().map(|sent| sent.text).collect();
     assert_eq!(sent, ["queued before the crash", "after the restart"]);
     let attempts = f.message(&input.id).attempts;
     assert_eq!(attempts.len(), 1);
@@ -464,7 +488,7 @@ async fn a_steer_refused_after_the_turn_ended_falls_back_to_the_queue_and_runs_n
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;
     let reply = f.fake.hold_next_submit();
-    let steer = f.send("also this").await;
+    let steer = f.send_file("also this", SendMode::Auto).await;
 
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     reply
@@ -476,7 +500,11 @@ async fn a_steer_refused_after_the_turn_ended_falls_back_to_the_queue_and_runs_n
     assert_eq!(attempts[0].delivery, ChatDelivery::Rejected);
     assert_eq!(attempts[1].intent, ChatSubmissionIntent::NewTurn);
     assert_eq!(attempts[1].delivery, ChatDelivery::Acknowledged);
-    assert_eq!(f.submits()[2].kind, SubmissionKind::StartTurn);
+    let submits = f.submits();
+    assert_eq!(submits[1].attachments, [saved_file()]);
+    assert_eq!(submits[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submits[2].text, submits[1].text);
+    assert_eq!(submits[2].attachments, [saved_file()]);
     assert_eq!(f.live().await.problem, None);
 }
 
@@ -493,6 +521,32 @@ async fn without_steering_a_send_during_a_turn_waits_in_the_visible_queue() {
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     assert_eq!(f.submits()[1].kind, SubmissionKind::StartTurn);
     assert_eq!(f.submits()[1].text, "second");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_attachment_message_queues_in_order_when_the_active_turn_cannot_steer() {
+    let f = Fixture::new(FakeAdapter::without_steering());
+    f.send("first").await;
+    f.queue("older").await;
+    let message = f.send_file("Read this", SendMode::Auto).await;
+    assert_eq!(f.queued(), ["older", "Read this"]);
+    assert_eq!(f.submits().len(), 1);
+    assert!(matches!(
+        f.host.send_queued_now(&f.chat.id, &message.id).await,
+        Err(HostError::Working)
+    ));
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.submits()[1].text, "older");
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    let submits = f.submits();
+    assert_eq!(submits[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submits[2].text, "Read this");
+    assert_eq!(submits[2].attachments, [saved_file()]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1421,7 +1475,7 @@ async fn a_discarded_message_is_never_sent_even_when_its_rejection_arrives_late(
 async fn a_refused_resend_returns_the_message_to_the_person_and_keeps_the_uncertainty() {
     let f = Fixture::new(FakeAdapter::codex());
     f.fake.script_submit(SubmitReply::LoseProcess);
-    let input = f.send("first").await;
+    let input = f.send_file("first", SendMode::Auto).await;
     f.fake
         .script_submit(SubmitReply::Reject("not now".to_owned()));
 
@@ -1443,8 +1497,14 @@ async fn a_refused_resend_returns_the_message_to_the_person_and_keeps_the_uncert
     // Asking again is a new submission of the same message.
     f.host.resend(&f.chat.id, &input.id).await.unwrap();
     settle().await;
-    assert_eq!(f.submits().len(), 3);
+    let submits = f.submits();
+    assert_eq!(submits.len(), 3);
+    for submit in submits {
+        assert_eq!(submit.text, "first");
+        assert_eq!(submit.attachments, [saved_file()]);
+    }
     assert_eq!(f.message(&input.id).attempts.len(), 3);
+    assert_eq!(f.message(&input.id).attachments, input.attachments);
 }
 
 #[tokio::test(start_paused = true)]
@@ -2237,7 +2297,7 @@ async fn send_now_steers_one_queued_input_and_leaves_the_rest_queued() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;
     f.queue("later").await;
-    let now = f.queue("this one now").await;
+    let now = f.send_file("this one now", SendMode::Queue).await;
 
     f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
     settle().await;
@@ -2249,6 +2309,7 @@ async fn send_now_steers_one_queued_input_and_leaves_the_rest_queued() {
         }
     );
     assert_eq!(f.submits()[1].text, "this one now");
+    assert_eq!(f.submits()[1].attachments, [saved_file()]);
     assert_eq!(f.queued(), ["later"]);
 }
 
@@ -2259,13 +2320,14 @@ async fn send_now_on_a_paused_queue_sends_only_that_input() {
     let f = Fixture::new(FakeAdapter::codex());
     f.host.stop(&f.chat.id).await.unwrap();
     f.queue("older").await;
-    let now = f.queue("this one now").await;
+    let now = f.send_file("this one now", SendMode::Queue).await;
 
     f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
     settle().await;
 
     let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
     assert_eq!(texts(&f), ["this one now"]);
+    assert_eq!(f.submits()[0].attachments, [saved_file()]);
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     assert_eq!(texts(&f), ["this one now"], "the paused queue stays paused");
     assert_eq!(f.queued(), ["older"]);
@@ -2421,6 +2483,7 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
     }))
     .await;
     assert_eq!(f.live().await.context.unwrap().usage.used, 124_000);
+    let queued = f.send_file("Read this", SendMode::Queue).await;
 
     let full = f
         .host
@@ -2449,7 +2512,34 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
     // Nothing reaches the harness while the turn runs.
     assert!(setting_changes(&f).is_empty());
 
+    f.fake.script_submit(SubmitReply::Reject(
+        "the selected settings cannot read the file".into(),
+    ));
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let written = f.fake.written();
+    let Some(
+        [
+            Written::Setting(_),
+            Written::Setting(_),
+            Written::Submit(submitted),
+        ],
+    ) = written.get(1..)
+    else {
+        panic!("both setting changes should precede the queued message: {written:?}");
+    };
+    assert_eq!(submitted.text, "Read this");
+    assert_eq!(submitted.attachments, [saved_file()]);
+    assert_eq!(f.queued(), ["Read this"]);
+    assert!(matches!(
+        f.live().await.problem,
+        Some(ChatProblem::DispatchRefused { .. })
+    ));
+    assert_eq!(
+        f.host.take_queued(&f.chat.id, &queued.id).await.unwrap(),
+        ("Read this".to_owned(), vec![saved_file()])
+    );
+    assert!(f.host.take_queued(&f.chat.id, &queued.id).await.is_err());
 
     let mut sent: Vec<String> = setting_changes(&f)
         .into_iter()

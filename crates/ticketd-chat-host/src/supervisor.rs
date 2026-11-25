@@ -11,7 +11,6 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use ticketd_core::harnesses::CODEX;
 use ticketd_core::{
     Chat, ChatAttachmentContent, ChatInteractionKind, ChatInteractionState, ChatMessage,
     ChatObservation, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnReceipt,
@@ -54,7 +53,7 @@ use crate::{
     HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind, InteractionRequest,
     InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
     NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
-    Problem, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
+    Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
     SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
 };
 
@@ -79,6 +78,10 @@ pub(crate) enum Command {
     SendQueuedNow {
         message_id: String,
         reply: Reply<()>,
+    },
+    TakeQueued {
+        message_id: String,
+        reply: Reply<(String, Vec<ChatAttachmentContent>)>,
     },
     Respond {
         interaction_id: String,
@@ -696,6 +699,9 @@ impl Supervisor {
             Command::SendQueuedNow { message_id, reply } => {
                 let _ = reply.send(self.send_queued_now(message_id).await);
             }
+            Command::TakeQueued { message_id, reply } => {
+                let _ = reply.send(self.take_queued(&message_id));
+            }
             Command::Respond {
                 interaction_id,
                 answer,
@@ -932,23 +938,27 @@ impl Supervisor {
     ) -> Result<ChatMessage, HostError> {
         self.recover_storage()?;
         let chat = self.chat_id.clone();
+        let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
+        let can_steer = self.active.is_some()
+            && self.steering().is_some()
+            && !(has_images && self.images_refused(true));
         if !attachments.is_empty() {
-            let refusal = if self.core(|core| core.chat(&chat))?.harness != CODEX.key.as_str() {
-                Some("Chat attachments can only be sent to Codex.")
-            } else if mode == SendMode::Queue || self.active.is_some() || self.dispatching.is_some()
-            {
-                Some("Wait for this turn to finish before sending attachments.")
-            } else if attachments.iter().any(ChatAttachmentContent::is_image)
-                && self
-                    .runtime
-                    .as_ref()
-                    .and_then(|runtime| runtime.handle.supports_image_input())
-                    == Some(false)
-            {
-                Some("The selected Codex model does not accept images.")
-            } else {
-                None
-            };
+            let model_changing = self.runtime.as_ref().is_some_and(|runtime| {
+                runtime.setting_changes.iter().any(|change| {
+                    change.setting == SettingKey::Model
+                        && matches!(
+                            change.state,
+                            SettingChangeState::Held | SettingChangeState::Sent
+                        )
+                })
+            });
+            let refusal = self.attachment_refusal(attachments).or_else(|| {
+                (has_images
+                    && self.images_refused(false)
+                    && !model_changing
+                    && !(mode == SendMode::Auto && can_steer))
+                    .then_some(Refusal::ImageInputUnsupported)
+            });
             if let Some(refusal) = refusal {
                 if let Some(command_id) = command_id
                     && let Some(saved) = self
@@ -956,13 +966,13 @@ impl Supervisor {
                 {
                     return Ok(saved);
                 }
-                return Err(Error::Chat(refusal.into()).into());
+                return Err(refusal.attachment_error().into());
             }
         }
         let message = self.write(|core| {
             core.save_chat_input_with_attachments(command_id, &chat, text, attachments)
         })?;
-        let immediate = self.active.is_none() || self.steering().is_some();
+        let immediate = self.active.is_none() || can_steer;
         if mode == SendMode::Auto
             && !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
             && immediate
@@ -978,6 +988,27 @@ impl Supervisor {
             }
         }
         Ok(message)
+    }
+
+    fn attachment_refusal(&self, attachments: &[ChatAttachmentContent]) -> Option<Refusal> {
+        if attachments.is_empty() {
+            return None;
+        }
+        self.adapter
+            .as_ref()
+            .map_or(Some(Refusal::Unsupported), |adapter| {
+                adapter.attachment_refusal(attachments)
+            })
+    }
+
+    fn images_refused(&self, steering: bool) -> bool {
+        self.runtime.as_ref().and_then(|runtime| {
+            if steering {
+                runtime.handle.supports_steer_image_input()
+            } else {
+                runtime.handle.supports_image_input()
+            }
+        }) == Some(false)
     }
 
     /// Accept work again only once storage can record what was lost meanwhile.
@@ -1028,9 +1059,19 @@ impl Supervisor {
             return Err(HostError::Working);
         }
         let chat = self.chat_id.clone();
-        let queued = self.core(|core| core.chat_queue(&chat))?;
-        if !queued.iter().any(|message| message.id == message_id) {
-            return Err(Error::Chat("this input is not in the queue".to_owned()).into());
+        let queued = self
+            .core(|core| core.chat_queue(&chat))?
+            .into_iter()
+            .find(|message| message.id == message_id)
+            .ok_or_else(|| Error::Chat("this input is not in the queue".to_owned()))?;
+        if self.active.is_some()
+            && self.images_refused(true)
+            && queued
+                .attachments
+                .iter()
+                .any(|file| file.media_type.starts_with("image/"))
+        {
+            return Err(Refusal::ImageInputUnsupported.attachment_error().into());
         }
         self.confirm_permission_restart_cleanup().await?;
         if !self.direct.contains(&message_id) {
@@ -1038,6 +1079,26 @@ impl Supervisor {
             self.direct.push_back(message_id);
         }
         Ok(())
+    }
+
+    fn take_queued(
+        &mut self,
+        message_id: &str,
+    ) -> Result<(String, Vec<ChatAttachmentContent>), HostError> {
+        if self.direct.iter().any(|id| id == message_id) {
+            return Err(HostError::Working);
+        }
+        let chat = self.chat_id.clone();
+        Ok(self.write(|core| {
+            let message = core
+                .chat_queue(&chat)?
+                .into_iter()
+                .find(|message| message.id == message_id)
+                .ok_or_else(|| Error::Chat("this input is not in the queue".to_owned()))?;
+            let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
+            core.withdraw_chat_input(&chat, message_id)?;
+            Ok((message.text, attachments))
+        })?)
     }
 
     /// Whether the queue, not paused, holds input saved before `message_id`.
@@ -1877,6 +1938,10 @@ impl Supervisor {
             preamble,
             context,
         });
+        if let Some(refusal) = self.attachment_refusal(&submission.attachments) {
+            self.on_dispatched(DispatchOutcome::NotSent(refusal));
+            return;
+        }
         let done = self.done.clone();
         tokio::spawn(async move {
             let outcome = handle.submit(submission).await;
@@ -2832,6 +2897,7 @@ impl Supervisor {
                 _ => None,
             },
             steering: self.active.as_ref().and_then(|_| self.steering()),
+            steering_images_refused: self.active.is_some() && self.images_refused(true),
             delivery_unconfirmed: self.unconfirmed_start.is_some(),
             sending: self.direct.iter().cloned().collect(),
             interactions: self

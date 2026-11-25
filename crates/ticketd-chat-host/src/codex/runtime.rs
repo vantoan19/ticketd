@@ -633,7 +633,17 @@ impl HarnessRuntime for CodexRuntime {
             .peer
             .session
             .reports
-            .supports_image_input()
+            .supports_image_input(false)
+    }
+
+    fn supports_steer_image_input(&self) -> Option<bool> {
+        self.connection
+            .rpc
+            .state()
+            .peer
+            .session
+            .reports
+            .supports_image_input(true)
     }
 
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
@@ -668,7 +678,12 @@ impl HarnessRuntime for CodexRuntime {
             let session = &mut peer.session;
             let thread = session.thread().ok_or(Refusal::RuntimeClosed)?.to_owned();
             session.runtime.check_submission(&kind, self.steering)?;
-            if has_images && session.reports.supports_image_input() == Some(false) {
+            if has_images
+                && session
+                    .reports
+                    .supports_image_input(kind != SubmissionKind::StartTurn)
+                    == Some(false)
+            {
                 return Err(Refusal::ImageInputUnsupported);
             }
             let prepared = match kind {

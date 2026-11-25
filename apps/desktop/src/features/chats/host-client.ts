@@ -323,8 +323,14 @@ export function createHostChatClient(
           destination,
         });
     },
-    queue: (id, text, links = []) =>
-      run("chat_send", { chatId: id, text, queue: true, links }),
+    queue: (id, text, links = [], attachments) =>
+      run("chat_send", {
+        chatId: id,
+        text,
+        queue: true,
+        links,
+        ...(attachments && { attachments }),
+      }),
     linkedTo: async (link) =>
       z.array(chatSummarySchema).parse(await call("chat_linked_to", { link })),
     folderFiles: async (folder, query) =>
@@ -333,6 +339,21 @@ export function createHostChatClient(
         .parse(await call("chat_files", { path: folder, query })),
     removeQueued: (id, queuedId) =>
       run("chat_remove_queued", { chatId: id, queuedId }),
+    editQueued: async (id, queuedId) =>
+      z
+        .object({
+          text: z.string(),
+          attachments: z.array(
+            z.object({ name: z.string(), dataUrl: z.string() }),
+          ),
+        })
+        .parse(
+          await call("chat_remove_queued", {
+            chatId: id,
+            queuedId,
+            edit: true,
+          }),
+        ),
     resumeQueue: (id) => run("chat_resume_queue", { chatId: id }),
     sendQueuedNow: (id, queuedId) =>
       run("chat_send_queued_now", { chatId: id, queuedId }),

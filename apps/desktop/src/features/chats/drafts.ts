@@ -6,6 +6,11 @@ import { ComposerAttachments } from "@/features/chats/composer-attachments";
 export const drafts = new Map<string, string>();
 /** The mentions in each draft, as long as its text is the one they were made in. */
 export const draftTokens = new Map<string, { text: string; tokens: Token[] }>();
+/** The save that can still clear a draft after the composer remounts. */
+export const draftSubmissions = new WeakMap<
+  ComposerAttachments,
+  Promise<void>
+>();
 const draftAttachments = new WeakMap<
   ChatClient,
   Map<string, ComposerAttachments>

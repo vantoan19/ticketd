@@ -23,8 +23,8 @@ use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
     Answer, AttachmentInput, ChatFailure, Chats, CloseAction, Created, FolderFile, HarnessStatus,
-    HistorySelection, LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention,
-    Stopping, UncertainDecision, close_action, quit_action, tray_tooltip,
+    HistorySelection, LinkRef, NewChatInput, Opened, Overview, QueuedDraft, QuitAction, Restored,
+    Retention, Stopping, UncertainDecision, close_action, quit_action, tray_tooltip,
 };
 use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
@@ -513,8 +513,18 @@ pub async fn chat_remove_queued(
     bridge: State<'_, ChatBridge>,
     chat_id: String,
     queued_id: String,
-) -> Outcome<()> {
-    bridge.chats.remove_queued(&chat_id, &queued_id).await
+    edit: Option<bool>,
+) -> Outcome<Option<QueuedDraft>> {
+    if edit == Some(true) {
+        bridge
+            .chats
+            .edit_queued(&chat_id, &queued_id)
+            .await
+            .map(Some)
+    } else {
+        bridge.chats.remove_queued(&chat_id, &queued_id).await?;
+        Ok(None)
+    }
 }
 
 #[tauri::command]

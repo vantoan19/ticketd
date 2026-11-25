@@ -26,7 +26,7 @@ import {
   type ProjectRef,
   type TranscriptItem,
 } from "@/features/chats/client";
-import { changeLine } from "@/features/chats/model";
+import { canSteer, changeLine } from "@/features/chats/model";
 import { plainText } from "@/features/documents/graph-text";
 import {
   captureChatAttachment,
@@ -653,13 +653,7 @@ export function createMockChatClient(
       kind: "user",
       text,
       delivery: "delivered",
-      ...(files?.length && {
-        attachments: files.map(({ name, dataUrl }) => ({
-          id: nextId("attachment"),
-          name,
-          media_type: dataUrl.slice(5, dataUrl.indexOf(";")),
-        })),
-      }),
+      ...(files?.length && { attachments: attachmentLabels(files) }),
     });
     patch(id, {
       activity: "working",
@@ -667,10 +661,31 @@ export function createMockChatClient(
       doing: { label: "Working", since: now },
     });
   };
-  const queue = async (id: string, text: string) =>
+  const attachmentLabels = (files: ChatAttachmentInput[]) =>
+    files.map(({ name, dataUrl }) => ({
+      id: nextId("attachment"),
+      name,
+      media_type: dataUrl.slice(5, dataUrl.indexOf(";")),
+    }));
+  const queuedFiles = new Map<string, ChatAttachmentInput[]>();
+  const queue = async (
+    id: string,
+    text: string,
+    files?: ChatAttachmentInput[],
+  ) => {
+    const queuedId = nextId("queued");
+    if (files?.length) queuedFiles.set(queuedId, files);
     patch(id, {
-      queue: [...get(id).chat.queue, { id: nextId("queued"), text }],
+      queue: [
+        ...get(id).chat.queue,
+        {
+          id: queuedId,
+          text,
+          ...(files?.length && { attachments: attachmentLabels(files) }),
+        },
+      ],
     });
+  };
   const linkAll = (id: string, links: LinkRef[]) => {
     for (const link of links) {
       const record = (seed.records ?? []).find(
@@ -690,18 +705,13 @@ export function createMockChatClient(
     const { chat } = get(id);
     if (chat.retention === "trashed")
       throw new ChatError("failed", "This Chat is in Trash.");
-    if (files?.length && chat.harness.id !== "codex")
-      throw new ChatError(
-        "failed",
-        "Chat attachments can only be sent to Codex.",
-      );
-    if (files?.length && live(chat))
-      throw new ChatError(
-        "failed",
-        "Wait for this turn to finish before sending attachments.",
-      );
     if (!live(chat)) startTurn(id, text, files);
-    else if (chat.steering.available)
+    else if (
+      canSteer(
+        chat,
+        files?.some((file) => file.dataUrl.startsWith("data:image/")),
+      )
+    )
       push(id, {
         id: nextId("user"),
         at: now,
@@ -709,8 +719,9 @@ export function createMockChatClient(
         steer: true,
         text,
         delivery: "delivered",
+        ...(files?.length && { attachments: attachmentLabels(files) }),
       });
-    else await queue(id, text);
+    else await queue(id, text, files);
   };
 
   const client: MockChatClient = {
@@ -886,9 +897,9 @@ export function createMockChatClient(
     },
     captureAttachment: (file) => captureChatAttachment(file, 100 * 1024 * 1024),
     async exportAttachment() {},
-    async queue(id, text, links = []) {
+    async queue(id, text, links = [], files) {
       linkAll(id, links);
-      await queue(id, text);
+      await queue(id, text, files);
     },
     linkedTo: async (link) =>
       [...chats.values()]
@@ -906,9 +917,18 @@ export function createMockChatClient(
         file.path.toLowerCase().includes(query.trim().toLowerCase()),
       ),
     async removeQueued(id, queuedId) {
+      queuedFiles.delete(queuedId);
       patch(id, {
         queue: get(id).chat.queue.filter((item) => item.id !== queuedId),
       });
+    },
+    async editQueued(id, queuedId) {
+      const queued = get(id).chat.queue.find((item) => item.id === queuedId);
+      if (!queued)
+        throw new ChatError("stale", "This message is no longer queued.");
+      const attachments = queuedFiles.get(queuedId) ?? [];
+      await client.removeQueued(id, queuedId);
+      return { text: queued.text, attachments };
     },
     async resumeQueue(id) {
       const { chat } = get(id);
@@ -917,20 +937,32 @@ export function createMockChatClient(
         queue_paused: false,
         queue: first && !live(chat) ? rest : chat.queue,
       });
-      if (first && !live(chat)) startTurn(id, first.text);
+      if (first && !live(chat)) {
+        startTurn(id, first.text, queuedFiles.get(first.id));
+        queuedFiles.delete(first.id);
+      }
     },
     async sendQueuedNow(id, queuedId) {
       const { chat } = get(id);
       const queued = chat.queue.find((item) => item.id === queuedId);
       if (!queued)
         throw new ChatError("stale", "This message is no longer queued.");
-      if (live(chat) && !chat.steering.available)
+      if (
+        live(chat) &&
+        !canSteer(
+          chat,
+          queued.attachments?.some((file) =>
+            file.media_type.startsWith("image/"),
+          ),
+        )
+      )
         throw new ChatError(
           "failed",
           "the Chat is working; try again when it has finished",
         );
-      patch(id, { queue: chat.queue.filter((item) => item.id !== queuedId) });
-      await send(id, queued.text);
+      const files = queuedFiles.get(queuedId);
+      await client.removeQueued(id, queuedId);
+      await send(id, queued.text, files);
     },
     async stop(id) {
       if (live(get(id).chat)) halt(id, "stopped");

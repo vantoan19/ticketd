@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
@@ -66,6 +67,7 @@ import {
   arrivals,
   attachmentsOf,
   drafts,
+  draftSubmissions,
   draftTokens,
   tokensOf,
 } from "@/features/chats/drafts";
@@ -502,6 +504,16 @@ function Conversation({
   const question = pending.find(
     (item) => item.request === "question" && item.free_text,
   );
+  const composerFiles = attachmentsOf(client, id);
+  const draftFiles = useSyncExternalStore(
+    composerFiles.subscribe,
+    composerFiles.snapshot,
+  );
+  const hasAttachments = draftFiles.length > 0;
+  const hasImages = draftFiles.some(
+    (file) =>
+      file.state === "ready" && file.content.dataUrl.startsWith("data:image/"),
+  );
   // A draft typed before a question arrived keeps its meaning: only a box that
   // was empty (or emptied since) answers it.
   const draftHeld = () => (drafts.get(id) ?? "").trim() !== "";
@@ -513,7 +525,8 @@ function Conversation({
     setSeenQuestion(question?.id);
     setHeldFor(question && draftHeld() ? question.id : undefined);
   }
-  const answering = Boolean(question) && heldFor !== question?.id;
+  const answering =
+    Boolean(question) && heldFor !== question?.id && !hasAttachments;
   const stoppable =
     isLive(chat) && !chat.stopping && !unconfirmedStart && chat.has_composer;
   /** Stops the turn; the Stop button leaves, so the message box takes focus. */
@@ -545,7 +558,8 @@ function Conversation({
     if (target.closest(LAYER) || document.querySelector(LAYER)) return;
     if (performance.now() - layerClosedAt.current < ESC_AFTER_LAYER_MS) return;
     if (target.closest(".chat-activity")) return;
-    if ((messageBox.current?.value ?? "").trim() !== "") return;
+    if ((messageBox.current?.value ?? "").trim() !== "" || hasAttachments)
+      return;
     event.preventDefault();
     stop();
   };
@@ -568,14 +582,24 @@ function Conversation({
         if (onRequestsAnswered) throw reason;
       },
     );
-  const edit = (queued: { id: string; text: string }) =>
+  const savingDraft = (submission: Promise<void>) => {
+    draftSubmissions.set(composerFiles, submission);
+    return submission;
+  };
+  const edit = (queuedId: string) =>
     quietly(
-      client.removeQueued(id, queued.id).then(() => {
+      client.editQueued(id, queuedId).then(async ({ text, attachments }) => {
+        // A successful submission clears its draft before recovered content is merged.
+        await draftSubmissions.get(composerFiles)?.catch(() => {});
         const draft = drafts.get(id) ?? "";
-        drafts.set(
-          id,
-          draft.trim() ? `${draft}\n\n${queued.text}` : queued.text,
-        );
+        if (text) {
+          const next = draft.trim() ? `${draft}\n\n${text}` : text;
+          const tokens = tokensOf(id);
+          drafts.set(id, next);
+          draftTokens.set(id, { text: next, tokens });
+        }
+        if (attachments.length) composerFiles.addCaptured(attachments);
+        if (question && text) setHeldFor(question.id);
         setEdits((count) => count + 1);
       }),
       "edit the queued message",
@@ -835,40 +859,35 @@ function Conversation({
                 framed={false}
                 inputRef={messageBox}
                 autoFocus={edits > 0}
-                placeholder={composerPlaceholder(chat, answering)}
+                placeholder={composerPlaceholder(chat, answering, hasImages)}
                 initialText={drafts.get(id) ?? ""}
                 initialTokens={tokensOf(id)}
-                attachments={attachmentsOf(client, id)}
+                attachments={composerFiles}
                 onText={(text, tokens) => {
                   drafts.set(id, text);
                   draftTokens.set(id, { text, tokens });
                   if (!text.trim()) setHeldFor(undefined);
+                  else if (hasAttachments && question) setHeldFor(question.id);
                 }}
                 mentions={mentions}
                 above={
                   <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
                 }
-                controls={(text, hasAttachments) => {
-                  if (hasAttachments && (isLive(chat) || chat.stopping))
-                    return {
-                      send: "send",
-                      enabled: false,
-                      effect:
-                        "Wait for this turn to finish before sending attachments.",
-                    };
-                  return composerControls(
+                controls={(text, hasAttachments) =>
+                  composerControls(
                     chat,
                     text,
                     answering,
                     hasAttachments,
-                  );
-                }}
+                    hasImages,
+                  )
+                }
                 onSend={(text, links, attachments) => {
                   const answerQuestion =
                     answering && question && !attachments?.length;
                   const outgoingText = quotedMessage(quotes, text);
                   const outgoingLinks = [...links, ...quoteLinks(quotes)];
-                  return run(
+                  const submission = run(
                     sent(
                       answerQuestion
                         ? client.answer(id, question.id, { text })
@@ -891,27 +910,28 @@ function Conversation({
                         },
                     true,
                   );
+                  return savingDraft(submission);
                 }}
-                onQueue={(text, links) =>
-                  run(
-                    sent(
-                      client
-                        .queue(id, quotedMessage(quotes, text), [
-                          ...links,
-                          ...quoteLinks(quotes),
-                        ])
-                        .then(() => clearQuotes(id)),
-                    ),
+                onQueue={(text, links, attachments) => {
+                  const outgoingText = quotedMessage(quotes, text);
+                  const outgoingLinks = [...links, ...quoteLinks(quotes)];
+                  const queued = attachments
+                    ? client.queue(id, outgoingText, outgoingLinks, attachments)
+                    : client.queue(id, outgoingText, outgoingLinks);
+                  const submission = run(
+                    sent(queued.then(() => clearQuotes(id))),
                     "queue the message",
                     () => {
                       messageBox.current?.focus();
                       retrySend.current?.();
                     },
-                  )
-                }
-                {...(pending.length > 0 && {
-                  onArrowUpFromEmpty: () => focusFirstChoice(dock.current),
-                })}
+                  );
+                  return savingDraft(submission);
+                }}
+                {...(pending.length > 0 &&
+                  !hasAttachments && {
+                    onArrowUpFromEmpty: () => focusFirstChoice(dock.current),
+                  })}
                 {...(isLive(chat) && { onStop: stop })}
                 stopping={chat.stopping || unconfirmedStart}
                 leading={

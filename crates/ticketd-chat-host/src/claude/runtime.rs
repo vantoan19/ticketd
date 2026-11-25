@@ -5,16 +5,19 @@
 //! write; they never read the protocol stream themselves.
 
 use std::collections::HashMap;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::{Duration, SystemTime};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use ticketd_core::ChatAttachmentContent;
 use tokio::io::BufReader;
 use tokio::sync::{Mutex as AsyncMutex, mpsc, oneshot};
 use tokio::time::timeout;
 
+use crate::attachment_input::AttachmentFiles;
 use crate::stdio::{
     ChildProcess, Io, Line, Reader, StderrTail, Writer, close_outcome, read_line, runtime_lost,
     write_bounded,
@@ -29,6 +32,7 @@ use crate::{
     SubmissionId, SubmissionKind,
 };
 
+use super::attachment_refusal;
 use super::session::{REOPEN_WITH, Session, unknown};
 
 /// The bridge protocol version this adapter speaks.
@@ -838,7 +842,10 @@ pub(super) async fn open_over(
     let (connection, events) = Connection::start(io, request.generation, options);
     match connection.open_session(request, claude).await {
         Ok(capabilities) => Ok(OpenedRuntime {
-            runtime: Arc::new(ClaudeRuntime { connection }),
+            runtime: Arc::new(ClaudeRuntime {
+                connection,
+                attachment_files: Mutex::default(),
+            }),
             events,
             capabilities,
         }),
@@ -963,6 +970,33 @@ pub(super) async fn probe_options(
 
 struct ClaudeRuntime {
     connection: Arc<Connection>,
+    // Claude can use these paths again as long as its session stays open.
+    attachment_files: Mutex<Vec<AttachmentFiles>>,
+}
+
+fn prepare_attachments(
+    attachments: Vec<ChatAttachmentContent>,
+) -> io::Result<(Vec<Value>, Option<AttachmentFiles>)> {
+    let mut input = Vec::with_capacity(attachments.len());
+    let mut files = None;
+    for attachment in attachments {
+        if let Some(url) = attachment.image_data_url() {
+            let (media_type, data) = url
+                .strip_prefix("data:")
+                .and_then(|url| url.split_once(";base64,"))
+                .ok_or(io::ErrorKind::InvalidData)?;
+            input.push(json!({"type": "image", "media_type": media_type, "data": data}));
+        } else {
+            let files = match &files {
+                Some(files) => files,
+                None => files.insert(AttachmentFiles::new()?),
+            };
+            let path = files.materialize(&attachment)?;
+            let path = path.to_str().ok_or(io::ErrorKind::InvalidData)?;
+            input.push(json!({"type": "file", "name": attachment.name(), "path": path}));
+        }
+    }
+    Ok((input, files))
 }
 
 impl std::fmt::Debug for ClaudeRuntime {
@@ -995,9 +1029,6 @@ impl Drop for ClaudeRuntime {
 #[async_trait]
 impl HarnessRuntime for ClaudeRuntime {
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
-        if !submission.attachments.is_empty() {
-            return DispatchOutcome::NotSent(Refusal::Unsupported);
-        }
         if let Some(refusal) = self.stale(submission.generation) {
             return DispatchOutcome::NotSent(refusal);
         }
@@ -1006,6 +1037,23 @@ impl HarnessRuntime for ClaudeRuntime {
         if matches!(submission.kind, SubmissionKind::Steer { .. }) {
             return DispatchOutcome::NotSent(Refusal::Unsupported);
         }
+        if let Some(refusal) = attachment_refusal(&submission.attachments) {
+            return DispatchOutcome::NotSent(refusal);
+        }
+        let (attachments, files) = if submission.attachments.is_empty() {
+            (Vec::new(), None)
+        } else {
+            let prepared = tokio::task::spawn_blocking(move || {
+                prepare_attachments(submission.attachments).inspect_err(|error| {
+                    tracing::warn!(error_kind = %error.kind(), "chat attachment handoff failed");
+                })
+            })
+            .await;
+            let Ok(Ok(prepared)) = prepared else {
+                return DispatchOutcome::NotSent(Refusal::AttachmentUnavailable);
+            };
+            prepared
+        };
         let generation = self.connection.generation.0;
         let outcome = self
             .connection
@@ -1015,12 +1063,21 @@ impl HarnessRuntime for ClaudeRuntime {
                         active: Some(active.clone()),
                     });
                 }
-                let command = json!({
+                let mut command = json!({
                     "cmd": "submit",
                     "generation": generation,
                     "submission_id": submission.submission.0,
                     "text": submission.text,
                 });
+                if !attachments.is_empty() {
+                    command["attachments"] = Value::Array(attachments);
+                }
+                if let Some(files) = files {
+                    self.attachment_files
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .push(files);
+                }
                 Ok((command, Kind::Submit(submission.submission)))
             })
             .await;
@@ -1129,7 +1186,14 @@ impl HarnessRuntime for ClaudeRuntime {
     }
 
     async fn close(&self) -> CloseOutcome {
-        self.connection.close().await
+        let outcome = self.connection.close().await;
+        if matches!(outcome, CloseOutcome::Confirmed { .. }) {
+            self.attachment_files
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .clear();
+        }
+        outcome
     }
 }
 

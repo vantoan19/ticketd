@@ -282,8 +282,10 @@ pub enum Refusal {
     UnknownRequest,
     /// The effective capabilities do not include this operation.
     Unsupported,
-    /// The selected model explicitly excludes image input.
+    /// The active harness or model explicitly excludes image input.
     ImageInputUnsupported,
+    /// An image exceeds this harness's input size limit.
+    ImageInputTooLarge,
     /// The host could not prepare a readable handoff copy from a saved snapshot.
     AttachmentUnavailable,
     /// The runtime was closed, replaced or lost before the write.
@@ -299,7 +301,8 @@ impl Refusal {
             Self::StartUnconfirmed => "the harness has not confirmed the previous message",
             Self::UnknownRequest => "the request was no longer open",
             Self::Unsupported => "the harness can't do that here",
-            Self::ImageInputUnsupported => "the selected model does not accept images",
+            Self::ImageInputUnsupported => "image input is unavailable for this Chat",
+            Self::ImageInputTooLarge => "an attached image is too large for the harness",
             Self::AttachmentUnavailable => {
                 "the Chat could not prepare an attachment file for the harness"
             }
@@ -1012,6 +1015,11 @@ pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
     /// Whether the selected model accepts image input, if the harness reported it.
     fn supports_image_input(&self) -> Option<bool> {
         None
+    }
+
+    /// A running turn can be served by a different model from the next turn.
+    fn supports_steer_image_input(&self) -> Option<bool> {
+        self.supports_image_input()
     }
 
     /// Hands input to the harness after rechecking generation and expected turn

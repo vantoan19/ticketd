@@ -504,8 +504,12 @@ impl Reports {
         }
     }
 
-    pub fn supports_image_input(&self) -> Option<bool> {
-        let model = self.overrides.model.as_deref().or(self.model.as_deref())?;
+    pub fn supports_image_input(&self, steering: bool) -> Option<bool> {
+        let model = steering
+            .then_some(self.rerouted_to.as_deref())
+            .flatten()
+            .or(self.overrides.model.as_deref())
+            .or(self.model.as_deref())?;
         let modalities = self
             .model_entry(model)?
             .get("inputModalities")?

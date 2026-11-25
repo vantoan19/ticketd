@@ -436,6 +436,7 @@ pub struct Doing {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Steering {
     pub available: bool,
+    pub images_refused: bool,
     pub effect: Option<String>,
 }
 
@@ -1784,6 +1785,7 @@ pub fn chat_state(
         catching_up: false,
         steering: Steering {
             available: live.steering.is_some(),
+            images_refused: live.steering_images_refused,
             // Said beside Steer, so the person knows what it does before choosing it.
             effect: live.steering.map(|steering| {
                 if steering.interrupts_tools {
