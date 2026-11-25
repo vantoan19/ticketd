@@ -413,7 +413,10 @@ button.chat-file-name:focus-visible {
 .chat-picker-model[data-state="checked"] {
   background: var(--accent);
 }
-.chat-picker-model:focus-visible {
+.chat-picker-model:focus-visible,
+.chat-picker
+  [data-slot="segmented-control"]
+  > :is([role="tab"], [role="radio"]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
