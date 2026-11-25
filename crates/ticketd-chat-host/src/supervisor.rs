@@ -3118,7 +3118,11 @@ impl Supervisor {
                 Some(detail) => Some(ChatProblem::StorageFailed {
                     detail: detail.clone(),
                 }),
-                None if self.lifecycle.has_retired_permission_runtime(&self.chat_id) => {
+                // The Automation still reports the reason it lost its own run.
+                // A replacement supervisor reports the pending cleanup instead.
+                None if self.unattended.is_none()
+                    && self.lifecycle.has_retired_permission_runtime(&self.chat_id) =>
+                {
                     Some(ChatProblem::CleanupUnconfirmed {
                         reason: HostError::PermissionRestartCleanupUnconfirmed.to_string(),
                     })
