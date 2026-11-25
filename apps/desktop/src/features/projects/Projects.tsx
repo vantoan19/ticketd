@@ -412,7 +412,7 @@ export function Projects({
           aria-label="Loading projects"
         >
           {[0, 1, 2].map((key) => (
-            <Skeleton key={key} className="project-skeleton-row" />
+            <Skeleton key={key} className="h-10" />
           ))}
         </div>
       ) : projects.length === 0 ? (
@@ -497,7 +497,7 @@ export function Projects({
                               type="button"
                               variant="outline"
                               size="sm"
-                              className="project-reactivate"
+                              className="min-w-32"
                               disabled={changing}
                               aria-label={`Reactivate ${item.name}`}
                               onClick={() => changeArchiveState(item)}

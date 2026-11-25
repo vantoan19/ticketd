@@ -64,9 +64,6 @@
 .project-row[data-archived] .project-row-name {
   color: var(--muted-foreground);
 }
-.project-reactivate {
-  min-inline-size: 8rem;
-}
 .project-row-meta {
   overflow: hidden;
   color: var(--muted-foreground);
@@ -155,9 +152,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-.project-skeleton-row {
-  height: 40px;
 }
 
 /* New project and Register checkout: the folder reads as a field. */
