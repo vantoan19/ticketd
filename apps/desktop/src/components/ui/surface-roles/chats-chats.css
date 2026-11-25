@@ -382,6 +382,12 @@ button.chat-file-name:focus-visible {
   line-height: var(--text-ui-line);
 }
 
+.chat-picker
+  [data-slot="segmented-control"]:not([data-variant="plain"])
+  > :is([role="tab"], [role="radio"]) {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
 .chat-picker [role="tab"] small {
   color: var(--muted-foreground);
   font-size: var(--text-caption);

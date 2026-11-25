@@ -714,20 +714,23 @@
 .chat-pick-note {
   padding: 6px 8px;
 }
-/* The one picker for harness, model and effort (#368): harness tabs, then the
-   chosen harness's models, then its efforts in one row. */
 /* The popover itself never scrolls: the picker is capped by the room the
-   pane body leaves (less the popover's 16px padding), and only the model
+   pane body leaves (less 8px padding on each edge), and only the model
    list scrolls inside it (CH-18). */
 .chat-picker {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: calc(var(--radix-popover-content-available-height) - 32px);
+  max-height: calc(var(--radix-popover-content-available-height) - 16px);
 }
 /* Harness tabs: one equal-width segmented strip that never wraps; a status
    word truncates inside its tab before the name does (CH-17). */
-
+.chat-picker
+  [data-slot="segmented-control"]:not([data-variant="plain"])
+  > :is([role="tab"], [role="radio"]) {
+  gap: 4px;
+  padding-inline: 0;
+}
 .chat-picker [role="tab"] small {
   flex: 0 1000 auto;
   min-width: 0;
@@ -747,7 +750,6 @@
 }
 .chat-picker[data-switch] .chat-picker-body {
   height: 272px;
-  min-height: 120px;
 }
 .chat-picker-models {
   display: flex;
@@ -755,7 +757,6 @@
   flex-direction: column;
   gap: 2px;
   min-height: 0;
-  margin: 0 -8px;
   overflow-y: auto;
 }
 .chat-picker-model-list {
