@@ -82,7 +82,9 @@ impl ChatHost {
         time_limit: Duration,
     ) -> Result<TurnEnd, HostError> {
         let unattended = UnattendedChat::new(unattended);
-        self.register_unattended(chat_id, unattended.clone());
+        if !self.register_unattended(chat_id, unattended.clone())? {
+            return Ok(TurnEnd::TakenOver);
+        }
         let ended = self
             .first_turn(chat_id, &unattended, text, time_limit)
             .await;

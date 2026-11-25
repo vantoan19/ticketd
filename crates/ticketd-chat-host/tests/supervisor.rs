@@ -552,6 +552,44 @@ async fn an_attachment_message_queues_in_order_when_the_active_turn_cannot_steer
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_image_saved_before_turn_start_waits_when_only_text_can_steer() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.fake.set_steer_image_input(false);
+    let first = f.fake.hold_next_submit();
+    f.send("Start the turn").await;
+    let image = ChatAttachmentContent::from_data_url(
+        "pixel.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/F9sAAAAASUVORK5CYII=",
+        100,
+    ).unwrap();
+    let message = f
+        .host
+        .send_with_attachments(
+            &f.chat.id,
+            None,
+            "Look at this",
+            SendMode::Auto,
+            vec![image.clone()],
+        )
+        .await
+        .unwrap();
+    first.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+
+    assert_eq!(f.submits().len(), 1);
+    assert!(f.message(&message.id).attempts.is_empty());
+    assert_eq!(f.queued(), ["Look at this"]);
+
+    f.send("Text can steer").await;
+    assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submits = f.submits();
+    assert_eq!(submits[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submits[2].attachments, [image]);
+    assert_eq!(f.message(&message.id).attempts.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
 async fn stop_during_a_pending_submission_interrupts_its_turn_and_keeps_unsent_input() {
     let f = Fixture::new(FakeAdapter::codex());
     let reply = f.fake.hold_next_submit();
@@ -2524,12 +2562,30 @@ async fn an_unadopted_queue_edit_keeps_original_snapshots_through_host_restart()
             "Edited",
             SendMode::Queue,
             vec![saved_file()],
-            vec![queued.id],
+            vec![queued.id.clone()],
         )
         .await
         .unwrap();
     assert_eq!(duplicate.id, saved.id);
     assert_eq!(f.queued(), ["Edited"]);
+
+    f.core().withdraw_chat_input(&f.chat.id, &saved.id).unwrap();
+    let retired = reopened
+        .send_replacing(
+            &f.chat.id,
+            Some("save-edit"),
+            "Edited",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![queued.id],
+        )
+        .await
+        .unwrap();
+    settle().await;
+    assert_eq!(retired.id, saved.id);
+    assert!(retired.message.is_none());
+    assert!(f.queued().is_empty());
+    assert_eq!(f.submits().len(), 1);
 }
 
 #[tokio::test(start_paused = true)]

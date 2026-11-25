@@ -12,9 +12,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use ticketd_core::{
-    Chat, ChatAttachmentContent, ChatInteractionKind, ChatInteractionState, ChatMessage,
-    ChatObservation, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurnReceipt,
-    ChatTurnState, Error, Workspace,
+    Chat, ChatAttachmentContent, ChatInputReceipt, ChatInteractionKind, ChatInteractionState,
+    ChatMessage, ChatObservation, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState,
+    ChatTurnReceipt, ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
@@ -67,7 +67,11 @@ pub(crate) enum Command {
         mode: SendMode,
         attachments: Vec<ChatAttachmentContent>,
         replaces: Vec<String>,
-        reply: Reply<ChatMessage>,
+        reply: Reply<ChatInputReceipt>,
+    },
+    ScheduleSaved {
+        message_id: String,
+        reply: Reply<()>,
     },
     SendUnattended {
         text: String,
@@ -124,6 +128,7 @@ enum Done {
     Opened {
         generation: RuntimeGeneration,
         result: Result<OpenedRuntime, Problem>,
+        accepted: Option<oneshot::Sender<()>>,
         /// The ticketd context read for the new session, or why it could not be.
         context: Result<Option<String>, String>,
     },
@@ -686,7 +691,9 @@ impl Supervisor {
                     return;
                 };
                 let command_id = format!("{}:first", self.chat_id);
-                let result = self.send(Some(&command_id), &text, SendMode::Auto, &[], &[]);
+                let result = self
+                    .send(Some(&command_id), &text, SendMode::Auto, &[], &[])
+                    .and_then(|receipt| receipt.into_message().map_err(HostError::from));
                 if let Ok(message) = &result {
                     let _ = unattended.first_message.set(message.id.clone());
                 }
@@ -707,6 +714,20 @@ impl Supervisor {
                     &attachments,
                     &replaces,
                 ));
+            }
+            Command::ScheduleSaved { message_id, reply } => {
+                let result = self.core(|core| core.chat_queue(&self.chat_id));
+                let _ = reply.send(
+                    result
+                        .map(|queue| {
+                            if let Some(message) =
+                                queue.into_iter().find(|row| row.id == message_id)
+                            {
+                                self.schedule_saved(&message, self.active.is_none());
+                            }
+                        })
+                        .map_err(HostError::from),
+                );
             }
             Command::Stop(reply) => {
                 let _ = reply.send(self.request_stop());
@@ -965,8 +986,7 @@ impl Supervisor {
         mode: SendMode,
         attachments: &[ChatAttachmentContent],
         replaces: &[String],
-    ) -> Result<ChatMessage, HostError> {
-        self.recover_storage()?;
+    ) -> Result<ChatInputReceipt, HostError> {
         let chat = self.chat_id.clone();
         // A lost reply can arrive after queue eligibility changed. Repeating an
         // already saved edit returns its receipt without dispatching it again.
@@ -978,6 +998,7 @@ impl Supervisor {
         {
             return Ok(saved);
         }
+        self.recover_storage()?;
         let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
         let can_steer = self.active.is_some()
             && self.steering().is_some()
@@ -1002,21 +1023,29 @@ impl Supervisor {
             if let Some(refusal) = refusal {
                 if replaces.is_empty()
                     && let Some(command_id) = command_id
-                    && let Some(saved) = self
-                        .core(|core| core.replay_chat_input(command_id, &chat, text, attachments))?
+                    && let Some(saved) = self.core(|core| {
+                        core.replay_chat_input_replacing(command_id, &chat, text, attachments, &[])
+                    })?
                 {
                     return Ok(saved);
                 }
                 return Err(refusal.attachment_error().into());
             }
         }
-        let message = self.write(|core| {
+        let receipt = self.write(|core| {
             core.save_chat_input_replacing(command_id, &chat, text, attachments, replaces)
         })?;
-        let immediate = self.active.is_none() || can_steer;
         if mode == SendMode::Auto
+            && let Some(message) = &receipt.message
+        {
+            self.schedule_saved(message, self.active.is_none() || can_steer);
+        }
+        Ok(receipt)
+    }
+
+    fn schedule_saved(&mut self, message: &ChatMessage, immediate: bool) {
+        if immediate
             && !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
-            && immediate
             && message.queued
             && !message.editing
             && !self.prepared_queue_edits.contains(&message.id)
@@ -1030,7 +1059,6 @@ impl Supervisor {
                 self.direct.push_back(message.id.clone());
             }
         }
-        Ok(message)
     }
 
     fn attachment_refusal(&self, attachments: &[ChatAttachmentContent]) -> Option<Refusal> {
@@ -1568,6 +1596,7 @@ impl Supervisor {
         });
         let (done, chat_id) = (self.done.clone(), chat.id.clone());
         let chat_span = self.span.clone();
+        let agent_lifecycle = self.unattended.as_ref().map(|_| self.lifecycle.clone());
         tokio::spawn(
             async move {
                 // Reading the context runs the CLI and can take seconds: off the async threads.
@@ -1581,12 +1610,34 @@ impl Supervisor {
                     .await
                     .ok()
                     .flatten();
+                let chat_id = request.chat_id.clone();
                 let result = adapter.open(request).await;
+                let (accepted, cleanup) = match agent_lifecycle {
+                    Some(lifecycle) => {
+                        let (accepted, received) = oneshot::channel();
+                        let runtime = result.as_ref().ok().map(|opened| opened.runtime.clone());
+                        (Some(accepted), Some((lifecycle, received, runtime)))
+                    }
+                    None => (None, None),
+                };
                 let _ = done.send(Done::Opened {
                     generation,
                     result,
+                    accepted,
                     context,
                 });
+                // The old worker may have timed out waiting for this open. Close a
+                // late process before allowing a replacement worker to start.
+                if let Some((lifecycle, received, runtime)) = cleanup
+                    && received.await.is_err()
+                {
+                    if let Some(runtime) = runtime
+                        && bounded_close(runtime.as_ref()).await.is_some()
+                    {
+                        lifecycle.retire_permission_runtime(&chat_id, runtime);
+                    }
+                    lifecycle.release_orphaned_agent_open(&chat_id);
+                }
             }
             .instrument(chat_span),
         );
@@ -1652,6 +1703,9 @@ impl Supervisor {
             }
         }
         if let Some(opening) = self.opening.take() {
+            if self.unattended.is_some() {
+                self.lifecycle.hold_orphaned_agent_open(&self.chat_id);
+            }
             if let Some(reply) = opening.reply {
                 let _ = reply.send(Err(HostError::Quitting));
             }
@@ -1697,9 +1751,11 @@ impl Supervisor {
         self.runtime = None;
         self.runtime_gone(TurnEnding::StoppedByTicketd(why), false);
         if let Some(reason) = &unconfirmed {
-            if permission_restart {
+            if permission_restart || self.unattended.is_some() {
                 self.lifecycle
                     .retire_permission_runtime(&self.chat_id, handle);
+            }
+            if permission_restart {
                 self.notice(
                     "ticketd could not confirm that the previous harness exited during the permission restart. Tools it started may still be running."
                         .to_owned(),
@@ -1861,66 +1917,94 @@ impl Supervisor {
             return;
         }
         // What the person asked to send again goes alone, as a new turn.
-        let resend = self.resend.clone().filter(|_| idle);
-        let message_id = loop {
-            if let Some(id) = &resend {
-                break id.clone();
-            }
-            match self.direct.front() {
-                Some(id) if idle || self.steering().is_some() => break id.clone(),
-                // Steering is not available: it stays in the visible queue.
-                Some(_) => {
-                    if let Some(id) = self.direct.pop_front() {
-                        self.direct_from_queue.remove(&id);
-                    }
+        loop {
+            let resend = self.resend.clone().filter(|_| idle);
+            let message_id = loop {
+                if let Some(id) = &resend {
+                    break id.clone();
                 }
-                None if idle
-                    && !chat.queue_paused
-                    && (self.runtime.is_some() || self.queue_started) =>
-                {
-                    match self.core(|core| core.chat_queue(&chat_id)) {
-                        Ok(queue) => {
-                            self.prepared_queue_edits
-                                .retain(|id| queue.iter().any(|message| &message.id == id));
-                            match queue.into_iter().find(|message| !message.editing) {
-                                Some(message)
-                                    if self.prepared_queue_edits.contains(&message.id) =>
-                                {
-                                    return;
-                                }
-                                Some(message) => break message.id,
-                                None => {
-                                    self.queue_started = false;
-                                    return;
+                match self.direct.front() {
+                    Some(id) if idle || self.steering().is_some() => break id.clone(),
+                    // Steering is not available: it stays in the visible queue.
+                    Some(_) => {
+                        if let Some(id) = self.direct.pop_front() {
+                            self.direct_from_queue.remove(&id);
+                        }
+                    }
+                    None if idle
+                        && self.unattended.is_none()
+                        && !chat.queue_paused
+                        && (self.runtime.is_some() || self.queue_started) =>
+                    {
+                        match self.core(|core| core.chat_queue(&chat_id)) {
+                            Ok(queue) => {
+                                self.prepared_queue_edits
+                                    .retain(|id| queue.iter().any(|message| &message.id == id));
+                                match queue.into_iter().find(|message| !message.editing) {
+                                    Some(message)
+                                        if self.prepared_queue_edits.contains(&message.id) =>
+                                    {
+                                        return;
+                                    }
+                                    Some(message) => break message.id,
+                                    None => {
+                                        self.queue_started = false;
+                                        return;
+                                    }
                                 }
                             }
+                            Err(_) => return,
                         }
-                        Err(_) => return,
+                    }
+                    None => {
+                        if chat.queue_paused {
+                            self.queue_started = false;
+                        }
+                        return;
                     }
                 }
-                None => {
-                    if chat.queue_paused {
-                        self.queue_started = false;
-                    }
+            };
+            // A run's supervisor may only send its own Prompt. This also holds
+            // if a person's saved reply became visible while this pump was running.
+            if self
+                .unattended
+                .as_ref()
+                .is_some_and(|agent| agent.first_message.get() != Some(&message_id))
+            {
+                if resend.is_some() {
+                    self.resend = None;
+                } else {
+                    self.direct.pop_front();
+                    self.direct_from_queue.remove(&message_id);
+                }
+                continue;
+            }
+            if self.runtime.is_none() {
+                if self.unattended.is_some()
+                    && !matches!(
+                        self.core(|core| core.automation_chat_harness(&chat_id)),
+                        Ok(Some(_))
+                    )
+                {
                     return;
                 }
+                let (session, origin, preamble) = native_session(&chat);
+                self.open(&chat, session, origin, preamble, None);
+                return;
             }
-        };
-        if self.runtime.is_none() {
-            let (session, origin, preamble) = native_session(&chat);
-            self.open(&chat, session, origin, preamble, None);
-            return;
+            let mut from_queue = false;
+            if resend.is_some() {
+                self.resend = None;
+            } else if self.direct.front() == Some(&message_id) {
+                self.direct.pop_front();
+                from_queue = self.direct_from_queue.remove(&message_id);
+            } else {
+                from_queue = true;
+            }
+            if !self.defer_image_steer_or_dispatch(&message_id, resend.is_some(), from_queue) {
+                return;
+            }
         }
-        let mut from_queue = false;
-        if resend.is_some() {
-            self.resend = None;
-        } else if self.direct.front() == Some(&message_id) {
-            self.direct.pop_front();
-            from_queue = self.direct_from_queue.remove(&message_id);
-        } else {
-            from_queue = true;
-        }
-        self.dispatch(&message_id, resend.is_some(), from_queue);
     }
 
     /// Records the possible submission, then hands the input to the adapter. Nothing
@@ -1929,9 +2013,14 @@ impl Supervisor {
     ///
     /// `resend` is set only for input the person asked to send again; it alone may
     /// follow an uncertain attempt. `from_queue` input had no row on screen until now.
-    fn dispatch(&mut self, message_id: &str, resend: bool, from_queue: bool) {
+    fn defer_image_steer_or_dispatch(
+        &mut self,
+        message_id: &str,
+        resend: bool,
+        from_queue: bool,
+    ) -> bool {
         let Some(runtime) = &self.runtime else {
-            return;
+            return false;
         };
         let (handle, generation) = (runtime.handle.clone(), runtime.generation);
         let (kind, intent) = match &self.active {
@@ -1946,8 +2035,25 @@ impl Supervisor {
         let starts_turn = kind == SubmissionKind::StartTurn;
         let attempt = Uuid::new_v4().to_string();
         let chat = self.chat_id.clone();
+        let unattended = self.unattended.clone();
         let recorded = self.write(|core| {
             let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
+            if !starts_turn
+                && handle.supports_steer_image_input() == Some(false)
+                && attachments.iter().any(ChatAttachmentContent::is_image)
+            {
+                return Ok(None);
+            }
+            if let Some(agent) = unattended {
+                return Ok(core
+                    .record_automation_chat_submission(
+                        &chat,
+                        &agent.settings.run_id,
+                        message_id,
+                        &attempt,
+                    )?
+                    .map(|message| (message, attachments)));
+            }
             let message = if resend {
                 core.record_chat_resubmission(&chat, message_id, &attempt)
             } else if from_queue {
@@ -1955,10 +2061,11 @@ impl Supervisor {
             } else {
                 core.record_chat_submission(&chat, message_id, &attempt, intent)
             }?;
-            Ok((message, attachments))
+            Ok(Some((message, attachments)))
         });
         let (message, attachments) = match recorded {
-            Ok(recorded) => recorded,
+            Ok(Some(recorded)) => recorded,
+            Ok(None) => return true,
             Err(error) => {
                 // Storage failure is reported by `write`; a refusal is said here.
                 // The queue is paused so the same refusal is not met again unasked.
@@ -1966,7 +2073,7 @@ impl Supervisor {
                     self.notice(format!("A message was not sent: {error}"));
                     let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                 }
-                return;
+                return false;
             }
         };
         if starts_turn {
@@ -2014,13 +2121,14 @@ impl Supervisor {
         });
         if let Some(refusal) = self.attachment_refusal(&submission.attachments) {
             self.on_dispatched(DispatchOutcome::NotSent(refusal));
-            return;
+            return false;
         }
         let done = self.done.clone();
         tokio::spawn(async move {
             let outcome = handle.submit(submission).await;
             let _ = done.send(Done::Dispatched { outcome });
         });
+        false
     }
 
     // ------------------------------------------------------------------
@@ -2032,8 +2140,9 @@ impl Supervisor {
             Done::Opened {
                 generation,
                 result,
+                accepted,
                 context,
-            } => self.on_opened(generation, result, context),
+            } => self.on_opened(generation, result, accepted, context),
             Done::Dispatched { outcome } => self.on_dispatched(outcome),
             Done::Context {
                 generation,
@@ -2153,6 +2262,7 @@ impl Supervisor {
         &mut self,
         generation: RuntimeGeneration,
         result: Result<OpenedRuntime, Problem>,
+        accepted: Option<oneshot::Sender<()>>,
         context: Result<Option<String>, String>,
     ) {
         let Some(opening) = self
@@ -2161,6 +2271,9 @@ impl Supervisor {
         else {
             return;
         };
+        if let Some(accepted) = accepted {
+            let _ = accepted.send(());
+        }
         let result = match result {
             Ok(opened) => {
                 self.start_settings = StartSettings::default();

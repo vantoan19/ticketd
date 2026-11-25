@@ -423,6 +423,20 @@ pub struct ChatMessage {
     pub created_at: String,
 }
 
+/// A saved request can outlive its queued message.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatInputReceipt {
+    pub id: String,
+    pub message: Option<ChatMessage>,
+}
+
+impl ChatInputReceipt {
+    pub fn into_message(self) -> Result<ChatMessage, Error> {
+        self.message
+            .ok_or_else(|| invalid("saved input is missing"))
+    }
+}
+
 /// Where user input stands, read from all of its attempts and the person's decisions
 /// together. Everything that asks "is it queued" or "does it await a decision" asks
 /// this, so a decision is never lost when a later observation arrives.
@@ -836,11 +850,16 @@ fn trim(connection: &Connection, chat_id: &str) -> Result<(), Error> {
             "DELETE FROM chat_changes WHERE chat_id = ?1 AND sequence <= ?2",
             params![chat_id, cut],
         )?;
-        connection.execute(
-            "UPDATE chats SET changes_trimmed_through = ?2 WHERE id = ?1",
-            params![chat_id, cut],
-        )?;
+        advance_change_floor(connection, chat_id, cut)?;
     }
+    Ok(())
+}
+
+fn advance_change_floor(connection: &Connection, chat_id: &str, cut: i64) -> Result<(), Error> {
+    connection.execute(
+        "UPDATE chats SET changes_trimmed_through = MAX(changes_trimmed_through, ?2) WHERE id = ?1",
+        params![chat_id, cut],
+    )?;
     Ok(())
 }
 
@@ -2236,7 +2255,8 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
     ) -> Result<ChatMessage, Error> {
-        self.save_chat_input_replacing(command_id, chat_id, text, files, &[])
+        self.save_chat_input_replacing(command_id, chat_id, text, files, &[])?
+            .into_message()
     }
 
     /// Save edited input and consume its held originals in the same transaction.
@@ -2247,7 +2267,33 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
         replaces: &[String],
-    ) -> Result<ChatMessage, Error> {
+    ) -> Result<ChatInputReceipt, Error> {
+        let (receipt, _) = self.save_input(command_id, chat_id, text, files, replaces, false)?;
+        Ok(receipt)
+    }
+
+    /// Saves a person's reply before ending the run that owns the Chat.
+    /// Both writes succeed together. Replaying an existing save leaves ownership alone.
+    pub fn save_automation_chat_reply(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replaces: &[String],
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
+        self.save_input(command_id, chat_id, text, files, replaces, true)
+    }
+
+    fn save_input(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replaces: &[String],
+        automation_reply: bool,
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
         if !replaces.is_empty() && command_id.is_none() {
             return Err(invalid("Editing queued input requires a command ID"));
         }
@@ -2255,6 +2301,7 @@ impl Workspace {
             save_input_request(chat_id, text, files, replaces)
         });
         self.chat_write(|connection| {
+            let mut run = None;
             let id = once(connection, command_id, request, || {
                 if text.trim().is_empty() && files.is_empty() {
                     return Err(invalid("Chat input must not be empty"));
@@ -2284,10 +2331,18 @@ impl Workspace {
                 if !files.is_empty() {
                     attachments::save(connection, &id, files)?;
                 }
+                if !replaces.is_empty() {
+                    // Older cursors may already contain a row just replaced.
+                    advance_change_floor(connection, chat_id, position)?;
+                }
+                if automation_reply {
+                    run = crate::automation_runs::take_over_chat(connection, chat_id, true)?;
+                }
                 trim(connection, chat_id)?;
                 Ok(id)
             })?;
-            read_message(connection, &id)?.ok_or_else(|| invalid("saved input is missing"))
+            let message = read_message(connection, &id)?;
+            Ok((ChatInputReceipt { id, message }, run))
         })
     }
 
@@ -2300,7 +2355,9 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
     ) -> Result<Option<ChatMessage>, Error> {
-        self.replay_chat_input_replacing(command_id, chat_id, text, files, &[])
+        self.replay_chat_input_replacing(command_id, chat_id, text, files, &[])?
+            .map(ChatInputReceipt::into_message)
+            .transpose()
     }
 
     /// Whether an edited input was durably saved. This reads the receipt only, even
@@ -2332,6 +2389,7 @@ impl Workspace {
         Ok(previous_outcome(&self.connection, command_id, &request)?.is_some())
     }
 
+    /// Reads the exact saved receipt even after its replacement row was withdrawn.
     pub fn replay_chat_input_replacing(
         &self,
         command_id: &str,
@@ -2339,15 +2397,14 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
         replaces: &[String],
-    ) -> Result<Option<ChatMessage>, Error> {
+    ) -> Result<Option<ChatInputReceipt>, Error> {
         let request = save_input_request(chat_id, text, files, replaces).to_string();
-        let Some(id) = previous_outcome(&self.connection, command_id, &request)? else {
-            return Ok(None);
-        };
-        Ok(Some(
-            read_message(&self.connection, &id)?
-                .ok_or_else(|| invalid("saved input is missing"))?,
-        ))
+        previous_outcome(&self.connection, command_id, &request)?
+            .map(|id| {
+                let message = read_message(&self.connection, &id)?;
+                Ok(ChatInputReceipt { id, message })
+            })
+            .transpose()
     }
 
     /// Withdraw queued input the person no longer wants sent. Refused once a submission
@@ -2456,7 +2513,8 @@ impl Workspace {
         attempt_id: &str,
         intent: ChatSubmissionIntent,
     ) -> Result<ChatMessage, Error> {
-        self.submit_input(chat_id, message_id, attempt_id, intent, false)
+        self.submit_input(chat_id, message_id, attempt_id, intent, false, None)?
+            .ok_or_else(|| invalid("saved input is missing"))
     }
 
     /// `record_chat_submission` for input sent from the queue. Queued input has no place
@@ -2469,7 +2527,26 @@ impl Workspace {
         attempt_id: &str,
         intent: ChatSubmissionIntent,
     ) -> Result<ChatMessage, Error> {
-        self.submit_input(chat_id, message_id, attempt_id, intent, true)
+        self.submit_input(chat_id, message_id, attempt_id, intent, true, None)?
+            .ok_or_else(|| invalid("saved input is missing"))
+    }
+
+    /// Records the run's Prompt only while that run still owns the Chat.
+    pub fn record_automation_chat_submission(
+        &mut self,
+        chat_id: &str,
+        run_id: &str,
+        message_id: &str,
+        attempt_id: &str,
+    ) -> Result<Option<ChatMessage>, Error> {
+        self.submit_input(
+            chat_id,
+            message_id,
+            attempt_id,
+            ChatSubmissionIntent::NewTurn,
+            false,
+            Some(run_id),
+        )
     }
 
     fn submit_input(
@@ -2479,8 +2556,22 @@ impl Workspace {
         attempt_id: &str,
         intent: ChatSubmissionIntent,
         from_queue: bool,
-    ) -> Result<ChatMessage, Error> {
+        run_id: Option<&str>,
+    ) -> Result<Option<ChatMessage>, Error> {
         self.chat_write(|connection| {
+            if let Some(run_id) = run_id {
+                let still_owned: bool = connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM chats JOIN automation_runs
+                          ON automation_runs.id = chats.automation_run_id
+                          WHERE chats.id = ?1 AND automation_runs.id = ?2
+                          AND automation_runs.status = 'running')",
+                    params![chat_id, run_id],
+                    |row| row.get(0),
+                )?;
+                if !still_owned {
+                    return Ok(None);
+                }
+            }
             if read_chat(connection, chat_id)?.trashed {
                 return Err(Error::ChatTrashed(chat_id.to_owned()));
             }
@@ -2493,7 +2584,7 @@ impl Workspace {
                 )
                 .optional()?;
             match recorded {
-                Some(recorded) if recorded == message_id => return Ok(message),
+                Some(recorded) if recorded == message_id => return Ok(Some(message)),
                 Some(_) => return Err(Error::RequestConflict(attempt_id.to_owned())),
                 None => {}
             }
@@ -2522,7 +2613,10 @@ impl Workspace {
                 )?;
             }
             trim(connection, chat_id)?;
-            read_message(connection, message_id)?.ok_or_else(|| invalid("saved input is missing"))
+            Ok(Some(
+                read_message(connection, message_id)?
+                    .ok_or_else(|| invalid("saved input is missing"))?,
+            ))
         })
     }
 

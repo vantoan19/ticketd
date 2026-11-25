@@ -17,7 +17,7 @@ use ticketd_chat_host::{
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
     AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatAttachmentContent,
-    ChatInputStanding, ChatItem, ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step,
+    ChatInputStanding, ChatItem, ChatLinkKind, ChatListFilter, Error, NotifyTarget, Schedule, Step,
     StepAction, Ticket, Trigger, Workspace, WorkspaceSession,
     sync::{
         AttachmentDownload,
@@ -897,6 +897,160 @@ async fn a_refused_attachment_reply_does_not_take_over_an_automation() {
     assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
     assert_eq!(written(&f), before);
     assert_eq!(f.fake.opens().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_invalid_reply_leaves_the_run_live_and_a_saved_reply_waits_for_cleanup() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let file = ChatAttachmentContent::from_data_url(
+        "notes.txt",
+        "data:text/plain;base64,c25hcHNob3Q=",
+        100,
+    )
+    .unwrap();
+
+    f.core().set_attachment_upload_limit(1).unwrap();
+    let before = written(&f);
+    assert!(matches!(
+        f.host
+            .send_with_attachments(
+                &chat,
+                Some("reply"),
+                "Valid once the limit is raised",
+                SendMode::Auto,
+                vec![file.clone()],
+            )
+            .await,
+        Err(HostError::Core(Error::UploadLimit { limit: 1 }))
+    ));
+    assert!(
+        f.host
+            .send_replacing(
+                &chat,
+                Some("invalid-replacement"),
+                "A stale edit",
+                SendMode::Auto,
+                Vec::new(),
+                vec!["missing-source".to_owned()],
+            )
+            .await
+            .is_err()
+    );
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    assert_eq!(written(&f), before);
+    assert!(f.core().chat_queue(&chat).unwrap().is_empty());
+
+    f.core().set_attachment_upload_limit(100).unwrap();
+    let close = f.fake.hold_next_close();
+    let host = f.host.clone();
+    let reply_chat = chat.clone();
+    let reply_file = file.clone();
+    let sending = tokio::spawn(async move {
+        host.send_with_attachments(
+            &reply_chat,
+            Some("reply"),
+            "Valid once the limit is raised",
+            SendMode::Queue,
+            vec![reply_file],
+        )
+        .await
+        .unwrap()
+    });
+    settle().await;
+    f.end_turn(TurnOutcome::Interrupted).await;
+    let queue = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert_eq!(queue.len(), 1, "the reply was saved before cleanup");
+    assert!(queue[0].attempts.is_empty());
+    assert_eq!(
+        f.core()
+            .chat_message_attachment_contents(&chat, &queue[0].id)
+            .unwrap()
+            .as_slice(),
+        std::slice::from_ref(&file)
+    );
+    assert_eq!(f.fake.opens().len(), 1);
+    assert!(matches!(
+        f.host
+            .send(&chat, None, "Later reply", SendMode::Auto)
+            .await,
+        Err(HostError::Working)
+    ));
+    let receipt = f
+        .host
+        .send_with_attachments(
+            &chat,
+            Some("reply"),
+            "Valid once the limit is raised",
+            SendMode::Auto,
+            vec![file],
+        )
+        .await
+        .unwrap();
+    assert_eq!(receipt.id, queue[0].id);
+    assert_eq!(written(&f).last().unwrap(), "close");
+
+    close.send(()).unwrap();
+    let saved = sending.await.unwrap();
+    assert_eq!(saved.id, receipt.id);
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert!(opens[1].unattended.is_none());
+    assert_eq!(
+        written(&f)[1..],
+        [
+            "interrupt",
+            "close",
+            "submit: Valid once the limit is raised"
+        ]
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn taking_over_a_slow_start_holds_the_reply_until_the_late_runtime_closes() {
+    let f = Fixture::new();
+    let open = f.fake.hold_next_open();
+    f.agent_working().await;
+    let chat = f.chat();
+
+    let reply = f
+        .host
+        .send(&chat, Some("reply"), "Hello", SendMode::Auto)
+        .await
+        .unwrap();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert!(f.fake.opens().is_empty());
+    assert_eq!(f.core().chat_queue(&chat).unwrap()[0].id, reply.id);
+
+    assert!(matches!(
+        f.host
+            .send(&chat, None, "Later reply", SendMode::Auto)
+            .await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    let close = f.fake.hold_next_close();
+    open.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(written(&f), ["close"]);
+    assert!(matches!(
+        f.host.resume_queue(&chat).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+
+    close.send(()).unwrap();
+    settle().await;
+    assert_eq!(written(&f), ["close"]);
+    f.host.resume_queue(&chat).await.unwrap();
+    settle().await;
+    let opens = f.fake.opens();
+    assert_eq!(opens.len(), 2);
+    assert!(opens[0].unattended.is_some());
+    assert!(opens[1].unattended.is_none());
+    assert_eq!(written(&f), ["close", "submit: Hello"]);
 }
 
 /// #387 M2: with a harness that cannot steer, the composer sends a reply to a going

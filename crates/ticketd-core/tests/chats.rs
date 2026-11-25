@@ -315,12 +315,23 @@ fn queued_edit_replacement_is_atomic_and_replays_after_its_originals_are_consume
     );
     workspace.set_attachment_upload_limit(100).unwrap();
 
-    let saved = workspace
+    let cursor = workspace.chat_snapshot(&chat.id, 10).unwrap().sequence;
+    let receipt = workspace
         .save_chat_input_replacing(Some("save-edit"), &chat.id, "Edited", edited, &replaces)
         .unwrap();
+    let saved = receipt.message.as_ref().unwrap();
+    assert_eq!(
+        workspace.chat_changes(&chat.id, cursor, 10).unwrap(),
+        ChatCatchUp::Resync
+    );
+    let refreshed = workspace.chat_snapshot(&chat.id, 10).unwrap();
+    assert!(matches!(
+        workspace.chat_changes(&chat.id, refreshed.sequence, 10).unwrap(),
+        ChatCatchUp::Changes { changes, .. } if changes.is_empty()
+    ));
     assert_eq!(
         workspace.chat_queue(&chat.id).unwrap().as_slice(),
-        std::slice::from_ref(&saved)
+        std::slice::from_ref(saved)
     );
     assert!(!saved.editing);
     assert_eq!(
@@ -341,13 +352,13 @@ fn queued_edit_replacement_is_atomic_and_replays_after_its_originals_are_consume
         workspace
             .save_chat_input_replacing(Some("save-edit"), &chat.id, "Edited", edited, &replaces)
             .unwrap(),
-        saved
+        receipt
     );
     assert_eq!(
         workspace
             .replay_chat_input_replacing("save-edit", &chat.id, "Edited", edited, &replaces)
             .unwrap(),
-        Some(saved)
+        Some(receipt)
     );
     assert!(matches!(
         workspace.replay_chat_input_replacing(

@@ -6,7 +6,10 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
-use ticketd_core::{ChatAttachmentContent, ChatMessage, ChatSnapshot, Error, WorkspaceGuard};
+use ticketd_core::{
+    AutomationRun, AutomationRunStatus, ChatAttachmentContent, ChatInputReceipt, ChatMessage,
+    ChatSnapshot, Error, WorkspaceGuard,
+};
 use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::supervisor::{Command, Reply, Supervisor, bounded_close};
@@ -72,7 +75,7 @@ pub enum HostError {
     #[error("contact with the harness was lost; whether the answer arrived is unknown")]
     ContactLost,
     #[error(
-        "The permission restart is waiting for the previous harness to exit. Tools it started may still be running."
+        "The Chat is waiting for the previous harness to exit. Tools it started may still be running."
     )]
     PermissionRestartCleanupUnconfirmed,
     #[error("{}", .0.message)]
@@ -277,6 +280,7 @@ pub struct UnconfirmedCleanup {
 }
 
 /// A Chat's unattended harness that `end_unattended` closed.
+#[derive(Clone)]
 pub(crate) struct Closed {
     /// Why its shutdown could not be confirmed, if it could not.
     unconfirmed: Option<String>,
@@ -367,7 +371,20 @@ struct Inner {
     /// The settings of each Chat that is running unattended, read when its
     /// supervisor starts.
     unattended: Mutex<HashMap<String, Arc<UnattendedChat>>>,
+    taking_over: Mutex<HashSet<String>>,
+    closing_agents: Mutex<HashMap<String, watch::Receiver<Option<Closed>>>>,
     lifecycle: Arc<HostLifecycle>,
+}
+
+struct TakeOver {
+    host: ChatHost,
+    chat_id: String,
+}
+
+impl Drop for TakeOver {
+    fn drop(&mut self) {
+        self.host.taking_over().remove(&self.chat_id);
+    }
 }
 
 /// Eligibility and process cleanup outlive any one supervisor.
@@ -382,6 +399,7 @@ pub(crate) struct HostLifecycle {
     // Only the old process handle survives Restore. The next supervisor reads
     // the Chat, its settings and its queue from the current Workspace.
     retired_permission_runtimes: Mutex<HashMap<String, Arc<dyn HarnessRuntime>>>,
+    orphaned_agent_opens: Mutex<HashSet<String>>,
 }
 
 impl HostLifecycle {
@@ -400,6 +418,20 @@ impl HostLifecycle {
             return Err(HostError::TurnedOff);
         }
         Ok(())
+    }
+
+    fn orphaned_agent_opens(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.orphaned_agent_opens
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    pub(crate) fn hold_orphaned_agent_open(&self, chat_id: &str) {
+        self.orphaned_agent_opens().insert(chat_id.to_owned());
+    }
+
+    pub(crate) fn release_orphaned_agent_open(&self, chat_id: &str) {
+        self.orphaned_agent_opens().remove(chat_id);
     }
 
     fn retired_permission_runtimes(
@@ -476,6 +508,8 @@ impl ChatHost {
                     .collect(),
                 chats: Mutex::new(HashMap::new()),
                 unattended: Mutex::new(HashMap::new()),
+                taking_over: Mutex::new(HashSet::new()),
+                closing_agents: Mutex::new(HashMap::new()),
                 lifecycle: Arc::new(HostLifecycle::default()),
             }),
         })
@@ -537,9 +571,8 @@ impl ChatHost {
     }
 
     /// The person's message. Saves the input, then dispatches, steers or queues it.
-    /// Returns once it is saved; delivery is reported through the Chat's records. In
-    /// the Chat of an Automation run it takes the run over first, so the Chat is the
-    /// person's from this message on: see `take_over`.
+    /// Returns once it is saved; delivery is reported through the Chat's records.
+    /// A reply and the takeover of its Automation run are saved together.
     pub async fn send(
         &self,
         chat_id: &str,
@@ -560,7 +593,9 @@ impl ChatHost {
         attachments: Vec<ChatAttachmentContent>,
     ) -> Result<ChatMessage, HostError> {
         self.send_replacing(chat_id, command_id, text, mode, attachments, Vec::new())
-            .await
+            .await?
+            .into_message()
+            .map_err(HostError::from)
     }
 
     pub async fn send_replacing(
@@ -571,35 +606,79 @@ impl ChatHost {
         mode: SendMode,
         attachments: Vec<ChatAttachmentContent>,
         replaces: Vec<String>,
-    ) -> Result<ChatMessage, HostError> {
-        if !attachments.is_empty() {
-            let workspace = self.workspace()?;
-            // Static refusals must not interrupt an Automation. The supervisor
-            // still checks the runtime's model and steering when it saves input.
-            if let Some(harness) = workspace.automation_chat_harness(chat_id)?
-                && let Err(refusal) = self.check_attachment_input(&harness, &attachments)
-            {
-                if let Some(command_id) = command_id
-                    && let Some(saved) = workspace.replay_chat_input_replacing(
+    ) -> Result<ChatInputReceipt, HostError> {
+        self.serving()?;
+        if self.check_agent_cleanup(chat_id).is_err()
+            && let Some(command_id) = command_id
+            && let Some(receipt) = self.workspace()?.replay_chat_input_replacing(
+                command_id,
+                chat_id,
+                text,
+                &attachments,
+                &replaces,
+            )?
+        {
+            return Ok(receipt);
+        }
+        if self
+            .workspace()?
+            .automation_chat_harness(chat_id)?
+            .is_some()
+        {
+            let gate = self.begin_take_over(chat_id)?;
+            let saved = {
+                let mut workspace = self.workspace()?;
+                if let Some(harness) = workspace.automation_chat_harness(chat_id)? {
+                    if let Err(refusal) = self.check_attachment_input(&harness, &attachments) {
+                        if let Some(command_id) = command_id
+                            && let Some(receipt) = workspace.replay_chat_input_replacing(
+                                command_id,
+                                chat_id,
+                                text,
+                                &attachments,
+                                &replaces,
+                            )?
+                        {
+                            return Ok(receipt);
+                        }
+                        return Err(refusal);
+                    }
+                    Some(workspace.save_automation_chat_reply(
                         command_id,
                         chat_id,
                         text,
                         &attachments,
                         &replaces,
-                    )?
-                {
-                    return Ok(saved);
+                    )?)
+                } else {
+                    None
                 }
-                return Err(refusal);
+            };
+            if let Some((receipt, run)) = saved {
+                if let Some(run) = run {
+                    let host = self.clone();
+                    let chat_id = chat_id.to_owned();
+                    let message_id = receipt.id.clone();
+                    // The takeover still completes if the caller loses its reply.
+                    tokio::spawn(async move {
+                        let (_, unconfirmed) = host.finish_take_over(&chat_id, run).await;
+                        if !unconfirmed && let Ok(commands) = host.sender_after_take_over(&gate) {
+                            // The reply starts a normal turn before admitting later sends.
+                            let (reply, scheduled) = oneshot::channel();
+                            let sent =
+                                commands.try_send(Command::ScheduleSaved { message_id, reply });
+                            drop(gate);
+                            if sent.is_ok() {
+                                let _ = scheduled.await;
+                            }
+                        }
+                    })
+                    .await
+                    .map_err(|_| HostError::Quitting)?;
+                }
+                return Ok(receipt);
             }
         }
-        // A reply sent to wait behind the agent's turn (a harness that cannot steer)
-        // waits for nothing once the take-over ended that turn: it is the resumed
-        // Chat's first turn (#387 M2).
-        let mode = match self.take_over(chat_id, true).await? {
-            Some(_) => SendMode::Auto,
-            None => mode,
-        };
         let (command_id, text) = (command_id.map(str::to_owned), text.to_owned());
         self.ask(chat_id, |reply| Command::Send {
             command_id,
@@ -612,31 +691,31 @@ impl ChatHost {
         .await
     }
 
-    /// The person replied in (`replied`) or stopped a Chat. When that takes an
-    /// Automation run over, every agent the run had working stops being unattended
-    /// at once: its turn is interrupted, its harness process is closed and the wait
-    /// in `run_unattended` ends. A harness cannot change how it runs in place, so
-    /// the Chat's next supervisor opens a new process that resumes the same
-    /// conversation as an ordinary Chat: the person's own settings and approvals, no
-    /// run marker on what it writes, and no time limit. Returns `None` when there was
-    /// no run to take over, else whether this Chat's harness was closed.
-    async fn take_over(&self, chat_id: &str, replied: bool) -> Result<Option<bool>, HostError> {
-        let Some(run) = self
-            .workspace()?
-            .take_over_automation_run(chat_id, replied)?
-        else {
-            return Ok(None);
-        };
+    /// Stops all agents of the run before allowing a new ordinary session.
+    async fn finish_take_over(&self, chat_id: &str, run: AutomationRun) -> (bool, bool) {
         let mut closed = false;
-        // The Chat acted on, and the Chat of a later step whose agent was working.
+        let mut unconfirmed = false;
         for step in run.steps.iter().filter_map(|step| step.chat_id.as_deref()) {
-            closed |= self
-                .end_unattended(step, StopReason::TakenOver)
-                .await
-                .is_some()
-                && step == chat_id;
+            let (_, result) = self.close_agent(step, StopReason::TakenOver).await;
+            if let Some(result) = result {
+                closed |= step == chat_id;
+                unconfirmed |= result.unconfirmed.is_some();
+                self.closing_agents().remove(step);
+            }
         }
-        Ok(Some(closed))
+        (closed, unconfirmed)
+    }
+
+    fn begin_take_over(&self, chat_id: &str) -> Result<TakeOver, HostError> {
+        // Admission and supervisor routing use the same lock.
+        let _chats = self.chats();
+        if !self.taking_over().insert(chat_id.to_owned()) {
+            return Err(HostError::Working);
+        }
+        Ok(TakeOver {
+            host: self.clone(),
+            chat_id: chat_id.to_owned(),
+        })
     }
 
     /// The person's Stop: pauses queue dispatch and asks the harness to interrupt the
@@ -645,8 +724,18 @@ impl ChatHost {
     /// person's Stop and nothing else: when ticketd closes an agent because its run
     /// ended, it uses `end_run_agents`.
     pub async fn stop(&self, chat_id: &str) -> Result<(), HostError> {
-        if self.take_over(chat_id, false).await? == Some(true) {
-            return Ok(());
+        if self
+            .workspace()?
+            .automation_chat_harness(chat_id)?
+            .is_some()
+        {
+            let _gate = self.begin_take_over(chat_id)?;
+            let run = self.workspace()?.take_over_automation_run(chat_id, false)?;
+            if let Some(run) = run
+                && self.finish_take_over(chat_id, run).await.0
+            {
+                return Ok(());
+            }
         }
         self.ask(chat_id, Command::Stop).await
     }
@@ -939,9 +1028,27 @@ impl ChatHost {
     // ponytail: supervisors and idle runtimes live until quit or trash; add an idle
     // timeout when the number of open harness processes becomes a cost.
     fn sender(&self, chat_id: &str) -> Result<mpsc::Sender<Command>, HostError> {
+        self.sender_for(chat_id, false)
+    }
+
+    fn sender_after_take_over(&self, gate: &TakeOver) -> Result<mpsc::Sender<Command>, HostError> {
+        self.sender_for(&gate.chat_id, true)
+    }
+
+    fn sender_for(
+        &self,
+        chat_id: &str,
+        after_take_over: bool,
+    ) -> Result<mpsc::Sender<Command>, HostError> {
         self.serving()?;
-        if let Some(commands) = self.chats().get(chat_id).filter(|c| !c.is_closed()) {
-            return Ok(commands.clone());
+        {
+            let chats = self.chats();
+            if !after_take_over {
+                self.check_agent_cleanup(chat_id)?;
+            }
+            if let Some(commands) = chats.get(chat_id).filter(|c| !c.is_closed()) {
+                return Ok(commands.clone());
+            }
         }
         let chat = (self.inner.open_workspace)()?.chat(chat_id)?;
         let adapter = self.inner.adapters.get(chat.harness.as_str()).cloned();
@@ -949,14 +1056,22 @@ impl ChatHost {
         // Checked again under the lock `stop_all` uses, so a request racing shutdown
         // cannot add a supervisor after the running ones were stopped.
         self.serving()?;
+        if !after_take_over {
+            self.check_agent_cleanup(chat_id)?;
+        }
+        let unattended = if after_take_over {
+            None
+        } else {
+            self.settings(chat_id)
+        };
         let commands = chats
             .entry(chat_id.to_owned())
             .and_modify(|commands| {
                 if commands.is_closed() {
-                    *commands = self.spawn(&chat, adapter.clone(), self.settings(&chat.id));
+                    *commands = self.spawn(&chat, adapter.clone(), unattended.clone());
                 }
             })
-            .or_insert_with(|| self.spawn(&chat, adapter.clone(), self.settings(&chat.id)));
+            .or_insert_with(|| self.spawn(&chat, adapter, unattended));
         Ok(commands.clone())
     }
 
@@ -1033,8 +1148,24 @@ impl ChatHost {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
-    pub(crate) fn register_unattended(&self, chat_id: &str, unattended: Arc<UnattendedChat>) {
+    pub(crate) fn register_unattended(
+        &self,
+        chat_id: &str,
+        unattended: Arc<UnattendedChat>,
+    ) -> Result<bool, HostError> {
+        // A cleanup beginning after this check sees the registration. A run
+        // already ended cannot register later and remove an ordinary supervisor.
+        let _chats = self.chats();
+        if self
+            .workspace()?
+            .automation_run(&unattended.settings.run_id)?
+            .status
+            != AutomationRunStatus::Running
+        {
+            return Ok(false);
+        }
         self.unattended().insert(chat_id.to_owned(), unattended);
+        Ok(true)
     }
 
     /// Whether an Automation run's agent can still work in this Chat.
@@ -1048,30 +1179,90 @@ impl ChatHost {
     /// takes it over at the same moment never close the person's new session.
     /// Returns `None` when it was not running unattended.
     pub(crate) async fn end_unattended(&self, chat_id: &str, why: StopReason) -> Option<Closed> {
-        let (unattended, commands) = {
+        let (started, result) = self.close_agent(chat_id, why).await;
+        started.then_some(result).flatten()
+    }
+
+    async fn close_agent(&self, chat_id: &str, why: StopReason) -> (bool, Option<Closed>) {
+        let (started, mut done) = {
             let mut chats = self.chats();
-            let unattended = self.unattended().remove(chat_id)?;
-            // Chat Off already shut down this run's supervisor. The entry now
-            // may hold a person-driven supervisor or pending storage recovery.
-            if *unattended.turned_off.borrow() {
-                return Some(Closed { unconfirmed: None });
+            let mut closing = self.closing_agents();
+            if let Some(done) = closing.get(chat_id) {
+                (false, done.clone())
+            } else {
+                let Some(unattended) = self.unattended().remove(chat_id) else {
+                    return (false, None);
+                };
+                // Chat Off already shut down this run's supervisor. The entry now
+                // may hold a person-driven supervisor or pending storage recovery.
+                if *unattended.turned_off.borrow() {
+                    return (true, Some(Closed { unconfirmed: None }));
+                }
+                let commands = chats.remove(chat_id);
+                let (finished, done) = watch::channel(None);
+                closing.insert(chat_id.to_owned(), done.clone());
+                let host = self.clone();
+                let chat_id = chat_id.to_owned();
+                tokio::spawn(async move {
+                    let cleanup = match commands {
+                        Some(commands) => Self::close_unattended(commands, why).await,
+                        None => None,
+                    };
+                    if let Some(message_id) = unattended.first_message.get()
+                        && let Ok(mut workspace) = host.workspace()
+                    {
+                        set_aside_first_message(&mut workspace, &chat_id, message_id, why);
+                    }
+                    host.inner.board.notify(&chat_id);
+                    let mut closing = host.closing_agents();
+                    let confirmed = cleanup.is_none();
+                    finished.send_replace(Some(Closed {
+                        unconfirmed: cleanup,
+                    }));
+                    // A later takeover also has to see an unconfirmed close.
+                    if confirmed {
+                        closing.remove(&chat_id);
+                    }
+                });
+                (true, done)
             }
-            (unattended, chats.remove(chat_id))
         };
-        let cleanup = match commands {
-            Some(commands) => Self::close_unattended(commands, why).await,
-            None => None,
-        };
-        if let Some(message_id) = unattended.first_message.get()
-            && let Ok(mut workspace) = self.workspace()
+        let result = done.wait_for(Option::is_some).await;
+        (started, result.ok().and_then(|closed| closed.clone()))
+    }
+
+    fn taking_over(&self) -> MutexGuard<'_, HashSet<String>> {
+        self.inner
+            .taking_over
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn closing_agents(&self) -> MutexGuard<'_, HashMap<String, watch::Receiver<Option<Closed>>>> {
+        self.inner
+            .closing_agents
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn check_agent_cleanup(&self, chat_id: &str) -> Result<(), HostError> {
+        if self.taking_over().contains(chat_id)
+            || self
+                .closing_agents()
+                .get(chat_id)
+                .is_some_and(|closed| closed.borrow().is_none())
         {
-            set_aside_first_message(&mut workspace, chat_id, message_id, why);
+            return Err(HostError::Working);
         }
-        // Wakes the wait in `run_unattended`, also when no supervisor had started.
-        self.inner.board.notify(chat_id);
-        Some(Closed {
-            unconfirmed: cleanup,
-        })
+        if self
+            .inner
+            .lifecycle
+            .orphaned_agent_opens()
+            .contains(chat_id)
+        {
+            return Err(HostError::PermissionRestartCleanupUnconfirmed);
+        }
+        Ok(())
     }
 
     pub(crate) fn workspace(&self) -> Result<WorkspaceGuard, HostError> {

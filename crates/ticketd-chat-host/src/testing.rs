@@ -56,6 +56,7 @@ struct State {
     inspection: Inspection,
     capabilities: Capabilities,
     attachment_refusal: Option<Refusal>,
+    steer_image_input: Option<bool>,
     open_failures: VecDeque<Problem>,
     open_holds: VecDeque<oneshot::Receiver<()>>,
     respond_holds: VecDeque<oneshot::Receiver<()>>,
@@ -120,6 +121,7 @@ impl FakeAdapter {
                 inspection,
                 capabilities,
                 attachment_refusal: None,
+                steer_image_input: None,
                 open_failures: VecDeque::new(),
                 open_holds: VecDeque::new(),
                 respond_holds: VecDeque::new(),
@@ -188,6 +190,10 @@ impl FakeAdapter {
 
     pub fn set_attachment_refusal(&self, refusal: Refusal) {
         self.state().attachment_refusal = Some(refusal);
+    }
+
+    pub fn set_steer_image_input(&self, supported: bool) {
+        self.state().steer_image_input = Some(supported);
     }
 
     /// The next `open` waits for the returned sender before it opens or fails.
@@ -439,6 +445,10 @@ struct FakeRuntime {
 
 #[async_trait]
 impl HarnessRuntime for FakeRuntime {
+    fn supports_steer_image_input(&self) -> Option<bool> {
+        self.fake.state().steer_image_input
+    }
+
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
         let scripted = {
             let mut state = self.fake.state();
