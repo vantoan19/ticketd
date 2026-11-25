@@ -14,6 +14,8 @@ import {
   type TranscriptPart,
   type Turn,
   chatTime,
+  turnClock,
+  turnSpanText,
   composerControls,
   composerPlaceholder,
   duration,
@@ -568,7 +570,7 @@ const rowWords = (turn: Turn) =>
   turn.rows.map((row) =>
     row.kind === "step"
       ? stepWords(row.step).label
-      : row.kind === "response"
+      : row.kind === "progress"
         ? row.item.text
         : row.kind,
   );
@@ -980,4 +982,101 @@ test("streaming into the latest turn leaves every earlier turn the same object",
   expect(after[0]).toBe(before[0]);
   expect(after[1]).not.toBe(before[1]);
   expect(after[1]?.rows.at(-1)).toMatchObject({ item: { text: "Working" } });
+});
+
+test("a response with more steps after it is a progress note, never the final answer", () => {
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:00:30Z"),
+        said("r1", "Looking at the limiter."),
+        did("s1", read("a.ts")),
+        said("r2", "Added the limiter."),
+      ],
+      idle,
+    ),
+  );
+  expect(turn?.final?.id).toBe("r2");
+  expect(turn?.rows.map((row) => row.kind)).toEqual(["progress", "step"]);
+  expect(turn?.rows[0]).toMatchObject({ item: { id: "r1" } });
+});
+
+test("while a turn runs every response in it is a progress note", () => {
+  const [turn] = turnsOf(
+    turns(
+      [you("u1", at), timing("active"), did("s1", read("a.ts")), said("r1")],
+      { activity: "working", problem: null },
+    ),
+  );
+  expect(turn?.final).toBeUndefined();
+  expect(turn?.rows.map((row) => row.kind)).toEqual(["step", "progress"]);
+});
+
+test("a turn says when it started and ended", () => {
+  const [turn] = turnsOf(
+    turns(
+      [you("u1", at), timing("completed", "2026-11-10T10:02:13Z"), said("r1")],
+      idle,
+    ),
+  );
+  expect(turn).toMatchObject({
+    started: "2026-11-10T10:00:00Z",
+    ended: "2026-11-10T10:02:13Z",
+  });
+  const [steered] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:02:13Z"),
+        did("s1", read("a.ts")),
+        you("u2", "2026-11-10T10:01:25Z", true),
+        said("r1"),
+      ],
+      idle,
+    ),
+  ).slice(1);
+  // A segment after a steer starts at the steer.
+  expect(steered?.started).toBe("2026-11-10T10:01:25Z");
+});
+
+test("a turn's time reads as a clock today, Yesterday with a clock, then the day", () => {
+  const now = new Date(2026, 10, 26, 9, 0).getTime();
+  const local = (day: number, hour: number, minute: number) =>
+    new Date(2026, 10, day, hour, minute);
+  const clock = (date: Date) =>
+    date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const today = local(26, 8, 5);
+  expect(turnClock(today.toISOString(), now)).toBe(clock(today));
+  const yesterday = local(25, 18, 40);
+  expect(turnClock(yesterday.toISOString(), now)).toBe(
+    `Yesterday ${clock(yesterday)}`,
+  );
+  expect(turnClock(local(24, 14, 3).toISOString(), now)).toBe(
+    new Date(2026, 10, 24).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    }),
+  );
+  expect(turnClock("not a time", now)).toBe("");
+});
+
+test("a turn's exact start and end are one sentence for its tooltip", () => {
+  const start = new Date(2026, 10, 24, 14, 3);
+  const sameDay = new Date(2026, 10, 24, 14, 12);
+  const nextDay = new Date(2026, 10, 25, 9, 30);
+  const full = (date: Date) =>
+    date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  const clock = (date: Date) =>
+    date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  expect(turnSpanText(start.toISOString(), sameDay.toISOString())).toBe(
+    `Started ${full(start)} · Ended ${clock(sameDay)}`,
+  );
+  expect(turnSpanText(start.toISOString(), nextDay.toISOString())).toBe(
+    `Started ${full(start)} · Ended ${full(nextDay)}`,
+  );
+  // A turn that has not ended says only when it started.
+  expect(turnSpanText(start.toISOString(), undefined)).toBe(
+    `Started ${full(start)}`,
+  );
 });

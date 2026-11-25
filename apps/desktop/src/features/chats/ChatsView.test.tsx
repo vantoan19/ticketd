@@ -1303,6 +1303,89 @@ const failedRun: Step = {
   truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
 };
 
+const readFile = (id: string): TranscriptItem =>
+  inTurn({
+    id,
+    at,
+    kind: "steps",
+    steps: [
+      {
+        kind: "read",
+        target: "src/auth/limiter.ts",
+        targets: [{ text: "src/auth/limiter.ts" }],
+      },
+    ],
+  });
+
+test("a finished turn shows its start once, on the work line, with the exact times in its tooltip", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      readFile("s1"),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  const time = document.querySelector<HTMLElement>(".chat-turn-time")!;
+  expect(time.textContent).toMatch(/^Nov\s+10$/);
+  // The time is not part of the fold button's name: that stays the work line's words.
+  expect(button("Worked for 2m 13s").textContent).not.toMatch(/Nov/);
+  fireEvent.pointerMove(time);
+  expect((await screen.findByRole("tooltip")).textContent).toMatch(
+    /^Started Nov 10, 2026, .+ · Ended .+$/,
+  );
+  // Your message has no time under it; Copy stays.
+  expect(document.querySelector(".chat-you-part .chat-fine")).toBeNull();
+  expect(
+    within(document.querySelector<HTMLElement>(".chat-you-part")!).getByRole(
+      "button",
+      { name: "Copy message" },
+    ),
+  ).toBeTruthy();
+});
+
+test("Copy and Save as Document belong to a turn's final response, not its progress notes", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("r1", "Reading the limiter first.")),
+      readFile("s1"),
+      inTurn(reply("r2", "The limiter is in.")),
+    ]),
+  );
+  const names = ["Copy response", "Save as Document"];
+  const count = () =>
+    names.map((name) => screen.queryAllByRole("button", { name }).length);
+  expect(count()).toEqual([1, 1]);
+  // Opening the work shows the progress note, and it still has no actions.
+  fireEvent.click(button("Worked for 2m 13s"));
+  expect(conversation().getByText("Reading the limiter first.")).toBeTruthy();
+  expect(count()).toEqual([1, 1]);
+  // The actions sit at the end of the turn, below everything it shows.
+  const unit = button("Copy response").closest(".chat-turn-unit")!;
+  expect(unit.lastElementChild?.contains(button("Copy response"))).toBe(true);
+});
+
+test("a turn still running offers no reply actions", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }, [
+      youSaid,
+      turnTiming("active"),
+      inTurn(reply("r1", "Reading the limiter first.")),
+      readFile("s1"),
+    ]),
+  );
+  // A running turn's text arrives in chunks, so it is read as a whole.
+  await waitFor(() =>
+    expect(document.querySelector(".chat-col")?.textContent).toContain(
+      "Reading the limiter first.",
+    ),
+  );
+  noButton("Copy response");
+  noButton("Save as Document");
+});
+
 test("a finished turn folds under one row, its final response outside, and opens to each step's output", async () => {
   await open(
     one({ id: "c1", title: "Limiter" }, [
