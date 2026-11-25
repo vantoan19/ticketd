@@ -53,7 +53,7 @@ const work = (more: Partial<CurrentWork> = {}): CurrentWork => ({
       plan: { id: "p1", name: "Checkout" },
       documents: [
         row("s", "Checkout spec", {
-          plans: [{ name: "Checkout", archived: false, spec: true }],
+          plans: [{ id: "p1", name: "Checkout", archived: false, spec: true }],
         }),
         row("l", "Checkout log", { tickets: [ticket("T-AB1")] }),
       ],
@@ -148,7 +148,7 @@ it("says Spec or the ticket reference on a row inside a Plan group, never the Pl
 it("loads Finished work and No Plan or ticket only when they are opened", async () => {
   vi.mocked(documents.finished).mockResolvedValue([
     row("f", "Shipped notes", {
-      plans: [{ name: "Old launch", archived: true, spec: false }],
+      plans: [{ id: "p0", name: "Old launch", archived: true, spec: false }],
     }),
   ]);
   renderDocuments();

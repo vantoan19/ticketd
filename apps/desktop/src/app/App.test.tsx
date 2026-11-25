@@ -11053,6 +11053,8 @@ test("supporting Document open failure survives an unrelated browse success and 
 test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
   "%s retains known content and counts when a background read fails",
   async (name) => {
+    // Documents opens on Current work here, its own read.
+    localStorage.removeItem("ticketd.preferences");
     const ticket = bulkTicket(1, { title: "Cached ticket" });
     const plan = { id: "cached-plan", name: "Cached Plan", archived: false };
     const file = {
