@@ -516,7 +516,7 @@ impl ChatHost {
         self.ask(chat_id, Command::Attach).await
     }
 
-    /// Checks what a harness can accept before saving the first message of a new Chat.
+    /// Checks static attachment constraints without opening a harness.
     pub fn check_attachment_input(
         &self,
         harness: &str,
@@ -572,6 +572,27 @@ impl ChatHost {
         attachments: Vec<ChatAttachmentContent>,
         replaces: Vec<String>,
     ) -> Result<ChatMessage, HostError> {
+        if !attachments.is_empty() {
+            let workspace = self.workspace()?;
+            // Static refusals must not interrupt an Automation. The supervisor
+            // still checks the runtime's model and steering when it saves input.
+            if let Some(harness) = workspace.automation_chat_harness(chat_id)?
+                && let Err(refusal) = self.check_attachment_input(&harness, &attachments)
+            {
+                if let Some(command_id) = command_id
+                    && let Some(saved) = workspace.replay_chat_input_replacing(
+                        command_id,
+                        chat_id,
+                        text,
+                        &attachments,
+                        &replaces,
+                    )?
+                {
+                    return Ok(saved);
+                }
+                return Err(refusal);
+            }
+        }
         // A reply sent to wait behind the agent's turn (a harness that cannot steer)
         // waits for nothing once the take-over ended that turn: it is the resumed
         // Chat's first turn (#387 M2).
@@ -671,7 +692,8 @@ impl ChatHost {
         .await
     }
 
-    /// Reads one queued message and its snapshots without withdrawing it.
+    /// Reads a queued message and its snapshots, holding it from automatic dispatch.
+    /// A delivered preparation is released by confirmation, Resume, Send now, or removal.
     pub async fn prepare_queue_edit(
         &self,
         chat_id: &str,
@@ -685,7 +707,9 @@ impl ChatHost {
         .await
     }
 
-    /// Withdraws a queued message after the composer has accepted its snapshots.
+    /// Holds the original message and snapshots after the composer accepts them.
+    /// The original is excluded from dispatch and remains until a replacement saves
+    /// or the person removes it.
     pub async fn confirm_queue_edit(
         &self,
         chat_id: &str,

@@ -55,6 +55,7 @@ pub struct FakeAdapter {
 struct State {
     inspection: Inspection,
     capabilities: Capabilities,
+    attachment_refusal: Option<Refusal>,
     open_failures: VecDeque<Problem>,
     open_holds: VecDeque<oneshot::Receiver<()>>,
     respond_holds: VecDeque<oneshot::Receiver<()>>,
@@ -118,6 +119,7 @@ impl FakeAdapter {
             state: Arc::new(Mutex::new(State {
                 inspection,
                 capabilities,
+                attachment_refusal: None,
                 open_failures: VecDeque::new(),
                 open_holds: VecDeque::new(),
                 respond_holds: VecDeque::new(),
@@ -182,6 +184,10 @@ impl FakeAdapter {
 
     pub fn set_inspection(&self, inspection: Inspection) {
         self.state().inspection = inspection;
+    }
+
+    pub fn set_attachment_refusal(&self, refusal: Refusal) {
+        self.state().attachment_refusal = Some(refusal);
     }
 
     /// The next `open` waits for the returned sender before it opens or fails.
@@ -335,8 +341,14 @@ impl HarnessAdapter for FakeAdapter {
         self.harness
     }
 
-    fn attachment_refusal(&self, _: &[ticketd_core::ChatAttachmentContent]) -> Option<Refusal> {
-        None
+    fn attachment_refusal(
+        &self,
+        attachments: &[ticketd_core::ChatAttachmentContent],
+    ) -> Option<Refusal> {
+        if attachments.is_empty() {
+            return None;
+        }
+        self.state().attachment_refusal.clone()
     }
 
     async fn inspect(&self) -> Inspection {

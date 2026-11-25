@@ -243,6 +243,7 @@ fn queued_edit_replacement_is_atomic_and_replays_after_its_originals_are_consume
     let other = workspace
         .save_chat_input(None, &chat.id, "Another message")
         .unwrap();
+    let before_edit = workspace.chat_change_sequence().unwrap();
     assert!(
         workspace
             .confirm_chat_queue_edit(&chat.id, &original.id, "edit-one")
@@ -258,6 +259,20 @@ fn queued_edit_replacement_is_atomic_and_replays_after_its_originals_are_consume
             )
             .is_err()
     );
+
+    let ChatCatchUp::Changes { changes, .. } =
+        workspace.chat_changes(&chat.id, before_edit, 10).unwrap()
+    else {
+        panic!("expected queue edit changes");
+    };
+    assert!(changes.iter().any(|change| matches!(
+        &change.record,
+        ChatRecord::Item(ChatItem::Message(message)) if message.id == original.id && message.editing
+    )));
+    assert!(changes.iter().any(|change| matches!(
+        &change.record,
+        ChatRecord::Chat(updated) if updated.id == chat.id
+    )));
 
     let replaces = vec![original.id.clone(), other.id.clone()];
     let edited = std::slice::from_ref(&file);
@@ -430,6 +445,11 @@ fn a_repeated_command_id_returns_the_first_result_instead_of_a_second_record() {
         .unwrap();
     assert_eq!(repeated.id, input.id);
     assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 1);
+    assert!(
+        !workspace
+            .replay_chat_queue_edit("send-1", &chat.id, "Run the tests", &[], &[])
+            .unwrap()
+    );
     assert!(matches!(
         workspace.save_chat_input(Some("send-1"), &chat.id, "Something else"),
         Err(Error::RequestConflict(_))

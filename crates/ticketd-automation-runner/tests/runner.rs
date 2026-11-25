@@ -11,14 +11,14 @@ use ticketd_chat_host::testing::{FakeAdapter, Written};
 use ticketd_chat_host::{
     ApprovalDecision, Capabilities, Capability, ChatHost, EventKind, HarnessAdapter, HostError,
     InteractionKind, InteractionRequest, NativeItemId, NativeRequestId, NativeSessionId,
-    NativeTurnId, Problem, ProblemKind, SendMode, SessionStart, SettingChangeState, SettingKey,
-    SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
+    NativeTurnId, Problem, ProblemKind, Refusal, SendMode, SessionStart, SettingChangeState,
+    SettingKey, SettingOutcome, StopReason, TurnEnding, TurnOutcome, WorkspaceOpener,
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
-    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatInputStanding, ChatItem,
-    ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger,
-    Workspace, WorkspaceSession,
+    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatAttachmentContent,
+    ChatInputStanding, ChatItem, ChatLinkKind, ChatListFilter, NotifyTarget, Schedule, Step,
+    StepAction, Ticket, Trigger, Workspace, WorkspaceSession,
     sync::{
         AttachmentDownload,
         remote::{FakeRemote, RemoteStorage},
@@ -857,6 +857,46 @@ async fn a_chat_taken_over_mid_run_goes_on_as_an_ordinary_chat_past_the_agents_l
     assert_eq!(written(&f).last().unwrap(), "submit: And Firefox");
     assert_eq!(f.fake.opens().len(), 2);
     assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_attachment_reply_does_not_take_over_an_automation() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let files = vec![
+        ChatAttachmentContent::from_data_url(
+            "notes.txt",
+            "data:text/plain;base64,c25hcHNob3Q=",
+            100,
+        )
+        .unwrap(),
+    ];
+    let saved = f
+        .core()
+        .save_chat_input_with_attachments(Some("saved"), &chat, "Earlier reply", &files)
+        .unwrap();
+    f.fake.set_attachment_refusal(Refusal::Unsupported);
+    let before = written(&f);
+
+    assert!(
+        f.host
+            .send_with_attachments(&chat, None, "New reply", SendMode::Auto, files.clone())
+            .await
+            .is_err()
+    );
+    let replay = f
+        .host
+        .send_with_attachments(&chat, Some("saved"), "Earlier reply", SendMode::Auto, files)
+        .await
+        .unwrap();
+    settle().await;
+
+    assert_eq!(replay.id, saved.id);
+    assert_eq!(f.core().chat_queue(&chat).unwrap(), [saved]);
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    assert_eq!(written(&f), before);
+    assert_eq!(f.fake.opens().len(), 1);
 }
 
 /// #387 M2: with a harness that cannot steer, the composer sends a reply to a going

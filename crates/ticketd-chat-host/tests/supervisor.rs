@@ -3,9 +3,11 @@
 //! moves only when every task is waiting, so `settle` means "until nothing more happens".
 #![allow(clippy::unwrap_used, clippy::panic)] // test setup and assertions
 
+use std::future::poll_fn;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::task::Poll;
 use std::time::Duration;
 
 use ticketd_chat_host::records::{FILES_RECORD_NAME, PLAN_RECORD_NAME, REASONING_RECORD_NAME};
@@ -2380,6 +2382,62 @@ async fn send_now_on_a_paused_queue_sends_only_that_input() {
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     assert_eq!(texts(&f), ["this one now"], "the paused queue stays paused");
     assert_eq!(f.queued(), ["older"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_auto_send_replay_keeps_prepared_and_confirmed_queue_edits_held() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let chat_id = &f.chat.id;
+    let saved = f
+        .host
+        .send(chat_id, Some("original"), "Held input", SendMode::Queue)
+        .await
+        .unwrap();
+    f.host.prepare_queue_edit(chat_id, &saved.id).await.unwrap();
+
+    for confirmed in [false, true] {
+        if confirmed {
+            assert!(
+                f.host
+                    .confirm_queue_edit(chat_id, &saved.id, "edit")
+                    .await
+                    .unwrap()
+            );
+        }
+        let replay = f
+            .host
+            .send(chat_id, Some("original"), "Held input", SendMode::Auto)
+            .await
+            .unwrap();
+        settle().await;
+
+        assert_eq!(replay.id, saved.id);
+        assert_eq!(replay.editing, confirmed);
+        assert_eq!(f.submits().len(), 1);
+        assert!(!f.core().chat(chat_id).unwrap().queue_paused);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_dropped_native_prepare_reply_leaves_the_queue_eligible_for_dispatch() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let saved = f.queue("Queued next").await;
+    let mut prepare = Box::pin(f.host.prepare_queue_edit(&f.chat.id, &saved.id));
+    // Enqueue the command on the active supervisor before dropping its reply.
+    poll_fn(|context| {
+        assert!(prepare.as_mut().poll(context).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    drop(prepare);
+
+    assert!(f.live().await.prepared_queue_edits.is_empty());
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let sent = f.submits();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1].text, "Queued next");
 }
 
 #[tokio::test(start_paused = true)]

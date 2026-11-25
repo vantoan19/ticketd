@@ -2325,6 +2325,9 @@ impl Workspace {
         files: &[ChatAttachmentContent],
         replaces: &[String],
     ) -> Result<bool, Error> {
+        if replaces.is_empty() {
+            return Ok(false);
+        }
         let request = save_input_request(chat_id, text, files, replaces).to_string();
         Ok(previous_outcome(&self.connection, command_id, &request)?.is_some())
     }
@@ -2382,6 +2385,7 @@ impl Workspace {
                     "UPDATE chat_messages SET editing = 1 WHERE id = ?1",
                     [message_id],
                 )?;
+                log(connection, chat_id, "message", message_id)?;
                 log(connection, chat_id, "chat", chat_id)?;
                 trim(connection, chat_id)?;
                 Ok(message_id.to_owned())

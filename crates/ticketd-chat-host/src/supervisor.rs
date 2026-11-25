@@ -718,7 +718,11 @@ impl Supervisor {
                 let _ = reply.send(self.send_queued_now(message_id).await);
             }
             Command::PrepareQueueEdit { message_id, reply } => {
-                let _ = reply.send(self.prepare_queue_edit(&message_id));
+                let draft = self.prepare_queue_edit(&message_id);
+                let prepared = draft.is_ok();
+                if reply.send(draft).is_ok() && prepared {
+                    self.prepared_queue_edits.insert(message_id);
+                }
             }
             Command::ConfirmQueueEdit {
                 message_id,
@@ -1014,6 +1018,8 @@ impl Supervisor {
             && !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
             && immediate
             && message.queued
+            && !message.editing
+            && !self.prepared_queue_edits.contains(&message.id)
             && !self.direct.contains(&message.id)
         {
             if self.active.is_none() && self.older_input_waits(&message.id) {
@@ -1121,14 +1127,14 @@ impl Supervisor {
     }
 
     fn prepare_queue_edit(
-        &mut self,
+        &self,
         message_id: &str,
     ) -> Result<(String, Vec<ChatAttachmentContent>), HostError> {
         if self.direct.iter().any(|id| id == message_id) {
             return Err(HostError::Working);
         }
         let chat = self.chat_id.clone();
-        let draft = self.core(|core| {
+        self.core(|core| {
             core.read(|core| {
                 let message = core
                     .chat_queue(&chat)?
@@ -1138,9 +1144,8 @@ impl Supervisor {
                 let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
                 Ok((message.text, attachments))
             })
-        })?;
-        self.prepared_queue_edits.insert(message_id.to_owned());
-        Ok(draft)
+        })
+        .map_err(Into::into)
     }
 
     fn confirm_queue_edit(
