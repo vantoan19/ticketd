@@ -81,6 +81,8 @@ pub struct Facts<'a> {
     pub activity: &'a str,
     pub opening: bool,
     pub last_change: Option<&'a ChatAgentChange>,
+    /// How many files the last turn changed.
+    pub files_changed: Option<usize>,
     pub last_response: Option<&'a str>,
 }
 
@@ -123,6 +125,49 @@ fn plain_start(markdown: &str) -> Option<String> {
     let text = text.replace(['`'], "").replace("**", "").replace("__", "");
     let text = text.trim();
     (!text.is_empty()).then(|| text.chars().take(140).collect())
+}
+
+/// "1 file changed", "3 files changed".
+fn files_line(count: usize) -> String {
+    let noun = if count == 1 { "file" } else { "files" };
+    format!("{count} {noun} changed")
+}
+
+/// Characters of a reply a row's second line keeps before it cuts at a word.
+const FIRST_WORDS: usize = 60;
+
+/// The first words of a reply, cut at a word with "…". A link is whole or left out:
+/// a row never shows half of one.
+fn first_words(markdown: &str) -> Option<String> {
+    let text = plain_start(markdown)?;
+    let mut kept = String::new();
+    let mut cut = false;
+    for word in text.split_whitespace() {
+        let link = word.starts_with("http://") || word.starts_with("https://");
+        let next = if kept.is_empty() {
+            word.chars().count()
+        } else {
+            kept.chars().count() + 1 + word.chars().count()
+        };
+        if link || next > FIRST_WORDS {
+            cut = true;
+            break;
+        }
+        if !kept.is_empty() {
+            kept.push(' ');
+        }
+        kept.push_str(word);
+    }
+    // A cut after a lead-in such as "I opened the PR:" drops its colon.
+    let kept = if cut {
+        kept.trim_end_matches([':', ',', ';', '-']).to_owned()
+    } else {
+        kept
+    };
+    if kept.is_empty() {
+        return None;
+    }
+    Some(if cut { format!("{kept}…") } else { kept })
 }
 
 /// Why a turn ended with an error, in a few words: what its notice is titled.
@@ -191,11 +236,14 @@ pub fn status(facts: &Facts<'_>) -> Status {
     if facts.problem == Some((ChatProblemKind::Failed, false)) {
         return make(Rank::Failed, "Failed", facts.failure.map(str::to_owned));
     }
+    // What the turn did, by what is worth most: a record it changed, the files it
+    // changed, then the first words of its reply.
     let done = || {
         facts
             .last_change
             .map(change_line)
-            .or_else(|| facts.last_response.and_then(plain_start))
+            .or_else(|| facts.files_changed.filter(|n| *n > 0).map(files_line))
+            .or_else(|| facts.last_response.and_then(first_words))
     };
     let outcome = ended.and_then(TurnEnding::of).map(|ending| match ending {
         TurnEnding::Completed => (Rank::Done, "Done".to_owned(), done()),
@@ -231,7 +279,9 @@ pub fn status(facts: &Facts<'_>) -> Status {
     }
     match outcome {
         Some((Rank::Done, word, Some(line))) => labelled(Rank::Idle, &line, &word, None),
-        Some((Rank::Done, _, None)) | None => make(Rank::Idle, "Idle", None),
+        // A finished turn with nothing to say about it, and a Chat with no turn yet.
+        Some((Rank::Done, _, None)) => make(Rank::Idle, "Done", None),
+        None => make(Rank::Idle, "No messages yet", None),
         Some((_, word, detail)) => make(Rank::Idle, &word, detail),
     }
 }

@@ -626,7 +626,8 @@ impl Tracker {
                 {
                     self.last_turn = Some(turn.clone());
                 }
-                self.updated_at = Some(turn.ended_at.clone().unwrap_or(turn.started_at.clone()));
+                self.touch(Some(turn.started_at.as_str()));
+                self.touch(turn.ended_at.as_deref());
             }
             ChatItem::Message(message) if message.role == ChatRole::User => {
                 if message.awaits_decision() {
@@ -636,9 +637,10 @@ impl Tracker {
                     self.uncertain = None;
                     self.uncertain_text = None;
                 }
-                self.updated_at = Some(message.created_at.clone());
+                self.touch(Some(message.created_at.as_str()));
             }
             ChatItem::Message(message) => {
+                self.touch(Some(message.created_at.as_str()));
                 if message.complete {
                     self.open.remove(&message.id);
                 } else {
@@ -651,6 +653,8 @@ impl Tracker {
                 self.last_response = Some(message.text.clone());
             }
             ChatItem::Interaction(interaction) => {
+                self.touch(interaction.asked_at.as_deref());
+                self.touch(interaction.resolved_at.as_deref());
                 let was = self.pending.contains_key(&interaction.id);
                 if interaction.state == ChatInteractionState::Pending {
                     self.pending
@@ -674,11 +678,13 @@ impl Tracker {
                 }
             }
             ChatItem::Tool(tool) if chat_reports::is_report(tool) => {
+                self.touch(tool.started_at.as_deref());
                 // Only the latest turn can still be running.
                 self.reports.retain(|_, kept| kept.turn_id == tool.turn_id);
                 self.reports.insert(tool.id.clone(), tool.clone());
             }
             ChatItem::Tool(tool) => {
+                self.touch(tool.started_at.as_deref());
                 if let Some(changes) = agent_changes(tool)
                     && let Some(change) = changes.last()
                 {
@@ -692,6 +698,37 @@ impl Tracker {
             }
             ChatItem::Session(_) | ChatItem::Notice(_) => {}
         }
+    }
+
+    /// How many files the latest turn changed, from the host's record of them.
+    fn files_changed(&self) -> Option<usize> {
+        let latest = self.last_turn.as_ref()?;
+        self.reports
+            .values()
+            .filter(|tool| tool.turn_id == latest.id)
+            .find_map(|tool| {
+                ticketd_chat_host::records::read::<ticketd_chat_host::records::FilesRecord>(
+                    &tool.name,
+                    ticketd_chat_host::records::FILES_RECORD_NAME,
+                    &tool.input,
+                )
+            })
+            .map(|record| record.files.len())
+    }
+
+    /// The newest time any record of the Chat carries: a working row's time counts
+    /// from here, so a long turn does not read as the day it started.
+    fn touch(&mut self, at: Option<&str>) {
+        if let Some(at) = at
+            && self.updated_at.as_deref().is_none_or(|newest| at > newest)
+        {
+            self.updated_at = Some(at.to_owned());
+        }
+    }
+
+    #[cfg(test)]
+    fn updated_at(&self) -> Option<&str> {
+        self.updated_at.as_deref()
     }
 
     /// Streamed text arrived for a message that has no record yet. Returns whether the
@@ -1731,6 +1768,70 @@ pub(crate) fn title(chat: &Chat) -> String {
     chat.title.clone().unwrap_or("Untitled Chat".to_owned())
 }
 
+/// The longest title a Chat is given from its first line.
+pub const TITLE_LIMIT: usize = 80;
+
+/// `text` as it is when it fits `limit` characters, else cut at a word and ended with
+/// "…", the whole result within `limit`. One long word is cut where it stands.
+pub fn cut_at_word(text: &str, limit: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= limit {
+        return text.to_owned();
+    }
+    let room = limit.saturating_sub(1);
+    let head: String = chars[..room].iter().collect();
+    // The next character starts a word: the head already ends at one.
+    if chars[room].is_whitespace() {
+        return format!("{}…", head.trim_end());
+    }
+    format!("{}…", before_last_word(&head))
+}
+
+/// `text` without its last, possibly partial, word; all of it when it has only one.
+fn before_last_word(text: &str) -> &str {
+    match text.trim_end().rfind(char::is_whitespace) {
+        Some(at) if at > 0 => text[..at].trim_end(),
+        _ => text,
+    }
+}
+
+/// The title the Chat view shows (U-chat titles). A title that starts with
+/// "Work on <reference>: " for a ticket linked to the Chat is the rest of the line,
+/// and the ticket's own title when the stored line was cut short of it. A title the
+/// 80-character limit cut mid-word is cut again at a word. Nothing stored changes.
+pub(crate) fn display_title(chat: &Chat, links: &[LinkedRecord]) -> String {
+    let stored = title(chat);
+    let Some(chat_title) = chat.title.as_deref() else {
+        return stored;
+    };
+    // The limit cut it: the same length and no ellipsis from a word cut.
+    let cut = chat_title.chars().count() == TITLE_LIMIT && !chat_title.ends_with('…');
+    let ticket = links.iter().find_map(|link| match link {
+        LinkedRecord::Ticket {
+            reference, title, ..
+        } => chat_title
+            .strip_prefix(&format!("Work on {reference}: "))
+            .filter(|rest| !rest.trim().is_empty())
+            .map(|rest| (rest, title.as_str())),
+        LinkedRecord::Document { .. } | LinkedRecord::Project { .. } => None,
+    });
+    let (rest, ticket_title) = match ticket {
+        Some((rest, ticket_title)) => (rest, Some(ticket_title)),
+        None => (chat_title, None),
+    };
+    // A line a cut ended, and its ticket's title that goes on from it.
+    let ended = rest.trim_end_matches('…');
+    if (cut || ended.len() < rest.len())
+        && let Some(full) = ticket_title.filter(|full| full.starts_with(ended))
+    {
+        return cut_at_word(full, TITLE_LIMIT);
+    }
+    if cut {
+        return format!("{}…", before_last_word(rest));
+    }
+    rest.to_owned()
+}
+
 pub fn chat_state(
     chat: &Chat,
     live: &ChatLive,
@@ -1747,7 +1848,7 @@ pub fn chat_state(
             .is_some_and(|problem| !problem.past && problem.kind.removes_composer());
     ChatState {
         id: chat.id.clone(),
-        title: title(chat),
+        title: display_title(chat, &around.links),
         harness: HarnessRef {
             id: chat.harness.clone(),
             name: name.to_owned(),
@@ -1843,6 +1944,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         activity,
         opening: opening(activity, live.opening).is_some(),
         last_change: tracker.last_change.as_ref(),
+        files_changed: tracker.files_changed(),
         last_response: tracker.last_response.as_deref(),
     });
     let interruption = match tracker.last_turn.as_ref().and_then(TurnEnding::of) {
@@ -1854,7 +1956,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
     };
     Summary {
         id: chat.id.clone(),
-        title: title(chat),
+        title: display_title(chat, &around.links),
         harness_id: chat.harness.clone(),
         harness_name: harness.to_owned(),
         // A managed folder is named by an id and never shared: the row leaves it out.
@@ -3062,5 +3164,174 @@ mod tests {
             (step.state, step.started_at.as_deref()),
             ("running", Some("2026-11-10T10:00:05Z"))
         );
+    }
+
+    fn ticket(reference: &str, title: &str) -> super::LinkedRecord {
+        super::LinkedRecord::Ticket {
+            id: format!("id-{reference}"),
+            reference: reference.to_owned(),
+            title: title.to_owned(),
+            status: "Todo".to_owned(),
+        }
+    }
+
+    fn titled(title: &str) -> Chat {
+        Chat {
+            title: Some(title.to_owned()),
+            ..chat(None)
+        }
+    }
+
+    #[test]
+    fn a_title_starting_with_a_linked_reference_is_the_rest_of_the_line() {
+        let linked = [ticket("T-12", "Design the attachment review UI")];
+        let shown = |title: &str, links: &[super::LinkedRecord]| {
+            super::display_title(&titled(title), links)
+        };
+        assert_eq!(
+            shown("Work on T-12: Design the attachment review UI", &linked),
+            "Design the attachment review UI"
+        );
+        // The reference is another ticket's, or no ticket is linked: nothing to drop.
+        assert_eq!(
+            shown("Work on T-99: Design it", &linked),
+            "Work on T-99: Design it"
+        );
+        assert_eq!(
+            shown("Work on T-12: Design it", &[]),
+            "Work on T-12: Design it"
+        );
+        assert_eq!(shown("Fix the login", &linked), "Fix the login");
+        // Only the lead is dropped; a title that is only the lead stays whole.
+        assert_eq!(shown("Work on T-12: ", &linked), "Work on T-12: ");
+    }
+
+    #[test]
+    fn a_title_cut_mid_word_at_eighty_characters_is_cut_again_at_a_word() {
+        let stored: String =
+            "Work on T-12: Design the attachment review UI for this user flow and the".to_owned()
+                + " settings";
+        let stored: String = stored.chars().take(80).collect();
+        assert_eq!(stored.chars().count(), 80);
+        // The linked ticket's own title starts the same: it is the title.
+        let linked = [ticket(
+            "T-12",
+            "Design the attachment review UI for this user flow and the settings page",
+        )];
+        assert_eq!(
+            super::display_title(&titled(&stored), &linked),
+            "Design the attachment review UI for this user flow and the settings page"
+        );
+        // Not linked: the cut falls back to a word.
+        let plain: String =
+            "Explain how the retry queue decides which Chats to send after a restart, in detail"
+                .chars()
+                .take(80)
+                .collect();
+        let shown = super::display_title(&titled(&plain), &[]);
+        assert_eq!(
+            shown,
+            "Explain how the retry queue decides which Chats to send after a restart, in…"
+        );
+        assert!(shown.chars().count() <= 80);
+        // A short title, or one a word cut already ended, is left alone.
+        assert_eq!(super::display_title(&titled("Short one"), &[]), "Short one");
+        let cut = super::cut_at_word(&"word ".repeat(30), 80);
+        assert_eq!(super::display_title(&titled(&cut), &[]), cut);
+    }
+
+    #[test]
+    fn a_new_chats_title_is_cut_at_a_word_with_an_ellipsis() {
+        assert_eq!(super::cut_at_word("Fix the login", 80), "Fix the login");
+        let long = "Explain how the retry queue decides which Chats to send after a restart, in detail please";
+        let cut = super::cut_at_word(long, 80);
+        assert_eq!(
+            cut,
+            "Explain how the retry queue decides which Chats to send after a restart, in…"
+        );
+        // A cut right after a word keeps that word.
+        let exact = format!("{} tail", "a".repeat(79));
+        assert_eq!(
+            super::cut_at_word(&exact, 80),
+            format!("{}…", "a".repeat(79))
+        );
+        // One long word has no word to cut at.
+        let one = "x".repeat(120);
+        assert_eq!(super::cut_at_word(&one, 80), format!("{}…", "x".repeat(79)));
+    }
+
+    #[test]
+    fn a_working_chats_time_counts_from_its_newest_activity() {
+        use ticketd_core::{ChatMessage, ChatRole};
+        let turn = ChatTurn {
+            id: "turn".to_owned(),
+            position: 1,
+            native_turn_id: None,
+            state: ChatTurnState::Active,
+            detail: None,
+            problem: None,
+            problem_resets_at: None,
+            ending: None,
+            started_at: "2026-11-24T22:00:00Z".to_owned(),
+            ended_at: None,
+        };
+        let message = ChatMessage {
+            id: "m".to_owned(),
+            position: 2,
+            role: ChatRole::Assistant,
+            text: "Looking".to_owned(),
+            complete: true,
+            turn_id: Some("turn".to_owned()),
+            queued: false,
+            attempts: Vec::new(),
+            created_at: "2026-11-25T09:30:00Z".to_owned(),
+        };
+        let mut running = tool("Read", "", ChatToolState::Running, None);
+        running.started_at = Some("2026-11-25T09:41:00Z".to_owned());
+        let mut tracker = Tracker::default();
+        for item in [
+            ChatItem::Turn(turn),
+            ChatItem::Message(message),
+            ChatItem::Tool(running),
+        ] {
+            tracker.note(&item);
+        }
+        assert_eq!(tracker.updated_at(), Some("2026-11-25T09:41:00Z"));
+        // An older record seen later never moves it back.
+        let mut older = tool("Read", "", ChatToolState::Completed, None);
+        older.started_at = Some("2026-11-25T09:00:00Z".to_owned());
+        tracker.note(&ChatItem::Tool(older));
+        assert_eq!(tracker.updated_at(), Some("2026-11-25T09:41:00Z"));
+    }
+
+    #[test]
+    fn the_files_a_turn_changed_are_counted_for_the_list_row() {
+        let files = json!({"files": [
+            {"path": "a.ts", "kind": "added", "from": null, "added_lines": 3, "removed_lines": 0, "confirmed": true},
+            {"path": "b.ts", "kind": "modified", "from": null, "added_lines": null, "removed_lines": null, "confirmed": false},
+        ]});
+        let record = tool(
+            ticketd_chat_host::records::FILES_RECORD_NAME,
+            &files.to_string(),
+            ChatToolState::Completed,
+            None,
+        );
+        let ended = ticketd_core::ChatTurn {
+            id: "turn".to_owned(),
+            position: 1,
+            native_turn_id: None,
+            state: ChatTurnState::Completed,
+            detail: None,
+            problem: None,
+            problem_resets_at: None,
+            ending: None,
+            started_at: String::new(),
+            ended_at: None,
+        };
+        let mut tracker = Tracker::default();
+        assert_eq!(tracker.files_changed(), None);
+        tracker.note(&ChatItem::Turn(ended));
+        tracker.note(&ChatItem::Tool(record));
+        assert_eq!(tracker.files_changed(), Some(2));
     }
 }

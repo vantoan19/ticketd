@@ -52,8 +52,85 @@ fn facts<'a>(chat: &'a Chat, live: &'a ChatLive, last_turn: Option<&'a ChatTurn>
         activity: "idle",
         opening: false,
         last_change: None,
+        files_changed: None,
         last_response: Some("All **done**. See `x`."),
     }
+}
+
+/// A seen row after a finished turn: the words line two says.
+fn seen_words(facts: Facts<'_>) -> String {
+    let status = status(&facts);
+    assert_eq!(status.rank, Rank::Idle);
+    status.word
+}
+
+#[test]
+fn a_seen_idle_row_says_its_last_outcome_by_priority() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let chat = chat(5);
+    let change = ChatAgentChange::Status {
+        reference: "T-12".to_owned(),
+        title: "Demo".to_owned(),
+        from: "Todo".to_owned(),
+        to: "In review".to_owned(),
+    };
+    // A record the agent changed comes first, then the files, then the reply.
+    let mut all = facts(&chat, &live, Some(&ended));
+    all.last_change = Some(&change);
+    all.files_changed = Some(3);
+    assert_eq!(seen_words(all), "Moved T-12 to In review");
+    let mut files = facts(&chat, &live, Some(&ended));
+    files.files_changed = Some(3);
+    assert_eq!(seen_words(files), "3 files changed");
+    let mut one = facts(&chat, &live, Some(&ended));
+    one.files_changed = Some(1);
+    assert_eq!(seen_words(one), "1 file changed");
+    // No files: the reply's first words.
+    assert_eq!(
+        seen_words(facts(&chat, &live, Some(&ended))),
+        "All done. See x."
+    );
+}
+
+#[test]
+fn a_reply_is_cut_at_a_word_and_never_inside_a_link() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let chat = chat(5);
+    let long = "Yes, the migration is safe to run twice because every step checks first and skips what exists";
+    let mut cut = facts(&chat, &live, Some(&ended));
+    cut.last_response = Some(long);
+    let words = seen_words(cut);
+    assert!(words.ends_with('…'), "{words}");
+    assert!(words.chars().count() <= 61, "{words}");
+    assert!(long.starts_with(words.trim_end_matches('…')), "{words}");
+    assert!(
+        !words.trim_end_matches('…').ends_with(' '),
+        "no space before the ellipsis: {words}"
+    );
+    assert!(
+        long[words.trim_end_matches('…').len()..].starts_with(' '),
+        "the cut falls at a word: {words}"
+    );
+
+    let mut link = facts(&chat, &live, Some(&ended));
+    link.last_response = Some("I opened the PR: https://github.com/example/repo/pull/12345");
+    assert_eq!(seen_words(link), "I opened the PR…");
+
+    let mut only = facts(&chat, &live, Some(&ended));
+    only.last_response = Some("https://github.com/example/repo/pull/12345");
+    assert_eq!(seen_words(only), "Done");
+}
+
+#[test]
+fn an_unused_chat_never_says_idle() {
+    let live = idle();
+    let status = status(&Facts {
+        last_response: None,
+        ..facts(&chat(0), &live, None)
+    });
+    assert_eq!(status.word, "No messages yet");
 }
 
 #[test]
