@@ -3,7 +3,7 @@
 ## Discover and read
 
 ```sh
-ticketd project list
+ticketd project list --all
 ticketd list --project PROJECT_ID --limit 20
 ticketd search "search text" --project PROJECT_ID --limit 20
 ticketd show T-KQ1

@@ -3523,6 +3523,59 @@ test("the Project palette checks the current assignment before treating the sele
   );
 });
 
+test("an earlier Project assignment check leaves a reopened palette alone", async () => {
+  const ticket = bulkTicket(1, {
+    reference: "T-FV1",
+    title: "Project check target",
+    project_id: "original",
+  });
+  const project = {
+    id: "original",
+    name: "Original Project",
+    path: "",
+    paths: [],
+  };
+  let deferred: Promise<unknown> | null = null;
+  let finish!: (value: typeof ticket) => void;
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return deferred ?? ticket;
+    if (command === "list_projects") return [project];
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  const row = await screen.findByRole("button", {
+    name: /Project check target/,
+  });
+  const open = () => {
+    row.focus();
+    fireEvent.keyDown(row, { key: "p" });
+    return screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+  };
+  const input = await open();
+  deferred = new Promise((resolve) => {
+    finish = resolve;
+  });
+  fireEvent.keyDown(input, { key: "Enter" });
+  deferred = null;
+  fireEvent.keyDown(input, { key: "Escape" });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("combobox", {
+        name: "Search tickets and destinations",
+      }),
+    ).toBeNull(),
+  );
+
+  const reopened = await open();
+  await act(async () => finish(ticket));
+  expect(
+    screen.getByRole("combobox", { name: "Search tickets and destinations" }),
+  ).toBe(reopened);
+});
+
 test("a palette status change shows on the list row at once, before the list is read again", async () => {
   vi.useFakeTimers();
   let current = bulkTicket(1, { reference: "T-FV1", title: "Palette target" });

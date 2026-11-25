@@ -277,6 +277,11 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
 #[cfg_attr(not(test), allow(dead_code))]
 const OMITTED_COLUMNS: &[(&str, &str, &str)] = &[
     (
+        "projects",
+        "archive_change",
+        "an identifier for the desktop's short-lived archive Undo",
+    ),
+    (
         "source_sync",
         "discovery_matches",
         "membership depends on the local connection's settings",

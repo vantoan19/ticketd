@@ -227,6 +227,60 @@ test.each(["Edit project", "Register checkout"])(
   },
 );
 
+test("an external archive moves focus from the removed row to the next Project", async () => {
+  const other = { ...project, id: "p2", name: "Another" };
+  const { rerender } = render(
+    <Projects {...props} projects={[project, other]} />,
+  );
+  screen.getByRole("button", { name: /^Original/ }).focus();
+  rerender(
+    <Projects {...props} projects={[{ ...project, archived: true }, other]} />,
+  );
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Actions for Another" }),
+  );
+});
+
+test("an edit failure after external archive stays out of the next Project dialog", async () => {
+  const other = { ...project, id: "p2", name: "Another" };
+  let reject!: (reason: Error) => void;
+  const edit = vi.spyOn(client, "editProject").mockImplementation(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+  );
+  const { rerender } = render(
+    <Projects {...props} projects={[project, other]} />,
+  );
+  await chooseAction("Edit project…");
+  const dialog = () => screen.getByRole("dialog", { name: "Edit project" });
+  fireEvent.change(within(dialog()).getByLabelText("Project name"), {
+    target: { value: "Draft rename" },
+  });
+  const save = within(dialog()).getByRole("button", { name: "Save project" });
+  await waitFor(() => expect(save).toHaveProperty("disabled", false));
+  fireEvent.click(save);
+  expect(edit).toHaveBeenCalledWith(project.id, "Draft rename", project.path);
+
+  rerender(
+    <Projects {...props} projects={[{ ...project, archived: true }, other]} />,
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await chooseAction("Edit project…", "Another");
+  await act(async () => reject(new Error("Stale save failure")));
+  expect(within(dialog()).queryByRole("alert")).toBeNull();
+  expect(within(dialog()).getByLabelText("Project name")).toHaveProperty(
+    "value",
+    "Another",
+  );
+  await waitFor(() =>
+    expect(
+      within(dialog()).getByRole("button", { name: "Save project" }),
+    ).toHaveProperty("disabled", false),
+  );
+});
+
 test("a new project waits for a folder, fills its name from it, then saves", async () => {
   vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue(
     "/Users/me/src/mobile-app",

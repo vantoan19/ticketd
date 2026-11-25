@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import { inboxClient } from "@/lib/api/inbox";
 import { failureText } from "@/lib/api/describe-failure";
@@ -57,7 +57,21 @@ export function useTicketCommands({
   } | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState<(() => void) | null>(null);
-  const [pending, setPending] = useState(false);
+  const opening = useMemo(
+    () => ({ open, reference, scope }),
+    [open, reference, scope],
+  );
+  const currentOpening = useRef<typeof opening | null>(null);
+  useLayoutEffect(() => {
+    currentOpening.current = opening;
+    return () => {
+      currentOpening.current = null;
+    };
+  }, [opening]);
+  const [pendingOpening, setPendingOpening] = useState<typeof opening | null>(
+    null,
+  );
+  const pending = pendingOpening === opening;
   const [duplicate, setDuplicate] = useState(false);
   const [leaving, setLeaving] = useState<string | null>(null);
   const blocked =
@@ -222,6 +236,7 @@ export function useTicketCommands({
     const subject = read ?? ticket;
     if (
       !subject ||
+      currentOpening.current !== opening ||
       blocked ||
       pending ||
       !scope ||
@@ -237,11 +252,12 @@ export function useTicketCommands({
       // Only a read made now says it is already set (the ADR's check before a
       // write); a copy from before a change elsewhere would close without writing.
       if (!read) {
-        setPending(true);
+        setPendingOpening(opening);
         let current: Ticket;
         try {
           current = await client.showTicket(subject.reference);
         } catch (reason) {
+          if (currentOpening.current !== opening) return;
           const message = failureText(
             reason,
             `check the ${scope.toLowerCase()}`,
@@ -250,7 +266,9 @@ export function useTicketCommands({
           line.show({ message, tone: "error" });
           return;
         } finally {
-          setPending(false);
+          setPendingOpening((pending) =>
+            pending === opening ? null : pending,
+          );
         }
         return apply(value, confirmed, customAt, current);
       }
@@ -347,13 +365,15 @@ export function useTicketCommands({
         break;
       }
     }
-    setPending(true);
+    setPendingOpening(opening);
     try {
       const written = await forward();
-      if (scope === "Reminder") reminderAttempt.current = null;
-      setRetry(null);
-      setError("");
-      close();
+      if (currentOpening.current === opening) {
+        if (scope === "Reminder") reminderAttempt.current = null;
+        setRetry(null);
+        setError("");
+        close();
+      }
       line.show({
         message,
         ...((scope !== "Status" || subject.status !== "Duplicate") &&
@@ -377,14 +397,16 @@ export function useTicketCommands({
       );
     } catch (reason) {
       const message = failureText(reason, failureAction);
-      setError(message);
-      if (scope === "Reminder")
-        setRetry(() => () => {
-          void apply(value, confirmed, customAt);
-        });
+      if (currentOpening.current === opening) {
+        setError(message);
+        if (scope === "Reminder")
+          setRetry(() => () => {
+            void apply(value, confirmed, customAt);
+          });
+      }
       line.show({ message, tone: "error" });
     } finally {
-      setPending(false);
+      setPendingOpening((pending) => (pending === opening ? null : pending));
     }
   }
   return {

@@ -194,6 +194,11 @@ export function Projects({
     (project) => Boolean(project.archived) === archived,
   );
   const rowActions = useRef(new Map<string, HTMLButtonElement>());
+  const focusedRow = useRef<{
+    id: string;
+    owner: HTMLElement;
+    neighbor: string | undefined;
+  } | null>(null);
   const focusAfterChange = useRef(
     new Map<
       string,
@@ -210,28 +215,42 @@ export function Projects({
   const tokens = rowTokens();
   const page = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    for (const [id, focus] of focusAfterChange.current) {
-      const project = projects.find((item) => item.id === id);
-      if (!project || Boolean(project.archived) !== focus.archived) continue;
-      focusAfterChange.current.delete(id);
-      if (page.current?.closest("[hidden]")) continue;
-
-      const active = document.activeElement;
-      if (
-        active !== document.body &&
-        active !== focus.owner &&
-        active !== focus.trigger
-      )
-        continue;
-      const action = rowActions.current.get(focus.target ?? "");
-
+    const visible = page.current && !page.current.closest("[hidden]");
+    const restoreFocus = (targetId?: string) => {
+      const action = rowActions.current.get(targetId ?? "");
       const target =
         action && !action.disabled
           ? action
           : page.current?.querySelector<HTMLElement>("#projects-heading");
       target?.focus();
+    };
+    for (const [id, focus] of focusAfterChange.current) {
+      const project = projects.find((item) => item.id === id);
+      if (!project || Boolean(project.archived) !== focus.archived) continue;
+      focusAfterChange.current.delete(id);
+      const active = document.activeElement;
+      if (
+        visible &&
+        (active === document.body ||
+          active === focus.owner ||
+          active === focus.trigger)
+      )
+        restoreFocus(focus.target);
     }
-  }, [projects]);
+    const focused = focusedRow.current;
+    if (
+      focused &&
+      !projects.some(
+        (project) =>
+          project.id === focused.id && Boolean(project.archived) === archived,
+      )
+    ) {
+      focusedRow.current = null;
+      const active = document.activeElement;
+      if (visible && (active === focused.owner || active === document.body))
+        restoreFocus(focused.neighbor);
+    }
+  }, [archived, projects]);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
   const activeDialog = useRef<OpenDialog | null>(null);
   useLayoutEffect(() => {
@@ -494,6 +513,20 @@ export function Projects({
                     key={item.id}
                     className="project-row"
                     data-open={isOpen || undefined}
+                    onFocusCapture={(event) => {
+                      focusedRow.current = {
+                        id: item.id,
+                        owner: event.target,
+                        neighbor: (shown[index + 1] ?? shown[index - 1])?.id,
+                      };
+                    }}
+                    onBlurCapture={(event) => {
+                      if (
+                        event.relatedTarget &&
+                        !event.currentTarget.contains(event.relatedTarget)
+                      )
+                        focusedRow.current = null;
+                    }}
 
                     {...arrival(0, { space: true }, tokens)}
                     {...departure({ space: true }, tokens)}

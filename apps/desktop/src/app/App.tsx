@@ -291,6 +291,7 @@ function AppContent() {
     | {
         mode: "edit_remote";
         projectId: string;
+        opening: symbol;
         exit?: "close" | "review" | "archived";
       }
     | null
@@ -1347,6 +1348,7 @@ function AppContent() {
                                           setProjectSource({
                                             mode: "edit_remote",
                                             projectId: sourceProject.id,
+                                            opening: Symbol(),
                                           }),
                                       })}
                                     />
@@ -1363,30 +1365,40 @@ function AppContent() {
                                         }
                                         onOpenChange={(open) =>
                                           !open &&
-                                          setProjectSource({
-                                            ...projectSource,
-                                            exit: "close",
-                                          })
+                                          setProjectSource((current) =>
+                                            current === projectSource
+                                              ? { ...current, exit: "close" }
+                                              : current,
+                                          )
                                         }
                                         onSaved={(project) => {
                                           void reportChange();
                                           if (project.remote)
                                             setProjectSource((current) =>
                                               current?.mode === "edit_remote" &&
-                                              current.projectId ===
-                                                project.id &&
+                                              current.opening ===
+                                                projectSource.opening &&
                                               current.exit !== "archived"
                                                 ? { ...current, exit: "review" }
                                                 : current,
                                             );
                                         }}
-                                        onExitComplete={() => {
-                                          if (projectSource.exit === "review")
-                                            reviewProjectSource(
-                                              sourceProject.id,
-                                            );
-                                          else setProjectSource(null);
-                                        }}
+                                        onExitComplete={() =>
+                                          setProjectSource((current) => {
+                                            if (
+                                              current?.mode !== "edit_remote" ||
+                                              current.opening !==
+                                                projectSource.opening
+                                            )
+                                              return current;
+                                            return current.exit === "review"
+                                              ? {
+                                                  mode: "review",
+                                                  projectId: current.projectId,
+                                                }
+                                              : null;
+                                          })
+                                        }
                                       />
                                     )}
                                   <ViewRegion
