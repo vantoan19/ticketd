@@ -40,7 +40,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ("document_opens", "sequence, document_id"),
     ("document_pins", "document_id"),
     ("document_tags", "document_id, tag_name"),
-    ("projects", "id, name, path, remote"),
+    ("projects", "id, name, path, remote, archived"),
     ("project_checkouts", "project_id, path"),
     ("plans", "id, name, archived, purpose, spec_document_id"),
     ("plan_documents", "plan_id, document_id"),
