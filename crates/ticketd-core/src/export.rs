@@ -194,6 +194,10 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
         "device-local: how many runs execute at once",
     ),
     (
+        "chat_attachments",
+        "device-local Chat snapshots retained with their bytes in complete Workspace backups",
+    ),
+    (
         "chat_changes",
         "a change feed the interface polls, not content",
     ),
