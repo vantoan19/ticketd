@@ -12,11 +12,19 @@ export function DocumentOutline({
   headings,
   current,
   onChoose,
+  folds,
 }: {
   headings: readonly OutlineHeading[];
   /** The anchor of the heading the reader is at. */
   current: string | null;
   onChoose: (heading: OutlineHeading) => void;
+  /** Fold all and Unfold all, shown above the sections when there is something to fold. */
+  folds?: {
+    folded: number;
+    allFolded: boolean;
+    foldAll: () => void;
+    unfoldAll: () => void;
+  };
 }) {
   const [open, setOpen] = useState(false);
   const nav = useRef<HTMLElement>(null);
@@ -119,7 +127,23 @@ export function DocumentOutline({
       </button>
       {open && (
         <div id={listId} className="document-outline-popover">
-          <p className="document-outline-title">On this page</p>
+          <div className="document-outline-head">
+            <p className="document-outline-title">On this page</p>
+            {folds && (
+              <span className="document-outline-actions">
+                {!folds.allFolded && (
+                  <button type="button" onClick={folds.foldAll}>
+                    Fold all
+                  </button>
+                )}
+                {folds.folded > 0 && (
+                  <button type="button" onClick={folds.unfoldAll}>
+                    Unfold all
+                  </button>
+                )}
+              </span>
+            )}
+          </div>
           <ul>
             {shown.map((heading) => (
               <li key={heading.id}>

@@ -27,6 +27,8 @@ export function headingElement(
 export function useCurrentHeading(
   scroller: HTMLElement | null,
   headings: readonly OutlineHeading[],
+  /** Sections folded away: their headings are not on the page, and a fold moves the rest. */
+  folded?: ReadonlySet<string>,
 ): { current: string | null; goTo: (id: string) => void } {
   const [live, setLive] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -37,7 +39,7 @@ export function useCurrentHeading(
       const top = scroller.getBoundingClientRect().top;
       const offsets = headings.map((heading) => {
         const element = headingElement(scroller, heading.id);
-        return element
+        return element && !element.closest("[hidden]")
           ? element.getBoundingClientRect().top - top
           : Number.POSITIVE_INFINITY;
       });
@@ -65,7 +67,7 @@ export function useCurrentHeading(
       for (const type of ["wheel", "touchstart", "keydown", "pointerdown"])
         scroller.removeEventListener(type, release);
     };
-  }, [scroller, headings]);
+  }, [scroller, headings, folded]);
   const goTo = (id: string) => {
     if (!scroller) return;
     held.current = id;
