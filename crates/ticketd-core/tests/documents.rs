@@ -53,6 +53,7 @@ fn retry_and_export_preserve_document_identity_and_markdown() {
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
     let request = || WriteRequest::CreateDocument {
         title: None,
+        summary: None,
         body: "# Source\n\n- [ ] Work\n".into(),
     };
     let first = workspace.write(Some("capture-1"), request()).unwrap();
@@ -1206,4 +1207,122 @@ fn document_backlinks_list_mentions_not_attachments_and_flag_trashed_tickets() {
         .unwrap();
     let links = workspace.document_backlinks(&document.id, 10, 0).unwrap();
     assert!(links[0].source_trashed);
+}
+
+#[test]
+fn a_summary_is_one_optional_line_set_changed_and_cleared_by_its_author() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let plain = workspace.create_document(Some("Plain"), "Body").unwrap();
+    assert_eq!(plain.summary, None);
+
+    // Created with a summary; a line break inside it is collapsed to one space.
+    let created = workspace
+        .create_document_with_summary(
+            Some("Report"),
+            Some("  Shipped in a1b2c3d.\r\nOne open question.  "),
+            "# Report\n\nLong body.",
+        )
+        .unwrap();
+    assert_eq!(
+        created.summary.as_deref(),
+        Some("Shipped in a1b2c3d. One open question.")
+    );
+
+    // A body change leaves it; a summary change leaves the body.
+    let edited = workspace
+        .change_document(
+            &created.id,
+            DocumentPatch {
+                body: Some("# Report\n\nNew body.".into()),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(edited.summary, created.summary);
+    let changed = workspace
+        .change_document(
+            &created.id,
+            DocumentPatch {
+                summary: Some(Some("Done.".into())),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(changed.summary.as_deref(), Some("Done."));
+    assert_eq!(changed.body, "# Report\n\nNew body.");
+    assert!(changed.updated_at >= edited.updated_at);
+
+    // The rows people browse and search carry it.
+    let recent = workspace.recent_documents().unwrap();
+    let row = recent.iter().find(|row| row.id == created.id).unwrap();
+    assert_eq!(row.summary.as_deref(), Some("Done."));
+    let found = workspace.search_documents("Report", None, 10, 0).unwrap();
+    assert_eq!(found[0].summary.as_deref(), Some("Done."));
+
+    // It survives a restart, and an empty value clears it.
+    drop(workspace);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(
+        workspace
+            .show_document(&created.id)
+            .unwrap()
+            .summary
+            .as_deref(),
+        Some("Done.")
+    );
+    for empty in ["", "  \n "] {
+        workspace
+            .change_document(
+                &created.id,
+                DocumentPatch {
+                    summary: Some(Some(empty.into())),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert_eq!(workspace.show_document(&created.id).unwrap().summary, None);
+        workspace
+            .change_document(
+                &created.id,
+                DocumentPatch {
+                    summary: Some(Some("Back".into())),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+    }
+    let cleared = workspace
+        .change_document(
+            &created.id,
+            DocumentPatch {
+                summary: Some(None),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    assert_eq!(cleared.summary, None);
+}
+
+#[test]
+fn the_json_export_carries_the_summary() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    workspace
+        .create_document_with_summary(Some("Report"), Some("Shipped."), "Body")
+        .unwrap();
+    workspace.create_document(Some("Plain"), "Body").unwrap();
+    let export = workspace.export().unwrap();
+    let summary_of = |title: &str| {
+        export["documents"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|document| document["title"] == title)
+            .unwrap()["summary"]
+            .clone()
+    };
+    assert_eq!(summary_of("Report"), "Shipped.");
+    assert_eq!(summary_of("Plain"), serde_json::Value::Null);
 }

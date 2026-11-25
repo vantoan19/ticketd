@@ -118,6 +118,7 @@ pub struct SourceListing<D: Serialize, S: Serialize> {
 pub struct DocumentSlice<'a> {
     pub id: &'a str,
     pub title: &'a Option<String>,
+    pub summary: &'a Option<String>,
     pub created_at: &'a str,
     pub updated_at: &'a str,
     pub trashed: bool,

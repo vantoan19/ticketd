@@ -603,3 +603,31 @@ fn provider_viewer_url_remains_one_usable_destination_when_it_contains_markdown_
         ["https://docs.google.com/document/d/native/edit?hint=%29attack"]
     );
 }
+
+#[test]
+fn a_documents_summary_leads_its_markdown_export_after_the_heading() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let export = |workspace: &Workspace, id: &str| {
+        let bundle = workspace
+            .export_markdown_with_files(
+                MarkdownExportSource::Document { id: id.into() },
+                dir.path(),
+            )
+            .unwrap();
+        std::fs::read_to_string(bundle.directory.join("content.md")).unwrap()
+    };
+    let headed = workspace
+        .create_document_with_summary(None, Some("Shipped in a1b2c3d."), "# Report\n\nBody.")
+        .unwrap();
+    assert_eq!(
+        export(&workspace, &headed.id),
+        "# Report\n\nShipped in a1b2c3d.\n\nBody."
+    );
+    let bare = workspace
+        .create_document_with_summary(None, Some("Done."), "Body only.")
+        .unwrap();
+    assert_eq!(export(&workspace, &bare.id), "Done.\n\nBody only.");
+    let none = workspace.create_document(None, "# Plain\n\nBody.").unwrap();
+    assert_eq!(export(&workspace, &none.id), "# Plain\n\nBody.");
+}
