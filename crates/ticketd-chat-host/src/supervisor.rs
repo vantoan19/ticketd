@@ -179,6 +179,7 @@ struct Dispatch {
     attempt: String,
     generation: RuntimeGeneration,
     starts_turn: bool,
+    early_rejection: Option<String>,
     preamble: Option<String>,
     context: Option<String>,
 }
@@ -1935,6 +1936,7 @@ impl Supervisor {
             attempt,
             generation,
             starts_turn,
+            early_rejection: None,
             preamble,
             context,
         });
@@ -2194,7 +2196,7 @@ impl Supervisor {
     /// outcome that arrives after its runtime was lost still settles the same attempt,
     /// but can no longer start a turn.
     fn on_dispatched(&mut self, outcome: DispatchOutcome) {
-        let Some(dispatch) = self.dispatching.take() else {
+        let Some(mut dispatch) = self.dispatching.take() else {
             return;
         };
         let attempt_id = dispatch.attempt.clone();
@@ -2202,6 +2204,13 @@ impl Supervisor {
             .runtime
             .as_ref()
             .is_some_and(|runtime| runtime.generation == dispatch.generation);
+        // A rejection can reach the event stream before the write task reports back.
+        let outcome = match (outcome, dispatch.early_rejection.take()) {
+            (DispatchOutcome::Written | DispatchOutcome::UnknownAfterLoss, Some(reason)) => {
+                DispatchOutcome::Rejected { reason }
+            }
+            (outcome, _) => outcome,
+        };
         match outcome {
             DispatchOutcome::NotSent(refusal) => {
                 let detail = refusal.reason().to_owned();
@@ -2380,12 +2389,17 @@ impl Supervisor {
                     }
                     DeliveryEvidence::Rejected { reason } => {
                         observations.push(ChatObservation::SubmissionRejected {
-                            attempt_id,
+                            attempt_id: attempt_id.clone(),
                             detail: Some(reason.clone()),
                         });
                         if unconfirmed {
                             self.stop_when_turn_known = false;
                             self.pause(ChatProblem::DispatchRefused { detail: reason });
+                        } else if let Some(dispatch) = &mut self.dispatching
+                            && dispatch.starts_turn
+                            && dispatch.attempt == attempt_id
+                        {
+                            dispatch.early_rejection = Some(reason);
                         }
                     }
                 }
