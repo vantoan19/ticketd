@@ -1816,9 +1816,9 @@ const WORK_ON_LEAD: &str = "Work on ";
 /// word cut ended says so with "…", and a shorter one was never cut). The first
 /// message is read only for these.
 pub(crate) fn title_may_be_cut(chat: &Chat) -> bool {
-    chat.title.as_deref().is_some_and(|title| {
-        title.chars().count() >= TITLE_LIMIT - 1 && !title.ends_with('…')
-    })
+    chat.title
+        .as_deref()
+        .is_some_and(|title| title.chars().count() >= TITLE_LIMIT - 1 && !title.ends_with('…'))
 }
 
 /// The first line of a Chat's first message, which its title is made from.
@@ -3269,7 +3269,11 @@ mod tests {
     fn a_title_starting_with_a_linked_reference_is_the_rest_of_the_line() {
         let linked = [ticket("T-12", "Design the attachment review UI")];
         assert_eq!(
-            shown("Work on T-12: Design the attachment review UI", &linked, None),
+            shown(
+                "Work on T-12: Design the attachment review UI",
+                &linked,
+                None
+            ),
             "Design the attachment review UI"
         );
         // The reference is another ticket's, or no ticket is linked: nothing to drop.
@@ -3318,7 +3322,8 @@ mod tests {
 
     #[test]
     fn a_first_line_of_exactly_eighty_characters_was_never_cut() {
-        let whole = "Explain how the retry queue decides which Chats to send after a restart, in deta";
+        let whole =
+            "Explain how the retry queue decides which Chats to send after a restart, in deta";
         assert_eq!(whole.chars().count(), 80);
         assert_eq!(shown(whole, &[], Some(whole)), whole);
         // With no first message to compare, the title is what is stored.
@@ -3349,7 +3354,8 @@ mod tests {
                 )
             })
         };
-        let moved = r#"{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"In review"}"#;
+        let moved =
+            r#"{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"In review"}"#;
         let posted = r#"{"kind":"update","reference":"T-12","excerpt":"Done"}"#;
         let later = r#"{"kind":"update","reference":"T-13","excerpt":"Next"}"#;
         let wording = |tracker: &Tracker| {
@@ -3360,12 +3366,18 @@ mod tests {
         };
         // Moved, then posted an update: in one call, and across two.
         let one_call = Tracker::from_items(&[changes("a", "t1", &format!("[{moved},{posted}]"))]);
-        assert_eq!(wording(&one_call).as_deref(), Some("Moved T-12 to In review"));
+        assert_eq!(
+            wording(&one_call).as_deref(),
+            Some("Moved T-12 to In review")
+        );
         let two_calls = Tracker::from_items(&[
             changes("a", "t1", &format!("[{moved}]")),
             changes("b", "t1", &format!("[{posted}]")),
         ]);
-        assert_eq!(wording(&two_calls).as_deref(), Some("Moved T-12 to In review"));
+        assert_eq!(
+            wording(&two_calls).as_deref(),
+            Some("Moved T-12 to In review")
+        );
         // The next turn is worded by its own first change.
         let next = Tracker::from_items(&[
             changes("a", "t1", &format!("[{moved}]")),

@@ -207,7 +207,10 @@ fn a_chats_first_input_text_is_read_whatever_came_after() {
         .save_chat_input(None, &chat.id, "Second message")
         .unwrap();
     assert_eq!(
-        workspace.chat_first_input_text(&chat.id).unwrap().as_deref(),
+        workspace
+            .chat_first_input_text(&chat.id)
+            .unwrap()
+            .as_deref(),
         Some("First message\nmore")
     );
 }

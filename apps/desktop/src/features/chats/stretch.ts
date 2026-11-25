@@ -170,9 +170,7 @@ export function stretchWords(rows: TurnRow[]): string {
       case "read":
         // Reads and searches alone are exploring, said once, as a merged row says it.
         if (only("read", "search") && tally.has("search"))
-          clauses.push(
-            `explored ${exploredCounts(n, total("search"))}`,
-          );
+          clauses.push(`explored ${exploredCounts(n, total("search"))}`);
         else clauses.push(`read ${count(n, "file")}`);
         break;
       case "search":

@@ -226,17 +226,15 @@ test("a row naming two long files keeps to one line, its outcome outside the cut
   await show([
     {
       chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
-      items: steps(
-        {
-          kind: "read",
-          target: "host.rs",
-          targets: [
-            { text: "crates/ticketd-core/src/source/extension/host.rs" },
-            { text: "docs/ticket-source-extensions-and-their-contracts.md" },
-          ],
-          state: "failed",
-        },
-      ),
+      items: steps({
+        kind: "read",
+        target: "host.rs",
+        targets: [
+          { text: "crates/ticketd-core/src/source/extension/host.rs" },
+          { text: "docs/ticket-source-extensions-and-their-contracts.md" },
+        ],
+        state: "failed",
+      }),
     },
   ]);
   const words = document.querySelector(".chat-step-words");
