@@ -6,6 +6,8 @@ import { Tooltip } from "@/components/ui/tooltip";
 
 /** How many characters of a name always show, so its extension survives. */
 const TAIL = 12;
+/** A path in a step row is cut shorter than a changed file's, so two fit on a line. */
+const STEP_PATH = 36;
 
 /** A path as its muted folder, cut from the start, then its name in ink. */
 export function PathText({ path, max }: { path: string; max?: number }) {
@@ -23,7 +25,7 @@ export function PathCode({ path }: { path: string }) {
   return (
     <Tooltip content={path}>
       <code className="chat-path">
-        <PathText path={path} />
+        <PathText path={path} max={STEP_PATH} />
       </code>
     </Tooltip>
   );
@@ -45,7 +47,7 @@ export function FileName({
 }) {
   const { open } = useContext(ChatFilesContext);
   const [gone, setGone] = useState(false);
-  const { folder, name } = splitPath(path);
+  const { folder, name } = splitPath(path, STEP_PATH);
   const split = Math.max(0, name.length - TAIL);
   const text = (
     <>
