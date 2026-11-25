@@ -14,6 +14,18 @@ export const SDK_CLAUDE_CODE_VERSION = "2.1.322";
 const id = z.string().min(1).max(200);
 const generation = z.number().int().nonnegative();
 const absolutePath = z.string().refine(isAbsolute, "must be an absolute path");
+const attachment = z.discriminatedUnion("type", [
+  z.strictObject({
+    type: z.literal("image"),
+    media_type: z.enum(["image/png", "image/jpeg", "image/webp", "image/gif"]),
+    data: z.base64().min(1),
+  }),
+  z.strictObject({
+    type: z.literal("file"),
+    name: z.string().min(1),
+    path: absolutePath,
+  }),
+]);
 /**
  * The modes a person's Chat can be in. `bypassPermissions` is Full access: Claude
  * Code runs every tool without asking. It is only ever the person's own pick; an
@@ -83,14 +95,20 @@ export const commandSchema = z.discriminatedUnion("cmd", [
     cmd: z.literal("options"),
     claude_executable: absolutePath,
   }),
-  z.strictObject({
-    id,
-    cmd: z.literal("submit"),
-    generation,
-    submission_id: id,
-    text: z.string().min(1),
-    allow_active_turn: z.boolean().optional(),
-  }),
+  z
+    .strictObject({
+      id,
+      cmd: z.literal("submit"),
+      generation,
+      submission_id: id,
+      text: z.string(),
+      attachments: z.array(attachment).optional(),
+      allow_active_turn: z.boolean().optional(),
+    })
+    .refine(
+      ({ text, attachments }) => text.length > 0 || !!attachments?.length,
+      "a message needs text or an attachment",
+    ),
   z.strictObject({
     id,
     cmd: z.literal("respond"),
