@@ -379,7 +379,10 @@ export function NewChat({
       }
       draft.setPendingCreate(null);
       setFailure(null);
-      if (input.current?.isConnected && !input.current.closest("[hidden]"))
+      if (
+        input.current?.isConnected &&
+        !input.current.closest('[hidden], [data-single="list"]')
+      )
         onCreated(created.chat_id);
     } catch (reason) {
       draft.setPendingCreate({

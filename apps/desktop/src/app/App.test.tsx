@@ -1794,6 +1794,7 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
   const { ChatClientContext } = await import("@/features/chats/client");
   const { chatState, createMockChatClient } =
     await import("@/features/chats/mock-client");
+  const { draftOf } = await import("@/features/chats/drafts");
   const { addQuote } = await import("@/features/chats/quotes");
   const chatId = "restored-common";
   const client = createMockChatClient({
@@ -1824,6 +1825,11 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
     plans: 0,
   };
   let replaced = false;
+  let refreshStarted = false;
+  let failRefresh!: (reason: Error) => void;
+  const refreshing = new Promise<never>((_, reject) => {
+    failRefresh = reject;
+  });
   const handlers: Record<string, unknown> = {
     safety_backups: [
       {
@@ -1843,7 +1849,10 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
       return { safety_path: "/tmp/safety.sqlite3" };
     },
     draft_retentions: () => {
-      if (replaced) throw new Error("Recovery refresh failed");
+      if (replaced) {
+        refreshStarted = true;
+        return refreshing;
+      }
       return [];
     },
     draft_cutover_pending: false,
@@ -1876,6 +1885,7 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
     });
   });
   expect(screen.getByRole("button", { name: "Remove old.txt" })).toBeTruthy();
+  const oldDraft = draftOf(client, chatId);
 
   fireEvent.click(screen.getByRole("button", { name: "New Chat" }));
   fireEvent.change(
@@ -1907,19 +1917,25 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
   fireEvent.click(
     await screen.findByRole("button", { name: "Replace workspace" }),
   );
+  await waitFor(() => expect(refreshStarted).toBe(true));
+  expect(draftOf(client, chatId)).not.toBe(oldDraft);
+  await act(async () => finish({ chat_id: chatId, send_error: "Too late" }));
+  expect(draftOf(client, chatId).snapshot().text).toBe("");
+  await act(async () => failRefresh(new Error("Recovery refresh failed")));
   expect(
     await screen.findByText(
       "The restore finished. Restart ticketd to see the restored data.",
     ),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Done" }));
-  await act(async () => finish({ chat_id: chatId, send_error: "Too late" }));
 
   fireEvent.click(
     await screen.findByRole("button", { name: /Back to Chats/i }),
   );
   expect(
-    screen.getByRole("textbox", { name: "Describe a task or ask a question" }),
+    await screen.findByRole("textbox", {
+      name: "Describe a task or ask a question",
+    }),
   ).toHaveProperty("value", "");
   fireEvent.click(await chat());
   expect(await message()).toHaveProperty("value", "");

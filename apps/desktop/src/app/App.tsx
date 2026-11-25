@@ -758,15 +758,17 @@ function AppContent() {
     });
   }
   const bulk = useBulkEdit(reportChange);
-  // A restore or a download from Drive replaced the whole Workspace: the
-  // selection, the opened pages and a failed bulk change describe the old one.
-  // The report reloads the list through the shared version.
-  const replaceWorkspace = async () => {
+  const discardChatWorkspace = () => {
     chat.replaceWorkspace?.();
     setSeenChatOpen(0);
     setSeenChatRequest(0);
     setChatWorkspace((generation) => generation + 1);
     setNewChatRequest(0);
+  };
+  // A restore or a download from Drive replaced the whole Workspace: the
+  // selection, the opened pages and a failed bulk change describe the old one.
+  // The report reloads the list through the shared version.
+  const replaceWorkspace = async () => {
     setProjectSource(null);
     setSelected(null);
     clearOpened();
@@ -1381,6 +1383,9 @@ function AppContent() {
                                             setView("inbox");
                                           }}
                                           onRestore={replaceWorkspace}
+                                          onWorkspaceReplaced={
+                                            discardChatWorkspace
+                                          }
                                           onSourcesChanged={
                                             sourceConnectionsChanged
                                           }

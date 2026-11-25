@@ -124,7 +124,12 @@ function LastBackupRow({
   );
 }
 
-function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
+type BackupsProps = {
+  onRestore: () => Promise<void>;
+  onWorkspaceReplaced?: (() => void) | undefined;
+};
+
+function BackupsContent({ onRestore, onWorkspaceReplaced }: BackupsProps) {
   const [last, setLast] = useState<LastBackup>({ status: "loading" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [message, setMessage] = useState("");
@@ -308,6 +313,7 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
         <RestoreDialog
           path={restoring}
           onClose={() => setRestoring(null)}
+          onWorkspaceReplaced={onWorkspaceReplaced}
           onRestored={async () => {
             setRestoredCount((count) => count + 1);
             await loadLast();
@@ -319,13 +325,13 @@ function BackupsContent({ onRestore }: { onRestore: () => Promise<void> }) {
   );
 }
 
-export function BackupsPage({ onRestore }: { onRestore: () => Promise<void> }) {
+export function BackupsPage(props: BackupsProps) {
   return (
     <SettingsPage
       {...sectionMeta("backups")}
       lede="Save a checked copy of this workspace, and restore one later."
     >
-      <BackupsContent onRestore={onRestore} />
+      <BackupsContent {...props} />
     </SettingsPage>
   );
 }

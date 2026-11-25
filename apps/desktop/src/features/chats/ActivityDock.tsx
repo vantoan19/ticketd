@@ -83,7 +83,7 @@ function Request({
   useEffect(() => {
     if (focusTitle) title.current?.focus();
   }, [focusTitle]);
-  const sending = answerDraft?.pending;
+  const sending = answerDraft?.pending ?? null;
   const text = answerDraft?.text ?? "";
   const [error, setError] = useState<FailureDescription | null>(null);
   const [showCommand, setShowCommand] = useState(false);

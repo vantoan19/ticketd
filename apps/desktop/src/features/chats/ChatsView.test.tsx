@@ -904,29 +904,50 @@ test("an edited New Chat uses current harness picks after reopening the draft", 
   );
 });
 
-test("a late New Chat success keeps the Chat selected since then", async () => {
-  const client = await open(one({ id: "c1", title: "Limiter" }));
-  const save = client.createChat;
-  let finish!: () => void;
-  const creating = new Promise<void>((resolve) => {
-    finish = resolve;
-  });
-  vi.spyOn(client, "createChat").mockImplementationOnce(async (request) => {
-    await creating;
-    return save(request);
-  });
-  fireEvent.click(button("New Chat"));
-  type("Create later", "Describe a task or ask a question");
-  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
-  fireEvent.click(button("Send"));
-  fireEvent.click(button(/^Limiter/));
-  await screen.findByRole("heading", { name: "Limiter" });
-  await act(async () => finish());
-  expect(
-    await screen.findByRole("button", { name: /^Create later/ }),
-  ).toBeTruthy();
-  expect(screen.getByRole("heading", { name: "Limiter" })).toBeTruthy();
-});
+test.each(["another Chat", "narrow list"])(
+  "a late New Chat success leaves the current pane alone (%s)",
+  async (target) => {
+    const measure =
+      target === "narrow list"
+        ? vi
+            .spyOn(HTMLElement.prototype, "clientWidth", "get")
+            .mockReturnValue(600)
+        : undefined;
+    const client = await open(
+      target === "narrow list" ? [] : one({ id: "c1", title: "Limiter" }),
+    );
+    measure?.mockRestore();
+    const save = client.createChat;
+    let finish!: () => void;
+    const creating = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    vi.spyOn(client, "createChat").mockImplementationOnce(async (request) => {
+      await creating;
+      return save(request);
+    });
+    fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+    type("Create later", "Describe a task or ask a question");
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    if (target === "narrow list") fireEvent.click(button("Back to Chats"));
+    else {
+      fireEvent.click(button(/^Limiter/));
+      await screen.findByRole("heading", { name: "Limiter" });
+    }
+    await act(async () => finish());
+    expect(
+      await screen.findByRole("button", { name: /^Create later/ }),
+    ).toBeTruthy();
+    if (target === "narrow list")
+      expect(
+        document.querySelector(".chats-workspace")?.getAttribute("data-single"),
+      ).toBe("list");
+    else expect(screen.getByRole("heading", { name: "Limiter" })).toBeTruthy();
+  },
+);
 
 test("Retry after navigation opens the Chat whose create reply was lost", async () => {
   const client = await open(one({ id: "c1", title: "Limiter" }));
