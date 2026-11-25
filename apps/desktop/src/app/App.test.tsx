@@ -7627,9 +7627,9 @@ test("Chats distinguishes an unknown list from empty and keeps known rows after 
   );
 });
 
-test.each([false, true])(
-  "New Chat Retry keeps the draft and creation identity follows payload edits (%s)",
-  async (edited) => {
+test.each(["Retry", "Send"])(
+  "New Chat %s after an edit uses the intended creation request",
+  async (action) => {
     const { ChatClientContext } = await import("@/features/chats/client");
     const { createMockChatClient } =
       await import("@/features/chats/mock-client");
@@ -7649,21 +7649,19 @@ test.each([false, true])(
     });
     fireEvent.change(input, { target: { value: "Keep these words" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    const retry = await screen.findByRole("button", { name: "Retry" });
+    await screen.findByRole("button", { name: "Retry" });
     expect(input).toHaveProperty("value", "Keep these words");
-    if (edited) {
-      fireEvent.change(input, { target: { value: "Edited words" } });
-      fireEvent.click(
-        screen.getByRole("button", {
-          name: "Claude Code, model Opus 5.5, effort Default",
-        }),
-      );
-      fireEvent.click(screen.getByRole("radio", { name: "High" }));
-      fireEvent.keyDown(document.body, { key: "Escape" });
-    }
-    fireEvent.click(retry);
+    fireEvent.change(input, { target: { value: "Edited words" } });
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: "Claude Code, model Opus 5.5, effort Default",
+      }),
+    );
+    fireEvent.click(screen.getByRole("radio", { name: "High" }));
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    fireEvent.click(screen.getByRole("button", { name: action }));
     await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
-    if (edited) {
+    if (action === "Send") {
       expect(create.mock.calls[1]?.[0].command_id).not.toBe(
         create.mock.calls[0]?.[0].command_id,
       );

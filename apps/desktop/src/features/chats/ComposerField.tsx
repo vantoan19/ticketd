@@ -199,7 +199,10 @@ export function ComposerField({
     null,
   );
   /** The trigger Escape closed; it stays closed until another one starts. */
-  const [dismissed, setDismissed] = useState<number | null>(null);
+  const [dismissed, setDismissed] = useState<Pick<
+    Trigger,
+    "start" | "char"
+  > | null>(null);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [active, setActive] = useState(0);
   const [announce, setAnnounce] = useState("");
@@ -231,7 +234,7 @@ export function ComposerField({
   const open =
     !readOnly &&
     trigger?.text === text &&
-    trigger.start !== dismissed &&
+    (trigger.start !== dismissed?.start || trigger.char !== dismissed.char) &&
     mentions
       ? trigger
       : null;
@@ -371,7 +374,8 @@ export function ComposerField({
   const updateTrigger = (value: string, caret: number) => {
     const found = triggerAt(value, caret);
     setTrigger(found && { ...found, text: value });
-    if (!found || found.start !== dismissed) setDismissed(null);
+    if (found?.start !== dismissed?.start || found?.char !== dismissed?.char)
+      setDismissed(null);
   };
 
   const changed = (next: string, caret: number) => {
@@ -457,7 +461,8 @@ export function ComposerField({
         // Closes the menu and keeps the text; a second Escape is Stop's.
         event.preventDefault();
         event.stopPropagation();
-        setDismissed(shown.trigger.start);
+        const { start, char } = shown.trigger;
+        setDismissed({ start, char });
         return;
       }
     }

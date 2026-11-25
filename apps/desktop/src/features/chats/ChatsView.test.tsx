@@ -582,12 +582,22 @@ test.each(["send", "queue"] as const)(
 
 test("New Chat keeps a pending first message and its retry identity across navigation", async () => {
   const client = await open(one({ id: "c1", title: "Limiter" }));
+  client.projectCheckouts = [
+    { project: { id: "p1", title: "Storefront" }, path: "/work/storefront" },
+  ];
   let rejectCreate!: (reason: Error) => void;
   const creating = new Promise<never>((_, reject) => {
     rejectCreate = reject;
   });
   const create = vi.spyOn(client, "createChat").mockReturnValueOnce(creating);
   fireEvent.click(button("New Chat"));
+  fireEvent.keyDown(button("Scratch folder"), { key: "Enter" });
+  fireEvent.click(
+    await screen.findByRole("menuitem", {
+      name: "Storefront /work/storefront",
+    }),
+  );
+  expect(button("Folder: /work/storefront")).toBeTruthy();
   const description = "Describe a task or ask a question";
   const box = () => composer(description);
   type("First caption", description);
@@ -597,12 +607,14 @@ test("New Chat keeps a pending first message and its retry identity across navig
   await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
   fireEvent.keyDown(box(), { key: "Enter" });
   expect(create).toHaveBeenCalledTimes(1);
+  expect(create.mock.calls[0]?.[0].folder).toBe("/work/storefront");
 
   fireEvent.click(button(/^Limiter/));
   await screen.findByRole("heading", { name: "Limiter" });
   fireEvent.click(button("New Chat"));
   await screen.findByRole("heading", { name: "What should we work on?" });
   expect(box()).toHaveProperty("readOnly", true);
+  expect(button("Folder: /work/storefront")).toBeTruthy();
   expect(box()).toHaveProperty("value", "First caption");
   expect(button("Remove first.txt")).toHaveProperty("disabled", true);
   fireEvent.keyDown(box(), { key: "Enter" });
@@ -618,8 +630,8 @@ test("New Chat keeps a pending first message and its retry identity across navig
   noButton("Remove first.txt");
 });
 
-test("Retry opens the Chat already created with the original folder and attachment", async () => {
-  const client = await open([]);
+test("Retry after navigation opens the Chat whose create reply was lost", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
   client.projectCheckouts = [
     { project: { id: "p1", title: "Storefront" }, path: "/work/storefront" },
   ];
@@ -631,14 +643,6 @@ test("Retry opens the Chat already created with the original folder and attachme
       throw new Error("The first reply was lost");
     });
   fireEvent.click(button("New Chat"));
-  const description = "Describe a task or ask a question";
-  type("First caption", description);
-  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
-    target: { files: [new File(["one"], "first.txt", { type: "text/plain" })] },
-  });
-  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
-  fireEvent.click(button("Send"));
-  const retry = await screen.findByRole("button", { name: "Retry" });
   fireEvent.keyDown(button("Scratch folder"), { key: "Enter" });
   fireEvent.click(
     await screen.findByRole("menuitem", {
@@ -646,13 +650,28 @@ test("Retry opens the Chat already created with the original folder and attachme
     }),
   );
   expect(button("Folder: /work/storefront")).toBeTruthy();
+  const description = "Describe a task or ask a question";
+  type("First caption", description);
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [new File(["one"], "first.txt", { type: "text/plain" })] },
+  });
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.click(button("Send"));
+  await screen.findByRole("button", { name: "Retry" });
+  expect(create.mock.calls[0]?.[0].folder).toBe("/work/storefront");
   type("New work after the failed reply", description);
   fireEvent.change(screen.getByLabelText("Choose files to attach"), {
     target: { files: [new File(["two"], "next.txt", { type: "text/plain" })] },
   });
   await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
 
-  fireEvent.click(retry);
+  fireEvent.click(button(/^Limiter/));
+  await screen.findByRole("heading", { name: "Limiter" });
+  fireEvent.click(button("New Chat"));
+  expect(
+    await screen.findByRole("button", { name: "Folder: /work/storefront" }),
+  ).toBeTruthy();
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
   expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
   await screen.findByRole("heading", { name: "First caption" });
   const matches = within(

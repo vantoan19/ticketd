@@ -1,4 +1,11 @@
-import type { ChatClient } from "@/features/chats/client";
+import type {
+  ChatClient,
+  HarnessOptions,
+  LinkedRecord,
+} from "@/features/chats/client";
+import type { Pick as HarnessPick } from "@/features/chats/harness-pick";
+import type { Quote } from "@/features/chats/quotes";
+import type { FailureDescription } from "@/lib/api/describe-failure";
 import {
   ComposerAttachments,
   NO_ATTACHMENTS,
@@ -15,8 +22,19 @@ type Snapshot = {
   saving: boolean;
   transfer: "preparing" | "adopting" | "confirming" | "unconfirmed" | null;
   failedAction: Action | null;
+  pendingCreate: PendingCreate | null;
   restored: boolean;
 };
+export type PendingCreate = {
+  request: Parameters<ChatClient["createChat"]>[0];
+  links: LinkedRecord[];
+  quotes: Quote[];
+  options: HarnessOptions | undefined;
+  pick: HarnessPick;
+  submitted: Pick<Snapshot, "text" | "tokens" | "items">;
+  failure: FailureDescription | null;
+};
+
 type QueuedDraft = {
   text: string;
   attachments: ChatAttachmentInput[];
@@ -51,6 +69,7 @@ export class ComposerDraft {
       saving: false,
       transfer: null,
       failedAction: null,
+      pendingCreate: null,
       restored: false,
     };
     this.view = this.state;
@@ -97,6 +116,10 @@ export class ComposerDraft {
       restored: Boolean(text.trim()) && this.state.restored,
     });
     return true;
+  }
+
+  setPendingCreate(pendingCreate: PendingCreate | null) {
+    this.update({ pendingCreate });
   }
 
   requestId(request: string) {

@@ -399,6 +399,18 @@ test("@ lists files in the folder, Escape closes the menu and keeps the text, an
   expect(screen.queryByRole("listbox")).toBeNull();
 });
 
+test("replacing a dismissed mention with another trigger opens its menu", async () => {
+  const { box } = setup();
+  type(box, "see @lim");
+  expect(await screen.findByText("Files in api")).toBeTruthy();
+  fireEvent.keyDown(box, { key: "Escape" });
+
+  type(box, "see @limiter");
+  expect(screen.queryByRole("listbox")).toBeNull();
+  type(box, "see #rate");
+  expect(await screen.findByRole("option", { name: /T-KQ12/ })).toBeTruthy();
+});
+
 test("/ at the start of a message offers the harness's commands", async () => {
   const { box } = setup([{ name: "review" }]);
   type(box, "/rev");
