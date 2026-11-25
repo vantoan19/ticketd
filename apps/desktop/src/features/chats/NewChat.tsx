@@ -315,7 +315,7 @@ export function NewChat({
   };
   const folderName = folder?.split(/[\\/]/).filter(Boolean).at(-1);
   const codex = harness?.id === "codex";
-  const canListSkills = codex && ready && !folderMissing;
+  const canListSkills = codex && ready;
   const { commands, openers } = useCodexCommands(
     codex,
     Boolean(offered?.permission?.changeable),
