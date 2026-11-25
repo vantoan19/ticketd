@@ -1,4 +1,4 @@
-#![allow(clippy::unwrap_used, clippy::panic)] // Setup that fails fails the test.
+#![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)] // Setup that fails fails the test.
 
 use std::{thread::sleep, time::Duration};
 use ticketd_core::{CurrentWork, Status, TicketPatch, Workspace};
