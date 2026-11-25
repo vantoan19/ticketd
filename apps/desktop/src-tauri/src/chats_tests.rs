@@ -1114,7 +1114,7 @@ async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
         .chats
         .check_queue_edits(&id, vec![command_id.clone()], vec![held.clone()])
         .unwrap();
-    assert_eq!(status.saved, [command_id.clone()]);
+    assert_eq!(status.saved.as_slice(), std::slice::from_ref(&command_id));
     assert_eq!(status.removed, [held]);
 
     f.chats
