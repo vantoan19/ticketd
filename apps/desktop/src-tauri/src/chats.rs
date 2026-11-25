@@ -1540,7 +1540,7 @@ impl Chats {
         let chat = workspace.create_chat(
             Some(&format!("{command_id}:chat")),
             NewChat {
-                title: Some(first_line.chars().take(80).collect()),
+                title: Some(chat_view::cut_at_word(first_line, chat_view::TITLE_LIMIT)),
                 harness: input.harness_id,
                 execution_folder,
                 folder_managed,

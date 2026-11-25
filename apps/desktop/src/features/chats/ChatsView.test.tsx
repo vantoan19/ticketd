@@ -1019,6 +1019,67 @@ test("the list says which Chats need the person, in words as well as the dot", a
   expect(working.hasAttribute("data-attention")).toBe(false);
 });
 
+const demoTicket = {
+  kind: "ticket" as const,
+  id: "t12",
+  reference: "T-12",
+  title: "Design the attachment review",
+  status: "In progress",
+};
+
+test("a linked ticket whose title is the Chat's title shows its reference alone", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Design the attachment review",
+      links: [demoTicket],
+    }),
+  );
+  const linked = within(screen.getByRole("group", { name: "Linked records" }));
+  const chip = linked.getByRole("button", { name: /^Open T-12/ });
+  expect(chip.textContent).toBe("T-12");
+});
+
+test("a linked ticket with another title keeps its title on the chip", async () => {
+  await open(one({ id: "c1", title: "Limiter", links: [demoTicket] }));
+  const chip = within(
+    screen.getByRole("group", { name: "Linked records" }),
+  ).getByRole("button", { name: /^Open T-12/ });
+  expect(chip.textContent).toBe("T-12Design the attachment review");
+});
+
+test("the header says the full title in a tooltip only while the title is cut", async () => {
+  const title = "A title long enough that the header has to cut it short";
+  await open(one({ id: "c1", title }));
+  const heading = screen.getByRole("heading", { name: title });
+  const measure = (cut: boolean) => {
+    Object.defineProperty(heading, "scrollWidth", {
+      configurable: true,
+      value: cut ? 400 : 100,
+    });
+    Object.defineProperty(heading, "clientWidth", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(heading, "scrollHeight", {
+      configurable: true,
+      value: 20,
+    });
+    Object.defineProperty(heading, "clientHeight", {
+      configurable: true,
+      value: 20,
+    });
+  };
+  measure(false);
+  await userEvent.hover(heading);
+  expect(await screen.queryByRole("tooltip")).toBeNull();
+  await userEvent.unhover(heading);
+  measure(true);
+  await userEvent.hover(heading);
+  const tip = await screen.findByRole("tooltip");
+  expect(tip.textContent).toBe(title);
+});
+
 test("a row's actions mark it unread or read and mute it, and say a refusal", async () => {
   const client = await open([
     { chat: chatState({ id: "c1", title: "Alert on-call" }) },

@@ -204,6 +204,26 @@ test("Quit names the runs it would stop", async () => {
   expect(client.quit).toBe(false);
 });
 
+test("working Chats spin once, on the sidebar's Chats item, and say Working with no spinner in the list", async () => {
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [
+      { chat: chatState({ id: "c1", title: "Limiter", activity: "working" }) },
+      { chat: chatState({ id: "c2", title: "Billing", activity: "working" }) },
+    ],
+  });
+  app(client);
+  const entry = await screen.findByRole("button", { name: "Chats, 2 working" });
+  expect(entry.querySelector(".sidebar-working")).not.toBeNull();
+  fireEvent.click(entry);
+  const list = within(await screen.findByRole("list", { name: "Chats" }));
+  for (const name of [/^Limiter/, /^Billing/]) {
+    const row = list.getByRole("button", { name });
+    expect(row.textContent).toContain("Working");
+    expect(row.querySelector(".chat-spin")).toBeNull();
+  }
+});
+
 test("Quit asks before stopping working Chats; Cancel leaves them running", async () => {
   const client = createMockChatClient({
     enabled: true,
