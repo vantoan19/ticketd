@@ -97,7 +97,7 @@ export function ChoiceList({
   onQueryChange?: (query: string) => void;
   /** Offers "Create “x”" as the last row while the query matches no label. */
   create?: (query: string) => void;
-  /** The empty row's words, or a function of the query ("No tickets match “x”"). */
+  /** The empty row's words or a function of the query. Null hides the row. */
   empty?: ReactNode | ((query: string) => ReactNode);
   /** A row-sized line above the rows (a search failure, "Searching…"). */
   notice?: ReactNode;
@@ -194,9 +194,11 @@ export function ChoiceList({
             {notice}
           </div>
         )}
-        <CommandEmpty>
-          {typeof empty === "function" ? empty(typed) : empty}
-        </CommandEmpty>
+        {empty !== null && (
+          <CommandEmpty>
+            {typeof empty === "function" ? empty(typed) : empty}
+          </CommandEmpty>
+        )}
         {sets.map((set, index) =>
           set.choices.length === 0 ? null : (
             <Fragment key={set.heading ?? index}>

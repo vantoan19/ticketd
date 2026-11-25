@@ -1,5 +1,11 @@
 import { failureText } from "@/lib/api/describe-failure";
-import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { FileText, Folder } from "lucide-react";
 import { ChoiceList, type ChoiceGroup } from "@/components/ui/choice-list";
 import { StatusIcon } from "./StatusIcon";
@@ -29,6 +35,10 @@ type SearchResult<Record> = {
   groups: RecordGroup<Record>[];
   empty?: ReactNode;
 };
+
+type SearchResponse<Record> =
+  | { result: SearchResult<Record>; error?: never }
+  | { error: string; result?: never };
 
 const DELAY_MS = 150;
 
@@ -67,39 +77,44 @@ export function RecordPicker<Record extends PickRecord>({
   revision?: number;
 }) {
   const [query, setQuery] = useState("");
+  const request = useMemo(
+    () => ({ query, things, revision }),
+    [query, things, revision],
+  );
   const [answer, setAnswer] = useState<{
-    query: string;
-    revision: number;
-    result: SearchResult<Record>;
+    request: typeof request;
+    response: SearchResponse<Record>;
   }>();
-  const [error, setError] = useState("");
   const find = useEffectEvent(search);
   useEffect(() => {
     let current = true;
     const timer = window.setTimeout(
       () => {
-        find(query.trim()).then(
+        find(request.query.trim()).then(
           (found) => {
             if (!current) return;
-            setAnswer({ query, revision, result: found });
-            setError("");
+            setAnswer({ request, response: { result: found } });
           },
           (reason: unknown) => {
-            if (current) setError(failureText(reason, `search ${things}`));
+            if (current)
+              setAnswer({
+                request,
+                response: {
+                  error: failureText(reason, `search ${request.things}`),
+                },
+              });
           },
         );
       },
-      query ? DELAY_MS : 0,
+      request.query ? DELAY_MS : 0,
     );
     return () => {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [query, revision, things]);
-  const result =
-    answer?.query === query && answer.revision === revision
-      ? answer.result
-      : undefined;
+  }, [request]);
+  const response = answer?.request === request ? answer.response : undefined;
+  const result = response?.result;
   const groups = result?.groups ?? [];
   const byKey = new Map(
     groups.flatMap((group) => group.records).map((r) => [r.key, r]),
@@ -137,11 +152,20 @@ export function RecordPicker<Record extends PickRecord>({
         const record = byKey.get(key);
         if (record) onPick(record);
       }}
-      {...(error && { notice: error })}
-      empty={(text) =>
-        result?.empty ??
-        empty?.(text, byKey.size > 0) ??
-        (text ? `No ${things} match “${text}”` : `No ${things} yet`)
+      notice={
+        !response ? (
+          <span role="status">Searching…</span>
+        ) : response.error ? (
+          <span role="alert">{response.error}</span>
+        ) : undefined
+      }
+      empty={
+        result
+          ? (text) =>
+              result.empty ??
+              empty?.(text, byKey.size > 0) ??
+              (text ? `No ${things} match “${text}”` : `No ${things} yet`)
+          : null
       }
     />
   );
