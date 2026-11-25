@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import { CheckIcon, PlusIcon } from "lucide-react";
 import {
   Command,
@@ -23,12 +23,33 @@ export type Choice = {
   /** Trailing 12/16 muted meta or a Kbd, before the check. */
   meta?: ReactNode;
   disabled?: boolean;
+  group?: string;
   /** Why a disabled row is unavailable; a 12/16 line under the label. */
   reason?: string;
 };
 
 /** A titled group of rows ("Linked to this ticket", "Recent"). */
-export type ChoiceGroup = { heading?: string; choices: Choice[] };
+export type ChoiceGroup = {
+  heading?: string;
+  choices: Choice[];
+  separator?: boolean;
+};
+
+function groupChoices(choices: Choice[]): ChoiceGroup[] {
+  const groups: ChoiceGroup[] = [];
+  for (const choice of choices) {
+    const previous = groups.at(-1);
+    if (previous && previous.heading === choice.group) {
+      previous.choices.push(choice);
+    } else {
+      groups.push({
+        ...(choice.group && { heading: choice.group, separator: true }),
+        choices: [choice],
+      });
+    }
+  }
+  return groups;
+}
 
 /**
  * The one choice-list anatomy (DESIGN.md section 11, P3) for every searchable
@@ -77,7 +98,7 @@ export function ChoiceList({
   /** Offers "Create “x”" as the last row while the query matches no label. */
   create?: (query: string) => void;
   /** The empty row's words, or a function of the query ("No tickets match “x”"). */
-  empty?: string | ((query: string) => string);
+  empty?: ReactNode | ((query: string) => ReactNode);
   /** A row-sized line above the rows (a search failure, "Searching…"). */
   notice?: ReactNode;
   size?: "default" | "tall";
@@ -89,7 +110,7 @@ export function ChoiceList({
   const sets: ChoiceGroup[] =
     groups.length > 0 && "choices" in (groups[0] as object)
       ? (groups as ChoiceGroup[])
-      : [{ choices: groups as Choice[] }];
+      : groupChoices(groups as Choice[]);
   const chosen = (value: string) =>
     typeof selected === "string"
       ? selected === value
@@ -178,12 +199,12 @@ export function ChoiceList({
         </CommandEmpty>
         {sets.map((set, index) =>
           set.choices.length === 0 ? null : (
-            <CommandGroup
-              key={set.heading ?? index}
-              {...(set.heading && { heading: set.heading })}
-            >
-              {set.choices.map(row)}
-            </CommandGroup>
+            <Fragment key={set.heading ?? index}>
+              {set.separator && index > 0 && <CommandSeparator />}
+              <CommandGroup {...(set.heading && { heading: set.heading })}>
+                {set.choices.map(row)}
+              </CommandGroup>
+            </Fragment>
           ),
         )}
         {create && typed && !exists && (

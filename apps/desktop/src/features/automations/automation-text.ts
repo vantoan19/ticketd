@@ -21,9 +21,9 @@ export function sourceName(
 }
 
 export function projectName(id: string, projects: Project[]): string {
-  return (
-    projects.find((project) => project.id === id)?.name ?? "a deleted project"
-  );
+  const project = projects.find((project) => project.id === id);
+  if (!project) return "a deleted project";
+  return project.archived ? `${project.name} (archived)` : project.name;
 }
 
 const DAY_NAMES: Record<

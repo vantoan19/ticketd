@@ -3428,6 +3428,61 @@ test("focused Ticket status key opens a scoped palette and Undo restores the sta
   await vi.waitFor(() => expect(current.status).toBe("Todo"));
 });
 
+test("the palette keeps the ticket's archived Project selected", async () => {
+  const current = bulkTicket(1, {
+    reference: "T-FV1",
+    title: "Palette archive target",
+    project_id: "saved",
+  });
+  const projects = [
+    { id: "saved", name: "Saved Project", archived: true, path: "", paths: [] },
+    {
+      id: "other",
+      name: "Hidden Project",
+      archived: true,
+      path: "",
+      paths: [],
+    },
+    { id: "active", name: "Open Project", path: "", paths: [] },
+  ];
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "list_projects") return projects;
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  const row = await screen.findByRole("button", {
+    name: /Palette archive target/,
+  });
+  row.focus();
+  fireEvent.keyDown(row, { key: "p" });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  const list = within(screen.getByRole("listbox"));
+  expect(
+    list
+      .getAllByRole("option")
+      .map((option) => option.getAttribute("aria-label")),
+  ).toEqual(["Open Project", "Saved Project", "No project"]);
+  expect(
+    list.getByRole("option", { name: "Saved Project", selected: true }),
+  ).toBeTruthy();
+  expect(list.getByText("Archived")).toBeTruthy();
+  fireEvent.keyDown(input, { key: "Enter" });
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("combobox", {
+        name: "Search tickets and destinations",
+      }),
+    ).toBeNull(),
+  );
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
+  ).toBe(false);
+});
+
 test("a palette status change shows on the list row at once, before the list is read again", async () => {
   vi.useFakeTimers();
   let current = bulkTicket(1, { reference: "T-FV1", title: "Palette target" });
@@ -11765,8 +11820,14 @@ test.each(["tickets", "Documents"])(
   },
 );
 
-test("bulk selection exposes Status, Project, Plan, Tags and More directly", async () => {
-  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+test("bulk selection exposes actions and offers only active Project destinations", async () => {
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1)],
+    list_projects: () => [
+      { id: "current", name: "Current Project", path: "", paths: [] },
+      { id: "old", name: "Old Project", path: "", paths: [], archived: true },
+    ],
+  });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   const bar = screen.getByRole("region", { name: "Bulk edit" });
   for (const name of [
@@ -11783,6 +11844,11 @@ test("bulk selection exposes Status, Project, Plan, Tags and More directly", asy
   expect(
     screen.getByRole("menuitem", { name: "Remove from Plan" }),
   ).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  openMenu("Project of selected tickets");
+  expect(
+    screen.getAllByRole("menuitem").map((item) => item.textContent),
+  ).toEqual(["Current Project", "No project"]);
 });
 
 test("workspace failure defers the band while editing, recovers through its header notice and retains a vacated slot until navigation", async () => {

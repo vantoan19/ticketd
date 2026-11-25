@@ -1,5 +1,5 @@
 import { failureText } from "@/lib/api/describe-failure";
-import { useEffect, useEffectEvent, useState } from "react";
+import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
 import { FileText, Folder } from "lucide-react";
 import { ChoiceList, type ChoiceGroup } from "@/components/ui/choice-list";
 import { StatusIcon } from "./StatusIcon";
@@ -55,7 +55,7 @@ export function RecordPicker({
   /** Keys already chosen; they are not offered again. */
   exclude?: readonly string[];
   /** The empty row's words for a query ("" while nothing is typed). */
-  empty?: (query: string) => string;
+  empty?: (query: string) => ReactNode;
   autoFocus?: boolean;
   rows?: number;
 }) {

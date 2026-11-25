@@ -151,6 +151,90 @@ fn a_chat_links_to_several_records_without_belonging_to_them() {
 }
 
 #[test]
+fn archived_projects_reject_new_chat_links_atomically() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
+    let project = workspace
+        .create_project("App", dir.path().to_str().unwrap())
+        .unwrap();
+    let link = ChatLink {
+        kind: ChatLinkKind::Project,
+        id: project.id.clone(),
+    };
+    let linked = workspace
+        .create_chat(
+            None,
+            NewChat {
+                links: vec![link.clone()],
+                ..new_chat()
+            },
+        )
+        .unwrap();
+    let other = workspace.create_chat(None, new_chat()).unwrap();
+    let ticket = workspace.create_ticket("Context").unwrap();
+    let ticket_link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: ticket.id,
+    };
+    workspace.set_project_archived(&project.id, true).unwrap();
+
+    assert!(workspace.project_for_folder(dir.path()).unwrap().is_none());
+    assert!(matches!(
+        workspace.create_project("Other project", dir.path().to_str().unwrap()),
+        Err(Error::CheckoutTaken(name)) if name == "App"
+    ));
+
+    assert!(matches!(
+        workspace.create_chat(
+            None,
+            NewChat {
+                links: vec![link.clone()],
+                ..new_chat()
+            }
+        ),
+        Err(Error::ProjectArchived(_))
+    ));
+    assert_eq!(
+        workspace.list_chats(ChatListFilter::Active).unwrap().len(),
+        2
+    );
+    assert!(matches!(
+        workspace.set_chat_link(&other.id, link.clone(), true),
+        Err(Error::ProjectArchived(_))
+    ));
+    assert!(matches!(
+        workspace.add_chat_links(&other.id, &[ticket_link, link.clone()]),
+        Err(Error::ProjectArchived(_))
+    ));
+    assert!(workspace.chat(&other.id).unwrap().links.is_empty());
+
+    assert!(
+        !workspace
+            .add_chat_links(&linked.id, std::slice::from_ref(&link))
+            .unwrap()
+    );
+    assert_eq!(
+        workspace
+            .set_chat_title(&linked.id, Some("Renamed"))
+            .unwrap()
+            .links,
+        [link.clone()]
+    );
+    assert!(
+        workspace
+            .set_chat_link(&linked.id, link, false)
+            .unwrap()
+            .links
+            .is_empty()
+    );
+    workspace.set_project_archived(&project.id, false).unwrap();
+    assert_eq!(
+        workspace.project_for_folder(dir.path()).unwrap(),
+        Some(project)
+    );
+}
+
+#[test]
 fn archiving_a_project_preserves_its_tickets_chats_and_settings() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();

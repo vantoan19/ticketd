@@ -2,6 +2,11 @@ import { useEffect, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import { inboxClient } from "@/lib/api/inbox";
 import { failureText } from "@/lib/api/describe-failure";
+import {
+  archivedProjectHint,
+  archivedProjectMatch,
+  projectAssignmentChoices,
+} from "@/features/projects/project-assignment";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import {
@@ -11,7 +16,12 @@ import {
 import { reminderPresets } from "@/features/tickets/reminder-presets";
 import type { TicketCommandScope } from "@/lib/ticket-command-actions";
 
-type Option = { value: string; label: string; selected?: boolean };
+type Option = {
+  value: string;
+  label: string;
+  selected?: boolean;
+  group?: string;
+};
 export function useTicketCommands({
   reference,
   initialTicket,
@@ -144,11 +154,12 @@ export function useTicketCommands({
       }));
     if (scope === "Project")
       options = [
-        ...projects.map((p) => ({
-          value: p.id,
-          label: p.name,
-          selected: p.id === ticket.project_id,
-        })),
+        ...projectAssignmentChoices(projects, ticket.project_id).map(
+          (option) => ({
+            ...option,
+            selected: option.value === ticket.project_id,
+          }),
+        ),
         {
           value: "",
           label: "No project",
@@ -191,6 +202,16 @@ export function useTicketCommands({
     )
   )
     options.push({ value: query.trim(), label: `Create “${query.trim()}”` });
+  if (scope === "Project" && query.trim()) {
+    const needle = query.trim().toLowerCase();
+    options = options.filter((option) =>
+      option.label.toLowerCase().includes(needle),
+    );
+  }
+  const archivedMatch =
+    scope === "Project" && options.length === 0
+      ? archivedProjectMatch(projects, query)
+      : undefined;
   async function apply(
     value: string,
     confirmed = false,
@@ -232,6 +253,10 @@ export function useTicketCommands({
       close();
       return;
     }
+    if (scope === "Project" && value === (subject.project_id ?? "")) {
+      close();
+      return;
+    }
     if (scope === "Status" && value === "Duplicate") {
       setFlowTicket(subject);
       close();
@@ -253,19 +278,25 @@ export function useTicketCommands({
     let forward: () => Promise<Ticket | void>;
     let undo: () => Promise<Ticket | void>;
     let message: string;
+    let failureAction = `change ${scope.toLowerCase()}`;
     switch (scope) {
       case "Status":
         forward = () => client.changeTicket(reference, { status: value });
         undo = () => client.changeTicket(reference, { status: subject.status });
         message = `Moved ${reference} to ${value}`;
         break;
-      case "Project":
+      case "Project": {
+        const destination =
+          projects.find((project) => project.id === value)?.name ??
+          "No project";
+        failureAction = `move ${reference} to ${destination}`;
         forward = () =>
           client.changeTicket(reference, { project_id: value || null });
         undo = () =>
           client.changeTicket(reference, { project_id: subject.project_id });
-        message = `Moved ${reference} to ${projects.find((p) => p.id === value)?.name ?? "No project"}`;
+        message = `Moved ${reference} to ${destination}`;
         break;
+      }
       case "Plan":
         forward = () => client.setPlan(reference, value || null);
         undo = () => client.setPlan(reference, subject.plan_id);
@@ -324,7 +355,11 @@ export function useTicketCommands({
       close();
       line.show({
         message,
-        ...(scope !== "Status" || subject.status !== "Duplicate"
+        ...((scope !== "Status" || subject.status !== "Duplicate") &&
+        (scope !== "Project" ||
+          !projects.some(
+            (project) => project.id === subject.project_id && project.archived,
+          ))
           ? {
               undo: async () => {
                 await refresh((await undo()) ?? undefined);
@@ -340,7 +375,7 @@ export function useTicketCommands({
         }),
       );
     } catch (reason) {
-      const message = failureText(reason, `change ${scope.toLowerCase()}`);
+      const message = failureText(reason, failureAction);
       setError(message);
       if (scope === "Reminder")
         setRetry(() => () => {
@@ -354,6 +389,7 @@ export function useTicketCommands({
   return {
     ticket,
     options,
+    projectHint: archivedMatch ? archivedProjectHint(archivedMatch) : undefined,
     apply,
     blocked,
     pending: pending || (scope === "Reminder" && reminderLoaded !== reference),

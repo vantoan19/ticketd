@@ -429,8 +429,57 @@ fn archived_projects_remain_addressable_but_are_hidden_from_the_default_list() {
         json(&["list", "--project", id])[0]["reference"],
         ticket["reference"]
     );
+    let create = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(["create", "From checkout"])
+            .args(args)
+            .current_dir(dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap()
+    };
+    let explicit = create(&["--project", id]);
+    assert!(!explicit.status.success());
+    assert!(String::from_utf8_lossy(&explicit.stderr).contains("Reactivate it"));
+    let batch = dir.path().join("assignment.json");
+    std::fs::write(
+        &batch,
+        serde_json::json!([
+            {"operation": "create", "name": "first", "title": "Would roll back"},
+            {"operation": "create", "name": "second", "title": "Refused", "project_id": id}
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let refused = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .arg("batch")
+        .arg(&batch)
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("Reactivate it"));
+    assert_eq!(json(&["list"]).as_array().unwrap().len(), 1);
+
+    let inferred = || {
+        let output = create(&[]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    assert!(inferred()["project_id"].is_null());
     assert_eq!(json(&["project", "reactivate", id]), project);
     assert_eq!(json(&["project", "list"]), serde_json::json!([project]));
+    assert_eq!(inferred()["project_id"], id);
 }
 
 #[test]
