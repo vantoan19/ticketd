@@ -166,7 +166,11 @@ export function Composer({
   const available = controls(text, items.length > 0);
   const state =
     waiting || transfer !== null
-      ? { ...available, enabled: false, queues: false }
+      ? {
+          ...available,
+          enabled: false,
+          ...(available.queues !== undefined && { queues: false }),
+        }
       : available;
   const submit = (action: Submit | undefined) => {
     const current = draft.snapshot();
@@ -363,9 +367,10 @@ export function Composer({
             return;
           }
           if (event.key !== "Enter" || event.shiftKey) return;
+          const queueShortcut = event.metaKey || event.ctrlKey;
+          if (answeringQuestion && queueShortcut) return;
           event.preventDefault();
-          if ((event.metaKey || event.ctrlKey) && state.queues !== undefined)
-            queue();
+          if (queueShortcut && state.queues !== undefined) queue();
           else if (state.enabled) submit(primary);
         }}
       />

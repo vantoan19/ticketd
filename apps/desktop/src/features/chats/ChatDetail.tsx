@@ -603,6 +603,7 @@ function Conversation({
   const answering =
     Boolean(question) &&
     !draftText.trim() &&
+    quotes.length === 0 &&
     !hasAttachments &&
     queueEdits.length === 0 &&
     !independentAnswer &&

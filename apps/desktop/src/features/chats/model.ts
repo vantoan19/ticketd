@@ -1004,9 +1004,9 @@ export function composerControls(
   const typed = text.trim() !== "" || hasAttachments;
   const blocked = blocksSend(chat.problem);
   if (!isLive(chat)) return { send: "send", enabled: typed && !blocked };
+  if (answering) return { send: "send", enabled: typed && !chat.stopping };
   // Stopping: Send waits for the turn to end; queueing stays possible.
   if (chat.stopping) return { send: "send", enabled: false, queues: typed };
-  if (answering) return { send: "send", enabled: typed, queues: typed };
   if (!canSteer(chat, hasImages))
     return {
       send: "queue",

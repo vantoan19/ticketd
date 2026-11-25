@@ -331,14 +331,17 @@ test("the send button reads Send, Steer or Queue, set by the turn", () => {
   });
 });
 
-test("an open question makes Send answer it; stopping makes Send wait while Cmd+Enter still queues", () => {
+test("answers only offer Send, while a message can still queue during Stop", () => {
   const waiting = chatState({ id: "c1", title: "x", activity: "waiting" });
   expect(composerControls(waiting, "hi", true)).toEqual({
     send: "send",
     enabled: true,
-    queues: true,
   });
   const stopping = { ...waiting, activity: "working" as const, stopping: true };
+  expect(composerControls(stopping, "hi", true)).toEqual({
+    send: "send",
+    enabled: false,
+  });
   expect(composerControls(stopping, "hi")).toEqual({
     send: "send",
     enabled: false,

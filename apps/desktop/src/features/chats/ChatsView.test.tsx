@@ -18,6 +18,7 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
+import { addQuote, clearQuotes } from "@/features/chats/quotes";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { ProjectNavigation } from "@/features/documents/navigation";
@@ -1391,6 +1392,65 @@ test.each(["before", "after"])(
     ).toEqual([]);
   },
 );
+
+test("a quote stays on the message route while the dock holds the unsent answer", async () => {
+  const id = "quoted-question";
+  const client = await open(
+    one({ id, title: "Limiter", activity: "waiting" }, [question]),
+  );
+  const send = vi.spyOn(client, "send").mockResolvedValue(undefined);
+  const reply = vi.spyOn(client, "answer");
+  type("Use the fallback", "Answer, or pick above");
+  const record = { kind: "ticket", id: "t14" } as const;
+  try {
+    act(() =>
+      addQuote(id, {
+        source: "T-14 · Description",
+        text: "Record both outcomes.",
+        record,
+      }),
+    );
+    expect(composer("Steer Codex")).toHaveProperty("value", "");
+    expect(screen.getByRole("textbox", { name: "Answer" })).toHaveProperty(
+      "value",
+      "Use the fallback",
+    );
+    type("Send this context", "Steer Codex");
+    fireEvent.keyDown(composer("Steer Codex"), { key: "Enter" });
+    expect(send).toHaveBeenCalledWith(
+      id,
+      "> From T-14 · Description:\n> Record both outcomes.\n\nSend this context",
+      [record],
+    );
+    expect(reply).not.toHaveBeenCalled();
+  } finally {
+    act(() => clearQuotes(id));
+  }
+});
+
+test("an answer has a plain Enter action and no queue shortcut", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
+  );
+  const answer = vi.spyOn(client, "answer");
+  const queue = vi.spyOn(client, "queue");
+  const box = composer("Answer, or pick above");
+  type("Answer this request", "Answer, or pick above");
+  expect(button("Send").getAttribute("aria-description")).toBeNull();
+  expect(button("Send").getAttribute("aria-keyshortcuts")).toBe("Enter");
+  expect(fireEvent.keyDown(box, { key: "Enter", ctrlKey: true })).toBe(true);
+  expect(fireEvent.keyDown(box, { key: "Enter", metaKey: true })).toBe(true);
+  expect(answer).not.toHaveBeenCalled();
+  expect(queue).not.toHaveBeenCalled();
+  expect(box).toHaveProperty("value", "Answer this request");
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(
+    await screen.findByText("Answered · Answer this request"),
+  ).toBeTruthy();
+  expect(answer).toHaveBeenCalledWith("c1", question.id, {
+    text: "Answer this request",
+  });
+});
 
 test("adding a file moves an unsent answer to its question and sends only the file", async () => {
   const client = await open(
