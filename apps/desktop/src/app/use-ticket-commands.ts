@@ -355,8 +355,11 @@ export function useTicketCommands({
           };
         const attempt = reminderAttempt.current;
         const undoRequestId = crypto.randomUUID();
-        forward = () =>
-          inboxClient.snooze(reference, attempt.dueAt, attempt.requestId);
+        forward = async () => {
+          await inboxClient.snooze(reference, attempt.dueAt, attempt.requestId);
+          if (reminderAttempt.current === attempt)
+            reminderAttempt.current = null;
+        };
         undo = () =>
           inboxClient.snooze(reference, attempt.previousDue, undoRequestId);
         message = dueAt
@@ -369,7 +372,6 @@ export function useTicketCommands({
     try {
       const written = await forward();
       if (currentOpening.current === opening) {
-        if (scope === "Reminder") reminderAttempt.current = null;
         setRetry(null);
         setError("");
         close();

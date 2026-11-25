@@ -227,19 +227,31 @@ test.each(["Edit project", "Register checkout"])(
   },
 );
 
-test("an external archive moves focus from the removed row to the next Project", async () => {
-  const other = { ...project, id: "p2", name: "Another" };
-  const { rerender } = render(
-    <Projects {...props} projects={[project, other]} />,
-  );
-  screen.getByRole("button", { name: /^Original/ }).focus();
-  rerender(
-    <Projects {...props} projects={[{ ...project, archived: true }, other]} />,
-  );
-  expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: "Actions for Another" }),
-  );
-});
+test.each([false, true])(
+  "an external archive restores focus with neighbor archived = %s",
+  (archiveNeighbor) => {
+    const other = { ...project, id: "p2", name: "Another" };
+    const last = { ...project, id: "p3", name: "Third" };
+    const { rerender } = render(
+      <Projects {...props} projects={[project, other, last]} />,
+    );
+    screen.getByRole("button", { name: /^Original/ }).focus();
+    rerender(
+      <Projects
+        {...props}
+        projects={[
+          { ...project, archived: true },
+          { ...other, archived: archiveNeighbor },
+          last,
+        ]}
+      />,
+    );
+    const target = archiveNeighbor
+      ? screen.getByRole("heading", { name: "Projects" })
+      : screen.getByRole("button", { name: "Actions for Another" });
+    expect(document.activeElement).toBe(target);
+  },
+);
 
 test("an edit failure after external archive stays out of the next Project dialog", async () => {
   const other = { ...project, id: "p2", name: "Another" };

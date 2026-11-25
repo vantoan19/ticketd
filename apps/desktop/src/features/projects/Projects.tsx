@@ -216,8 +216,16 @@ export function Projects({
   const page = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const visible = page.current && !page.current.closest("[hidden]");
+    const isShown = (id: string) =>
+      projects.some(
+        (project) =>
+          project.id === id && Boolean(project.archived) === archived,
+      );
     const restoreFocus = (targetId?: string) => {
-      const action = rowActions.current.get(targetId ?? "");
+      const action =
+        targetId && isShown(targetId)
+          ? rowActions.current.get(targetId)
+          : undefined;
       const target =
         action && !action.disabled
           ? action
@@ -238,13 +246,7 @@ export function Projects({
         restoreFocus(focus.target);
     }
     const focused = focusedRow.current;
-    if (
-      focused &&
-      !projects.some(
-        (project) =>
-          project.id === focused.id && Boolean(project.archived) === archived,
-      )
-    ) {
+    if (focused && !isShown(focused.id)) {
       focusedRow.current = null;
       const active = document.activeElement;
       if (visible && (active === focused.owner || active === document.body))
