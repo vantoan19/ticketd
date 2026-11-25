@@ -13,6 +13,7 @@ import type {
   ItemOf,
 } from "@/features/chats/client";
 import { scopeIsPath } from "@/features/chats/files";
+import { stretchesOf, type TurnBlock } from "@/features/chats/stretch";
 import { formatTime } from "@/lib/format";
 
 /**
@@ -519,6 +520,11 @@ export type Turn = {
   /** "Worked for 2m 13s · 1 failed". */
   label: string;
   rows: TurnRow[];
+  /**
+   * The same rows as the turn shows them: its notes and kept rows, and its work as
+   * stretches between the notes. The last stretch of a running turn is ongoing.
+   */
+  blocks: TurnBlock[];
   /** The turn's last response, when no step follows it. */
   final?: ItemOf<"response">;
   /** Why the turn stopped: stopped, quit or failed. */
@@ -532,6 +538,8 @@ export type Turn = {
   /** Every item the turn holds, for the reading position. */
   ids: string[];
 };
+
+export type { Stretch, TurnBlock } from "@/features/chats/stretch";
 
 export type TranscriptPart =
   { kind: "item"; item: TranscriptItem } | { kind: "turn"; turn: Turn };
@@ -585,15 +593,15 @@ type Segment = {
 };
 
 /** The last element that passes `test`. */
-function lastOf<T, S extends T>(
+export function lastOf<T, S extends T>(
   list: readonly T[],
   test: (value: T) => value is S,
 ): S | undefined;
-function lastOf<T>(
+export function lastOf<T>(
   list: readonly T[],
   test: (value: T) => boolean,
 ): T | undefined;
-function lastOf<T>(list: readonly T[], test: (value: T) => boolean) {
+export function lastOf<T>(list: readonly T[], test: (value: T) => boolean) {
   for (let index = list.length - 1; index >= 0; index -= 1) {
     const value = list[index];
     if (value !== undefined && test(value)) return value;
@@ -896,6 +904,7 @@ export function turns(
       unconfirmed,
       label: [span, ...waitWords, ...counts].join(" · "),
       rows: turnRows,
+      blocks: stretchesOf(turnRows, ongoing && !unconfirmed),
       ...(final && { final }),
       ...(marker && { marker }),
       ...(plan && planUnfinished(plan) && { plan }),

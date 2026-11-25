@@ -68,9 +68,11 @@ import {
   failureMarkerMatches,
   workedFor,
   isLive,
+  lastOf,
   recordNamer,
   type RecordName,
   type TranscriptPart,
+  type Stretch,
   type Turn,
   type TurnRow,
   type ViewStep,
@@ -86,6 +88,7 @@ import {
   scopeIsPath,
 } from "@/features/chats/files";
 import { sentParts } from "@/features/chats/composer-mentions";
+import { inView, useKeptOpen } from "@/features/chats/use-kept-open";
 import {
   steerCaption,
   steersAwaitingRead,
@@ -913,6 +916,98 @@ function Row({
   }
 }
 
+/**
+ * A stretch of a turn's work, between two progress notes. While it is in progress
+ * its steps show as they come, and when it finishes in view they stay put until it
+ * has left the view (the turn's own rule), so nothing above the newest line moves.
+ * Then it folds to one muted row, which opens to its steps. A stretch that was
+ * already done when it first showed starts folded; the person's own toggle wins.
+ */
+function StretchView({
+  stretch,
+  stretchKey,
+  harness,
+  readOnly,
+  actions,
+  live,
+  open: always,
+}: {
+  stretch: Stretch;
+  stretchKey: string;
+  harness: string;
+  readOnly: boolean;
+  actions: TranscriptActions;
+  live: boolean;
+  /** Its steps show with no row of their own: the turn is its one stretch, or a stop was not confirmed. */
+  open: boolean;
+}) {
+  const [toggled, setToggled] = useState(() => toggles.get(stretchKey));
+  const reading = useReading();
+  const part = useRef<HTMLDivElement>(null);
+  const rowButton = useRef<HTMLButtonElement>(null);
+  const bodyId = useId();
+  const rowId = useId();
+  const kept = useKeptOpen(!stretch.ongoing, part, inView);
+  // Shown bare (steps only) while it is the work going on, or kept after it ends in
+  // view, so the row does not appear above steps someone is reading.
+  const bare = always || (toggled === undefined && kept);
+  const open = bare || toggled === true;
+  const toggle = () => {
+    toggles.set(stretchKey, !open);
+    setToggled(!open);
+    // The row stays where the reader clicked it.
+    if (rowButton.current) reading.keep(rowButton.current);
+    // Collapsing with focus inside leaves focus on the row.
+    if (open) rowButton.current?.focus();
+  };
+  const rows = stretch.rows.map((row) => (
+    <Row
+      key={row.key}
+      row={row}
+      harness={harness}
+      readOnly={readOnly}
+      actions={actions}
+      live={live}
+    />
+  ));
+  return (
+    <div ref={part} className="chat-stretch">
+      {!bare && (
+        <button
+          ref={rowButton}
+          id={rowId}
+          type="button"
+          className="chat-fold chat-stretch-row"
+          data-anchor=""
+          aria-expanded={open}
+          aria-controls={open ? bodyId : undefined}
+          onClick={toggle}
+        >
+          <span>{stretch.label}</span>
+          {open ? (
+            <ChevronDown size={14} aria-hidden />
+          ) : (
+            <ChevronRight size={14} aria-hidden />
+          )}
+        </button>
+      )}
+      {open &&
+        (bare ? (
+          <div className="chat-turn-rows">{rows}</div>
+        ) : (
+          <div
+            id={bodyId}
+            className="chat-turn-rows chat-stretch-steps"
+            role="group"
+            aria-labelledby={rowId}
+          >
+            {rows}
+          </div>
+        ))}
+    </div>
+  );
+}
+
 /** Fold toggles the person made, by Chat and turn; they win for the session. */
 const toggles = new Map<string, boolean>();
 
@@ -945,44 +1040,17 @@ const TurnView = memo(function TurnView({
   const bodyId = useId();
   const rowId = useId();
   // A turn that ends in view of someone reading, or with focus inside, stays open
-  // until it leaves the view. `settled` says the end has been looked at.
-  const [settled, setSettled] = useState(!turn.live);
-  const [held, setHeld] = useState(false);
+  // until it leaves the view.
+  const kept = useKeptOpen(
+    !turn.live,
+    part,
+    (element, scroller) => !reading.follows() && inView(element, scroller),
+  );
   // A turn seen running here fades its fold row in when it ends; history doesn't.
   const [endsHere] = useState(turn.live);
-  useLayoutEffect(() => {
-    if (turn.live || settled) return;
-    const element = part.current;
-    const scroller = element?.closest(".chat-scroll");
-    const readingHere =
-      element &&
-      scroller &&
-      (element.contains(document.activeElement) ||
-        (!reading.follows() &&
-          element.getBoundingClientRect().bottom >
-            scroller.getBoundingClientRect().top &&
-          element.getBoundingClientRect().top <
-            scroller.getBoundingClientRect().bottom));
-    setHeld(Boolean(readingHere));
-    setSettled(true);
-  }, [reading, settled, turn.live]);
-  useEffect(() => {
-    const element = part.current;
-    const scroller = element?.closest(".chat-scroll");
-    if (!held || !element || typeof IntersectionObserver === "undefined")
-      return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry && !entry.isIntersecting) setHeld(false);
-      },
-      { root: scroller ?? null },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [held]);
   const folds = turn.rows.some((row) => row.kept !== true);
   const showRow = !turn.live && folds;
-  const open = !showRow || (toggled ?? (turn.unconfirmed || !settled || held));
+  const open = !showRow || (toggled ?? (turn.unconfirmed || kept));
   const toggle = () => {
     const next = !open;
     toggles.set(key, next);
@@ -996,19 +1064,37 @@ const TurnView = memo(function TurnView({
   const changes = turn.rows.flatMap((row) =>
     row.kind === "record" ? [row.change] : [],
   );
-  const rows = (only: (row: TurnRow) => boolean) =>
-    turn.rows
-      .filter(only)
-      .map((row) => (
-        <Row
-          key={row.key}
-          row={row}
-          harness={harness}
-          readOnly={readOnly}
-          actions={actions}
-          live={rowLive}
-        />
-      ));
+  const row = (each: TurnRow) => (
+    <Row
+      key={each.key}
+      row={each}
+      harness={harness}
+      readOnly={readOnly}
+      actions={actions}
+      live={rowLive}
+    />
+  );
+  // A turn with no notes is one stretch, and its work line already says what it
+  // holds: it opens straight to its steps.
+  const single =
+    turn.blocks.filter((block) => block.kind === "stretch").length === 1 &&
+    !turn.blocks.some((block) => block.kind === "progress");
+  const blocks = turn.blocks.map((block) =>
+    block.kind === "stretch" ? (
+      <StretchView
+        key={block.key}
+        stretch={block}
+        stretchKey={`${key}:${block.key}`}
+        harness={harness}
+        readOnly={readOnly}
+        actions={actions}
+        live={rowLive}
+        open={single || turn.unconfirmed}
+      />
+    ) : (
+      row(block)
+    ),
+  );
   // A turn that shows nothing of its work (only its answer) has no work part.
   const work = showRow || turn.rows.length > 0;
   return (
@@ -1048,13 +1134,13 @@ const TurnView = memo(function TurnView({
               role={showRow ? "group" : undefined}
               aria-labelledby={showRow ? rowId : undefined}
             >
-              {rows(() => true)}
+              {blocks}
             </div>
           ) : (
             // Collapsed, receipts and notes sit under the turn row in order.
             turn.rows.some((row) => row.kept === true) && (
               <div className="chat-turn-rows">
-                {rows((row) => row.kept === true)}
+                {turn.rows.filter((each) => each.kept === true).map(row)}
               </div>
             )
           )}
@@ -1524,6 +1610,9 @@ export function Transcript({
           (row.kind === "reasoning" && row.item.state === "running"),
       ),
   );
+  // Words are streaming in now: the newest thing in the Chat is a response still arriving.
+  const newest = lastOf(items, (item) => item.kind !== "turn");
+  const writing = newest?.kind === "response" && newest.state === "streaming";
   const empty = items.length === 0 && !chat.catching_up && !isLive(chat);
   const asking = items.some(
     (item) => item.kind === "request" && item.state === "pending",
@@ -1614,7 +1703,10 @@ export function Transcript({
                   (part) => part.kind === "turn" && part.turn.unconfirmed,
                 ) ? (
                 <BetweenSteps running={stepRuns}>
-                  {chat.doing ? (
+                  {writing ? (
+                    // Words are arriving: the one live line says so, with its own clock.
+                    <WorkingLine key="writing" label="Writing" fromShown />
+                  ) : chat.doing ? (
                     <WorkingLine
                       label={chat.doing.label}
                       since={chat.doing.since}

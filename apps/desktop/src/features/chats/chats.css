@@ -570,11 +570,28 @@
 .chat-turn-rows[data-folded] {
   padding-left: 16px;
 }
+/* A progress note: 8px above, like the work around it. */
 .chat-turn-response {
-  margin: 4px 0 8px;
+  margin: 8px 0 0;
 }
 .chat-turn-response:first-child {
   margin-top: 0;
+}
+/* A stretch: its row, then its steps indented under it when opened. */
+.chat-stretch {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.chat-stretch-row {
+  align-self: flex-start;
+}
+.chat-stretch-steps {
+  padding-left: 16px;
+}
+:where(:is(.ticket-detail, .chat-pane)[data-width~="max-400"])
+  .chat-stretch-steps {
+  padding-left: 12px;
 }
 :where(:is(.ticket-detail, .chat-pane)[data-width~="max-400"])
   .chat-turn-rows[data-folded] {
