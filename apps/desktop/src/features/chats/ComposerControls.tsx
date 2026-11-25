@@ -627,7 +627,7 @@ function OptionLine({ option }: { option: Option }) {
  * The small Permissions trigger beside the picker. It always names the mode
  * that applies ("Ask before edits"), never a bare "Default" (STATIC-13). Full
  * access, where the harness never asks, trades the shield for a struck one, so
- * it reads at a glance. It gives way before the picker does: below a 600px
+ * it reads at a glance. It gives way before the picker does: below a 510px
  * composer only the shield shows.
  */
 function PermissionPicker({

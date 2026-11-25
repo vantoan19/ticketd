@@ -110,6 +110,9 @@ test("Permissions drops its label before the picker gives up the effort's word",
   const word = hiddenBelow(".chat-control-effort");
   expect(word).toBe(459);
   expect(permission).toBeGreaterThan(word ?? 0);
+  // Measured: the longest label beside the widest effort word needs 506px, and
+  // "Full access" beside "Medium" 462px; the label went at 600px, far too early.
+  expect(permission).toBe(509);
 });
 
 test("the bars replace the effort's word below 460px, and show nowhere else", () => {

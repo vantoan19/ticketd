@@ -779,16 +779,18 @@
    drops its label and keeps its shield; then, below 460px, the effort's word
    gives way to its bars ("✳ ▂▄▆ ⌄"), so one row holds picker, Permissions,
    Stop and Send. The composer is measured by the Chat tray (a query container)
-   or, outside one, by its pane (data-width). */
+   or, outside one, by its pane (data-width). The label goes just before the
+   widest usual row would truncate: "✳ Extra high" beside "Ask before edits"
+   needs a 506px tray ("Full access" beside "✳ Medium" needs 462px). */
 [data-control] .effort-glyph {
   display: none;
 }
-@container (max-width: 599px) {
+@container (max-width: 509px) {
   .chat-permission-label {
     display: none;
   }
 }
-:where([data-width~="max-599"]) .chat-permission-label {
+:where([data-width~="max-509"]) .chat-permission-label {
   display: none;
 }
 @container (max-width: 459px) {
