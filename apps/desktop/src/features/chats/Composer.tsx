@@ -22,7 +22,7 @@ import {
   type ChatAttachmentInput,
   type ComposerAttachments,
 } from "@/features/chats/composer-attachments";
-import { ComposerDraft } from "@/features/chats/drafts";
+import { ComposerDraft, type SaveResult } from "@/features/chats/drafts";
 import {
   readLinuxClipboardImage,
   redactedLinuxPaste,
@@ -32,7 +32,7 @@ type Submit = (
   text: string,
   links: LinkRef[],
   files?: ChatAttachmentInput[],
-) => Promise<void>;
+) => Promise<SaveResult>;
 
 // Matches the dedicated chooser request handled by the Linux desktop adapter.
 const CLIPBOARD_FILE_PICKER = "application/x-ticketd-clipboard";

@@ -307,7 +307,7 @@ test("Stop waits while stopping and is the retry once the stop is not confirmed"
   expect(button("Stop")).toHaveProperty("disabled", false);
 });
 
-test("a queued message can be sent now, alone, or moved back into the message box", async () => {
+test("Send now sends one queued message and keeps the other held for editing", async () => {
   const client = await open(
     one({
       id: "c1",
@@ -331,18 +331,17 @@ test("a queued message can be sent now, alone, or moved back into the message bo
       "draft\n\nand a changelog entry",
     ),
   );
-  await waitFor(() =>
-    expect(
-      screen.queryByText("and a changelog entry", { selector: "li *" }),
-    ).toBeNull(),
-  );
+  expect(await within(second).findByText("Editing")).toBeTruthy();
+  expect(within(second).queryByRole("button", { name: "Send now" })).toBeNull();
 
   fireEvent.click(button("Send now"));
   expect(
     await screen.findByText("then add tests", { selector: ".chat-you *" }),
   ).toBeTruthy();
   const { chat } = await client.openChat("c1");
-  expect(chat.queue).toEqual([]);
+  expect(chat.queue).toEqual([
+    { id: "q2", text: "and a changelog entry", editing: true },
+  ]);
   expect(chat.queue_paused).toBe(true);
 });
 
@@ -367,6 +366,7 @@ test("editing a queued message appends its text and saved files to the current d
   fireEvent.keyDown(box(), { key: "Enter", ctrlKey: true });
   const queue = await screen.findByRole("list", { name: "Queued messages" });
   expect(within(queue).getByText("Queued text · notes.txt")).toBeTruthy();
+  const queuedId = (await client.openChat("c1")).chat.queue[0]?.id;
   type("Existing draft", "Steer Codex");
   fireEvent.change(screen.getByLabelText("Choose files to attach"), {
     target: { files: [draft] },
@@ -399,6 +399,10 @@ test("editing a queued message appends its text and saved files to the current d
       { name: "draft.txt", dataUrl: "data:text/plain;base64,ZHJhZnQ=" },
       snapshot,
     ],
+    { messageIds: [queuedId], commandId: expect.any(String) },
+  );
+  await waitFor(async () =>
+    expect((await client.openChat("c1")).chat.queue).toEqual([]),
   );
 });
 
@@ -467,7 +471,10 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
   await screen.findByRole("heading", { name: "Limiter" });
 
   const retry = await screen.findByRole("button", { name: "Retry queue edit" });
-  expect((await client.openChat("c1")).chat.queue).toHaveLength(0);
+  const held = (await client.openChat("c1")).chat.queue;
+  expect(held).toEqual([
+    expect.objectContaining({ text: "Queued caption", editing: true }),
+  ]);
   expect(composer()).toHaveProperty("value", "Draft caption\n\nQueued caption");
   expect(composer()).toHaveProperty("readOnly", true);
   expect(button("Send")).toHaveProperty("disabled", true);
@@ -487,14 +494,138 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
   expect(
     (await client.openChat("c1")).items.filter((item) => item.kind === "user"),
   ).toHaveLength(0);
-  const send = vi.spyOn(client, "send");
+  const save = client.send;
+  const send = vi
+    .spyOn(client, "send")
+    .mockImplementationOnce(async (...args) => {
+      await save(...args);
+      throw new Error("Save acknowledgement lost");
+    });
   fireEvent.click(button("Send"));
   expect(send).toHaveBeenCalledWith(
     "c1",
     "Draft caption\n\nQueued caption",
     [],
     files,
+    { messageIds: [held[0]?.id], commandId: expect.any(String) },
   );
+  const check = vi.spyOn(client, "checkQueueEdits");
+  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(composer("Steer Codex")).toHaveProperty("value", ""),
+  );
+  expect(check).toHaveBeenCalledWith(
+    "c1",
+    [send.mock.calls[0]?.[4]?.commandId],
+    [],
+  );
+  expect(send).toHaveBeenCalledTimes(1);
+  const { chat, items } = await client.openChat("c1");
+  expect(chat.queue).toEqual([]);
+  expect(items.filter((item) => item.kind === "user")).toHaveLength(1);
+});
+
+test.each([false, true])(
+  "a changed draft reconciles a lost queue save after navigation (late receipt: %s)",
+  async (lateReceipt) => {
+    const client = await open([
+      ...one({ id: "c1", title: "Limiter", queue_paused: true }),
+      ...one({ id: "c2", title: "Other" }),
+    ]);
+    await act(async () => client.queue("c1", "Original text"));
+    fireEvent.click(button("Edit in the message box"));
+    await waitFor(() =>
+      expect(composer()).toHaveProperty("value", "Original text"),
+    );
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    const save = client.send;
+    const send = vi
+      .spyOn(client, "send")
+      .mockImplementationOnce(async (...args) => {
+        await save(...args);
+        throw new Error("Save acknowledgement lost");
+      });
+    fireEvent.click(button("Send"));
+    await screen.findByRole("button", { name: "Retry" });
+    fireEvent.click(button(/^Other/));
+    await screen.findByRole("heading", { name: "Other" });
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+
+    type("New wording", "Steer Codex");
+    if (lateReceipt) {
+      vi.spyOn(client, "checkQueueEdits").mockResolvedValueOnce({
+        saved: [],
+        removed: [],
+      });
+      fireEvent.click(button("Steer"));
+      const retry = await screen.findByRole("button", { name: "Retry" });
+      expect(send).toHaveBeenCalledTimes(2);
+      fireEvent.click(retry);
+    } else {
+      fireEvent.click(button("Steer"));
+    }
+    expect(
+      await screen.findByText(
+        "The earlier message was already saved. Your edited draft is ready to send.",
+      ),
+    ).toBeTruthy();
+    const sentAttempts = lateReceipt ? 2 : 1;
+    expect(send).toHaveBeenCalledTimes(sentAttempts);
+    const box = composer("Steer Codex");
+    expect(box).toHaveProperty("value", "New wording");
+    await waitFor(() =>
+      expect(button("Steer")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Steer"));
+    expect(send.mock.calls[sentAttempts]).toEqual(["c1", "New wording", []]);
+  },
+);
+
+test("a saved queue edit reopens and a lost Remove reply leaves its draft usable", async () => {
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  const file = {
+    name: "notes.txt",
+    dataUrl: "data:text/plain;base64,c2F2ZWQ=",
+  };
+  await act(async () => {
+    await client.queue("c1", "Original text", [], [file]);
+    const held = (await client.openChat("c1")).chat.queue[0];
+    if (!held) throw new Error("The queued input is missing.");
+    await client.confirmQueueEdit("c1", held.id, "earlier-edit");
+  });
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("Editing")).toBeTruthy();
+  expect(within(queue).getByText("Original text · notes.txt")).toBeTruthy();
+  expect(within(queue).queryByRole("button", { name: "Send now" })).toBeNull();
+  expect(composer()).toHaveProperty("value", "");
+  fireEvent.click(
+    within(queue).getByRole("button", { name: "Edit in the message box" }),
+  );
+  await waitFor(() => expect(composer()).toHaveProperty("readOnly", false));
+  expect(composer()).toHaveProperty("value", "Original text");
+  expect(button("Remove notes.txt")).toBeTruthy();
+  const remove = client.removeQueued;
+  const removeQueued = vi
+    .spyOn(client, "removeQueued")
+    .mockImplementationOnce(async (...args) => {
+      await remove(...args);
+      throw new Error("Remove acknowledgement lost");
+    });
+  fireEvent.click(
+    within(queue).getByRole("button", { name: "Remove from queue" }),
+  );
+  await screen.findByRole("button", { name: "Retry" });
+  expect((await client.openChat("c1")).chat.queue).toEqual([]);
+
+  const send = vi.spyOn(client, "send");
+  fireEvent.click(button("Send"));
+  await waitFor(() =>
+    expect(send).toHaveBeenCalledWith("c1", "Original text", [], [file]),
+  );
+  expect(removeQueued).toHaveBeenCalledTimes(1);
 });
 
 test("a pending queue edit does not duplicate a queued message sent before confirmation", async () => {

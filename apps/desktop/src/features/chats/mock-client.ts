@@ -18,6 +18,7 @@ import {
   type SettingOption,
   type Stopping,
   type LinkRef,
+  type QueueEditSave,
   type LinkedRecord,
   type Suggestion,
   type OpenRequest,
@@ -672,6 +673,7 @@ export function createMockChatClient(
     }));
   const queuedFiles = new Map<string, ChatAttachmentInput[]>();
   const queueEdits = new Map<string, { id: string; queuedId: string }>();
+  const savedQueueEdits = new Map<string, string>();
   const queue = async (
     id: string,
     text: string,
@@ -726,6 +728,34 @@ export function createMockChatClient(
         ...(files?.length && { attachments: attachmentLabels(files) }),
       });
     else await queue(id, text, files);
+  };
+
+  const saveDraft = async (
+    action: typeof send,
+    id: string,
+    text: string,
+    links: LinkRef[],
+    files?: ChatAttachmentInput[],
+    edit?: QueueEditSave,
+  ) => {
+    if (edit && savedQueueEdits.get(edit.commandId) === id) return;
+    if (
+      edit &&
+      !edit.messageIds.every((idToReplace) =>
+        get(id).chat.queue.some((row) => row.id === idToReplace && row.editing),
+      )
+    )
+      throw new ChatError(
+        "stale",
+        "The original queued message is no longer held for editing.",
+      );
+    linkAll(id, links);
+    await action(id, text, files);
+    if (edit) {
+      for (const idToReplace of edit.messageIds)
+        await client.removeQueued(id, idToReplace);
+      savedQueueEdits.set(edit.commandId, id);
+    }
   };
 
   const client: MockChatClient = {
@@ -901,16 +931,12 @@ export function createMockChatClient(
       entry.listeners.add(listener);
       return () => entry.listeners.delete(listener);
     },
-    async send(id, text, links = [], files) {
-      linkAll(id, links);
-      await send(id, text, files);
-    },
+    send: (id, text, links = [], files, edit) =>
+      saveDraft(send, id, text, links, files, edit),
     captureAttachment: (file) => captureChatAttachment(file, 100 * 1024 * 1024),
     async exportAttachment() {},
-    async queue(id, text, links = [], files) {
-      linkAll(id, links);
-      await queue(id, text, files);
-    },
+    queue: (id, text, links = [], files, edit) =>
+      saveDraft(queue, id, text, links, files, edit),
     linkedTo: async (link) =>
       [...chats.values()]
         .filter(
@@ -939,21 +965,41 @@ export function createMockChatClient(
       const attachments = queuedFiles.get(queuedId) ?? [];
       return { text: queued.text, attachments };
     },
+    async checkQueueEdits(id, saves, removals) {
+      return {
+        saved: saves.filter(
+          (commandId) => savedQueueEdits.get(commandId) === id,
+        ),
+        removed: removals.filter(
+          (queuedId) =>
+            !get(id).chat.queue.some(
+              (item) => item.id === queuedId && item.editing,
+            ),
+        ),
+      };
+    },
     async confirmQueueEdit(id, queuedId, transferId) {
       const previous = queueEdits.get(transferId);
       if (previous) return previous.id === id && previous.queuedId === queuedId;
       if (!get(id).chat.queue.some((item) => item.id === queuedId))
         return false;
       queueEdits.set(transferId, { id, queuedId });
-      await client.removeQueued(id, queuedId);
+      patch(id, {
+        queue: get(id).chat.queue.map((item) =>
+          item.id === queuedId ? { ...item, editing: true } : item,
+        ),
+      });
       return true;
     },
     async resumeQueue(id) {
       const { chat } = get(id);
-      const [first, ...rest] = chat.queue;
+      const first = chat.queue.find((item) => !item.editing);
       patch(id, {
         queue_paused: false,
-        queue: first && !live(chat) ? rest : chat.queue,
+        queue:
+          first && !live(chat)
+            ? chat.queue.filter((item) => item.id !== first.id)
+            : chat.queue,
       });
       if (first && !live(chat)) {
         startTurn(id, first.text, queuedFiles.get(first.id));
@@ -962,7 +1008,9 @@ export function createMockChatClient(
     },
     async sendQueuedNow(id, queuedId) {
       const { chat } = get(id);
-      const queued = chat.queue.find((item) => item.id === queuedId);
+      const queued = chat.queue.find(
+        (item) => item.id === queuedId && !item.editing,
+      );
       if (!queued)
         throw new ChatError("stale", "This message is no longer queued.");
       if (

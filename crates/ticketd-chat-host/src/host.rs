@@ -559,6 +559,19 @@ impl ChatHost {
         mode: SendMode,
         attachments: Vec<ChatAttachmentContent>,
     ) -> Result<ChatMessage, HostError> {
+        self.send_replacing(chat_id, command_id, text, mode, attachments, Vec::new())
+            .await
+    }
+
+    pub async fn send_replacing(
+        &self,
+        chat_id: &str,
+        command_id: Option<&str>,
+        text: &str,
+        mode: SendMode,
+        attachments: Vec<ChatAttachmentContent>,
+        replaces: Vec<String>,
+    ) -> Result<ChatMessage, HostError> {
         // A reply sent to wait behind the agent's turn (a harness that cannot steer)
         // waits for nothing once the take-over ended that turn: it is the resumed
         // Chat's first turn (#387 M2).
@@ -572,6 +585,7 @@ impl ChatHost {
             text,
             mode,
             attachments,
+            replaces,
             reply,
         })
         .await

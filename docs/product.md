@@ -665,7 +665,9 @@ collect OAuth tokens, proxy model requests, or change billing.
   and image previews and can send attachments with or without text. Chat captures the
   bytes when a file is added and supplies native images or readable file copies to the
   selected harness within its permissions. Queueing, editing, and resending keep the text
-  and files together. Sent files can be saved from Chat history.
+  and files together. While a queued message is being edited, its original text and
+  files stay saved in the queue and can be reopened after restarting ticketd. Saving
+  the edited message replaces the original. Sent files can be saved from Chat history.
 - **Lifetime.** Execution belongs to the desktop backend, not the view: navigating away
   keeps work running, and explicit Quit stops it. One ranked status per Chat drives
   the list, sidebar count, app-icon count, and system notifications, which can be

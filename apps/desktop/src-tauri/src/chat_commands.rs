@@ -23,8 +23,9 @@ use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
     Answer, AttachmentInput, ChatFailure, Chats, CloseAction, Created, FolderFile, HarnessStatus,
-    HistorySelection, LinkRef, NewChatInput, Opened, Overview, QueuedDraft, QuitAction, Restored,
-    Retention, Stopping, UncertainDecision, close_action, quit_action, tray_tooltip,
+    HistorySelection, LinkRef, NewChatInput, Opened, Overview, QueueEditSave, QueueEditStatus,
+    QueuedDraft, QuitAction, Restored, Retention, Stopping, UncertainDecision, close_action,
+    quit_action, tray_tooltip,
 };
 use ticketd_chat_host::attention::{Alert, Notifier, Row, badge_text};
 
@@ -461,6 +462,7 @@ pub async fn chat_send(
     queue: bool,
     links: Option<Vec<LinkRef>>,
     attachments: Option<Vec<AttachmentInput>>,
+    queue_edit: Option<QueueEditSave>,
 ) -> Outcome<()> {
     let mode = if queue {
         SendMode::Queue
@@ -476,6 +478,7 @@ pub async fn chat_send(
             mode,
             &links,
             attachments.unwrap_or_default(),
+            queue_edit,
         )
         .await
 }
@@ -542,6 +545,16 @@ pub async fn chat_remove_queued(
         bridge.chats.remove_queued(&chat_id, &queued_id).await?;
         Ok(None)
     }
+}
+
+#[tauri::command(async)]
+pub fn chat_check_queue_edits(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    saves: Vec<String>,
+    removals: Vec<String>,
+) -> Outcome<QueueEditStatus> {
+    bridge.chats.check_queue_edits(&chat_id, saves, removals)
 }
 
 #[tauri::command]

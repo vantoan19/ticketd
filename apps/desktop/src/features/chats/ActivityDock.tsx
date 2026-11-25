@@ -386,12 +386,14 @@ function Request({
 function QueueCard({
   queued,
   canSendNow,
+  adopted,
   onSendNow,
   onEdit,
   onRemove,
 }: {
   queued: Queued;
   canSendNow: boolean;
+  adopted: boolean;
   onSendNow: () => Promise<void>;
   onEdit: () => void;
   onRemove: () => void;
@@ -411,7 +413,8 @@ function QueueCard({
               .filter(Boolean)
               .join(" · ")}
           </span>
-          {queued.refused_steer && (
+          {queued.editing && <span className="chat-queue-note">Editing</span>}
+          {!queued.editing && queued.refused_steer && (
             <span className="chat-queue-note">
               Couldn't steer; queued · {queued.refused_steer}
             </span>
@@ -434,13 +437,15 @@ function QueueCard({
                 <CornerUpRight aria-hidden />
               </IconButton>
             )}
-            <IconButton
-              label="Edit in the message box"
-              aria-describedby={textId}
-              onClick={onEdit}
-            >
-              <Pencil aria-hidden />
-            </IconButton>
+            {!adopted && (
+              <IconButton
+                label="Edit in the message box"
+                aria-describedby={textId}
+                onClick={onEdit}
+              >
+                <Pencil aria-hidden />
+              </IconButton>
+            )}
             <IconButton
               label="Remove from queue"
               aria-describedby={textId}
@@ -472,6 +477,7 @@ export function ActivityDock({
   onLeave,
   onAnswered,
   onSendNow,
+  queueEdits,
   onEdit,
   onRemove,
   onResume,
@@ -492,12 +498,14 @@ export function ActivityDock({
   onLeave: () => void;
   onAnswered?: (requestId: string, origin: Element | null) => void;
   onSendNow: (queuedId: string) => Promise<void>;
+  queueEdits: readonly string[];
   onEdit: (queuedId: string) => void;
   onRemove: (queuedId: string) => void;
   onResume: () => void;
 }) {
   const request = requests[0];
   const { queue, queue_paused: paused } = chat;
+  const waiting = queue.filter((queued) => !queued.editing).length;
   // During a turn that cannot be steered, a queued message can only wait.
   const live = chat.activity === "working" || chat.activity === "waiting";
   // Always drawn (empty it takes no room): a request or the queue that leaves
@@ -528,11 +536,15 @@ export function ActivityDock({
         {queue.length > 0 && (
           <QueueSection key="queue">
             <div className="chat-queue-head">
-              <span>
-                Queued <Count>{queue.length}</Count> ·{" "}
-                {paused ? "Paused" : "After this turn"}
-              </span>
-              {paused && (
+              {waiting ? (
+                <span>
+                  Queued <Count>{waiting}</Count> ·{" "}
+                  {paused ? "Paused" : "After this turn"}
+                </span>
+              ) : (
+                <span>Saved for editing</span>
+              )}
+              {paused && waiting > 0 && (
                 <Button
                   variant="ghost"
                   size="sm"
@@ -549,14 +561,16 @@ export function ActivityDock({
                   <QueueCard
                     key={queued.id}
                     queued={queued}
+                    adopted={queueEdits.includes(queued.id)}
                     canSendNow={
-                      !live ||
-                      canSteer(
-                        chat,
-                        queued.attachments?.some((file) =>
-                          file.media_type.startsWith("image/"),
-                        ),
-                      )
+                      !queued.editing &&
+                      (!live ||
+                        canSteer(
+                          chat,
+                          queued.attachments?.some((file) =>
+                            file.media_type.startsWith("image/"),
+                          ),
+                        ))
                     }
                     onSendNow={() => onSendNow(queued.id)}
                     onEdit={() => onEdit(queued.id)}

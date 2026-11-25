@@ -316,13 +316,14 @@ export function createHostChatClient(
         close(feed);
       };
     },
-    send: (id, text, links = [], attachments) =>
+    send: (id, text, links = [], attachments, queueEdit) =>
       run("chat_send", {
         chatId: id,
         text,
         queue: false,
         links,
         ...(attachments && { attachments }),
+        ...(queueEdit && { queueEdit }),
       }),
     async captureAttachment(file) {
       const limit = z
@@ -353,13 +354,14 @@ export function createHostChatClient(
           destination,
         });
     },
-    queue: (id, text, links = [], attachments) =>
+    queue: (id, text, links = [], attachments, queueEdit) =>
       run("chat_send", {
         chatId: id,
         text,
         queue: true,
         links,
         ...(attachments && { attachments }),
+        ...(queueEdit && { queueEdit }),
       }),
     linkedTo: async (link) =>
       z.array(chatSummarySchema).parse(await call("chat_linked_to", { link })),
@@ -383,6 +385,12 @@ export function createHostChatClient(
             queuedId,
             edit: true,
           }),
+        ),
+    checkQueueEdits: async (id, saves, removals) =>
+      z
+        .object({ saved: z.array(z.string()), removed: z.array(z.string()) })
+        .parse(
+          await call("chat_check_queue_edits", { chatId: id, saves, removals }),
         ),
     confirmQueueEdit: async (id, queuedId, transferId) =>
       z.boolean().parse(

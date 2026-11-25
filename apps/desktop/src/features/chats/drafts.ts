@@ -2,6 +2,8 @@ import type {
   ChatClient,
   HarnessOptions,
   LinkedRecord,
+  QueueEditSave,
+  QueueEditStatus,
 } from "@/features/chats/client";
 import type { Pick as HarnessPick } from "@/features/chats/harness-pick";
 import type { Quote } from "@/features/chats/quotes";
@@ -15,6 +17,7 @@ import type { Token } from "@/features/chats/composer-mentions";
 import { QuestionDrafts } from "@/features/chats/question-drafts";
 
 type Action = "send" | "queue";
+export type SaveResult = void | "keep_draft";
 type Snapshot = {
   text: string;
   tokens: Token[];
@@ -24,6 +27,7 @@ type Snapshot = {
   failedAction: Action | null;
   pendingCreate: PendingCreate | null;
   restored: boolean;
+  queueEdits: string[];
 };
 export type PendingCreate = {
   request: Parameters<ChatClient["createChat"]>[0];
@@ -49,12 +53,15 @@ export class ComposerDraft {
   private saving: Promise<void> | undefined;
   private staged:
     | {
+        queuedId: string;
         payload: QueuedDraft;
         cards: Snapshot["items"];
         confirm: () => Promise<boolean>;
       }
     | undefined;
   private attempt = { id: "", request: "" };
+  private queueSaves = new Map<string, { key: string; edit: QueueEditSave }>();
+  private queueRemovals = new Set<string>();
   private prefilled: string | null = null;
 
   constructor(
@@ -71,6 +78,7 @@ export class ComposerDraft {
       failedAction: null,
       pendingCreate: null,
       restored: false,
+      queueEdits: [],
     };
     this.view = this.state;
     if (attachments !== NO_ATTACHMENTS)
@@ -128,14 +136,24 @@ export class ComposerDraft {
     return this.attempt.id;
   }
 
-  save(action: Action, send: () => Promise<void>, keepDraft = false) {
+  changedSince(submitted: Snapshot) {
+    const current = this.state;
+    return (
+      current.text !== submitted.text ||
+      current.tokens !== submitted.tokens ||
+      current.items !== submitted.items ||
+      current.queueEdits !== submitted.queueEdits
+    );
+  }
+
+  save(action: Action, send: () => Promise<SaveResult>, keepDraft = false) {
     if (this.locked()) return;
     this.update({ saving: true });
     this.saving = (async () => {
       try {
-        await send();
+        const result = await send();
         this.attempt = { id: "", request: "" };
-        if (keepDraft) {
+        if (keepDraft || result === "keep_draft") {
           this.update({ failedAction: null });
           return;
         }
@@ -146,6 +164,7 @@ export class ComposerDraft {
           tokens: [],
           restored: false,
           failedAction: null,
+          queueEdits: [],
         };
         if (this.state.items.length)
           this.attachments.remove(
@@ -177,16 +196,56 @@ export class ComposerDraft {
       : {};
   }
 
+  queueEditsToCheck() {
+    return {
+      saves: [...this.queueSaves.keys()],
+      removals: [...this.queueRemovals],
+    };
+  }
+
+  rememberQueueSave(edit: QueueEditSave, key: string) {
+    this.queueSaves.set(edit.commandId, { key, edit });
+  }
+
+  rememberQueueRemoval(queuedId: string) {
+    if (this.state.queueEdits.includes(queuedId))
+      this.queueRemovals.add(queuedId);
+  }
+
+  settleQueueEdits({ saved, removed }: QueueEditStatus, key?: string) {
+    const consumed = new Set(removed);
+    let sameDraft = false;
+    for (const commandId of saved) {
+      const pending = this.queueSaves.get(commandId);
+      if (!pending) continue;
+      sameDraft ||= pending.key === key;
+      for (const id of pending.edit.messageIds) consumed.add(id);
+    }
+    if (consumed.size > 0) {
+      for (const [commandId, { edit }] of this.queueSaves) {
+        if (edit.messageIds.some((id) => consumed.has(id)))
+          this.queueSaves.delete(commandId);
+      }
+      for (const id of consumed) this.queueRemovals.delete(id);
+      this.update({
+        queueEdits: this.state.queueEdits.filter((id) => !consumed.has(id)),
+      });
+    }
+    return sameDraft;
+  }
+
   async editQueued(
+    queuedId: string,
     read: () => Promise<QueuedDraft>,
     confirm: () => Promise<boolean>,
   ) {
-    if (this.state.transfer) return;
+    if (this.state.transfer || this.state.queueEdits.includes(queuedId)) return;
     this.update({ transfer: "preparing" });
     try {
       await this.saving;
       const payload = await read();
       this.staged = {
+        queuedId,
         payload,
         confirm,
         // Captured preview IDs are disjoint from ordinary draft attachments.
@@ -215,19 +274,25 @@ export class ComposerDraft {
 
   private async confirmTransfer() {
     if (!this.staged) return;
-    const { payload, confirm } = this.staged;
+    const { queuedId, payload, confirm } = this.staged;
     this.update({ transfer: "confirming" });
-    let withdrawn: boolean;
+    let held: boolean;
     try {
-      withdrawn = await confirm();
+      held = await confirm();
     } catch {
       this.update({ transfer: "unconfirmed" });
       return;
     }
     this.staged = undefined;
-    if (withdrawn) this.append(payload);
+    if (held) {
+      this.state = {
+        ...this.state,
+        queueEdits: [...this.state.queueEdits, queuedId],
+      };
+      this.append(payload);
+    }
     this.update({ transfer: null });
-    return withdrawn;
+    return held;
   }
 }
 

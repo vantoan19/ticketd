@@ -1060,6 +1060,88 @@ async fn a_fresh_session_starts_with_the_history_the_person_selected_and_replays
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.chats
+        .send(&id, "Original", SendMode::Queue)
+        .await
+        .unwrap();
+    let original = f.core().chat_queue(&id).unwrap().remove(0);
+    let transfer = uuid::Uuid::new_v4().to_string();
+    assert!(
+        f.chats
+            .confirm_queue_edit(&id, &original.id, &transfer)
+            .await
+            .unwrap()
+    );
+    let ticket = f.core().create_ticket("Linked during the edit").unwrap();
+    let link = LinkRef {
+        kind: LinkKind::Ticket,
+        id: ticket.id,
+    };
+    let command_id = uuid::Uuid::new_v4().to_string();
+    let request = || {
+        Some(QueueEditSave {
+            command_id: command_id.clone(),
+            message_ids: vec![original.id.clone()],
+        })
+    };
+    let held = original.id.clone();
+    let pending = f
+        .chats
+        .check_queue_edits(&id, vec![command_id.clone()], vec![held.clone()])
+        .unwrap();
+    assert!(pending.saved.is_empty());
+    assert!(pending.removed.is_empty());
+
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            std::slice::from_ref(&link),
+            Vec::new(),
+            request(),
+        )
+        .await
+        .unwrap();
+    f.core()
+        .set_chat_link(&id, ChatLink::from(link.clone()), false)
+        .unwrap();
+
+    let status = f
+        .chats
+        .check_queue_edits(&id, vec![command_id.clone()], vec![held.clone()])
+        .unwrap();
+    assert_eq!(status.saved, [command_id.clone()]);
+    assert_eq!(status.removed, [held]);
+
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[link],
+            Vec::new(),
+            request(),
+        )
+        .await
+        .unwrap();
+    assert!(f.core().chat(&id).unwrap().links.is_empty());
+    let queue = f.core().chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].text, "Edited");
+
+    f.chats.remove_queued(&id, &queue[0].id).await.unwrap();
+    f.chats
+        .send_linking(&id, "Edited", SendMode::Queue, &[], Vec::new(), request())
+        .await
+        .unwrap();
+    assert!(f.core().chat_queue(&id).unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_fresh_session_excludes_attachment_only_messages_from_picked_history() {
     let f = Fixture::new().await;
     let mut input = f.input("");
@@ -2761,7 +2843,14 @@ async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_i
     assert!(f.chats.linked_to(&link()).unwrap().is_empty());
 
     f.chats
-        .send_linking(&id, "Look at it", SendMode::Queue, &[link()], Vec::new())
+        .send_linking(
+            &id,
+            "Look at it",
+            SendMode::Queue,
+            &[link()],
+            Vec::new(),
+            None,
+        )
         .await
         .unwrap();
     let linked = f.chats.linked_to(&link()).unwrap();
@@ -2779,7 +2868,14 @@ async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_i
     };
     let refused = f
         .chats
-        .send_linking(&other, "And this", SendMode::Queue, &[gone], Vec::new())
+        .send_linking(
+            &other,
+            "And this",
+            SendMode::Queue,
+            &[gone],
+            Vec::new(),
+            None,
+        )
         .await;
     assert!(refused.is_err());
     let (opened, _) = f.open(&other).await;

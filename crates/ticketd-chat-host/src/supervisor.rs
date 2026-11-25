@@ -66,6 +66,7 @@ pub(crate) enum Command {
         text: String,
         mode: SendMode,
         attachments: Vec<ChatAttachmentContent>,
+        replaces: Vec<String>,
         reply: Reply<ChatMessage>,
     },
     SendUnattended {
@@ -685,7 +686,7 @@ impl Supervisor {
                     return;
                 };
                 let command_id = format!("{}:first", self.chat_id);
-                let result = self.send(Some(&command_id), &text, SendMode::Auto, &[]);
+                let result = self.send(Some(&command_id), &text, SendMode::Auto, &[], &[]);
                 if let Ok(message) = &result {
                     let _ = unattended.first_message.set(message.id.clone());
                 }
@@ -696,9 +697,16 @@ impl Supervisor {
                 text,
                 mode,
                 attachments,
+                replaces,
                 reply,
             } => {
-                let _ = reply.send(self.send(command_id.as_deref(), &text, mode, &attachments));
+                let _ = reply.send(self.send(
+                    command_id.as_deref(),
+                    &text,
+                    mode,
+                    &attachments,
+                    &replaces,
+                ));
             }
             Command::Stop(reply) => {
                 let _ = reply.send(self.request_stop());
@@ -952,9 +960,20 @@ impl Supervisor {
         text: &str,
         mode: SendMode,
         attachments: &[ChatAttachmentContent],
+        replaces: &[String],
     ) -> Result<ChatMessage, HostError> {
         self.recover_storage()?;
         let chat = self.chat_id.clone();
+        // A lost reply can arrive after queue eligibility changed. Repeating an
+        // already saved edit returns its receipt without dispatching it again.
+        if !replaces.is_empty()
+            && let Some(command_id) = command_id
+            && let Some(saved) = self.core(|core| {
+                core.replay_chat_input_replacing(command_id, &chat, text, attachments, replaces)
+            })?
+        {
+            return Ok(saved);
+        }
         let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
         let can_steer = self.active.is_some()
             && self.steering().is_some()
@@ -977,7 +996,8 @@ impl Supervisor {
                     .then_some(Refusal::ImageInputUnsupported)
             });
             if let Some(refusal) = refusal {
-                if let Some(command_id) = command_id
+                if replaces.is_empty()
+                    && let Some(command_id) = command_id
                     && let Some(saved) = self
                         .core(|core| core.replay_chat_input(command_id, &chat, text, attachments))?
                 {
@@ -987,7 +1007,7 @@ impl Supervisor {
             }
         }
         let message = self.write(|core| {
-            core.save_chat_input_with_attachments(command_id, &chat, text, attachments)
+            core.save_chat_input_replacing(command_id, &chat, text, attachments, replaces)
         })?;
         let immediate = self.active.is_none() || can_steer;
         if mode == SendMode::Auto
@@ -1080,7 +1100,7 @@ impl Supervisor {
         let queued = self
             .core(|core| core.chat_queue(&chat))?
             .into_iter()
-            .find(|message| message.id == message_id)
+            .find(|message| message.id == message_id && !message.editing)
             .ok_or_else(|| Error::Chat("this input is not in the queue".to_owned()))?;
         if self.active.is_some()
             && self.images_refused(true)
@@ -1132,10 +1152,10 @@ impl Supervisor {
             return Ok(false);
         }
         let chat = self.chat_id.clone();
-        let withdrawn =
+        let held =
             self.write(|core| core.confirm_chat_queue_edit(&chat, message_id, transfer_id))?;
         self.prepared_queue_edits.remove(message_id);
-        Ok(withdrawn)
+        Ok(held)
     }
 
     /// Whether the queue, not paused, holds input saved before `message_id`.
@@ -1145,7 +1165,8 @@ impl Supervisor {
             Ok(!core.chat(&chat)?.queue_paused
                 && core
                     .chat_queue(&chat)?
-                    .first()
+                    .iter()
+                    .find(|message| !message.editing)
                     .is_some_and(|first| first.id != message_id))
         })
         // Unreadable now: sent directly, as before; the dispatch reads storage again.
@@ -1856,7 +1877,7 @@ impl Supervisor {
                         Ok(queue) => {
                             self.prepared_queue_edits
                                 .retain(|id| queue.iter().any(|message| &message.id == id));
-                            match queue.into_iter().next() {
+                            match queue.into_iter().find(|message| !message.editing) {
                                 Some(message)
                                     if self.prepared_queue_edits.contains(&message.id) =>
                                 {

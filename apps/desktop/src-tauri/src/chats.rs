@@ -138,6 +138,25 @@ impl From<LinkRef> for ChatLink {
     }
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct QueueEditSave {
+    command_id: String,
+    message_ids: Vec<String>,
+}
+
+#[derive(Serialize)]
+pub struct QueueEditStatus {
+    saved: Vec<String>,
+    removed: Vec<String>,
+}
+
+fn queue_edit_save_id(command_id: &str) -> Outcome<String> {
+    let id = uuid::Uuid::parse_str(command_id)
+        .map_err(|_| failed("the edit command id must be a UUID"))?;
+    Ok(format!("{id}:queue-edit-save"))
+}
+
 #[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewChatInput {
@@ -729,6 +748,7 @@ fn surroundings(
                     }),
                 id: message.id,
                 text: message.text,
+                editing: message.editing,
                 attachments: message.attachments,
             })
             .collect(),
@@ -1094,7 +1114,12 @@ impl Chats {
             ];
             for filter in filters {
                 for chat in workspace.list_chats(filter)? {
-                    if !chat.queue_paused && !workspace.chat_queue(&chat.id)?.is_empty() {
+                    if !chat.queue_paused
+                        && workspace
+                            .chat_queue(&chat.id)?
+                            .iter()
+                            .any(|message| !message.editing)
+                    {
                         workspace.set_chat_queue_paused(&chat.id, true)?;
                     }
                 }
@@ -2007,14 +2032,45 @@ impl Chats {
         mode: SendMode,
         links: &[LinkRef],
         files: Vec<AttachmentInput>,
+        queue_edit: Option<QueueEditSave>,
     ) -> Outcome<()> {
         let host = self.host()?;
+        let (command_id, replaces) = if let Some(edit) = queue_edit {
+            if edit.message_ids.is_empty() {
+                return Err(failed("choose a queued message to edit"));
+            }
+            (
+                Some(queue_edit_save_id(&edit.command_id)?),
+                edit.message_ids,
+            )
+        } else {
+            (None, Vec::new())
+        };
+        // A saved edit can still replay when the Workspace upload limit changed.
+        // Core checks the current limit again when it actually saves the message.
         let limit = if files.is_empty() {
             0
+        } else if command_id.is_some() {
+            MAX_BACKUP_FILE_BYTES
         } else {
             self.workspace()?.attachment_upload_limit()?
         };
         let attachments = Self::decode_message_attachments(text, files, limit)?;
+        if let Some(command_id) = command_id.as_deref() {
+            let workspace = self.workspace()?;
+            if workspace.chat_queue_edit_saved(chat_id, command_id)?
+                && workspace.replay_chat_queue_edit(
+                    command_id,
+                    chat_id,
+                    text,
+                    &attachments,
+                    &replaces,
+                )?
+            {
+                self.resync(chat_id);
+                return Ok(());
+            }
+        }
         let present = self.workspace()?.chat(chat_id)?.links;
         let mut added = false;
         for link in links {
@@ -2031,13 +2087,23 @@ impl Chats {
         if added {
             host.links_changed(chat_id).await?;
         }
-        if attachments.is_empty() {
-            self.send(chat_id, text, mode).await
-        } else {
-            host.send_with_attachments(chat_id, None, text, mode, attachments)
-                .await?;
-            Ok(())
+        let replacing = !replaces.is_empty();
+        if !replacing && attachments.is_empty() {
+            return self.send(chat_id, text, mode).await;
         }
+        host.send_replacing(
+            chat_id,
+            command_id.as_deref(),
+            text,
+            mode,
+            attachments,
+            replaces,
+        )
+        .await?;
+        if replacing {
+            self.resync(chat_id);
+        }
+        Ok(())
     }
 
     pub fn export_attachment(&self, chat_id: &str, id: &str, destination: &Path) -> Outcome<()> {
@@ -2118,14 +2184,50 @@ impl Chats {
     ) -> Outcome<bool> {
         let transfer_id = uuid::Uuid::parse_str(transfer_id)
             .map_err(|_| failed("the transfer id must be a UUID"))?;
-        let withdrawn = self
+        let held = self
             .host()?
             .confirm_queue_edit(chat_id, message_id, &format!("{transfer_id}:queue-edit"))
             .await?;
-        if withdrawn {
+        if held {
             self.resync(chat_id);
         }
-        Ok(withdrawn)
+        Ok(held)
+    }
+
+    pub fn check_queue_edits(
+        &self,
+        chat_id: &str,
+        saves: Vec<String>,
+        removals: Vec<String>,
+    ) -> Outcome<QueueEditStatus> {
+        self.host()?;
+        let saves = saves
+            .into_iter()
+            .map(|id| queue_edit_save_id(&id).map(|key| (id, key)))
+            .collect::<Outcome<Vec<_>>>()?;
+        let result = self.workspace()?.read(|workspace| {
+            let mut saved = Vec::new();
+            for (id, key) in saves {
+                if workspace.chat_queue_edit_saved(chat_id, &key)? {
+                    saved.push(id);
+                }
+            }
+            let removed = if removals.is_empty() {
+                removals
+            } else {
+                let queue = workspace.chat_queue(chat_id)?;
+                removals
+                    .into_iter()
+                    .filter(|id| {
+                        !queue
+                            .iter()
+                            .any(|message| &message.id == id && message.editing)
+                    })
+                    .collect()
+            };
+            Ok(QueueEditStatus { saved, removed })
+        })?;
+        Ok(result)
     }
 
     pub async fn resume_queue(&self, chat_id: &str) -> Outcome<()> {

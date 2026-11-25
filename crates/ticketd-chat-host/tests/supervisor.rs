@@ -2425,8 +2425,53 @@ async fn an_unadopted_queue_edit_keeps_original_snapshots_through_host_restart()
             .await
             .unwrap()
     );
-    assert!(f.queued().is_empty());
-    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.queued(), ["Recover this draft"]);
+    after_restart.quit().await;
+    let reopened = start_host(&f.path, &f.storage_up, &f.fake);
+    assert!(
+        reopened
+            .send_queued_now(&f.chat.id, &queued.id)
+            .await
+            .is_err()
+    );
+    reopened.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(
+        f.submits().len(),
+        1,
+        "neither queue action sent the held original"
+    );
+    assert_eq!(
+        reopened
+            .prepare_queue_edit(&f.chat.id, &queued.id)
+            .await
+            .unwrap(),
+        ("Recover this draft".to_owned(), vec![saved_file()])
+    );
+    let saved = reopened
+        .send_replacing(
+            &f.chat.id,
+            Some("save-edit"),
+            "Edited",
+            SendMode::Queue,
+            vec![saved_file()],
+            vec![queued.id.clone()],
+        )
+        .await
+        .unwrap();
+    let duplicate = reopened
+        .send_replacing(
+            &f.chat.id,
+            Some("save-edit"),
+            "Edited",
+            SendMode::Queue,
+            vec![saved_file()],
+            vec![queued.id],
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate.id, saved.id);
+    assert_eq!(f.queued(), ["Edited"]);
 }
 
 #[tokio::test(start_paused = true)]
@@ -2709,7 +2754,7 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
             .await
             .unwrap()
     );
-    assert!(f.queued().is_empty());
+    assert_eq!(f.queued(), ["Read this"]);
     assert!(
         f.host
             .confirm_queue_edit(&f.chat.id, &queued.id, "accepted-edit")
@@ -2717,7 +2762,7 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
             .unwrap()
     );
     assert!(
-        !f.host
+        f.host
             .confirm_queue_edit(&f.chat.id, &queued.id, "other-edit")
             .await
             .unwrap()

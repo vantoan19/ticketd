@@ -169,7 +169,7 @@ fn a_complete_backup_restores_the_exact_image_in_sent_chat_history() {
 }
 
 #[test]
-fn a_complete_backup_restores_the_exact_queued_chat_files() {
+fn a_complete_backup_restores_the_exact_files_of_a_held_queue_edit() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);
     let first = ticketd_core::ChatAttachmentContent::from_data_url(
@@ -187,6 +187,11 @@ fn a_complete_backup_restores_the_exact_queued_chat_files() {
     let queued = workspace
         .save_chat_input_with_attachments(None, &chat.id, "Use both", &[first, second])
         .unwrap();
+    assert!(
+        workspace
+            .confirm_chat_queue_edit(&chat.id, &queued.id, "edit")
+            .unwrap()
+    );
     let backup = dir.path().join("backup.sqlite3");
     workspace.backup(&backup).unwrap();
     let target = dir.path().join("restored.sqlite3");
@@ -196,6 +201,7 @@ fn a_complete_backup_restores_the_exact_queued_chat_files() {
     assert_eq!(queue.len(), 1);
     assert_eq!(queue[0].id, queued.id);
     let queued = &queue[0];
+    assert!(queued.editing);
     assert!(queued.queued);
     assert_eq!(queued.text, "Use both");
     assert_eq!(queued.attachments.len(), 2);
@@ -214,6 +220,125 @@ fn a_complete_backup_restores_the_exact_queued_chat_files() {
             .unwrap();
         assert_eq!(std::fs::read(destination).unwrap(), expected);
     }
+}
+
+#[test]
+fn queued_edit_replacement_is_atomic_and_replays_after_its_originals_are_consumed() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "notes.txt",
+        "data:text/plain;base64,c25hcHNob3Q=",
+        100,
+    )
+    .unwrap();
+    let original = workspace
+        .save_chat_input_with_attachments(
+            None,
+            &chat.id,
+            "Before editing",
+            std::slice::from_ref(&file),
+        )
+        .unwrap();
+    let other = workspace
+        .save_chat_input(None, &chat.id, "Another message")
+        .unwrap();
+    assert!(
+        workspace
+            .confirm_chat_queue_edit(&chat.id, &original.id, "edit-one")
+            .unwrap()
+    );
+    assert!(
+        workspace
+            .record_chat_queue_submission(
+                &chat.id,
+                &original.id,
+                "send-held",
+                ChatSubmissionIntent::NewTurn
+            )
+            .is_err()
+    );
+
+    let replaces = vec![original.id.clone(), other.id.clone()];
+    let edited = std::slice::from_ref(&file);
+    assert!(
+        workspace
+            .save_chat_input_replacing(Some("save-edit"), &chat.id, "Edited", edited, &replaces)
+            .is_err()
+    );
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 2);
+    assert_eq!(
+        workspace
+            .chat_message_attachment_contents(&chat.id, &original.id)
+            .unwrap(),
+        [file.clone()]
+    );
+    assert!(
+        workspace
+            .confirm_chat_queue_edit(&chat.id, &other.id, "edit-two")
+            .unwrap()
+    );
+
+    workspace.set_attachment_upload_limit(1).unwrap();
+    assert!(matches!(
+        workspace.save_chat_input_replacing(
+            Some("save-edit"),
+            &chat.id,
+            "Edited",
+            edited,
+            &replaces
+        ),
+        Err(Error::UploadLimit { limit: 1 })
+    ));
+    assert!(
+        workspace
+            .chat_queue(&chat.id)
+            .unwrap()
+            .iter()
+            .all(|message| message.editing)
+    );
+    workspace.set_attachment_upload_limit(100).unwrap();
+
+    let saved = workspace
+        .save_chat_input_replacing(Some("save-edit"), &chat.id, "Edited", edited, &replaces)
+        .unwrap();
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap(), [saved.clone()]);
+    assert!(!saved.editing);
+    assert_eq!(
+        workspace
+            .chat_message_attachment_contents(&chat.id, &saved.id)
+            .unwrap(),
+        [file.clone()]
+    );
+    assert!(
+        workspace
+            .chat_attachment_content(&chat.id, &original.attachments[0].id)
+            .is_err()
+    );
+
+    workspace.set_attachment_upload_limit(1).unwrap();
+    assert_eq!(
+        workspace
+            .save_chat_input_replacing(Some("save-edit"), &chat.id, "Edited", edited, &replaces)
+            .unwrap(),
+        saved
+    );
+    assert_eq!(
+        workspace
+            .replay_chat_input_replacing("save-edit", &chat.id, "Edited", edited, &replaces)
+            .unwrap(),
+        Some(saved)
+    );
+    assert!(matches!(
+        workspace.replay_chat_input_replacing(
+            "save-edit",
+            &chat.id,
+            "Edited",
+            edited,
+            &replaces[..1]
+        ),
+        Err(Error::RequestConflict(_))
+    ));
 }
 
 #[test]

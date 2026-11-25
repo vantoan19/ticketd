@@ -416,6 +416,9 @@ pub struct ChatMessage {
     pub turn_id: Option<String>,
     /// User input with no submission that may have reached the harness.
     pub queued: bool,
+    /// Kept for draft recovery and excluded from dispatch while the edit is held.
+    #[serde(default)]
+    pub editing: bool,
     pub attempts: Vec<ChatSubmissionAttempt>,
     pub created_at: String,
 }
@@ -933,7 +936,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
 fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>, Error> {
     let message = connection
         .query_row(
-            "SELECT id, position, role, text, complete, turn_id, created_at FROM chat_messages WHERE id = ?1",
+            "SELECT id, position, role, text, complete, turn_id, created_at, editing FROM chat_messages WHERE id = ?1",
             [id],
             |row| {
                 Ok(ChatMessage {
@@ -946,6 +949,7 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
                     turn_id: row.get(5)?,
                     created_at: row.get(6)?,
                     queued: false,
+                    editing: row.get(7)?,
                     attempts: Vec::new(),
                 })
             },
@@ -1238,11 +1242,19 @@ fn previous_outcome(
     Ok(None)
 }
 
-fn save_input_request(chat_id: &str, text: &str, files: &[ChatAttachmentContent]) -> Value {
+fn save_input_request(
+    chat_id: &str,
+    text: &str,
+    files: &[ChatAttachmentContent],
+    replaces: &[String],
+) -> Value {
     let mut request = json!({"operation": "save_chat_input", "chat_id": chat_id, "text": text});
     if !files.is_empty() {
         request["attachments"] =
             Value::Array(files.iter().map(ChatAttachmentContent::identity).collect());
+    }
+    if !replaces.is_empty() {
+        request["replaces"] = json!(replaces);
     }
     request
 }
@@ -1257,12 +1269,17 @@ fn withdraw_queued_input(
     if !queued {
         return Ok(false);
     }
+    delete_queued_input(connection, message_id)?;
+    Ok(true)
+}
+
+fn delete_queued_input(connection: &Connection, message_id: &str) -> Result<(), Error> {
     connection.execute(
         "DELETE FROM chat_submission_attempts WHERE message_id = ?1",
         [message_id],
     )?;
     connection.execute("DELETE FROM chat_messages WHERE id = ?1", [message_id])?;
-    Ok(true)
+    Ok(())
 }
 
 /// The last `CHAT_TOOL_OUTPUT_LIMIT` bytes of `output`, and whether its start was dropped.
@@ -2219,7 +2236,24 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
     ) -> Result<ChatMessage, Error> {
-        let request = command_id.map_or(Value::Null, |_| save_input_request(chat_id, text, files));
+        self.save_chat_input_replacing(command_id, chat_id, text, files, &[])
+    }
+
+    /// Save edited input and consume its held originals in the same transaction.
+    pub fn save_chat_input_replacing(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replaces: &[String],
+    ) -> Result<ChatMessage, Error> {
+        if !replaces.is_empty() && command_id.is_none() {
+            return Err(invalid("Editing queued input requires a command ID"));
+        }
+        let request = command_id.map_or(Value::Null, |_| {
+            save_input_request(chat_id, text, files, replaces)
+        });
         self.chat_write(|connection| {
             let id = once(connection, command_id, request, || {
                 if text.trim().is_empty() && files.is_empty() {
@@ -2233,6 +2267,13 @@ impl Workspace {
                 }
                 if read_chat(connection, chat_id)?.trashed {
                     return Err(Error::ChatTrashed(chat_id.to_owned()));
+                }
+                for original in replaces {
+                    let message = require_input(connection, chat_id, original)?;
+                    if !message.queued || !message.editing {
+                        return Err(invalid("the original message is no longer held for editing"));
+                    }
+                    delete_queued_input(connection, original)?;
                 }
                 let id = Uuid::new_v4().to_string();
                 let position = log(connection, chat_id, "message", &id)?;
@@ -2259,7 +2300,44 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
     ) -> Result<Option<ChatMessage>, Error> {
-        let request = save_input_request(chat_id, text, files).to_string();
+        self.replay_chat_input_replacing(command_id, chat_id, text, files, &[])
+    }
+
+    /// Whether an edited input was durably saved. This reads the receipt only, even
+    /// if the replacement message itself was later edited or removed.
+    pub fn chat_queue_edit_saved(&self, chat_id: &str, command_id: &str) -> Result<bool, Error> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM request_outcomes WHERE id = ?1
+              AND json_extract(request, '$.operation') = 'save_chat_input'
+              AND json_extract(request, '$.chat_id') = ?2
+              AND json_array_length(request, '$.replaces') > 0)",
+            params![command_id, chat_id],
+            |row| row.get(0),
+        )?)
+    }
+
+    /// Confirms an exact edited send even if its saved replacement was later removed.
+    pub fn replay_chat_queue_edit(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replaces: &[String],
+    ) -> Result<bool, Error> {
+        let request = save_input_request(chat_id, text, files, replaces).to_string();
+        Ok(previous_outcome(&self.connection, command_id, &request)?.is_some())
+    }
+
+    pub fn replay_chat_input_replacing(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        replaces: &[String],
+    ) -> Result<Option<ChatMessage>, Error> {
+        let request = save_input_request(chat_id, text, files, replaces).to_string();
         let Some(id) = previous_outcome(&self.connection, command_id, &request)? else {
             return Ok(None);
         };
@@ -2280,8 +2358,8 @@ impl Workspace {
         })
     }
 
-    /// Atomically withdraws a queued message and records the renderer's transfer receipt.
-    /// A retry returns the same successful withdrawal after a lost acknowledgement.
+    /// Holds queued input for editing without withdrawing its text and snapshots.
+    /// A retry returns the same outcome after a lost acknowledgement.
     pub fn confirm_chat_queue_edit(
         &mut self,
         chat_id: &str,
@@ -2295,9 +2373,15 @@ impl Workspace {
                 "message_id": message_id,
             });
             let outcome = once(connection, Some(transfer_id), request, || {
-                if !withdraw_queued_input(connection, chat_id, message_id)? {
+                let queued = owned(connection, "chat_messages", chat_id, message_id)?
+                    && read_message(connection, message_id)?.is_some_and(|message| message.queued);
+                if !queued {
                     return Ok(String::new());
                 }
+                connection.execute(
+                    "UPDATE chat_messages SET editing = 1 WHERE id = ?1",
+                    [message_id],
+                )?;
                 log(connection, chat_id, "chat", chat_id)?;
                 trim(connection, chat_id)?;
                 Ok(message_id.to_owned())
@@ -2316,7 +2400,7 @@ impl Workspace {
     ) -> Result<ChatMessage, Error> {
         self.chat_write(|connection| {
             let message = require_input(connection, chat_id, message_id)?;
-            if !message.queued {
+            if !message.queued || message.editing {
                 return Err(invalid("this input is not in the queue"));
             }
             connection.execute(
@@ -2338,7 +2422,7 @@ impl Workspace {
         })
     }
 
-    /// Queued input in the order it was saved.
+    /// Queued input in the order it was saved, including originals held for editing.
     pub fn chat_queue(&self, chat_id: &str) -> Result<Vec<ChatMessage>, Error> {
         read_chat(&self.connection, chat_id)?;
         let mut statement = self.connection.prepare(
@@ -2408,6 +2492,9 @@ impl Workspace {
                 Some(recorded) if recorded == message_id => return Ok(message),
                 Some(_) => return Err(Error::RequestConflict(attempt_id.to_owned())),
                 None => {}
+            }
+            if message.editing {
+                return Err(invalid("this input is held for editing"));
             }
             if !message.queued {
                 return Err(Error::ChatSubmissionUnresolved(message_id.to_owned()));

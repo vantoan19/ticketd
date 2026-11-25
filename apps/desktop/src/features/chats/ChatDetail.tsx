@@ -55,8 +55,10 @@ import {
   useChatClient,
   type ChatSnapshot,
   type ChatState,
+  type LinkRef,
   type LinkedRecord,
   type Problem,
+  type QueueEditSave,
   type RequestAnswer,
   type TranscriptItem,
 } from "@/features/chats/client";
@@ -73,9 +75,10 @@ import {
 } from "@/features/chats/composer-settings";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import { Composer } from "@/features/chats/Composer";
+import type { ChatAttachmentInput } from "@/features/chats/composer-attachments";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
-import { arrivals, draftOf } from "@/features/chats/drafts";
+import { arrivals, draftOf, type SaveResult } from "@/features/chats/drafts";
 import {
   clearQuotes,
   quoteLinks,
@@ -395,16 +398,17 @@ function Conversation({
    * Runs a command; a refusal is said once, and the view keeps the host's
    * state. `name` says what did not happen: "send the message".
    */
-  const run = (
-    action: Promise<unknown>,
+  const run = <T,>(
+    action: Promise<T>,
     name: string,
     retry?: () => void,
     retryRequiresSend = false,
   ) =>
     action.then(
-      () => {
+      (result) => {
         setFailure(null);
         setArrival("");
+        return result;
       },
       (reason: unknown) => {
         setFailure({ ...chatFailure(reason, name, retry), retryRequiresSend });
@@ -560,6 +564,7 @@ function Conversation({
     items: draftFiles,
     restored,
     transfer,
+    queueEdits,
   } = useSyncExternalStore(draft.subscribe, draft.snapshot);
   const hasAttachments = draftFiles.length > 0;
   const hasImages = draftFiles.some(
@@ -582,6 +587,7 @@ function Conversation({
     Boolean(question) &&
     (!draftHeld || heldFor !== question?.id) &&
     !hasAttachments &&
+    queueEdits.length === 0 &&
     !independentAnswer &&
     !restored;
   const stoppable =
@@ -659,6 +665,7 @@ function Conversation({
     const transferId = crypto.randomUUID();
     quietly(
       draft.editQueued(
+        queuedId,
         () => client.editQueued(id, queuedId),
         () => client.confirmQueueEdit(id, queuedId, transferId),
       ),
@@ -702,6 +709,81 @@ function Conversation({
     setNewFrom(undefined);
     setAsked(null);
     return action;
+  };
+  const submitMessage = (
+    action: "send" | "queue",
+    text: string,
+    links: LinkRef[],
+    attachments?: ChatAttachmentInput[],
+  ) => {
+    const outgoingText = quotedMessage(quotes, text);
+    const outgoingLinks = [...links, ...quoteLinks(quotes)];
+    const submitted = draft.snapshot();
+    const requestKey = (messageIds: string[]) =>
+      JSON.stringify({
+        outgoingText,
+        outgoingLinks,
+        // A ready attachment's item ID owns its immutable captured bytes.
+        attachmentIds: submitted.items.map((item) => item.id),
+        messageIds,
+      });
+    let queueEdit: QueueEditSave | undefined;
+    let attemptedDraft = submitted;
+    const send = async (): Promise<SaveResult> => {
+      const { saves, removals } = draft.queueEditsToCheck();
+      if (saves.length || removals.length) {
+        const status = await client.checkQueueEdits(id, saves, removals);
+        const sameDraft = draft.settleQueueEdits(
+          status,
+          requestKey(queueEdit?.messageIds ?? submitted.queueEdits),
+        );
+        if (status.saved.length) {
+          if (sameDraft) clearQuotes(id, quotes);
+          return sameDraft ? undefined : "keep_draft";
+        }
+      }
+      const messageIds = draft.snapshot().queueEdits;
+      if (!queueEdit && messageIds.length) {
+        attemptedDraft = draft.snapshot();
+        const key = requestKey(messageIds);
+        queueEdit = { commandId: draft.requestId(key), messageIds };
+        draft.rememberQueueSave(queueEdit, key);
+      }
+      if (queueEdit) {
+        await client[action](
+          id,
+          outgoingText,
+          outgoingLinks,
+          attachments,
+          queueEdit,
+        );
+        draft.settleQueueEdits({ saved: [queueEdit.commandId], removed: [] });
+      } else if (attachments) {
+        await client[action](id, outgoingText, outgoingLinks, attachments);
+      } else {
+        await client[action](id, outgoingText, outgoingLinks);
+      }
+      clearQuotes(id, quotes);
+    };
+    const save = (): Promise<SaveResult> =>
+      run(
+        sent(send()),
+        action === "send" ? "send the message" : "queue the message",
+        () => {
+          messageBox.current?.focus();
+          if (queueEdit)
+            draft.save(action, save, draft.changedSince(attemptedDraft));
+          else retrySend.current?.();
+        },
+        action === "send" && submitted.queueEdits.length === 0,
+      ).then((result) => {
+        if (result === "keep_draft")
+          setArrival(
+            "The earlier message was already saved. Your edited draft is ready to send.",
+          );
+        return result;
+      });
+    return save();
   };
   const messageCount = items.filter(isMessage).length;
   const pickableMessageCount = picked
@@ -909,9 +991,12 @@ function Conversation({
                       "send the queued message",
                     ).then(() => {})
                   }
+                  queueEdits={queueEdits}
                   onEdit={edit}
                   onRemove={(queuedId) => {
                     const remove = () => {
+                      if (draft.locked()) return;
+                      draft.rememberQueueRemoval(queuedId);
                       const origin = document.activeElement;
                       void run(
                         client.removeQueued(id, queuedId),
@@ -919,6 +1004,10 @@ function Conversation({
                         remove,
                       )
                         .then(() => {
+                          draft.settleQueueEdits({
+                            saved: [],
+                            removed: [queuedId],
+                          });
                           if (
                             document.activeElement === origin ||
                             document.activeElement === document.body
@@ -995,52 +1084,17 @@ function Conversation({
                     hasImages,
                   )
                 }
-                onSend={(text, links, attachments) => {
-                  const answerQuestion =
-                    answering && question && !attachments?.length;
-                  const outgoingText = quotedMessage(quotes, text);
-                  const outgoingLinks = [...links, ...quoteLinks(quotes)];
-                  const submission = run(
-                    sent(
-                      answerQuestion
-                        ? client.answer(id, question.id, { text })
-                        : (attachments
-                            ? client.send(
-                                id,
-                                outgoingText,
-                                outgoingLinks,
-                                attachments,
-                              )
-                            : client.send(id, outgoingText, outgoingLinks)
-                          ).then(() => clearQuotes(id, quotes)),
-                    ),
-                    answerQuestion ? "send your answer" : "send the message",
-                    answerQuestion
-                      ? undefined
-                      : () => {
-                          messageBox.current?.focus();
-                          retrySend.current?.();
-                        },
-                    true,
-                  );
-                  return submission;
-                }}
-                onQueue={(text, links, attachments) => {
-                  const outgoingText = quotedMessage(quotes, text);
-                  const outgoingLinks = [...links, ...quoteLinks(quotes)];
-                  const queued = attachments
-                    ? client.queue(id, outgoingText, outgoingLinks, attachments)
-                    : client.queue(id, outgoingText, outgoingLinks);
-                  const submission = run(
-                    sent(queued.then(() => clearQuotes(id, quotes))),
-                    "queue the message",
-                    () => {
-                      messageBox.current?.focus();
-                      retrySend.current?.();
-                    },
-                  );
-                  return submission;
-                }}
+                onSend={(text, links, attachments) =>
+                  answering && question && !attachments?.length
+                    ? run(
+                        sent(client.answer(id, question.id, { text })),
+                        "send your answer",
+                      )
+                    : submitMessage("send", text, links, attachments)
+                }
+                onQueue={(text, links, attachments) =>
+                  submitMessage("queue", text, links, attachments)
+                }
                 {...(pending.length > 0 &&
                   !hasAttachments && {
                     onArrowUpFromEmpty: () => focusFirstChoice(dock.current),

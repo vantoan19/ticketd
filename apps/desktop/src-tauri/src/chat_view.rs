@@ -444,6 +444,7 @@ pub struct Steering {
 pub struct Queued {
     pub id: String,
     pub text: String,
+    pub editing: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub attachments: Vec<ChatAttachment>,
     /// It was sent to steer the running turn and the harness did not take it: why, as
@@ -715,6 +716,7 @@ impl Tracker {
             complete: false,
             turn_id: Some(turn_id.to_owned()),
             queued: false,
+            editing: false,
             attempts: Vec::new(),
             created_at: String::new(),
         };
@@ -1311,6 +1313,7 @@ pub fn item(
                 },
             }
         }
+        ChatItem::Message(message) if message.editing && message.queued => return None,
         ChatItem::Message(message) if message.role == ChatRole::User => Item::User {
             id: message.id.clone(),
             at: message.created_at.clone(),

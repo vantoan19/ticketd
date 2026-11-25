@@ -681,6 +681,7 @@ export const chatStateSchema = z.object({
       id: z.string(),
       text: z.string(),
       attachments: z.array(chatAttachmentSchema).optional(),
+      editing: z.boolean().optional(),
       /** Sent to steer, and the harness did not take it: the host's reason. */
       refused_steer: z.string().nullish(),
     }),
@@ -823,6 +824,9 @@ export class ChatError extends Error {
   }
 }
 
+export type QueueEditSave = { commandId: string; messageIds: string[] };
+export type QueueEditStatus = { saved: string[]; removed: string[] };
+
 export interface ChatClient {
   /** The Experimental switch. Off by default. */
   getEnabled(): Promise<boolean>;
@@ -885,6 +889,7 @@ export interface ChatClient {
     text: string,
     links?: LinkRef[],
     attachments?: ChatAttachmentInput[],
+    queueEdit?: QueueEditSave,
   ): Promise<void>;
   captureAttachment(file: File): Promise<ChatAttachmentInput>;
   exportAttachment(id: string, file: ChatAttachment): Promise<void>;
@@ -893,6 +898,7 @@ export interface ChatClient {
     text: string,
     links?: LinkRef[],
     attachments?: ChatAttachmentInput[],
+    queueEdit?: QueueEditSave,
   ): Promise<void>;
   /** The Chats outside the trash linked to one record. Refetch on `revision`. */
   linkedTo(link: LinkRef): Promise<ChatSummary[]>;
@@ -903,7 +909,13 @@ export interface ChatClient {
     id: string,
     queuedId: string,
   ): Promise<{ text: string; attachments: ChatAttachmentInput[] }>;
-  /** Withdraws only after the app-session draft has accepted the snapshot. */
+  /** Reads save receipts and checks whether explicitly removed originals still exist. */
+  checkQueueEdits(
+    id: string,
+    saves: string[],
+    removals: string[],
+  ): Promise<QueueEditStatus>;
+  /** Holds the original message for editing after the draft displays its snapshot. */
   confirmQueueEdit(
     id: string,
     queuedId: string,
