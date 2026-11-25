@@ -2151,6 +2151,22 @@ impl Workspace {
         })
     }
 
+    /// The text of the Chat's first message from the person, which its title was cut
+    /// from; `None` while it has none. Read on its own, because a snapshot holds
+    /// only the latest items.
+    pub fn chat_first_input_text(&self, chat_id: &str) -> Result<Option<String>, Error> {
+        read_chat(&self.connection, chat_id)?;
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT text FROM chat_messages WHERE chat_id = ?1 AND role = 'user'
+                 ORDER BY position LIMIT 1",
+                [chat_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// Queued input in the order it was saved.
     pub fn chat_queue(&self, chat_id: &str) -> Result<Vec<ChatMessage>, Error> {
         read_chat(&self.connection, chat_id)?;

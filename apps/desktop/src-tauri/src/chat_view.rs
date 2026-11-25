@@ -539,6 +539,9 @@ pub struct Surroundings {
     /// The other Chats that use the same folder.
     pub shared_with: Vec<SharedChat>,
     pub links: Vec<LinkedRecord>,
+    /// The first line of the Chat's first message, read only when its title could
+    /// have been cut from it (`title_may_be_cut`).
+    pub first_line: Option<String>,
     pub queue: Vec<Queued>,
     pub project: Option<ProjectRef>,
     /// Read only for an open Chat; list rows do not show it.
@@ -1801,18 +1804,42 @@ fn before_last_word(text: &str) -> &str {
     }
 }
 
+/// Whether the stored title is long enough to be a cut of the first line (a title a
+/// word cut ended says so with "…", and a shorter one was never cut). The first
+/// message is read only for these.
+pub(crate) fn title_may_be_cut(chat: &Chat) -> bool {
+    chat.title.as_deref().is_some_and(|title| {
+        title.chars().count() >= TITLE_LIMIT - 1 && !title.ends_with('…')
+    })
+}
+
+/// The first line of a Chat's first message, which its title is made from.
+pub(crate) fn first_line_of(message: &str) -> Option<String> {
+    message.trim().lines().next().map(str::to_owned)
+}
+
 /// The title the Chat view shows (U-chat titles). A title that starts with
 /// "Work on <reference>: " for a ticket linked to the Chat is the rest of the line,
 /// and the ticket's own title when the stored line was cut short of it. A title the
-/// 80-character limit cut mid-word is cut again at a word. Nothing stored changes.
-pub(crate) fn display_title(chat: &Chat, links: &[LinkedRecord]) -> String {
+/// old 80-character limit cut mid-word, which is a strict prefix of the first line,
+/// is cut again at a word. Nothing stored changes.
+pub(crate) fn display_title(chat: &Chat, around: &Surroundings) -> String {
     let stored = title(chat);
     let Some(chat_title) = chat.title.as_deref() else {
         return stored;
     };
-    // The limit cut it: the same length and no ellipsis from a word cut.
-    let cut = chat_title.chars().count() == TITLE_LIMIT && !chat_title.ends_with('…');
-    let ticket = links.iter().find_map(|link| match link {
+    // The limit cut it: the first line goes on past it. A title of the limit's length
+    // that is the whole line was never cut; one that lost a trimmed space still is.
+    let rest_of_line = around
+        .first_line
+        .as_deref()
+        .and_then(|line| line.strip_prefix(chat_title))
+        .filter(|rest| !rest.is_empty());
+    let cut = rest_of_line.is_some();
+    // It ended at a word's end, so that word is whole.
+    let at_word_end = rest_of_line.is_some_and(|rest| rest.starts_with(char::is_whitespace))
+        || chat_title.ends_with(char::is_whitespace);
+    let ticket = around.links.iter().find_map(|link| match link {
         LinkedRecord::Ticket {
             reference, title, ..
         } => chat_title
@@ -1833,6 +1860,10 @@ pub(crate) fn display_title(chat: &Chat, links: &[LinkedRecord]) -> String {
         return cut_at_word(full, TITLE_LIMIT);
     }
     if cut {
+        let whole = rest.trim_end();
+        if at_word_end && whole.chars().count() < TITLE_LIMIT {
+            return format!("{whole}…");
+        }
         return format!("{}…", before_last_word(rest));
     }
     rest.to_owned()
@@ -1854,7 +1885,7 @@ pub fn chat_state(
             .is_some_and(|problem| !problem.past && problem.kind.removes_composer());
     ChatState {
         id: chat.id.clone(),
-        title: display_title(chat, &around.links),
+        title: display_title(chat, around),
         harness: HarnessRef {
             id: chat.harness.clone(),
             name: name.to_owned(),
@@ -1962,7 +1993,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
     };
     Summary {
         id: chat.id.clone(),
-        title: display_title(chat, &around.links),
+        title: display_title(chat, around),
         harness_id: chat.harness.clone(),
         harness_name: harness.to_owned(),
         // A managed folder is named by an id and never shared: the row leaves it out.
@@ -3216,36 +3247,41 @@ mod tests {
         }
     }
 
+    /// What the Chat view makes of a stored title, the Chat's links and its first line.
+    fn shown(title: &str, links: &[super::LinkedRecord], first_line: Option<&str>) -> String {
+        let around = super::Surroundings {
+            links: links.to_vec(),
+            first_line: first_line.map(str::to_owned),
+            ..Default::default()
+        };
+        super::display_title(&titled(title), &around)
+    }
+
     #[test]
     fn a_title_starting_with_a_linked_reference_is_the_rest_of_the_line() {
         let linked = [ticket("T-12", "Design the attachment review UI")];
-        let shown = |title: &str, links: &[super::LinkedRecord]| {
-            super::display_title(&titled(title), links)
-        };
         assert_eq!(
-            shown("Work on T-12: Design the attachment review UI", &linked),
+            shown("Work on T-12: Design the attachment review UI", &linked, None),
             "Design the attachment review UI"
         );
         // The reference is another ticket's, or no ticket is linked: nothing to drop.
         assert_eq!(
-            shown("Work on T-99: Design it", &linked),
+            shown("Work on T-99: Design it", &linked, None),
             "Work on T-99: Design it"
         );
         assert_eq!(
-            shown("Work on T-12: Design it", &[]),
+            shown("Work on T-12: Design it", &[], None),
             "Work on T-12: Design it"
         );
-        assert_eq!(shown("Fix the login", &linked), "Fix the login");
+        assert_eq!(shown("Fix the login", &linked, None), "Fix the login");
         // Only the lead is dropped; a title that is only the lead stays whole.
-        assert_eq!(shown("Work on T-12: ", &linked), "Work on T-12: ");
+        assert_eq!(shown("Work on T-12: ", &linked, None), "Work on T-12: ");
     }
 
     #[test]
     fn a_title_cut_mid_word_at_eighty_characters_is_cut_again_at_a_word() {
-        let stored: String =
-            "Work on T-12: Design the attachment review UI for this user flow and the".to_owned()
-                + " settings";
-        let stored: String = stored.chars().take(80).collect();
+        let line = "Work on T-12: Design the attachment review UI for this user flow and the settings page";
+        let stored: String = line.chars().take(80).collect();
         assert_eq!(stored.chars().count(), 80);
         // The linked ticket's own title starts the same: it is the title.
         let linked = [ticket(
@@ -3253,25 +3289,42 @@ mod tests {
             "Design the attachment review UI for this user flow and the settings page",
         )];
         assert_eq!(
-            super::display_title(&titled(&stored), &linked),
+            shown(&stored, &linked, Some(line)),
             "Design the attachment review UI for this user flow and the settings page"
         );
         // Not linked: the cut falls back to a word.
-        let plain: String =
-            "Explain how the retry queue decides which Chats to send after a restart, in detail"
-                .chars()
-                .take(80)
-                .collect();
-        let shown = super::display_title(&titled(&plain), &[]);
+        let line =
+            "Explain how the retry queue decides which Chats to send after a restart, in detail";
+        let plain: String = line.chars().take(80).collect();
+        let shown_title = shown(&plain, &[], Some(line));
         assert_eq!(
-            shown,
+            shown_title,
             "Explain how the retry queue decides which Chats to send after a restart, in…"
         );
-        assert!(shown.chars().count() <= 80);
+        assert!(shown_title.chars().count() <= 80);
         // A short title, or one a word cut already ended, is left alone.
-        assert_eq!(super::display_title(&titled("Short one"), &[]), "Short one");
+        assert_eq!(shown("Short one", &[], Some("Short one")), "Short one");
         let cut = super::cut_at_word(&"word ".repeat(30), 80);
-        assert_eq!(super::display_title(&titled(&cut), &[]), cut);
+        assert_eq!(shown(&cut, &[], Some(&"word ".repeat(30))), cut);
+    }
+
+    #[test]
+    fn a_first_line_of_exactly_eighty_characters_was_never_cut() {
+        let whole = "Explain how the retry queue decides which Chats to send after a restart, in deta";
+        assert_eq!(whole.chars().count(), 80);
+        assert_eq!(shown(whole, &[], Some(whole)), whole);
+        // With no first message to compare, the title is what is stored.
+        assert_eq!(shown(whole, &[], None), whole);
+    }
+
+    #[test]
+    fn a_legacy_title_that_lost_its_trailing_space_is_still_a_cut() {
+        // Cut at 80 characters, then trimmed to 79 by the space that ended it: its
+        // last word was whole.
+        let stored = format!("{}abcd", "word ".repeat(15));
+        assert_eq!(stored.chars().count(), 79);
+        let line = format!("{stored} and the rest of the line");
+        assert_eq!(shown(&stored, &[], Some(&line)), format!("{stored}…"));
     }
 
     #[test]

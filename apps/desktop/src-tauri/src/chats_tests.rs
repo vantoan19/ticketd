@@ -2694,6 +2694,40 @@ async fn a_long_codex_turn_reads_the_workspace_at_most_once_per_update_and_sends
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_row_reads_the_first_message_to_tell_a_cut_title_from_a_whole_one() {
+    let f = Fixture::new().await;
+    let mut core = f.core();
+    let make = |core: &mut Workspace, title: &str, message: &str| {
+        let chat = core
+            .create_chat(
+                None,
+                NewChat {
+                    title: Some(title.to_owned()),
+                    harness: "codex".to_owned(),
+                    execution_folder: f.dir.path().to_string_lossy().into_owned(),
+                    folder_managed: false,
+                    links: Vec::new(),
+                },
+            )
+            .unwrap();
+        core.save_chat_input(None, &chat.id, message).unwrap();
+        chat.id
+    };
+    let line = "Explain how the retry queue decides which Chats to send after a restart, in deta";
+    assert_eq!(line.chars().count(), 80);
+    let whole = make(&mut core, line, line);
+    let cut_line = format!("{line}il please");
+    let cut = make(&mut core, line, &cut_line);
+    let (_, rows, _) = f.chats.overview_digest().unwrap();
+    let title = |id: &str| rows.iter().find(|row| row.id == id).unwrap().title.clone();
+    assert_eq!(title(&whole), line);
+    assert_eq!(
+        title(&cut),
+        "Explain how the retry queue decides which Chats to send after a restart, in…"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_overview_wake_reads_again_only_the_chat_that_changed() {
     let f = Fixture::new().await;
     f.chat().await;

@@ -196,6 +196,23 @@ fn a_repeated_command_id_returns_the_first_result_instead_of_a_second_record() {
 }
 
 #[test]
+fn a_chats_first_input_text_is_read_whatever_came_after() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    assert_eq!(workspace.chat_first_input_text(&chat.id).unwrap(), None);
+    workspace
+        .save_chat_input(None, &chat.id, "First message\nmore")
+        .unwrap();
+    workspace
+        .save_chat_input(None, &chat.id, "Second message")
+        .unwrap();
+    assert_eq!(
+        workspace.chat_first_input_text(&chat.id).unwrap().as_deref(),
+        Some("First message\nmore")
+    );
+}
+
+#[test]
 fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_separate_facts() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

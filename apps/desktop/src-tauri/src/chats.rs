@@ -672,6 +672,13 @@ fn surroundings(
         })
         .collect();
     let links = links(workspace, &chat.id)?;
+    let first_line = if chat_view::title_may_be_cut(chat) {
+        workspace
+            .chat_first_input_text(&chat.id)?
+            .and_then(|text| chat_view::first_line_of(&text))
+    } else {
+        None
+    };
     let trashed_links = workspace
         .chat_linked_records(&chat.id)?
         .into_iter()
@@ -683,6 +690,7 @@ fn surroundings(
         checked_turn,
         folder_missing,
         shared_with,
+        first_line,
         project: project(workspace, &chat.execution_folder, &links)?,
         branch: None,
         links,
@@ -1535,12 +1543,12 @@ impl Chats {
             Some(path) => (folder_argument(path)?, false),
             None => (managed.to_string_lossy().into_owned(), true),
         };
-        let first_line = input.message.trim().lines().next().unwrap_or_default();
+        let first_line = chat_view::first_line_of(&input.message).unwrap_or_default();
         // The Chat is stored first: a request the core refuses leaves no folder behind.
         let chat = workspace.create_chat(
             Some(&format!("{command_id}:chat")),
             NewChat {
-                title: Some(chat_view::cut_at_word(first_line, chat_view::TITLE_LIMIT)),
+                title: Some(chat_view::cut_at_word(&first_line, chat_view::TITLE_LIMIT)),
                 harness: input.harness_id,
                 execution_folder,
                 folder_managed,
