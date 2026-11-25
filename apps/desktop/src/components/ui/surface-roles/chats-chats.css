@@ -131,7 +131,7 @@
 .chat-you-actions {
   opacity: 0;
 }
-.chat-you-part:hover .chat-you-actions,
+.chat-you-box:hover .chat-you-actions,
 .chat-you-actions:focus-within {
   opacity: 1;
 }
@@ -162,12 +162,23 @@
 .chat-ai p {
   white-space: pre-line;
 }
-.chat-turn .chat-actions {
+.chat-turn-actions {
   opacity: 0;
 }
-.chat-turn:hover .chat-actions,
-.chat-turn .chat-actions:focus-within {
+.chat-turn-unit:hover .chat-turn-actions,
+.chat-turn-actions:focus-within {
   opacity: 1;
+}
+@media (pointer: coarse) {
+  .chat-turn-actions {
+    opacity: 1;
+  }
+}
+.chat-turn-time {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-variant-numeric: tabular-nums;
 }
 .chat-steps,
 .chat-working,

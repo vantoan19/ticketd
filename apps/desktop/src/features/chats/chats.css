@@ -289,14 +289,25 @@
   align-items: center;
   gap: 6px;
 }
+/* The turn's rhythm (DESIGN.md section 15): 16px under your message, 12px
+   between the parts of a turn (work line, answer, what changed), 40px between
+   turns. A turn's reply actions show in the 40px after it, so the column ends
+   with that much room too and a finished turn never moves the end. */
 .chat-col {
   flex: none;
   display: flex;
   flex-direction: column;
-  gap: 20px;
+  gap: 40px;
   width: 100%;
   max-width: var(--chat-column);
   margin: 0 auto;
+  padding-bottom: 40px;
+}
+.chat-part[data-kind="user"] + * {
+  margin-top: -24px;
+}
+.chat-turn-unit + :is(.chat-working, .chat-working-slot) {
+  margin-top: -28px;
 }
 .chat-dock {
   flex: none;
@@ -332,18 +343,20 @@
 .chat-dock-slot-content {
   display: flow-root;
 }
-/* Your message: right-aligned on an accent fill, exactly as sent. Time and Copy
-   show under it on hover or focus. */
+/* Your message: right-aligned on an accent fill, exactly as sent. Copy shows
+   beside it on hover or focus. */
 .chat-you-part {
   position: relative;
 }
 /* Its box is the animated element (Arrives), so the spacing is set on it. */
 .chat-you-part > * {
   gap: 4px;
-  padding-bottom: 6px;
+}
+.chat-you-box {
+  position: relative;
+  max-width: 82%;
 }
 .chat-you {
-  max-width: 82%;
   padding: 10px 14px;
   overflow-wrap: anywhere;
 }
@@ -355,17 +368,15 @@
   overflow: hidden;
 }
 /* Show more sits right under the bubble, on its edge (STATIC-17): set on the Button. */
-/* Hover actions occupy their own overlay, so the source's 22px turn gap
-   does not grow by an invisible action row. The 6px inset is always reserved. */
+/* Copy sits in the free space at the bubble's left, on its bottom line, so the
+   16px under your message holds nothing. */
 .chat-you-actions {
   position: absolute;
-  right: -8px;
-  bottom: -26px;
+  right: 100%;
+  bottom: 0;
   display: flex;
   align-items: center;
-  gap: 4px;
-  min-height: 32px;
-  margin: 0;
+  padding-right: 4px;
 }
 .chat-you-part .chat-caption {
   margin-top: 0;
@@ -389,13 +400,16 @@
 /* Touch keeps message actions visible in normal flow, with room for the
    shared 44px targets before the next turn. */
 @media (pointer: coarse) {
-  .chat-you-part > * {
-    padding-bottom: 0;
+  .chat-you-box {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
   }
   .chat-you-actions {
     position: static;
     min-height: 44px;
     margin-right: -8px;
+    padding-right: 0;
   }
 }
 /* A single line break in a reply is a new line, as in other chat apps. A hard
@@ -404,16 +418,39 @@
   display: none;
 }
 .chat-turn > * {
-  gap: 20px;
+  gap: 8px;
 }
-.chat-actions {
+/* A turn: its parts 12px apart. Its reply actions sit in the 40px after it,
+   outside the unit's height, so nothing is reserved for them. */
+.chat-turn-unit {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+.chat-turn-actions {
+  position: absolute;
+  top: 100%;
+  left: -8px;
   display: flex;
   align-items: center;
   gap: 2px;
-  /* Tucked under the reply so the hidden row costs little space. */
-  margin: -16px 0 -8px -8px;
+  /* The pointer travels from the answer to the actions without leaving the turn. */
+  padding-top: 4px;
 }
-/* Response actions show on hover and whenever the keyboard is inside them. */
+/* What the turn changed: rows 28px each, no gap between them. */
+.chat-changed + .chat-changed {
+  margin-top: -12px;
+}
+/* Touch keeps the actions in a row of their own, with 44px targets. */
+@media (pointer: coarse) {
+  .chat-turn-actions {
+    position: static;
+    margin-left: -8px;
+    padding-top: 0;
+  }
+}
 .chat-steps,
 .chat-working,
 .chat-line {
@@ -489,15 +526,27 @@
 .chat-working-slot {
   min-height: var(--text-ui-line);
 }
+/* The work line: the fold on the left, the turn's time on the right, 28px. */
+.chat-foldline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 28px;
+}
 .chat-fold {
   display: inline-flex;
-  align-self: flex-start;
   align-items: center;
   gap: 4px;
+  min-width: 0;
   max-width: calc(100% + 16px);
   min-height: 28px;
-  margin: -4px 0 -6px -8px;
+  margin-left: -8px;
   padding: 4px 8px;
+}
+.chat-turn-time {
+  flex: none;
+  white-space: nowrap;
 }
 .chat-fold > svg {
   flex: none;
@@ -515,7 +564,7 @@
   contain-intrinsic-block-size: auto 40px;
   overflow-clip-margin: 8px;
 }
-.chat-fold + .chat-turn-rows {
+.chat-foldline + .chat-turn-rows {
   margin-top: 8px;
 }
 .chat-turn-rows[data-folded] {
@@ -526,10 +575,6 @@
 }
 .chat-turn-response:first-child {
   margin-top: 0;
-}
-/* The rows below a response sit close under it. */
-.chat-below {
-  margin-top: -12px;
 }
 :where(:is(.ticket-detail, .chat-pane)[data-width~="max-400"])
   .chat-turn-rows[data-folded] {
@@ -1478,7 +1523,7 @@
   --chat-column: 680px;
   --chat-gutter: 48px;
 }
-.chat-pane[data-expanded] .chat-you {
+.chat-pane[data-expanded] .chat-you-box {
   max-width: min(82%, 560px);
 }
 /* Below a 640px pane (not window) the column takes the pane. This follows the

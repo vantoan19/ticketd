@@ -76,6 +76,8 @@ import {
   type ViewStep,
   goneWords,
   sentence,
+  turnClock,
+  turnSpanText,
 } from "@/features/chats/model";
 import { FileName, PathCode } from "@/features/chats/FileName";
 import {
@@ -101,7 +103,6 @@ import {
 } from "@/features/chats/use-arrivals";
 import { Presence, Appear, Shimmer } from "@/components/ui/motion";
 import { useReading } from "@/features/chats/use-transcript-scroll";
-import { formatTime } from "@/lib/format";
 
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
@@ -133,16 +134,6 @@ const UserMessageContext = createContext<{
   harness: string;
 }>({ opening: false, waiting: new Set(), harness: "" });
 
-/** "10:44": when your message was sent, as the hover line says it. */
-const sentAt = (stamp: string) => {
-  const date = new Date(stamp);
-  return Number.isNaN(date.getTime()) ? "" : formatTime(date);
-};
-
-/**
- * Your message, exactly as sent, on the right. Past four lines it folds behind
- * Show more. Its time and Copy show on hover or focus.
- */
 /** A record a sent message mentions: a link, or its name and "(in Trash)". */
 function SentMention({
   record,
@@ -205,6 +196,11 @@ function SentText({ text }: { text: string }) {
   );
 }
 
+/**
+ * Your message, exactly as sent, on the right. Past four lines it folds behind
+ * Show more. Copy shows beside it on hover or focus; the turn's time is on its
+ * work line.
+ */
 function UserMessage({ item }: { item: ItemOf<"user"> }) {
   const { opening, waiting, harness } = useContext(UserMessageContext);
   const caption =
@@ -230,17 +226,22 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
     observer.observe(box);
     return () => observer.disconnect();
   }, [item.text, more]);
-  const time = sentAt(item.at);
   return (
     <div className="chat-you-part">
       <Arrives id={item.id} className="flex flex-col items-end">
         {item.images && item.images.length > 0 && (
           <ImageTiles images={item.images} />
         )}
-        <div className="chat-you">
-          <div ref={text} data-clamped={more ? undefined : ""}>
-            <span className="sr-only">You: </span>
-            <SentText text={item.text} />
+        <div className="chat-you-box">
+          <div className="chat-you">
+            <div ref={text} data-clamped={more ? undefined : ""}>
+              <span className="sr-only">You: </span>
+              <SentText text={item.text} />
+            </div>
+          </div>
+          <div className="chat-you-actions">
+            {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
+            <CopyButton text={item.text} label="Copy message" />
           </div>
         </div>
         {long && (
@@ -255,26 +256,18 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
           </Button>
         )}
         {caption && <div className="chat-caption">{caption}</div>}
-        <div className="chat-you-actions">
-          {time && <span className="chat-fine">{time}</span>}
-          {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
-          <CopyButton text={item.text} label="Copy message" />
-        </div>
       </Arrives>
     </div>
   );
 }
 
+/** A response's text. Its actions belong to the turn's end (ReplyActions). */
 const Response = memo(function Response({
   item,
   harness,
-  readOnly,
-  actions,
 }: {
   item: ItemOf<"response">;
   harness: string;
-  readOnly: boolean;
-  actions: TranscriptActions;
 }) {
   // Streamed text fades in chunk by chunk as it arrives; no typewriter.
   const chunkStarts = useChunkStarts(item.text, item.state === "streaming");
@@ -291,24 +284,41 @@ const Response = memo(function Response({
             saved.
           </p>
         )}
-        {item.state === "complete" && (
-          <div className="chat-actions">
-            <CopyButton text={item.text} label="Copy response" />
-            {!readOnly && (
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => actions.saveAsDocument(item)}
-              >
-                <FilePlus2 aria-hidden /> Save as Document
-              </Button>
-            )}
-          </div>
-        )}
       </Arrives>
     </div>
   );
 });
+
+/**
+ * Copy and Save as Document for a turn's final response. They sit in the 40px gap
+ * after the turn, shown on hover or focus without taking space (coarse pointers
+ * keep them in a row). A progress note has none.
+ */
+function ReplyActions({
+  item,
+  readOnly,
+  actions,
+}: {
+  item: ItemOf<"response">;
+  readOnly: boolean;
+  actions: TranscriptActions;
+}) {
+  if (item.state !== "complete") return null;
+  return (
+    <div className="chat-turn-actions">
+      <CopyButton text={item.text} label="Copy response" />
+      {!readOnly && (
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={() => actions.saveAsDocument(item)}
+        >
+          <FilePlus2 aria-hidden /> Save as Document
+        </Button>
+      )}
+    </div>
+  );
+}
 
 /** The current time, ticking each second while `on`. */
 function useNow(on: boolean) {
@@ -870,17 +880,12 @@ function Row({
           />
         </Arrives>
       );
-    case "response":
+    case "progress":
       return (
         // Keyed by the item: the fold remounts the answer outside the rows, and
         // the reading position finds it again by this key.
         <div className="chat-turn-response" data-anchor={row.item.id}>
-          <Response
-            item={row.item}
-            harness={harness}
-            readOnly={readOnly}
-            actions={actions}
-          />
+          <Response item={row.item} harness={harness} />
         </div>
       );
     case "record":
@@ -1004,53 +1009,57 @@ const TurnView = memo(function TurnView({
           live={rowLive}
         />
       ));
+  // A turn that shows nothing of its work (only its answer) has no work part.
+  const work = showRow || turn.rows.length > 0;
   return (
-    <>
-      <div
-        ref={part}
-        className="chat-turnpart"
-        data-anchor=""
-        data-seen={turn.ids.at(-1)}
-      >
-        {showRow && (
-          // A plain row, not a Button: the turn's whole fold line is the target.
-          <button
-            ref={rowButton}
-            id={rowId}
-            type="button"
-            className="chat-fold"
-            data-fresh={endsHere ? "" : undefined}
-            aria-expanded={open}
-            aria-controls={open ? bodyId : undefined}
-            onClick={toggle}
-          >
-            <span>{turn.label}</span>
-            {open ? (
-              <ChevronDown size={14} aria-hidden />
-            ) : (
-              <ChevronRight size={14} aria-hidden />
-            )}
-          </button>
-        )}
-        {open ? (
-          <div
-            id={showRow ? bodyId : undefined}
-            className="chat-turn-rows"
-            data-folded={showRow ? "" : undefined}
-            role={showRow ? "group" : undefined}
-            aria-labelledby={showRow ? rowId : undefined}
-          >
-            {rows(() => true)}
-          </div>
-        ) : (
-          // Collapsed, receipts and notes sit under the turn row in order.
-          turn.rows.some((row) => row.kept === true) && (
-            <div className="chat-turn-rows">
-              {rows((row) => row.kept === true)}
+    // One unit: its parts sit 12px apart, and 40px separates it from what
+    // follows, where its reply actions show.
+    <div className="chat-turn-unit" data-seen={turn.ids.at(-1)}>
+      {work && (
+        <div ref={part} className="chat-turnpart" data-anchor="">
+          {showRow && (
+            <div className="chat-foldline">
+              {/* A plain row, not a Button: the turn's whole fold line is the target. */}
+              <button
+                ref={rowButton}
+                id={rowId}
+                type="button"
+                className="chat-fold"
+                data-fresh={endsHere ? "" : undefined}
+                aria-expanded={open}
+                aria-controls={open ? bodyId : undefined}
+                onClick={toggle}
+              >
+                <span>{turn.label}</span>
+                {open ? (
+                  <ChevronDown size={14} aria-hidden />
+                ) : (
+                  <ChevronRight size={14} aria-hidden />
+                )}
+              </button>
+              <TurnTime turn={turn} />
             </div>
-          )
-        )}
-      </div>
+          )}
+          {open ? (
+            <div
+              id={showRow ? bodyId : undefined}
+              className="chat-turn-rows"
+              data-folded={showRow ? "" : undefined}
+              role={showRow ? "group" : undefined}
+              aria-labelledby={showRow ? rowId : undefined}
+            >
+              {rows(() => true)}
+            </div>
+          ) : (
+            // Collapsed, receipts and notes sit under the turn row in order.
+            turn.rows.some((row) => row.kept === true) && (
+              <div className="chat-turn-rows">
+                {rows((row) => row.kept === true)}
+              </div>
+            )
+          )}
+        </div>
+      )}
       {turn.plan && (
         <div data-anchor="">
           <PlanCard
@@ -1062,18 +1071,13 @@ const TurnView = memo(function TurnView({
       )}
       {turn.final && (
         <div data-anchor={turn.final.id}>
-          <Response
-            item={turn.final}
-            harness={harness}
-            readOnly={readOnly}
-            actions={actions}
-          />
+          <Response item={turn.final} harness={harness} />
         </div>
       )}
       {/* Below the response, in order: the stop marker, then #367's changed
           files row, then #364's records row. */}
       {turn.marker && (
-        <div className="chat-below" data-anchor="">
+        <div data-anchor="">
           <StopMarker
             item={turn.marker}
             harness={harness}
@@ -1082,7 +1086,7 @@ const TurnView = memo(function TurnView({
         </div>
       )}
       {turn.files && (
-        <div className="chat-below" data-anchor="">
+        <div className="chat-changed" data-anchor="">
           <FilesSummary
             item={turn.files}
             commandEdits={turn.commandEdits ?? false}
@@ -1091,7 +1095,7 @@ const TurnView = memo(function TurnView({
         </div>
       )}
       {!turn.live && changes.length > 0 && (
-        <div className="chat-below" data-anchor="">
+        <div className="chat-changed" data-anchor="">
           {/* Never folded; "N more" opens the fold, where each is a step row. */}
           <ReceiptRow
             changes={changes}
@@ -1101,9 +1105,29 @@ const TurnView = memo(function TurnView({
           />
         </div>
       )}
-    </>
+      {turn.final && (
+        <ReplyActions item={turn.final} readOnly={readOnly} actions={actions} />
+      )}
+    </div>
   );
 });
+
+/**
+ * The turn's one time, on the right of its work line: its start ("14:03",
+ * "Yesterday 18:40", "Nov 24"), with the exact start and end in its tooltip.
+ */
+function TurnTime({ turn }: { turn: Turn }) {
+  if (!turn.started) return null;
+  const clock = turnClock(turn.started);
+  if (!clock) return null;
+  return (
+    <Tooltip content={turnSpanText(turn.started, turn.ended)}>
+      <time className="chat-turn-time" dateTime={turn.started}>
+        {clock}
+      </time>
+    </Tooltip>
+  );
+}
 
 function markerText(
   item: ItemOf<"marker">,
@@ -1201,13 +1225,12 @@ const Item = memo(function Item({
     case "user":
       return <UserMessage item={item} />;
     case "response":
+      // Outside any turn the response is its own final one.
       return (
-        <Response
-          item={item}
-          harness={harness}
-          readOnly={readOnly}
-          actions={actions}
-        />
+        <div className="chat-turn-unit">
+          <Response item={item} harness={harness} />
+          <ReplyActions item={item} readOnly={readOnly} actions={actions} />
+        </div>
       );
     case "session": {
       const label =
@@ -1538,6 +1561,7 @@ export function Transcript({
                     {marker}
                     <div
                       className="chat-part"
+                      data-kind={part.item.kind}
                       data-anchor=""
                       data-seen={part.item.id}
                     >

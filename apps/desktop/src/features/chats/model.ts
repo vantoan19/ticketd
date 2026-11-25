@@ -476,7 +476,12 @@ export type TurnRow =
       decision?: string;
       kept?: false;
     }
-  | { kind: "response"; key: string; item: ItemOf<"response">; kept?: false }
+  /**
+   * A progress note: a response the harness wrote while the turn was still
+   * running, with more work after it (or the turn still going). It is part of the
+   * work, so it has no reply actions; the turn's `final` response is the answer.
+   */
+  | { kind: "progress"; key: string; item: ItemOf<"response">; kept?: false }
   | {
       kind: "record";
       key: string;
@@ -503,6 +508,10 @@ export type TurnRow =
  */
 export type Turn = {
   key: string;
+  /** When the turn (or, after a steer, this segment) started: an ISO time. */
+  started?: string;
+  /** When it ended; none while it runs or when the stop was not confirmed. */
+  ended?: string;
   /** Still running: nothing folds and there is no turn row. */
   live: boolean;
   /** Stop was asked for and not confirmed: the turn row shows, open. */
@@ -604,13 +613,21 @@ export function receiptLine(request: ItemOf<"request">) {
   return `Answered · ${request.answer ?? subject}`;
 }
 
+/** A response before the turn knows whether it is the final answer or a progress note. */
+type DraftResponse = {
+  kind: "response";
+  key: string;
+  item: ItemOf<"response">;
+  kept?: false;
+};
+
 /**
  * A turn's rows in order, and every step as it now reads. Steps merge across the
  * items they arrived in. `running` is what a step still running reads as: running,
  * or Not finished once its turn ended, or Not confirmed after an unconfirmed stop.
  */
 function rowsOf(members: TranscriptItem[], running: Step["state"]) {
-  const rows: TurnRow[] = [];
+  const rows: (TurnRow | DraftResponse)[] = [];
   const all: Step[] = [];
   let steps: { key: string; step: Step }[] = [];
   // One line for every warning, where the first one came.
@@ -829,6 +846,14 @@ export function turns(
     );
     const final =
       !ongoing && lastWork?.kind === "response" ? lastWork.item : undefined;
+    // Every other response is a progress note.
+    const turnRows = rows.flatMap((row): TurnRow[] =>
+      row.kind !== "response"
+        ? [row]
+        : row.item === final
+          ? []
+          : [{ ...row, kind: "progress" }],
+    );
     const started = time(part.steer ? part.started : timing?.started_at);
     const ended = unconfirmed
       ? now
@@ -859,12 +884,18 @@ export function turns(
       : words[1];
     const waitWords =
       waited > WAIT_SAID_FROM ? [`waited ${duration(waited)}`] : [];
+    const startedAt = part.steer ? part.started : timing?.started_at;
+    const endedAt = part.until ?? timing?.ended_at;
     const turn: Turn = {
       key: first.id,
+      ...(startedAt && time(startedAt) !== undefined && { started: startedAt }),
+      ...(!unconfirmed &&
+        endedAt &&
+        time(endedAt) !== undefined && { ended: endedAt }),
       live: ongoing && !unconfirmed,
       unconfirmed,
       label: [span, ...waitWords, ...counts].join(" · "),
-      rows: rows.filter((row) => row.kind !== "response" || row.item !== final),
+      rows: turnRows,
       ...(final && { final }),
       ...(marker && { marker }),
       ...(plan && planUnfinished(plan) && { plan }),
@@ -1342,6 +1373,36 @@ export function chatTime(timestamp: string, now = Date.now()): string {
   if (new Date(now - 86_400_000).toDateString() === then.toDateString())
     return "Yesterday";
   return shortDay(then);
+}
+
+/**
+ * A turn's start on its work line: "14:03" today, "Yesterday 18:40", then the
+ * day ("Nov 24"). The clock is in the computer's own format. "" for no time.
+ */
+export function turnClock(timestamp: string, now = Date.now()): string {
+  const then = new Date(timestamp);
+  if (Number.isNaN(then.getTime())) return "";
+  const today = new Date(now).toDateString();
+  if (then.toDateString() === today) return formatTime(then);
+  if (new Date(now - 86_400_000).toDateString() === then.toDateString())
+    return `Yesterday ${formatTime(then)}`;
+  return shortDay(then);
+}
+
+/**
+ * The tooltip of a turn's time: its exact start and end, "Started Nov 24, 2:03 PM ·
+ * Ended 2:12 PM" (the day again only when it ended on another one).
+ */
+export function turnSpanText(started: string, ended?: string): string {
+  const from = new Date(started);
+  if (Number.isNaN(from.getTime())) return "";
+  const full = (date: Date) =>
+    date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  const to = ended ? new Date(ended) : undefined;
+  if (!to || Number.isNaN(to.getTime())) return `Started ${full(from)}`;
+  return `Started ${full(from)} · Ended ${
+    to.toDateString() === from.toDateString() ? formatTime(to) : full(to)
+  }`;
 }
 
 /** KiB or MiB to one decimal, as the truncation note states sizes. */
