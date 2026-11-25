@@ -1433,6 +1433,39 @@ async fn a_context_that_cannot_be_read_is_said_and_the_session_starts_without_it
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_early_harness_rejection_keeps_the_attachment_message_editable() {
+    let f = Fixture::new(FakeAdapter::without_steering());
+    let reply = f.fake.hold_next_submit();
+    let message = f.send_file("Read this", SendMode::Auto).await;
+    let reason = "This model cannot read the attachment.".to_owned();
+    f.emit(EventKind::SubmissionEvidence {
+        submission: f.submits()[0].submission.clone(),
+        evidence: DeliveryEvidence::Rejected {
+            reason: reason.clone(),
+        },
+    })
+    .await;
+    reply.send(SubmitReply::Timeout).unwrap();
+    settle().await;
+
+    let live = f.live().await;
+    assert_eq!(
+        live.problem,
+        Some(ChatProblem::DispatchRefused { detail: reason })
+    );
+    assert!(!live.delivery_unconfirmed);
+    assert_eq!(
+        f.message(&message.id).attempts[0].delivery,
+        ChatDelivery::Rejected
+    );
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(
+        f.host.take_queued(&f.chat.id, &message.id).await.unwrap(),
+        ("Read this".to_owned(), vec![saved_file()])
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_discarded_message_is_never_sent_even_when_its_rejection_arrives_late() {
     let f = Fixture::new(FakeAdapter::codex());
     f.fake.script_submit(SubmitReply::Timeout);
