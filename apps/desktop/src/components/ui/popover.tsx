@@ -25,6 +25,7 @@ function PopoverTrigger({
  * wide as the trigger and 280px. `variant="bar"` holds a row of icon buttons
  * floating over content (the editor's selection bubble): 4px padding, as wide
  * as its buttons. `compact-list` uses 260px for caret block choices.
+ * `compact-form` uses an 8px inset and lets its content own scrolling.
  */
 function PopoverContent({
   className,
@@ -38,7 +39,13 @@ function PopoverContent({
   ...props
 }: React.ComponentProps<typeof PopoverPrimitive.Content> & {
   variant?:
-    "form" | "workspace" | "list" | "compact-list" | "constrained-list" | "bar";
+    | "form"
+    | "compact-form"
+    | "workspace"
+    | "list"
+    | "compact-list"
+    | "constrained-list"
+    | "bar";
 }) {
   const contentRef = useClosingOverlayRef(ref);
   const boundary = useOverlayBoundary();

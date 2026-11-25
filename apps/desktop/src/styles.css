@@ -901,6 +901,14 @@
   overflow-y: auto;
   box-shadow: var(--shadow-large);
 }
+.ui-popover[data-variant="compact-form"] {
+  max-width: min(
+    calc(100vw - 16px),
+    var(--radix-popover-content-available-width, 100vw)
+  );
+  overflow: clip;
+  padding: 8px;
+}
 .ui-menu {
   box-shadow: var(--shadow-menu);
 }
