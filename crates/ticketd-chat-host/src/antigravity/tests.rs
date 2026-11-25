@@ -1,13 +1,14 @@
 use std::{path::PathBuf, time::Duration};
 
 use serde_json::{Value, json};
+use ticketd_core::ChatAttachmentContent;
 
 use crate::conformance::{GENERATION, drain, open_request, start_turn};
 use crate::scripted::{Peer, pipes};
 use crate::{
-    DispatchOutcome, EventKind, HarnessSettings, InteractionAnswer, InteractionKind,
-    InteractionResponse, NativeSessionId, OpenRequest, OpenedRuntime, ProblemKind, Refusal,
-    RespondOutcome, SessionStart, SettingChange, SettingKey, SettingOutcome, TurnOutcome,
+    DeliveryEvidence, DispatchOutcome, EventKind, HarnessSettings, InteractionAnswer,
+    InteractionKind, InteractionResponse, NativeSessionId, OpenRequest, OpenedRuntime, ProblemKind,
+    Refusal, RespondOutcome, SessionStart, SettingChange, SettingKey, SettingOutcome, TurnOutcome,
 };
 
 use super::{ANTIGRAVITY, runtime, settings};
@@ -20,6 +21,16 @@ const MISSING_RESUME: &str =
     include_str!("../../tests/fixtures/antigravity/resume-missing-session.jsonl");
 const SIGNED_OUT: &str = include_str!("../../tests/fixtures/antigravity/signed-out.jsonl");
 const QUOTA_DIAGNOSTIC: &str = "\n⚠ agent executor error: generating and executing: Error 429, Message: Synthetic fixture quota exhausted for this test., Status: RESOURCE_EXHAUSTED, Details: []\n";
+const PNG_BASE64: &str =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aensAAAAASUVORK5CYII=";
+
+fn screenshot() -> ChatAttachmentContent {
+    ChatAttachmentContent::from_image_data_url(
+        "screen.png",
+        &format!("data:image/png;base64,{PNG_BASE64}"),
+    )
+    .unwrap()
+}
 
 #[cfg(unix)]
 #[tokio::test]
@@ -276,6 +287,128 @@ async fn startup(peer: &mut Peer, fixture: &str) {
             _ => break,
         }
     }
+}
+
+#[tokio::test]
+async fn recorded_image_capability_allows_a_native_image_prompt() {
+    let (mut peer, opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    let mut input = start_turn("image");
+    input.text = "Describe this screenshot.".to_owned();
+    input.attachments = vec![screenshot()];
+
+    assert_eq!(opened.runtime.submit(input).await, DispatchOutcome::Written);
+    let outgoing = peer.written().await;
+    assert_eq!(outgoing["method"], "session/prompt");
+    assert_eq!(
+        outgoing["params"],
+        json!({
+            "sessionId": "session-1",
+            "prompt": [
+                {"type": "text", "text": "Describe this screenshot."},
+                {"type": "image", "mimeType": "image/png", "data": PNG_BASE64}
+            ]
+        })
+    );
+}
+
+#[tokio::test]
+async fn an_unadvertised_image_capability_refuses_the_whole_prompt() {
+    let fixture = PROMPT.replacen("\"image\":true,", "", 1);
+    let (mut peer, opened) = open(&fixture, SessionStart::New, settings::OWN).await;
+    assert_eq!(opened.runtime.supports_image_input(), Some(false));
+    let mut input = start_turn("image");
+    input.text = "Do not send this separately.".to_owned();
+    input.attachments = vec![screenshot()];
+    assert_eq!(
+        opened.runtime.submit(input).await,
+        DispatchOutcome::NotSent(Refusal::ImageInputUnsupported)
+    );
+    assert_eq!(
+        opened.runtime.submit(start_turn("next")).await,
+        DispatchOutcome::Written
+    );
+    assert_eq!(
+        peer.written().await["params"]["prompt"],
+        json!([{"type": "text", "text": "hello"}])
+    );
+}
+
+#[tokio::test]
+async fn acp_invalid_params_reports_recoverable_rejection_for_the_image_prompt() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    let mut input = start_turn("image");
+    input.attachments = vec![screenshot()];
+    let submission = input.submission.clone();
+    assert_eq!(opened.runtime.submit(input).await, DispatchOutcome::Written);
+    let outgoing = peer.written().await;
+    let reason = "The selected model does not accept this image.";
+    send(
+        &mut peer,
+        &json!({
+            "jsonrpc": "2.0", "id": outgoing["id"],
+            "error": {"code": -32602, "message": reason}
+        }),
+    )
+    .await;
+    let evidence = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let EventKind::SubmissionEvidence {
+                submission: id,
+                evidence,
+            } = opened.events.recv().await.unwrap().kind
+            {
+                assert_eq!(id, submission);
+                break evidence;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        evidence,
+        DeliveryEvidence::Rejected {
+            reason: reason.to_owned()
+        }
+    );
+}
+
+#[tokio::test]
+async fn file_only_prompt_provides_a_readable_copy_under_the_selected_permission() {
+    let (mut peer, mut opened) = open(PROMPT, SessionStart::New, settings::OWN).await;
+    assert_current_permission(&mut opened.events, settings::OWN).await;
+    let mut input = start_turn("file");
+    input.text.clear();
+    input.attachments = vec![
+        ChatAttachmentContent::from_data_url(
+            "captured file.txt",
+            "data:text/plain;base64,c2F2ZWQgc25hcHNob3QK",
+            1024,
+        )
+        .unwrap(),
+    ];
+
+    assert_eq!(opened.runtime.submit(input).await, DispatchOutcome::Written);
+    let outgoing = peer.written().await;
+    assert_eq!(outgoing["method"], "session/prompt");
+    let blocks = outgoing["params"]["prompt"].as_array().unwrap();
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0]["type"], "text");
+    let reference: Value = serde_json::from_str(
+        blocks[0]["text"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("Read this Chat attachment snapshot: ")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reference["name"], "captured file.txt");
+    let path = PathBuf::from(reference["path"].as_str().unwrap());
+    assert!(path.is_absolute());
+    assert_eq!(std::fs::read(&path).unwrap(), b"saved snapshot\n");
+
+    peer.exit(0);
+    opened.runtime.close().await;
+    assert!(!path.exists());
 }
 
 #[tokio::test]

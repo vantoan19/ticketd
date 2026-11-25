@@ -33,6 +33,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import type { ChatState } from "@/features/chats/client";
 import { requestChoices as choices } from "@/features/chats/dock-focus";
 import {
+  canSteer,
   recordNamer,
   requestLabel,
   ticketdParts,
@@ -380,15 +381,13 @@ function QueueCard({
                 <CornerUpRight aria-hidden />
               </IconButton>
             )}
-            {!queued.attachments?.length && (
-              <IconButton
-                label="Edit in the message box"
-                aria-describedby={textId}
-                onClick={onEdit}
-              >
-                <Pencil aria-hidden />
-              </IconButton>
-            )}
+            <IconButton
+              label="Edit in the message box"
+              aria-describedby={textId}
+              onClick={onEdit}
+            >
+              <Pencil aria-hidden />
+            </IconButton>
             <IconButton
               label="Remove from queue"
               aria-describedby={textId}
@@ -434,7 +433,7 @@ export function ActivityDock({
   onLeave: () => void;
   onAnswered?: (requestId: string, origin: Element | null) => void;
   onSendNow: (queuedId: string) => Promise<void>;
-  onEdit: (queued: Queued) => void;
+  onEdit: (queuedId: string) => void;
   onRemove: (queuedId: string) => void;
   onResume: () => void;
 }) {
@@ -442,7 +441,6 @@ export function ActivityDock({
   const { queue, queue_paused: paused } = chat;
   // During a turn that cannot be steered, a queued message can only wait.
   const live = chat.activity === "working" || chat.activity === "waiting";
-  const canSendNow = !live || chat.steering.available;
   // Always drawn (empty it takes no room): a request or the queue that leaves
   // fades out here while the tray closes its space (DockSlot).
   return (
@@ -489,9 +487,17 @@ export function ActivityDock({
                   <QueueCard
                     key={queued.id}
                     queued={queued}
-                    canSendNow={canSendNow}
+                    canSendNow={
+                      !live ||
+                      canSteer(
+                        chat,
+                        queued.attachments?.some((file) =>
+                          file.media_type.startsWith("image/"),
+                        ),
+                      )
+                    }
                     onSendNow={() => onSendNow(queued.id)}
-                    onEdit={() => onEdit(queued)}
+                    onEdit={() => onEdit(queued.id)}
                     onRemove={() => onRemove(queued.id)}
                   />
                 ))}

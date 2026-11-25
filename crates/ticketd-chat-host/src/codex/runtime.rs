@@ -633,7 +633,17 @@ impl HarnessRuntime for CodexRuntime {
             .peer
             .session
             .reports
-            .supports_image_input()
+            .supports_image_input(false)
+    }
+
+    fn supports_steer_image_input(&self) -> Option<bool> {
+        self.connection
+            .rpc
+            .state()
+            .peer
+            .session
+            .reports
+            .supports_image_input(true)
     }
 
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
@@ -649,9 +659,6 @@ impl HarnessRuntime for CodexRuntime {
             SubmissionKind::Steer { .. } => "turn/steer",
         };
         let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
-        if !attachments.is_empty() && !matches!(kind, SubmissionKind::StartTurn) {
-            return DispatchOutcome::NotSent(Refusal::Unsupported);
-        }
         let prepared = if attachments.is_empty() {
             attachment_input(text, attachments).ok()
         } else {
@@ -671,7 +678,12 @@ impl HarnessRuntime for CodexRuntime {
             let session = &mut peer.session;
             let thread = session.thread().ok_or(Refusal::RuntimeClosed)?.to_owned();
             session.runtime.check_submission(&kind, self.steering)?;
-            if has_images && session.reports.supports_image_input() == Some(false) {
+            if has_images
+                && session
+                    .reports
+                    .supports_image_input(kind != SubmissionKind::StartTurn)
+                    == Some(false)
+            {
                 return Err(Refusal::ImageInputUnsupported);
             }
             let prepared = match kind {
@@ -693,9 +705,6 @@ impl HarnessRuntime for CodexRuntime {
                     if let Some(unattended) = session.turn_overrides.clone() {
                         merge(&mut params, unattended);
                     }
-                    if let Some(files) = files {
-                        peer.attachment_files.push(files);
-                    }
                     session.runtime.start_written(&id);
                     (params, Call::StartTurn(id))
                 }
@@ -712,6 +721,9 @@ impl HarnessRuntime for CodexRuntime {
                     )
                 }
             };
+            if let Some(files) = files {
+                peer.attachment_files.push(files);
+            }
             Ok(prepared)
         };
         self.connection

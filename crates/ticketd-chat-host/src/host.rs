@@ -189,6 +189,8 @@ pub struct ChatLive {
     pub opening: Option<ticketd_core::ChatSessionOrigin>,
     /// What steering does when a send would steer; `None` means a send queues.
     pub steering: Option<SteeringBehavior>,
+    /// Whether a known model restriction rules an image out of the running turn.
+    pub steering_images_refused: bool,
     /// A new turn was handed to the harness and nothing confirmed it yet.
     pub delivery_unconfirmed: bool,
     /// Input the person sent that is held to go out as soon as the session can take it,
@@ -214,6 +216,7 @@ impl ChatLive {
             running: false,
             opening: None,
             steering: None,
+            steering_images_refused: false,
             delivery_unconfirmed: false,
             sending: Vec::new(),
             interactions: Vec::new(),
@@ -510,6 +513,26 @@ impl ChatHost {
         self.ask(chat_id, Command::Attach).await
     }
 
+    /// Checks what a harness can accept before saving the first message of a new Chat.
+    pub fn check_attachment_input(
+        &self,
+        harness: &str,
+        attachments: &[ChatAttachmentContent],
+    ) -> Result<(), HostError> {
+        if attachments.is_empty() {
+            return Ok(());
+        }
+        let adapter = self
+            .inner
+            .adapters
+            .get(harness)
+            .ok_or_else(|| HostError::HarnessUnavailable(harness.to_owned()))?;
+        match adapter.attachment_refusal(attachments) {
+            Some(refusal) => Err(refusal.attachment_error().into()),
+            None => Ok(()),
+        }
+    }
+
     /// The person's message. Saves the input, then dispatches, steers or queues it.
     /// Returns once it is saved; delivery is reported through the Chat's records. In
     /// the Chat of an Automation run it takes the run over first, so the Chat is the
@@ -629,6 +652,17 @@ impl ChatHost {
             reply,
         })
         .await
+    }
+
+    /// Moves one queued message back into the draft with its original saved snapshots.
+    pub async fn take_queued(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<(String, Vec<ChatAttachmentContent>), HostError> {
+        let message_id = message_id.to_owned();
+        self.ask(chat_id, |reply| Command::TakeQueued { message_id, reply })
+            .await
     }
 
     pub async fn respond(

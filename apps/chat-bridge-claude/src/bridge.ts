@@ -534,6 +534,32 @@ export function createBridge(deps: BridgeDeps) {
     if (unresolved.length > 0 && !command.allow_active_turn) {
       return reject(command.id, "turn_active", "a turn is active");
     }
+    let content: Extract<
+      SDKUserMessage["message"],
+      { role: "user" }
+    >["content"] = command.text;
+    if (command.attachments?.length) {
+      content = [];
+      if (command.text) content.push({ type: "text", text: command.text });
+      for (const attachment of command.attachments) {
+        if (attachment.type === "image") {
+          content.push({
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: attachment.media_type,
+              data: attachment.data,
+            },
+          });
+        } else {
+          const { name, path } = attachment;
+          content.push({
+            type: "text",
+            text: `Read this Chat attachment snapshot: ${JSON.stringify({ name, path })}`,
+          });
+        }
+      }
+    }
     const uuid = randomUUID();
     current.submissions.set(uuid, {
       submissionId: command.submission_id,
@@ -542,7 +568,7 @@ export function createBridge(deps: BridgeDeps) {
     current.inputQueue.push({
       type: "user",
       uuid,
-      message: { role: "user", content: command.text },
+      message: { role: "user", content },
       parent_tool_use_id: null,
     });
     current.wakeInput?.();
@@ -935,7 +961,7 @@ export function createBridge(deps: BridgeDeps) {
         });
       }
       case "user": {
-        // Echoed and replayed user text is the host's own input; only tool
+        // Echoed and replayed user input is already saved by the host; only tool
         // results carry new information.
         const inner = isObject(message.message) ? message.message : {};
         const outcome = isObject(message.tool_use_result)

@@ -662,6 +662,7 @@ export const chatStateSchema = z.object({
   /** Whether Send can reach the turn in progress; otherwise input is queued. */
   steering: z.object({
     available: z.boolean(),
+    images_refused: z.boolean().optional(),
     /** What steering does to running work, as the harness defines it. */
     effect: z.string().nullish(),
   }),
@@ -874,12 +875,21 @@ export interface ChatClient {
   ): Promise<void>;
   captureAttachment(file: File): Promise<ChatAttachmentInput>;
   exportAttachment(id: string, file: ChatAttachment): Promise<void>;
-  queue(id: string, text: string, links?: LinkRef[]): Promise<void>;
+  queue(
+    id: string,
+    text: string,
+    links?: LinkRef[],
+    attachments?: ChatAttachmentInput[],
+  ): Promise<void>;
   /** The Chats outside the trash linked to one record. Refetch on `revision`. */
   linkedTo(link: LinkRef): Promise<ChatSummary[]>;
   /** Files and folders under `folder` matching `query`, for the composer's `@` menu. */
   folderFiles(folder: string, query: string): Promise<FolderFile[]>;
   removeQueued(id: string, queuedId: string): Promise<void>;
+  editQueued(
+    id: string,
+    queuedId: string,
+  ): Promise<{ text: string; attachments: ChatAttachmentInput[] }>;
   resumeQueue(id: string): Promise<void>;
   /** Sends one queued message now, alone: it steers the turn or starts one; a paused queue stays paused. */
   sendQueuedNow(id: string, queuedId: string): Promise<void>;
