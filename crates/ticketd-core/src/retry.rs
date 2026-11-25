@@ -49,6 +49,8 @@ pub enum WriteRequest {
     },
     CreateDocument {
         title: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        summary: Option<String>,
         body: String,
     },
     ChangeDocument {
@@ -491,9 +493,15 @@ impl Workspace {
             WriteRequest::CreateTicketFromDocument { id, title, follow } => WriteResult::Ticket(
                 self.create_ticket_from_document_following(&id, &title, follow)?,
             ),
-            WriteRequest::CreateDocument { title, body } => {
-                WriteResult::Document(self.create_document(title.as_deref(), &body)?)
-            }
+            WriteRequest::CreateDocument {
+                title,
+                summary,
+                body,
+            } => WriteResult::Document(self.create_document_with_summary(
+                title.as_deref(),
+                summary.as_deref(),
+                &body,
+            )?),
             WriteRequest::ChangeDocument { id, patch } => {
                 WriteResult::Document(self.change_document(&id, patch)?)
             }

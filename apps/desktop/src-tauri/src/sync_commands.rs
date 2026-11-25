@@ -850,6 +850,7 @@ fn restore(
             patch: DocumentPatch {
                 title: Some(Some(earlier.title).filter(|title| !title.is_empty())),
                 body: Some(earlier.body),
+                summary: None,
                 expected_updated_at: None,
             },
         },

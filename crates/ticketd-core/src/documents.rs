@@ -20,6 +20,9 @@ pub struct Document {
     pub origin_ticket: Option<String>,
     #[serde(default)]
     pub kept: bool,
+    /// The author's one-line plain-text summary. ticketd never writes one.
+    #[serde(default)]
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -34,6 +37,8 @@ pub struct DocumentSummary {
     pub tags: Vec<String>,
     #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +51,8 @@ pub struct DocumentSearchResult {
     pub tags: Vec<String>,
     #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
+    pub summary: Option<String>,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -58,10 +65,29 @@ pub struct DocumentPatch {
     )]
     pub title: Option<Option<String>>,
     pub body: Option<String>,
+    /// Outer None leaves the summary unchanged; Some(None) or an empty value removes it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_title"
+    )]
+    pub summary: Option<Option<String>>,
     /// The `updated_at` the caller last saw. When present and stale the change is rejected, so
     /// an editor's autosave cannot silently overwrite a change made elsewhere.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expected_updated_at: Option<String>,
+}
+
+/// A summary is one line of plain text: line breaks become a space and the ends are
+/// trimmed. Nothing left means no summary.
+pub(crate) fn one_line_summary(summary: &str) -> Option<String> {
+    let line = summary
+        .split(['\n', '\r', '\u{85}', '\u{2028}', '\u{2029}'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    (!line.is_empty()).then_some(line)
 }
 
 fn present_title<'de, D: serde::Deserializer<'de>>(
@@ -75,6 +101,11 @@ pub(crate) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
         CREATE TABLE IF NOT EXISTS documents (id TEXT PRIMARY KEY, kind TEXT NOT NULL DEFAULT 'document' CHECK(kind = 'document'), title TEXT, body TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')), FOREIGN KEY(id, kind) REFERENCES entities(id, kind));
         CREATE TABLE IF NOT EXISTS document_opens (sequence INTEGER PRIMARY KEY AUTOINCREMENT, document_id TEXT NOT NULL UNIQUE REFERENCES documents(id));")?;
     Ok(())
+}
+
+/// Format version 100: a Document's optional one-line summary, written by its author.
+pub(crate) fn migrate_summary(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
+    crate::format::add_column_if_missing(tx, "documents", "summary", "TEXT")
 }
 
 pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
@@ -102,7 +133,7 @@ pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200),
 /// Columns read by every Document list query; see `summary_from_row`.
 fn summary_columns() -> String {
     format!(
-        "d.id, {HEADING}, (SELECT t.reference FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id), d.body, d.updated_at, (SELECT group_concat(tag_name, char(31)) FROM (SELECT tag_name FROM document_tags WHERE document_id = d.id ORDER BY tag_name))"
+        "d.id, {HEADING}, (SELECT t.reference FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id), d.body, d.updated_at, (SELECT group_concat(tag_name, char(31)) FROM (SELECT tag_name FROM document_tags WHERE document_id = d.id ORDER BY tag_name)), d.summary"
     )
 }
 
@@ -122,6 +153,7 @@ fn summary_from_row(
             .map(|value| value.split('\u{1f}').map(str::to_owned).collect())
             .unwrap_or_default(),
         updated_at: row.get(4)?,
+        summary: row.get(6)?,
     })
 }
 
@@ -224,6 +256,17 @@ fn without_repeated_heading<'a>(text: &'a str, heading: &str) -> &'a str {
 
 impl Workspace {
     pub fn create_document(&mut self, title: Option<&str>, body: &str) -> Result<Document, Error> {
+        self.create_document_with_summary(title, None, body)
+    }
+
+    /// Like [`Workspace::create_document`], with the author's one-line summary.
+    pub fn create_document_with_summary(
+        &mut self,
+        title: Option<&str>,
+        summary: Option<&str>,
+        body: &str,
+    ) -> Result<Document, Error> {
+        let summary = summary.and_then(one_line_summary);
         let id = Uuid::new_v4().to_string();
         self.connection.execute_batch("SAVEPOINT create_document")?;
         let result = (|| {
@@ -232,8 +275,8 @@ impl Workspace {
                 [&id],
             )?;
             self.connection.execute(
-                "INSERT INTO documents (id, title, body) VALUES (?1, ?2, ?3)",
-                params![id, title, body],
+                "INSERT INTO documents (id, title, body, summary) VALUES (?1, ?2, ?3, ?4)",
+                params![id, title, body, summary],
             )?;
             crate::document_links::index_body(&self.connection, &id, body)?;
             self.open_document(&id)
@@ -255,7 +298,7 @@ impl Workspace {
     pub fn show_document(&self, id: &str) -> Result<Document, Error> {
         self.connection
             .query_row(
-                &format!("SELECT d.id, d.title, d.body, d.created_at, d.updated_at, d.trashed, (SELECT brief FROM activities WHERE id = d.originating_activity_id), d.kept, (SELECT t.reference FROM activities a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = d.originating_activity_id), {HEADING} FROM documents d WHERE d.id = ?1"),
+                &format!("SELECT d.id, d.title, d.body, d.created_at, d.updated_at, d.trashed, (SELECT brief FROM activities WHERE id = d.originating_activity_id), d.kept, (SELECT t.reference FROM activities a JOIN tickets t ON t.id = a.ticket_id WHERE a.id = d.originating_activity_id), {HEADING}, d.summary FROM documents d WHERE d.id = ?1"),
                 [id],
                 |row| {
                     Ok(Document {
@@ -269,6 +312,7 @@ impl Workspace {
                         kept: row.get(7)?,
                         origin_ticket: row.get(8)?,
                         heading: row.get(9)?,
+                        summary: row.get(10)?,
                     })
                 },
             )
@@ -402,6 +446,7 @@ impl Workspace {
                             origin_ticket: summary.origin_ticket,
                             tags: summary.tags,
                             updated_at: summary.updated_at,
+                            summary: summary.summary,
                         })
                     },
                 )?
@@ -447,6 +492,7 @@ impl Workspace {
                     origin_ticket: summary.origin_ticket,
                     tags: summary.tags,
                     updated_at: summary.updated_at,
+                    summary: summary.summary,
                 })
             })?
             .collect::<Result<_, _>>()?)
@@ -528,7 +574,14 @@ impl Workspace {
                 return Err(Error::DocumentChanged(id.to_owned()));
             }
             let body_to_index = patch.body.clone();
-            let changes = match (patch.title, patch.body) {
+            let summary_changes = match &patch.summary {
+                Some(summary) => workspace.connection.execute(
+                    "UPDATE documents SET summary = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0 AND summary IS NOT ?2",
+                    params![id, summary.as_deref().and_then(one_line_summary)],
+                )?,
+                None => 0,
+            };
+            let changes = summary_changes + match (patch.title, patch.body) {
             (Some(title), Some(body)) => workspace.connection.execute("UPDATE documents SET title = ?2, body = ?3, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title, body])?,
             (Some(title), None) => workspace.connection.execute("UPDATE documents SET title = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, title])?,
             (None, Some(body)) => workspace.connection.execute("UPDATE documents SET body = ?2, updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE id = ?1 AND trashed = 0", params![id, body])?,

@@ -353,6 +353,7 @@ fn a_conflicting_body_can_be_settled_with_an_edited_value() {
                     title: None,
                     body: Some(body.into()),
                     expected_updated_at: None,
+                    ..Default::default()
                 },
             )
             .unwrap();
@@ -1200,9 +1201,9 @@ fn the_same_field_changed_on_two_devices_converges_in_every_order() {
 fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
     // A higher format number, with or without what else this version does not know.
     for (from, to) in [
-        ("format: 1\n", "format: 4\n"),
-        ("format: 1\n", "format: 4\nmood: \"happy\"\n"),
-        ("format: 1\n", "format: 4\n---\n<!-- ticketd:mood -->\n"),
+        ("format: 1\n", "format: 5\n"),
+        ("format: 1\n", "format: 5\nmood: \"happy\"\n"),
+        ("format: 1\n", "format: 5\n---\n<!-- ticketd:mood -->\n"),
     ] {
         let mut devices = devices();
         let reference = devices.shared_ticket("Login");

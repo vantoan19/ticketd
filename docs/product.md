@@ -258,7 +258,9 @@ core workflows for Documents, Activities, Plans, tags, and links
 
 - A **Document** is Markdown with its own ID, an optional title, and no mandatory
   type. Without a title, its heading is the first nonempty line (or, for activity
-  details, the Activity's brief).
+  details, the Activity's brief). A Document may also carry a **summary**: one
+  plain line written by its author (`--summary` on `document create` and `document
+change`; an empty value clears it). ticketd never writes one.
 - Capture opens an editor at once with no required field, autosaves, and creates
   nothing if left empty. Documents opens on Recently opened with pinned items above;
   tags, pins, and links are optional.

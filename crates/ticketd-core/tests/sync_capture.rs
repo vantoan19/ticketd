@@ -197,6 +197,7 @@ fn a_write_from_another_process_is_captured() {
         Some("request-1"),
         WriteRequest::CreateDocument {
             title: Some("From the CLI".into()),
+            summary: None,
             body: "Body".into(),
         },
     )

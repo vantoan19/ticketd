@@ -301,6 +301,7 @@ fn save_document(
     let Some(id) = id else {
         let request = WriteRequest::CreateDocument {
             title,
+            summary: None,
             body: body.unwrap_or_default(),
         };
         return match open_workspace()
@@ -315,6 +316,7 @@ fn save_document(
         title: title_changed.then_some(title),
         body,
         expected_updated_at,
+        ..Default::default()
     };
     open_workspace()
         .and_then(|mut w| w.change_document(&id, patch))
