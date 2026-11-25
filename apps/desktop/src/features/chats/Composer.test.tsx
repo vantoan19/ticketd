@@ -6,6 +6,7 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import type { LinkedRecord } from "@/features/chats/client";
 import { Composer } from "@/features/chats/Composer";
@@ -73,7 +74,96 @@ test("picks several files and retries just the failed capture", async () => {
   );
 });
 
+function setupAttachmentComposer(initialText = "") {
+  const onSend = vi.fn(async () => {});
+  render(
+    <Composer
+      placeholder="Message"
+      initialText={initialText}
+      controls={(text, hasAttachments) => ({
+        send: "send",
+        enabled: text.trim() !== "" || hasAttachments,
+      })}
+      onSend={onSend}
+      attachments={
+        new ComposerAttachments((file) => captureChatAttachment(file, 1024))
+      }
+    />,
+  );
+  const box = screen.getByRole<HTMLTextAreaElement>("textbox", {
+    name: "Message",
+  });
+  return { box, onSend };
+}
+
+test("pastes multiple files, removes one, and sends the other without text", async () => {
+  const { box, onSend } = setupAttachmentComposer();
+  const first = new File(["one"], "first.txt", { type: "text/plain" });
+  const second = new File(["two"], "second.txt", { type: "text/plain" });
+  expect(
+    fireEvent.paste(box, { clipboardData: { files: [first, second] } }),
+  ).toBe(false);
+  fireEvent.click(screen.getByRole("button", { name: "Remove first.txt" }));
+  expect(screen.getAllByRole("listitem")).toHaveLength(1);
+  expect(
+    screen.getByRole("button", { name: "Remove second.txt" }),
+  ).toBeTruthy();
+  const send = screen.getByRole<HTMLButtonElement>("button", { name: "Send" });
+  await waitFor(() => expect(send.disabled).toBe(false));
+  fireEvent.click(send);
+  expect(onSend).toHaveBeenCalledWith(
+    "",
+    [],
+    [{ name: "second.txt", dataUrl: "data:text/plain;base64,dHdv" }],
+  );
+});
+
+test("pastes files supplied through clipboard items in order", async () => {
+  const { box, onSend } = setupAttachmentComposer("Use these files");
+  const first = new File(["one"], "first.txt", { type: "text/plain" });
+  const second = new File(["two"], "second.txt", { type: "text/plain" });
+  expect(
+    fireEvent.paste(box, {
+      clipboardData: {
+        files: [],
+        items: [
+          { kind: "file", type: "text/plain", getAsFile: () => first },
+          { kind: "string", type: "text/plain" },
+          { kind: "file", type: "", getAsFile: () => null },
+          { kind: "file", type: "text/plain", getAsFile: () => second },
+        ],
+      },
+    }),
+  ).toBe(false);
+  const send = screen.getByRole<HTMLButtonElement>("button", { name: "Send" });
+  await waitFor(() => expect(send.disabled).toBe(false));
+  fireEvent.click(send);
+  expect(onSend).toHaveBeenCalledWith(
+    "Use these files",
+    [],
+    [
+      { name: "first.txt", dataUrl: "data:text/plain;base64,b25l" },
+      { name: "second.txt", dataUrl: "data:text/plain;base64,dHdv" },
+    ],
+  );
+});
+
+test("pastes a plain-text file path at the caret", async () => {
+  const user = userEvent.setup();
+  const { box, onSend } = setupAttachmentComposer("Open  next.");
+  box.focus();
+  box.setSelectionRange(5, 5);
+  await user.paste("C:\\samples\\report.txt");
+  expect(box.value).toBe("Open C:\\samples\\report.txt next.");
+  expect(
+    screen.queryByRole("list", { name: "Message attachments" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(onSend).toHaveBeenCalledWith("Open C:\\samples\\report.txt next.", []);
+});
+
 test("pastes a removable screenshot and sends the image without text", async () => {
+  const { box, onSend } = setupAttachmentComposer();
   const image = new File(["clipboard bytes"], "image.png", {
     type: "image/png",
   });
@@ -81,24 +171,27 @@ test("pastes a removable screenshot and sends the image without text", async () 
     name: "image.png",
     dataUrl: "data:image/png;base64,Y2xpcGJvYXJkIGJ5dGVz",
   };
-  const capture = vi.fn(async () => attachment);
-  const onSend = vi.fn(async () => {});
-  render(
-    <Composer
-      placeholder="Message"
-      controls={(text, hasAttachments) => ({
-        send: "send",
-        enabled: text.trim() !== "" || hasAttachments,
-      })}
-      onSend={onSend}
-      attachments={new ComposerAttachments(capture)}
-    />,
-  );
-  const box = screen.getByRole("textbox", { name: "Message" });
   const paste = () =>
-    fireEvent.paste(box, { clipboardData: { files: [image] } });
+    fireEvent.paste(box, {
+      clipboardData: {
+        files: [image],
+        items: [
+          { kind: "file", type: "image/png", getAsFile: () => image },
+          {
+            kind: "file",
+            type: "image/jpeg",
+            getAsFile: () =>
+              new File(["alternate bytes"], "image.jpg", {
+                type: "image/jpeg",
+              }),
+          },
+          { kind: "string", type: "text/html" },
+        ],
+      },
+    });
   expect(paste()).toBe(false);
   await screen.findByRole("img", { name: "image.png" });
+  expect(screen.getAllByRole("listitem")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Remove image.png" }));
   expect(screen.queryByRole("img", { name: "image.png" })).toBeNull();
   expect(
@@ -112,7 +205,6 @@ test("pastes a removable screenshot and sends the image without text", async () 
     ).toBe(false),
   );
   fireEvent.keyDown(box, { key: "Enter" });
-  expect(capture).toHaveBeenCalledWith(image);
   expect(onSend).toHaveBeenCalledWith("", [], [attachment]);
 });
 

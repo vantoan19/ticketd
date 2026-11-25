@@ -1,4 +1,5 @@
 import {
+  useCallback,
   useImperativeHandle,
   useRef,
   useState,
@@ -27,6 +28,9 @@ type Submit = (
   links: LinkRef[],
   files?: ChatAttachmentInput[],
 ) => Promise<void>;
+
+// Matches the dedicated chooser request handled by the Linux desktop adapter.
+const CLIPBOARD_FILE_PICKER = "application/x-ticketd-clipboard";
 
 /**
  * The message box and its control row. The send button's word comes from
@@ -97,6 +101,23 @@ export function Composer({
   const [tokens, setTokens] = useState(initialTokens);
   const [busy, setBusy] = useState(false);
   const filePicker = useRef<HTMLInputElement>(null);
+  const clipboardFilePicker = useRef<HTMLInputElement>(null);
+  const [receivingClipboardFiles, setReceivingClipboardFiles] = useState(false);
+  const bindClipboardFilePicker = useCallback(
+    (picker: HTMLInputElement | null) => {
+      clipboardFilePicker.current = picker;
+      if (!picker) return;
+      const canceled = () => setReceivingClipboardFiles(false);
+      picker.addEventListener("cancel", canceled);
+      return () => {
+        clipboardFilePicker.current = null;
+        picker.removeEventListener("cancel", canceled);
+      };
+    },
+    [],
+  );
+  const linuxDesktop =
+    "__TAURI_INTERNALS__" in window && /^linux/i.test(navigator.platform);
   const [failedAction, setFailedAction] = useState<"send" | "queue" | null>(
     null,
   );
@@ -112,7 +133,7 @@ export function Composer({
   const files = items.flatMap((item) =>
     item.state === "ready" ? [item.content] : [],
   );
-  const waiting = items.length !== files.length;
+  const waiting = receivingClipboardFiles || items.length !== files.length;
   const available = controls(text, items.length > 0);
   const state = waiting
     ? { ...available, enabled: false, queues: false }
@@ -152,6 +173,10 @@ export function Composer({
   const queue = () => {
     if (state.queues) submit(onQueue);
   };
+  const addPickedFiles = (input: HTMLInputElement) => {
+    if (!busy) attachments.add(Array.from(input.files ?? []));
+    input.value = "";
+  };
   return (
     <form
       className="chat-composer"
@@ -162,18 +187,41 @@ export function Composer({
       }}
       onPaste={(event) => {
         if (attachments === NO_ATTACHMENTS) return;
-        const image =
-          Array.from(event.clipboardData.files).find((file) =>
-            file.type.startsWith("image/"),
-          ) ??
-          Array.from(event.clipboardData.items ?? [])
-            .find(
-              (item) => item.kind === "file" && item.type.startsWith("image/"),
-            )
-            ?.getAsFile();
-        if (!image) return;
-        event.preventDefault();
-        attachments.add([image]);
+        const clipboard = event.clipboardData;
+        // The file list and file items can describe the same clipboard data.
+        const pastedFiles = Array.from(clipboard.files);
+        if (!pastedFiles.length) {
+          for (const item of Array.from(clipboard.items ?? [])) {
+            if (item.kind !== "file") continue;
+            const file = item.getAsFile();
+            if (file) pastedFiles.push(file);
+          }
+        }
+        if (pastedFiles.length) {
+          event.preventDefault();
+          attachments.add(pastedFiles);
+          return;
+        }
+        // Newer WebKitGTK hides the URI values for clipboard files from the DOM.
+        if (
+          clipboardFilePicker.current &&
+          event.isTrusted &&
+          !busy &&
+          !receivingClipboardFiles &&
+          clipboard.types.includes("text/uri-list") &&
+          !clipboard.getData("text/uri-list") &&
+          !clipboard.getData("text/plain") &&
+          !clipboard.getData("text/html")
+        ) {
+          try {
+            clipboardFilePicker.current.showPicker();
+          } catch {
+            // WebKit can decline a picker when there is no active gesture.
+            return;
+          }
+          event.preventDefault();
+          setReceivingClipboardFiles(true);
+        }
       }}
     >
       {above}
@@ -268,14 +316,21 @@ export function Composer({
                 multiple
                 hidden
                 aria-label="Choose files to attach"
-                onChange={(event) => {
-                  if (!busy)
-                    attachments.add(
-                      Array.from(event.currentTarget.files ?? []),
-                    );
-                  event.currentTarget.value = "";
-                }}
+                onChange={(event) => addPickedFiles(event.currentTarget)}
               />
+              {linuxDesktop && (
+                <input
+                  ref={bindClipboardFilePicker}
+                  type="file"
+                  multiple
+                  hidden
+                  accept={CLIPBOARD_FILE_PICKER}
+                  onChange={(event) => {
+                    setReceivingClipboardFiles(false);
+                    addPickedFiles(event.currentTarget);
+                  }}
+                />
+              )}
               <IconButton
                 type="button"
                 variant="ghost"

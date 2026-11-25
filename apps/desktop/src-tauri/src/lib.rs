@@ -4,6 +4,8 @@ mod attachment_commands;
 mod attachment_media;
 mod automation_commands;
 mod automation_runner;
+#[cfg(target_os = "linux")]
+mod chat_clipboard;
 mod chat_commands;
 mod chat_reports;
 mod chat_ticketd;
@@ -2219,6 +2221,17 @@ pub fn run() -> Result<(), tauri::Error> {
             started,
         })
         .setup(move |app| {
+            #[cfg(target_os = "linux")]
+            if let Some(window) = tauri::Manager::get_webview_window(app, "main") {
+                let dev_url = if tauri::is_dev() {
+                    app.config().build.dev_url.clone()
+                } else {
+                    None
+                };
+                window.with_webview(move |webview| {
+                    chat_clipboard::install(&webview.inner(), dev_url);
+                })?;
+            }
             #[cfg(all(debug_assertions, unix))]
             ticketd_chat_host::prepare_harness_recording(|| {
                 open_workspace()?
