@@ -132,6 +132,14 @@ fn gh_token(host: &str, account: Option<&str>) -> Option<Secret> {
     .into_iter()
     .find_map(|program| {
         let mut command = Command::new(program);
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            use windows::Win32::System::Threading::CREATE_NO_WINDOW;
+
+            // Keep background credential checks from opening a desktop console.
+            command.creation_flags(CREATE_NO_WINDOW.0);
+        }
         command.args(["auth", "token", "--hostname", host]);
         if let Some(account) = account {
             command.args(["--user", account]);
@@ -167,6 +175,70 @@ mod tests {
                 .find(|(key, _)| *key == name)
                 .map(|(_, value)| (*value).to_owned())
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn gh_token_runs_without_a_console_window() {
+        use std::{env, fs, os::windows::process::CommandExt};
+        use windows::Win32::System::Threading::DETACHED_PROCESS;
+
+        const PROBE: &str = "TICKETD_TEST_GITHUB_CONSOLE";
+        if env::var_os(PROBE).is_some() {
+            assert!(fs::File::open("CONIN$").is_err(), "probe has a console");
+            assert!(
+                gh_token("github.com", None)
+                    .is_some_and(|token| token.expose() == "test-token-without-console-window"),
+                "expected the GitHub CLI fixture to return the token without opening a console window"
+            );
+            return;
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let fixture = directory.path().join("gh.rs");
+        fs::write(
+            &fixture,
+            r#"
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetConsoleWindow() -> *mut std::ffi::c_void;
+}
+
+fn main() {
+    // SAFETY: This function takes no arguments and reports this process's window.
+    if !unsafe { GetConsoleWindow() }.is_null() {
+        std::process::exit(1);
+    }
+    println!("test-token-without-console-window");
+}
+"#,
+        )
+        .unwrap();
+        let build = Command::new("rustc")
+            .arg(&fixture)
+            .arg("-o")
+            .arg(directory.path().join("gh.exe"))
+            .output()
+            .unwrap();
+        assert!(
+            build.status.success(),
+            "{}",
+            String::from_utf8_lossy(&build.stderr)
+        );
+
+        // Match the Windows desktop, which has no console for gh to inherit.
+        let probe = Command::new(env::current_exe().unwrap())
+            .arg("gh_token_runs_without_a_console_window")
+            .env(PROBE, "1")
+            .env("PATH", directory.path())
+            .creation_flags(DETACHED_PROCESS.0)
+            .output()
+            .unwrap();
+        let report = String::from_utf8_lossy(&probe.stdout);
+        assert!(
+            probe.status.success() && report.contains("1 passed"),
+            "{report}"
+        );
     }
 
     #[test]
