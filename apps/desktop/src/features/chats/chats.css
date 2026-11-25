@@ -714,20 +714,23 @@
 .chat-pick-note {
   padding: 6px 8px;
 }
-/* The one picker for harness, model and effort (#368): harness tabs, then the
-   chosen harness's models, then its efforts in one row. */
-/* The popover itself never scrolls: the picker is capped by the room the
-   pane body leaves (less the popover's 16px padding), and only the model
-   list scrolls inside it (CH-18). */
+/* Normally only the model list scrolls (CH-18). When the controls and a
+   model row cannot fit, scroll the picker as well, inside the popover inset. */
 .chat-picker {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: calc(var(--radix-popover-content-available-height) - 32px);
+  max-height: calc(var(--radix-popover-content-available-height) - 16px);
+  overflow-y: auto;
 }
 /* Harness tabs: one equal-width segmented strip that never wraps; a status
    word truncates inside its tab before the name does (CH-17). */
-
+.chat-picker
+  [data-slot="segmented-control"]:not([data-variant="plain"])
+  > :is([role="tab"], [role="radio"]) {
+  gap: 4px;
+  padding-inline: 0;
+}
 .chat-picker [role="tab"] small {
   flex: 0 1000 auto;
   min-width: 0;
@@ -747,15 +750,13 @@
 }
 .chat-picker[data-switch] .chat-picker-body {
   height: 272px;
-  min-height: 120px;
 }
 .chat-picker-models {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
   gap: 2px;
-  min-height: 0;
-  margin: 0 -8px;
+  min-height: 48px;
   overflow-y: auto;
 }
 .chat-picker-model-list {
@@ -766,7 +767,6 @@
 .chat-picker-models > [data-slot="button"] {
   flex: none;
   align-self: flex-start;
-  margin-left: 2px;
 }
 .chat-picker-skeleton-model {
   flex: none;
@@ -776,11 +776,16 @@
 .chat-picker-skeleton-row {
   height: 28px;
 }
+.chat-picker-label,
+.chat-picker-model,
+.chat-picker-note {
+  padding-inline: 8px;
+}
 .chat-picker-model {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  padding: 6px 8px;
+  padding-block: 6px;
 }
 .chat-picker-model-line {
   display: flex;
@@ -792,13 +797,13 @@
   height: 14px;
   margin-left: auto;
 }
-/* Effort sits above the models, always in view; its segments share the
+/* Effort sits above the models. Its segments share the
    width and never push past the popover's edge. */
 .chat-picker-effort {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding-bottom: 8px;
 }
 /* Every effort the harness lists shows, in equal segments that never wrap. */

@@ -382,12 +382,18 @@ button.chat-file-name:focus-visible {
   line-height: var(--text-ui-line);
 }
 
+.chat-picker
+  [data-slot="segmented-control"]:not([data-variant="plain"])
+  > :is([role="tab"], [role="radio"]) {
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
 .chat-picker [role="tab"] small {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-.chat-picker [role="tab"][data-dim] > .chat-picker-harness-name {
+.chat-picker [role="tab"][data-dim] .chat-picker-harness-name {
   color: var(--muted-foreground);
 }
 .chat-picker-label {
@@ -407,7 +413,10 @@ button.chat-file-name:focus-visible {
 .chat-picker-model[data-state="checked"] {
   background: var(--accent);
 }
-.chat-picker-model:focus-visible {
+.chat-picker-model:focus-visible,
+.chat-picker
+  [data-slot="segmented-control"]
+  > :is([role="tab"], [role="radio"]):focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }

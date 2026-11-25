@@ -2,6 +2,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -29,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
@@ -254,6 +256,11 @@ export function HarnessPicker({
 }) {
   const [open, setOpen] = useState(false);
   const [all, setAll] = useState(false);
+  const composerAnchor = useRef<HTMLFormElement>(null);
+  // Use the whole composer as the anchor so a flipped picker still clears it.
+  useLayoutEffect(() => {
+    composerAnchor.current = inputRef.current?.form ?? null;
+  }, [inputRef]);
   // New Chat hides its own copy of a harness's notice while the popover shows it.
   useEffect(() => onOpenChange?.(open), [open, onOpenChange]);
   const [viewed, setViewed] = useState(harnessId);
@@ -362,6 +369,7 @@ export function HarnessPicker({
 
   return (
     <Popover open={open} onOpenChange={changeOpen}>
+      <PopoverAnchor virtualRef={composerAnchor} />
       <Tooltip
         shortcut={shortcutLabel("chat-model")}
         content={
@@ -412,6 +420,9 @@ export function HarnessPicker({
       <PopoverContent
         align="start"
         side="top"
+        sideOffset={8}
+        collisionPadding={8}
+        variant="compact-form"
         className="w-80"
         aria-label="Harness and model"
         onCloseAutoFocus={(event) => {
@@ -443,10 +454,12 @@ export function HarnessPicker({
                   dim={!item.ready}
                   decorative
                 />
-                <span className="chat-picker-harness-name shrink-0">
-                  {item.name}
+                <span className="flex min-w-0 items-center gap-1 overflow-hidden">
+                  <span className="chat-picker-harness-name max-w-full shrink-0 truncate">
+                    {item.name}
+                  </span>
+                  {!item.ready && item.word && <small>· {item.word}</small>}
                 </span>
-                {!item.ready && item.word && <small>· {item.word}</small>}
               </SegmentedTab>
             ))}
           </SegmentedTabList>
