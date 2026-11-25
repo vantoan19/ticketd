@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use ticketd_core::ChatAttachmentContent;
 use tokio::time::timeout;
 
 use crate::{
@@ -18,6 +19,7 @@ use crate::{
     SubmissionKind,
 };
 
+use crate::attachment_input::AttachmentFiles;
 use crate::json_rpc::{
     self, CallOutcome, Connection, Incoming, MAX_FRAME_BYTES, Peer, Reply, Response, RpcError,
 };
@@ -55,6 +57,7 @@ struct CodexPeer {
     session: Session,
     /// Set for a thread that can call the ticketd CLI as its own tool.
     ticket_tool: Option<Arc<TicketTool>>,
+    attachment_files: Vec<AttachmentFiles>,
 }
 
 impl Peer for CodexPeer {
@@ -117,6 +120,7 @@ impl Peer for CodexPeer {
         if let Some(tool) = &self.ticket_tool {
             tool.close();
         }
+        self.attachment_files.clear();
         self.session.disconnected();
     }
 }
@@ -573,6 +577,36 @@ struct CodexRuntime {
     steering: bool,
 }
 
+fn attachment_input(
+    text: String,
+    attachments: Vec<ChatAttachmentContent>,
+) -> std::io::Result<(Vec<Value>, Option<AttachmentFiles>)> {
+    let mut input = Vec::new();
+    let mut files = None;
+    if !text.is_empty() || attachments.is_empty() {
+        input.push(json!({"type": "text", "text": text, "text_elements": []}));
+    }
+    for attachment in attachments {
+        if let Some(url) = attachment.image_data_url() {
+            input.push(json!({"type": "image", "url": url}));
+        } else {
+            let files = match &files {
+                Some(files) => files,
+                None => files.insert(AttachmentFiles::new()?),
+            };
+            let path = files.materialize(&attachment)?;
+            let path = path.to_str().ok_or(std::io::ErrorKind::InvalidData)?;
+            let reference = json!({"name": attachment.name(), "path": path});
+            input.push(json!({
+                "type": "text",
+                "text": format!("Read this Chat attachment snapshot: {reference}"),
+                "text_elements": []
+            }));
+        }
+    }
+    Ok((input, files))
+}
+
 impl std::fmt::Debug for CodexRuntime {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -614,19 +648,25 @@ impl HarnessRuntime for CodexRuntime {
             SubmissionKind::StartTurn => "turn/start",
             SubmissionKind::Steer { .. } => "turn/steer",
         };
-        let has_images = !attachments.is_empty();
-        if has_images && !matches!(kind, SubmissionKind::StartTurn) {
+        let has_images = attachments.iter().any(ChatAttachmentContent::is_image);
+        if !attachments.is_empty() && !matches!(kind, SubmissionKind::StartTurn) {
             return DispatchOutcome::NotSent(Refusal::Unsupported);
         }
-        let mut input = Vec::new();
-        if !text.is_empty() || !has_images {
-            input.push(json!({"type": "text", "text": text, "text_elements": []}));
-        }
-        input.extend(
-            attachments
-                .into_iter()
-                .map(|image| json!({"type": "image", "url": image.image_data_url()})),
-        );
+        let prepared = if attachments.is_empty() {
+            attachment_input(text, attachments).ok()
+        } else {
+            tokio::task::spawn_blocking(move || {
+                attachment_input(text, attachments).inspect_err(|error| {
+                    tracing::warn!(error_kind = %error.kind(), "chat attachment handoff failed");
+                })
+            })
+            .await
+            .ok()
+            .and_then(Result::ok)
+        };
+        let Some((input, files)) = prepared else {
+            return DispatchOutcome::NotSent(Refusal::AttachmentUnavailable);
+        };
         let prepare = move |peer: &mut CodexPeer| {
             let session = &mut peer.session;
             let thread = session.thread().ok_or(Refusal::RuntimeClosed)?.to_owned();
@@ -652,6 +692,9 @@ impl HarnessRuntime for CodexRuntime {
                     // An unattended session's approvals and sandbox, again every turn.
                     if let Some(unattended) = session.turn_overrides.clone() {
                         merge(&mut params, unattended);
+                    }
+                    if let Some(files) = files {
+                        peer.attachment_files.push(files);
                     }
                     session.runtime.start_written(&id);
                     (params, Call::StartTurn(id))

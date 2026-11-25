@@ -24,7 +24,7 @@ import {
 } from "@/features/chats/client";
 import { loadPreferences, setPreference } from "@/lib/preferences";
 import { typedReference } from "@/features/tickets/ticket-references";
-import { captureClipboardImage } from "@/features/chats/composer-attachments";
+import { captureChatAttachment } from "@/features/chats/composer-attachments";
 
 /** The fields of `show_ticket`'s reply a linked ticket needs. */
 const exactTicketSchema = z.object({
@@ -298,21 +298,21 @@ export function createHostChatClient(
         close(feed);
       };
     },
-    send: (id, text, links = [], images) =>
+    send: (id, text, links = [], attachments) =>
       run("chat_send", {
         chatId: id,
         text,
         queue: false,
         links,
-        ...(images && { images }),
+        ...(attachments && { attachments }),
       }),
-    async captureImage(file) {
+    async captureAttachment(file) {
       const limit = z
         .number()
         .int()
         .positive()
         .parse(await bridge.invoke("attachment_upload_limit"));
-      return captureClipboardImage(file, limit);
+      return captureChatAttachment(file, limit);
     },
     async exportAttachment(id, file) {
       const destination = await bridge.saveFile(file.name);

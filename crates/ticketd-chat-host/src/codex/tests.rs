@@ -341,6 +341,59 @@ async fn a_screenshot_is_native_visual_input_with_or_without_text() {
     }
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_local_file_reaches_codex_as_a_readable_copy_of_the_snapshot() {
+    let source = tempfile::tempdir().unwrap();
+    let path = source.path().join("details.txt");
+    std::fs::write(&path, b"original bytes\r\n").unwrap();
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "details.txt",
+        "data:text/plain;base64,b3JpZ2luYWwgYnl0ZXMNCg==",
+        100,
+    )
+    .unwrap();
+    std::fs::write(&path, b"changed after capture").unwrap();
+
+    for text in ["", "What does details.txt say?"] {
+        let (mut peer, runtime, _events) = open().await;
+        let submission = Submission {
+            attachments: vec![file.clone()],
+            ..start_turn("sub-1", text)
+        };
+        let (outcome, written) = tokio::join!(runtime.submit(submission), peer.written());
+        assert_eq!(outcome, DispatchOutcome::Written);
+        assert_eq!(written["method"], "turn/start");
+        assert!(written["params"]["sandboxPolicy"].is_null());
+        let input = written["params"]["input"].as_array().unwrap();
+        if !text.is_empty() {
+            assert_eq!(input[0]["text"], text);
+        }
+        assert_eq!(input.len(), 1 + usize::from(!text.is_empty()));
+        let reference = input.last().unwrap();
+        assert_eq!(reference["type"], "text");
+        let reference: Value = serde_json::from_str(
+            reference["text"]
+                .as_str()
+                .unwrap()
+                .strip_prefix("Read this Chat attachment snapshot: ")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reference["name"], "details.txt");
+        let staged = Path::new(reference["path"].as_str().unwrap());
+        assert_ne!(staged, path);
+        assert!(staged.is_absolute());
+        // The runtime returned from submission; the harness can still open it.
+        assert_eq!(std::fs::read(staged).unwrap(), b"original bytes\r\n");
+        let (closed, ()) = tokio::join!(runtime.close(), async {
+            assert!(peer.stdin_closed().await);
+            peer.exit(0);
+        });
+        assert!(matches!(closed, CloseOutcome::Confirmed { .. }));
+        assert!(!staged.exists());
+    }
+}
+
 fn steer(id: &str, expected_turn: &str, text: &str) -> Submission {
     Submission {
         kind: SubmissionKind::Steer {

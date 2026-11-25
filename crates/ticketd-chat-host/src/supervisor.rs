@@ -933,24 +933,30 @@ impl Supervisor {
         self.recover_storage()?;
         let chat = self.chat_id.clone();
         if !attachments.is_empty() {
-            if self.core(|core| core.chat(&chat))?.harness != CODEX.key.as_str() {
-                return Err(Error::Chat("Screenshots can only be sent to Codex.".into()).into());
-            }
-            if mode == SendMode::Queue || self.active.is_some() || self.dispatching.is_some() {
-                return Err(Error::Chat(
-                    "Wait for this turn to finish before sending a screenshot.".into(),
-                )
-                .into());
-            }
-            if self
-                .runtime
-                .as_ref()
-                .and_then(|runtime| runtime.handle.supports_image_input())
-                == Some(false)
+            let refusal = if self.core(|core| core.chat(&chat))?.harness != CODEX.key.as_str() {
+                Some("Chat attachments can only be sent to Codex.")
+            } else if mode == SendMode::Queue || self.active.is_some() || self.dispatching.is_some()
             {
-                return Err(
-                    Error::Chat("The selected Codex model does not accept images.".into()).into(),
-                );
+                Some("Wait for this turn to finish before sending attachments.")
+            } else if attachments.iter().any(ChatAttachmentContent::is_image)
+                && self
+                    .runtime
+                    .as_ref()
+                    .and_then(|runtime| runtime.handle.supports_image_input())
+                    == Some(false)
+            {
+                Some("The selected Codex model does not accept images.")
+            } else {
+                None
+            };
+            if let Some(refusal) = refusal {
+                if let Some(command_id) = command_id
+                    && let Some(saved) = self
+                        .core(|core| core.replay_chat_input(command_id, &chat, text, attachments))?
+                {
+                    return Ok(saved);
+                }
+                return Err(Error::Chat(refusal.into()).into());
             }
         }
         let message = self.write(|core| {

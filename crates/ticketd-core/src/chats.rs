@@ -1153,6 +1153,22 @@ fn once(
         return create();
     };
     let request = request.to_string();
+    if let Some(id) = previous_outcome(connection, command_id, &request)? {
+        return Ok(id);
+    }
+    let id = create()?;
+    connection.execute(
+        "INSERT INTO request_outcomes (id, request, outcome) VALUES (?1, ?2, ?3)",
+        params![command_id, request, serde_json::to_string(&id)?],
+    )?;
+    Ok(id)
+}
+
+fn previous_outcome(
+    connection: &Connection,
+    command_id: &str,
+    request: &str,
+) -> Result<Option<String>, Error> {
     let stored: Option<(String, String)> = connection
         .query_row(
             "SELECT request, outcome FROM request_outcomes WHERE id = ?1",
@@ -1164,14 +1180,18 @@ fn once(
         if previous != request {
             return Err(Error::RequestConflict(command_id.to_owned()));
         }
-        return Ok(serde_json::from_str(&outcome)?);
+        return Ok(Some(serde_json::from_str(&outcome)?));
     }
-    let id = create()?;
-    connection.execute(
-        "INSERT INTO request_outcomes (id, request, outcome) VALUES (?1, ?2, ?3)",
-        params![command_id, request, serde_json::to_string(&id)?],
-    )?;
-    Ok(id)
+    Ok(None)
+}
+
+fn save_input_request(chat_id: &str, text: &str, files: &[ChatAttachmentContent]) -> Value {
+    let mut request = json!({"operation": "save_chat_input", "chat_id": chat_id, "text": text});
+    if !files.is_empty() {
+        request["attachments"] =
+            Value::Array(files.iter().map(ChatAttachmentContent::identity).collect());
+    }
+    request
 }
 
 /// The last `CHAT_TOOL_OUTPUT_LIMIT` bytes of `output`, and whether its start was dropped.
@@ -2107,11 +2127,7 @@ impl Workspace {
             }
         }
         self.chat_write(|connection| {
-            let mut request = json!({"operation": "save_chat_input", "chat_id": chat_id, "text": text});
-            if command_id.is_some() && !files.is_empty() {
-                request["attachments"] =
-                    Value::Array(files.iter().map(ChatAttachmentContent::identity).collect());
-            }
+            let request = command_id.map_or(Value::Null, |_| save_input_request(chat_id, text, files));
             let id = once(connection, command_id, request, || {
                 if read_chat(connection, chat_id)?.trashed {
                     return Err(Error::ChatTrashed(chat_id.to_owned()));
@@ -2130,6 +2146,25 @@ impl Workspace {
             })?;
             read_message(connection, &id)?.ok_or_else(|| invalid("saved input is missing"))
         })
+    }
+
+    /// Reads the outcome of a previously saved input. A retry can succeed even
+    /// when the Chat has since become busy and would refuse new attachments.
+    pub fn replay_chat_input(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+    ) -> Result<Option<ChatMessage>, Error> {
+        let request = save_input_request(chat_id, text, files).to_string();
+        let Some(id) = previous_outcome(&self.connection, command_id, &request)? else {
+            return Ok(None);
+        };
+        Ok(Some(
+            read_message(&self.connection, &id)?
+                .ok_or_else(|| invalid("saved input is missing"))?,
+        ))
     }
 
     /// Withdraw queued input the person no longer wants sent. Refused once a submission

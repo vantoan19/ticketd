@@ -54,36 +54,69 @@ impl fmt::Debug for ChatAttachmentContent {
 
 impl ChatAttachmentContent {
     pub fn from_image_data_url(name: &str, data_url: &str) -> Result<Self, Error> {
-        let (media_type, encoded) = data_url
+        let content = Self::from_data_url(name, data_url, u64::MAX)?;
+        if !content.is_image() {
+            return Err(invalid("The clipboard did not provide a readable image."));
+        }
+        Ok(content)
+    }
+
+    /// Takes the byte snapshot supplied by the composer, without opening any source path.
+    pub fn from_data_url(name: &str, data_url: &str, limit: u64) -> Result<Self, Error> {
+        if !attachments::valid_filename(name) {
+            return Err(invalid("The attachment has an invalid file name."));
+        }
+        let (claimed_type, encoded) = data_url
             .strip_prefix("data:")
             .and_then(|value| value.split_once(";base64,"))
-            .ok_or_else(|| invalid("The clipboard did not provide a readable image."))?;
+            .filter(|(media_type, _)| media_type.len() <= 128)
+            .ok_or_else(|| invalid("The attachment could not be read."))?;
+        if encoded.len() as u64 > limit.div_ceil(3).saturating_mul(4) {
+            return Err(Error::UploadLimit { limit });
+        }
         let bytes = STANDARD
             .decode(encoded)
-            .map_err(|_| invalid("The clipboard did not provide a readable image."))?;
-        if !matches!(
-            media_type,
-            "image/png" | "image/jpeg" | "image/webp" | "image/gif"
-        ) || attachment_previews::classify(&bytes) != Some(media_type)
-        {
+            .map_err(|_| invalid("The attachment could not be read."))?;
+        let claimed_type = claimed_type.split(';').next().unwrap_or_default();
+        let image_type = attachment_previews::classify(&bytes[..bytes.len().min(16)])
+            .filter(|media_type| supported_image(media_type));
+        if claimed_type.starts_with("image/") && image_type != Some(claimed_type) {
             return Err(invalid("Chat can attach PNG, JPEG, WebP, and GIF images."));
         }
-        if !attachments::valid_filename(name) {
-            return Err(invalid("The screenshot has an invalid file name."));
-        }
-        Ok(Self {
+        let media_type = image_type.unwrap_or(if claimed_type.is_empty() {
+            "application/octet-stream"
+        } else {
+            claimed_type
+        });
+        let content = Self {
             name: name.to_owned(),
             media_type: media_type.to_owned(),
             bytes,
-        })
+        };
+        content.ensure_fits(limit)?;
+        Ok(content)
     }
 
-    pub fn image_data_url(&self) -> String {
-        format!(
-            "data:{};base64,{}",
-            self.media_type,
-            STANDARD.encode(&self.bytes)
-        )
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    pub fn bytes(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn is_image(&self) -> bool {
+        supported_image(&self.media_type)
+    }
+
+    pub fn image_data_url(&self) -> Option<String> {
+        self.is_image().then(|| {
+            format!(
+                "data:{};base64,{}",
+                self.media_type,
+                STANDARD.encode(&self.bytes)
+            )
+        })
     }
 
     pub(super) fn ensure_fits(&self, limit: u64) -> Result<(), Error> {
@@ -100,6 +133,13 @@ impl ChatAttachmentContent {
             "sha256": format!("{:x}", Sha256::digest(&self.bytes)),
         })
     }
+}
+
+fn supported_image(media_type: &str) -> bool {
+    matches!(
+        media_type,
+        "image/png" | "image/jpeg" | "image/webp" | "image/gif"
+    )
 }
 
 pub(super) fn save(

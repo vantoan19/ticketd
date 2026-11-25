@@ -19,7 +19,7 @@ export function attachmentsOf(
     draftAttachments.get(client) ?? new Map<string, ComposerAttachments>();
   if (!draftAttachments.has(client)) draftAttachments.set(client, drafts);
   const attachments =
-    drafts.get(id) ?? new ComposerAttachments(client.captureImage);
+    drafts.get(id) ?? new ComposerAttachments(client.captureAttachment);
   if (!drafts.has(id)) drafts.set(id, attachments);
   return attachments;
 }

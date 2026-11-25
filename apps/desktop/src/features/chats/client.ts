@@ -1,7 +1,7 @@
 import { createContext, useContext } from "react";
 import { z } from "zod";
 import { attachmentSchema } from "@/lib/api/attachments";
-import type { ChatImage } from "@/features/chats/composer-attachments";
+import type { ChatAttachmentInput } from "@/features/chats/composer-attachments";
 
 /**
  * What the desktop host tells the Chat screens, and what they may ask of it.
@@ -849,6 +849,7 @@ export interface ChatClient {
     folder: string | null;
     links: LinkRef[];
     message: string;
+    attachments?: ChatAttachmentInput[];
     /** New Chat's picks: option ids the harness offered. Unset keeps its own setting. */
     model?: string;
     effort?: string;
@@ -869,9 +870,9 @@ export interface ChatClient {
     id: string,
     text: string,
     links?: LinkRef[],
-    images?: ChatImage[],
+    attachments?: ChatAttachmentInput[],
   ): Promise<void>;
-  captureImage(file: File): Promise<ChatImage>;
+  captureAttachment(file: File): Promise<ChatAttachmentInput>;
   exportAttachment(id: string, file: ChatAttachment): Promise<void>;
   queue(id: string, text: string, links?: LinkRef[]): Promise<void>;
   /** The Chats outside the trash linked to one record. Refetch on `revision`. */

@@ -28,7 +28,10 @@ import {
 } from "@/features/chats/client";
 import { changeLine } from "@/features/chats/model";
 import { plainText } from "@/features/documents/graph-text";
-import { captureClipboardImage } from "@/features/chats/composer-attachments";
+import {
+  captureChatAttachment,
+  type ChatAttachmentInput,
+} from "@/features/chats/composer-attachments";
 
 /** Words for a condition that holds now and is not a failure; as the host says them. */
 const CONDITION_WORDS: Partial<Record<string, string>> = {
@@ -639,13 +642,24 @@ export function createMockChatClient(
       unseen: get(id).chat.unseen,
     });
   };
-  const startTurn = (id: string, text: string) => {
+  const startTurn = (
+    id: string,
+    text: string,
+    files?: ChatAttachmentInput[],
+  ) => {
     push(id, {
       id: nextId("user"),
       at: now,
       kind: "user",
       text,
       delivery: "delivered",
+      ...(files?.length && {
+        attachments: files.map(({ name, dataUrl }) => ({
+          id: nextId("attachment"),
+          name,
+          media_type: dataUrl.slice(5, dataUrl.indexOf(";")),
+        })),
+      }),
     });
     patch(id, {
       activity: "working",
@@ -668,11 +682,25 @@ export function createMockChatClient(
         patch(id, { links: [...current, record] });
     }
   };
-  const send = async (id: string, text: string) => {
+  const send = async (
+    id: string,
+    text: string,
+    files?: ChatAttachmentInput[],
+  ) => {
     const { chat } = get(id);
     if (chat.retention === "trashed")
       throw new ChatError("failed", "This Chat is in Trash.");
-    if (!live(chat)) startTurn(id, text);
+    if (files?.length && chat.harness.id !== "codex")
+      throw new ChatError(
+        "failed",
+        "Chat attachments can only be sent to Codex.",
+      );
+    if (files?.length && live(chat))
+      throw new ChatError(
+        "failed",
+        "Wait for this turn to finish before sending attachments.",
+      );
+    if (!live(chat)) startTurn(id, text, files);
     else if (chat.steering.available)
       push(id, {
         id: nextId("user"),
@@ -794,6 +822,11 @@ export function createMockChatClient(
       const harness = harnesses.find((item) => item.id === input.harness_id);
       if (!harness?.usable)
         throw new ChatError("failed", "The harness is not ready.");
+      if (input.attachments?.length && harness.id !== "codex")
+        throw new ChatError(
+          "failed",
+          "Chat attachments can only be sent to Codex.",
+        );
       // A repeated request finds the Chat the first try created.
       const existing = requests.get(input.command_id);
       if (existing) return { chat_id: existing };
@@ -804,7 +837,10 @@ export function createMockChatClient(
       store({
         chat: chatState({
           id,
-          title: input.message.slice(0, 60),
+          title:
+            input.message.trim().slice(0, 60) ||
+            input.attachments?.[0]?.name ||
+            "Untitled Chat",
           harness: { id: harness.id, name: harness.name },
           folder: {
             path,
@@ -818,7 +854,7 @@ export function createMockChatClient(
           ),
         }),
       });
-      startTurn(id, input.message);
+      startTurn(id, input.message, input.attachments);
       return { chat_id: id };
     },
     async openChat(id) {
@@ -844,13 +880,11 @@ export function createMockChatClient(
       entry.listeners.add(listener);
       return () => entry.listeners.delete(listener);
     },
-    async send(id, text, links = [], images) {
-      if (images?.length)
-        throw new ChatError("failed", "This preview cannot send screenshots.");
+    async send(id, text, links = [], files) {
       linkAll(id, links);
-      await send(id, text);
+      await send(id, text, files);
     },
-    captureImage: (file) => captureClipboardImage(file, 100 * 1024 * 1024),
+    captureAttachment: (file) => captureChatAttachment(file, 100 * 1024 * 1024),
     async exportAttachment() {},
     async queue(id, text, links = []) {
       linkAll(id, links);

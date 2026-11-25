@@ -36,7 +36,7 @@ import { Composer } from "@/features/chats/Composer";
 import type { Token } from "@/features/chats/composer-mentions";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
-import { carryIntoChat } from "@/features/chats/drafts";
+import { attachmentsOf, carryIntoChat } from "@/features/chats/drafts";
 import {
   NEW_CHAT,
   clearQuotes,
@@ -403,6 +403,7 @@ export function NewChat({
                 placeholder="Describe a task or ask a question"
                 initialText={draft}
                 initialTokens={draftTokens}
+                attachments={attachmentsOf(client, NEW_CHAT)}
                 onText={(text, tokens) => {
                   draft = text;
                   draftTokens = tokens;
@@ -414,9 +415,9 @@ export function NewChat({
                 above={
                   <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
                 }
-                controls={(text) => ({
+                controls={(text, hasAttachments) => ({
                   send: "send",
-                  enabled: ready && text.trim() !== "",
+                  enabled: ready && (text.trim() !== "" || hasAttachments),
                 })}
                 leading={
                   <NewChatControls
@@ -447,7 +448,7 @@ export function NewChat({
                   />
                 }
                 retryRef={retrySend}
-                onSend={async (typed, mentioned) => {
+                onSend={async (typed, mentioned, attachments) => {
                   if (!harness) return;
                   const message = quotedMessage(quotes, typed);
                   const chosen = links.map(({ kind, id }) => ({ kind, id }));
@@ -467,6 +468,7 @@ export function NewChat({
                         ) === index,
                     ),
                     message,
+                    ...(attachments && { attachments }),
                     // The first turn runs on what the picker shows (LIVE-7).
                     ...(pick.model && { model: pick.model }),
                     ...(pick.effort && { effort: pick.effort }),
@@ -489,15 +491,19 @@ export function NewChat({
                     if (folder) rememberFolder(folder);
                     clearQuotes(NEW_CHAT);
                     prefilled = null;
-                    // The Chat exists but holds no message. It is opened with the
-                    // unsent words in its composer, so they are sent there and no
-                    // second Chat is made for them.
-                    if (created.send_error)
+                    // The Chat exists but holds no message. Open it with the
+                    // captured draft so a retry sends to the same Chat.
+                    if (created.send_error) {
                       carryIntoChat(
                         created.chat_id,
                         message,
                         `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
                       );
+                      if (attachments)
+                        attachmentsOf(client, created.chat_id).addCaptured(
+                          attachments,
+                        );
+                    }
                     setFailure(null);
                     onCreated(created.chat_id);
                   } catch (reason) {

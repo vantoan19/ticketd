@@ -17,7 +17,7 @@ use ticketd_chat_host::{
     QuestionAnswer, REGISTRATIONS, ResumeMode, SendMode, SettingKey, StartSettings, StopReason,
     Subscription, TurnEnding, UnconfirmedCleanup, WorkspaceOpener,
 };
-use ticketd_core::harnesses::ResumePolicy;
+use ticketd_core::harnesses::{CODEX, ResumePolicy};
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatDelivery, ChatInputStanding,
     ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
@@ -82,9 +82,9 @@ impl From<HostError> for ChatFailure {
 
 type Outcome<T> = Result<T, ChatFailure>;
 
-#[derive(Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ClipboardImage {
+pub struct AttachmentInput {
     name: String,
     data_url: String,
 }
@@ -131,7 +131,7 @@ impl From<LinkRef> for ChatLink {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct NewChatInput {
     /// A UUID the interface makes once per New Chat attempt and repeats on a retry, so
@@ -142,6 +142,8 @@ pub struct NewChatInput {
     pub folder: Option<String>,
     pub links: Vec<LinkRef>,
     pub message: String,
+    #[serde(default)]
+    pub attachments: Vec<AttachmentInput>,
     /// New Chat's picks: option ids the harness listed. Unset keeps its own setting.
     #[serde(default)]
     pub model: Option<String>,
@@ -185,7 +187,7 @@ pub enum Retention {
 }
 
 /// A Chat that was created. `send_error` says why its first message was not saved. The
-/// Chat exists either way: the interface opens it with the unsent text in its composer
+/// Chat exists either way: the interface opens it with the unsent draft in its composer
 /// and makes a new `command_id` for whatever New Chat is asked for next.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Created {
@@ -1481,13 +1483,16 @@ impl Chats {
     /// and the message an earlier try saved instead of making them again.
     pub async fn create(&self, input: NewChatInput) -> Outcome<Created> {
         let host = self.host()?;
-        text_argument(&input.message, "The message")?;
+        let attachments = self.message_attachments(&input.message, input.attachments)?;
         let command_id = uuid::Uuid::parse_str(&input.command_id)
             .map_err(|_| failed("the request id must be a UUID"))?
             .to_string();
         let served = |adapter: &Arc<dyn HarnessAdapter>| adapter.harness().key.as_str();
         if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
             return Err(failed(self.unavailable(&input.harness_id)));
+        }
+        if !attachments.is_empty() && input.harness_id != CODEX.key.as_str() {
+            return Err(failed("Chat attachments can only be sent to Codex."));
         }
         let picks = StartSettings {
             model: input.model.clone(),
@@ -1518,12 +1523,18 @@ impl Chats {
             Some(path) => (folder_argument(path)?, false),
             None => (managed.to_string_lossy().into_owned(), true),
         };
-        let first_line = input.message.trim().lines().next().unwrap_or_default();
+        let title = input
+            .message
+            .trim()
+            .lines()
+            .next()
+            .or_else(|| attachments.first().map(ChatAttachmentContent::name))
+            .map(|line| line.chars().take(80).collect());
         // The Chat is stored first: a request the core refuses leaves no folder behind.
         let chat = workspace.create_chat(
             Some(&format!("{command_id}:chat")),
             NewChat {
-                title: Some(first_line.chars().take(80).collect()),
+                title,
                 harness: input.harness_id,
                 execution_folder,
                 folder_managed,
@@ -1550,7 +1561,13 @@ impl Chats {
                 .map_err(ChatFailure::from)?;
         }
         let first = format!("{command_id}:first");
-        let sent = host.send(&chat.id, Some(&first), &input.message, SendMode::Auto);
+        let sent = host.send_with_attachments(
+            &chat.id,
+            Some(&first),
+            &input.message,
+            SendMode::Auto,
+            attachments,
+        );
         Ok(created(
             sent.await
                 .err()
@@ -1876,6 +1893,27 @@ impl Chats {
         Ok(())
     }
 
+    fn message_attachments(
+        &self,
+        text: &str,
+        files: Vec<AttachmentInput>,
+    ) -> Outcome<Vec<ChatAttachmentContent>> {
+        if files.is_empty() || !text.is_empty() {
+            text_argument(text, "The message")?;
+        }
+        if files.is_empty() {
+            return Ok(Vec::new());
+        }
+        let limit = self.workspace()?.attachment_upload_limit()?;
+        files
+            .into_iter()
+            .map(|file| {
+                ChatAttachmentContent::from_data_url(&file.name, &file.data_url, limit)
+                    .map_err(ChatFailure::from)
+            })
+            .collect()
+    }
+
     /// Sends or queues a message after linking the records it mentions or quotes, so the
     /// harness is told about them with this message (spec 21.4). A record that cannot be
     /// linked refuses the message; links made before the refusal stay, as harmless as
@@ -1886,27 +1924,10 @@ impl Chats {
         text: &str,
         mode: SendMode,
         links: &[LinkRef],
-        images: Vec<ClipboardImage>,
+        files: Vec<AttachmentInput>,
     ) -> Outcome<()> {
-        if images.is_empty() || !text.is_empty() {
-            text_argument(text, "The message")?;
-        }
         let host = self.host()?;
-        let attachments = if images.is_empty() {
-            Vec::new()
-        } else {
-            let limit = self.workspace()?.attachment_upload_limit()?;
-            images
-                .into_iter()
-                .map(|image| {
-                    // Base64 is four bytes per three source bytes, plus the data URL prefix.
-                    if image.data_url.len() as u64 > limit.div_ceil(3) * 4 + 32 {
-                        return Err(ticketd_core::Error::UploadLimit { limit });
-                    }
-                    ChatAttachmentContent::from_image_data_url(&image.name, &image.data_url)
-                })
-                .collect::<Result<Vec<_>, _>>()?
-        };
+        let attachments = self.message_attachments(text, files)?;
         let present = self.workspace()?.chat(chat_id)?.links;
         let mut added = false;
         for link in links {

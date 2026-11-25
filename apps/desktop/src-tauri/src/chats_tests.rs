@@ -122,6 +122,7 @@ impl Fixture {
             folder: Some(self.dir.path().to_string_lossy().into_owned()),
             links: Vec::new(),
             message: message.to_owned(),
+            attachments: Vec::new(),
             model: None,
             effort: None,
             permission: None,
@@ -1566,6 +1567,36 @@ async fn repeating_a_new_chat_request_sends_its_first_message_once() {
         ..f.input("first")
     };
     assert!(f.chats.create(not_a_uuid).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
+    let f = Fixture::new().await;
+    let input: NewChatInput = serde_json::from_value(json!({
+        "command_id": uuid::Uuid::new_v4().to_string(),
+        "harness_id": "codex",
+        "folder": f.dir.path(),
+        "links": [],
+        "message": "",
+        "attachments": [{ "name": "sample.txt", "dataUrl": "data:text/plain;base64,ZXhhY3QgYnl0ZXM=" }],
+    }))
+    .unwrap();
+    let first = f.chats.create(input.clone()).await.unwrap();
+    assert_eq!(first.send_error, None);
+    settle().await;
+    let again = f.chats.create(input).await.unwrap();
+    assert_eq!(again, first);
+    settle().await;
+
+    let saved = messages(&f.core(), &first.chat_id).unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].attachments[0].name, "sample.txt");
+    let exported = f.dir.path().join("exported.txt");
+    f.chats
+        .export_attachment(&first.chat_id, &saved[0].attachments[0].id, &exported)
+        .unwrap();
+    assert_eq!(std::fs::read(exported).unwrap(), b"exact bytes");
+    assert_eq!(f.submitted().len(), 1);
 }
 
 #[tokio::test(start_paused = true)]

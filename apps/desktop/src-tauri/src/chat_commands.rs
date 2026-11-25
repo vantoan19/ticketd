@@ -22,7 +22,7 @@ use tauri_plugin_opener::OpenerExt;
 use crate::chat_reports::SettingChangeView;
 use crate::chat_view::{LinkedRecord, Summary};
 use crate::chats::{
-    Answer, ChatFailure, Chats, ClipboardImage, CloseAction, Created, FolderFile, HarnessStatus,
+    Answer, AttachmentInput, ChatFailure, Chats, CloseAction, Created, FolderFile, HarnessStatus,
     HistorySelection, LinkRef, NewChatInput, Opened, Overview, QuitAction, Restored, Retention,
     Stopping, UncertainDecision, close_action, quit_action, tray_tooltip,
 };
@@ -451,7 +451,7 @@ pub async fn chat_send(
     text: String,
     queue: bool,
     links: Option<Vec<LinkRef>>,
-    images: Option<Vec<ClipboardImage>>,
+    attachments: Option<Vec<AttachmentInput>>,
 ) -> Outcome<()> {
     let mode = if queue {
         SendMode::Queue
@@ -461,7 +461,13 @@ pub async fn chat_send(
     let links = links.unwrap_or_default();
     bridge
         .chats
-        .send_linking(&chat_id, &text, mode, &links, images.unwrap_or_default())
+        .send_linking(
+            &chat_id,
+            &text,
+            mode,
+            &links,
+            attachments.unwrap_or_default(),
+        )
         .await
 }
 

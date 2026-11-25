@@ -284,6 +284,8 @@ pub enum Refusal {
     Unsupported,
     /// The selected model explicitly excludes image input.
     ImageInputUnsupported,
+    /// The host could not prepare a readable handoff copy from a saved snapshot.
+    AttachmentUnavailable,
     /// The runtime was closed, replaced or lost before the write.
     RuntimeClosed,
 }
@@ -298,6 +300,9 @@ impl Refusal {
             Self::UnknownRequest => "the request was no longer open",
             Self::Unsupported => "the harness can't do that here",
             Self::ImageInputUnsupported => "the selected Codex model does not accept images",
+            Self::AttachmentUnavailable => {
+                "the Chat could not prepare an attachment file for the harness"
+            }
             Self::RuntimeClosed => "the harness session had closed",
         }
     }

@@ -140,6 +140,54 @@ fn a_complete_backup_restores_the_exact_image_in_sent_chat_history() {
 }
 
 #[test]
+fn a_complete_backup_restores_the_exact_queued_chat_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let first = ticketd_core::ChatAttachmentContent::from_data_url(
+        "sample.txt",
+        "data:text/plain;base64,b3JpZ2luYWwgYnl0ZXMNCg==",
+        100,
+    )
+    .unwrap();
+    let second = ticketd_core::ChatAttachmentContent::from_data_url(
+        "empty.bin",
+        "data:application/octet-stream;base64,",
+        100,
+    )
+    .unwrap();
+    let queued = workspace
+        .save_chat_input_with_attachments(None, &chat.id, "Use both", &[first, second])
+        .unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    workspace.backup(&backup).unwrap();
+    let target = dir.path().join("restored.sqlite3");
+    Workspace::restore(&target, &backup).unwrap();
+    let restored = Workspace::open(&target).unwrap();
+    let queue = restored.chat_queue(&chat.id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, queued.id);
+    let queued = &queue[0];
+    assert!(queued.queued);
+    assert_eq!(queued.text, "Use both");
+    assert_eq!(queued.attachments.len(), 2);
+    for (file, name, expected) in [
+        (
+            &queued.attachments[0],
+            "sample.txt",
+            b"original bytes\r\n".as_slice(),
+        ),
+        (&queued.attachments[1], "empty.bin", b"".as_slice()),
+    ] {
+        assert_eq!(file.name, name);
+        let destination = dir.path().join(name);
+        restored
+            .export_chat_attachment(&chat.id, &file.id, &destination)
+            .unwrap();
+        assert_eq!(std::fs::read(destination).unwrap(), expected);
+    }
+}
+
+#[test]
 fn a_chat_links_to_several_records_without_belonging_to_them() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

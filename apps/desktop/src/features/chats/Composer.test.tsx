@@ -11,10 +11,67 @@ import type { LinkedRecord } from "@/features/chats/client";
 import { Composer } from "@/features/chats/Composer";
 import {
   ComposerAttachments,
-  captureClipboardImage,
+  captureChatAttachment,
 } from "@/features/chats/composer-attachments";
 
 afterEach(cleanup);
+
+test("picks several files and retries just the failed capture", async () => {
+  const original = new File(["one"], "first.txt", { type: "text/plain" });
+  const missing = new File(["two"], "second.txt", { type: "text/plain" });
+  let unavailable = true;
+  const capture = vi.fn(async (file: File) => {
+    if (file === missing && unavailable) throw new Error("Cannot read file");
+    return {
+      name: file.name,
+      dataUrl:
+        file === original
+          ? "data:text/plain;base64,b25l"
+          : "data:text/plain;base64,dHdv",
+    };
+  });
+  const onSend = vi.fn(async () => {});
+  render(
+    <Composer
+      placeholder="Message"
+      initialText="Use both files"
+      controls={(text, hasAttachments) => ({
+        send: "send",
+        enabled: text.trim() !== "" || hasAttachments,
+      })}
+      onSend={onSend}
+      attachments={new ComposerAttachments(capture)}
+    />,
+  );
+  const picker = screen.getByLabelText("Choose files to attach");
+  expect(picker).toHaveProperty("multiple", true);
+  fireEvent.change(picker, { target: { files: [original, missing] } });
+  await screen.findByRole("alert");
+  fireEvent.change(picker, { target: { files: [] } });
+  expect(screen.getByRole("button", { name: "Remove first.txt" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Send" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  unavailable = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry second.txt" }));
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(capture.mock.calls).toEqual([[original], [missing], [missing]]);
+  expect(onSend).toHaveBeenCalledWith(
+    "Use both files",
+    [],
+    [
+      { name: "first.txt", dataUrl: "data:text/plain;base64,b25l" },
+      { name: "second.txt", dataUrl: "data:text/plain;base64,dHdv" },
+    ],
+  );
+});
 
 test("pastes a removable screenshot and sends the image without text", async () => {
   const image = new File(["clipboard bytes"], "image.png", {
@@ -62,7 +119,7 @@ test("pastes a removable screenshot and sends the image without text", async () 
 test("an oversized pasted image blocks sending until it is removed", async () => {
   const onSend = vi.fn(async () => {});
   const draft = new ComposerAttachments((file) =>
-    captureClipboardImage(file, 10),
+    captureChatAttachment(file, 10),
   );
   render(
     <Composer

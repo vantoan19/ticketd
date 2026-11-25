@@ -854,7 +854,7 @@ function Conversation({
                       send: "send",
                       enabled: false,
                       effect:
-                        "Wait for this turn to finish before sending a screenshot.",
+                        "Wait for this turn to finish before sending attachments.",
                     };
                   return composerControls(
                     chat,
@@ -863,21 +863,21 @@ function Conversation({
                     hasAttachments,
                   );
                 }}
-                onSend={(text, links, images) => {
+                onSend={(text, links, attachments) => {
                   const answerQuestion =
-                    answering && question && !images?.length;
+                    answering && question && !attachments?.length;
                   const outgoingText = quotedMessage(quotes, text);
                   const outgoingLinks = [...links, ...quoteLinks(quotes)];
                   return run(
                     sent(
                       answerQuestion
                         ? client.answer(id, question.id, { text })
-                        : (images
+                        : (attachments
                             ? client.send(
                                 id,
                                 outgoingText,
                                 outgoingLinks,
-                                images,
+                                attachments,
                               )
                             : client.send(id, outgoingText, outgoingLinks)
                           ).then(() => clearQuotes(id)),

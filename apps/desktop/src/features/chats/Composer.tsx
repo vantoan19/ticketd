@@ -1,11 +1,12 @@
 import {
   useImperativeHandle,
+  useRef,
   useState,
   useSyncExternalStore,
   type ReactNode,
   type Ref,
 } from "react";
-import { Square, X } from "lucide-react";
+import { Paperclip, RotateCcw, Square, X } from "lucide-react";
 import { IconButton } from "@/components/ui/icon-button";
 import type { LinkRef } from "@/features/chats/client";
 import { linksOf, type Token } from "@/features/chats/composer-mentions";
@@ -17,14 +18,14 @@ import type { ComposerControls } from "@/features/chats/model";
 import { SendButton } from "@/features/chats/SendButton";
 import {
   NO_ATTACHMENTS,
-  type ChatImage,
+  type ChatAttachmentInput,
   type ComposerAttachments,
 } from "@/features/chats/composer-attachments";
 
 type Submit = (
   text: string,
   links: LinkRef[],
-  images?: ChatImage[],
+  files?: ChatAttachmentInput[],
 ) => Promise<void>;
 
 /**
@@ -95,6 +96,7 @@ export function Composer({
   const [text, setTextState] = useState(initialText);
   const [tokens, setTokens] = useState(initialTokens);
   const [busy, setBusy] = useState(false);
+  const filePicker = useRef<HTMLInputElement>(null);
   const [failedAction, setFailedAction] = useState<"send" | "queue" | null>(
     null,
   );
@@ -107,21 +109,21 @@ export function Composer({
     attachments.subscribe,
     attachments.snapshot,
   );
-  const images = items.flatMap((item) =>
-    item.state === "ready" ? [item.image] : [],
+  const files = items.flatMap((item) =>
+    item.state === "ready" ? [item.content] : [],
   );
-  const waiting = items.length !== images.length;
+  const waiting = items.length !== files.length;
   const available = controls(text, items.length > 0);
   const state = waiting
     ? { ...available, enabled: false, queues: false }
     : available;
   const submit = (action: Submit | undefined) => {
     const message = text.trim();
-    if (!action || (!message && !images.length) || waiting || busy) return;
+    if (!action || (!message && !files.length) || waiting || busy) return;
     setBusy(true);
     const links = linksOf(tokens);
-    const sent = images.length
-      ? action(message, links, images)
+    const sent = files.length
+      ? action(message, links, files)
       : action(message, links);
     sent.then(
       () => {
@@ -171,7 +173,7 @@ export function Composer({
             ?.getAsFile();
         if (!image) return;
         event.preventDefault();
-        void attachments.paste(image);
+        attachments.add([image]);
       }}
     >
       {above}
@@ -185,19 +187,31 @@ export function Composer({
               key={item.id}
               className="flex min-w-0 items-center gap-2 rounded-md border px-2 py-1 text-xs"
             >
-              {item.state === "ready" && (
-                <img
-                  className="h-12 w-16 rounded-sm object-contain"
-                  src={item.image.dataUrl}
-                  alt={item.image.name}
-                />
-              )}
+              {item.state === "ready" &&
+                item.content.dataUrl.startsWith("data:image/") && (
+                  <img
+                    className="h-12 w-16 rounded-sm object-contain"
+                    src={item.content.dataUrl}
+                    alt={item.name}
+                  />
+                )}
               <span className="truncate">{item.name}</span>
               {item.state === "capturing" && (
                 <span role="status">Capturing…</span>
               )}
               {item.state === "failed" && (
-                <span role="alert">{item.error}</span>
+                <>
+                  <span role="alert">{item.error}</span>
+                  <IconButton
+                    type="button"
+                    variant="ghost"
+                    size="icon-compact"
+                    label={`Retry ${item.name}`}
+                    onClick={() => attachments.retry(item.id)}
+                  >
+                    <RotateCcw aria-hidden />
+                  </IconButton>
+                </>
               )}
               <IconButton
                 type="button"
@@ -246,6 +260,34 @@ export function Composer({
       <div className="chat-composer-row">
         {leading}
         <div className="chat-composer-end">
+          {attachments !== NO_ATTACHMENTS && (
+            <>
+              <input
+                ref={filePicker}
+                type="file"
+                multiple
+                hidden
+                aria-label="Choose files to attach"
+                onChange={(event) => {
+                  if (!busy)
+                    attachments.add(
+                      Array.from(event.currentTarget.files ?? []),
+                    );
+                  event.currentTarget.value = "";
+                }}
+              />
+              <IconButton
+                type="button"
+                variant="ghost"
+                size="icon-compact"
+                label="Attach files"
+                disabled={busy}
+                onClick={() => filePicker.current?.click()}
+              >
+                <Paperclip aria-hidden />
+              </IconButton>
+            </>
+          )}
           {beforeStop}
           {onStop && (
             <IconButton

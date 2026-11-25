@@ -2131,6 +2131,66 @@ test("a first message that was not sent opens the Chat with the text, and New Ch
   expect(asked[3]?.command_id).not.toBe(asked[2]?.command_id);
 });
 
+test("a first-message save failure carries picked files and a screenshot into the created Chat", async () => {
+  const mock = createMockChatClient({
+    enabled: true,
+    chats: one({ id: "c1", title: "Recovered Chat" }),
+  });
+  const createChat = vi.fn(async () => ({
+    chat_id: "c1",
+    send_error: "storage failed",
+  }));
+  const send = vi.fn(async () => {});
+  render(
+    <ChatClientContext value={{ ...mock, createChat, send }}>
+      <ChatProvider>
+        <ChatsView />
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  const describe = "Describe a task or ask a question";
+  const file = new File(["old bytes"], "details.txt", { type: "text/plain" });
+  const screenshot = new File(["screenshot"], "Screen.png", {
+    type: "image/png",
+  });
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [file] },
+  });
+  fireEvent.paste(composer(describe), {
+    clipboardData: { files: [screenshot] },
+  });
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.click(button("Send"));
+  const captured = [
+    { name: "details.txt", dataUrl: "data:text/plain;base64,b2xkIGJ5dGVz" },
+    { name: "Screen.png", dataUrl: "data:image/png;base64,c2NyZWVuc2hvdA==" },
+  ];
+  expect(createChat).toHaveBeenCalledWith(
+    expect.objectContaining({ message: "", attachments: captured }),
+  );
+  await screen.findByRole("heading", { name: "Recovered Chat" });
+  expect(screen.getByRole("alert").textContent).toContain("Storage failed.");
+  expect(button("Remove details.txt")).toBeTruthy();
+  expect(screen.getByRole("img", { name: "Screen.png" })).toBeTruthy();
+
+  fireEvent.click(button("New Chat"));
+  expect(
+    screen.queryByRole("button", { name: "Remove details.txt" }),
+  ).toBeNull();
+  fireEvent.click(screen.getByText("Recovered Chat"));
+  await screen.findByRole("button", { name: "Remove details.txt" });
+  type("Read the original file");
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.click(button("Send"));
+  expect(send).toHaveBeenCalledWith(
+    "c1",
+    "Read the original file",
+    [],
+    captured,
+  );
+});
+
 test("New Chat says how the harness is signed in before the first message is sent", async () => {
   const client = await open([]);
   client.setHarnesses([
