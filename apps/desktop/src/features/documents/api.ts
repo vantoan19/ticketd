@@ -70,6 +70,23 @@ const summary = z.object({
   snippet: z.string().transform(plainSnippet).optional(),
   tags: z.array(z.string()).optional(),
   updated_at: z.string().optional(),
+  /** Where the Document belongs, read with the row so a list never asks per row. */
+  plans: z
+    .array(
+      z.object({ name: z.string(), archived: z.boolean(), spec: z.boolean() }),
+    )
+    .optional(),
+  tickets: z
+    .array(
+      z.object({
+        reference: z.string(),
+        title: z.string(),
+        status: z.string(),
+      }),
+    )
+    .optional(),
+  /** Whether this computer has opened the Document; a row without it counts as opened. */
+  opened: z.boolean().optional(),
 });
 const searchResult = summary;
 export type DocumentSummary = z.infer<typeof summary>;

@@ -8,8 +8,10 @@ import { Switch } from "@/components/ui/switch";
 import { Pager } from "@/components/ui/pager";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { StatusDot } from "@/components/ui/status-dot";
+import { documentRowContext } from "./row-context";
 import { Item } from "@/components/ui/item";
-import { compactAgo, formatDateTime } from "@/lib/format";
+import { formatDateTime, listTime } from "@/lib/format";
 import {
   ariaKeyShortcuts,
   matchesShortcut,
@@ -136,7 +138,6 @@ export function Documents({
       searchTrigger.current?.focus();
     }
   }, [searchOpen]);
-  const [contexts, setContexts] = useState<Record<string, string | null>>({});
   const [focusedRow, setFocusedRow] = useState<string | null>(null);
   const [groupPins, setGroupPins] = useState<DocumentSummary[]>([]);
   const engaged = useRef(false);
@@ -169,6 +170,8 @@ export function Documents({
   const [allOffset, setAllOffset] = useState(0);
   const [allLoaded, setAllLoaded] = useState(false);
   const [selected, setSelected] = useState<Document | null>(null);
+  // Documents opened since the list was read: their rows lose the unread dot at once.
+  const [openedHere, setOpenedHere] = useState<ReadonlySet<string>>(new Set());
   // Reader identity and failure outlive unrelated successful navigator reads.
   const [opening, setOpening] = useState<{
     id: string;
@@ -181,6 +184,7 @@ export function Documents({
     setSelected(null);
     return Promise.all([documents.open(id), documents.tags(id)]).then(
       ([doc, values]) => {
+        setOpenedHere((seen) => new Set(seen).add(id));
         if (request !== openGeneration.current) return false;
         setSelected(doc);
         setTags(values);
@@ -494,36 +498,6 @@ export function Documents({
               (doc) => !groupPins.some((pin) => pin.id === doc.id),
             ),
           ];
-  const visibleIds = visibleRows.map((doc) => doc.id).join(",");
-  useEffect(() => {
-    if (!active || !visibleIds) return;
-    let current = true;
-    void Promise.all(
-      visibleIds.split(",").map(async (id) => {
-        try {
-          const links = await documents.links(id);
-          const plan = links
-            .flat()
-            .find(
-              (link) =>
-                (link.source_kind === "plan" || link.target_kind === "plan") &&
-                !link.passage,
-            );
-          if (!plan) return [id, ""] as const;
-          const label =
-            plan.source_kind === "plan" ? plan.source_label : plan.target_label;
-          return [id, plan.explicit ? label : `Spec of ${label}`] as const;
-        } catch {
-          return [id, null] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (current) setContexts(Object.fromEntries(entries));
-    });
-    return () => {
-      current = false;
-    };
-  }, [active, visibleIds, changeVersion]);
   const tabRow =
     visibleRows.find((doc) => doc.id === focusedRow)?.id ??
     visibleRows.find((doc) => doc.id === selected?.id)?.id ??
@@ -579,7 +553,8 @@ export function Documents({
     <ul className="document-list">
       {items.map((doc, index) => {
         const pinned = pins.some((p) => p.id === doc.id);
-        const date = doc.updated_at ? compactAgo(doc.updated_at) : "";
+        const date = doc.updated_at ? listTime(doc.updated_at) : "";
+        const context = documentRowContext(doc);
         const snippet =
           mark && doc.snippet && !sameText(doc.snippet, doc.heading)
             ? doc.snippet
@@ -592,7 +567,6 @@ export function Documents({
               data-open={selected?.id === doc.id || undefined}
               data-pinned={pinned || undefined}
             >
-              <FileText aria-hidden="true" className="document-list-kind" />
               <div className="document-list-content">
                 <button
                   type="button"
@@ -636,23 +610,42 @@ export function Documents({
                   }}
                   onClick={() => open(doc.id)}
                 >
-                  <span className="truncate">{doc.heading}</span>
+                  <span className="document-list-title">{doc.heading}</span>
                 </button>
                 <p className="document-list-meta">
-                  {contexts[doc.id] ? (
-                    <span>{contexts[doc.id]}</span>
-                  ) : (
-                    !doc.origin_ticket &&
-                    !doc.tags?.length && (
-                      <span>
-                        {contexts[doc.id] === null
-                          ? "Links unavailable"
-                          : contexts[doc.id] === undefined
-                            ? "Loading links…"
-                            : "Not linked"}
-                      </span>
-                    )
+                  {doc.opened === false && !openedHere.has(doc.id) && (
+                    <span role="img" aria-label="Not opened yet">
+                      <StatusDot tone="unread" size={6} />
+                    </span>
                   )}
+                  {date && doc.updated_at && (
+                    <Tooltip content={formatDateTime(doc.updated_at)}>
+                      <time
+                        className="document-list-date"
+                        dateTime={doc.updated_at}
+                        tabIndex={-1}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "Escape" ||
+                            event.key === "ArrowLeft"
+                          ) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            event.currentTarget
+                              .closest("li")
+                              ?.querySelector<HTMLButtonElement>(
+                                "[data-document-row]",
+                              )
+                              ?.focus();
+                          }
+                        }}
+                      >
+                        {date}
+                      </time>
+                    </Tooltip>
+                  )}
+                  {date && context && <span aria-hidden="true">·</span>}
+                  {context && <span className="truncate">{context}</span>}
                   {doc.origin_ticket && (
                     <span className="document-origin">
                       Update details · {doc.origin_ticket}
@@ -678,29 +671,6 @@ export function Documents({
                   <p className="document-snippet">{highlight(snippet, mark)}</p>
                 )}
               </div>
-              {date && doc.updated_at && (
-                <Tooltip content={formatDateTime(doc.updated_at)}>
-                  <time
-                    className="document-list-date"
-                    dateTime={doc.updated_at}
-                    tabIndex={-1}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape" || event.key === "ArrowLeft") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        event.currentTarget
-                          .closest("li")
-                          ?.querySelector<HTMLButtonElement>(
-                            "[data-document-row]",
-                          )
-                          ?.focus();
-                      }
-                    }}
-                  >
-                    {date}
-                  </time>
-                </Tooltip>
-              )}
               {inTrash ? (
                 <Button
                   variant="outline"

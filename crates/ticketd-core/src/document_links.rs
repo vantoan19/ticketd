@@ -51,7 +51,7 @@ pub(crate) fn migrate(tx: &Connection) -> Result<(), Error> {
 /// ticket created later appears, and the context graph and link lists always agree.
 /// Explicit ticket-to-Document references (the `ticket_documents` table) join them with the
 /// an empty passage (there is no text to quote) and `explicit` set.
-const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.reference = n.reference WHERE n.activity = 0 UNION SELECT ticket_id, document_id, '', 1 FROM ticket_documents)";
+pub(crate) const DOCUMENT_MENTIONS: &str = "(SELECT source_id, target_id, passage, 0 AS explicit FROM context_mentions UNION SELECT n.source_id, t.id, n.passage, 0 FROM numeric_mentions n JOIN tickets t ON t.reference = n.reference WHERE n.activity = 0 UNION SELECT ticket_id, document_id, '', 1 FROM ticket_documents)";
 
 /// The numeric mention index as Workspaces at format versions 41 to 55 had it, keyed by the
 /// ticket number as written. Format version 56 gave tickets device references and replaced it

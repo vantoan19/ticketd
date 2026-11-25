@@ -84,27 +84,28 @@
 .documents-list-view .document-list li {
   position: relative;
   display: grid;
-  grid-template-columns: 16px minmax(0, 1fr) auto;
-  gap: 0 10px;
-  height: 52px;
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 52px;
   margin: 0 8px;
   padding: 8px 10px;
-}
-.document-list-kind {
-  width: 16px;
-  height: 16px;
-  margin-top: 2px;
 }
 .document-list-content {
   min-width: 0;
 }
 .documents-page .document-list-open {
-  display: flex;
+  display: block;
   width: 100%;
-  height: 20px;
+  height: auto;
   min-height: 0;
   padding: 0;
   overflow: hidden;
+}
+/* A title wraps to two lines before it is cut. */
+.document-list-title {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 .document-list-meta {
   display: flex;
@@ -114,14 +115,11 @@
   margin: 0;
   overflow: hidden;
 }
-.document-list-date {
-  align-self: end;
-}
 .document-list-pin,
 .document-list li > [data-restore] {
   position: absolute;
   right: 4px;
-  top: 2px;
+  bottom: 4px;
 }
 .document-list-pin {
   pointer-events: none;

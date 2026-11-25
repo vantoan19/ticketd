@@ -4101,7 +4101,6 @@ kbd,
 .document-list-open:focus-visible {
   outline: none;
 }
-.document-list-kind,
 .document-list-meta,
 .document-list-date,
 .documents-include {

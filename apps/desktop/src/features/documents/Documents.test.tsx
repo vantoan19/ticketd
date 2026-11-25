@@ -213,7 +213,13 @@ it("shows snippet, tags and date per row, highlights matches and refocuses searc
     />,
   );
   // A row is the title and one meta line; the snippet shows in search results.
-  expect((await screen.findByText("now")).tagName).toBe("TIME");
+  const time = await screen.findByText(
+    new Date().toLocaleTimeString(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+    }),
+  );
+  expect(time.tagName).toBe("TIME");
   expect(screen.queryByText("First plan text")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "Search Documents" }));
   fireEvent.change(
@@ -313,4 +319,120 @@ it("an empty Documents list offers New Document once, in its header", async () =
   expect(create).toHaveLength(1);
   fireEvent.click(create[0]!);
   expect(onCapture).toHaveBeenCalled();
+});
+
+const renderDocuments = () =>
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+
+it("says on each row where the Document belongs and never asks for links per row", async () => {
+  const plan = (name: string, archived = false, spec = false) => ({
+    name,
+    archived,
+    spec,
+  });
+  const ticket = (reference: string) => ({
+    reference,
+    title: "Work",
+    status: "Todo",
+  });
+  vi.mocked(documents.recent).mockResolvedValue([
+    { id: "a", heading: "Spec doc", plans: [plan("Launch", false, true)] },
+    {
+      id: "b",
+      heading: "Old notes",
+      plans: [plan("Old launch", true)],
+      tickets: [ticket("T-KQ1")],
+    },
+    { id: "c", heading: "Brief", tickets: [ticket("T-KQ2"), ticket("T-KQ3")] },
+    {
+      id: "d",
+      heading: "T-KQ4 findings",
+      tickets: [ticket("T-KQ4")],
+    },
+    { id: "e", heading: "Loose", plans: [], tickets: [] },
+  ]);
+  const { container } = renderDocuments();
+  await screen.findByRole("button", { name: "Spec doc" });
+  const meta = (title: string) =>
+    screen
+      .getByRole("button", { name: title })
+      .closest("li")
+      ?.querySelector(".document-list-meta")?.textContent;
+  expect(meta("Spec doc")).toBe("Spec of Launch");
+  expect(meta("Old notes")).toBe("Old launch");
+  expect(meta("Brief")).toBe("T-KQ2");
+  expect(meta("T-KQ4 findings")).toBe("");
+  expect(meta("Loose")).toBe("");
+  expect(container.textContent).not.toMatch(/Not linked|Loading links/);
+  expect(documents.links).not.toHaveBeenCalled();
+});
+
+it("shows a dot named Not opened yet only on Documents never opened here, and no page icon", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([
+    { id: "a", heading: "Fresh", opened: false },
+    { id: "b", heading: "Read", opened: true },
+  ]);
+  const { container } = renderDocuments();
+  await screen.findByRole("button", { name: "Fresh" });
+  const dot = screen.getByRole("img", { name: "Not opened yet" });
+  expect(dot.closest("li")).toBe(
+    screen.getByRole("button", { name: "Fresh" }).closest("li"),
+  );
+  expect(screen.getAllByRole("img", { name: "Not opened yet" })).toHaveLength(
+    1,
+  );
+  expect(container.querySelector(".document-list-kind")).toBeNull();
+});
+
+it("reads the time on a row as a time of day today and a weekday within the week", async () => {
+  const day = 86_400_000;
+  vi.mocked(documents.recent).mockResolvedValue([
+    { id: "a", heading: "Today", updated_at: new Date().toISOString() },
+    {
+      id: "b",
+      heading: "This week",
+      updated_at: new Date(Date.now() - 3 * day).toISOString(),
+    },
+  ]);
+  renderDocuments();
+  await screen.findByRole("button", { name: "This week" });
+  const timeOf = (title: string) =>
+    screen
+      .getByRole("button", { name: title })
+      .closest("li")
+      ?.querySelector("time")?.textContent;
+  expect(timeOf("Today")).toMatch(/\d:\d\d/);
+  expect(timeOf("This week")).toBe(
+    new Date(Date.now() - 3 * day).toLocaleDateString(undefined, {
+      weekday: "short",
+    }),
+  );
+});
+
+it("removes the dot from a row once its Document is opened", async () => {
+  vi.mocked(documents.recent).mockResolvedValue([
+    { id: "a", heading: "Fresh", opened: false },
+  ]);
+  vi.mocked(documents.open).mockResolvedValue({
+    id: "a",
+    title: "Fresh",
+    body: "text",
+    created_at: "now",
+    updated_at: "now",
+    trashed: false,
+  });
+  renderDocuments();
+  fireEvent.click(await screen.findByRole("button", { name: "Fresh" }));
+  await screen.findByText("text");
+  expect(screen.queryByRole("img", { name: "Not opened yet" })).toBeNull();
 });
