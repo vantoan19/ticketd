@@ -123,7 +123,7 @@ export function NewChat({
     if (!start) return null;
     const next = ticketPrompt(start.ticket);
     const kept = !draft.canPrefill();
-    if (!kept) draft.setText(next.text, next.tokens, { prefilled: true });
+    if (!kept) draft.setText(next.text, next.tokens, true);
     return { ...next, kept };
   });
   const {
@@ -377,7 +377,7 @@ export function NewChat({
           `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
         );
       }
-      if (keepDraft) draft.removeAttachmentCards(pending.submitted.items);
+      if (keepDraft) draft.settleCreateInput(pending.submitted);
       draft.setPendingCreate(null);
       setFailure(null);
       if (
@@ -658,11 +658,7 @@ export function NewChat({
                   size="xs"
                   disabled={saving}
                   onClick={() => {
-                    if (
-                      draft.setText(prompt.text, prompt.tokens, {
-                        prefilled: true,
-                      })
-                    ) {
+                    if (draft.setText(prompt.text, prompt.tokens, true)) {
                       setComposerKey((count) => count + 1);
                     }
                   }}

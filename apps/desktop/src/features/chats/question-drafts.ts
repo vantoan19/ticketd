@@ -1,12 +1,14 @@
 import type { RequestAnswer } from "@/features/chats/client";
+import type { Token } from "@/features/chats/composer-mentions";
 
 export type AnswerDraft = {
   text: string;
   pending: RequestAnswer | null;
   inComposer?: boolean;
+  tokens?: Token[];
 };
 
-/** Answers in the dock belong to the Chat and request, across pane mounts. */
+/** Answer drafts belong to the request across pane mounts and input locations. */
 export class QuestionDrafts {
   private drafts = new Map<string, AnswerDraft>();
   private listeners = new Set<() => void>();
@@ -24,16 +26,25 @@ export class QuestionDrafts {
     for (const listener of this.listeners) listener();
   }
 
-  setText(id: string, text: string) {
-    if (!this.drafts.get(id)?.pending) {
-      this.update(id, text ? { text, pending: null } : null);
-    }
+  setText(
+    id: string,
+    text: string,
+    source: Pick<AnswerDraft, "tokens" | "inComposer"> = {},
+  ) {
+    if (this.drafts.get(id)?.pending) return false;
+    this.update(id, text ? { ...source, text, pending: null } : null);
+    return true;
   }
 
   begin(id: string, answer: RequestAnswer, inComposer = false) {
     const current = this.drafts.get(id);
     if (current?.pending) return false;
-    this.update(id, { text: current?.text ?? "", pending: answer, inComposer });
+    this.update(id, {
+      ...current,
+      text: current?.text ?? "",
+      pending: answer,
+      inComposer,
+    });
     return true;
   }
 
@@ -42,7 +53,7 @@ export class QuestionDrafts {
     if (draft?.pending !== answer) return;
     this.update(
       id,
-      completed || !draft.text ? null : { text: draft.text, pending: null },
+      completed || !draft.text ? null : { ...draft, pending: null },
     );
   }
 

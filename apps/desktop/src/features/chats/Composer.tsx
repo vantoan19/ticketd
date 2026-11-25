@@ -36,6 +36,7 @@ type Submit = (
 
 // Matches the dedicated chooser request handled by the Linux desktop adapter.
 const CLIPBOARD_FILE_PICKER = "application/x-ticketd-clipboard";
+const NO_TOKENS: Token[] = [];
 
 /**
  * The message box and its control row. The send button's word comes from
@@ -113,8 +114,21 @@ export function Composer({
   );
   const draft = sharedDraft ?? localDraft;
   const { attachments } = draft;
-  const { text, tokens, items, failedAction, saving, transfer } =
-    useSyncExternalStore(draft.subscribe, draft.snapshot);
+  const {
+    text: draftText,
+    tokens: draftTokens,
+    items,
+    failedAction,
+    saving,
+    transfer,
+  } = useSyncExternalStore(draft.subscribe, draft.snapshot);
+  const { questions } = draft;
+  const answers = useSyncExternalStore(questions.subscribe, questions.snapshot);
+  const answer = answeringQuestion ? answers.get(answeringQuestion) : undefined;
+  const text = answeringQuestion ? (answer?.text ?? "") : draftText;
+  const tokens = answeringQuestion
+    ? (answer?.tokens ?? NO_TOKENS)
+    : draftTokens;
   const busy = saving || transfer !== null;
   const filePicker = useRef<HTMLInputElement>(null);
   const clipboardFilePicker = useRef<HTMLInputElement>(null);
@@ -136,8 +150,14 @@ export function Composer({
   const linuxDesktop =
     "__TAURI_INTERNALS__" in window && /^linux/i.test(navigator.platform);
   const setText = (next: string, nextTokens: Token[] = []) => {
-    if (draft.setText(next, nextTokens, { answeringQuestion }))
-      onText?.(next, nextTokens);
+    if (draft.locked()) return;
+    const changed = answeringQuestion
+      ? questions.setText(answeringQuestion, next, {
+          tokens: nextTokens,
+          inComposer: true,
+        })
+      : draft.setText(next, nextTokens);
+    if (changed) onText?.(next, nextTokens);
   };
   const files = items.flatMap((item) =>
     item.state === "ready" ? [item.content] : [],
@@ -150,7 +170,12 @@ export function Composer({
       : available;
   const submit = (action: Submit | undefined) => {
     const current = draft.snapshot();
-    const message = current.text.trim();
+    const submittedAnswer = answeringQuestion
+      ? questions.snapshot().get(answeringQuestion)
+      : undefined;
+    const message = (
+      answeringQuestion ? (submittedAnswer?.text ?? "") : current.text
+    ).trim();
     const selected = current.items.flatMap((item) =>
       item.state === "ready" ? [item.content] : [],
     );
@@ -159,14 +184,22 @@ export function Composer({
       draft.locked() ||
       receivingClipboardFiles ||
       current.items.length !== selected.length ||
+      (answeringQuestion && (action !== onSend || current.items.length > 0)) ||
       (!message && !selected.length)
     )
       return;
-    const links = linksOf(current.tokens);
-    draft.save(action === onQueue ? "queue" : "send", () =>
-      selected.length
-        ? action(message, links, selected)
-        : action(message, links),
+    const links = linksOf(
+      answeringQuestion
+        ? (submittedAnswer?.tokens ?? NO_TOKENS)
+        : current.tokens,
+    );
+    draft.save(
+      action === onQueue ? "queue" : "send",
+      () =>
+        selected.length
+          ? action(message, links, selected)
+          : action(message, links),
+      Boolean(answeringQuestion),
     );
   };
   useImperativeHandle(retryRef, () => () => {

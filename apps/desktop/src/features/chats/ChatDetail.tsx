@@ -587,7 +587,6 @@ function Conversation({
   }, [items, questionDrafts]);
   const {
     text: draftText,
-    answeringQuestion,
     items: draftFiles,
     restored,
     saving: savingDraft,
@@ -600,10 +599,10 @@ function Conversation({
     (file) =>
       file.state === "ready" && file.content.dataUrl.startsWith("data:image/"),
   );
-  // Keep answer text tied to the request it was typed for, even after reopening.
+  // A message draft stays separate while the question accepts its own text.
   const answering =
     Boolean(question) &&
-    (!draftText.trim() || answeringQuestion === question?.id) &&
+    !draftText.trim() &&
     !hasAttachments &&
     queueEdits.length === 0 &&
     !independentAnswer &&

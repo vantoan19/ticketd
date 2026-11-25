@@ -949,70 +949,82 @@ test.each(["another Chat", "narrow list"])(
   },
 );
 
-test("Retry after navigation opens the Chat whose create reply was lost", async () => {
-  const client = await open(one({ id: "c1", title: "Limiter" }));
-  client.projectCheckouts = [
-    { project: { id: "p1", title: "Storefront" }, path: "/work/storefront" },
-  ];
-  const saved = client.createChat;
-  const create = vi
-    .spyOn(client, "createChat")
-    .mockImplementationOnce(async (request) => {
-      await saved(request);
-      throw new Error("The first reply was lost");
+test.each([false, true])(
+  "Retry after navigation opens the Chat whose create reply was lost (revised caption: %s)",
+  async (revisedCaption) => {
+    const client = await open(one({ id: "c1", title: "Limiter" }));
+    client.projectCheckouts = [
+      { project: { id: "p1", title: "Storefront" }, path: "/work/storefront" },
+    ];
+    const saved = client.createChat;
+    const create = vi
+      .spyOn(client, "createChat")
+      .mockImplementationOnce(async (request) => {
+        await saved(request);
+        throw new Error("The first reply was lost");
+      });
+    fireEvent.click(button("New Chat"));
+    fireEvent.keyDown(button("Scratch folder"), { key: "Enter" });
+    fireEvent.click(
+      await screen.findByRole("menuitem", {
+        name: "Storefront /work/storefront",
+      }),
+    );
+    expect(button("Folder: /work/storefront")).toBeTruthy();
+    const description = "Describe a task or ask a question";
+    type("First caption", description);
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: {
+        files: [new File(["one"], "first.txt", { type: "text/plain" })],
+      },
     });
-  fireEvent.click(button("New Chat"));
-  fireEvent.keyDown(button("Scratch folder"), { key: "Enter" });
-  fireEvent.click(
-    await screen.findByRole("menuitem", {
-      name: "Storefront /work/storefront",
-    }),
-  );
-  expect(button("Folder: /work/storefront")).toBeTruthy();
-  const description = "Describe a task or ask a question";
-  type("First caption", description);
-  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
-    target: { files: [new File(["one"], "first.txt", { type: "text/plain" })] },
-  });
-  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
-  fireEvent.click(button("Send"));
-  await screen.findByRole("button", { name: "Retry" });
-  expect(create.mock.calls[0]?.[0].folder).toBe("/work/storefront");
-  type("New work after the failed reply", description);
-  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
-    target: { files: [new File(["two"], "next.txt", { type: "text/plain" })] },
-  });
-  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    await screen.findByRole("button", { name: "Retry" });
+    expect(create.mock.calls[0]?.[0].folder).toBe("/work/storefront");
+    const nextCaption = revisedCaption ? "New work after the failed reply" : "";
+    if (revisedCaption) type(nextCaption, description);
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: {
+        files: [new File(["two"], "next.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
 
-  fireEvent.click(button(/^Limiter/));
-  await screen.findByRole("heading", { name: "Limiter" });
-  fireEvent.click(button("New Chat"));
-  expect(
-    await screen.findByRole("button", { name: "Folder: /work/storefront" }),
-  ).toBeTruthy();
-  fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
-  expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
-  await screen.findByRole("heading", { name: "First caption" });
-  const matches = within(
-    screen.getByRole("list", { name: "Chats" }),
-  ).getAllByText("First caption");
-  expect(matches).toHaveLength(1);
-  fireEvent.click(button("New Chat"));
-  expect(composer(description)).toHaveProperty(
-    "value",
-    "New work after the failed reply",
-  );
-  expect(button("Remove next.txt")).toBeTruthy();
-  noButton("Remove first.txt");
-  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
-  fireEvent.click(button("Send"));
-  expect(create.mock.calls[2]?.[0].attachments).toEqual([
-    { name: "next.txt", dataUrl: "data:text/plain;base64,dHdv" },
-  ]);
-  expect(create.mock.calls[2]?.[0].command_id).not.toBe(
-    create.mock.calls[0]?.[0].command_id,
-  );
-});
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+    fireEvent.click(button("New Chat"));
+    expect(
+      await screen.findByRole("button", { name: "Folder: /work/storefront" }),
+    ).toBeTruthy();
+    fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
+    expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+    await screen.findByRole("heading", { name: "First caption" });
+    const matches = within(
+      screen.getByRole("list", { name: "Chats" }),
+    ).getAllByText("First caption");
+    expect(matches).toHaveLength(1);
+    fireEvent.click(button("New Chat"));
+    expect(composer(description)).toHaveProperty("value", nextCaption);
+    expect(button("Remove next.txt")).toBeTruthy();
+    noButton("Remove first.txt");
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    expect(create.mock.calls[2]?.[0].message).toBe(nextCaption);
+    expect(create.mock.calls[2]?.[0].attachments).toEqual([
+      { name: "next.txt", dataUrl: "data:text/plain;base64,dHdv" },
+    ]);
+    expect(create.mock.calls[2]?.[0].command_id).not.toBe(
+      create.mock.calls[0]?.[0].command_id,
+    );
+  },
+);
 
 test("an image that the running turn cannot take can be queued for the next turn", async () => {
   await open(
@@ -1379,6 +1391,108 @@ test.each(["before", "after"])(
     ).toEqual([]);
   },
 );
+
+test("adding a file moves an unsent answer to its question and sends only the file", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [
+      { ...question, options: [] },
+    ]),
+  );
+  const send = vi.spyOn(client, "send").mockResolvedValue(undefined);
+  const reply = vi.spyOn(client, "answer");
+  type("Ask the operator", "Answer, or pick above");
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: {
+      files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+    },
+  });
+  expect(screen.getByRole("textbox", { name: "Answer" })).toHaveProperty(
+    "value",
+    "Ask the operator",
+  );
+  const message = composer("Steer Codex");
+  expect(message).toHaveProperty("value", "");
+  await waitFor(() =>
+    expect(button("Steer")).toHaveProperty("disabled", false),
+  );
+  fireEvent.keyDown(message, { key: "Enter" });
+  expect(send).toHaveBeenCalledWith(
+    "c1",
+    "",
+    [],
+    [{ name: "notes.txt", dataUrl: "data:text/plain;base64,bm90ZXM=" }],
+  );
+  expect(reply).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(composer("Answer, or pick above")).toHaveProperty(
+      "value",
+      "Ask the operator",
+    ),
+  );
+  fireEvent.click(button("Send"));
+  expect(reply).toHaveBeenCalledWith("c1", question.id, {
+    text: "Ask the operator",
+  });
+});
+
+test("an ended question does not turn its unsent answer into a message", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [question]),
+  );
+  const send = vi.spyOn(client, "send");
+  const reply = vi.spyOn(client, "answer");
+  const box = composer("Answer, or pick above");
+  box.focus();
+  type("Earlier answer", "Answer, or pick above");
+  act(() => {
+    client.push("c1", { ...question, state: "expired" });
+    client.patch("c1", { activity: "working" });
+  });
+  const message = composer("Steer Codex");
+  expect(message).toHaveProperty("value", "");
+  expect(document.activeElement).toBe(message);
+  fireEvent.keyDown(message, { key: "Enter" });
+  expect(send).not.toHaveBeenCalled();
+  expect(reply).not.toHaveBeenCalled();
+  type("A separate message", "Steer Codex");
+  fireEvent.keyDown(message, { key: "Enter" });
+  expect(send).toHaveBeenCalledWith("c1", "A separate message", []);
+});
+
+test("queue Edit keeps an unsent answer separate from the adopted message", async () => {
+  const client = await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "waiting",
+        queue_paused: true,
+        queue: [{ id: "q1", text: "Queued wording" }],
+      },
+      [{ ...question, options: [] }],
+    ),
+  );
+  const send = vi.spyOn(client, "send");
+  const reply = vi.spyOn(client, "answer");
+  type("Earlier answer", "Answer, or pick above");
+  fireEvent.click(button("Edit in the message box"));
+  await waitFor(() =>
+    expect(button("Steer")).toHaveProperty("disabled", false),
+  );
+  const message = composer("Steer Codex");
+  expect(message).toHaveProperty("value", "Queued wording");
+  expect(screen.getByRole("textbox", { name: "Answer" })).toHaveProperty(
+    "value",
+    "Earlier answer",
+  );
+  expect(document.activeElement).toBe(message);
+  fireEvent.keyDown(message, { key: "Enter" });
+  expect(send).toHaveBeenCalledWith("c1", "Queued wording", [], undefined, {
+    messageIds: ["q1"],
+    commandId: expect.any(String),
+  });
+  expect(reply).not.toHaveBeenCalled();
+});
 
 test("an independent answer survives removing the last file and navigating during its submission", async () => {
   const client = await open([

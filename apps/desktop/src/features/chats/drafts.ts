@@ -21,7 +21,6 @@ export type SaveResult = void | "keep_draft";
 type Snapshot = {
   text: string;
   tokens: Token[];
-  answeringQuestion: string | undefined;
   items: ReturnType<ComposerAttachments["snapshot"]>;
   saving: boolean;
   transfer: "preparing" | "adopting" | "confirming" | "unconfirmed" | null;
@@ -83,7 +82,6 @@ export class ComposerDraft {
     this.state = {
       text,
       tokens,
-      answeringQuestion: undefined,
       items: attachments.snapshot(),
       saving: false,
       transfer: null,
@@ -137,24 +135,13 @@ export class ComposerDraft {
     );
   }
 
-  setText(
-    text: string,
-    tokens: Token[],
-    {
-      prefilled = false,
-      answeringQuestion,
-    }: {
-      prefilled?: boolean;
-      answeringQuestion?: string | undefined;
-    } = {},
-  ) {
+  setText(text: string, tokens: Token[], prefilled = false) {
     if (this.locked()) return false;
     if (prefilled) this.prefilled = text;
     else if (text !== this.prefilled) this.prefilled = null;
     this.update({
       text,
       tokens,
-      answeringQuestion: text.trim() ? answeringQuestion : undefined,
       restored: Boolean(text.trim()) && this.state.restored,
     });
     return true;
@@ -200,7 +187,6 @@ export class ComposerDraft {
           ...this.state,
           text: "",
           tokens: [],
-          answeringQuestion: undefined,
           restored: false,
           failedAction: null,
           queueEdits: [],
@@ -214,7 +200,12 @@ export class ComposerDraft {
     })();
   }
 
-  removeAttachmentCards(items: Snapshot["items"]) {
+  settleCreateInput({ text, tokens, items }: PendingCreate["submitted"]) {
+    this.clearAcceptedCaption(text.trim(), JSON.stringify(linksOf(tokens)));
+    this.removeAttachmentCards(items);
+  }
+
+  private removeAttachmentCards(items: Snapshot["items"]) {
     if (items.length)
       this.attachments.remove(new Set(items.map((item) => item.id)));
   }
@@ -235,7 +226,6 @@ export class ComposerDraft {
     return text
       ? {
           text: before.trim() ? `${before}\n\n${text}` : text,
-          answeringQuestion: undefined,
           restored: true,
         }
       : {};
@@ -270,6 +260,16 @@ export class ComposerDraft {
       this.queueRemovals.add(queuedId);
   }
 
+  private clearAcceptedCaption(text: string, linkKey: string) {
+    if (
+      this.state.text.trim() === text &&
+      JSON.stringify(linksOf(this.state.tokens)) === linkKey
+    ) {
+      this.prefilled = null;
+      this.update({ text: "", tokens: [], restored: false });
+    }
+  }
+
   settleQueueEdits({ saved, removed }: QueueEditStatus, key?: string) {
     const consumed = new Set(removed);
     let sameDraft = false;
@@ -282,18 +282,7 @@ export class ComposerDraft {
       acknowledgedQuotes.push(...pending.quotes);
       // A changed draft keeps its new words and files, but has already sent
       // the unchanged text and the original attachment cards.
-      if (
-        this.state.text.trim() === pending.text &&
-        JSON.stringify(linksOf(this.state.tokens)) === pending.linkKey
-      ) {
-        this.state = {
-          ...this.state,
-          text: "",
-          tokens: [],
-          answeringQuestion: undefined,
-          restored: false,
-        };
-      }
+      this.clearAcceptedCaption(pending.text, pending.linkKey);
       if (pending.attachmentIds.size)
         this.attachments.remove(pending.attachmentIds);
     }
