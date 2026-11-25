@@ -157,6 +157,26 @@ export function IfFields({
                       text={project || NO_PROJECT}
                       menu="Project is"
                     >
+                      {projects
+                        .filter(
+                          (project) =>
+                            !project.archived ||
+                            check.project_id === project.id,
+                        )
+                        .map(({ id }) => (
+                          <DropdownMenuItem
+                            key={id}
+                            onSelect={() =>
+                              set(index, { ...check, project_id: id })
+                            }
+                          >
+                            {projectName(id, projects)}
+                          </DropdownMenuItem>
+                        ))}
+                      {projects.some(
+                        (project) =>
+                          !project.archived || check.project_id === project.id,
+                      ) && <DropdownMenuSeparator />}
                       <DropdownMenuItem
                         onSelect={() =>
                           set(index, { ...check, project_id: null })
@@ -164,17 +184,6 @@ export function IfFields({
                       >
                         {NO_PROJECT}
                       </DropdownMenuItem>
-                      {projects.length > 0 && <DropdownMenuSeparator />}
-                      {projects.map(({ id, name }) => (
-                        <DropdownMenuItem
-                          key={id}
-                          onSelect={() =>
-                            set(index, { ...check, project_id: id })
-                          }
-                        >
-                          {name}
-                        </DropdownMenuItem>
-                      ))}
                     </Pick>
                   )}
                 </>

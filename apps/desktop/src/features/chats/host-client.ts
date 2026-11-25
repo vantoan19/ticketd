@@ -94,7 +94,7 @@ export function tauriBridge(): HostBridge {
 }
 
 const failureSchema = z.object({
-  code: z.enum(["stale", "gone", "failed"]),
+  code: z.enum(["stale", "gone", "failed", "project_archived"]),
   message: z.string(),
 });
 const stoppingSchema = z.object({
@@ -237,13 +237,16 @@ export function createHostChatClient(
         .parse(await call("chat_harness_skills", { harnessId, folder })),
     pickFolder: () => bridge.pickFolder(),
     listProjectFolders: async () =>
-      (await listProjects()).flatMap(({ id, name, paths }) => {
-        const project = { id, title: name };
-        return paths.filter(Boolean).map((path) => ({ project, path }));
-      }),
+      (await listProjects())
+        .filter((project) => !project.archived)
+        .flatMap(({ id, name, paths }) => {
+          const project = { id, title: name };
+          return paths.filter(Boolean).map((path) => ({ project, path }));
+        }),
     projectFolder: async (projectId) =>
-      (await listProjects()).find((project) => project.id === projectId)
-        ?.path || null,
+      (await listProjects()).find(
+        (project) => project.id === projectId && !project.archived,
+      )?.path || null,
     folderProject: async (path) =>
       projectRefSchema
         .nullable()

@@ -76,6 +76,22 @@ test("Enter never sends while the # menu is open, even with no row to pick (chat
   expect(box.value).toBe("Look at #zzz");
 });
 
+test("an archived Project mention explains how to link it without offering a choice", async () => {
+  const { box, onSend } = setup(
+    [],
+    [{ kind: "project", id: "p1", title: "Storefront", archived: true }],
+  );
+  type(box, "#store");
+  expect(
+    await screen.findByText(
+      "Storefront is archived. Reactivate it on the Projects page to link it.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("option")).toBeNull();
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onSend).not.toHaveBeenCalled();
+});
+
 test("# with nothing typed offers the linked records, then the recently updated ones", async () => {
   const { box } = setup();
   type(box, "#");

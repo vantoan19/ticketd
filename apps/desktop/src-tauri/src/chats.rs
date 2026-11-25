@@ -67,6 +67,12 @@ fn stale(message: impl Into<String>) -> ChatFailure {
 
 impl From<ticketd_core::Error> for ChatFailure {
     fn from(error: ticketd_core::Error) -> Self {
+        if matches!(error, ticketd_core::Error::ProjectArchived(_)) {
+            return Self {
+                code: error.kind().code(),
+                message: error.to_string(),
+            };
+        }
         failed(error.to_string())
     }
 }
@@ -575,6 +581,7 @@ fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, tick
                 LinkedRecord::Project {
                     id: record.id,
                     title,
+                    archived: project.archived,
                 }
             }
         });
@@ -740,7 +747,7 @@ fn project(
         })
         .or_else(|| {
             links.iter().find_map(|link| match link {
-                LinkedRecord::Project { id, title } => Some(ProjectRef {
+                LinkedRecord::Project { id, title, .. } => Some(ProjectRef {
                     id: id.clone(),
                     title: title.clone(),
                 }),
@@ -1902,9 +1909,8 @@ impl Chats {
     }
 
     /// Sends or queues a message after linking the records it mentions or quotes, so the
-    /// harness is told about them with this message (spec 21.4). A record that cannot be
-    /// linked refuses the message; links made before the refusal stay, as harmless as
-    /// linking them by hand.
+    /// harness is told about them with this message (spec 21.4). An invalid link
+    /// refuses the whole set of links and the message.
     pub async fn send_linking(
         &self,
         chat_id: &str,
@@ -1914,20 +1920,8 @@ impl Chats {
     ) -> Outcome<()> {
         text_argument(text, "The message")?;
         let host = self.host()?;
-        let present = self.workspace()?.chat(chat_id)?.links;
-        let mut added = false;
-        for link in links {
-            let link = ChatLink::from(link.clone());
-            if present
-                .iter()
-                .any(|old| old.kind == link.kind && old.id == link.id)
-            {
-                continue;
-            }
-            self.workspace()?.set_chat_link(chat_id, link, true)?;
-            added = true;
-        }
-        if added {
+        let links: Vec<_> = links.iter().cloned().map(ChatLink::from).collect();
+        if !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)? {
             host.links_changed(chat_id).await?;
         }
         self.send(chat_id, text, mode).await
@@ -2220,16 +2214,27 @@ impl Chats {
         );
         // Projects are few and have no search index: match their names here.
         let needle = query.to_lowercase();
-        let projects = workspace.list_projects()?.into_iter();
-        found.extend(
+        let projects = workspace.list_projects()?;
+        let matching = || {
             projects
+                .iter()
                 .filter(|project| project.name.to_lowercase().contains(&needle))
+        };
+        let record = |project: &ticketd_core::Project| LinkedRecord::Project {
+            id: project.id.clone(),
+            title: project.name.clone(),
+            archived: project.archived,
+        };
+        found.extend(
+            matching()
+                .filter(|project| !project.archived)
                 .take(8)
-                .map(|project| LinkedRecord::Project {
-                    id: project.id,
-                    title: project.name,
-                }),
+                .map(record),
         );
+        // Offer no assignment for an archived match. Its name explains an empty search.
+        if found.is_empty() {
+            found.extend(matching().find(|project| project.archived).map(record));
+        }
         Ok(found)
     }
 

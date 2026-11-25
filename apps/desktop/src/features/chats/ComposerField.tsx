@@ -12,11 +12,13 @@ import {
 import { File, FileText, Folder, FolderKanban } from "lucide-react";
 import { Reference } from "@/components/ui/reference";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import type {
-  FolderFile,
-  HarnessSkill,
-  LinkedRecord,
+import {
+  isArchivedProjectRecord,
+  type FolderFile,
+  type HarnessSkill,
+  type LinkedRecord,
 } from "@/features/chats/client";
+import { archivedProjectHint } from "@/features/projects/project-assignment";
 import {
   insertToken,
   mentionText,
@@ -62,6 +64,7 @@ type Answer = {
   options: Option[];
   state: "ready" | "failed";
   error?: string;
+  archivedProject?: string | undefined;
 };
 
 const RECORD_GROUPS = {
@@ -250,64 +253,81 @@ export function ComposerField({
   // updated ones the host finds for an empty query.
   const linkedFirst =
     open?.char === "#" && !query && mentions
-      ? recordOptions(mentions.linked, "Linked to this Chat")
+      ? recordOptions(
+          mentions.linked.filter((record) => !isArchivedProjectRecord(record)),
+          "Linked to this Chat",
+        )
       : null;
   const searches = Boolean(
     open && atHand === null && (open.char !== "$" || searchingSkills),
   );
   // What the open trigger asks for, read when its search changes.
-  const search = useEffectEvent(() => {
-    if (!open || !mentions) return null;
-    if (open.char === "$")
-      return skillSearch?.load().then((skills) =>
-        skills.map((skill): Option => ({
-          id: skill.name,
-          group: skill.description,
-          insert: { kind: "skill", text: `$${skill.name}` },
-        })),
-      );
-    const folder = mentions.folder;
-    return open.char === "#"
-      ? mentions.records(query).then((found) =>
-          linkedFirst
-            ? [
-                ...linkedFirst,
-                ...recordOptions(
-                  found.filter(
-                    (record) =>
-                      !mentions.linked.some(
-                        (linked) =>
-                          linked.kind === record.kind &&
-                          linked.id === record.id,
+  const search = useEffectEvent(
+    ():
+      | Promise<Pick<Answer, "options" | "archivedProject">>
+      | null
+      | undefined => {
+      if (!open || !mentions) return null;
+      if (open.char === "$")
+        return skillSearch?.load().then((skills) => ({
+          options: skills.map((skill): Option => ({
+            id: skill.name,
+            group: skill.description,
+            insert: { kind: "skill", text: `$${skill.name}` },
+          })),
+        }));
+      const folder = mentions.folder;
+      return open.char === "#"
+        ? mentions.records(query).then((found) => {
+            const eligible = found.filter(
+              (record) => !isArchivedProjectRecord(record),
+            );
+            return {
+              archivedProject:
+                eligible.length === 0
+                  ? found.find(isArchivedProjectRecord)?.title
+                  : undefined,
+              options: linkedFirst
+                ? [
+                    ...linkedFirst,
+                    ...recordOptions(
+                      eligible.filter(
+                        (record) =>
+                          !mentions.linked.some(
+                            (linked) =>
+                              linked.kind === record.kind &&
+                              linked.id === record.id,
+                          ),
                       ),
+                      "Recent",
+                    ),
+                  ]
+                : recordOptions(
+                    eligible.sort(
+                      (a, b) =>
+                        Object.keys(RECORD_GROUPS).indexOf(a.kind) -
+                        Object.keys(RECORD_GROUPS).indexOf(b.kind),
+                    ),
                   ),
-                  "Recent",
-                ),
-              ]
-            : recordOptions(
-                [...found].sort(
-                  (a, b) =>
-                    Object.keys(RECORD_GROUPS).indexOf(a.kind) -
-                    Object.keys(RECORD_GROUPS).indexOf(b.kind),
-                ),
-              ),
-        )
-      : folder
-        ? folder.files(query).then((files) =>
-            files.map((file): Option => ({
-              id: file.path,
-              group: file.folder ? "folder" : "file",
-              insert: { kind: "path", text: file.path },
-            })),
-          )
-        : null;
-  });
+            };
+          })
+        : folder
+          ? folder.files(query).then((files) => ({
+              options: files.map((file): Option => ({
+                id: file.path,
+                group: file.folder ? "folder" : "file",
+                insert: { kind: "path", text: file.path },
+              })),
+            }))
+          : null;
+    },
+  );
   useEffect(() => {
     if (!searches) return;
     let current = true;
     search()?.then(
-      (options) =>
-        current && setAnswer({ key: searchKey, options, state: "ready" }),
+      (result) =>
+        current && setAnswer({ key: searchKey, ...result, state: "ready" }),
       (reason: unknown) =>
         current &&
         setAnswer({
@@ -584,6 +604,11 @@ export function ComposerField({
               role={shown.state === "failed" ? "alert" : undefined}
             >
               {empty}
+              {shown.state === "ready" && answered?.archivedProject && (
+                <span className="block text-xs">
+                  {archivedProjectHint(answered.archivedProject)}
+                </span>
+              )}
             </p>
           )}
           {shown.trigger.char === "#" && (

@@ -24,6 +24,8 @@ pub enum FailureKind {
     Cycle,
     /// The record changed elsewhere, or a request was reused for different content.
     Conflict,
+    /// The Project must be reactivated before it can receive a new assignment.
+    ProjectArchived,
     /// A file is larger than the workspace upload limit.
     TooLarge,
     /// An account must be connected or reconnected first.
@@ -45,6 +47,7 @@ impl FailureKind {
             Self::NotFound => "not_found",
             Self::Cycle => "cycle",
             Self::Conflict => "conflict",
+            Self::ProjectArchived => "project_archived",
             Self::TooLarge => "too_large",
             Self::NotSignedIn => "not_signed_in",
             Self::Offline => "offline",
@@ -112,6 +115,7 @@ impl Error {
                 | RemoteError::Other(_) => FailureKind::Failed,
             },
             Self::UploadLimit { .. } => FailureKind::TooLarge,
+            Self::ProjectArchived(_) => FailureKind::ProjectArchived,
             Self::TicketChanged(_)
             | Self::DocumentChanged(_)
             | Self::RequestConflict(_)
@@ -172,7 +176,6 @@ impl Error {
             | Self::DependencyReviewChanged
             | Self::SyncReviewChanged
             | Self::DependencyReviewMode(_)
-            | Self::ProjectArchived(_)
             | Self::PlanArchived
             | Self::EmptyTag
             | Self::InvalidTag { .. }

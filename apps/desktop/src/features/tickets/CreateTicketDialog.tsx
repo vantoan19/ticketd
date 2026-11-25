@@ -165,11 +165,9 @@ function RecoveredCreateTicketDialog({
       body: "",
       status: initialStatus ?? "Todo",
       project:
-        navigation.project === "all" ||
-        navigation.project === "unlinked" ||
-        projects.find((project) => project.id === navigation.project)?.archived
-          ? ""
-          : navigation.project,
+        projects.find(
+          (project) => project.id === navigation.project && !project.archived,
+        )?.id ?? "",
       plan: navigation.plan,
       tags: [],
       restored: false,
@@ -296,10 +294,20 @@ function RecoveredCreateTicketDialog({
         });
       } else if (creationAttempted) {
         const failure = describeFailure(reason, "confirm the new ticket");
-        setError({
-          ...failure,
-          sentence: `${failure.sentence} Retry safely: it never creates a second ticket.`,
-        });
+        if (failure.code === "project_archived") {
+          setDraft({
+            ...submission,
+            requestId: undefined,
+            followCreated: undefined,
+            createMore: undefined,
+          });
+          setError({ ...failure, title: "Couldn't create the ticket" });
+        } else {
+          setError({
+            ...failure,
+            sentence: `${failure.sentence} Retry safely: it never creates a second ticket.`,
+          });
+        }
       } else {
         const failure = describeFailure(reason, "create the ticket");
         setError({
@@ -523,11 +531,13 @@ function RecoveredCreateTicketDialog({
               shortcut="ticket-project"
               onSelect={(project) => update({ project })}
               options={[
-                ...projects.map((project) => ({
-                  value: project.id,
-                  label: project.name,
-                  icon: <Folder />,
-                })),
+                ...projects
+                  .filter((project) => !project.archived)
+                  .map((project) => ({
+                    value: project.id,
+                    label: project.name,
+                    icon: <Folder />,
+                  })),
                 { value: "", label: "No project" },
               ]}
             />

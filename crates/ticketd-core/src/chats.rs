@@ -1077,7 +1077,9 @@ fn read_history(
 
 fn ensure_link_target(connection: &Connection, link: &ChatLink) -> Result<(), Error> {
     let (table, missing): (&str, fn(String) -> Error) = match link.kind {
-        ChatLinkKind::Project => ("projects", Error::ProjectNotFound),
+        ChatLinkKind::Project => {
+            return crate::projects::ensure_active(connection, &link.id).map(|_| ());
+        }
         ChatLinkKind::Ticket => ("tickets", Error::NotFound),
         ChatLinkKind::Document => ("documents", Error::DocumentNotFound),
     };
@@ -1093,13 +1095,22 @@ fn ensure_link_target(connection: &Connection, link: &ChatLink) -> Result<(), Er
     }
 }
 
-fn add_link(connection: &Connection, chat_id: &str, link: &ChatLink) -> Result<(), Error> {
+fn add_link(connection: &Connection, chat_id: &str, link: &ChatLink) -> Result<bool, Error> {
+    let kind = name(link.kind)?;
+    let linked: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM chat_links WHERE chat_id = ?1 AND kind = ?2 AND target_id = ?3)",
+        params![chat_id, kind, link.id],
+        |row| row.get(0),
+    )?;
+    if linked {
+        return Ok(false);
+    }
     ensure_link_target(connection, link)?;
     connection.execute(
-        "INSERT OR IGNORE INTO chat_links (chat_id, kind, target_id) VALUES (?1, ?2, ?3)",
-        params![chat_id, name(link.kind)?, link.id],
+        "INSERT INTO chat_links (chat_id, kind, target_id) VALUES (?1, ?2, ?3)",
+        params![chat_id, kind, link.id],
     )?;
-    Ok(())
+    Ok(true)
 }
 
 /// Runs `create` once per command ID and returns the ID of the record it created.
@@ -1914,7 +1925,7 @@ impl Workspace {
     ) -> Result<Chat, Error> {
         self.update_chat(id, |connection| {
             if present {
-                add_link(connection, id, &link)
+                add_link(connection, id, &link).map(|_| ())
             } else {
                 connection.execute(
                     "DELETE FROM chat_links WHERE chat_id = ?1 AND kind = ?2 AND target_id = ?3",
@@ -1922,6 +1933,23 @@ impl Workspace {
                 )?;
                 Ok(())
             }
+        })
+    }
+
+    /// Adds a message's new links together. Existing links are allowed, including
+    /// those to Projects archived since they were linked.
+    pub fn add_chat_links(&mut self, id: &str, links: &[ChatLink]) -> Result<bool, Error> {
+        self.chat_write(|connection| {
+            read_chat(connection, id)?;
+            let mut added = false;
+            for link in links {
+                added |= add_link(connection, id, link)?;
+            }
+            if added {
+                log(connection, id, "chat", id)?;
+                trim(connection, id)?;
+            }
+            Ok(added)
         })
     }
 

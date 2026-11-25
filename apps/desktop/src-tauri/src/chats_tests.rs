@@ -1642,7 +1642,8 @@ async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the
         found,
         [LinkedRecord::Project {
             id: project.id.clone(),
-            title: "Storefront".to_owned()
+            title: "Storefront".to_owned(),
+            archived: false,
         }]
     );
 

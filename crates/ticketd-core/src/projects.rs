@@ -143,7 +143,11 @@ impl Workspace {
     pub fn resolve_project(&self, directory: &std::path::Path) -> Result<Option<Project>, Error> {
         let directory = std::fs::canonicalize(directory)?;
         let mut matches = Vec::new();
-        for project in self.list_projects()? {
+        for project in self
+            .list_projects()?
+            .into_iter()
+            .filter(|project| !project.archived)
+        {
             if project.paths.iter().any(|path| {
                 std::fs::canonicalize(path).is_ok_and(|root| directory.starts_with(root))
             }) {
@@ -266,11 +270,15 @@ impl Workspace {
     /// canonical, so the folder is resolved first when it exists.
     pub fn project_for_folder(&self, folder: &std::path::Path) -> Result<Option<Project>, Error> {
         let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        Ok(self.list_projects()?.into_iter().find(|project| {
-            std::iter::once(&project.path)
-                .chain(&project.paths)
-                .any(|path| !path.is_empty() && folder.starts_with(path))
-        }))
+        Ok(self
+            .list_projects()?
+            .into_iter()
+            .filter(|project| !project.archived)
+            .find(|project| {
+                std::iter::once(&project.path)
+                    .chain(&project.paths)
+                    .any(|path| !path.is_empty() && folder.starts_with(path))
+            }))
     }
 
     pub fn list_projects(&self) -> Result<Vec<Project>, Error> {

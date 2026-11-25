@@ -12,6 +12,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import { App } from "@/app/App";
 import { ChatClientContext } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
+import { LinkPicker } from "@/features/chats/LinkPicker";
 import { ExperimentalCard } from "@/features/chats/ExperimentalCard";
 import {
   SettingsStateContext,
@@ -52,6 +53,25 @@ afterEach(() => {
   cleanup();
   localStorage.clear();
   expect(unknownCommands).toEqual([]);
+});
+
+test("the Chat Link picker offers no archived Project and tells how to reactivate it", async () => {
+  const client = createMockChatClient({
+    records: [{ kind: "project", id: "old", title: "Obsolete repo", archived: true }],
+  });
+  const onPick = vi.fn();
+  render(
+    <ChatClientContext value={client}>
+      <LinkPicker linked={[]} onPick={onPick} />
+    </ChatClientContext>,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Link a ticket, Document or Project" }));
+  const search = await screen.findByRole("combobox");
+  fireEvent.change(search, { target: { value: "obsolete" } });
+  expect(await screen.findByText("Obsolete repo is archived. Reactivate it on the Projects page to link it.")).toBeTruthy();
+  expect(screen.queryByRole("option")).toBeNull();
+  fireEvent.keyDown(search, { key: "Enter" });
+  expect(onPick).not.toHaveBeenCalled();
 });
 
 const waitingChat = () => ({

@@ -1,4 +1,9 @@
 import { TicketCommandPicker } from "./TicketCommandPicker";
+import {
+  archivedProjectHint,
+  archivedProjectMatch,
+  projectAssignmentChoices,
+} from "@/features/projects/project-assignment";
 import { TicketAgentStrip } from "./TicketAgent";
 import { shortcutLabel, ariaKeyShortcuts } from "@/lib/shortcuts";
 import {
@@ -176,6 +181,7 @@ export function PropertyPicker({
   things,
   trailing,
   notice,
+  emptyHint,
 }: {
   label: string;
   /** What the search finds, for its placeholder: "Search projects". */
@@ -200,6 +206,7 @@ export function PropertyPicker({
   trailing?: ReactNode;
   /** A line above the choices, such as why suggestions are missing. */
   notice?: ReactNode;
+  emptyHint?: (query: string) => string | undefined;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -212,6 +219,7 @@ export function PropertyPicker({
     onChoose(next);
   }
   const icon = Icon && <Icon aria-hidden="true" />;
+  const hint = emptyHint?.(query);
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -255,6 +263,13 @@ export function PropertyPicker({
           onSelect={choose}
           {...(multiple && { create: choose })}
           {...(notice && { notice })}
+          {...(hint && {
+            empty: (
+              <span>
+                No matches<span className="block text-xs">{hint}</span>
+              </span>
+            ),
+          })}
         />
       </PopoverContent>
     </Popover>
@@ -311,10 +326,7 @@ export function TicketProperties({
   // A failed change per property: one caption under its value, "Not saved ·
   // Retry", with the cause under Details. Nothing else in the rail turns red.
   const [errors, setErrors] = useState<
-    Record<
-      string,
-      { failure: FailureDescription; label: string; retry: () => void } | null
-    >
+    Record<string, { failure: FailureDescription; retry: () => void } | null>
   >({});
   // While the workspace cannot be written, the controls rest disabled; the
   // workspace band says why once for the window.
@@ -346,7 +358,11 @@ export function TicketProperties({
       window.clearTimeout(timer);
     };
   }, [tagQuery]);
-  async function save(key: string, action: () => Promise<Ticket>) {
+  async function save(
+    key: string,
+    action: () => Promise<Ticket>,
+    attemptedMove?: string,
+  ) {
     const returnFocus =
       document.activeElement instanceof HTMLElement &&
       (document.activeElement.closest('[role="dialog"]') !== null ||
@@ -385,12 +401,15 @@ export function TicketProperties({
     try {
       updated = await action();
     } catch (reason) {
+      const failure = describeFailure(
+        reason,
+        attemptedMove ?? `change the ${key.toLowerCase()}`,
+      );
       setErrors((old) => ({
         ...old,
         [key]: {
-          failure: describeFailure(reason, `change the ${key.toLowerCase()}`),
-          label: "Not saved",
-          retry: () => void save(key, action),
+          failure,
+          retry: () => void save(key, action, attemptedMove),
         },
       }));
       setPending("");
@@ -436,8 +455,8 @@ export function TicketProperties({
         {errors[label] && (
           <FailureCaption
             failure={errors[label].failure}
-            label={errors[label].label}
             onRetry={errors[label].retry}
+            showSentence={errors[label].failure.code === "project_archived"}
           />
         )}
       </>
@@ -626,15 +645,26 @@ export function TicketProperties({
       selected={ticket.project_id ?? ""}
       disabled={disabled}
       trailing={saving("Project")}
-      choices={projects.map((p) => ({ value: p.id, label: p.name }))}
+      choices={projectAssignmentChoices(projects, ticket.project_id)}
       clear={{ value: "", label: "No project" }}
-      onChoose={(value) =>
-        void save("Project", () =>
-          client.changeTicket(ticket.reference, {
-            project_id: value || null,
-          }),
-        )
-      }
+      emptyHint={(query) => {
+        const name = archivedProjectMatch(projects, query);
+        return name && archivedProjectHint(name);
+      }}
+      onChoose={(value) => {
+        if (value === (ticket.project_id ?? "")) return;
+        const name =
+          projects.find((project) => project.id === value)?.name ??
+          "No project";
+        void save(
+          "Project",
+          () =>
+            client.changeTicket(ticket.reference, {
+              project_id: value || null,
+            }),
+          `move ${ticket.reference} to ${name}`,
+        );
+      }}
     />,
   );
   const planRow = property(

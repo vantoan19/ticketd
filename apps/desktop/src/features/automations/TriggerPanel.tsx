@@ -459,31 +459,41 @@ export function ConditionRows({
                   text={value ? `is ${value}` : "Choose projects"}
                   menu="Project is"
                 >
-                  {projects.length === 0 && (
+                  {!projects.some(
+                    (project) =>
+                      !project.archived ||
+                      condition.any_of.includes(project.id),
+                  ) && (
                     <DropdownMenuItem disabled>
-                      No projects yet
+                      No projects to choose
                     </DropdownMenuItem>
                   )}
-                  {projects.map((project) => (
-                    <DropdownMenuCheckboxItem
-                      key={project.id}
-                      // Open for the next pick: one condition names several.
-                      onSelect={(event) => event.preventDefault()}
-                      checked={condition.any_of.includes(project.id)}
-                      onCheckedChange={(checked) =>
-                        set(index, {
-                          ...condition,
-                          any_of: checked
-                            ? [...condition.any_of, project.id]
-                            : condition.any_of.filter(
-                                (id) => id !== project.id,
-                              ),
-                        })
-                      }
-                    >
-                      {project.name}
-                    </DropdownMenuCheckboxItem>
-                  ))}
+                  {projects
+                    .filter(
+                      (project) =>
+                        !project.archived ||
+                        condition.any_of.includes(project.id),
+                    )
+                    .map((project) => (
+                      <DropdownMenuCheckboxItem
+                        key={project.id}
+                        // Open for the next pick: one condition names several.
+                        onSelect={(event) => event.preventDefault()}
+                        checked={condition.any_of.includes(project.id)}
+                        onCheckedChange={(checked) =>
+                          set(index, {
+                            ...condition,
+                            any_of: checked
+                              ? [...condition.any_of, project.id]
+                              : condition.any_of.filter(
+                                  (id) => id !== project.id,
+                                ),
+                          })
+                        }
+                      >
+                        {projectName(project.id, projects)}
+                      </DropdownMenuCheckboxItem>
+                    ))}
                 </Pick>
               ) : (
                 <Pick
