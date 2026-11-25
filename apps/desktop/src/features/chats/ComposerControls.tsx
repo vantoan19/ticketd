@@ -1,5 +1,7 @@
 import {
+  useCallback,
   useEffect,
+  useImperativeHandle,
   useLayoutEffect,
   useRef,
   useState,
@@ -52,6 +54,7 @@ import {
   shownOf,
   effortBars,
   labelOf,
+  type PickerOpeners,
   type Setting,
 } from "@/features/chats/composer-settings";
 import { HarnessMark } from "@/features/chats/HarnessMark";
@@ -211,6 +214,7 @@ export function HarnessPicker({
   note,
   notice,
   onOpenChange,
+  openFromComposer,
   inputRef,
   held = false,
 }: {
@@ -246,6 +250,7 @@ export function HarnessPicker({
   /** What to do about a harness that is not ready, shown when it is chosen. */
   notice?: ((id: string) => ReactNode) | undefined;
   onOpenChange?: ((open: boolean) => void) | undefined;
+  openFromComposer?: PickerOpeners["model"] | undefined;
   /** Where focus returns after the popover closes: the message box. */
   inputRef: RefObject<HTMLTextAreaElement | null>;
 }) {
@@ -259,6 +264,19 @@ export function HarnessPicker({
   // New Chat hides its own copy of a harness's notice while the popover shows it.
   useEffect(() => onOpenChange?.(open), [open, onOpenChange]);
   const [viewed, setViewed] = useState(harnessId);
+  const changeOpen = useCallback(
+    (next: boolean) => {
+      setOpen(next);
+      if (next) {
+        setViewed(harnessId);
+        setAll(false);
+      }
+    },
+    [harnessId],
+  );
+  useImperativeHandle(openFromComposer, () => () => changeOpen(true), [
+    changeOpen,
+  ]);
   const tabList = useRef<HTMLDivElement>(null);
   // The current model is in view when the list opens (CH-18).
   const body = useRef<HTMLDivElement>(null);
@@ -279,12 +297,12 @@ export function HarnessPicker({
         (event.metaKey || event.ctrlKey)
       ) {
         event.preventDefault();
-        setOpen(true);
+        changeOpen(true);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [changeOpen]);
   const harness = harnesses.find((item) => item.id === harnessId);
   const shown =
     models.find((option) => option.id === model) ??
@@ -350,16 +368,7 @@ export function HarnessPicker({
   };
 
   return (
-    <Popover
-      open={open}
-      onOpenChange={(next) => {
-        setOpen(next);
-        if (next) {
-          setViewed(harnessId);
-          setAll(false);
-        }
-      }}
-    >
+    <Popover open={open} onOpenChange={changeOpen}>
       <PopoverAnchor virtualRef={composerAnchor} />
       <Tooltip
         shortcut={shortcutLabel("chat-model")}
@@ -620,6 +629,7 @@ function PermissionPicker({
   value,
   harness,
   onChange,
+  openFromComposer,
   inputRef,
   before = false,
   held = false,
@@ -630,10 +640,13 @@ function PermissionPicker({
   value: string | null;
   harness: string;
   onChange: (value: string) => void;
+  openFromComposer?: PickerOpeners["permission"] | undefined;
   inputRef: RefObject<HTMLTextAreaElement | null>;
   /** New Chat: no session yet, so no option is the session's own. */
   before?: boolean;
 }) {
+  const [open, setOpen] = useState(false);
+  useImperativeHandle(openFromComposer, () => () => setOpen(true), []);
   const shown =
     value ?? setting.options.find((option) => option.is_default)?.id ?? null;
   const label = shown ? labelOf(setting, shown) : "Permissions";
@@ -657,7 +670,7 @@ function PermissionPicker({
       </ReadOnly>
     );
   return (
-    <DropdownMenu>
+    <DropdownMenu open={open} onOpenChange={setOpen}>
       <Tooltip content={held ? `${label} from your next message` : null}>
         <DropdownMenuTrigger asChild>
           <Button
@@ -730,10 +743,12 @@ export function ComposerControls({
   chat,
   onChange,
   inputRef,
+  openers,
 }: {
   chat: ChatState;
   onChange: (setting: Setting, value: string) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  openers: PickerOpeners;
 }) {
   const model = chat.settings?.model;
   const effort = chat.settings?.effort;
@@ -784,6 +799,7 @@ export function ComposerControls({
         note={NEXT_MESSAGE}
         held={changeHeld(model) || changeHeld(effort)}
         inputRef={inputRef}
+        openFromComposer={openers.model}
       />
       {permission && permissionId && (
         <PermissionPicker
@@ -793,6 +809,7 @@ export function ComposerControls({
           harness={chat.harness.name}
           onChange={(value) => onChange("permission", value)}
           inputRef={inputRef}
+          openFromComposer={openers.permission}
         />
       )}
     </div>
@@ -861,6 +878,7 @@ export function NewChatControls({
   notice,
   onOpenChange,
   inputRef,
+  openers,
 }: {
   harnesses: HarnessStatus[];
   harnessId: string | null;
@@ -872,6 +890,7 @@ export function NewChatControls({
   notice: (id: string) => ReactNode;
   onOpenChange?: (open: boolean) => void;
   inputRef: RefObject<HTMLTextAreaElement | null>;
+  openers: PickerOpeners;
 }) {
   if (!harnessId) return <CheckingHarnesses />;
   const harness = harnesses.find((item) => item.id === harnessId);
@@ -901,6 +920,7 @@ export function NewChatControls({
         notice={notice}
         onOpenChange={onOpenChange}
         inputRef={inputRef}
+        openFromComposer={openers.model}
       />
       {permission?.changeable && (
         <PermissionPicker
@@ -910,6 +930,7 @@ export function NewChatControls({
           before
           onChange={(value) => onPick({ ...pick, permission: value })}
           inputRef={inputRef}
+          openFromComposer={openers.permission}
         />
       )}
     </div>

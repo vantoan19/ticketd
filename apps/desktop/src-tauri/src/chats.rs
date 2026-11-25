@@ -379,6 +379,13 @@ fn folder_argument(path: &str) -> Outcome<String> {
     Ok(path.to_owned())
 }
 
+fn managed_chat_folders(workspace: &Workspace) -> Outcome<PathBuf> {
+    Ok(PathBuf::from(format!(
+        "{}.chats",
+        workspace.workspace_info()?.path
+    )))
+}
+
 /// The number in a harness's version output ("codex-cli 0.150.0", "2.1.322 (Claude Code)"),
 /// which names the tool itself; the whole text when no number is found.
 fn version_number(output: &str) -> &str {
@@ -1444,6 +1451,25 @@ impl Chats {
         Ok(view)
     }
 
+    pub async fn skills(
+        &self,
+        harness_id: &str,
+        folder: Option<&str>,
+    ) -> Outcome<Vec<ticketd_chat_host::HarnessSkill>> {
+        let host = self.host()?;
+        let folder = if let Some(folder) = folder {
+            PathBuf::from(folder_argument(folder)?)
+        } else {
+            let workspace = self.workspace()?;
+            let folder = managed_chat_folders(&workspace)?;
+            std::fs::create_dir_all(&folder).map_err(|error| {
+                failed(format!("could not prepare the scratch folder: {error}"))
+            })?;
+            folder
+        };
+        host.skills(harness_id, &folder).await?.map_err(failed)
+    }
+
     /// How many Chats outside the trash already use the folder.
     /// The Project whose checkout holds `path`, for New Chat's folder button.
     pub fn folder_project(&self, path: &str) -> Outcome<Option<ProjectRef>> {
@@ -1504,8 +1530,7 @@ impl Chats {
         let mut workspace = self.workspace()?;
         // Beside the workspace file, one per Chat, named by the request so that a
         // retry asks for the same Chat.
-        let managed =
-            PathBuf::from(format!("{}.chats", workspace.workspace_info()?.path)).join(&command_id);
+        let managed = managed_chat_folders(&workspace)?.join(&command_id);
         let (execution_folder, folder_managed) = match &input.folder {
             Some(path) => (folder_argument(path)?, false),
             None => (managed.to_string_lossy().into_owned(), true),

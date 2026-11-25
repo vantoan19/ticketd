@@ -1,0 +1,6 @@
+{"note":"Synthetic skills/list response using the codex-cli 0.170.0 app-server bindings."}
+{"client":{"id":1,"method":"initialize","params":{"clientInfo":{"name":"ticketd","title":"ticketd","version":"0.0.0-test"}}}}
+{"server":{"id":1,"result":{"userAgent":"ticketd/0.170.0","codexHome":"/home/example/.codex","platformFamily":"unix","platformOs":"macos"}}}
+{"client":{"method":"initialized"}}
+{"client":{"id":2,"method":"skills/list","params":{"cwds":["/work/chat-1"]}}}
+{"server":{"id":2,"result":{"data":[{"cwd":"/work/chat-1","skills":[{"name":"check-logs","description":"Inspect application logs","shortDescription":"Inspect logs","path":"/work/chat-1/.agents/skills/check-logs/SKILL.md","scope":"repo","enabled":true,"pluginId":null},{"name":"draft-report","description":"Draft a report","path":"/home/example/.agents/skills/draft-report/SKILL.md","scope":"user","enabled":false,"pluginId":null}],"errors":[]}]}}}

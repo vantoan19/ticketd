@@ -642,6 +642,9 @@ collect OAuth tokens, proxy model requests, or change billing.
   recent folders, a Scratch folder, and the system folder chooser. If a Chat's
   folder goes missing, it can continue in another Project checkout or a folder
   chosen through the system chooser.
+- **Codex composer.** Type `$` to find enabled skills for the Chat's folder.
+  Choosing a skill inserts its mention into the draft. At the start of a draft,
+  `/` offers the model picker and, when available, the permissions picker.
 - **Antigravity.** The person's installed `agy` serves the Chat over ACP. New
   Chats use Antigravity settings by default. Permission choices come from
   the harness, with a native Full access flag that takes effect after a

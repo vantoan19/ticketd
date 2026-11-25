@@ -35,6 +35,7 @@ import {
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { Composer } from "@/features/chats/Composer";
 import type { Token } from "@/features/chats/composer-mentions";
+import { useCodexCommands } from "@/features/chats/composer-settings";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
 import { carryIntoChat } from "@/features/chats/drafts";
@@ -313,6 +314,12 @@ export function NewChat({
     rememberPick(harness.id, next);
   };
   const folderName = folder?.split(/[\\/]/).filter(Boolean).at(-1);
+  const codex = harness?.id === "codex";
+  const canListSkills = codex && ready;
+  const { commands, openers } = useCodexCommands(
+    codex,
+    Boolean(offered?.permission?.changeable),
+  );
   const mentions = useMemo<ComposerMentions>(
     () => ({
       records: (query) => client.searchRecords(query),
@@ -323,9 +330,13 @@ export function NewChat({
           files: (query: string) => client.folderFiles(folder, query),
         },
       }),
+      commands,
+      skills: canListSkills
+        ? { folder, load: () => client.harnessSkills("codex", folder) }
+        : undefined,
       harness: harness?.name ?? "Harness",
     }),
-    [client, links, folder, folderName, harness?.name],
+    [client, links, folder, folderName, harness?.name, commands, canListSkills],
   );
   return (
     <section className="ticket-detail chat-pane" aria-labelledby="chat-heading">
@@ -428,6 +439,7 @@ export function NewChat({
                     }}
                     onOpenChange={setPickerOpen}
                     inputRef={input}
+                    openers={openers}
                   />
                 }
                 retryRef={retrySend}

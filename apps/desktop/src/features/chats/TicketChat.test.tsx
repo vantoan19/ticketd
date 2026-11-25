@@ -70,3 +70,54 @@ test("Chat about this ticket prefills New Chat and sends nothing until the perso
     message: "Work on T-KQ12: Login rate limits",
   });
 });
+
+test("a Codex Chat can find skills after its Project folder is missing", async () => {
+  const client = createMockChatClient({
+    enabled: true,
+    harnesses: [{ id: "codex", name: "Codex", status: "ready" }],
+  });
+  vi.spyOn(client, "folderFiles").mockRejectedValueOnce(
+    new Error("Folder is missing"),
+  );
+  const skills = vi
+    .spyOn(client, "harnessSkills")
+    .mockResolvedValue([{ name: "check-logs", description: "Inspect logs" }]);
+  client.nextFolder = "/work/replacement";
+  render(
+    <ChatClientContext value={client}>
+      <ChatProvider>
+        <LinkedChats
+          ticket={{ ...ticket, trashed: false }}
+          folder="/work/missing"
+        />
+        <ChatsView />
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Chat about this ticket" }),
+  );
+  const scratch = await screen.findByRole("button", { name: "Scratch folder" });
+  await screen.findByText(/Project folder isn’t on this computer/);
+  await screen.findByRole("button", { name: /Codex.*model/i });
+  const box = screen.getByLabelText("Describe a task or ask a question");
+  fireEvent.change(box, { target: { value: "$ch" } });
+  await waitFor(() => expect(skills).toHaveBeenCalledWith("codex", null));
+  expect(await screen.findByText("$check-logs")).toBeTruthy();
+
+  fireEvent.keyDown(scratch, { key: "Enter" });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Choose a folder…" }),
+  );
+  await screen.findByRole("button", { name: "Folder: /work/replacement" });
+  fireEvent.change(box, { target: { value: "$che" } });
+  await waitFor(() =>
+    expect(skills).toHaveBeenCalledWith("codex", "/work/replacement"),
+  );
+  expect(await screen.findByText("$check-logs")).toBeTruthy();
+  expect(
+    screen.queryByText(/Project folder isn’t on this computer/),
+  ).toBeNull();
+  fireEvent.change(box, { target: { value: "" } });
+});
