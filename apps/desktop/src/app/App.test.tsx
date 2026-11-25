@@ -19,7 +19,7 @@ import {
   screen,
   within,
 } from "@testing-library/react";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, expect, test, vi, beforeEach } from "vitest";
 import userEvent from "@testing-library/user-event";
 import { App } from "@/app/App";
 // The views App loads on first visit, loaded up front so a visit renders at once.
@@ -152,6 +152,14 @@ vi.mock("@uiw/react-codemirror", () => ({
     />
   ),
 }));
+
+beforeEach(() => {
+  // Most Documents tests browse the Recent list; Current work has its own tests.
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent" }),
+  );
+});
 
 afterEach(() => {
   cleanup();
@@ -7307,6 +7315,10 @@ test("filter checks stay staged until the menu closes, then the bar follows the 
 });
 
 test("Documents folds local search in its header and navigates one row stop without replacing the reader metadata", async () => {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent" }),
+  );
   const docs = [
     {
       id: "guide",
@@ -9632,6 +9644,10 @@ test("New ticket expands without replacing the rich draft and creates once from 
 });
 
 test("Capture saves a linked Document without changing the thought and keeps it in Documents", async () => {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent" }),
+  );
   await import("@/features/markdown/MarkdownEditor");
   vi.useFakeTimers();
   const ticket = bulkTicket(1);
@@ -11052,7 +11068,7 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
     const read = {
       "All tickets": "find_tickets",
       Plans: "list_plans",
-      Documents: "recent_documents",
+      Documents: "current_work_documents",
       Attachments: "search_attachments",
     }[name];
     bridge.invoke.mockImplementation((command: string, args) => {
@@ -11065,8 +11081,18 @@ test.each(["All tickets", "Plans", "Documents", "Attachments"] as const)(
       if (command === "list_plans") return [plan];
       if (command === "show_plan")
         return { plan, counts: counted({}), members: [], documents: [] };
-      if (command === "recent_documents")
-        return [{ id: "cached-doc", heading: "Cached Document" }];
+      if (command === "current_work_documents")
+        return {
+          groups: [
+            {
+              plan: null,
+              documents: [{ id: "cached-doc", heading: "Cached Document" }],
+            },
+          ],
+          finished: 0,
+          unlinked: 0,
+          trashed: 0,
+        };
       if (command === "search_attachments")
         return [
           {
@@ -13956,11 +13982,10 @@ test.each(["old first", "new first", "new focus"])(
     try {
       const user = userEvent.setup();
       render(<App />);
-      await user.click(
-        await screen.findByRole("button", { name: "Documents" }),
-      );
-      const nav = await screen.findByRole("radio", { name: "Trash" });
+      const nav = await screen.findByRole("button", { name: "Documents" });
       await user.click(nav);
+      await user.click(await screen.findByRole("button", { name: "More" }));
+      await user.click(await screen.findByRole("menuitem", { name: /^Trash/ }));
       await screen.findByRole("button", { name: "Restore Alpha" });
       version++;
       await vi.waitFor(() => expect(resolveOld).toBeTypeOf("function"), {

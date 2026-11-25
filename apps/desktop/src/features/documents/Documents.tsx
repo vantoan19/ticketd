@@ -600,10 +600,14 @@ export function Documents({
       rovingItems.push(`group:${key}`);
       if (groupOpen(key)) rovingItems.push(...group.documents.map((d) => d.id));
     }
-    rovingItems.push("group:finished");
-    if (finishedOpen) rovingItems.push(...finished.map((doc) => doc.id));
-    rovingItems.push("group:unlinked");
-    if (unlinkedOpen) rovingItems.push(...unlinked.map((doc) => doc.id));
+    if (work && work.finished > 0) {
+      rovingItems.push("group:finished");
+      if (finishedOpen) rovingItems.push(...finished.map((doc) => doc.id));
+    }
+    if (work && work.unlinked > 0) {
+      rovingItems.push("group:unlinked");
+      if (unlinkedOpen) rovingItems.push(...unlinked.map((doc) => doc.id));
+    }
   } else rovingItems.push(...visibleRows.map((doc) => doc.id));
   const tabRow =
     rovingItems.find((item) => item === focusedRow) ??
