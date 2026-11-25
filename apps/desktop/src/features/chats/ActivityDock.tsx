@@ -32,6 +32,10 @@ import { Disclosure } from "@/components/ui/disclosure";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import type { ChatState, RequestAnswer } from "@/features/chats/client";
+import type {
+  AnswerDraft,
+  QuestionDrafts,
+} from "@/features/chats/question-drafts";
 import { requestChoices as choices } from "@/features/chats/dock-focus";
 import {
   canSteer,
@@ -53,6 +57,8 @@ function Request({
   onAnswered,
   name,
   answerInComposer,
+  answerDraft,
+  questionDrafts,
   focusTitle = false,
 }: {
   request: PendingRequest;
@@ -64,6 +70,8 @@ function Request({
   focusTitle?: boolean;
   onAnswer: (answer: RequestAnswer) => Promise<void>;
   answerInComposer: boolean;
+  answerDraft?: AnswerDraft | undefined;
+  questionDrafts: QuestionDrafts;
   /** Successful answers can return to the view that opened the Chat. */
   onAnswered?: (requestId: string, origin: Element | null) => void;
   /** ↓ from the last choice, Esc, or an answer: focus goes back to the message box. */
@@ -75,8 +83,11 @@ function Request({
   useEffect(() => {
     if (focusTitle) title.current?.focus();
   }, [focusTitle]);
-  const [sending, setSending] = useState<RequestAnswer | null>(null);
-  const [text, setText] = useState("");
+  const [sendingChoice, setSendingChoice] = useState<RequestAnswer | null>(
+    null,
+  );
+  const sending = answerDraft?.pending ?? sendingChoice;
+  const text = answerDraft?.text ?? "";
   const [error, setError] = useState<FailureDescription | null>(null);
   const [showCommand, setShowCommand] = useState(false);
   const question = request.request === "question";
@@ -87,16 +98,24 @@ function Request({
   const submit = (answer: RequestAnswer) => {
     if (sending) return;
     const origin = document.activeElement;
-    setSending(answer);
+    if (showAnswerField) {
+      if (!questionDrafts.begin(request.id, answer)) return;
+    } else {
+      setSendingChoice(answer);
+    }
+    const settle = (completed: boolean) => {
+      if (showAnswerField) questionDrafts.settle(request.id, answer, completed);
+      else setSendingChoice(null);
+    };
     setError(null);
     onAnswer(answer).then(
       () => {
-        setSending(null);
+        settle(true);
         if (onAnswered) onAnswered(request.id, origin);
         else onLeave();
       },
       (reason: unknown) => {
-        setSending(null);
+        settle(false);
         const failure = describeFailure(reason, "send your answer");
         // Picking again is the retry.
         setError({
@@ -345,7 +364,9 @@ function Request({
               placeholder="Type your answer"
               value={text}
               readOnly={sending !== null}
-              onChange={(event) => setText(event.target.value)}
+              onChange={(event) =>
+                questionDrafts.setText(request.id, event.target.value)
+              }
             />
             <Button
               type="submit"
@@ -446,6 +467,8 @@ export function ActivityDock({
   dockRef,
   onAnswer,
   composerQuestion,
+  answerDraft,
+  questionDrafts,
   onLeave,
   onAnswered,
   onSendNow,
@@ -464,6 +487,8 @@ export function ActivityDock({
   dockRef?: Ref<HTMLDivElement>;
   onAnswer: (requestId: string, answer: RequestAnswer) => Promise<void>;
   composerQuestion?: string | undefined;
+  answerDraft?: AnswerDraft | undefined;
+  questionDrafts: QuestionDrafts;
   onLeave: () => void;
   onAnswered?: (requestId: string, origin: Element | null) => void;
   onSendNow: (queuedId: string) => Promise<void>;
@@ -489,6 +514,8 @@ export function ActivityDock({
             count={requests.length}
             onAnswer={(answer) => onAnswer(request.id, answer)}
             answerInComposer={composerQuestion === request.id}
+            answerDraft={answerDraft}
+            questionDrafts={questionDrafts}
             onLeave={onLeave}
             {...(onAnswered && { onAnswered })}
             name={recordNamer(chat.links)}

@@ -2,6 +2,7 @@ import {
   Fragment,
   useContext,
   useEffect,
+  useEffectEvent,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -340,6 +341,19 @@ const ESC_AFTER_LAYER_MS = 1000;
 /** How long scrolling pauses before what was read through is kept. */
 const READ_THROUGH_MS = 250;
 
+function AdoptQueueEdit({ adopt }: { adopt: () => void }) {
+  const adopted = useEffectEvent(adopt);
+  useLayoutEffect(() => {
+    // Commit the entire locked draft and let the composer paint it before
+    // acknowledging custody. A pane that leaves first cannot withdraw the queue.
+    let frame = window.requestAnimationFrame(() => {
+      frame = window.requestAnimationFrame(() => adopted());
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  return null;
+}
+
 function Conversation({
   snapshot,
   focusRequest,
@@ -486,7 +500,6 @@ function Conversation({
       harness,
     ],
   );
-  /** Remounts the composer with the draft after Edit moved a queued message into it. */
   const pending = items.filter(
     (item): item is PendingRequest =>
       item.kind === "request" && item.state === "pending",
@@ -528,6 +541,19 @@ function Conversation({
     (item) => item.request === "question" && item.free_text,
   );
   const draft = draftOf(client, id);
+  const questionDrafts = draft.questions;
+  const answerDrafts = useSyncExternalStore(
+    questionDrafts.subscribe,
+    questionDrafts.snapshot,
+  );
+  const independentAnswer = question && answerDrafts.has(question.id);
+  useEffect(() => {
+    if (!questionDrafts.snapshot().size) return;
+    for (const item of items) {
+      if (item.kind === "request" && item.state !== "pending")
+        questionDrafts.close(item.id);
+    }
+  }, [items, questionDrafts]);
   const {
     text: draftText,
     items: draftFiles,
@@ -555,6 +581,7 @@ function Conversation({
     Boolean(question) &&
     (!draftHeld || heldFor !== question?.id) &&
     !hasAttachments &&
+    !independentAnswer &&
     !restored;
   const stoppable =
     isLive(chat) && !chat.stopping && !unconfirmedStart && chat.has_composer;
@@ -626,12 +653,10 @@ function Conversation({
   const edit = (queuedId: string) => {
     const transferId = crypto.randomUUID();
     quietly(
-      draft
-        .editQueued(
-          () => client.editQueued(id, queuedId),
-          () => client.confirmQueueEdit(id, queuedId, transferId),
-        )
-        .then(finishEdit),
+      draft.editQueued(
+        () => client.editQueued(id, queuedId),
+        () => client.confirmQueueEdit(id, queuedId, transferId),
+      ),
       "edit the queued message",
     );
   };
@@ -862,6 +887,8 @@ function Conversation({
                   dockRef={dock}
                   onAnswer={answer}
                   composerQuestion={answering ? question?.id : undefined}
+                  answerDraft={pending[0] && answerDrafts.get(pending[0].id)}
+                  questionDrafts={questionDrafts}
                   {...(onRequestsAnswered && {
                     onAnswered: (requestId: string, origin: Element | null) =>
                       setAnswered({ id: requestId, origin }),
@@ -907,11 +934,22 @@ function Conversation({
                 draft={draft}
                 onText={(text) => {
                   if (!text.trim()) setHeldFor(undefined);
-                  else if (hasAttachments && question) setHeldFor(question.id);
+                  else if (!answering && question) setHeldFor(question.id);
                 }}
                 mentions={mentions}
                 above={
                   <>
+                    {transfer === "adopting" && (
+                      <AdoptQueueEdit
+                        adopt={() =>
+                          quietly(
+                            draft.adoptTransfer()?.then(finishEdit) ??
+                              Promise.resolve(),
+                            "edit the queued message",
+                          )
+                        }
+                      />
+                    )}
                     {transfer === "unconfirmed" && (
                       <div
                         className="flex items-center gap-2 px-3 py-2"

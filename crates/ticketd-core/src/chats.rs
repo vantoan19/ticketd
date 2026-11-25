@@ -246,6 +246,20 @@ pub struct NewChat {
     pub links: Vec<ChatLink>,
 }
 
+/// Option IDs the person requested for the first session, including explicit defaults.
+#[derive(Debug, Clone, Copy, Default, Serialize)]
+pub struct ChatStartPicks<'a> {
+    pub model: Option<&'a str>,
+    pub effort: Option<&'a str>,
+    pub permission: Option<&'a str>,
+}
+
+pub enum ChatCreationReplay {
+    Exact(Chat),
+    /// A saved request from before the requested settings were recorded.
+    Legacy(Chat),
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Chat {
     pub id: String,
@@ -1119,10 +1133,19 @@ pub(crate) fn create_chat_in(
     command_id: Option<&str>,
     chat: NewChat,
 ) -> Result<Chat, Error> {
+    let request = create_chat_request(&chat);
+    create_chat_with_request(connection, command_id, chat, request)
+}
+
+fn create_chat_with_request(
+    connection: &Connection,
+    command_id: Option<&str>,
+    chat: NewChat,
+    request: Value,
+) -> Result<Chat, Error> {
     if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
         return Err(invalid("a Chat needs a harness and an execution folder"));
     }
-    let request = create_chat_request(&chat);
     let id = once(connection, command_id, request, || {
         let id = Uuid::new_v4().to_string();
         let title = chat
@@ -1145,6 +1168,32 @@ pub(crate) fn create_chat_in(
 
 fn create_chat_request(chat: &NewChat) -> Value {
     json!({"operation": "create_chat", "chat": chat})
+}
+
+fn creation_requests(chat: &NewChat, picks: ChatStartPicks<'_>) -> (Value, Value) {
+    let legacy = create_chat_request(chat);
+    let mut request = legacy.clone();
+    request["start_picks"] = json!(picks);
+    (request, legacy)
+}
+
+fn replay_chat_creation(
+    connection: &Connection,
+    command_id: &str,
+    request: &Value,
+    legacy: &Value,
+) -> Result<Option<ChatCreationReplay>, Error> {
+    match previous_outcome(connection, command_id, &request.to_string()) {
+        Ok(id) => id
+            .map(|id| read_chat(connection, &id).map(ChatCreationReplay::Exact))
+            .transpose(),
+        Err(Error::RequestConflict(_)) => {
+            previous_outcome(connection, command_id, &legacy.to_string())?
+                .map(|id| read_chat(connection, &id).map(ChatCreationReplay::Legacy))
+                .transpose()
+        }
+        Err(error) => Err(error),
+    }
 }
 
 fn once(
@@ -1770,12 +1819,29 @@ impl Workspace {
         &self,
         command_id: &str,
         chat: &NewChat,
-    ) -> Result<Option<Chat>, Error> {
+        picks: ChatStartPicks<'_>,
+    ) -> Result<Option<ChatCreationReplay>, Error> {
+        let (request, legacy) = creation_requests(chat, picks);
         crate::read_scope::run(&self.connection, |connection| {
-            let request = create_chat_request(chat).to_string();
-            previous_outcome(connection, command_id, &request)?
-                .map(|id| read_chat(connection, &id))
-                .transpose()
+            replay_chat_creation(connection, command_id, &request, &legacy)
+        })
+    }
+
+    /// Stores the selected start settings as part of the create request's identity.
+    pub fn create_chat_with_picks(
+        &mut self,
+        command_id: &str,
+        chat: NewChat,
+        picks: ChatStartPicks<'_>,
+    ) -> Result<Chat, Error> {
+        let (request, legacy) = creation_requests(&chat, picks);
+        self.chat_write(|connection| {
+            if let Some(ChatCreationReplay::Exact(chat) | ChatCreationReplay::Legacy(chat)) =
+                replay_chat_creation(connection, command_id, &request, &legacy)?
+            {
+                return Ok(chat);
+            }
+            create_chat_with_request(connection, Some(command_id), chat, request)
         })
     }
 

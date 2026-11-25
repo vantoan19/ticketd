@@ -331,9 +331,11 @@ test("a queued message can be sent now, alone, or moved back into the message bo
       "draft\n\nand a changelog entry",
     ),
   );
-  expect(
-    screen.queryByText("and a changelog entry", { selector: "li *" }),
-  ).toBeNull();
+  await waitFor(() =>
+    expect(
+      screen.queryByText("and a changelog entry", { selector: "li *" }),
+    ).toBeNull(),
+  );
 
   fireEvent.click(button("Send now"));
   expect(
@@ -436,6 +438,11 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
   const confirm = vi
     .spyOn(client, "confirmQueueEdit")
     .mockImplementationOnce(async (...args) => {
+      expect(composer()).toHaveProperty(
+        "value",
+        "Draft caption\n\nQueued caption",
+      );
+      expect(button("Remove notes.txt")).toHaveProperty("disabled", true);
       await acknowledge(...args);
       throw new Error("Acknowledgement lost");
     });
@@ -443,17 +450,18 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
   fireEvent.click(button("Edit in the message box"));
   fireEvent.click(button(/^Other/));
   await screen.findByRole("heading", { name: "Other" });
+  await act(async () => finishPreparing());
   expect((await client.openChat("c1")).chat.queue).toHaveLength(1);
+  expect(confirm).not.toHaveBeenCalled();
   fireEvent.click(button(/^Limiter/));
   await screen.findByRole("heading", { name: "Limiter" });
-  expect(composer()).toHaveProperty("readOnly", true);
 
-  await act(async () => finishPreparing());
   expect(
     await screen.findByRole("button", { name: "Retry queue edit" }),
   ).toBeTruthy();
   expect((await client.openChat("c1")).chat.queue).toHaveLength(0);
-  expect(composer()).toHaveProperty("value", "Draft caption");
+  expect(composer()).toHaveProperty("value", "Draft caption\n\nQueued caption");
+  expect(composer()).toHaveProperty("readOnly", true);
   expect(button("Send")).toHaveProperty("disabled", true);
   fireEvent.click(button("Retry queue edit"));
 
@@ -463,6 +471,7 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
       "Draft caption\n\nQueued caption",
     );
     expect(button("Remove notes.txt")).toBeTruthy();
+    expect(button("Send")).toHaveProperty("disabled", false);
   });
   expect(confirm.mock.calls[1]).toEqual(confirm.mock.calls[0]);
   expect(
@@ -878,6 +887,102 @@ test.each(["before", "after"])(
     ).toEqual([]);
   },
 );
+
+test("an independent answer survives removing the last file and navigating during its submission", async () => {
+  const client = await open([
+    ...one({ id: "c1", title: "Limiter", activity: "waiting" }, [
+      { ...question, options: [] },
+    ]),
+    ...one({ id: "c2", title: "Other" }),
+  ]);
+  const answer = () => screen.getByRole("textbox", { name: "Answer" });
+  const navigateAwayAndBack = async () => {
+    fireEvent.click(button(/^Other/));
+    await screen.findByRole("heading", { name: "Other" });
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+  };
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: {
+      files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+    },
+  });
+  fireEvent.change(answer(), {
+    target: { value: "Fail open for five minutes" },
+  });
+  fireEvent.click(button("Remove notes.txt"));
+  expect(composer("Steer Codex")).toHaveProperty("value", "");
+  expect(answer()).toHaveProperty("value", "Fail open for five minutes");
+  type("Independent message", "Steer Codex");
+  await navigateAwayAndBack();
+  expect(answer()).toHaveProperty("value", "Fail open for five minutes");
+
+  const sendAnswer = client.answer;
+  let finish!: () => void;
+  const pending = new Promise<void>((resolve) => {
+    finish = resolve;
+  });
+  const save = vi
+    .spyOn(client, "answer")
+    .mockImplementationOnce(async (...args) => {
+      await pending;
+      return sendAnswer(...args);
+    });
+  fireEvent.click(button("Send answer"));
+  await navigateAwayAndBack();
+  expect(answer()).toHaveProperty("readOnly", true);
+  expect(answer()).toHaveProperty("value", "Fail open for five minutes");
+  expect(button("Send answer")).toHaveProperty("disabled", true);
+  fireEvent.submit(answer().closest("form")!);
+  expect(save).toHaveBeenCalledTimes(1);
+
+  await act(async () => finish());
+  expect(
+    await screen.findByText("Answered · Fail open for five minutes"),
+  ).toBeTruthy();
+  await waitFor(() =>
+    expect(screen.queryByRole("textbox", { name: "Answer" })).toBeNull(),
+  );
+  expect(composer("Steer Codex")).toHaveProperty(
+    "value",
+    "Independent message",
+  );
+});
+
+test("an expired independent question keeps the message draft and forgets the old answer", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "waiting" }, [
+      { ...question, options: [] },
+    ]),
+  );
+  const answer = () => screen.getByRole("textbox", { name: "Answer" });
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: {
+      files: [new File(["notes"], "notes.txt", { type: "text/plain" })],
+    },
+  });
+  fireEvent.change(answer(), { target: { value: "Old answer" } });
+  type("Keep this message", "Steer Codex");
+  fireEvent.click(button("Remove notes.txt"));
+  let fail!: (reason: Error) => void;
+  vi.spyOn(client, "answer").mockReturnValueOnce(
+    new Promise<void>((_, reject) => {
+      fail = reject;
+    }),
+  );
+  fireEvent.click(button("Send answer"));
+  act(() => client.push("c1", { ...question, options: [], state: "expired" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("textbox", { name: "Answer" })).toBeNull(),
+  );
+  await act(async () => fail(new Error("Closed while submitting")));
+  act(() => client.push("c1", { ...question, id: "next", options: [] }));
+  expect(await screen.findByRole("textbox", { name: "Answer" })).toHaveProperty(
+    "value",
+    "",
+  );
+  expect(composer("Steer Codex")).toHaveProperty("value", "Keep this message");
+});
 
 test("a request arriving mid-draft takes no focus, and the draft keeps its meaning", async () => {
   const client = await open(

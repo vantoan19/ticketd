@@ -2382,6 +2382,80 @@ async fn send_now_on_a_paused_queue_sends_only_that_input() {
     assert_eq!(f.queued(), ["older"]);
 }
 
+#[tokio::test(start_paused = true)]
+async fn an_unadopted_queue_edit_keeps_original_snapshots_through_host_restart() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let queued = f.send_file("Recover this draft", SendMode::Queue).await;
+
+    // The prepared response never reaches a composer that can adopt it.
+    let ignored = f
+        .host
+        .prepare_queue_edit(&f.chat.id, &queued.id)
+        .await
+        .unwrap();
+    drop(ignored);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(
+        f.submits().len(),
+        1,
+        "the prepared edit must not flow into dispatch"
+    );
+    assert_eq!(f.queued(), ["Recover this draft"]);
+    f.host.quit().await;
+
+    let after_restart = start_host(&f.path, &f.storage_up, &f.fake);
+    let snapshot = after_restart
+        .prepare_queue_edit(&f.chat.id, &queued.id)
+        .await
+        .unwrap();
+    assert_eq!(snapshot.0, "Recover this draft");
+    assert_eq!(snapshot.1[0].bytes(), b"snapshot");
+    assert_eq!(f.queued(), ["Recover this draft"]);
+
+    assert!(
+        after_restart
+            .confirm_queue_edit(&f.chat.id, &queued.id, "renderer-adopted")
+            .await
+            .unwrap()
+    );
+    assert!(
+        after_restart
+            .confirm_queue_edit(&f.chat.id, &queued.id, "renderer-adopted")
+            .await
+            .unwrap()
+    );
+    assert!(f.queued().is_empty());
+    assert_eq!(f.submits().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn removing_an_abandoned_edit_releases_the_following_queue_entry() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let abandoned = f.send_file("Abandoned edit", SendMode::Queue).await;
+    f.queue("Next").await;
+    f.host
+        .prepare_queue_edit(&f.chat.id, &abandoned.id)
+        .await
+        .unwrap();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.submits().len(), 1);
+
+    f.core()
+        .withdraw_chat_input(&f.chat.id, &abandoned.id)
+        .unwrap();
+    f.host.notify_changed(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(
+        f.submits()
+            .into_iter()
+            .map(|submission| submission.text)
+            .collect::<Vec<_>>(),
+        ["first", "Next"]
+    );
+}
+
 /// Without steering, a turn in progress cannot take it now: it stays in the queue.
 #[tokio::test(start_paused = true)]
 async fn send_now_is_refused_during_a_turn_that_cannot_be_steered() {

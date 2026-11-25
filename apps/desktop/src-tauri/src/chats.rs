@@ -19,9 +19,10 @@ use ticketd_chat_host::{
 };
 use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
-    BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatDelivery, ChatInputStanding,
-    ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
-    ChatSubmissionIntent, ChatTurnState, MAX_BACKUP_FILE_BYTES, NewChat, Workspace, WorkspaceGuard,
+    BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatCreationReplay, ChatDelivery,
+    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord,
+    ChatRole, ChatStartPicks, ChatSubmissionIntent, ChatTurnState, MAX_BACKUP_FILE_BYTES, NewChat,
+    Workspace, WorkspaceGuard,
 };
 use tokio::sync::oneshot;
 
@@ -1520,7 +1521,18 @@ impl Chats {
             .to_string();
         let create = format!("{command_id}:chat");
         let first = format!("{command_id}:first");
-        let (new_chat, attachments) = {
+        let picks = StartSettings {
+            model: input.model,
+            effort: input.effort,
+            permission: input.permission,
+            ..StartSettings::default()
+        };
+        let requested = ChatStartPicks {
+            model: picks.model.as_deref(),
+            effort: picks.effort.as_deref(),
+            permission: picks.permission.as_deref(),
+        };
+        let (new_chat, attachments, legacy_saved) = {
             let workspace = self.workspace()?;
             // Beside the Workspace, one folder per Chat, named by the request.
             let execution_folder = match &input.folder {
@@ -1543,7 +1555,7 @@ impl Chats {
                 folder_managed: input.folder.is_none(),
                 links: input.links.into_iter().map(ChatLink::from).collect(),
             };
-            let existing = workspace.replay_chat_creation(&create, &new_chat)?;
+            let existing = workspace.replay_chat_creation(&create, &new_chat, requested)?;
             let new_limit = (existing.is_none() && !input.attachments.is_empty())
                 .then(|| workspace.attachment_upload_limit())
                 .transpose()?;
@@ -1552,17 +1564,27 @@ impl Chats {
                 input.attachments,
                 new_limit.unwrap_or(MAX_BACKUP_FILE_BYTES),
             )?;
-            if let Some(chat) = existing
-                && workspace
+            let mut legacy_saved = None;
+            if let Some(receipt) = existing {
+                let (chat, exact) = match receipt {
+                    ChatCreationReplay::Exact(chat) => (chat, true),
+                    ChatCreationReplay::Legacy(chat) => (chat, false),
+                };
+                if workspace
                     .replay_chat_input(&first, &chat.id, &input.message, &attachments)?
                     .is_some()
-            {
-                return Ok(Created {
-                    chat_id: chat.id,
-                    send_error: None,
-                });
+                {
+                    let created = Created {
+                        chat_id: chat.id,
+                        send_error: None,
+                    };
+                    if exact || picks.is_empty() {
+                        return Ok(created);
+                    }
+                    legacy_saved = Some(created);
+                }
             }
-            if new_limit.is_none() && !attachments.is_empty() {
+            if legacy_saved.is_none() && new_limit.is_none() && !attachments.is_empty() {
                 let limit = workspace.attachment_upload_limit()?;
                 if attachments
                     .iter()
@@ -1571,22 +1593,18 @@ impl Chats {
                     return Err(ticketd_core::Error::UploadLimit { limit }.into());
                 }
             }
-            if !new_chat.folder_managed {
+            if legacy_saved.is_none() && !new_chat.folder_managed {
                 folder_argument(&new_chat.execution_folder)?;
             }
-            (new_chat, attachments)
+            (new_chat, attachments, legacy_saved)
         };
-        let served = |adapter: &Arc<dyn HarnessAdapter>| adapter.harness().key.as_str();
-        if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
-            return Err(failed(self.unavailable(&input.harness_id)));
+        if legacy_saved.is_none() {
+            let served = |adapter: &Arc<dyn HarnessAdapter>| adapter.harness().key.as_str();
+            if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
+                return Err(failed(self.unavailable(&input.harness_id)));
+            }
+            host.check_attachment_input(&input.harness_id, &attachments)?;
         }
-        host.check_attachment_input(&input.harness_id, &attachments)?;
-        let picks = StartSettings {
-            model: input.model.clone(),
-            effort: input.effort.clone(),
-            permission: input.permission.clone(),
-            ..StartSettings::default()
-        };
         if !picks.is_empty() {
             // Only what the harness offered and allows.
             let offered = self.options(&input.harness_id).await?;
@@ -1601,8 +1619,13 @@ impl Chats {
                 )));
             }
         }
+        if let Some(created) = legacy_saved {
+            return Ok(created);
+        }
         // The Chat is stored first: a request the core refuses leaves no folder behind.
-        let chat = self.workspace()?.create_chat(Some(&create), new_chat)?;
+        let chat = self
+            .workspace()?
+            .create_chat_with_picks(&create, new_chat, requested)?;
         let created = |send_error| Created {
             chat_id: chat.id.clone(),
             send_error,
