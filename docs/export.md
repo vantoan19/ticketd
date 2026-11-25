@@ -74,6 +74,9 @@ complete snapshot has been written. Errors are reported to stderr by the CLI or
 in the desktop. When redirecting stdout yourself, a failed command may leave a
 partial file; use `--file` for safe publication.
 
+Chat attachment snapshots are local to the device. A complete Workspace backup preserves
+the exact files alongside their queued and sent Chat messages.
+
 The root object has integer `format_version` 3 and arrays named `projects`,
 `project_checkouts`, `plans`, `plan_documents`, `ticket_documents`, `tickets`, `documents`, `document_opens`, `document_pins`, `document_tags`, `entities`, `context_mentions`, `numeric_mentions`, `activity_mentions`, `activities`, `evidence`, `ticket_history`,
 `ticket_follows`, `inbox_entries`, `tags`, `ticket_tags`, `dependencies`,

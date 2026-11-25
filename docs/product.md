@@ -653,6 +653,12 @@ collect OAuth tokens, proxy model requests, or change billing.
   turn steers it where the harness supports that, otherwise the message is visibly
   queued. ticketd owns the queue. Stop pauses it and requests interruption without
   claiming every tool stopped.
+- **Chat attachments.** Paste a screenshot or files copied in the system file manager,
+  or choose multiple files with **Attach files**. The composer shows removable filenames
+  and image previews and can send attachments with or without text. Chat captures the
+  bytes when a file is added and supplies native images or readable file copies to the
+  selected harness within its permissions. Queueing, editing, and resending keep the text
+  and files together. Sent files can be saved from Chat history.
 - **Lifetime.** Execution belongs to the desktop backend, not the view: navigating away
   keeps work running, and explicit Quit stops it. One ranked status per Chat drives
   the list, sidebar count, app-icon count, and system notifications, which can be
@@ -662,9 +668,10 @@ collect OAuth tokens, proxy model requests, or change billing.
   Documents, evidence, and status changes under native permission rules. Messages never
   become Activities or Documents automatically; Save as Document is offered.
 - **Retention and recovery.** History and queued input are saved automatically. Archive
-  hides a Chat while work continues; trash stops work and is recoverable. Backups
-  include Chat records but not harness credentials or native resume files. Uncertain
-  deliveries are never resent automatically.
+  hides a Chat while work continues; trash stops work and is recoverable. Complete
+  Workspace backups preserve Chat records and the captured files on queued and sent
+  messages. Harness credentials and native resume files stay with the harness.
+  Uncertain deliveries are never resent automatically.
 
 ### Automations
 
