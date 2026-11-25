@@ -1030,6 +1030,189 @@ fn an_emptied_or_missing_folder_is_a_recovery_state_and_never_removes_local_cont
 }
 
 #[test]
+fn project_archive_and_reactivation_sync_from_a_legacy_base_with_local_configuration() {
+    let mut devices = Devices::new(&NAMES[..2]);
+    let checkout_a = tempfile::tempdir().unwrap();
+    let checkout_b = tempfile::tempdir().unwrap();
+    let remote_a = "github.com/team/site";
+    let remote_b = "github.example.com/team/site";
+    let project = devices.workspaces[0]
+        .create_project_with_remote(
+            "Website",
+            checkout_a.path().to_str().unwrap(),
+            Some(remote_a),
+        )
+        .unwrap();
+    let ticket = devices.workspaces[0]
+        .create_ticket_in_context("Fix login", Some(&project.id), None)
+        .unwrap();
+    devices.sync(0);
+
+    let legacy = format!(
+        "---\nkind: project\nformat: 1\nid: \"{}\"\nname: \"Website\"\n---\n",
+        project.id
+    );
+    devices.hand_edit(RemoteKind::Project, &project.id, &legacy);
+    for index in 0..2 {
+        let report = devices.sync(index);
+        assert_eq!(
+            (report.uploaded, report.conflicts, report.skipped),
+            (0, 0, 0)
+        );
+        assert!(
+            !devices.workspaces[index]
+                .show_project(&project.id)
+                .unwrap()
+                .archived
+        );
+    }
+
+    let imported = devices.workspaces[1].show_project(&project.id).unwrap();
+    assert!(imported.paths.is_empty());
+    assert!(imported.remote.is_none());
+    let local_project = devices.workspaces[1]
+        .edit_project_with_remote(
+            &project.id,
+            "Web",
+            checkout_b.path().to_str().unwrap(),
+            ticketd_core::ProjectRemoteChange::Set(remote_b),
+        )
+        .unwrap();
+
+    // The rename and archive both travel, using the legacy Active value as their base.
+    for (writer, archived) in [(0, true), (1, false)] {
+        let reader = 1 - writer;
+        devices.workspaces[writer]
+            .set_project_archived(&project.id, archived)
+            .unwrap();
+        assert_eq!(devices.sync(writer).uploaded, 1);
+        let report = devices.sync(reader);
+        assert_eq!((report.conflicts, report.skipped), (0, 0));
+        assert_eq!(report.uploaded, usize::from(archived));
+        assert_eq!(devices.sync(writer).uploaded, 0);
+        let (_, stored) = devices.remote_text(RemoteKind::Project, &project.id);
+        assert!(stored.contains("\nformat: 4\n"));
+        assert!(stored.contains(&format!("\narchived: {archived}\n")));
+        assert!(!stored.contains(remote_a));
+        assert!(!stored.contains(remote_b));
+
+        for (index, original) in [(0, &project), (1, &local_project)] {
+            let workspace = &devices.workspaces[index];
+            let actual = workspace.show_project(&project.id).unwrap();
+            assert_eq!(actual.id, project.id);
+            assert_eq!(actual.archived, archived);
+            assert_eq!(actual.name, "Web");
+            assert_eq!(actual.paths, original.paths);
+            assert_eq!(actual.remote, original.remote);
+            assert_eq!(
+                workspace
+                    .show_ticket(&ticket.reference)
+                    .unwrap()
+                    .project_id
+                    .as_deref(),
+                Some(project.id.as_str())
+            );
+        }
+        for index in 0..2 {
+            let report = devices.sync(index);
+            assert_eq!((report.uploaded, report.pending), (0, 0));
+        }
+    }
+}
+
+#[test]
+fn different_project_archive_values_without_a_common_base_go_to_review() {
+    let mut devices = Devices::new(&NAMES[..2]);
+    let checkout = tempfile::tempdir().unwrap();
+    let source = &mut devices.workspaces[0];
+    let project = source
+        .create_project("Website", checkout.path().to_str().unwrap())
+        .unwrap();
+    let active = source
+        .export_sync_record(SyncKind::Project, &project.id)
+        .unwrap();
+    source.set_project_archived(&project.id, true).unwrap();
+    devices.workspaces[1].apply_sync_record(&active).unwrap();
+    devices.sync(0);
+
+    assert_eq!(devices.sync(1).conflicts, 1);
+    let target = &mut devices.workspaces[1];
+    assert!(!target.show_project(&project.id).unwrap().archived);
+    let conflict = target
+        .sync_conflict(SyncKind::Project, &project.id)
+        .unwrap();
+    assert_eq!(conflict.fields[0].field, "archived");
+    assert_eq!(conflict.fields[0].local, Some(SyncValue::Flag(false)));
+    assert_eq!(conflict.fields[0].remote, Some(SyncValue::Flag(true)));
+    let resolution = choose(
+        target,
+        SyncKind::Project,
+        &project.id,
+        "archived",
+        SyncChoice::Remote,
+    );
+    target
+        .resolve_sync_conflict(SyncKind::Project, &project.id, &[resolution])
+        .unwrap();
+    devices.sync(1);
+    devices.sync(0);
+    for workspace in &devices.workspaces {
+        assert!(workspace.show_project(&project.id).unwrap().archived);
+        assert!(workspace.sync_conflicts().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn an_archived_project_and_its_ticket_stay_linked_in_either_arrival_order() {
+    let mut devices = Devices::new(&NAMES[..2]);
+    for project_first in [true, false] {
+        let checkout = tempfile::tempdir().unwrap();
+        let source = &mut devices.workspaces[0];
+        let project = source
+            .create_project("Website", checkout.path().to_str().unwrap())
+            .unwrap();
+        let ticket = source
+            .create_ticket_in_context("Fix login", Some(&project.id), None)
+            .unwrap();
+        source.set_project_archived(&project.id, true).unwrap();
+        devices.sync(0);
+
+        let omitted = if project_first {
+            RemoteKey::new(RemoteKind::Ticket, ticket.id.clone())
+        } else {
+            RemoteKey::new(RemoteKind::Project, project.id.clone())
+        };
+        devices.remote.omit_from_next_listing(&[omitted]);
+        assert_eq!(devices.sync(1).skipped, 0);
+        let target = &devices.workspaces[1];
+        if project_first {
+            assert!(target.show_project(&project.id).unwrap().archived);
+            assert!(target.show_ticket(&ticket.reference).is_err());
+        } else {
+            assert!(target.show_project(&project.id).is_err());
+            assert!(
+                target
+                    .show_ticket(&ticket.reference)
+                    .unwrap()
+                    .project_id
+                    .is_none()
+            );
+        }
+
+        let report = devices.sync(1);
+        assert_eq!(
+            (report.uploaded, report.conflicts, report.skipped),
+            (0, 0, 0)
+        );
+        let target = &devices.workspaces[1];
+        assert!(target.show_project(&project.id).unwrap().archived);
+        let linked = target.show_ticket(&ticket.reference).unwrap();
+        assert_eq!(linked.id, ticket.id);
+        assert_eq!(linked.project_id.as_deref(), Some(project.id.as_str()));
+    }
+}
+
+#[test]
 fn a_relationship_whose_target_arrives_later_is_neither_lost_nor_undone_by_a_local_edit() {
     let mut devices = devices();
     let blocker = devices.workspaces[0].create_ticket("Blocker").unwrap();
@@ -1200,9 +1383,9 @@ fn the_same_field_changed_on_two_devices_converges_in_every_order() {
 fn a_file_from_a_newer_ticketd_is_skipped_and_never_overwritten_until_it_can_be_read() {
     // A higher format number, with or without what else this version does not know.
     for (from, to) in [
-        ("format: 1\n", "format: 4\n"),
-        ("format: 1\n", "format: 4\nmood: \"happy\"\n"),
-        ("format: 1\n", "format: 4\n---\n<!-- ticketd:mood -->\n"),
+        ("format: 1\n", "format: 5\n"),
+        ("format: 1\n", "format: 5\nmood: \"happy\"\n"),
+        ("format: 1\n", "format: 5\n---\n<!-- ticketd:mood -->\n"),
     ] {
         let mut devices = devices();
         let reference = devices.shared_ticket("Login");

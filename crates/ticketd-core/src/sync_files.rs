@@ -77,9 +77,10 @@ pub const MAX_FILE_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_HEADER_INDENT: usize = 64;
 
 const FILE_FORMAT_WITH_TYPED_SOURCE: i64 = 3;
+const FILE_FORMAT_WITH_PROJECT_ARCHIVE: i64 = 4;
 /// The highest format this version reads. A file that says a higher number
 /// is left alone until this desktop runs a ticketd that reads it.
-const LATEST_FILE_FORMAT: i64 = FILE_FORMAT_WITH_TYPED_SOURCE;
+const LATEST_FILE_FORMAT: i64 = FILE_FORMAT_WITH_PROJECT_ARCHIVE;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -271,6 +272,7 @@ const PLAN: &[Field] = &[
     ("documents", Type::Ids, false),
 ];
 const PROJECT: &[Field] = &[("name", Type::Name, true)];
+const PROJECT_ARCHIVE: &[Field] = &[("archived", Type::Flag, false)];
 /// The text after the header is the agent's instructions.
 const AUTOMATION_AGENT: &[Field] = &[
     ("name", Type::Text, false),
@@ -345,11 +347,14 @@ fn shape(block: Block, format: i64) -> (impl Iterator<Item = &'static Field> + C
         Block::Part(SyncPartKind::Activity) => (ACTIVITY, true),
         Block::Part(SyncPartKind::Evidence) => (EVIDENCE, false),
     };
-    let state_fields = match block {
+    let versioned_fields = match block {
         Block::Record(SyncKind::Ticket) if format < FILE_FORMAT_WITH_TYPED_SOURCE => {
             SOURCE_STATE_V1
         }
         Block::Record(SyncKind::Ticket) => SOURCE_STATE_V3,
+        Block::Record(SyncKind::Project) if format >= FILE_FORMAT_WITH_PROJECT_ARCHIVE => {
+            PROJECT_ARCHIVE
+        }
         _ => &[],
     };
     let presentation = match block {
@@ -359,7 +364,7 @@ fn shape(block: Block, format: i64) -> (impl Iterator<Item = &'static Field> + C
         _ => &[],
     };
     (
-        fields.iter().chain(state_fields).chain(presentation),
+        fields.iter().chain(versioned_fields).chain(presentation),
         has_body,
     )
 }
@@ -676,10 +681,12 @@ fn quote(text: &str) -> String {
 type Labels = BTreeMap<String, String>;
 
 fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels: &Labels) {
-    let format = if fields.contains_key("source_provider") {
-        FILE_FORMAT_WITH_TYPED_SOURCE
-    } else {
-        1
+    let format = match block {
+        Block::Record(SyncKind::Project) => FILE_FORMAT_WITH_PROJECT_ARCHIVE,
+        Block::Record(SyncKind::Ticket) if fields.contains_key("source_provider") => {
+            FILE_FORMAT_WITH_TYPED_SOURCE
+        }
+        _ => 1,
     };
     let (schema, has_body) = shape(block, format);
     let quote = |text: &str| match labels.get(text) {
@@ -1104,6 +1111,10 @@ impl SyncRecord {
                     };
                     let block = Block::Record(kind);
                     let (id, mut fields) = typed(block, format, entries, body)?;
+                    if kind == SyncKind::Project && format < FILE_FORMAT_WITH_PROJECT_ARCHIVE {
+                        // The merge base must agree with the Active value stored in the Workspace.
+                        fields.insert("archived".into(), SyncValue::Flag(false));
+                    }
                     let legacy_source = format < FILE_FORMAT_WITH_TYPED_SOURCE
                         && kind == SyncKind::Ticket
                         && has_source(&fields);
@@ -1383,8 +1394,15 @@ fn read_record(c: &Connection, kind: SyncKind, id: &str) -> Result<Option<SyncRe
     Ok(record)
 }
 
-/// Format 92 reads the earlier shape while it repairs source observations.
-pub(crate) fn read_record_before_source_presentation(
+/// Format 92 reads tickets without the later source presentation fields.
+pub(crate) fn read_ticket_before_source_presentation(
+    c: &Connection,
+    id: &str,
+) -> Result<Option<SyncRecord>, Error> {
+    read_record_before_source_presentation(c, SyncKind::Ticket, id)
+}
+
+fn read_record_before_source_presentation(
     c: &Connection,
     kind: SyncKind,
     id: &str,
@@ -1396,7 +1414,10 @@ pub(crate) fn read_record_before_source_presentation(
         "SELECT due_at FROM ticket_reminders WHERE ticket_id = ?1 AND person = '{LOCAL_PERSON}'"
     );
     let queries: &[(&str, &[&str])] = match kind {
-        SyncKind::Project => &[("SELECT name FROM projects WHERE id = ?1", &["name"])],
+        SyncKind::Project => &[(
+            "SELECT name, archived FROM projects WHERE id = ?1",
+            &["name", "archived"],
+        )],
         SyncKind::Document => &[(
             "SELECT title, body, created_at, originating_activity_id, trashed, kept, EXISTS(SELECT 1 FROM document_pins WHERE document_id = d.id) FROM documents d WHERE id = ?1",
             &[
@@ -2138,7 +2159,7 @@ impl Workspace {
     ///
     /// A relationship to a record that is not here yet is skipped and returned; apply
     /// the same record again once that record has arrived. No history or inbox entry
-    /// is recorded, and the rules for edits made on this device (Trash, archived Plans,
+    /// is recorded, and the rules for edits made on this device (Trash, archived Plans and Projects,
     /// external ownership, dependency loops) do not apply: the record is taken as it is.
     pub fn apply_sync_record(&mut self, record: &SyncRecord) -> Result<Vec<MissingTarget>, Error> {
         record.validate()?;
@@ -2225,8 +2246,14 @@ automation: name trashed
             "source_state source_closure_reason source_updated_at",
             "source_state_category source_state_name source_updated_at source_partition source_provider_name source_provider_icon_svg",
         );
-        assert_eq!(LATEST_FILE_FORMAT, 3);
-        for (format, expected) in [(1, FORMAT_1), (2, FORMAT_1), (3, format_3.as_str())] {
+        let format_4 = format_3.replace("project: name\n", "project: name archived\n");
+        assert_eq!(LATEST_FILE_FORMAT, 4);
+        for (format, expected) in [
+            (1, FORMAT_1),
+            (2, FORMAT_1),
+            (3, format_3.as_str()),
+            (4, format_4.as_str()),
+        ] {
             let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
             let blocks = SyncKind::ALL
                 .into_iter()
