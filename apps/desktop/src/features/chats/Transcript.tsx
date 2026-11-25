@@ -63,6 +63,7 @@ import {
 } from "@/features/chats/TurnReports";
 import {
   binarySize,
+  canPickHistoryMessage,
   duration,
   plainOutput,
   receiptLine,
@@ -1372,7 +1373,8 @@ const excerpt = (text: string) =>
 /**
  * The conversation, in the order things happened, read result-first: each turn's
  * work folds under one row once it ends. In pick mode it becomes the history
- * picker of "Resume in a fresh session": only messages, each with a checkbox.
+ * picker of "Resume in a fresh session": attachments stay visible and only
+ * messages that can be included have a checkbox.
  * `newFrom` is the first item that arrived while the reader was away.
  */
 export function Transcript({
@@ -1443,16 +1445,20 @@ export function Transcript({
           (item) =>
             (item.kind === "user" || item.kind === "response") && (
               <div key={item.id} className="chat-pickrow">
-                <input
-                  type="checkbox"
-                  checked={picked.has(item.id)}
-                  aria-label={
-                    item.kind === "user"
-                      ? `Include your message: ${excerpt(item.text)}`
-                      : `Include the reply: ${excerpt(item.text)}`
-                  }
-                  onChange={(event) => onPick?.(item.id, event.target.checked)}
-                />
+                {canPickHistoryMessage(item) && (
+                  <input
+                    type="checkbox"
+                    checked={picked.has(item.id)}
+                    aria-label={
+                      item.kind === "user"
+                        ? `Include your message: ${excerpt(item.text)}`
+                        : `Include the reply: ${excerpt(item.text)}`
+                    }
+                    onChange={(event) =>
+                      onPick?.(item.id, event.target.checked)
+                    }
+                  />
+                )}
                 <div>
                   <Item
                     item={item}

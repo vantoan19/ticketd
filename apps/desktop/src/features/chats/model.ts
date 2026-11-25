@@ -450,6 +450,15 @@ export type Turn = {
 export type TranscriptPart =
   { kind: "item"; item: TranscriptItem } | { kind: "turn"; turn: Turn };
 
+// Fresh history skips attachment-only messages in the desktop command.
+export function canPickHistoryMessage(item: TranscriptItem): boolean {
+  return (
+    item.kind === "response" ||
+    (item.kind === "user" &&
+      (!item.attachments?.length || /\P{White_Space}/u.test(item.text)))
+  );
+}
+
 export function failureMarkerMatches(
   marker: ItemOf<"marker"> | undefined,
   text: string | null | undefined,

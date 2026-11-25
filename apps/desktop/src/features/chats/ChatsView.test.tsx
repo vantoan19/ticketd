@@ -1450,6 +1450,16 @@ test("picking messages turns the transcript into the history picker", async () =
           text: "Add a limiter",
           delivery: "delivered",
         },
+        {
+          id: "u2",
+          at,
+          kind: "user",
+          text: "",
+          delivery: "delivered",
+          attachments: [
+            { id: "file1", name: "notes.txt", media_type: "text/plain" },
+          ],
+        },
         reply("r1", "Added the limiter."),
       ],
     ),
@@ -1465,6 +1475,8 @@ test("picking messages turns the transcript into the history picker", async () =
       "Pick the messages to give the new session · 0 of 2. Only message text is included.",
     ),
   ).toBeTruthy();
+  expect(button("Save notes.txt")).toBeTruthy();
+  expect(screen.getAllByRole("checkbox")).toHaveLength(2);
   expect(button("Resume")).toHaveProperty("disabled", true);
   fireEvent.click(
     screen.getByRole("checkbox", {

@@ -1,6 +1,8 @@
 //! Hands GTK's clipboard snapshots to a composer paste WebKit has redacted.
 
-use gtk::prelude::WidgetExt;
+use std::{cell::Cell, rc::Rc};
+
+use gtk::prelude::{ObjectExt, WidgetExt};
 use webkit2gtk::{FileChooserRequest, FileChooserRequestExt, WebView, WebViewExt};
 
 const CLIPBOARD_FILE_PICKER: &str = "application/x-ticketd-clipboard";
@@ -54,45 +56,76 @@ fn clipboard_image(
         finish(Ok(None));
         return;
     };
+    // Bind the paste to this owner while the limit is loaded.
+    let owner_changed = Rc::new(Cell::new(false));
+    let owner_change_handler = clipboard.connect_local("owner-change", false, {
+        let owner_changed = owner_changed.clone();
+        move |_| {
+            owner_changed.set(true);
+            None
+        }
+    });
+    let finish = {
+        let clipboard = clipboard.clone();
+        move |result| {
+            clipboard.disconnect(owner_change_handler);
+            finish(result);
+        }
+    };
     let png = gtk::gdk::Atom::intern("image/png");
     clipboard.request_contents(
         &gtk::gdk::Atom::intern("TARGETS"),
         move |clipboard, selection| {
-            if !selection
-                .targets()
-                .is_some_and(|targets| targets.contains(&png))
+            if owner_changed.get()
+                || !selection
+                    .targets()
+                    .is_some_and(|targets| targets.contains(&png))
             {
                 finish(Ok(None));
                 return;
             }
-            clipboard.request_contents(&png, move |_, selection| {
-                let length = selection.length();
-                if length <= 0 || selection.data_type() != png {
+
+            let clipboard = clipboard.clone();
+            gtk::glib::MainContext::default().spawn_local(async move {
+                let limit = tauri::async_runtime::spawn_blocking(|| {
+                    crate::open_workspace()?.attachment_upload_limit()
+                })
+                .await
+                .unwrap_or_else(|error| Err(ticketd_core::Error::Attachment(error.to_string())));
+                if owner_changed.get() {
                     finish(Ok(None));
                     return;
                 }
-                // GTK owns the selection only for this callback. Copy the data before
-                // the clipboard can change, within the largest possible Workspace limit.
-                let bytes = (length as u64 <= ticketd_core::MAX_BACKUP_FILE_BYTES)
-                    .then(|| selection.data());
-                gtk::glib::MainContext::default().spawn_local(async move {
-                    let result = tauri::async_runtime::spawn_blocking(move || {
-                        let limit = crate::open_workspace()?.attachment_upload_limit()?;
-                        match bytes {
-                            Some(bytes) if length as u64 <= limit => {
-                                ticketd_core::ChatAttachmentContent::from_clipboard_png(
-                                    bytes, limit,
-                                )
+                let limit = match limit {
+                    Ok(limit) => limit,
+                    Err(error) => {
+                        finish(Err(error));
+                        return;
+                    }
+                };
+                clipboard.request_contents(&png, move |_, selection| {
+                    let length = selection.length();
+                    if owner_changed.get() || length <= 0 || selection.data_type() != png {
+                        finish(Ok(None));
+                        return;
+                    }
+                    if length as u64 > limit {
+                        finish(Err(ticketd_core::Error::UploadLimit { limit }));
+                        return;
+                    }
+                    // GTK owns the selection only during this callback.
+                    let bytes = selection.data();
+                    gtk::glib::MainContext::default().spawn_local(async move {
+                        let result = tauri::async_runtime::spawn_blocking(move || {
+                            ticketd_core::ChatAttachmentContent::from_clipboard_png(bytes, limit)
                                 .map(Some)
-                            }
-                            _ => Err(ticketd_core::Error::UploadLimit { limit }),
-                        }
-                    })
-                    .await
-                    .unwrap_or_else(|error| {
-                        Err(ticketd_core::Error::Attachment(error.to_string()))
+                        })
+                        .await
+                        .unwrap_or_else(|error| {
+                            Err(ticketd_core::Error::Attachment(error.to_string()))
+                        });
+                        finish(result);
                     });
-                    finish(result);
                 });
             });
         },

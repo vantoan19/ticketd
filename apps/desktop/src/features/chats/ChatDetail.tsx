@@ -88,6 +88,7 @@ import { lastAsk, runningPlan } from "@/features/chats/reports";
 import { PlanPill } from "@/features/chats/TurnReports";
 import { LinkPicker, RecordChip } from "@/features/chats/LinkPicker";
 import {
+  canPickHistoryMessage,
   composerControls,
   composerPlaceholder,
   firstNew,
@@ -703,6 +704,9 @@ function Conversation({
     return action;
   };
   const messageCount = items.filter(isMessage).length;
+  const pickableMessageCount = picked
+    ? items.filter(canPickHistoryMessage).length
+    : 0;
   // Pickers and menus opened in the conversation stay below the pane header.
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const trashed = chat.retention === "trashed";
@@ -826,8 +830,8 @@ function Conversation({
             <div className="chat-line">
               <span>
                 Pick the messages to give the new session ·{" "}
-                {ofTotal(picked.size, messageCount)}. Only message text is
-                included.
+                {ofTotal(picked.size, pickableMessageCount)}. Only message text
+                is included.
               </span>
               <span className="chat-spacer" />
               <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>
