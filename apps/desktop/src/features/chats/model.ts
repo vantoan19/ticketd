@@ -13,7 +13,12 @@ import type {
   ItemOf,
 } from "@/features/chats/client";
 import { scopeIsPath } from "@/features/chats/files";
-import { stretchesOf, type TurnBlock } from "@/features/chats/stretch";
+import {
+  count,
+  exploredCounts,
+  stretchesOf,
+  type TurnBlock,
+} from "@/features/chats/stretch";
 import { formatTime } from "@/lib/format";
 
 /**
@@ -51,9 +56,6 @@ export function applyChange(
       : [...snapshot.items, change.item],
   };
 }
-
-const count = (n: number, one: string, many = `${one}s`) =>
-  `${n} ${n === 1 ? one : many}`;
 
 /** Running, succeeded, and any other outcome; then what three or more count as. */
 const STEP_VERBS = {
@@ -262,7 +264,7 @@ export function stepWords(
     const { files, searches } = step.explored;
     parts = [
       {
-        text: `Explored ${count(files.length, "file")} · ${count(searches.length, "search", "searches")}`,
+        text: `Explored ${exploredCounts(files.length, searches.length)}`,
       },
     ];
   } else if (step.kind === "run" && step.description) {

@@ -53,8 +53,13 @@ export function stretchesOf(rows: TurnRow[], running: boolean): TurnBlock[] {
   });
 }
 
-const count = (n: number, one: string, many = `${one}s`) =>
+/** "1 file", "2 files": a count with its noun. */
+export const count = (n: number, one: string, many = `${one}s`) =>
   `${n} ${n === 1 ? one : many}`;
+
+/** "6 files · 2 searches": what an Explored row and an exploring stretch both say. */
+export const exploredCounts = (files: number, searches: number) =>
+  `${count(files, "file")} · ${count(searches, "search", "searches")}`;
 
 /** A ticket's reference, "T-12" or "T-AX76". */
 const RECORD_REFERENCE = /^[A-Z]+-[A-Z0-9]+$/;
@@ -166,7 +171,7 @@ export function stretchWords(rows: TurnRow[]): string {
         // Reads and searches alone are exploring, said once, as a merged row says it.
         if (only("read", "search") && tally.has("search"))
           clauses.push(
-            `explored ${count(n, "file")} · ${count(total("search"), "search", "searches")}`,
+            `explored ${exploredCounts(n, total("search"))}`,
           );
         else clauses.push(`read ${count(n, "file")}`);
         break;

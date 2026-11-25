@@ -1804,6 +1804,11 @@ fn before_last_word(text: &str) -> &str {
     }
 }
 
+/// How a Chat started from a ticket begins, "Work on T-12: <title>". The UI writes
+/// that first line (`WORK_ON_LEAD` in `src/features/chats/ticket-chat.ts`) and
+/// `display_title` reads it back. Change both together.
+const WORK_ON_LEAD: &str = "Work on ";
+
 /// Whether the stored title is long enough to be a cut of the first line (a title a
 /// word cut ended says so with "…", and a shorter one was never cut). The first
 /// message is read only for these.
@@ -1843,7 +1848,7 @@ pub(crate) fn display_title(chat: &Chat, around: &Surroundings) -> String {
         LinkedRecord::Ticket {
             reference, title, ..
         } => chat_title
-            .strip_prefix(&format!("Work on {reference}: "))
+            .strip_prefix(&format!("{WORK_ON_LEAD}{reference}: "))
             .filter(|rest| !rest.trim().is_empty())
             .map(|rest| (rest, title.as_str())),
         LinkedRecord::Document { .. } | LinkedRecord::Project { .. } => None,
