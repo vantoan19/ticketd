@@ -14,6 +14,8 @@ const schema = z.object({
   origin_brief: z.string().nullable().optional(),
   origin_ticket: z.string().nullable().optional(),
   kept: z.boolean().optional(),
+  /** The author's one-line summary; absent when there is none. */
+  summary: z.string().nullable().optional(),
 });
 export type Document = z.infer<typeof schema>;
 const linkSchema = z.object({
@@ -154,6 +156,8 @@ export const documents = {
     titleChanged: boolean,
     expectedUpdatedAt: string | null,
     requestId: string,
+    /** The summary to store (empty clears it); leave it out to keep the stored one. */
+    summary?: string,
   ) =>
     schema.parse(
       await invoke("save_document", {
@@ -163,6 +167,7 @@ export const documents = {
         titleChanged,
         expectedUpdatedAt,
         requestId,
+        summary,
       }),
     ),
 };

@@ -225,6 +225,23 @@
   margin: -10px 0 8px;
   min-width: 0;
 }
+/* The author's one-line summary, under the meta line: read as text, edited in place. */
+.document-summary {
+  margin: 0 0 8px;
+  color: var(--muted-foreground);
+  font-size: var(--text-reading-subsection);
+  line-height: 27px;
+  overflow-wrap: anywhere;
+}
+.document-summary [data-slot="input"] {
+  height: 27px;
+  padding: 0;
+  color: inherit;
+  font-size: inherit;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: inherit;
+}
 .document-meta-item,
 .document-meta-part {
   display: inline-flex;

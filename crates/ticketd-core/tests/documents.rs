@@ -1090,6 +1090,34 @@ fn stale_expected_revision_rejects_a_document_change() {
 }
 
 #[test]
+fn stale_expected_revision_rejects_a_summary_change_the_way_it_rejects_a_title() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let doc = workspace.create_document(None, "Original").unwrap();
+    let summary = |text: &str, expected: &str| DocumentPatch {
+        summary: Some(Some(text.into())),
+        expected_updated_at: Some(expected.into()),
+        ..Default::default()
+    };
+    workspace
+        .change_document(&doc.id, summary("From the agent", &doc.updated_at))
+        .unwrap();
+    // Sleep past the millisecond clock so the revision visibly moves.
+    std::thread::sleep(std::time::Duration::from_millis(5));
+    let error = workspace
+        .change_document(&doc.id, summary("From the editor", &doc.updated_at))
+        .unwrap_err();
+    assert!(error.to_string().contains("changed elsewhere"));
+    let current = workspace.show_document(&doc.id).unwrap();
+    assert_eq!(current.summary.as_deref(), Some("From the agent"));
+    // An empty value clears it, on the current revision.
+    workspace
+        .change_document(&doc.id, summary("", &current.updated_at))
+        .unwrap();
+    assert_eq!(workspace.show_document(&doc.id).unwrap().summary, None);
+}
+
+#[test]
 fn heading_keeps_literal_html_text() {
     use ticketd_core::derive_heading;
     assert_eq!(

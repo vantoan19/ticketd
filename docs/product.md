@@ -260,7 +260,8 @@ core workflows for Documents, Activities, Plans, tags, and links
   type. Without a title, its heading is the first nonempty line (or, for activity
   details, the Activity's brief). A Document may also carry a **summary**: one
   plain line written by its author (`--summary` on `document create` and `document
-change`; an empty value clears it). ticketd never writes one.
+change`; an empty value clears it) or by a person in the reader's Edit mode. The
+  reader shows it under the meta line. ticketd never writes one.
 - Capture opens an editor at once with no required field, autosaves, and creates
   nothing if left empty. Documents opens on Recently opened with pinned items above;
   tags, pins, and links are optional.
