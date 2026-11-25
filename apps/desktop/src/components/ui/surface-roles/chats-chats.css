@@ -393,7 +393,7 @@ button.chat-file-name:focus-visible {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-.chat-picker [role="tab"][data-dim] > .chat-picker-harness-name {
+.chat-picker [role="tab"][data-dim] .chat-picker-harness-name {
   color: var(--muted-foreground);
 }
 .chat-picker-label {

@@ -454,10 +454,12 @@ export function HarnessPicker({
                   dim={!item.ready}
                   decorative
                 />
-                <span className="chat-picker-harness-name min-w-0 truncate">
-                  {item.name}
+                <span className="flex min-w-0 items-center gap-1 overflow-hidden">
+                  <span className="chat-picker-harness-name max-w-full shrink-0 truncate">
+                    {item.name}
+                  </span>
+                  {!item.ready && item.word && <small>· {item.word}</small>}
                 </span>
-                {!item.ready && item.word && <small>· {item.word}</small>}
               </SegmentedTab>
             ))}
           </SegmentedTabList>
