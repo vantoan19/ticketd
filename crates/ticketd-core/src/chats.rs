@@ -1122,7 +1122,7 @@ pub(crate) fn create_chat_in(
     if chat.harness.trim().is_empty() || chat.execution_folder.trim().is_empty() {
         return Err(invalid("a Chat needs a harness and an execution folder"));
     }
-    let request = json!({"operation": "create_chat", "chat": &chat});
+    let request = create_chat_request(&chat);
     let id = once(connection, command_id, request, || {
         let id = Uuid::new_v4().to_string();
         let title = chat
@@ -1141,6 +1141,10 @@ pub(crate) fn create_chat_in(
         Ok(id)
     })?;
     read_chat(connection, &id)
+}
+
+fn create_chat_request(chat: &NewChat) -> Value {
+    json!({"operation": "create_chat", "chat": chat})
 }
 
 fn once(
@@ -1192,6 +1196,24 @@ fn save_input_request(chat_id: &str, text: &str, files: &[ChatAttachmentContent]
             Value::Array(files.iter().map(ChatAttachmentContent::identity).collect());
     }
     request
+}
+
+fn withdraw_queued_input(
+    connection: &Connection,
+    chat_id: &str,
+    message_id: &str,
+) -> Result<bool, Error> {
+    let queued = owned(connection, "chat_messages", chat_id, message_id)?
+        && read_message(connection, message_id)?.is_some_and(|message| message.queued);
+    if !queued {
+        return Ok(false);
+    }
+    connection.execute(
+        "DELETE FROM chat_submission_attempts WHERE message_id = ?1",
+        [message_id],
+    )?;
+    connection.execute("DELETE FROM chat_messages WHERE id = ?1", [message_id])?;
+    Ok(true)
 }
 
 /// The last `CHAT_TOOL_OUTPUT_LIMIT` bytes of `output`, and whether its start was dropped.
@@ -1743,6 +1765,20 @@ impl Workspace {
         self.chat_write(|connection| create_chat_in(connection, command_id, chat))
     }
 
+    /// Finds the Chat created by this request without starting a new write.
+    pub fn replay_chat_creation(
+        &self,
+        command_id: &str,
+        chat: &NewChat,
+    ) -> Result<Option<Chat>, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            let request = create_chat_request(chat).to_string();
+            previous_outcome(connection, command_id, &request)?
+                .map(|id| read_chat(connection, &id))
+                .transpose()
+        })
+    }
+
     pub fn chat(&self, id: &str) -> Result<Chat, Error> {
         read_chat(&self.connection, id)
     }
@@ -2117,18 +2153,18 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
     ) -> Result<ChatMessage, Error> {
-        if text.trim().is_empty() && files.is_empty() {
-            return Err(invalid("Chat input must not be empty"));
-        }
-        if !files.is_empty() {
-            let limit = self.attachment_upload_limit()?;
-            for file in files {
-                file.ensure_fits(limit)?;
-            }
-        }
         self.chat_write(|connection| {
             let request = command_id.map_or(Value::Null, |_| save_input_request(chat_id, text, files));
             let id = once(connection, command_id, request, || {
+                if text.trim().is_empty() && files.is_empty() {
+                    return Err(invalid("Chat input must not be empty"));
+                }
+                if !files.is_empty() {
+                    let limit = crate::attachments::upload_limit(connection)?;
+                    for file in files {
+                        file.ensure_fits(limit)?;
+                    }
+                }
                 if read_chat(connection, chat_id)?.trashed {
                     return Err(Error::ChatTrashed(chat_id.to_owned()));
                 }
@@ -2171,17 +2207,36 @@ impl Workspace {
     /// may have reached the harness: that input is history, not queue.
     pub fn withdraw_chat_input(&mut self, chat_id: &str, message_id: &str) -> Result<Chat, Error> {
         self.update_chat(chat_id, |connection| {
-            let queued = owned(connection, "chat_messages", chat_id, message_id)?
-                && read_message(connection, message_id)?.is_some_and(|message| message.queued);
-            if !queued {
+            if !withdraw_queued_input(connection, chat_id, message_id)? {
                 return Err(invalid("this input is not in the queue"));
             }
-            connection.execute(
-                "DELETE FROM chat_submission_attempts WHERE message_id = ?1",
-                [message_id],
-            )?;
-            connection.execute("DELETE FROM chat_messages WHERE id = ?1", [message_id])?;
             Ok(())
+        })
+    }
+
+    /// Atomically withdraws a queued message and records the renderer's transfer receipt.
+    /// A retry returns the same successful withdrawal after a lost acknowledgement.
+    pub fn confirm_chat_queue_edit(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+        transfer_id: &str,
+    ) -> Result<bool, Error> {
+        self.chat_write(|connection| {
+            let request = json!({
+                "operation": "confirm_chat_queue_edit",
+                "chat_id": chat_id,
+                "message_id": message_id,
+            });
+            let outcome = once(connection, Some(transfer_id), request, || {
+                if !withdraw_queued_input(connection, chat_id, message_id)? {
+                    return Ok(String::new());
+                }
+                log(connection, chat_id, "chat", chat_id)?;
+                trim(connection, chat_id)?;
+                Ok(message_id.to_owned())
+            })?;
+            Ok(!outcome.is_empty())
         })
     }
 

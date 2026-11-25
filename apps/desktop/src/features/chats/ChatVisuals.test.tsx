@@ -17,7 +17,6 @@ import {
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
-import { drafts } from "@/features/chats/drafts";
 import { HarnessMark } from "@/features/chats/HarnessMark";
 import {
   chatState,
@@ -39,7 +38,6 @@ window.ResizeObserver = class {
 
 afterEach(() => {
   cleanup();
-  drafts.clear();
   watching.clear();
 });
 

@@ -668,6 +668,7 @@ export function createMockChatClient(
       media_type: dataUrl.slice(5, dataUrl.indexOf(";")),
     }));
   const queuedFiles = new Map<string, ChatAttachmentInput[]>();
+  const queueEdits = new Map<string, { id: string; queuedId: string }>();
   const queue = async (
     id: string,
     text: string,
@@ -833,11 +834,6 @@ export function createMockChatClient(
       const harness = harnesses.find((item) => item.id === input.harness_id);
       if (!harness?.usable)
         throw new ChatError("failed", "The harness is not ready.");
-      if (input.attachments?.length && harness.id !== "codex")
-        throw new ChatError(
-          "failed",
-          "Chat attachments can only be sent to Codex.",
-        );
       // A repeated request finds the Chat the first try created.
       const existing = requests.get(input.command_id);
       if (existing) return { chat_id: existing };
@@ -927,8 +923,16 @@ export function createMockChatClient(
       if (!queued)
         throw new ChatError("stale", "This message is no longer queued.");
       const attachments = queuedFiles.get(queuedId) ?? [];
-      await client.removeQueued(id, queuedId);
       return { text: queued.text, attachments };
+    },
+    async confirmQueueEdit(id, queuedId, transferId) {
+      const previous = queueEdits.get(transferId);
+      if (previous) return previous.id === id && previous.queuedId === queuedId;
+      if (!get(id).chat.queue.some((item) => item.id === queuedId))
+        return false;
+      queueEdits.set(transferId, { id, queuedId });
+      await client.removeQueued(id, queuedId);
+      return true;
     },
     async resumeQueue(id) {
       const { chat } = get(id);

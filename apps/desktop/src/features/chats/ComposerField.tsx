@@ -161,6 +161,7 @@ export function ComposerField({
   mentions,
   placeholder,
   autoFocus,
+  readOnly,
   inputRef,
 }: {
   text: string;
@@ -171,6 +172,7 @@ export function ComposerField({
   mentions?: ComposerMentions | undefined;
   placeholder: string;
   autoFocus: boolean;
+  readOnly: boolean;
   inputRef?: Ref<HTMLTextAreaElement> | undefined;
 }) {
   const box = useRef<HTMLTextAreaElement | null>(null);
@@ -204,7 +206,9 @@ export function ComposerField({
   useLayoutEffect(() => caretAfterPrefill(), []);
 
   const open =
-    trigger && trigger.start !== dismissed && mentions ? trigger : null;
+    !readOnly && trigger && trigger.start !== dismissed && mentions
+      ? trigger
+      : null;
   const openKey = open ? `${open.char}${open.start}:${open.query}` : "";
   const query = open?.query.trim() ?? "";
   // Linked records and the harness's commands are at hand; only searches wait.
@@ -546,6 +550,7 @@ export function ComposerField({
           {"​"}
         </div>
         <textarea
+          readOnly={readOnly}
           ref={(node) => {
             box.current = node;
             shareNode(inputRef, node);

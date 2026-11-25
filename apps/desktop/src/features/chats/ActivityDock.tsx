@@ -30,7 +30,8 @@ import { Kbd } from "@/components/ui/kbd";
 import { Time } from "@/components/ui/time";
 import { Disclosure } from "@/components/ui/disclosure";
 import { IconButton } from "@/components/ui/icon-button";
-import type { ChatState } from "@/features/chats/client";
+import { Input } from "@/components/ui/input";
+import type { ChatState, RequestAnswer } from "@/features/chats/client";
 import { requestChoices as choices } from "@/features/chats/dock-focus";
 import {
   canSteer,
@@ -51,6 +52,7 @@ function Request({
   onLeave,
   onAnswered,
   name,
+  answerInComposer,
   focusTitle = false,
 }: {
   request: PendingRequest;
@@ -60,7 +62,8 @@ function Request({
   count: number;
   /** Take focus on the title when shown: the Chat was opened from its notification. */
   focusTitle?: boolean;
-  onAnswer: (optionId: string) => Promise<void>;
+  onAnswer: (answer: RequestAnswer) => Promise<void>;
+  answerInComposer: boolean;
   /** Successful answers can return to the view that opened the Chat. */
   onAnswered?: (requestId: string, origin: Element | null) => void;
   /** ↓ from the last choice, Esc, or an answer: focus goes back to the message box. */
@@ -72,19 +75,21 @@ function Request({
   useEffect(() => {
     if (focusTitle) title.current?.focus();
   }, [focusTitle]);
-  const [sending, setSending] = useState<string | null>(null);
+  const [sending, setSending] = useState<RequestAnswer | null>(null);
+  const [text, setText] = useState("");
   const [error, setError] = useState<FailureDescription | null>(null);
   const [showCommand, setShowCommand] = useState(false);
   const question = request.request === "question";
+  const showAnswerField = question && request.free_text && !answerInComposer;
   // What runs exactly, when the title says it as sentences or shortened.
   const exact =
     request.command ?? (request.ticketd?.length ? request.subject : undefined);
-  const pick = (optionId: string) => {
+  const submit = (answer: RequestAnswer) => {
     if (sending) return;
     const origin = document.activeElement;
-    setSending(optionId);
+    setSending(answer);
     setError(null);
-    onAnswer(optionId).then(
+    onAnswer(answer).then(
       () => {
         setSending(null);
         if (onAnswered) onAnswered(request.id, origin);
@@ -96,13 +101,16 @@ function Request({
         // Picking again is the retry.
         setError({
           ...failure,
-          sentence: question
-            ? `${failure.sentence} Pick again to retry.`
-            : failure.sentence,
+          sentence:
+            question && "option_id" in answer
+              ? `${failure.sentence} Pick again to retry.`
+              : failure.sentence,
         });
       },
     );
   };
+  const pick = (option_id: string) => submit({ option_id });
+  const selected = sending && "option_id" in sending ? sending.option_id : null;
   const commandDisclosure = exact ? (
     <div className="chat-request-command">
       <Disclosure
@@ -262,14 +270,14 @@ function Request({
                 data-choice=""
                 className="chat-option"
                 disabled={sending !== null}
-                data-selected={sending === option.id ? "" : undefined}
-                aria-pressed={sending === option.id}
+                data-selected={selected === option.id ? "" : undefined}
+                aria-pressed={selected === option.id}
                 aria-keyshortcuts={index < 9 ? String(index + 1) : undefined}
                 onClick={() => pick(option.id)}
               >
                 <span>{option.label}</span>
                 {option.description && <small>{option.description}</small>}
-                {sending === option.id && (
+                {selected === option.id && (
                   <LoaderCircle size={12} className="chat-spin" aria-hidden />
                 )}
               </button>
@@ -296,13 +304,13 @@ function Request({
                     {option.label}
                     {index < 3 ? (
                       <Kbd aria-hidden="true" className="w-5">
-                        {sending === option.id ? (
+                        {selected === option.id ? (
                           <LoaderCircle size={12} className="chat-spin" />
                         ) : (
                           index + 1
                         )}
                       </Kbd>
-                    ) : sending === option.id ? (
+                    ) : selected === option.id ? (
                       <LoaderCircle
                         size={12}
                         className="chat-spin"
@@ -323,6 +331,30 @@ function Request({
             })}
             {commandDisclosure}
           </div>
+        )}
+        {showAnswerField && (
+          <form
+            className="flex items-center gap-2"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (text.trim()) submit({ text: text.trim() });
+            }}
+          >
+            <Input
+              aria-label="Answer"
+              placeholder="Type your answer"
+              value={text}
+              readOnly={sending !== null}
+              onChange={(event) => setText(event.target.value)}
+            />
+            <Button
+              type="submit"
+              size="compact"
+              disabled={!text.trim() || sending !== null}
+            >
+              Send answer
+            </Button>
+          </form>
         )}
         {question && error && <FailureAlert size="compact" failure={error} />}
       </div>
@@ -413,6 +445,7 @@ export function ActivityDock({
   plan,
   dockRef,
   onAnswer,
+  composerQuestion,
   onLeave,
   onAnswered,
   onSendNow,
@@ -429,7 +462,8 @@ export function ActivityDock({
   /** The plan pill, when the turn has a plan. */
   plan?: ReactNode;
   dockRef?: Ref<HTMLDivElement>;
-  onAnswer: (requestId: string, optionId: string) => Promise<void>;
+  onAnswer: (requestId: string, answer: RequestAnswer) => Promise<void>;
+  composerQuestion?: string | undefined;
   onLeave: () => void;
   onAnswered?: (requestId: string, origin: Element | null) => void;
   onSendNow: (queuedId: string) => Promise<void>;
@@ -453,7 +487,8 @@ export function ActivityDock({
             request={request}
             position={1}
             count={requests.length}
-            onAnswer={(optionId) => onAnswer(request.id, optionId)}
+            onAnswer={(answer) => onAnswer(request.id, answer)}
+            answerInComposer={composerQuestion === request.id}
             onLeave={onLeave}
             {...(onAnswered && { onAnswered })}
             name={recordNamer(chat.links)}

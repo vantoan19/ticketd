@@ -21,7 +21,6 @@ import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { ProjectNavigation } from "@/features/documents/navigation";
-import { drafts } from "@/features/chats/drafts";
 import {
   chatState,
   createMockChatClient,
@@ -38,11 +37,14 @@ window.ResizeObserver = class {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
-  // What was typed in one test is not a draft in the next.
-  drafts.clear();
 });
 
 const at = "2026-11-10T10:00:00Z";
+const png =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhQAAAABJRU5ErkJggg==";
+const screenshotBytes = Uint8Array.from(atob(png), (byte) =>
+  byte.charCodeAt(0),
+);
 const reply = (id: string, text: string): TranscriptItem => ({
   id,
   at,
@@ -411,6 +413,56 @@ test("editing queued input waits for the draft submission that is still saving",
   expect(composer()).toHaveProperty("value", "Edit this message");
 });
 
+test.each(["send", "queue"] as const)(
+  "a pending %s keeps one locked draft across Chat navigation and clears it together",
+  async (submit) => {
+    const client = await open([
+      ...one({ id: "c1", title: "Limiter", activity: "working" }),
+      ...one({ id: "c2", title: "Other" }),
+    ]);
+    let finishSaving!: () => void;
+    const saving = new Promise<void>((resolve) => {
+      finishSaving = resolve;
+    });
+    const save = vi.spyOn(client, submit).mockReturnValue(saving);
+    const box = () => composer("Steer Codex");
+    type("Original caption", "Steer Codex");
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: {
+        files: [new File(["one"], "original.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() =>
+      expect(button("Steer")).toHaveProperty("disabled", false),
+    );
+    fireEvent.keyDown(box(), { key: "Enter", ctrlKey: submit === "queue" });
+    expect(save).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(button(/^Other/));
+    await screen.findByRole("heading", { name: "Other" });
+    fireEvent.click(button(/^Limiter/));
+    await screen.findByRole("heading", { name: "Limiter" });
+    expect(box()).toHaveProperty("readOnly", true);
+    expect(box()).toHaveProperty("value", "Original caption");
+    type("Late edit", "Steer Codex");
+    fireEvent.paste(box(), {
+      clipboardData: {
+        files: [new File(["two"], "late.txt", { type: "text/plain" })],
+      },
+    });
+    fireEvent.keyDown(box(), { key: "Enter", ctrlKey: submit === "queue" });
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(screen.queryByText("late.txt")).toBeNull();
+    expect(box()).toHaveProperty("value", "Original caption");
+    expect(button("Remove original.txt")).toHaveProperty("disabled", true);
+
+    await act(async () => finishSaving());
+    expect(box()).toHaveProperty("readOnly", false);
+    expect(box()).toHaveProperty("value", "");
+    expect(screen.queryByText("original.txt")).toBeNull();
+  },
+);
+
 test("an image that the running turn cannot take can be queued for the next turn", async () => {
   await open(
     one({
@@ -420,7 +472,7 @@ test("an image that the running turn cannot take can be queued for the next turn
       steering: { available: true, images_refused: true },
     }),
   );
-  const file = new File(["snapshot"], "Screen.png", { type: "image/png" });
+  const file = new File([screenshotBytes], "Screen.png", { type: "image/png" });
   fireEvent.paste(composer("Steer Codex"), {
     clipboardData: { files: [file] },
   });
@@ -644,6 +696,52 @@ test("digits pick a question's option only while focus is inside the request", a
   fireEvent.keyDown(button(/Fail open/), { key: "2" });
   expect(await screen.findByText("Answered · Fail closed")).toBeTruthy();
 });
+
+test.each(["before", "after"])(
+  "a native free-text question can be answered separately from a file attached %s it",
+  async (when) => {
+    const client = await open(
+      one({ id: "c1", title: "Limiter", activity: "working" }),
+    );
+    const ask = () =>
+      act(() => {
+        client.push("c1", { ...question, options: [] });
+        client.patch("c1", { activity: "waiting" });
+      });
+    if (when === "after") {
+      ask();
+      expect(composer("Answer, or pick above")).toBeTruthy();
+    }
+    const file = new File(["notes"], "notes.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: { files: [file] },
+    });
+    if (when === "before") ask();
+    type("Keep this caption", "Steer Codex");
+    const request = await screen.findByRole("group", {
+      name: /Redis is unreachable/,
+    });
+    fireEvent.change(within(request).getByRole("textbox", { name: "Answer" }), {
+      target: { value: "Fail open for five minutes" },
+    });
+    fireEvent.click(
+      within(request).getByRole("button", { name: "Send answer" }),
+    );
+    expect(
+      await screen.findByText("Answered · Fail open for five minutes"),
+    ).toBeTruthy();
+    expect(composer("Steer Codex")).toHaveProperty(
+      "value",
+      "Keep this caption",
+    );
+    expect(screen.getByText("notes.txt")).toBeTruthy();
+    expect(
+      (await client.openChat("c1")).items.filter(
+        (item) => item.kind === "user",
+      ),
+    ).toEqual([]);
+  },
+);
 
 test("a request arriving mid-draft takes no focus, and the draft keeps its meaning", async () => {
   const client = await open(
@@ -2280,7 +2378,7 @@ test("a first-message save failure carries picked files and a screenshot into th
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   const describe = "Describe a task or ask a question";
   const file = new File(["old bytes"], "details.txt", { type: "text/plain" });
-  const screenshot = new File(["screenshot"], "Screen.png", {
+  const screenshot = new File([screenshotBytes], "Screen.png", {
     type: "image/png",
   });
   fireEvent.change(screen.getByLabelText("Choose files to attach"), {
@@ -2293,7 +2391,7 @@ test("a first-message save failure carries picked files and a screenshot into th
   fireEvent.click(button("Send"));
   const captured = [
     { name: "details.txt", dataUrl: "data:text/plain;base64,b2xkIGJ5dGVz" },
-    { name: "Screen.png", dataUrl: "data:image/png;base64,c2NyZWVuc2hvdA==" },
+    { name: "Screen.png", dataUrl: `data:image/png;base64,${png}` },
   ];
   expect(createChat).toHaveBeenCalledWith(
     expect.objectContaining({ message: "", attachments: captured }),

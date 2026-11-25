@@ -1460,7 +1460,10 @@ async fn an_early_harness_rejection_keeps_the_attachment_message_editable() {
     );
     assert_eq!(f.submits().len(), 1);
     assert_eq!(
-        f.host.take_queued(&f.chat.id, &message.id).await.unwrap(),
+        f.host
+            .prepare_queue_edit(&f.chat.id, &message.id)
+            .await
+            .unwrap(),
         ("Read this".to_owned(), vec![saved_file()])
     );
 }
@@ -2569,10 +2572,41 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
         Some(ChatProblem::DispatchRefused { .. })
     ));
     assert_eq!(
-        f.host.take_queued(&f.chat.id, &queued.id).await.unwrap(),
+        f.host
+            .prepare_queue_edit(&f.chat.id, &queued.id)
+            .await
+            .unwrap(),
         ("Read this".to_owned(), vec![saved_file()])
     );
-    assert!(f.host.take_queued(&f.chat.id, &queued.id).await.is_err());
+    // An interrupted edit can abandon the response. Its saved entry and
+    // original bytes are still available to the next composer.
+    assert_eq!(f.queued(), ["Read this"]);
+    assert_eq!(
+        f.host
+            .prepare_queue_edit(&f.chat.id, &queued.id)
+            .await
+            .unwrap(),
+        ("Read this".to_owned(), vec![saved_file()])
+    );
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &queued.id, "accepted-edit")
+            .await
+            .unwrap()
+    );
+    assert!(f.queued().is_empty());
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &queued.id, "accepted-edit")
+            .await
+            .unwrap()
+    );
+    assert!(
+        !f.host
+            .confirm_queue_edit(&f.chat.id, &queued.id, "other-edit")
+            .await
+            .unwrap()
+    );
 
     let mut sent: Vec<String> = setting_changes(&f)
         .into_iter()

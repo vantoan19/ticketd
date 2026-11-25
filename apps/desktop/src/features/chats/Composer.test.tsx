@@ -164,12 +164,18 @@ test("pastes a plain-text file path at the caret", async () => {
 
 test("pastes a removable screenshot and sends the image without text", async () => {
   const { box, onSend } = setupAttachmentComposer();
-  const image = new File(["clipboard bytes"], "image.png", {
-    type: "image/png",
-  });
+  const png =
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhQAAAABJRU5ErkJggg==";
+  const image = new File(
+    [Uint8Array.from(atob(png), (byte) => byte.charCodeAt(0))],
+    "image.png",
+    {
+      type: "image/png",
+    },
+  );
   const attachment = {
     name: "image.png",
-    dataUrl: "data:image/png;base64,Y2xpcGJvYXJkIGJ5dGVz",
+    dataUrl: `data:image/png;base64,${png}`,
   };
   const paste = () =>
     fireEvent.paste(box, {
@@ -206,6 +212,37 @@ test("pastes a removable screenshot and sends the image without text", async () 
   );
   fireEvent.keyDown(box, { key: "Enter" });
   expect(onSend).toHaveBeenCalledWith("", [], [attachment]);
+});
+
+test("a mismatched PNG fails capture and can be removed while its caption and companion remain", async () => {
+  const { box, onSend } = setupAttachmentComposer("Keep this caption");
+  const badImage = new File(["plain text"], "broken.png", {
+    type: "image/png",
+  });
+  const validFile = new File(["notes"], "notes.txt", { type: "text/plain" });
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [badImage, validFile] },
+  });
+  expect((await screen.findByRole("alert")).textContent).toMatch(/image|PNG/i);
+  expect(screen.getByRole("button", { name: "Retry broken.png" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Send" })).toHaveProperty(
+    "disabled",
+    true,
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Remove broken.png" }));
+  expect(box).toHaveProperty("value", "Keep this caption");
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(onSend).toHaveBeenCalledWith(
+    "Keep this caption",
+    [],
+    [{ name: "notes.txt", dataUrl: "data:text/plain;base64,bm90ZXM=" }],
+  );
 });
 
 test("an oversized pasted image blocks sending until it is removed", async () => {

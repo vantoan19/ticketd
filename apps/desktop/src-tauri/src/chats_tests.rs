@@ -1584,9 +1584,23 @@ async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
     let first = f.chats.create(input.clone()).await.unwrap();
     assert_eq!(first.send_error, None);
     settle().await;
-    let again = f.chats.create(input).await.unwrap();
+    f.core().set_attachment_upload_limit(4).unwrap();
+    let again = f.chats.create(input.clone()).await.unwrap();
     assert_eq!(again, first);
     settle().await;
+    let mut changed = input.clone();
+    changed.attachments[0].data_url = "data:text/plain;base64,ZGlmZmVyZW50".into();
+    let conflict = f.chats.create(changed).await.unwrap_err();
+    assert!(conflict.message.contains("different"), "{conflict:?}");
+    let fresh = NewChatInput {
+        command_id: uuid::Uuid::new_v4().to_string(),
+        ..input
+    };
+    assert!(f.chats.create(fresh).await.is_err());
+    assert_eq!(
+        f.core().list_chats(ChatListFilter::Active).unwrap().len(),
+        1
+    );
 
     let saved = messages(&f.core(), &first.chat_id).unwrap();
     assert_eq!(saved.len(), 1);

@@ -49,6 +49,7 @@ import {
   type ChatState,
   type LinkedRecord,
   type Problem,
+  type RequestAnswer,
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
@@ -63,14 +64,7 @@ import { HarnessMark } from "@/features/chats/HarnessMark";
 import { Composer } from "@/features/chats/Composer";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
 import { ComposerQuotes } from "@/features/chats/ComposerQuote";
-import {
-  arrivals,
-  attachmentsOf,
-  drafts,
-  draftSubmissions,
-  draftTokens,
-  tokensOf,
-} from "@/features/chats/drafts";
+import { arrivals, draftOf } from "@/features/chats/drafts";
 import {
   clearQuotes,
   quoteLinks,
@@ -463,7 +457,6 @@ function Conversation({
     ],
   );
   /** Remounts the composer with the draft after Edit moved a queued message into it. */
-  const [edits, setEdits] = useState(0);
   const pending = items.filter(
     (item): item is PendingRequest =>
       item.kind === "request" && item.state === "pending",
@@ -504,11 +497,13 @@ function Conversation({
   const question = pending.find(
     (item) => item.request === "question" && item.free_text,
   );
-  const composerFiles = attachmentsOf(client, id);
-  const draftFiles = useSyncExternalStore(
-    composerFiles.subscribe,
-    composerFiles.snapshot,
-  );
+  const draft = draftOf(client, id);
+  const {
+    text: draftText,
+    items: draftFiles,
+    restored,
+    transfer,
+  } = useSyncExternalStore(draft.subscribe, draft.snapshot);
   const hasAttachments = draftFiles.length > 0;
   const hasImages = draftFiles.some(
     (file) =>
@@ -516,17 +511,20 @@ function Conversation({
   );
   // A draft typed before a question arrived keeps its meaning: only a box that
   // was empty (or emptied since) answers it.
-  const draftHeld = () => (drafts.get(id) ?? "").trim() !== "";
+  const draftHeld = draftText.trim() !== "";
   const [seenQuestion, setSeenQuestion] = useState(question?.id);
   const [heldFor, setHeldFor] = useState(() =>
-    question && draftHeld() ? question.id : undefined,
+    question && draftHeld ? question.id : undefined,
   );
   if (question?.id !== seenQuestion) {
     setSeenQuestion(question?.id);
-    setHeldFor(question && draftHeld() ? question.id : undefined);
+    setHeldFor(question && draftHeld ? question.id : undefined);
   }
   const answering =
-    Boolean(question) && heldFor !== question?.id && !hasAttachments;
+    Boolean(question) &&
+    (!draftHeld || heldFor !== question?.id) &&
+    !hasAttachments &&
+    !restored;
   const stoppable =
     isLive(chat) && !chat.stopping && !unconfirmedStart && chat.has_composer;
   /** Stops the turn; the Stop button leaves, so the message box takes focus. */
@@ -563,8 +561,8 @@ function Conversation({
     event.preventDefault();
     stop();
   };
-  const answer = (requestId: string, optionId: string) =>
-    client.answer(id, requestId, { option_id: optionId }).then(
+  const answer = (requestId: string, response: RequestAnswer) =>
+    client.answer(id, requestId, response).then(
       () => setFailure(null),
       (reason: unknown) => {
         // The request left the dock; say why the pick did nothing.
@@ -582,28 +580,30 @@ function Conversation({
         if (onRequestsAnswered) throw reason;
       },
     );
-  const savingDraft = (submission: Promise<void>) => {
-    draftSubmissions.set(composerFiles, submission);
-    return submission;
+  const finishEdit = (result: boolean | undefined) => {
+    if (result === false)
+      throw new ChatError(
+        "stale",
+        "The message is no longer available to edit.",
+      );
+    if (result) {
+      messageBox.current?.focus();
+      const box = messageBox.current;
+      box?.setSelectionRange(box.value.length, box.value.length);
+    }
   };
-  const edit = (queuedId: string) =>
+  const edit = (queuedId: string) => {
+    const transferId = crypto.randomUUID();
     quietly(
-      client.editQueued(id, queuedId).then(async ({ text, attachments }) => {
-        // A successful submission clears its draft before recovered content is merged.
-        await draftSubmissions.get(composerFiles)?.catch(() => {});
-        const draft = drafts.get(id) ?? "";
-        if (text) {
-          const next = draft.trim() ? `${draft}\n\n${text}` : text;
-          const tokens = tokensOf(id);
-          drafts.set(id, next);
-          draftTokens.set(id, { text: next, tokens });
-        }
-        if (attachments.length) composerFiles.addCaptured(attachments);
-        if (question && text) setHeldFor(question.id);
-        setEdits((count) => count + 1);
-      }),
+      draft
+        .editQueued(
+          () => client.editQueued(id, queuedId),
+          () => client.confirmQueueEdit(id, queuedId, transferId),
+        )
+        .then(finishEdit),
       "edit the queued message",
     );
+  };
   // Placed once when the Chat opens; it stays until the person sends or leaves.
   // After what the person read through, which the host keeps (#365); a Chat
   // never read here says from its unseen turn.
@@ -649,8 +649,6 @@ function Conversation({
   const onNotice = (action: Exclude<NoticeAction, "help" | "copy-command">) => {
     if (action === "check") quietly(client.checkAgain(id), "check again");
     else if (action === "start-fresh") {
-      // An earlier queue edit's autofocus must expire before the box returns.
-      if (!chat.has_composer) setEdits(0);
       void run(client.resume(id, { kind: "none" }), "start a fresh session")
         .then(() => setFreshStarts((count) => count + 1))
         .catch(() => {});
@@ -817,6 +815,7 @@ function Conversation({
                   {...(plan && { plan: <PlanPill item={plan} /> })}
                   dockRef={dock}
                   onAnswer={answer}
+                  composerQuestion={answering ? question?.id : undefined}
                   {...(onRequestsAnswered && {
                     onAnswered: (requestId: string, origin: Element | null) =>
                       setAnswered({ id: requestId, origin }),
@@ -855,23 +854,43 @@ function Conversation({
               </DockSlot>
               <Composer
                 retryRef={retrySend}
-                key={`${id}:${edits}`}
+                key={id}
                 framed={false}
                 inputRef={messageBox}
-                autoFocus={edits > 0}
                 placeholder={composerPlaceholder(chat, answering, hasImages)}
-                initialText={drafts.get(id) ?? ""}
-                initialTokens={tokensOf(id)}
-                attachments={composerFiles}
-                onText={(text, tokens) => {
-                  drafts.set(id, text);
-                  draftTokens.set(id, { text, tokens });
+                draft={draft}
+                onText={(text) => {
                   if (!text.trim()) setHeldFor(undefined);
                   else if (hasAttachments && question) setHeldFor(question.id);
                 }}
                 mentions={mentions}
                 above={
-                  <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
+                  <>
+                    {transfer === "unconfirmed" && (
+                      <div
+                        className="flex items-center gap-2 px-3 py-2"
+                        role="status"
+                      >
+                        Couldn’t confirm the queued message moved into the
+                        draft.
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="compact"
+                          onClick={() =>
+                            quietly(
+                              draft.retryTransfer()?.then(finishEdit) ??
+                                Promise.resolve(),
+                              "edit the queued message",
+                            )
+                          }
+                        >
+                          Retry queue edit
+                        </Button>
+                      </div>
+                    )}
+                    <ComposerQuotes quotes={quotes} onRemove={removeQuote} />
+                  </>
                 }
                 controls={(text, hasAttachments) =>
                   composerControls(
@@ -910,7 +929,7 @@ function Conversation({
                         },
                     true,
                   );
-                  return savingDraft(submission);
+                  return submission;
                 }}
                 onQueue={(text, links, attachments) => {
                   const outgoingText = quotedMessage(quotes, text);
@@ -926,7 +945,7 @@ function Conversation({
                       retrySend.current?.();
                     },
                   );
-                  return savingDraft(submission);
+                  return submission;
                 }}
                 {...(pending.length > 0 &&
                   !hasAttachments && {

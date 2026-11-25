@@ -87,6 +87,35 @@ fn message(workspace: &Workspace, chat: &Chat, id: &str) -> ChatMessage {
 }
 
 #[test]
+fn a_saved_input_replays_after_the_upload_limit_is_lowered() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let file =
+        |data| ticketd_core::ChatAttachmentContent::from_data_url("note.txt", data, 100).unwrap();
+    let original = [file("data:text/plain;base64,bm90ZQ==")];
+    let different = [file("data:text/plain;base64,c3RvcA==")];
+    let saved = workspace
+        .save_chat_input_with_attachments(Some("save"), &chat.id, "Caption", &original)
+        .unwrap();
+    workspace.set_attachment_upload_limit(2).unwrap();
+    assert_eq!(
+        workspace
+            .save_chat_input_with_attachments(Some("save"), &chat.id, "Caption", &original)
+            .unwrap(),
+        saved
+    );
+    assert!(matches!(
+        workspace.save_chat_input_with_attachments(Some("save"), &chat.id, "Caption", &different),
+        Err(Error::RequestConflict(_))
+    ));
+    assert!(matches!(
+        workspace.save_chat_input_with_attachments(Some("new"), &chat.id, "Caption", &original),
+        Err(Error::UploadLimit { limit: 2 })
+    ));
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap(), [saved]);
+}
+
+#[test]
 fn a_complete_backup_restores_the_exact_image_in_sent_chat_history() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

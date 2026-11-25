@@ -654,15 +654,33 @@ impl ChatHost {
         .await
     }
 
-    /// Moves one queued message back into the draft with its original saved snapshots.
-    pub async fn take_queued(
+    /// Reads one queued message and its snapshots without withdrawing it.
+    pub async fn prepare_queue_edit(
         &self,
         chat_id: &str,
         message_id: &str,
     ) -> Result<(String, Vec<ChatAttachmentContent>), HostError> {
         let message_id = message_id.to_owned();
-        self.ask(chat_id, |reply| Command::TakeQueued { message_id, reply })
-            .await
+        self.ask(chat_id, |reply| Command::PrepareQueueEdit {
+            message_id,
+            reply,
+        })
+        .await
+    }
+
+    /// Withdraws a queued message after the composer has accepted its snapshots.
+    pub async fn confirm_queue_edit(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        transfer_id: &str,
+    ) -> Result<bool, HostError> {
+        self.ask(chat_id, |reply| Command::ConfirmQueueEdit {
+            message_id: message_id.to_owned(),
+            transfer_id: transfer_id.to_owned(),
+            reply,
+        })
+        .await
     }
 
     pub async fn respond(

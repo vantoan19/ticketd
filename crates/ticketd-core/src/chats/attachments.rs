@@ -61,6 +61,11 @@ impl ChatAttachmentContent {
         Ok(content)
     }
 
+    /// Takes ownership of the PNG snapshot read by the platform's clipboard adapter.
+    pub fn from_clipboard_png(bytes: Vec<u8>, limit: u64) -> Result<Self, Error> {
+        Self::from_bytes("Screenshot.png", "image/png", bytes, limit)
+    }
+
     /// Takes the byte snapshot supplied by the composer, without opening any source path.
     pub fn from_data_url(name: &str, data_url: &str, limit: u64) -> Result<Self, Error> {
         if !attachments::valid_filename(name) {
@@ -78,10 +83,21 @@ impl ChatAttachmentContent {
             .decode(encoded)
             .map_err(|_| invalid("The attachment could not be read."))?;
         let claimed_type = claimed_type.split(';').next().unwrap_or_default();
+        Self::from_bytes(name, claimed_type, bytes, limit)
+    }
+
+    fn from_bytes(
+        name: &str,
+        claimed_type: &str,
+        bytes: Vec<u8>,
+        limit: u64,
+    ) -> Result<Self, Error> {
         let image_type = attachment_previews::classify(&bytes[..bytes.len().min(16)])
             .filter(|media_type| supported_image(media_type));
         if claimed_type.starts_with("image/") && image_type != Some(claimed_type) {
-            return Err(invalid("Chat can attach PNG, JPEG, WebP, and GIF images."));
+            return Err(invalid(
+                "The file bytes do not match a supported PNG, JPEG, WebP, or GIF image.",
+            ));
         }
         let media_type = image_type.unwrap_or(if claimed_type.is_empty() {
             "application/octet-stream"
@@ -99,6 +115,10 @@ impl ChatAttachmentContent {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn media_type(&self) -> &str {
+        &self.media_type
     }
 
     pub fn bytes(&self) -> &[u8] {

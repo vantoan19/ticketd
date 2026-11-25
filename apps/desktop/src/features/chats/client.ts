@@ -890,6 +890,12 @@ export interface ChatClient {
     id: string,
     queuedId: string,
   ): Promise<{ text: string; attachments: ChatAttachmentInput[] }>;
+  /** Withdraws only after the app-session draft has accepted the snapshot. */
+  confirmQueueEdit(
+    id: string,
+    queuedId: string,
+    transferId: string,
+  ): Promise<boolean>;
   resumeQueue(id: string): Promise<void>;
   /** Sends one queued message now, alone: it steers the turn or starts one; a paused queue stays paused. */
   sendQueuedNow(id: string, queuedId: string): Promise<void>;

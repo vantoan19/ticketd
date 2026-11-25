@@ -79,9 +79,14 @@ pub(crate) enum Command {
         message_id: String,
         reply: Reply<()>,
     },
-    TakeQueued {
+    PrepareQueueEdit {
         message_id: String,
         reply: Reply<(String, Vec<ChatAttachmentContent>)>,
+    },
+    ConfirmQueueEdit {
+        message_id: String,
+        transfer_id: String,
+        reply: Reply<bool>,
     },
     Respond {
         interaction_id: String,
@@ -700,8 +705,15 @@ impl Supervisor {
             Command::SendQueuedNow { message_id, reply } => {
                 let _ = reply.send(self.send_queued_now(message_id).await);
             }
-            Command::TakeQueued { message_id, reply } => {
-                let _ = reply.send(self.take_queued(&message_id));
+            Command::PrepareQueueEdit { message_id, reply } => {
+                let _ = reply.send(self.prepare_queue_edit(&message_id));
+            }
+            Command::ConfirmQueueEdit {
+                message_id,
+                transfer_id,
+                reply,
+            } => {
+                let _ = reply.send(self.confirm_queue_edit(&message_id, &transfer_id));
             }
             Command::Respond {
                 interaction_id,
@@ -1082,24 +1094,37 @@ impl Supervisor {
         Ok(())
     }
 
-    fn take_queued(
-        &mut self,
+    fn prepare_queue_edit(
+        &self,
         message_id: &str,
     ) -> Result<(String, Vec<ChatAttachmentContent>), HostError> {
         if self.direct.iter().any(|id| id == message_id) {
             return Err(HostError::Working);
         }
         let chat = self.chat_id.clone();
-        Ok(self.write(|core| {
-            let message = core
-                .chat_queue(&chat)?
-                .into_iter()
-                .find(|message| message.id == message_id)
-                .ok_or_else(|| Error::Chat("this input is not in the queue".to_owned()))?;
-            let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
-            core.withdraw_chat_input(&chat, message_id)?;
-            Ok((message.text, attachments))
+        Ok(self.core(|core| {
+            core.read(|core| {
+                let message = core
+                    .chat_queue(&chat)?
+                    .into_iter()
+                    .find(|message| message.id == message_id)
+                    .ok_or_else(|| Error::Chat("this input is not in the queue".to_owned()))?;
+                let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
+                Ok((message.text, attachments))
+            })
         })?)
+    }
+
+    fn confirm_queue_edit(
+        &mut self,
+        message_id: &str,
+        transfer_id: &str,
+    ) -> Result<bool, HostError> {
+        if self.direct.iter().any(|id| id == message_id) {
+            return Ok(false);
+        }
+        let chat = self.chat_id.clone();
+        Ok(self.write(|core| core.confirm_chat_queue_edit(&chat, message_id, transfer_id))?)
     }
 
     /// Whether the queue, not paused, holds input saved before `message_id`.

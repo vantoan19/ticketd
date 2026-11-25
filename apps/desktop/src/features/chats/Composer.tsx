@@ -22,6 +22,11 @@ import {
   type ChatAttachmentInput,
   type ComposerAttachments,
 } from "@/features/chats/composer-attachments";
+import { ComposerDraft } from "@/features/chats/drafts";
+import {
+  readLinuxClipboardImage,
+  redactedLinuxPaste,
+} from "@/features/chats/linux-clipboard";
 
 type Submit = (
   text: string,
@@ -58,7 +63,8 @@ export function Composer({
   autoFocus = false,
   framed = true,
   retryRef,
-  attachments = NO_ATTACHMENTS,
+  attachments: initialAttachments = NO_ATTACHMENTS,
+  draft: sharedDraft,
 }: {
   /**
    * Draws its own ring. In a Chat the composer is the last part of the tray,
@@ -84,6 +90,7 @@ export function Composer({
   onSend: Submit;
   onQueue?: Submit;
   attachments?: ComposerAttachments;
+  draft?: ComposerDraft;
   /** Pass only while a turn is in progress. */
   onStop?: () => void;
   /** Stop was asked for and has not finished: Stop waits. */
@@ -97,11 +104,19 @@ export function Composer({
   inputRef?: Ref<HTMLTextAreaElement>;
   autoFocus?: boolean;
 }) {
-  const [text, setTextState] = useState(initialText);
-  const [tokens, setTokens] = useState(initialTokens);
-  const [busy, setBusy] = useState(false);
+  const [localDraft] = useState(
+    () =>
+      sharedDraft ??
+      new ComposerDraft(initialAttachments, initialText, initialTokens),
+  );
+  const draft = sharedDraft ?? localDraft;
+  const { attachments } = draft;
+  const { text, tokens, items, failedAction, saving, transfer } =
+    useSyncExternalStore(draft.subscribe, draft.snapshot);
+  const busy = saving || transfer !== null;
   const filePicker = useRef<HTMLInputElement>(null);
   const clipboardFilePicker = useRef<HTMLInputElement>(null);
+  const clipboardImagePicker = useRef<HTMLInputElement>(null);
   const [receivingClipboardFiles, setReceivingClipboardFiles] = useState(false);
   const bindClipboardFilePicker = useCallback(
     (picker: HTMLInputElement | null) => {
@@ -118,46 +133,37 @@ export function Composer({
   );
   const linuxDesktop =
     "__TAURI_INTERNALS__" in window && /^linux/i.test(navigator.platform);
-  const [failedAction, setFailedAction] = useState<"send" | "queue" | null>(
-    null,
-  );
   const setText = (next: string, nextTokens: Token[] = []) => {
-    setTextState(next);
-    setTokens(nextTokens);
-    onText?.(next, nextTokens);
+    if (draft.setText(next, nextTokens)) onText?.(next, nextTokens);
   };
-  const items = useSyncExternalStore(
-    attachments.subscribe,
-    attachments.snapshot,
-  );
   const files = items.flatMap((item) =>
     item.state === "ready" ? [item.content] : [],
   );
   const waiting = receivingClipboardFiles || items.length !== files.length;
   const available = controls(text, items.length > 0);
-  const state = waiting
-    ? { ...available, enabled: false, queues: false }
-    : available;
+  const state =
+    waiting || transfer !== null
+      ? { ...available, enabled: false, queues: false }
+      : available;
   const submit = (action: Submit | undefined) => {
-    const message = text.trim();
-    if (!action || (!message && !files.length) || waiting || busy) return;
-    setBusy(true);
-    const links = linksOf(tokens);
-    const sent = files.length
-      ? action(message, links, files)
-      : action(message, links);
-    sent.then(
-      () => {
-        setText("");
-        if (items.length)
-          attachments.remove(new Set(items.map((item) => item.id)));
-        setFailedAction(null);
-        setBusy(false);
-      },
-      () => {
-        setFailedAction(action === onQueue ? "queue" : "send");
-        setBusy(false);
-      },
+    const current = draft.snapshot();
+    const message = current.text.trim();
+    const selected = current.items.flatMap((item) =>
+      item.state === "ready" ? [item.content] : [],
+    );
+    if (
+      !action ||
+      draft.locked() ||
+      receivingClipboardFiles ||
+      current.items.length !== selected.length ||
+      (!message && !selected.length)
+    )
+      return;
+    const links = linksOf(current.tokens);
+    draft.save(action === onQueue ? "queue" : "send", () =>
+      selected.length
+        ? action(message, links, selected)
+        : action(message, links),
     );
   };
   useImperativeHandle(retryRef, () => () => {
@@ -174,7 +180,7 @@ export function Composer({
     if (state.queues) submit(onQueue);
   };
   const addPickedFiles = (input: HTMLInputElement) => {
-    if (!busy) attachments.add(Array.from(input.files ?? []));
+    if (!draft.locked()) attachments.add(Array.from(input.files ?? []));
     input.value = "";
   };
   return (
@@ -186,6 +192,10 @@ export function Composer({
         if (state.enabled) submit(primary);
       }}
       onPaste={(event) => {
+        if (draft.locked()) {
+          event.preventDefault();
+          return;
+        }
         if (attachments === NO_ATTACHMENTS) return;
         const clipboard = event.clipboardData;
         // The file list and file items can describe the same clipboard data.
@@ -200,6 +210,17 @@ export function Composer({
         if (pastedFiles.length) {
           event.preventDefault();
           attachments.add(pastedFiles);
+          return;
+        }
+        if (
+          clipboardImagePicker.current &&
+          event.isTrusted &&
+          redactedLinuxPaste(clipboard)
+        ) {
+          event.preventDefault();
+          attachments.addClipboardImage(
+            readLinuxClipboardImage(clipboardImagePicker.current),
+          );
           return;
         }
         // Newer WebKitGTK hides the URI values for clipboard files from the DOM.
@@ -250,15 +271,22 @@ export function Composer({
               {item.state === "failed" && (
                 <>
                   <span role="alert">{item.error}</span>
-                  <IconButton
-                    type="button"
-                    variant="ghost"
-                    size="icon-compact"
-                    label={`Retry ${item.name}`}
-                    onClick={() => attachments.retry(item.id)}
-                  >
-                    <RotateCcw aria-hidden />
-                  </IconButton>
+                  {item.source ? (
+                    <IconButton
+                      type="button"
+                      variant="ghost"
+                      size="icon-compact"
+                      label={`Retry ${item.name}`}
+                      disabled={busy}
+                      onClick={() => {
+                        if (!draft.locked()) attachments.retry(item.id);
+                      }}
+                    >
+                      <RotateCcw aria-hidden />
+                    </IconButton>
+                  ) : (
+                    <span>Paste the screenshot again to retry.</span>
+                  )}
                 </>
               )}
               <IconButton
@@ -267,7 +295,9 @@ export function Composer({
                 size="icon-compact"
                 label={`Remove ${item.name}`}
                 disabled={busy}
-                onClick={() => attachments.remove(new Set([item.id]))}
+                onClick={() => {
+                  if (!draft.locked()) attachments.remove(new Set([item.id]));
+                }}
               >
                 <X aria-hidden />
               </IconButton>
@@ -282,6 +312,7 @@ export function Composer({
         tokens={tokens}
         mentions={mentions}
         autoFocus={autoFocus}
+        readOnly={busy}
         onChange={setText}
         onKeyDown={(event) => {
           if (event.nativeEvent.isComposing) return;
@@ -319,17 +350,25 @@ export function Composer({
                 onChange={(event) => addPickedFiles(event.currentTarget)}
               />
               {linuxDesktop && (
-                <input
-                  ref={bindClipboardFilePicker}
-                  type="file"
-                  multiple
-                  hidden
-                  accept={CLIPBOARD_FILE_PICKER}
-                  onChange={(event) => {
-                    setReceivingClipboardFiles(false);
-                    addPickedFiles(event.currentTarget);
-                  }}
-                />
+                <>
+                  <input
+                    ref={bindClipboardFilePicker}
+                    type="file"
+                    multiple
+                    hidden
+                    accept={CLIPBOARD_FILE_PICKER}
+                    onChange={(event) => {
+                      setReceivingClipboardFiles(false);
+                      addPickedFiles(event.currentTarget);
+                    }}
+                  />
+                  <input
+                    ref={clipboardImagePicker}
+                    type="file"
+                    multiple
+                    hidden
+                  />
+                </>
               )}
               <IconButton
                 type="button"

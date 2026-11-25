@@ -21,7 +21,7 @@ use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatDelivery, ChatInputStanding,
     ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole,
-    ChatSubmissionIntent, ChatTurnState, NewChat, Workspace, WorkspaceGuard,
+    ChatSubmissionIntent, ChatTurnState, MAX_BACKUP_FILE_BYTES, NewChat, Workspace, WorkspaceGuard,
 };
 use tokio::sync::oneshot;
 
@@ -1489,10 +1489,64 @@ impl Chats {
     /// and the message an earlier try saved instead of making them again.
     pub async fn create(&self, input: NewChatInput) -> Outcome<Created> {
         let host = self.host()?;
-        let attachments = self.message_attachments(&input.message, input.attachments)?;
         let command_id = uuid::Uuid::parse_str(&input.command_id)
             .map_err(|_| failed("the request id must be a UUID"))?
             .to_string();
+        let create = format!("{command_id}:chat");
+        let first = format!("{command_id}:first");
+        let (new_chat, attachments) = {
+            let workspace = self.workspace()?;
+            // Beside the Workspace, one folder per Chat, named by the request.
+            let execution_folder = match &input.folder {
+                Some(path) => path.clone(),
+                None => PathBuf::from(format!("{}.chats", workspace.workspace_info()?.path))
+                    .join(&command_id)
+                    .to_string_lossy()
+                    .into_owned(),
+            };
+            let new_chat = NewChat {
+                title: input
+                    .message
+                    .trim()
+                    .lines()
+                    .next()
+                    .or_else(|| input.attachments.first().map(|file| file.name.as_str()))
+                    .map(|line| line.chars().take(80).collect()),
+                harness: input.harness_id.clone(),
+                execution_folder,
+                folder_managed: input.folder.is_none(),
+                links: input.links.into_iter().map(ChatLink::from).collect(),
+            };
+            let existing = workspace.replay_chat_creation(&create, &new_chat)?;
+            let limit = workspace.attachment_upload_limit()?;
+            let decode_limit = if existing.is_some() {
+                MAX_BACKUP_FILE_BYTES
+            } else {
+                limit
+            };
+            let attachments =
+                Self::decode_message_attachments(&input.message, input.attachments, decode_limit)?;
+            if let Some(chat) = existing
+                && workspace
+                    .replay_chat_input(&first, &chat.id, &input.message, &attachments)?
+                    .is_some()
+            {
+                return Ok(Created {
+                    chat_id: chat.id,
+                    send_error: None,
+                });
+            }
+            if attachments
+                .iter()
+                .any(|file| file.bytes().len() as u64 > limit)
+            {
+                return Err(ticketd_core::Error::UploadLimit { limit }.into());
+            }
+            if !new_chat.folder_managed {
+                folder_argument(&new_chat.execution_folder)?;
+            }
+            (new_chat, attachments)
+        };
         let served = |adapter: &Arc<dyn HarnessAdapter>| adapter.harness().key.as_str();
         if !self.adapters.iter().any(|a| served(a) == input.harness_id) {
             return Err(failed(self.unavailable(&input.harness_id)));
@@ -1518,34 +1572,8 @@ impl Chats {
                 )));
             }
         }
-        let mut workspace = self.workspace()?;
-        // Beside the workspace file, one per Chat, named by the request so that a
-        // retry asks for the same Chat.
-        let managed =
-            PathBuf::from(format!("{}.chats", workspace.workspace_info()?.path)).join(&command_id);
-        let (execution_folder, folder_managed) = match &input.folder {
-            Some(path) => (folder_argument(path)?, false),
-            None => (managed.to_string_lossy().into_owned(), true),
-        };
-        let title = input
-            .message
-            .trim()
-            .lines()
-            .next()
-            .or_else(|| attachments.first().map(ChatAttachmentContent::name))
-            .map(|line| line.chars().take(80).collect());
         // The Chat is stored first: a request the core refuses leaves no folder behind.
-        let chat = workspace.create_chat(
-            Some(&format!("{command_id}:chat")),
-            NewChat {
-                title,
-                harness: input.harness_id,
-                execution_folder,
-                folder_managed,
-                links: input.links.into_iter().map(ChatLink::from).collect(),
-            },
-        )?;
-        drop(workspace);
+        let chat = self.workspace()?.create_chat(Some(&create), new_chat)?;
         let created = |send_error| Created {
             chat_id: chat.id.clone(),
             send_error,
@@ -1564,7 +1592,6 @@ impl Chats {
                 .await
                 .map_err(ChatFailure::from)?;
         }
-        let first = format!("{command_id}:first");
         let sent = host.send_with_attachments(
             &chat.id,
             Some(&first),
@@ -1897,10 +1924,10 @@ impl Chats {
         Ok(())
     }
 
-    fn message_attachments(
-        &self,
+    fn decode_message_attachments(
         text: &str,
         files: Vec<AttachmentInput>,
+        limit: u64,
     ) -> Outcome<Vec<ChatAttachmentContent>> {
         if files.is_empty() || !text.is_empty() {
             text_argument(text, "The message")?;
@@ -1908,7 +1935,6 @@ impl Chats {
         if files.is_empty() {
             return Ok(Vec::new());
         }
-        let limit = self.workspace()?.attachment_upload_limit()?;
         files
             .into_iter()
             .map(|file| {
@@ -1931,7 +1957,12 @@ impl Chats {
         files: Vec<AttachmentInput>,
     ) -> Outcome<()> {
         let host = self.host()?;
-        let attachments = self.message_attachments(text, files)?;
+        let limit = if files.is_empty() {
+            0
+        } else {
+            self.workspace()?.attachment_upload_limit()?
+        };
+        let attachments = Self::decode_message_attachments(text, files, limit)?;
         let present = self.workspace()?.chat(chat_id)?.links;
         let mut added = false;
         for link in links {
@@ -1962,6 +1993,12 @@ impl Chats {
         self.workspace()?
             .export_chat_attachment(chat_id, id, destination)?;
         Ok(())
+    }
+
+    pub fn capture_attachment(&self, file: AttachmentInput) -> Outcome<String> {
+        let limit = self.workspace()?.attachment_upload_limit()?;
+        let content = ChatAttachmentContent::from_data_url(&file.name, &file.data_url, limit)?;
+        Ok(content.media_type().to_owned())
     }
 
     /// What the composer's `@` menu offers from a Chat's folder.
@@ -2004,8 +2041,7 @@ impl Chats {
     }
 
     pub async fn edit_queued(&self, chat_id: &str, message_id: &str) -> Outcome<QueuedDraft> {
-        let (text, attachments) = self.host()?.take_queued(chat_id, message_id).await?;
-        self.resync(chat_id);
+        let (text, attachments) = self.host()?.prepare_queue_edit(chat_id, message_id).await?;
         Ok(QueuedDraft {
             text,
             attachments: attachments
@@ -2016,6 +2052,24 @@ impl Chats {
                 })
                 .collect(),
         })
+    }
+
+    pub async fn confirm_queue_edit(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+        transfer_id: &str,
+    ) -> Outcome<bool> {
+        let transfer_id = uuid::Uuid::parse_str(transfer_id)
+            .map_err(|_| failed("the transfer id must be a UUID"))?;
+        let withdrawn = self
+            .host()?
+            .confirm_queue_edit(chat_id, message_id, &format!("{transfer_id}:queue-edit"))
+            .await?;
+        if withdrawn {
+            self.resync(chat_id);
+        }
+        Ok(withdrawn)
     }
 
     pub async fn resume_queue(&self, chat_id: &str) -> Outcome<()> {

@@ -29,6 +29,31 @@ const working = (over = {}) =>
     ],
   });
 
+test.each(["claude-code", "antigravity"])(
+  "a fixture can create a Chat with an attachment using %s",
+  async (harness_id) => {
+    const client = createMockChatClient({
+      harnesses: [{ id: harness_id, name: harness_id, status: "ready" }],
+    });
+    const { chat_id } = await client.createChat({
+      command_id: "first-message",
+      harness_id,
+      folder: null,
+      links: [],
+      message: "",
+      attachments: [
+        { name: "notes.txt", dataUrl: "data:text/plain;base64,bm90ZXM=" },
+      ],
+    });
+    expect((await client.openChat(chat_id)).items).toContainEqual(
+      expect.objectContaining({
+        kind: "user",
+        attachments: [expect.objectContaining({ name: "notes.txt" })],
+      }),
+    );
+  },
+);
+
 test("a request takes one answer; a second is refused as stale", async () => {
   const client = working({ activity: "waiting" });
   await client.answer("c1", "req-1", { option_id: "once" });

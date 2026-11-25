@@ -472,6 +472,14 @@ pub async fn chat_send(
 }
 
 #[tauri::command(async)]
+pub fn chat_capture_attachment(
+    bridge: State<'_, ChatBridge>,
+    attachment: AttachmentInput,
+) -> Outcome<String> {
+    bridge.chats.capture_attachment(attachment)
+}
+
+#[tauri::command(async)]
 pub fn chat_export_attachment(
     bridge: State<'_, ChatBridge>,
     chat_id: String,
@@ -525,6 +533,19 @@ pub async fn chat_remove_queued(
         bridge.chats.remove_queued(&chat_id, &queued_id).await?;
         Ok(None)
     }
+}
+
+#[tauri::command]
+pub async fn chat_confirm_queue_edit(
+    bridge: State<'_, ChatBridge>,
+    chat_id: String,
+    queued_id: String,
+    transfer_id: String,
+) -> Outcome<bool> {
+    bridge
+        .chats
+        .confirm_queue_edit(&chat_id, &queued_id, &transfer_id)
+        .await
 }
 
 #[tauri::command]

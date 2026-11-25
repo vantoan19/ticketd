@@ -24,7 +24,10 @@ import {
 } from "@/features/chats/client";
 import { loadPreferences, setPreference } from "@/lib/preferences";
 import { typedReference } from "@/features/tickets/ticket-references";
-import { captureChatAttachment } from "@/features/chats/composer-attachments";
+import {
+  CaptureError,
+  captureChatAttachment,
+} from "@/features/chats/composer-attachments";
 
 /** The fields of `show_ticket`'s reply a linked ticket needs. */
 const exactTicketSchema = z.object({
@@ -312,7 +315,19 @@ export function createHostChatClient(
         .int()
         .positive()
         .parse(await bridge.invoke("attachment_upload_limit"));
-      return captureChatAttachment(file, limit);
+      return captureChatAttachment(file, limit, async (attachment) => {
+        let reply: unknown;
+        try {
+          reply = await bridge.invoke("chat_capture_attachment", {
+            attachment,
+          });
+        } catch (reason) {
+          const failure = failureSchema.safeParse(reason);
+          if (failure.success) throw new CaptureError(failure.data.message);
+          throw reason;
+        }
+        return z.string().parse(reply);
+      });
     },
     async exportAttachment(id, file) {
       const destination = await bridge.saveFile(file.name);
@@ -354,6 +369,14 @@ export function createHostChatClient(
             edit: true,
           }),
         ),
+    confirmQueueEdit: async (id, queuedId, transferId) =>
+      z.boolean().parse(
+        await call("chat_confirm_queue_edit", {
+          chatId: id,
+          queuedId,
+          transferId,
+        }),
+      ),
     resumeQueue: (id) => run("chat_resume_queue", { chatId: id }),
     sendQueuedNow: (id, queuedId) =>
       run("chat_send_queued_now", { chatId: id, queuedId }),
