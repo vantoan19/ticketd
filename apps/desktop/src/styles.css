@@ -2746,7 +2746,7 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 /* Reply headings (DESIGN 15): h1-h3 at the reading size, h4-h6 and a paragraph
    that is only bold (boldOnly) at the body size; both 600 on the body's line
    height. A heading groups with what follows: space above, little below. */
-.chat-ai .markdown-document :is(h1, h2, h3, h4, h5, h6, p[data-bold-only]) {
+.chat-ai .markdown-document :where(h1, h2, h3, h4, h5, h6, p[data-bold-only]) {
   color: var(--foreground);
   font-size: var(--text-doc);
   font-weight: 600;
