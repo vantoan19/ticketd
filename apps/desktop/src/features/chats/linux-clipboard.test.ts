@@ -9,7 +9,7 @@ test("the Linux image fallback is limited to an empty DOM clipboard", () => {
       items: { length: items },
       files: { length: files },
       getData: (format: string) => (format === "text/plain" ? text : ""),
-    }) as DataTransfer;
+    }) as unknown as DataTransfer;
   expect(redactedLinuxPaste(payload([]))).toBe(true);
   expect(redactedLinuxPaste(payload(["text/plain"]))).toBe(false);
   expect(redactedLinuxPaste(payload(["text/uri-list"]))).toBe(false);
