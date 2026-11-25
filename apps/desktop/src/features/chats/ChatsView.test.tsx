@@ -342,6 +342,95 @@ test("a queued message can be sent now, alone, or moved back into the message bo
   expect(chat.queue_paused).toBe(true);
 });
 
+test("editing a queued message appends its text and saved files to the current draft", async () => {
+  const client = await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }),
+  );
+  const file = new File(["saved"], "notes.txt", { type: "text/plain" });
+  const snapshot = {
+    name: "notes.txt",
+    dataUrl: "data:text/plain;base64,c2F2ZWQ=",
+  };
+  const draft = new File(["draft"], "draft.txt", { type: "text/plain" });
+  const box = () => composer("Steer Codex");
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [file] },
+  });
+  type("Queued text", "Steer Codex");
+  await waitFor(() =>
+    expect(button("Steer")).toHaveProperty("disabled", false),
+  );
+  fireEvent.keyDown(box(), { key: "Enter", ctrlKey: true });
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("Queued text · notes.txt")).toBeTruthy();
+  type("Existing draft", "Steer Codex");
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [draft] },
+  });
+  fireEvent.click(
+    within(queue).getByRole("button", { name: "Edit in the message box" }),
+  );
+  await screen.findByRole("button", { name: "Remove notes.txt" });
+  expect(box()).toHaveProperty("value", "Existing draft\n\nQueued text");
+  const send = vi.spyOn(client, "send");
+  await waitFor(() =>
+    expect(button("Steer")).toHaveProperty("disabled", false),
+  );
+  fireEvent.click(button("Steer"));
+  expect(send).toHaveBeenCalledWith(
+    "c1",
+    "Existing draft\n\nQueued text",
+    [],
+    [
+      { name: "draft.txt", dataUrl: "data:text/plain;base64,ZHJhZnQ=" },
+      snapshot,
+    ],
+  );
+});
+
+test("editing queued input waits for the draft submission that is still saving", async () => {
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      queue: [{ id: "q1", text: "Edit this message" }],
+      queue_paused: true,
+    }),
+  );
+  const saved = Promise.withResolvers<void>();
+  vi.spyOn(client, "send").mockReturnValueOnce(saved.promise);
+  type("Sending this draft");
+  fireEvent.click(button("Send"));
+  await act(async () => {
+    fireEvent.click(button("Edit in the message box"));
+  });
+  await act(async () => saved.resolve());
+  expect(composer()).toHaveProperty("value", "Edit this message");
+});
+
+test("an image that the running turn cannot take can be queued for the next turn", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      activity: "working",
+      steering: { available: true, images_refused: true },
+    }),
+  );
+  const file = new File(["snapshot"], "Screen.png", { type: "image/png" });
+  fireEvent.paste(composer("Steer Codex"), {
+    clipboardData: { files: [file] },
+  });
+  await waitFor(() =>
+    expect(button("Queue")).toHaveProperty("disabled", false),
+  );
+  expect(composer("Queue for Codex")).toHaveProperty("value", "");
+  fireEvent.click(button("Queue"));
+  const queue = await screen.findByRole("list", { name: "Queued messages" });
+  expect(within(queue).getByText("Screen.png")).toBeTruthy();
+  expect(within(queue).queryByRole("button", { name: "Send now" })).toBeNull();
+});
+
 test("an approval's reason sets its `code spans` in mono, without the backticks", async () => {
   await open(
     one({ id: "c1", title: "Limiter", activity: "waiting" }, [
@@ -572,6 +661,43 @@ test("a request arriving mid-draft takes no focus, and the draft keeps its meani
   type("", "Steer Codex");
   expect(composer("Answer, or pick above")).toBeTruthy();
 });
+
+test.each(["before", "after"])(
+  "a file-only draft attached %s a question stays a message",
+  async (when) => {
+    const client = await open(
+      one({ id: "c1", title: "Limiter", activity: "working" }),
+    );
+    const ask = () =>
+      act(() => {
+        client.push("c1", question);
+        client.patch("c1", { activity: "waiting" });
+      });
+    if (when === "after") ask();
+    const file = new File(["notes"], "question.txt", { type: "text/plain" });
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: { files: [file] },
+    });
+    if (when === "before") ask();
+    expect(composer("Steer Codex")).toHaveProperty("value", "");
+    expect(
+      screen.getByRole("group", { name: /Redis is unreachable/ }),
+    ).toBeTruthy();
+    await waitFor(() =>
+      expect(button("Steer")).toHaveProperty("disabled", false),
+    );
+    const send = vi.spyOn(client, "send");
+    const answer = vi.spyOn(client, "answer");
+    fireEvent.click(button("Steer"));
+    expect(send).toHaveBeenCalledWith(
+      "c1",
+      "",
+      [],
+      [{ name: "question.txt", dataUrl: "data:text/plain;base64,bm90ZXM=" }],
+    );
+    expect(answer).not.toHaveBeenCalled();
+  },
+);
 
 test("an uncertain delivery is never resent unless the person says so", async () => {
   const client = await open(

@@ -13,5 +13,4 @@
 {"server":{"id":4,"result":{"turn":{"id":"turn_2","status":"inProgress","items":[],"error":null}}}}
 {"server":{"method":"turn/completed","params":{"threadId":"thr_1","turn":{"id":"turn_2","status":"completed","items":[],"error":null}}}}
 {"mark":"the second turn too"}
-{"client":{"id":5,"method":"turn/start","params":{"threadId":"thr_1","clientUserMessageId":"sub-3","input":[{"type":"text","text":"Careful now","text_elements":[]}],"approvalPolicy":"on-request","sandboxPolicy":{"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false}}}}
 {"server":{"id":5,"result":{"turn":{"id":"turn_3","status":"inProgress","items":[],"error":null}}}}

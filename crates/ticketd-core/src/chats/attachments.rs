@@ -110,13 +110,16 @@ impl ChatAttachmentContent {
     }
 
     pub fn image_data_url(&self) -> Option<String> {
-        self.is_image().then(|| {
-            format!(
-                "data:{};base64,{}",
-                self.media_type,
-                STANDARD.encode(&self.bytes)
-            )
-        })
+        self.is_image().then(|| self.data_url())
+    }
+
+    /// Sends the saved snapshot back to the composer when reopening a queued draft.
+    pub fn data_url(&self) -> String {
+        format!(
+            "data:{};base64,{}",
+            self.media_type,
+            STANDARD.encode(&self.bytes)
+        )
     }
 
     pub(super) fn ensure_fits(&self, limit: u64) -> Result<(), Error> {

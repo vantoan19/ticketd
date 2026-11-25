@@ -975,6 +975,12 @@ export type ComposerControls = {
   effect?: string;
 };
 
+export function canSteer(chat: ChatState, hasImages = false) {
+  return (
+    chat.steering.available && !(hasImages && chat.steering.images_refused)
+  );
+}
+
 /**
  * The send button for the turn's state and what is typed. `answering` is set
  * while the message box answers an open question.
@@ -984,6 +990,7 @@ export function composerControls(
   text: string,
   answering = false,
   hasAttachments = false,
+  hasImages = false,
 ): ComposerControls {
   const typed = text.trim() !== "" || hasAttachments;
   const blocked = blocksSend(chat.problem);
@@ -991,12 +998,14 @@ export function composerControls(
   // Stopping: Send waits for the turn to end; queueing stays possible.
   if (chat.stopping) return { send: "send", enabled: false, queues: typed };
   if (answering) return { send: "send", enabled: typed, queues: typed };
-  if (!chat.steering.available)
+  if (!canSteer(chat, hasImages))
     return {
       send: "queue",
       enabled: typed,
       queues: typed,
-      effect: `${chat.harness.name} can't steer, so this waits for the turn to end.`,
+      effect: chat.steering.available
+        ? "The running turn can't take these images, so this waits for the turn to end."
+        : `${chat.harness.name} can't steer, so this waits for the turn to end.`,
     };
   return {
     send: "steer",
@@ -1024,11 +1033,17 @@ export function requestLabel(request: PendingRequest, name?: RecordName) {
 }
 
 /** What the message box says it will do with what is typed. */
-export function composerPlaceholder(chat: ChatState, answering: boolean) {
+export function composerPlaceholder(
+  chat: ChatState,
+  answering: boolean,
+  hasImages = false,
+) {
   const harness = chat.harness.name;
   if (!isLive(chat) || chat.stopping) return `Message ${harness}`;
   if (answering) return "Answer, or pick above";
-  return chat.steering.available ? `Steer ${harness}` : `Queue for ${harness}`;
+  return canSteer(chat, hasImages)
+    ? `Steer ${harness}`
+    : `Queue for ${harness}`;
 }
 
 export type NoticeAction =

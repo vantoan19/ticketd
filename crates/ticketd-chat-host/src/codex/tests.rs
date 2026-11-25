@@ -1201,7 +1201,37 @@ async fn full_access_goes_out_with_each_turn_and_leaving_it_restores_the_threads
         runtime.change_setting(change).await,
         crate::SettingOutcome::Applied
     );
-    let outcome = submit(&mut peer, &runtime, start_turn("sub-3", "Careful now")).await;
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "details.txt",
+        "data:text/plain;base64,c2F2ZWQ=",
+        100,
+    )
+    .unwrap();
+    let (outcome, ()) = tokio::join!(
+        runtime.submit(Submission {
+            attachments: vec![file],
+            ..start_turn("sub-3", "Careful now")
+        }),
+        async {
+            let written = peer.written().await;
+            assert_eq!(written["method"], "turn/start");
+            let params = &written["params"];
+            assert_eq!(params["clientUserMessageId"], "sub-3");
+            assert_eq!(params["approvalPolicy"], "on-request");
+            assert_eq!(
+                params["sandboxPolicy"],
+                json!({"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false})
+            );
+            assert_eq!(params["input"][0]["text"], "Careful now");
+            assert!(
+                params["input"][1]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("details.txt")
+            );
+            peer.play().await;
+        }
+    );
     assert!(matches!(outcome, DispatchOutcome::Acknowledged { .. }));
     // The turn that carried the change records it with the Chat.
     let rerecorded = drain(&mut opened.events)
@@ -2209,6 +2239,7 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
         setting,
         value: value.to_owned(),
     };
+    assert_eq!(runtime.supports_image_input(), Some(true));
     assert_eq!(
         runtime
             .change_setting(change(crate::SettingKey::Model, "gpt-b"))
@@ -2221,8 +2252,49 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
             .await,
         crate::SettingOutcome::Unsupported
     );
+    let image = ticketd_core::ChatAttachmentContent::from_image_data_url(
+        "Screenshot.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+    ).unwrap();
+    let refused = runtime
+        .submit(Submission {
+            attachments: vec![image.clone()],
+            ..start_turn("with-attachment", "Look at this")
+        })
+        .await;
+    assert_eq!(
+        refused,
+        DispatchOutcome::NotSent(Refusal::ImageInputUnsupported)
+    );
+    peer.assert_nothing_written().await;
     // Nothing was written for the change: the next turn carries it.
     let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Go")).await;
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+    let rerouted = json!({"method": "model/rerouted", "params": {
+        "threadId": "thr_1", "turnId": "turn_1", "fromModel": "gpt-b", "toModel": "gpt-a"
+    }});
+    peer.send(&format!("{rerouted}\n")).await;
+    drain(&mut opened.events).await;
+    assert_eq!(runtime.supports_image_input(), Some(false));
+    assert_eq!(runtime.supports_steer_image_input(), Some(true));
+    let (outcome, ()) = tokio::join!(
+        runtime.submit(Submission {
+            attachments: vec![image],
+            ..steer("with-attachment", "turn_1", "Look at this")
+        }),
+        async {
+            let written = peer.written().await;
+            assert_eq!(written["method"], "turn/steer");
+            assert_eq!(written["params"]["input"][1]["type"], "image");
+            let reply = json!({"id": written["id"], "result": {"turnId": "turn_1"}});
+            peer.send(&format!("{reply}\n")).await;
+        }
+    );
     assert_eq!(
         outcome,
         DispatchOutcome::Acknowledged {
