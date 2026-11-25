@@ -26,7 +26,7 @@ mod workspace_session;
 
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
-    ContextGraphPage, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
+    ContextGraphPage, CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
     DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
     MetadataSelection, Plan, PlanView, Project, ProjectRemoteChange, SafetyBackup, SidebarCounts,
     Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
@@ -241,6 +241,39 @@ fn all_documents(
 ) -> Result<Vec<DocumentSummary>, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.all_documents_page(50, offset, include_support))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn current_work_documents(include_support: bool) -> Result<CurrentWork, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.current_work(include_support))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn finished_documents(
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSummary>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.finished_documents_page(50, offset, include_support))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn unlinked_documents(
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSummary>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.unlinked_documents_page(50, offset, include_support))
+        .map_err(BridgeFailure::from)
+}
+#[tauri::command(async)]
+fn documents_by_title(
+    offset: u32,
+    include_support: bool,
+) -> Result<Vec<DocumentSummary>, BridgeFailure> {
+    open_workspace()
+        .and_then(|w| w.documents_by_title_page(50, offset, include_support))
         .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]
@@ -2419,6 +2452,10 @@ pub fn run() -> Result<(), tauri::Error> {
             set_document_tag,
             all_documents,
             trashed_documents,
+            current_work_documents,
+            finished_documents,
+            unlinked_documents,
+            documents_by_title,
             set_document_trashed,
             show_document,
             document_summary,

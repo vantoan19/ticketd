@@ -4105,6 +4105,27 @@ kbd,
   font-weight: 500;
   line-height: var(--text-ui-line);
 }
+.documents-group-toggle {
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+  cursor: pointer;
+}
+.documents-group-toggle:hover {
+  color: var(--foreground);
+}
+.documents-group-toggle:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+  border-radius: var(--radius-card);
+}
+.documents-folds {
+  box-shadow: inset 0 1px 0 var(--group-hairline);
+}
 .documents-page .document-list-open {
   border: 0;
   background: transparent;
@@ -4126,13 +4147,11 @@ kbd,
   outline: none;
 }
 .document-list-meta,
-.document-list-date,
-.documents-include {
+.document-list-date {
   color: var(--muted-foreground);
 }
 .document-list-meta,
-.document-list-date,
-.documents-include {
+.document-list-date {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }

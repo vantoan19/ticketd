@@ -12,6 +12,7 @@ import { documents } from "./api";
 
 vi.mock("./api", () => ({
   documents: {
+    currentWork: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
     summary: vi.fn().mockResolvedValue({
       id: "d1",
@@ -35,6 +36,11 @@ vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
   LazyMarkdownEditor: ({ value }: { value: string }) => <p>{value}</p>,
 }));
 beforeEach(() => {
+  // These tests browse Recent; Current work has its own file.
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent" }),
+  );
   vi.mocked(documents.links).mockResolvedValue([[], []]);
   vi.mocked(documents.summary).mockResolvedValue({
     id: "d1",
@@ -43,7 +49,20 @@ beforeEach(() => {
     tickets: [],
     tags: [],
   });
+  vi.mocked(documents.currentWork).mockResolvedValue({
+    groups: [],
+    finished: 0,
+    unlinked: 0,
+    trashed: 0,
+  });
 });
+const openTrash = async () => {
+  fireEvent.pointerDown(await screen.findByRole("button", { name: "More" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(await screen.findByRole("menuitem", { name: /^Trash/ }));
+};
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -99,7 +118,7 @@ it("moves a Document to Trash and restores it from Trash navigation", async () =
   await waitFor(() =>
     expect(screen.queryByRole("button", { name: "Context" })).toBeNull(),
   );
-  fireEvent.click(screen.getByRole("radio", { name: "Trash" }));
+  await openTrash();
   fireEvent.click(await screen.findByRole("button", { name: "Context" }));
   expect(await screen.findByText("Preserved")).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Restore" }));
@@ -137,7 +156,15 @@ it("includes Activity details on request and keeps a selected detail", async () 
       target={null}
     />,
   );
-  fireEvent.click(screen.getByLabelText("Show update details"));
+  fireEvent.pointerDown(await screen.findByRole("button", { name: "More" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitemcheckbox", {
+      name: "Show update details",
+    }),
+  );
   fireEvent.click(await screen.findByRole("button", { name: "Update" }));
   expect(screen.getByText("Update details · T-KQ1")).toBeTruthy();
   fireEvent.click(
@@ -183,7 +210,7 @@ it("says what Restore did and keeps focus in the Trash list", async () => {
       target={null}
     />,
   );
-  fireEvent.click(await screen.findByRole("radio", { name: "Trash" }));
+  await openTrash();
   fireEvent.click(await screen.findByRole("button", { name: "Restore Alpha" }));
   await waitFor(() =>
     expect(document.activeElement).toBe(

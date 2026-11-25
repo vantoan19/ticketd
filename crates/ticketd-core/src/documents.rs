@@ -182,7 +182,7 @@ pub(crate) fn migrate_search(tx: &rusqlite::Transaction<'_>) -> Result<(), Error
 // else the first plain-text line of its body. `ticketd_heading` is registered on every workspace connection.
 pub(crate) const HEADING: &str = "coalesce(nullif(substr(trim(d.title), 1, 200), ''), ticketd_brief_heading((SELECT brief FROM activities WHERE id = d.originating_activity_id)), ticketd_heading(substr(d.body, 1, 4096)), 'Untitled')";
 /// Columns read by every Document list query; see `summary_from_row`.
-fn summary_columns() -> String {
+pub(crate) fn summary_columns() -> String {
     format!(
         "d.id, {HEADING}, (SELECT t.reference FROM activities a JOIN tickets t ON t.id=a.ticket_id WHERE a.id=d.originating_activity_id), d.body, d.updated_at, (SELECT group_concat(tag_name, char(31)) FROM (SELECT tag_name FROM document_tags WHERE document_id = d.id ORDER BY tag_name)), d.summary, {PLANS_JSON}, {tickets}, EXISTS (SELECT 1 FROM document_opens WHERE document_id = d.id)",
         tickets = tickets_json()
@@ -201,7 +201,7 @@ fn tickets_json() -> String {
     )
 }
 
-fn summary_from_row(
+pub(crate) fn summary_from_row(
     row: &rusqlite::Row<'_>,
     query: Option<&str>,
 ) -> rusqlite::Result<DocumentSummary> {
