@@ -48,6 +48,7 @@ type ReviewProps = {
   projectRemote?: string;
   connection?: string;
   onClose: () => void;
+  closing?: boolean;
   onSetup: (setup: ProjectSourceSetup) => void;
   onConnected: () => void;
   onEditRemote?: () => void;
@@ -71,6 +72,7 @@ function ProjectSourceReview({
   projectRemote,
   connection,
   onClose,
+  closing = false,
   onSetup,
   onConnected,
   onEditRemote,
@@ -254,10 +256,11 @@ function ProjectSourceReview({
 
   return (
     <DialogShell
-      open={exit === null}
+      open={!closing && exit === null}
       onOpenChange={(open) => !open && setExit({ action: "skip" })}
       onExitComplete={() => {
-        if (exit?.action === "setup") onSetup(exit.setup);
+        if (closing) onClose();
+        else if (exit?.action === "setup") onSetup(exit.setup);
         else if (exit?.action === "edit") onEditRemote?.();
         else {
           if (exit?.action === "connected") onConnected();

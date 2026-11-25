@@ -13316,6 +13316,7 @@ test("a legacy project offers the detected remote in its header and lets you dis
 test("setting up the source from a project pre-fills discovery and resumes backfill review after save", async () => {
   const project = { ...projectForRemote, remote: "github.com/acme/api" };
   let saved = false;
+  let archived = false;
   const configured = {
     ...reviewSourceEntry,
     next_id: "github",
@@ -13346,7 +13347,7 @@ test("setting up the source from a project pre-fills discovery and resumes backf
     issues: [],
   };
   await renderReviewApp({
-    list_projects: [project],
+    list_projects: () => [{ ...project, archived }],
     list_sources: () => [
       { ...configured, saved: saved ? configured.saved : null },
     ],
@@ -13409,6 +13410,19 @@ test("setting up the source from a project pre-fills discovery and resumes backf
   expect(
     bridge.invoke.mock.calls.some(([command]) => command === "connect_source"),
   ).toBe(false);
+
+  archived = true;
+  await screen.findByRole("button", { name: "Reactivate" });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Connect project to GitHub" }),
+    ).toBeNull(),
+  );
+  archived = false;
+  await sidebar.findByRole("button", { name: "API repo" });
+  expect(
+    screen.queryByRole("dialog", { name: "Connect project to GitHub" }),
+  ).toBeNull();
 });
 
 test("a known ticket keeps its saved wrapped title and body while a fresh detail read is pending", async () => {

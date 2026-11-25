@@ -286,8 +286,13 @@ function AppContent() {
         projectId: string;
         resumed?: boolean;
         connection?: string;
+        closing?: boolean;
       }
-    | { mode: "edit_remote"; projectId: string; exit?: "close" | "review" }
+    | {
+        mode: "edit_remote";
+        projectId: string;
+        exit?: "close" | "review" | "archived";
+      }
     | null
   >(null);
   useThemeSync();
@@ -743,6 +748,16 @@ function AppContent() {
   const sourceProject = projects.find(
     (item) => item.id === projectSource?.projectId,
   );
+  if (sourceProject?.archived && projectSource) {
+    if (projectSource.mode === "review" && !projectSource.closing)
+      setProjectSource({ ...projectSource, closing: true });
+    if (
+      projectSource.mode === "edit_remote" &&
+      projectSource.exit !== "archived"
+    )
+      setProjectSource({ ...projectSource, exit: "archived" });
+    if (projectSource.mode === "setup") setProjectSource(null);
+  }
   const sourceRevision = JSON.stringify(
     sourceEntries.map(({ saved }) => [saved?.id, saved?.saved_at]),
   );
@@ -1310,38 +1325,42 @@ function AppContent() {
                                     plans={plans}
                                     create={createTicket}
                                   />
-                                  {projectSource?.mode === "review" &&
-                                    !sourceProject?.archived && (
-                                      <ConnectProjectSource
-                                        projectId={projectSource.projectId}
-                                        {...(sourceProject?.remote && {
-                                          projectRemote: sourceProject.remote,
-                                        })}
-                                        {...(projectSource.connection && {
-                                          connection: projectSource.connection,
-                                        })}
-                                        resumeAfterSetup={
-                                          projectSource.resumed ?? false
-                                        }
-                                        onClose={() => setProjectSource(null)}
-                                        onSetup={setupProjectSource}
-                                        onConnected={() => void reportChange()}
-                                        fallbackFocus={() => contentPanel}
-                                        {...(sourceProject && {
-                                          onEditRemote: () =>
-                                            setProjectSource({
-                                              mode: "edit_remote",
-                                              projectId: sourceProject.id,
-                                            }),
-                                        })}
-                                      />
-                                    )}
+                                  {projectSource?.mode === "review" && (
+                                    <ConnectProjectSource
+                                      projectId={projectSource.projectId}
+                                      closing={projectSource.closing ?? false}
+                                      {...(sourceProject?.remote && {
+                                        projectRemote: sourceProject.remote,
+                                      })}
+                                      {...(projectSource.connection && {
+                                        connection: projectSource.connection,
+                                      })}
+                                      resumeAfterSetup={
+                                        projectSource.resumed ?? false
+                                      }
+                                      onClose={() => setProjectSource(null)}
+                                      onSetup={setupProjectSource}
+                                      onConnected={() => void reportChange()}
+                                      fallbackFocus={() => contentPanel}
+                                      {...(sourceProject && {
+                                        onEditRemote: () =>
+                                          setProjectSource({
+                                            mode: "edit_remote",
+                                            projectId: sourceProject.id,
+                                          }),
+                                      })}
+                                    />
+                                  )}
                                   {projectSource?.mode === "edit_remote" &&
-                                    sourceProject &&
-                                    !sourceProject.archived && (
+                                    sourceProject && (
                                       <ProjectFormDialog
                                         project={sourceProject}
                                         open={!projectSource.exit}
+                                        resolveReturnFocus={() =>
+                                          projectSource.exit === "archived"
+                                            ? contentPanel
+                                            : null
+                                        }
                                         onOpenChange={(open) =>
                                           !open &&
                                           setProjectSource({
@@ -1352,10 +1371,14 @@ function AppContent() {
                                         onSaved={(project) => {
                                           void reportChange();
                                           if (project.remote)
-                                            setProjectSource({
-                                              ...projectSource,
-                                              exit: "review",
-                                            });
+                                            setProjectSource((current) =>
+                                              current?.mode === "edit_remote" &&
+                                              current.projectId ===
+                                                project.id &&
+                                              current.exit !== "archived"
+                                                ? { ...current, exit: "review" }
+                                                : current,
+                                            );
                                         }}
                                         onExitComplete={() => {
                                           if (projectSource.exit === "review")

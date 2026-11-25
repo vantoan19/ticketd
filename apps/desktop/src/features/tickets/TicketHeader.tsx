@@ -97,7 +97,9 @@ export function TicketHeader({
   const now = useNow();
   const chatAbout = useChatAboutTicket(
     ticket,
-    projects.find((project) => project.id === ticket?.project_id)?.path ?? null,
+    projects.find(
+      (project) => project.id === ticket?.project_id && !project.archived,
+    )?.path ?? null,
   );
   const target = usePublishTarget();
   const preview = usePublicationPreview(ticket, target);

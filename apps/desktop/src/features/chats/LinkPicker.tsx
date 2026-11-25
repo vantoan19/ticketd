@@ -1,4 +1,4 @@
-import { useContext, useRef, useState } from "react";
+import { useContext, useState } from "react";
 import { FileText, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -21,6 +21,7 @@ import {
   useChatClient,
   type LinkedRecord,
 } from "@/features/chats/client";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import { archivedProjectHint } from "@/features/projects/project-assignment";
 import { RecordPicker, type PickRecord } from "@/features/tickets/RecordPicker";
 
@@ -141,18 +142,12 @@ export function LinkPicker({
   onOpenChange?: (open: boolean) => void;
 }) {
   const client = useChatClient();
+  const revision = useWorkspaceChange();
   const [ownOpen, setOwnOpen] = useState(false);
   const controlled = openFromOutside !== undefined;
   const open = openFromOutside ?? ownOpen;
   const setOpen = (next: boolean) =>
     controlled ? onOpenChange?.(next) : setOwnOpen(next);
-  const found = useRef(new Map<string, LinkedRecord>());
-  // Results that exist but are all linked already: not the same as no match.
-  const [allLinked, setAllLinked] = useState(false);
-  const [archived, setArchived] = useState<{
-    query: string;
-    name: string;
-  } | null>(null);
   const exclude = linked.map(key);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -185,6 +180,7 @@ export function LinkPicker({
         <RecordPicker
           things="tickets, Documents and Projects"
           exclude={exclude}
+          revision={revision}
           search={async (query) => {
             // The client puts a typed ticket reference first (chat CH-47).
             const foundRecords = await client.searchRecords(query);
@@ -194,55 +190,41 @@ export function LinkPicker({
             const archivedMatch =
               records.length === 0 &&
               foundRecords.find(isArchivedProjectRecord);
-            setArchived(
-              archivedMatch ? { query, name: archivedMatch.title } : null,
-            );
-            for (const record of records)
-              found.current.set(key(record), record);
-            setAllLinked(
-              records.length > 0 &&
-                records.every((record) => exclude.includes(key(record))),
-            );
-            return [
-              {
-                ...(!query && { heading: "Recent" }),
-                records: records.map((record): PickRecord =>
-                  record.kind === "ticket"
-                    ? { ...record, key: key(record) }
-                    : {
-                        kind: record.kind,
-                        key: key(record),
-                        title: record.title,
-                      },
-                ),
-              },
-            ];
+            return {
+              groups: [
+                {
+                  ...(!query && { heading: "Recent" }),
+                  records: records.map(
+                    (record): PickRecord & { record: LinkedRecord } => ({
+                      ...record,
+                      key: key(record),
+                      record,
+                    }),
+                  ),
+                },
+              ],
+              ...(query &&
+                archivedMatch && {
+                  empty: (
+                    <span className="text-xs">
+                      {archivedProjectHint(archivedMatch.title)}
+                    </span>
+                  ),
+                }),
+            };
           }}
-          onPick={(picked) => {
-            const record = found.current.get(picked.key);
-            if (!record) return;
+          onPick={({ record }) => {
             onPick(record);
             setOpen(false);
           }}
-          empty={(query) =>
-            allLinked ? (
-              query ? (
-                "Everything with that name is already linked."
-              ) : (
-                "Everything recent is already linked."
-              )
-            ) : query ? (
-              <span>
-                No ticket, Document or Project has that in its name.
-                {archived?.query === query && (
-                  <span className="block text-xs">
-                    {archivedProjectHint(archived.name)}
-                  </span>
-                )}
-              </span>
-            ) : (
-              "Type part of a name or a reference to find it."
-            )
+          empty={(query, hasMatches) =>
+            hasMatches
+              ? query
+                ? "Everything with that name is already linked."
+                : "Everything recent is already linked."
+              : query
+                ? "No ticket, Document or Project has that in its name."
+                : "Type part of a name or a reference to find it."
           }
         />
       </PopoverContent>

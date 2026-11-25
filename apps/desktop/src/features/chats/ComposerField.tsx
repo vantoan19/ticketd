@@ -18,6 +18,7 @@ import {
   type HarnessSkill,
   type LinkedRecord,
 } from "@/features/chats/client";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import { archivedProjectHint } from "@/features/projects/project-assignment";
 import {
   insertToken,
@@ -229,10 +230,23 @@ export function ComposerField({
   const query = open?.query.trim() ?? "";
   const skillSearch = open?.char === "$" ? mentions?.skills : undefined;
   const searchingSkills = skillSearch !== undefined;
+  const workspaceChange = useWorkspaceChange();
+  const linkedProjects =
+    open?.char === "#"
+      ? mentions?.linked
+          .filter(({ kind }) => kind === "project")
+          .map((record) => [
+            record.id,
+            record.title,
+            isArchivedProjectRecord(record),
+          ])
+      : undefined;
   // One folder lookup supplies every query until the skill menu closes.
   const searchKey = skillSearch
     ? `skills:${skillSearch.folder ?? ""}`
-    : openKey;
+    : open?.char === "#"
+      ? JSON.stringify([openKey, workspaceChange, linkedProjects])
+      : openKey;
   // Linked records and the harness's commands are at hand; only searches wait.
   const atHand: Option[] | null =
     !open || !mentions
@@ -535,9 +549,11 @@ export function ComposerField({
             ? `No file or folder matches “${query}”.`
             : "This Chat’s folder has no files yet."
           : shown.trigger.char === "#"
-            ? query
-              ? "No ticket, Document or Project has that in its name."
-              : "Type part of a name to find it."
+            ? !query
+              ? "Type part of a name to find it."
+              : answered?.archivedProject
+                ? archivedProjectHint(answered.archivedProject)
+                : "No ticket, Document or Project has that in its name."
             : shown.trigger.char === "$"
               ? query
                 ? `No skill matches “${query}”.`
@@ -604,11 +620,6 @@ export function ComposerField({
               role={shown.state === "failed" ? "alert" : undefined}
             >
               {empty}
-              {shown.state === "ready" && answered?.archivedProject && (
-                <span className="block text-xs">
-                  {archivedProjectHint(answered.archivedProject)}
-                </span>
-              )}
             </p>
           )}
           {shown.trigger.char === "#" && (

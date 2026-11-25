@@ -104,10 +104,12 @@ function reportFailure(
 function CheckoutRow({
   path,
   first,
+  disabled,
   onRemove,
 }: {
   path: string;
   first: boolean;
+  disabled: boolean;
   onRemove?: () => void;
 }) {
   const manager = fileManagerName();
@@ -130,12 +132,25 @@ function CheckoutRow({
       </span>
       {first && <span className="checkout-note">First checkout</span>}
       <span className="checkout-actions">
-        <CopyButton label="Copy path" subject={path} text={path} />
-        <IconButton label={`Show in ${manager}`} onClick={reveal}>
+        <CopyButton
+          label="Copy path"
+          subject={path}
+          text={path}
+          disabled={disabled}
+        />
+        <IconButton
+          label={`Show in ${manager}`}
+          onClick={reveal}
+          disabled={disabled}
+        >
           <FolderOpen />
         </IconButton>
         {onRemove && (
-          <IconButton label="Remove checkout" onClick={onRemove}>
+          <IconButton
+            label="Remove checkout"
+            onClick={onRemove}
+            disabled={disabled}
+          >
             <X />
           </IconButton>
         )}
@@ -199,6 +214,7 @@ export function Projects({
     )?.focus();
   }, [projects]);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
+  const [closedForArchive, setClosedForArchive] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const sourceReview = useRef<string | null>(null);
@@ -242,18 +258,28 @@ export function Projects({
     };
   }, [projects]);
 
-  const editing = projects.find(
-    (item) => item.id === editingId && !item.archived,
-  );
+  const editing = projects.find((item) => item.id === editingId);
   const checkoutProject =
     dialog?.kind === "checkout"
-      ? projects.find((item) => item.id === dialog.id && !item.archived)
+      ? projects.find((item) => item.id === dialog.id)
       : undefined;
   const checkoutPath = checkoutProject
     ? (checkoutDrafts[checkoutProject.id] ?? "")
     : "";
 
+  const archivedDialog =
+    (dialog?.kind === "edit" && editing?.archived) || checkoutProject?.archived;
+  if (archivedDialog) {
+    setClosedForArchive(true);
+    closeDialog();
+  }
+
+  function closeDialog() {
+    setDialog(null);
+  }
+
   function open(next: OpenDialog) {
+    setClosedForArchive(false);
     setError(null);
     if (next.kind !== "checkout")
       setEditingId(next.kind === "edit" ? next.id : null);
@@ -370,6 +396,11 @@ export function Projects({
     </Button>
   );
   const blocked = pending ? "Saving…" : null;
+  const returnFocus = () => {
+    const header =
+      page.current?.querySelector<HTMLElement>("#projects-heading");
+    return closedForArchive ? (header ?? null) : null;
+  };
 
   return (
     // The page stays mounted while another is shown; its entrance (enter.ts)
@@ -380,6 +411,7 @@ export function Projects({
           title="Projects"
           titleId="projects-heading"
           {...(projects.length > 0 && {
+            wrapActions: true,
             count: <Count>{shown.length}</Count>,
             actions: (
               <>
@@ -450,6 +482,7 @@ export function Projects({
                             type="button"
                             className="project-row-toggle"
                             aria-expanded={isOpen}
+                            disabled={changing}
                             aria-controls={checkouts}
                             onClick={() =>
                               setExpanded((old) => ({
@@ -564,6 +597,7 @@ export function Projects({
                               type="button"
                               variant="link"
                               size="inline"
+                              disabled={changing}
                               onClick={() =>
                                 open({ kind: "checkout", id: item.id })
                               }
@@ -581,6 +615,7 @@ export function Projects({
                                 key={path}
                                 path={path}
                                 first={path === item.path}
+                                disabled={changing}
                                 {...(!archived && {
                                   onRemove: () =>
                                     void removeCheckout(item, path),
@@ -630,17 +665,24 @@ export function Projects({
           dialog?.kind === "project" || (dialog?.kind === "edit" && !!editing)
         }
         {...(editing && { project: editing })}
-        onOpenChange={(next) => !next && setDialog(null)}
+        resolveReturnFocus={returnFocus}
+        onOpenChange={(next) => !next && closeDialog()}
         onSaved={projectSaved}
         onExitComplete={() => {
           const projectId = sourceReview.current;
           sourceReview.current = null;
-          if (projectId) onConnectSource?.(projectId);
+          if (
+            projectId &&
+            !closedForArchive &&
+            !projects.find(({ id }) => id === projectId)?.archived
+          )
+            onConnectSource?.(projectId);
         }}
       />
       <DialogShell
         open={!!checkoutProject}
-        onOpenChange={(next) => !next && setDialog(null)}
+        resolveReturnFocus={returnFocus}
+        onOpenChange={(next) => !next && closeDialog()}
         title="Register checkout"
         description={`Choose another folder where ${checkoutProject?.name ?? "this project"} is checked out.`}
         primaryLabel="Register checkout"
