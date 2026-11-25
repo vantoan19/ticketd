@@ -638,6 +638,12 @@ collect OAuth tokens, proxy model requests, or change billing.
   Before sending, the person picks the harness and, from what it reports, its model,
   effort, and permission mode. Full access, where the harness edits and runs
   commands without asking, is a choice for a person's Chat.
+- **Titles.** A Chat is titled by its first line, cut at a word with "…" when it runs
+  past 80 characters. A Chat started from a ticket takes the ticket's title instead of
+  repeating "Work on T-12:", and the linked chip then shows the reference alone.
+  Existing Chats read the same way; nothing stored is rewritten. A row's second line
+  says what the Chat last did (a record it changed, the files it changed, or the first
+  words of its reply), and "Working" while it runs.
 - **Folder choice.** New Chat offers locally registered Project checkouts,
   recent folders, a Scratch folder, and the system folder chooser. If a Chat's
   folder goes missing, it can continue in another Project checkout or a folder

@@ -73,3 +73,15 @@ test("a word that changes with no dot arriving crossfades at once", async () => 
   await clock.advance(40);
   expect(Number(word("Choose one").style.opacity)).toBeGreaterThan(0);
 });
+
+test("working is the word in ink with no spinner and no dot", () => {
+  render(
+    <MotionProvider>
+      <ChatStatus status={working} activity="working" />
+    </MotionProvider>,
+  );
+  expect(word("Working")).toBeTruthy();
+  expect(line().querySelector(".chat-spin")).toBeNull();
+  expect(line().querySelector('[data-slot="status-dot"]')).toBeNull();
+  expect(line().hasAttribute("data-signal")).toBe(true);
+});

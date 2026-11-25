@@ -27,6 +27,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -297,6 +298,7 @@ function LinkedRecords({
               key={`${record.kind}:${record.id}`}
               record={record}
               backLabel={`Back to ${chat.title}`}
+              chatTitle={chat.title}
               onRemove={() => remove(record)}
             />
           ))}
@@ -317,6 +319,7 @@ function LinkedRecords({
                       <RecordChip
                         record={record}
                         backLabel={`Back to ${chat.title}`}
+                        chatTitle={chat.title}
                         onRemove={() => remove(record)}
                       />
                     </li>
@@ -1073,9 +1076,12 @@ export function ChatDetail({
               className="chat-head-mark"
             />
           )}
-          <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
-            {chat?.title ?? (title || "Chat")}
-          </h2>
+          {/* The full title, only while the header cuts it. */}
+          <Tooltip content={chat?.title ?? (title || "Chat")} overflowOnly>
+            <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
+              {chat?.title ?? (title || "Chat")}
+            </h2>
+          </Tooltip>
           {chat && (
             <ChatContext chat={chat} asOf={lastAsk(snapshot?.items ?? [])} />
           )}
