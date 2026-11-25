@@ -1607,19 +1607,45 @@ async fn capture_uses_the_workspace_filename_media_and_size_rules() {
 
 #[tokio::test(start_paused = true)]
 async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
+    use ticketd_chat_host::{AppliesFrom, PermissionKind, Setting};
+
     let f = Fixture::new().await;
+    let mut options = codex_options();
+    options.permission = Some(Setting {
+        current: Some("ask".into()),
+        options: vec![
+            ticketd_chat_host::SettingOption {
+                permission: Some(PermissionKind::Ask),
+                ..offered("ask", true)
+            },
+            ticketd_chat_host::SettingOption {
+                permission: Some(PermissionKind::FullAccess),
+                ..offered("full", false)
+            },
+        ],
+        unchangeable: None,
+        applies_from: AppliesFrom::NextRequest,
+        answered_by: None,
+    });
+    f.fake.set_options(options);
     let input: NewChatInput = serde_json::from_value(json!({
         "command_id": uuid::Uuid::new_v4().to_string(),
         "harness_id": "codex",
         "folder": f.dir.path(),
         "links": [],
         "message": "",
+        "model": "gpt-b",
+        "permission": "ask",
         "attachments": [{ "name": "sample.txt", "dataUrl": "data:text/plain;base64,ZXhhY3QgYnl0ZXM=" }],
     }))
     .unwrap();
     let first = f.chats.create(input.clone()).await.unwrap();
     assert_eq!(first.send_error, None);
     settle().await;
+    assert_eq!(
+        f.fake.opens()[0].settings.permission.as_deref(),
+        Some("ask")
+    );
     f.core().set_attachment_upload_limit(4).unwrap();
     let again = f.chats.create(input.clone()).await.unwrap();
     assert_eq!(again, first);
@@ -1628,6 +1654,27 @@ async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
     changed.attachments[0].data_url = "data:text/plain;base64,ZGlmZmVyZW50".into();
     let conflict = f.chats.create(changed).await.unwrap_err();
     assert!(conflict.message.contains("different"), "{conflict:?}");
+    for changed in [
+        NewChatInput {
+            model: Some("gpt-a".into()),
+            ..input.clone()
+        },
+        NewChatInput {
+            effort: Some("high".into()),
+            ..input.clone()
+        },
+        NewChatInput {
+            permission: Some("full".into()),
+            ..input.clone()
+        },
+        NewChatInput {
+            permission: Some("invalid".into()),
+            ..input.clone()
+        },
+    ] {
+        let conflict = f.chats.create(changed).await.unwrap_err();
+        assert!(conflict.message.contains("different"), "{conflict:?}");
+    }
     let fresh = NewChatInput {
         command_id: uuid::Uuid::new_v4().to_string(),
         ..input
@@ -1647,6 +1694,53 @@ async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
         .unwrap();
     assert_eq!(std::fs::read(exported).unwrap(), b"exact bytes");
     assert_eq!(f.submitted().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_legacy_first_message_receipt_still_validates_requested_start_settings() {
+    let f = Fixture::new().await;
+    f.fake.set_options(codex_options());
+    let input = f.input("first");
+    let mut workspace = f.core();
+    let chat = workspace
+        .create_chat(
+            Some(&format!("{}:chat", input.command_id)),
+            NewChat {
+                title: Some(input.message.clone()),
+                harness: input.harness_id.clone(),
+                execution_folder: input.folder.clone().unwrap(),
+                folder_managed: false,
+                links: vec![],
+            },
+        )
+        .unwrap();
+    workspace
+        .save_chat_input(
+            Some(&format!("{}:first", input.command_id)),
+            &chat.id,
+            &input.message,
+        )
+        .unwrap();
+    drop(workspace);
+    let invalid = NewChatInput {
+        model: Some("missing".into()),
+        ..input.clone()
+    };
+    let error = f.chats.create(invalid).await.unwrap_err();
+    assert!(error.message.contains("not a model it offers"), "{error:?}");
+    let valid = NewChatInput {
+        model: Some("gpt-b".into()),
+        ..input
+    };
+    assert_eq!(
+        f.chats.create(valid).await.unwrap(),
+        Created {
+            chat_id: chat.id,
+            send_error: None
+        }
+    );
+    settle().await;
+    assert!(f.submitted().is_empty());
 }
 
 #[tokio::test(start_paused = true)]

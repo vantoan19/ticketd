@@ -5,6 +5,7 @@ import {
   type ChatAttachmentInput,
 } from "@/features/chats/composer-attachments";
 import type { Token } from "@/features/chats/composer-mentions";
+import { QuestionDrafts } from "@/features/chats/question-drafts";
 
 type Action = "send" | "queue";
 type Snapshot = {
@@ -12,7 +13,7 @@ type Snapshot = {
   tokens: Token[];
   items: ReturnType<ComposerAttachments["snapshot"]>;
   saving: boolean;
-  transfer: "pending" | "unconfirmed" | null;
+  transfer: "preparing" | "adopting" | "confirming" | "unconfirmed" | null;
   failedAction: Action | null;
   restored: boolean;
 };
@@ -23,11 +24,18 @@ type QueuedDraft = {
 
 /** One draft and its in-flight operations, independent of the mounted pane. */
 export class ComposerDraft {
+  readonly questions = new QuestionDrafts();
   private state: Snapshot;
+  private view: Snapshot;
   private listeners = new Set<() => void>();
   private saving: Promise<void> | undefined;
   private staged:
-    { payload: QueuedDraft; confirm: () => Promise<boolean> } | undefined;
+    | {
+        payload: QueuedDraft;
+        cards: Snapshot["items"];
+        confirm: () => Promise<boolean>;
+      }
+    | undefined;
   private attempt = { id: "", request: "" };
   private prefilled: string | null = null;
 
@@ -45,13 +53,14 @@ export class ComposerDraft {
       failedAction: null,
       restored: false,
     };
+    this.view = this.state;
     if (attachments !== NO_ATTACHMENTS)
       attachments.subscribe(() =>
         this.update({ items: attachments.snapshot() }),
       );
   }
 
-  snapshot = () => this.state;
+  snapshot = () => this.view;
 
   subscribe = (listener: () => void) => {
     this.listeners.add(listener);
@@ -60,6 +69,14 @@ export class ComposerDraft {
 
   private update(changes: Partial<Snapshot>) {
     this.state = { ...this.state, ...changes };
+    const staged = this.staged;
+    this.view = staged
+      ? {
+          ...this.state,
+          ...this.appendedText(staged.payload.text),
+          items: [...this.state.items, ...staged.cards],
+        }
+      : this.state;
     for (const listener of this.listeners) listener();
   }
 
@@ -122,15 +139,15 @@ export class ComposerDraft {
   }
 
   private append({ text, attachments }: QueuedDraft) {
-    if (text) {
-      const before = this.state.text;
-      this.state = {
-        ...this.state,
-        text: before.trim() ? `${before}\n\n${text}` : text,
-        restored: true,
-      };
-    }
+    this.state = { ...this.state, ...this.appendedText(text) };
     this.attachments.addCaptured(attachments);
+  }
+
+  private appendedText(text: string) {
+    const before = this.state.text;
+    return text
+      ? { text: before.trim() ? `${before}\n\n${text}` : text, restored: true }
+      : {};
   }
 
   async editQueued(
@@ -138,17 +155,31 @@ export class ComposerDraft {
     confirm: () => Promise<boolean>,
   ) {
     if (this.state.transfer) return;
-    this.update({ transfer: "pending" });
+    this.update({ transfer: "preparing" });
     try {
       await this.saving;
-      // Custody moves to this app-session draft before the host can delete
-      // the saved copy. It is kept staged until the host confirms withdrawal.
-      this.staged = { payload: await read(), confirm };
+      const payload = await read();
+      this.staged = {
+        payload,
+        confirm,
+        // Captured preview IDs are disjoint from ordinary draft attachments.
+        cards: payload.attachments.map((content, index) => ({
+          id: -index - 1,
+          name: content.name,
+          state: "ready",
+          content,
+        })),
+      };
+      this.update({ transfer: "adopting" });
     } catch (reason) {
       this.update({ transfer: null });
       throw reason;
     }
-    return this.confirmTransfer();
+  }
+
+  /** Called only after a mounted composer displays the complete locked draft. */
+  adoptTransfer() {
+    if (this.state.transfer === "adopting") return this.confirmTransfer();
   }
 
   retryTransfer() {
@@ -158,7 +189,7 @@ export class ComposerDraft {
   private async confirmTransfer() {
     if (!this.staged) return;
     const { payload, confirm } = this.staged;
-    this.update({ transfer: "pending" });
+    this.update({ transfer: "confirming" });
     let withdrawn: boolean;
     try {
       withdrawn = await confirm();

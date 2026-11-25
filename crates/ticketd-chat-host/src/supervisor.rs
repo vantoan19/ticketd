@@ -270,6 +270,9 @@ pub(crate) struct Supervisor {
     /// The inputs in `direct` that the person took out of the queue with Send now.
     /// They had no row on screen, so their history moves to where they are sent.
     direct_from_queue: HashSet<String>,
+    /// Prepared edits keep their saved rows. The automatic queue waits for the
+    /// composer, while an explicit Send now or Resume may still release them.
+    prepared_queue_edits: HashSet<String>,
     /// Input the person asked to send again although its delivery is uncertain.
     resend: Option<String>,
     /// Selected history for a fresh session, sent with the next new turn.
@@ -384,6 +387,7 @@ impl Supervisor {
             active: None,
             direct: VecDeque::new(),
             direct_from_queue: HashSet::new(),
+            prepared_queue_edits: HashSet::new(),
             resend: None,
             preamble: None,
             session_context: None,
@@ -1053,6 +1057,7 @@ impl Supervisor {
         self.confirm_permission_restart_cleanup().await?;
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, false))?;
+        self.prepared_queue_edits.clear();
         // The person asked for the queue to run: it opens a session when none is live.
         self.queue_started = true;
         if matches!(self.problem, Some(ChatProblem::DispatchRefused { .. })) {
@@ -1087,6 +1092,7 @@ impl Supervisor {
             return Err(Refusal::ImageInputUnsupported.attachment_error().into());
         }
         self.confirm_permission_restart_cleanup().await?;
+        self.prepared_queue_edits.remove(&message_id);
         if !self.direct.contains(&message_id) {
             self.direct_from_queue.insert(message_id.clone());
             self.direct.push_back(message_id);
@@ -1095,14 +1101,14 @@ impl Supervisor {
     }
 
     fn prepare_queue_edit(
-        &self,
+        &mut self,
         message_id: &str,
     ) -> Result<(String, Vec<ChatAttachmentContent>), HostError> {
         if self.direct.iter().any(|id| id == message_id) {
             return Err(HostError::Working);
         }
         let chat = self.chat_id.clone();
-        Ok(self.core(|core| {
+        let draft = self.core(|core| {
             core.read(|core| {
                 let message = core
                     .chat_queue(&chat)?
@@ -1112,7 +1118,9 @@ impl Supervisor {
                 let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
                 Ok((message.text, attachments))
             })
-        })?)
+        })?;
+        self.prepared_queue_edits.insert(message_id.to_owned());
+        Ok(draft)
     }
 
     fn confirm_queue_edit(
@@ -1124,7 +1132,10 @@ impl Supervisor {
             return Ok(false);
         }
         let chat = self.chat_id.clone();
-        Ok(self.write(|core| core.confirm_chat_queue_edit(&chat, message_id, transfer_id))?)
+        let withdrawn =
+            self.write(|core| core.confirm_chat_queue_edit(&chat, message_id, transfer_id))?;
+        self.prepared_queue_edits.remove(message_id);
+        Ok(withdrawn)
     }
 
     /// Whether the queue, not paused, holds input saved before `message_id`.
@@ -1819,6 +1830,7 @@ impl Supervisor {
         if chat.trashed {
             self.direct.clear();
             self.direct_from_queue.clear();
+            self.prepared_queue_edits.clear();
             self.resend = None;
             return;
         }
@@ -1841,13 +1853,22 @@ impl Supervisor {
                     && (self.runtime.is_some() || self.queue_started) =>
                 {
                     match self.core(|core| core.chat_queue(&chat_id)) {
-                        Ok(queue) => match queue.into_iter().next() {
-                            Some(message) => break message.id,
-                            None => {
-                                self.queue_started = false;
-                                return;
+                        Ok(queue) => {
+                            self.prepared_queue_edits
+                                .retain(|id| queue.iter().any(|message| &message.id == id));
+                            match queue.into_iter().next() {
+                                Some(message)
+                                    if self.prepared_queue_edits.contains(&message.id) =>
+                                {
+                                    return;
+                                }
+                                Some(message) => break message.id,
+                                None => {
+                                    self.queue_started = false;
+                                    return;
+                                }
                             }
-                        },
+                        }
                         Err(_) => return,
                     }
                 }
