@@ -24,15 +24,29 @@ use std::sync::{Arc, Mutex, PoisonError};
 
 use async_trait::async_trait;
 use serde_json::{Value, json};
+use ticketd_core::ChatAttachmentContent;
 
 use crate::install::{LaunchEnvironment, Os, parse_version};
 use crate::stdio::{Serving, spawn};
 use crate::{
     Capabilities, Capability, Harness, HarnessAdapter, HarnessOptions, Inspection, LoginState,
-    OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Setting, Unattended,
+    OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal, Setting, Unattended,
 };
 
 use runtime::Options;
+
+// The Claude API limits each image to 10 MB after base64 encoding.
+const MAX_ENCODED_IMAGE_BYTES: usize = 10_000_000;
+
+fn attachment_refusal(attachments: &[ChatAttachmentContent]) -> Option<Refusal> {
+    attachments
+        .iter()
+        .any(|attachment| {
+            attachment.is_image()
+                && attachment.bytes().len().div_ceil(3) > MAX_ENCODED_IMAGE_BYTES / 4
+        })
+        .then_some(Refusal::ImageInputTooLarge)
+}
 
 /// File name of the bridge without its extension. Tauri ships it as a sidecar, so the
 /// host passes `<folder of the application executable>/<this name>` (`.exe` on

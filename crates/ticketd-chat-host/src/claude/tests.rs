@@ -126,6 +126,48 @@ async fn submit(
     outcome
 }
 
+#[tokio::test]
+async fn a_file_only_message_keeps_the_snapshot_readable_until_claude_closes() {
+    let (mut peer, runtime, _events) = open().await;
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "notes.txt",
+        "data:text/plain;base64,b3JpZ2luYWwgYnl0ZXMNCg==",
+        100,
+    )
+    .unwrap();
+    let submission = Submission {
+        attachments: vec![file],
+        ..start_turn("sub-1", "")
+    };
+    let (outcome, written) = tokio::join!(runtime.submit(submission), async {
+        let written = peer.written().await;
+        peer.send(
+            "{\"v\":1,\"event\":\"input_handed_to_sdk\",\"generation\":7,\"submission_id\":\"sub-1\"}\n",
+        )
+        .await;
+        written
+    });
+    assert_eq!(outcome, DispatchOutcome::Written);
+    assert_eq!(written["cmd"], "submit");
+    assert_eq!(written["text"], "");
+    let attachments = written["attachments"].as_array().unwrap();
+    assert_eq!(attachments.len(), 1);
+    let attachment = &attachments[0];
+    assert_eq!(attachment["type"], "file");
+    assert_eq!(attachment["name"], "notes.txt");
+    let path = Path::new(attachment["path"].as_str().unwrap());
+    assert!(path.is_absolute());
+    assert_eq!(std::fs::read(path).unwrap(), b"original bytes\r\n");
+
+    let (closed, ()) = tokio::join!(runtime.close(), async {
+        assert!(peer.stdin_closed().await);
+        assert!(path.is_file());
+        peer.exit(0);
+    });
+    assert!(matches!(closed, CloseOutcome::Confirmed { .. }));
+    assert!(!path.exists());
+}
+
 #[tokio::test(start_paused = true)]
 async fn handing_input_to_the_sdk_is_a_write_and_later_evidence_arrives_as_events() {
     let (mut peer, runtime, mut events) = open().await;
