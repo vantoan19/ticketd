@@ -158,6 +158,7 @@ const sourceRepositoryRouteSchema = lazySchema(() =>
     repository: z.string(),
     project_remote: z.string().nullable(),
     project: z.object({ id: z.string(), name: z.string() }).nullable(),
+    archived_project_name: z.string().nullable().default(null),
   }),
 );
 export type SourceRepositoryRoute = z.infer<typeof sourceRepositoryRouteSchema>;
