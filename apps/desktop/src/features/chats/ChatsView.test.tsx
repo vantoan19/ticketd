@@ -2013,6 +2013,11 @@ test("records are linked by title and unlinked from their chip", async () => {
   );
 });
 
+test("the context button carries no native title; its path is the shared tooltip", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  expect(button(/^Folder web-app/).hasAttribute("title")).toBe(false);
+});
+
 test("Check again shows only while the harness isn't ready, and a failed recheck says so", async () => {
   const client = await open(one({ id: "c1", title: "Limiter" }));
   fireEvent.click(button(/^Folder web-app/));

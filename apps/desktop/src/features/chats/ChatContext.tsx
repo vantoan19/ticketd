@@ -24,6 +24,7 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { StatusDot } from "@/components/ui/status-dot";
+import { Tooltip } from "@/components/ui/tooltip";
 import { useCopy } from "@/components/ui/use-copy";
 import { fileManagerName } from "@/lib/platform";
 import { PathText } from "@/components/ui/path-text";
@@ -436,20 +437,21 @@ export function ChatContext({
   const { folder } = chat;
   return (
     <Popover>
-      <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          data-context=""
-          data-missing={folder.missing ? "" : undefined}
-          aria-label={contextLabel(chat)}
-          title={folder.path}
-        >
-          <FolderLead chat={chat} />
-          <span className="chat-context-name">{folderLabel(folder)}</span>
-          <ChevronDown aria-hidden />
-        </Button>
-      </PopoverTrigger>
+      <Tooltip content={folder.path}>
+        <PopoverTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            data-context=""
+            data-missing={folder.missing ? "" : undefined}
+            aria-label={contextLabel(chat)}
+          >
+            <FolderLead chat={chat} />
+            <span className="chat-context-name">{folderLabel(folder)}</span>
+            <ChevronDown aria-hidden />
+          </Button>
+        </PopoverTrigger>
+      </Tooltip>
       <PopoverContent
         align="end"
         aria-label="Chat context"
