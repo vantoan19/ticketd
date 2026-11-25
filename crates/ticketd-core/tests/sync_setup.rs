@@ -1365,7 +1365,7 @@ fn a_record_held_back_by_a_newer_format_file_is_not_a_pending_upload_and_is_put_
     let (version, synced) = desks.file(&key);
     let newer = String::from_utf8(synced)
         .unwrap()
-        .replacen("format: 1\n", "format: 4\n", 1);
+        .replacen("format: 1\n", "format: 5\n", 1);
     desks
         .remote
         .write(
@@ -2163,7 +2163,9 @@ fn a_format_97_workspace_with_a_drive_binding_becomes_a_google_drive_binding_and
         columns += &format!("ALTER TABLE sync_state DROP COLUMN {column};");
     }
     fixture
-        .execute_batch(&format!("{columns} PRAGMA user_version = 97;"))
+        .execute_batch(&format!(
+            "{columns} ALTER TABLE projects DROP COLUMN archived; PRAGMA user_version = 97;"
+        ))
         .unwrap();
     drop(fixture);
 
@@ -2201,7 +2203,11 @@ fn a_format_98_s3_binding_has_no_endpoint_recorded_until_the_desktop_records_one
     drop(desk);
     let fixture = rusqlite::Connection::open(&path).unwrap();
     fixture
-        .execute_batch("ALTER TABLE sync_state DROP COLUMN s3_endpoint; PRAGMA user_version = 98;")
+        .execute_batch(
+            "ALTER TABLE sync_state DROP COLUMN s3_endpoint;
+             ALTER TABLE projects DROP COLUMN archived;
+             PRAGMA user_version = 98;",
+        )
         .unwrap();
     drop(fixture);
 

@@ -217,8 +217,9 @@ fn archived_projects_reject_new_chat_links_atomically() {
         workspace
             .set_chat_title(&linked.id, Some("Renamed"))
             .unwrap()
-            .links,
-        [link.clone()]
+            .links
+            .as_slice(),
+        std::slice::from_ref(&link)
     );
     assert!(
         workspace
@@ -278,7 +279,10 @@ fn archiving_a_project_preserves_its_tickets_chats_and_settings() {
     let archived = workspace.set_project_archived(&project.id, true).unwrap();
     assert!(archived.archived);
     assert_eq!(workspace.show_project(&project.id).unwrap(), archived);
-    assert_eq!(workspace.list_projects().unwrap(), [archived.clone()]);
+    assert_eq!(
+        workspace.list_projects().unwrap().as_slice(),
+        std::slice::from_ref(&archived)
+    );
     assert_eq!(workspace.list_tickets().unwrap().len(), 1);
     assert_eq!(workspace.show_ticket(&active.reference).unwrap(), active);
     assert_eq!(
