@@ -593,15 +593,9 @@ function Conversation({
       () => {
         setFailure(null);
         if (optionId !== "deny") return;
-        // The person's next words are the point of a Deny, so the box takes
-        // focus, unless they moved elsewhere or another request waits.
+        // The box takes focus as for any answer (the dock's onLeave); an
+        // answer made from Inbox still goes on to the next request there.
         setDenied(true);
-        const active = document.activeElement;
-        if (
-          pending.every((item) => item.id === requestId) &&
-          (active === document.body || dock.current?.contains(active))
-        )
-          messageBox.current?.focus();
       },
       (reason: unknown) => {
         // The request left the dock; say why the pick did nothing.
