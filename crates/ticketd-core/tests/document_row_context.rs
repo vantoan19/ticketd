@@ -1,3 +1,5 @@
+#![allow(clippy::unwrap_used, clippy::panic)] // Setup that fails fails the test.
+
 use ticketd_core::{DocumentSummary, Status, TicketPatch, Workspace};
 
 fn row(rows: Vec<DocumentSummary>, id: &str) -> DocumentSummary {
