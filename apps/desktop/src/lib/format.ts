@@ -9,6 +9,7 @@
  * - `relativeDateTime` for sentences ("5 h ago", then "Nov 2").
  * - `formatTime` for clock times in transcripts (OS locale, 12/24h).
  * - `formatDateTime` for the exact local time in a tooltip.
+ * - `listTime` for a list row's time: "23:43", "Mon", "25 Nov", then "25 Nov 2025".
  */
 
 /** The noun for a count: "ticket" for 1, "tickets" otherwise. */
@@ -91,4 +92,36 @@ export function compactAgo(timestamp: string, now = Date.now()): string | null {
   if (minutes < 1440) return `${Math.floor(minutes / 60)}h`;
   if (minutes < 10080) return `${Math.floor(minutes / 1440)}d`;
   return shortDate(then, now);
+}
+
+const DAY = 86_400_000;
+
+/**
+ * The time a list row shows, by calendar day: the time of day today, a weekday for the
+ * six days before, the day and month this year, and the full date before that.
+ */
+export function listTime(
+  timestamp: string,
+  now = Date.now(),
+  locale?: string,
+): string | null {
+  const then = new Date(timestamp);
+  if (Number.isNaN(then.getTime())) return null;
+  const days = Math.round(
+    (startOfLocalDay(new Date(now)) - startOfLocalDay(then)) / DAY,
+  );
+  if (days === 0)
+    return then.toLocaleTimeString(locale, {
+      hour: "numeric",
+      minute: "2-digit",
+    });
+  if (days > 0 && days < 7)
+    return then.toLocaleDateString(locale, { weekday: "short" });
+  return then.toLocaleDateString(locale, {
+    day: "numeric",
+    month: "short",
+    ...(then.getFullYear() !== new Date(now).getFullYear()
+      ? { year: "numeric" }
+      : {}),
+  });
 }
