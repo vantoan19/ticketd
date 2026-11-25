@@ -783,6 +783,7 @@ export function createMockChatClient(
         },
       );
     },
+    harnessSkills: async () => [],
     pickFolder: async () => client.nextFolder,
     folderProject: async (path) => client.folderProjects.get(path) ?? null,
     projectFolder: async (id) => client.projectFolders.get(id) ?? null,

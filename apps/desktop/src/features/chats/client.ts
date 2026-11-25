@@ -611,6 +611,12 @@ export const harnessOptionsSchema = z.object({
 });
 export type HarnessOptions = z.infer<typeof harnessOptionsSchema>;
 
+export const harnessSkillSchema = z.object({
+  name: z.string().min(1),
+  description: z.string(),
+});
+export type HarnessSkill = z.infer<typeof harnessSkillSchema>;
+
 export const chatStateSchema = z.object({
   id: z.string(),
   title: z.string(),
@@ -821,6 +827,10 @@ export interface ChatClient {
   harnessCatalog(): Promise<HarnessInfo[]>;
   /** What a harness offers before a session; asked of the harness once per version. */
   harnessOptions(harnessId: string): Promise<HarnessOptions>;
+  harnessSkills(
+    harnessId: string,
+    folder: string | null,
+  ): Promise<HarnessSkill[]>;
   /** The native folder dialog; null when dismissed. */
   pickFolder(): Promise<string | null>;
   /** How many Chats already run in the folder. */

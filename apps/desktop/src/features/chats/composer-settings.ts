@@ -1,11 +1,44 @@
+import { useMemo, useRef, type RefObject } from "react";
 import type {
   ChatState,
   HarnessSetting,
   SettingChange,
 } from "@/features/chats/client";
+import type { ComposerCommand } from "@/features/chats/ComposerField";
 
 /** The wording and arithmetic behind the composer's harness triggers (#368). */
 export type Setting = "model" | "effort" | "permission";
+
+export type PickerOpeners = {
+  model: RefObject<(() => void) | null>;
+  permission: RefObject<(() => void) | null>;
+};
+
+/** Codex's app-server leaves these commands to its client. */
+export function useCodexCommands(
+  codex: boolean,
+  canChangePermissions: boolean,
+) {
+  const model = useRef<() => void>(null);
+  const permission = useRef<() => void>(null);
+  const commands = useMemo<ComposerCommand[] | undefined>(() => {
+    if (!codex) return undefined;
+    const chooseModel = {
+      name: "model",
+      description: "Choose a model and reasoning effort",
+      run: () => model.current?.(),
+    };
+    const choosePermissions = {
+      name: "permissions",
+      description: "Choose what Codex can do",
+      run: () => permission.current?.(),
+    };
+    return canChangePermissions
+      ? [chooseModel, choosePermissions]
+      : [chooseModel];
+  }, [codex, canChangePermissions]);
+  return { commands, openers: { model, permission } };
+}
 
 /** The effort that reads as the most, with no bars of its own in the menu. */
 const MAX = "max";

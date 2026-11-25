@@ -638,6 +638,9 @@ collect OAuth tokens, proxy model requests, or change billing.
   Before sending, the person picks the harness and, from what it reports, its model,
   effort, and permission mode. Full access, where the harness edits and runs
   commands without asking, is a choice for a person's Chat.
+- **Codex composer.** Type `$` to find enabled skills for the Chat's folder.
+  Choosing a skill inserts its mention into the draft. At the start of a draft,
+  `/` offers the model picker and, when available, the permissions picker.
 - **Antigravity.** The person's installed `agy` serves the Chat over ACP. New
   Chats use Antigravity settings by default. Permission choices come from
   the harness, with a native Full access flag that takes effect after a
