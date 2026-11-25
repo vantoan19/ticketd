@@ -138,6 +138,7 @@ export type ChatStatus = z.infer<typeof chatStatusSchema>;
 /** A Project as a Chat names it: the folder's Project, else a linked one. */
 export const projectRefSchema = z.object({ id: z.string(), title: z.string() });
 export type ProjectRef = z.infer<typeof projectRefSchema>;
+export type ProjectFolder = { project: ProjectRef; path: string };
 
 export const chatSummarySchema = z.object({
   id: z.string(),
@@ -823,6 +824,8 @@ export interface ChatClient {
   harnessOptions(harnessId: string): Promise<HarnessOptions>;
   /** The native folder dialog; null when dismissed. */
   pickFolder(): Promise<string | null>;
+  /** Registered Project checkouts on this computer. */
+  listProjectFolders(): Promise<ProjectFolder[]>;
   /** How many Chats already run in the folder. */
   folderUse(path: string): Promise<number>;
   /** The Project whose checkout holds `path`, for New Chat's folder button. */

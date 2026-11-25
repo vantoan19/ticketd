@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useContext,
   useEffect,
   useLayoutEffect,
@@ -11,6 +12,7 @@ import {
 import {
   ArrowLeft,
   ArrowUpRight,
+  ChevronDown,
   Maximize2,
   Minimize2,
   Trash2,
@@ -25,6 +27,11 @@ import {
 import { Button } from "@/components/ui/button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { ofTotal } from "@/lib/format";
@@ -51,6 +58,7 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
+import { ChatFolderChoices } from "@/features/chats/ChatFolderChoices";
 import { ChatContext, ContextCount } from "@/features/chats/ChatContext";
 import { ComposerControls } from "@/features/chats/ComposerControls";
 import {
@@ -139,12 +147,13 @@ function NoticeText({ text, path }: { text: string; path?: string }) {
   return nodes;
 }
 
-const ACTION_LABEL: Record<Exclude<NoticeAction, "help">, string> = {
+type ButtonAction = Exclude<NoticeAction, "help" | "pick-folder">;
+
+const ACTION_LABEL: Record<ButtonAction, string> = {
   check: "Check again",
   "copy-command": "Copy command",
   resend: "Send again",
   discard: "Don't send",
-  "pick-folder": "Choose a folder…",
   "start-fresh": "Start fresh",
   resume: "Resume in a fresh session…",
 };
@@ -158,11 +167,13 @@ export function ProblemNotice({
   problem,
   harness,
   onAction,
+  folderPicker,
   flat = false,
 }: {
   problem: Problem;
   harness: string;
-  onAction: (action: Exclude<NoticeAction, "help" | "copy-command">) => void;
+  onAction: (action: Exclude<ButtonAction, "copy-command">) => void;
+  folderPicker?: ReactNode;
   flat?: boolean;
 }) {
   const notice = problemNotice(
@@ -207,6 +218,8 @@ export function ProblemNotice({
             >
               {copied ? "Copied" : ACTION_LABEL[action]}
             </Button>
+          ) : action === "pick-folder" ? (
+            <Fragment key={action}>{folderPicker}</Fragment>
           ) : (
             <Button
               key={action}
@@ -620,7 +633,7 @@ function Conversation({
   // Pickers and menus opened in the conversation stay below the pane header.
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const trashed = chat.retention === "trashed";
-  const onNotice = (action: Exclude<NoticeAction, "help" | "copy-command">) => {
+  const onNotice = (action: Exclude<ButtonAction, "copy-command">) => {
     if (action === "check") quietly(client.checkAgain(id), "check again");
     else if (action === "start-fresh") {
       // An earlier queue edit's autofocus must expire before the box returns.
@@ -629,13 +642,6 @@ function Conversation({
         .then(() => setFreshStarts((count) => count + 1))
         .catch(() => {});
     } else if (action === "resume") setResuming(true);
-    else if (action === "pick-folder")
-      quietly(
-        client
-          .pickFolder()
-          .then((path) => (path ? client.setFolder(id, path) : undefined)),
-        "change the folder",
-      );
     else if (chat.problem?.message_id)
       quietly(
         client.resolveUncertain(
@@ -646,6 +652,26 @@ function Conversation({
         action === "resend" ? "send it again" : "discard it",
       );
   };
+  const folderPicker = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button variant="outline" size="sm">
+          Choose a folder… <ChevronDown aria-hidden />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="w-72">
+        <ChatFolderChoices
+          unavailableFolder={chat.folder.path}
+          onPick={(path) =>
+            quietly(client.setFolder(id, path), "change the folder")
+          }
+          onBrowseError={(reason) =>
+            setFailure(chatFailure(reason, "change the folder"))
+          }
+        />
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
   return (
     <OverlayBoundary element={body}>
       <div ref={setBody} className="chat-body" onKeyDown={onPaneKey}>
@@ -764,6 +790,7 @@ function Conversation({
                 problem={problem}
                 harness={harness}
                 onAction={onNotice}
+                folderPicker={folderPicker}
               />
             )
           ) : (
@@ -779,6 +806,7 @@ function Conversation({
                     problem={problem}
                     harness={harness}
                     onAction={onNotice}
+                    folderPicker={folderPicker}
                   />
                 )}
                 <ActivityDock

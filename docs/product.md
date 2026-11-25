@@ -638,6 +638,10 @@ collect OAuth tokens, proxy model requests, or change billing.
   Before sending, the person picks the harness and, from what it reports, its model,
   effort, and permission mode. Full access, where the harness edits and runs
   commands without asking, is a choice for a person's Chat.
+- **Folder choice.** New Chat offers locally registered Project checkouts,
+  recent folders, a Scratch folder, and the system folder chooser. If a Chat's
+  folder goes missing, it can continue in another Project checkout or a folder
+  chosen through the system chooser.
 - **Antigravity.** The person's installed `agy` serves the Chat over ACP. New
   Chats use Antigravity settings by default. Permission choices come from
   the harness, with a native Full access flag that takes effect after a
