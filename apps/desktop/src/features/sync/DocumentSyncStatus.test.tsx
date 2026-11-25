@@ -22,15 +22,13 @@ vi.mock("@/features/documents/api", () => ({
     show: vi.fn(),
     version: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi
-      .fn()
-      .mockResolvedValue({
-        id: "d1",
-        heading: "",
-        plans: [],
-        tickets: [],
-        tags: [],
-      }),
+    summary: vi.fn().mockResolvedValue({
+      id: "d1",
+      heading: "",
+      plans: [],
+      tickets: [],
+      tags: [],
+    }),
   },
 }));
 vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({

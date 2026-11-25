@@ -37,15 +37,13 @@ vi.mock("./api", () => ({
     version: vi.fn(),
     setTrashed: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi
-      .fn()
-      .mockResolvedValue({
-        id: "d1",
-        heading: "",
-        plans: [],
-        tickets: [],
-        tags: [],
-      }),
+    summary: vi.fn().mockResolvedValue({
+      id: "d1",
+      heading: "",
+      plans: [],
+      tickets: [],
+      tags: [],
+    }),
     createTicket: vi.fn(),
     linkMarkdown: vi.fn(),
     recent: vi.fn(),
