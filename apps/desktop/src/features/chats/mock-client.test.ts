@@ -1,5 +1,9 @@
 import { expect, test } from "vitest";
-import type { ChatChange, TranscriptItem } from "@/features/chats/client";
+import type {
+  ChatChange,
+  RecordChange,
+  TranscriptItem,
+} from "@/features/chats/client";
 import { chatState, createMockChatClient } from "@/features/chats/mock-client";
 
 const at = "2026-11-10T10:00:00Z";
@@ -159,21 +163,25 @@ test("quitting stops working Chats and says why in their history", async () => {
 });
 
 test("an idle row says its latest turn's first record change, not the last", async () => {
-  const records = (id: string, turn: string, changes: ChatChange[]) =>
+  const records = (id: string, turn: string, changes: RecordChange[]) =>
     ({ id, at, kind: "records", turn_id: turn, changes }) as TranscriptItem;
-  const moved: ChatChange = {
+  const moved: RecordChange = {
     kind: "status",
     reference: "T-12",
     title: "Demo",
     from: "Todo",
     to: "In review",
   };
-  const posted: ChatChange = {
+  const posted: RecordChange = {
     kind: "update",
     reference: "T-12",
     excerpt: "Done",
   };
-  const next: ChatChange = { kind: "update", reference: "T-13", excerpt: "Hi" };
+  const next: RecordChange = {
+    kind: "update",
+    reference: "T-13",
+    excerpt: "Hi",
+  };
   const client = createMockChatClient({
     chats: [
       {
