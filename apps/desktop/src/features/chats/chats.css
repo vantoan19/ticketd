@@ -589,6 +589,10 @@
 .chat-stretch-steps {
   padding-left: 16px;
 }
+/* A lone Explored row's files stand where its row would. */
+.chat-stretch-steps > .chat-steplist {
+  margin-left: 0;
+}
 :where(:is(.ticket-detail, .chat-pane)[data-width~="max-400"])
   .chat-stretch-steps {
   padding-left: 12px;

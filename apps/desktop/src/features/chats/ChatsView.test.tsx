@@ -3368,6 +3368,36 @@ test("a turn with no progress notes shows its one stretch as a row when opened",
   expect(button("Ran npm test")).toBeTruthy();
 });
 
+test("a stretch of one Explored row opens straight to its files, with no row repeating its words", async () => {
+  await open(
+    one({ id: "stretch-explored", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn(reply("n1", "Looking around first.")),
+      inTurn({
+        id: "s1",
+        at,
+        kind: "steps",
+        steps: [
+          { ...readLimiter, state: "done" },
+          {
+            kind: "search",
+            target: "limit",
+            targets: [{ text: "limit", scope: "src" }],
+            state: "done",
+          },
+        ],
+      }),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  fireEvent.click(button("Worked for 30s"));
+  fireEvent.click(button("Explored 1 file · 1 search"));
+  // The files are right there; the same words are not said a second time.
+  expect(button("Open src/auth/limiter.ts")).toBeTruthy();
+  expect(screen.getAllByText("Explored 1 file · 1 search")).toHaveLength(1);
+});
+
 test("the stretches you open stay as you left them for the session", async () => {
   await open(
     one({ id: "stretch-toggled", title: "Limiter" }, [

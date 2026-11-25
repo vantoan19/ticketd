@@ -960,6 +960,11 @@ function StretchView({
     // Collapsing with focus inside leaves focus on the row.
     if (open) rowButton.current?.focus();
   };
+  // A stretch of one merged Explored row opens to its files, not to a row that says
+  // the same words again.
+  const only = stretch.rows.length === 1 ? stretch.rows[0] : undefined;
+  const explored =
+    only?.kind === "step" && only.step.explored ? only.step : undefined;
   const rows = stretch.rows.map((row) => (
     <Row
       key={row.key}
@@ -1001,7 +1006,15 @@ function StretchView({
             role="group"
             aria-labelledby={rowId}
           >
-            {rows}
+            {explored ? (
+              <StepDetail
+                id={`${bodyId}-files`}
+                step={explored}
+                harness={harness}
+              />
+            ) : (
+              rows
+            )}
           </div>
         ))}
     </div>
