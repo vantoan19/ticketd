@@ -477,11 +477,13 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
 
 #### Project remote routing
 
-A newly imported GitHub issue is linked to the project whose Project remote
-matches its repository, including the host. If no project claims the repository,
-the ticket arrives in No project. When import links a project, it records an
-ordinary project membership change in the ticket's history. Project links remain
-locally editable.
+A newly imported GitHub issue is linked to the active Project whose Project remote
+matches its repository, including the host. The ticket arrives in No project
+when no Project claims the repository or the Project is archived. An archived
+Project keeps its claim, and discovery and refresh continue. Reactivating the
+Project resumes routing future imports and preserves earlier assignments. When
+import links a Project, it records a Project membership change in the ticket's
+history. Project links remain locally editable.
 When GitHub confirms a transfer to another repository, refresh follows the issue
 on the same ticket and keeps its existing project link and local work.
 Changing or clearing a Project remote affects future imports. Each device keeps
@@ -498,10 +500,12 @@ listed, backfill works offline. If the source needs setup, the preview identifie
 the repository to add. Confirming applies the reviewed changes together. If the
 effect changes before confirmation, review the updated preview.
 
-GitHub source settings show the project each saved discovery repository routes to.
-Link an unclaimed repository to a project with a local checkout and no Project
-remote, or create a project from a checkout folder, then review backfill. Removing a repository from
-discovery leaves its Project remote on the project.
+GitHub source settings show the Project each saved discovery repository routes to.
+For an archived claim, the destination is No project and the preview names the
+archived Project. Link an unclaimed repository to an active Project with a local
+checkout and no Project remote, or create a Project from a checkout folder,
+then review backfill. Removing a repository from discovery leaves its Project
+remote on the Project.
 
 ### Workspace sync
 
