@@ -105,13 +105,17 @@ export class ComposerDraft {
     return this.attempt.id;
   }
 
-  save(action: Action, send: () => Promise<void>) {
+  save(action: Action, send: () => Promise<void>, keepDraft = false) {
     if (this.locked()) return;
     this.update({ saving: true });
     this.saving = (async () => {
       try {
         await send();
         this.attempt = { id: "", request: "" };
+        if (keepDraft) {
+          this.update({ failedAction: null });
+          return;
+        }
         this.prefilled = null;
         this.state = {
           ...this.state,

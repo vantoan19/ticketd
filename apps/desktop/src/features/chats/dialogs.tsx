@@ -110,8 +110,8 @@ export function ResumeDialog({
         ))}
       </fieldset>
       <p className="chat-fine">
-        Linked tickets and Documents are read fresh. Nothing you sent before is
-        sent again.
+        Selected history includes message text only. Linked tickets and
+        Documents are read fresh.
       </p>
       {error && <FailureAlert size="compact" failure={error} />}
     </DialogShell>

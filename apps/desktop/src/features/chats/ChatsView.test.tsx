@@ -618,6 +618,60 @@ test("New Chat keeps a pending first message and its retry identity across navig
   noButton("Remove first.txt");
 });
 
+test("Retry opens the Chat already created with the original folder and attachment", async () => {
+  const client = await open([]);
+  client.projectCheckouts = [
+    { project: { id: "p1", title: "Storefront" }, path: "/work/storefront" },
+  ];
+  const saved = client.createChat;
+  const create = vi
+    .spyOn(client, "createChat")
+    .mockImplementationOnce(async (request) => {
+      await saved(request);
+      throw new Error("The first reply was lost");
+    });
+  fireEvent.click(button("New Chat"));
+  const description = "Describe a task or ask a question";
+  type("First caption", description);
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [new File(["one"], "first.txt", { type: "text/plain" })] },
+  });
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.click(button("Send"));
+  const retry = await screen.findByRole("button", { name: "Retry" });
+  fireEvent.keyDown(button("Scratch folder"), { key: "Enter" });
+  fireEvent.click(
+    await screen.findByRole("menuitem", {
+      name: "Storefront /work/storefront",
+    }),
+  );
+  expect(button("Folder: /work/storefront")).toBeTruthy();
+  type("New work after the failed reply", description);
+  fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+    target: { files: [new File(["two"], "next.txt", { type: "text/plain" })] },
+  });
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+
+  fireEvent.click(retry);
+  expect(create.mock.calls[1]).toEqual(create.mock.calls[0]);
+  await screen.findByRole("heading", { name: "First caption" });
+  const matches = within(
+    screen.getByRole("list", { name: "Chats" }),
+  ).getAllByText("First caption");
+  expect(matches).toHaveLength(1);
+  fireEvent.click(button("New Chat"));
+  expect(composer(description)).toHaveProperty(
+    "value",
+    "New work after the failed reply",
+  );
+  expect(button("Remove next.txt")).toBeTruthy();
+  await waitFor(() => expect(button("Send")).toHaveProperty("disabled", false));
+  fireEvent.click(button("Send"));
+  expect(create.mock.calls[2]?.[0].command_id).not.toBe(
+    create.mock.calls[0]?.[0].command_id,
+  );
+});
+
 test("an image that the running turn cannot take can be queued for the next turn", async () => {
   await open(
     one({
@@ -1356,6 +1410,9 @@ test.each([
     const dialog = await screen.findByRole("dialog", {
       name: "Resume in a fresh session",
     });
+    expect(
+      within(dialog).getByText(/Selected history includes message text only/),
+    ).toBeTruthy();
     const choices = within(dialog).getByRole("radiogroup", {
       name: "History to give the new session",
     });
@@ -1405,7 +1462,7 @@ test("picking messages turns the transcript into the history picker", async () =
   fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
   expect(
     await screen.findByText(
-      "Pick the messages to give the new session · 0 of 2",
+      "Pick the messages to give the new session · 0 of 2. Only message text is included.",
     ),
   ).toBeTruthy();
   expect(button("Resume")).toHaveProperty("disabled", true);
@@ -1415,7 +1472,7 @@ test("picking messages turns the transcript into the history picker", async () =
     }),
   );
   expect(
-    screen.getByText("Pick the messages to give the new session · 1 of 2"),
+    screen.getByText(/Pick the messages to give the new session · 1 of 2/),
   ).toBeTruthy();
   fireEvent.click(button("Resume"));
   expect(

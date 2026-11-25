@@ -210,12 +210,6 @@ export function NewChat({
     setLinkedNote("");
     return true;
   };
-  /**
-   * Names a request to the host. It is repeated only when the very same request
-   * is sent again after a failure, which then finds what the first try made; any
-   * change to the message, harness, folder or links is a new request.
-   */
-  const retrySend = useRef<(() => void) | null>(null);
   useEffect(() => {
     let current = true;
     client.harnesses().then(
@@ -436,7 +430,6 @@ export function NewChat({
                     openers={openers}
                   />
                 }
-                retryRef={retrySend}
                 onSend={async (typed, mentioned, attachments) => {
                   if (!harness) return;
                   const message = quotedMessage(quotes, typed);
@@ -463,44 +456,54 @@ export function NewChat({
                     ...(pick.effort && { effort: pick.effort }),
                     ...(pick.permission && { permission: pick.permission }),
                   };
-                  const command_id = draft.requestId(
-                    JSON.stringify(requestInput),
-                  );
-                  // Notifications are asked for with the first Chat message.
-                  if (loadPreferences().notifyChats)
-                    void notificationClient.requestPermission().catch(() => {});
-                  try {
-                    const created = await client.createChat({
-                      command_id,
-                      ...requestInput,
-                    });
-                    if (offered) rememberStart(created.chat_id, offered, pick);
-                    if (folder) rememberFolder(folder);
-                    clearQuotes(NEW_CHAT, quotes);
-                    // The Chat exists but holds no message. Open it with the
-                    // captured draft so a retry sends to the same Chat.
-                    if (created.send_error) {
-                      await draftOf(client, created.chat_id).recover({
-                        text: message,
-                        attachments: attachments ?? [],
-                      });
-                      arrivals.set(
-                        created.chat_id,
-                        `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
+                  const request = {
+                    command_id: draft.requestId(JSON.stringify(requestInput)),
+                    ...requestInput,
+                  };
+                  const submitted = draft.snapshot();
+                  const create = async () => {
+                    // Notifications are asked for with the first Chat message.
+                    if (loadPreferences().notifyChats)
+                      void notificationClient
+                        .requestPermission()
+                        .catch(() => {});
+                    try {
+                      const created = await client.createChat(request);
+                      if (offered)
+                        rememberStart(created.chat_id, offered, pick);
+                      if (folder) rememberFolder(folder);
+                      clearQuotes(NEW_CHAT, quotes);
+                      // The Chat exists but holds no message. Open it with the
+                      // captured draft so a retry sends to the same Chat.
+                      if (created.send_error) {
+                        await draftOf(client, created.chat_id).recover({
+                          text: message,
+                          attachments: attachments ?? [],
+                        });
+                        arrivals.set(
+                          created.chat_id,
+                          `Your first message wasn’t sent. ${sentence(created.send_error)} It’s in the box below.`,
+                        );
+                      }
+                      setFailure(null);
+                      onCreated(created.chat_id);
+                    } catch (reason) {
+                      setFailure(
+                        chatFailure(reason, "start the Chat", () => {
+                          input.current?.focus();
+                          const current = draft.snapshot();
+                          const keepDraft =
+                            current.text !== submitted.text ||
+                            current.tokens !== submitted.tokens ||
+                            current.items !== submitted.items;
+                          // The host may have committed the first request already.
+                          draft.save("send", create, keepDraft);
+                        }),
                       );
+                      throw reason;
                     }
-                    setFailure(null);
-                    onCreated(created.chat_id);
-                  } catch (reason) {
-                    // Sending again repeats this same request safely.
-                    setFailure(
-                      chatFailure(reason, "start the Chat", () => {
-                        input.current?.focus();
-                        retrySend.current?.();
-                      }),
-                    );
-                    throw reason;
-                  }
+                  };
+                  await create();
                 }}
               />
             </div>

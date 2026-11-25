@@ -339,6 +339,25 @@ test("a # mention inserts the record without sending, and the message links it w
   ]);
 });
 
+test("sending by button clears the open mention menu with the draft", async () => {
+  const { box, onSend } = setup();
+  box.focus();
+  type(box, "#rate");
+  await screen.findByRole("option", { name: /T-KQ12/ });
+
+  const send = screen.getByRole("button", { name: "Send" });
+  send.focus();
+  fireEvent.click(send);
+  await waitFor(() => expect(box).toHaveProperty("value", ""));
+  expect(box.readOnly).toBe(false);
+  expect(onSend).toHaveBeenCalledWith("#rate", []);
+  expect(screen.queryByRole("listbox")).toBeNull();
+
+  box.focus();
+  type(box, "#rate");
+  expect(await screen.findByRole("option", { name: /T-KQ12/ })).toBeTruthy();
+});
+
 test("Enter never sends while the # menu is open, even with no row to pick (chat CH-46)", async () => {
   const { box, onSend } = setup();
   // Still searching: no row is highlighted yet.

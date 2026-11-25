@@ -2219,8 +2219,8 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
     ) -> Result<ChatMessage, Error> {
+        let request = command_id.map_or(Value::Null, |_| save_input_request(chat_id, text, files));
         self.chat_write(|connection| {
-            let request = command_id.map_or(Value::Null, |_| save_input_request(chat_id, text, files));
             let id = once(connection, command_id, request, || {
                 if text.trim().is_empty() && files.is_empty() {
                     return Err(invalid("Chat input must not be empty"));

@@ -2462,6 +2462,10 @@ impl Chats {
                 ("picked", chosen)
             }
         };
+        let chosen: Vec<_> = chosen
+            .into_iter()
+            .filter(|message| message.attachments.is_empty() || !message.text.trim().is_empty())
+            .collect();
         let mut text = String::new();
         if !chosen.is_empty() {
             text.push_str(

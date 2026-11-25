@@ -826,7 +826,8 @@ function Conversation({
             <div className="chat-line">
               <span>
                 Pick the messages to give the new session ·{" "}
-                {ofTotal(picked.size, messageCount)}
+                {ofTotal(picked.size, messageCount)}. Only message text is
+                included.
               </span>
               <span className="chat-spacer" />
               <Button variant="ghost" size="sm" onClick={() => setPicked(null)}>

@@ -66,19 +66,34 @@ fn clipboard_image(
                 return;
             }
             clipboard.request_contents(&png, move |_, selection| {
-                let result = (|| {
-                    let length = selection.length();
-                    if length <= 0 || selection.data_type() != png {
-                        return Ok(None);
-                    }
-                    let limit = crate::open_workspace()?.attachment_upload_limit()?;
-                    if length as u64 > limit {
-                        return Err(ticketd_core::Error::UploadLimit { limit });
-                    }
-                    ticketd_core::ChatAttachmentContent::from_clipboard_png(selection.data(), limit)
-                        .map(Some)
-                })();
-                finish(result);
+                let length = selection.length();
+                if length <= 0 || selection.data_type() != png {
+                    finish(Ok(None));
+                    return;
+                }
+                // GTK owns the selection only for this callback. Copy the data before
+                // the clipboard can change, within the largest possible Workspace limit.
+                let bytes = (length as u64 <= ticketd_core::MAX_BACKUP_FILE_BYTES)
+                    .then(|| selection.data());
+                gtk::glib::MainContext::default().spawn_local(async move {
+                    let result = tauri::async_runtime::spawn_blocking(move || {
+                        let limit = crate::open_workspace()?.attachment_upload_limit()?;
+                        match bytes {
+                            Some(bytes) if length as u64 <= limit => {
+                                ticketd_core::ChatAttachmentContent::from_clipboard_png(
+                                    bytes, limit,
+                                )
+                                .map(Some)
+                            }
+                            _ => Err(ticketd_core::Error::UploadLimit { limit }),
+                        }
+                    })
+                    .await
+                    .unwrap_or_else(|error| {
+                        Err(ticketd_core::Error::Attachment(error.to_string()))
+                    });
+                    finish(result);
+                });
             });
         },
     );

@@ -1060,6 +1060,55 @@ async fn a_fresh_session_starts_with_the_history_the_person_selected_and_replays
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_fresh_session_excludes_attachment_only_messages_from_picked_history() {
+    let f = Fixture::new().await;
+    let mut input = f.input("");
+    input.attachments = vec![AttachmentInput {
+        name: "original.txt".to_owned(),
+        data_url: "data:text/plain;base64,c25hcHNob3Q=".to_owned(),
+    }];
+    let created = f.chats.create(input).await.unwrap();
+    assert_eq!(created.send_error, None);
+    let id = created.chat_id;
+    settle().await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    let original = messages(&f.core(), &id).unwrap().remove(0);
+    assert!(original.text.is_empty());
+    assert_eq!(original.attachments[0].name, "original.txt");
+    f.fake.lose_process().await;
+    settle().await;
+
+    f.chats
+        .resume(
+            &id,
+            HistorySelection::Picked {
+                ids: vec![original.id],
+            },
+        )
+        .await
+        .unwrap();
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-2"),
+    })
+    .await;
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Session {
+            history: "picked",
+            count: 0,
+            ..
+        }
+    )));
+    f.chats.send(&id, "continue", SendMode::Auto).await.unwrap();
+    settle().await;
+    assert_eq!(f.submitted().last().map(String::as_str), Some("continue"));
+}
+
+#[tokio::test(start_paused = true)]
 async fn native_only_permission_restart_offers_fresh_recovery_and_refuses_history_selection() {
     let f = Fixture::with_adapter(FakeAdapter::new(
         &ticketd_core::harnesses::ANTIGRAVITY,

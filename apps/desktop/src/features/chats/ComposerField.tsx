@@ -195,7 +195,9 @@ export function ComposerField({
   const box = useRef<HTMLTextAreaElement | null>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const [trigger, setTrigger] = useState<Trigger | null>(null);
+  const [trigger, setTrigger] = useState<(Trigger & { text: string }) | null>(
+    null,
+  );
   /** The trigger Escape closed; it stays closed until another one starts. */
   const [dismissed, setDismissed] = useState<number | null>(null);
   const [answer, setAnswer] = useState<Answer | null>(null);
@@ -222,8 +224,15 @@ export function ComposerField({
   });
   useLayoutEffect(() => caretAfterPrefill(), []);
 
+  if (trigger && trigger.text !== text) {
+    setTrigger(null);
+    setDismissed(null);
+  }
   const open =
-    !readOnly && trigger && trigger.start !== dismissed && mentions
+    !readOnly &&
+    trigger?.text === text &&
+    trigger.start !== dismissed &&
+    mentions
       ? trigger
       : null;
   const openKey = open ? `${open.char}${open.start}:${open.query}` : "";
@@ -359,6 +368,12 @@ export function ComposerField({
       : null;
   const options = shown?.options ?? [];
 
+  const updateTrigger = (value: string, caret: number) => {
+    const found = triggerAt(value, caret);
+    setTrigger(found && { ...found, text: value });
+    if (!found || found.start !== dismissed) setDismissed(null);
+  };
+
   const changed = (next: string, caret: number) => {
     let nextTokens = reconcile(text, next, tokens, removed.current);
     const pick = inserting.current;
@@ -377,9 +392,7 @@ export function ComposerField({
       ].sort((a, b) => a.start - b.start);
     }
     onChange(next, nextTokens);
-    const found = triggerAt(next, caret);
-    setTrigger(found);
-    if (!found || found.start !== dismissed) setDismissed(null);
+    updateTrigger(next, caret);
   };
 
   const pick = (option: Option) => {
@@ -634,7 +647,7 @@ export function ComposerField({
           onSelect={(event) => {
             const target = event.currentTarget;
             if (target.selectionStart !== target.selectionEnd) return;
-            setTrigger(triggerAt(target.value, target.selectionStart));
+            updateTrigger(target.value, target.selectionStart);
           }}
           onScroll={(event) => {
             if (mirror.current)
