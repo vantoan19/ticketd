@@ -278,7 +278,7 @@ async fn the_host_dispatches_a_saved_screenshot_as_one_message() {
         SubmissionId(retained.attempts[0].id.clone())
     );
     assert_eq!(sent.text, "");
-    assert_eq!(sent.attachments, [image.clone()]);
+    assert_eq!(sent.attachments.as_slice(), std::slice::from_ref(&image));
     assert_eq!(
         f.core()
             .chat_attachment_content(&f.chat.id, &retained.attachments[0].id)
