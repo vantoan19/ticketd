@@ -1732,7 +1732,7 @@ test("a restore reads the list once, during the restore", async () => {
   fireEvent.click(screen.getByRole("button", { name: /^Restore…/ }));
   for (let i = 0; i < 3; i += 1) await turn();
   const before = lists;
-  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  fireEvent.click(screen.getByRole("button", { name: "Replace Workspace" }));
   for (let i = 0; i < 6; i += 1) await turn();
   expect(screen.getByText("Workspace restored")).toBeTruthy();
   expect(lists - before).toBe(1);
@@ -1801,7 +1801,7 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   fireEvent.click(screen.getByRole("button", { name: /^Restore…/ }));
   for (let i = 0; i < 3; i += 1) await turn();
   const before = order.length;
-  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  fireEvent.click(screen.getByRole("button", { name: "Replace Workspace" }));
   for (let i = 0; i < 6; i += 1) await turn();
   for (let i = 0; i < 6; i += 1) await turn();
   bridge.token.next = nextToken;
@@ -1942,7 +1942,7 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
   );
   fireEvent.click(await screen.findByRole("button", { name: /^Restore…/ }));
   fireEvent.click(
-    await screen.findByRole("button", { name: "Replace workspace" }),
+    await screen.findByRole("button", { name: "Replace Workspace" }),
   );
   await waitFor(() => expect(refreshStarted).toBe(true));
   expect(draftOf(client, chatId)).not.toBe(oldDraft);
@@ -12921,7 +12921,7 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     });
     await user.click(review);
     const dialog = await screen.findByRole("dialog", {
-      name: "Replace this workspace?",
+      name: "Replace this Workspace?",
     });
     overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
     await user.keyboard("{Escape}");
