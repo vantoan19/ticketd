@@ -246,7 +246,7 @@ impl Workspace {
             binding.and_then(|binding| Some((binding.clone(), binding.connection_id?)))
         else {
             return Err(Error::Attachment(
-                "Workspace sync is not on Google Drive, so there is no sync folder to keep uploads in"
+                "Workspace sync is not on Google Drive, so there is no sync folder to keep uploads in; turn it on in Settings › Workspace sync"
                     .into(),
             ));
         };

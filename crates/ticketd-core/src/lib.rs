@@ -571,7 +571,7 @@ fn upload_limit_message(limit: u64) -> String {
         );
     }
     format!(
-        "file exceeds the workspace upload limit of {bound}; change it in Settings > Files or `ticketd attachment limit --bytes <bytes>`"
+        "file exceeds the workspace upload limit of {bound}; change it in Settings › Files or `ticketd attachment limit --bytes <bytes>`"
     )
 }
 
@@ -718,7 +718,7 @@ impl Workspace {
             if backup::table_exists(&connection, "ticketd_backup_container")?
                 || backup::table_exists(&connection, "ticketd_backup_files")?
             {
-                return Err(Error::Backup("this is an attachment backup container; restore it with `ticketd restore-workspace <backup>` or Settings > Restore from backup".into()));
+                return Err(Error::Backup("this is an attachment backup container; restore it with `ticketd restore-workspace <backup>` or Settings › Backups & export".into()));
             }
             session::configure(&connection)?;
             let version: i64 =

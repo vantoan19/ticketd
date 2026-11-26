@@ -21,7 +21,7 @@ ticketd source conformance example-tracker --set board=Demo --strict \
 
 The link returns the extension registration. The conformance report should have
 `"passed":true`, including a passed `cancellation` check. Each skipped check
-has a reason. In **Settings → Ticket sources**, add an **Example Tracker** connection
+has a reason. In **Settings › Ticket sources**, add an **Example Tracker** connection
 with board `Demo`, preview the matches, and save. Select **Sync now** to import
 the two sample issues. The same setup and refresh are available in the CLI.
 
@@ -251,7 +251,7 @@ it. If the process sends no terminal response within about two seconds,
 ticketd terminates the process tree. The next request starts a new process.
 
 To try cancellation with your linked extension, start **Sync now** in
-**Settings → Ticket sources** and select **Cancel sync**. In an interactive terminal,
+**Settings › Ticket sources** and select **Cancel sync**. In an interactive terminal,
 `ticketd source CONNECTION refresh` reports progress on stderr and stops
 with exit status 130 when you press Ctrl+C.
 
@@ -346,7 +346,7 @@ OS, locale, PATH, temporary-directory and proxy variables, plus those declared i
 `env`. ticketd strips variables with the `TICKETD_` prefix, including
 credential overrides.
 
-Enter credentials in the connection form under **Settings → Ticket sources**. Use
+Enter credentials in the connection form under **Settings › Ticket sources**. Use
 **Needs sign-in → Re-enter credentials** when the tracker rejects them.
 In the CLI, pipe a JSON object with credential fields to
 `ticketd source CONNECTION sign-in --config-file -`. At setup, use

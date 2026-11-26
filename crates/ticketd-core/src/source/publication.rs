@@ -1291,7 +1291,7 @@ fn require_target<'a>(
     target.ok_or_else(|| {
         (
             IneligibleReason::SourceNotConnected,
-            format!("connect {provider_name} in Settings before publishing"),
+            format!("connect {provider_name} in Settings › Ticket sources before publishing"),
         )
     })
 }

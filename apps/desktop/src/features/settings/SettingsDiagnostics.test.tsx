@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { SettingsView } from "@/features/settings/SettingsView";
+import { SettingsStateContext } from "@/features/settings/use-settings-state";
 import { setDetailedLogging } from "@/features/settings/detailed-logging";
 import { workspaceClient } from "@/lib/api/workspace";
 import { revealFailureDetails } from "@/test/failure-details";
@@ -133,7 +134,7 @@ async function renderPage() {
   render(<SettingsView selected="diagnostics" onRestore={async () => {}} />);
   // The page reads the level and the recent errors when it opens.
   await screen.findByText(/Detailed logging/);
-  await screen.findAllByText(/No recent errors|Error in|Warning in/);
+  await screen.findAllByText(/No recent errors| · \d+ times?, last/);
 }
 
 const calls = (command: string) =>
@@ -379,7 +380,7 @@ test("a folder that cannot be opened is reported", async () => {
   );
 });
 
-test("Recent errors lists each kind with how often and when it last happened", async () => {
+test("Recent errors lists each kind with its setting, how often and when it last happened", async () => {
   errors = [
     group({ count: 3 }),
     group({
@@ -401,18 +402,15 @@ test("Recent errors lists each kind with how often and when it last happened", a
   const rows = within(list).getAllByRole("listitem");
   expect(rows).toHaveLength(3);
   expect(rows[0]?.textContent).toContain("Sync pass failed");
-  expect(rows[0]?.textContent).toContain("Warning in Workspace sync");
-  expect(rows[0]?.textContent).toContain("3 times, last");
+  expect(rows[0]?.textContent).toContain("Workspace sync · 3 times, last");
   expect(rows[1]?.textContent).toContain("Previous session ended unexpectedly");
-  expect(rows[1]?.textContent).toContain("Warning in App");
-  expect(rows[1]?.textContent).toContain("1 time, last");
+  expect(rows[1]?.textContent).toContain("App · 1 time, last");
   expect(rows[2]?.textContent).toContain("TypeError");
-  expect(rows[2]?.textContent).toContain("Error in App");
-  expect(rows[2]?.textContent).toContain("12 times, last");
+  expect(rows[2]?.textContent).toContain("App · 12 times, last");
   expect(screen.queryByText("No recent errors")).toBeNull();
 });
 
-test("Recent errors names the area of the app, not the module", async () => {
+test("Recent errors names the setting of the app, not the module", async () => {
   errors = [
     "ticketd_desktop_lib::sync_scheduler",
     "ticketd_automation_runner",
@@ -424,10 +422,56 @@ test("Recent errors names the area of the app, not the module", async () => {
   await renderPage();
   const list = screen.getByRole("list", { name: "Recent errors" });
   const rows = within(list).getAllByRole("listitem");
-  ["Workspace sync", "Automations", "Chats", "Sources", "Reminders"].forEach(
-    (area, index) =>
-      expect(rows[index]?.textContent).toContain(`Warning in ${area}`),
+  [
+    "Workspace sync",
+    "Automations",
+    "Agents",
+    "Ticket sources",
+    "Attention",
+  ].forEach((page, index) =>
+    expect(rows[index]?.textContent).toContain(`${page} · `),
   );
+});
+
+test("a recent error opens the setting it names", async () => {
+  errors = [
+    group({ kind: "the remote file changed" }),
+    group({ target: "ticketd_core::source::tracking", kind: "refresh timed out" }),
+    group({ target: "ticketd::webview", kind: "TypeError" }),
+  ];
+  answer();
+  const openPage = vi.fn();
+  render(
+    <SettingsStateContext.Provider
+      value={{
+        query: "",
+        setQuery: () => {},
+        openPage,
+        needsSetup: {},
+        refreshIndicators: () => {},
+      }}
+    >
+      <SettingsView selected="diagnostics" onRestore={async () => {}} />
+    </SettingsStateContext.Provider>,
+  );
+  const rows = within(
+    await screen.findByRole("list", { name: "Recent errors" }),
+  ).getAllByRole("listitem");
+  fireEvent.click(
+    within(rows[0] as HTMLElement).getByRole("button", {
+      name: /Open Workspace sync/,
+    }),
+  );
+  expect(openPage).toHaveBeenLastCalledWith("workspace-sync");
+  fireEvent.click(
+    within(rows[1] as HTMLElement).getByRole("button", {
+      name: /Open Ticket sources/,
+    }),
+  );
+  expect(openPage).toHaveBeenLastCalledWith("ticket-sources");
+  // An error of the app itself has no setting to open.
+  expect(within(rows[2] as HTMLElement).queryByRole("button")).toBeNull();
+  expect(openPage).toHaveBeenCalledTimes(2);
 });
 
 test("Recent errors shows only the five most recent kinds", async () => {

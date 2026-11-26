@@ -5,7 +5,7 @@
 The desktop saves a **restore point** the first time you open ticketd each day and keeps the
 last 7, so you can go back a few days without having done anything.
 
-1. Open **Settings → Backups & export**. **Restore points** lists them, newest first. To
+1. Open **Settings › Backups & export**. **Restore points** lists them, newest first. To
    add one before something risky, choose **Back up now**: it is saved at once, checked,
    and needs no file.
 2. To recover, choose **Restore…** on a point. Copies saved before a restore or an update
@@ -38,7 +38,7 @@ Choose a workspace backup when you want to restore tickets and their history.
 
 ## Sync two desktops with Google Drive
 
-1. On the computer with the workspace you want to keep, open **Settings →
+1. On the computer with the workspace you want to keep, open **Settings ›
    Workspace sync**, choose **Start with this Workspace**, then **Continue**.
    Choose **Google Drive** and **Connect Google Drive**. Sign in to the account
    you will use on both computers. Sync writes readable, unencrypted files to

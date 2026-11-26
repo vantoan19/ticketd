@@ -654,7 +654,9 @@ fn an_unavailable_linux_keyring_reports_session_only_and_does_not_persist_a_key(
     let refresh = ["source", "example-tracker", "refresh"];
     let denied = command().args(refresh).output().unwrap();
     assert!(!denied.status.success());
-    assert!(String::from_utf8_lossy(&denied.stderr).contains("sign-in --config-file -"));
+    let denied_message = String::from_utf8_lossy(&denied.stderr);
+    assert!(denied_message.contains("sign-in --config-file -"));
+    assert!(denied_message.contains("Settings › Ticket sources"), "{denied_message}");
     let mut sign_in = command()
         .args(["source", "example-tracker", "sign-in", "--config-file", "-"])
         .stdin(Stdio::piped())
