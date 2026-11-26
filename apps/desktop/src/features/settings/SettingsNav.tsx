@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { ArrowLeft, ListChecks, type LucideIcon } from "lucide-react";
 import { SearchInput } from "@/components/ui/search-input";
 import { Glide } from "@/components/ui/motion";
@@ -97,7 +97,13 @@ export function SettingsNav({
     setup,
     setupRow,
   } = useSettingsState();
-  const selected = navSectionOf(resolveSettingsPage(chosen));
+  const page = resolveSettingsPage(chosen);
+  const selected = navSectionOf(page);
+  // Clearing the field returns to the page the search came from.
+  const cameFrom = useRef<SettingsPageId>("appearance");
+  useEffect(() => {
+    if (page !== "search") cameFrom.current = page;
+  }, [page]);
   const mobile = useIsMobile();
   useEffect(() => {
     if (!mobile && navOpen) setNavOpen(false);
@@ -132,6 +138,8 @@ export function SettingsNav({
             onValueChange={(value) => {
               setQuery(value);
               if (value.trim() && selected !== null) onSelect?.("search");
+              else if (!value.trim() && page === "search")
+                onSelect?.(cameFrom.current);
             }}
             onKeyDown={(event) => {
               if (event.key === "Enter") setNavOpen(false);

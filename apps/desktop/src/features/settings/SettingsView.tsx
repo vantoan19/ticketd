@@ -27,6 +27,8 @@ import { SetupPage } from "@/features/settings/pages/SetupPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
 import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { useFadeThrough } from "@/features/settings/fade-through";
+import { showSetting } from "@/features/settings/settings-highlight";
+import { useSettingsState } from "@/features/settings/use-settings-state";
 // The keyframes of the page's own entrance (settings-layout.css plays them).
 import "@/components/ui/enter";
 import "@/features/settings/settings.css";
@@ -93,6 +95,21 @@ export function SettingsView({
   useLayoutEffect(() => {
     if (scroller.current) scroller.current.scrollTop = 0;
   }, [selected]);
+  // A result of Search opens its page and shows the setting there. The page
+  // is `selected` once the old one has faded out. Going elsewhere first drops
+  // the request, so it never fires on a later visit.
+  const { target, clearTarget } = useSettingsState();
+  const shownSetting = useRef<(() => void) | null>(null);
+  useEffect(() => {
+    if (target && target.page !== chosen) clearTarget?.();
+  }, [target, chosen, clearTarget]);
+  useEffect(() => {
+    if (!target || target.page !== selected || !scroller.current) return;
+    shownSetting.current?.();
+    shownSetting.current = showSetting(scroller.current, target.title);
+    clearTarget?.();
+  }, [target, selected, clearTarget]);
+  useEffect(() => () => shownSetting.current?.(), []);
   // ⌘F and Ctrl+F search the settings, not the page, while Settings is open.
   useEffect(() => {
     function onKeyDown(event: KeyboardEvent) {

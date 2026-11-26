@@ -29,6 +29,7 @@ import {
   SettingsStateContext,
   type IndicatorSection,
   type SettingsRead,
+  type SettingsTarget,
 } from "@/features/settings/use-settings-state";
 
 /** Holds what the nav and the pages share while Settings is open. */
@@ -45,6 +46,17 @@ export function SettingsStateProvider({
 }) {
   const [query, setQuery] = useState("");
   const [navOpen, setNavOpen] = useState(false);
+  const [target, setTarget] = useState<SettingsTarget | null>(null);
+  const targets = useRef(0);
+  const openSetting = useCallback(
+    (page: SettingsPageId, title: string) => {
+      targets.current += 1;
+      setTarget({ page, title, id: targets.current });
+      onOpenPage(page);
+    },
+    [onOpenPage],
+  );
+  const clearTarget = useCallback(() => setTarget(null), []);
   const [needsSetup, setNeedsSetup] = useState<
     Partial<Record<IndicatorSection, boolean>>
   >({});
@@ -202,6 +214,9 @@ export function SettingsStateProvider({
       query,
       setQuery,
       openPage: onOpenPage,
+      openSetting,
+      target,
+      clearTarget,
       needsSetup,
       refreshIndicators,
       setup,
@@ -213,6 +228,9 @@ export function SettingsStateProvider({
     [
       query,
       onOpenPage,
+      openSetting,
+      target,
+      clearTarget,
       needsSetup,
       refreshIndicators,
       setup,
