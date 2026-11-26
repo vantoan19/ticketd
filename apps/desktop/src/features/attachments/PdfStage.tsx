@@ -144,6 +144,10 @@ function PdfPages({
   // Where the view's middle was when it last scrolled: a resize that changes the Fit
   // scale keeps the same place in view instead of landing on another page.
   const centerRef = useRef<number | null>(null);
+  // The page a jump asked for and where the stage came to rest. A short last page cannot
+  // reach the top of the view (the scroll stops at the end), so while the view stays where
+  // the jump left it the page asked for is the page shown, and Next does not skip it.
+  const jumped = useRef<{ index: number; top: number } | null>(null);
 
   // The stage's width, for Fit.
   useEffect(() => {
@@ -175,12 +179,17 @@ function PdfPages({
     let frame = 0;
     const update = () => {
       frame = 0;
-      const index = pageInView(
-        layout.tops,
-        layout.heights,
-        stage.scrollTop - origin(stage),
-        stage.clientHeight,
-      );
+      const held = jumped.current;
+      if (held && Math.abs(stage.scrollTop - held.top) > 1)
+        jumped.current = null;
+      const index =
+        jumped.current?.index ??
+        pageInView(
+          layout.tops,
+          layout.heights,
+          stage.scrollTop - origin(stage),
+          stage.clientHeight,
+        );
       centerRef.current =
         (stage.scrollTop - origin(stage) + stage.clientHeight / 2) /
         layout.total;
@@ -212,6 +221,7 @@ function PdfPages({
     // A zoom sets its own anchor; a new Fit scale (the stage was resized) keeps the last one.
     const point = anchorRef.current ?? centerRef.current;
     anchorRef.current = null;
+    jumped.current = null;
     if (!stage || point === null) return;
     stage.scrollTop =
       point * layout.total - stage.clientHeight / 2 + origin(stage);
@@ -234,7 +244,10 @@ function PdfPages({
     const index = Math.min(Math.max(target, 1), pages.length) - 1;
     setPage(index + 1);
     setDraft(null);
-    if (stage) stage.scrollTop = origin(stage) + layout.tops[index]! - PAGE_GAP;
+    if (stage) {
+      stage.scrollTop = origin(stage) + layout.tops[index]! - PAGE_GAP;
+      jumped.current = { index, top: stage.scrollTop };
+    }
   }
   function commitDraft() {
     const number = Number.parseInt(draft ?? "", 10);

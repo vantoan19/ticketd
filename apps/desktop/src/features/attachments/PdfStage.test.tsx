@@ -61,14 +61,14 @@ function Stage({ onRetry = () => {} }: { onRetry?: () => void }) {
     </div>
   );
 }
-function scrollable() {
+function scrollable(max = Number.POSITIVE_INFINITY) {
   const stage = screen.getByTestId("stage");
   let top = 0;
   const to = (value: number) => (top = value);
   Object.defineProperty(stage, "scrollTop", {
     get: () => top,
     set: (value: number) => {
-      top = value;
+      top = Math.min(value, max);
     },
   });
   Object.defineProperty(stage, "clientHeight", { get: () => 600 });
@@ -270,4 +270,29 @@ test("leaving the PDF lets go of the parsed document", async () => {
   view.unmount();
   await act(async () => {});
   expect(pdf.destroy).toHaveBeenCalled();
+});
+
+test("Next reaches a short last page that the scroll cannot bring to the top", async () => {
+  serve(4);
+  render(<Stage />);
+  await screen.findByRole("img", { name: "Page 1" });
+  // The stage stops scrolling at 1500, before page 3 (at 2012) could reach the top.
+  const stage = scrollable(1500);
+  const field = screen.getByRole<HTMLInputElement>("textbox", { name: "Page" });
+  const next = () =>
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+  next();
+  fireEvent.scroll(stage.stage);
+  await waitFor(() => expect(field.value).toBe("2"));
+  // Page 2 still fills most of the view at 1500, but Next said page 3.
+  next();
+  fireEvent.scroll(stage.stage);
+  await act(async () => new Promise((resolve) => setTimeout(resolve, 50)));
+  expect(field.value).toBe("3");
+  next();
+  expect(field.value).toBe("4");
+  // Scrolling away by hand lets the view name the page again.
+  stage.to(100);
+  fireEvent.scroll(stage.stage);
+  await waitFor(() => expect(field.value).toBe("1"));
 });
