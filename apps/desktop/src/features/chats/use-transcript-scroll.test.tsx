@@ -163,6 +163,25 @@ test("the fold shrinking the turn, then rows that arrive, keeps following", () =
 
 // MOTION-18: a small wheel up inside the bottom band is the reader leaving,
 // and the next token does not snap them back.
+test("the Jump strip closing at the end is not the reader scrolling up", () => {
+  const { box, column, state } = setup();
+  size(box, 200, 1000);
+  resized(column);
+  wheelUp(box, 500);
+  expect(state()).toBe("stopped");
+  // End: the keydown, then the browser scrolls to the end of the shorter scroller.
+  fireEvent.keyDown(box, { key: "End" });
+  box.scrollTop = 1000;
+  fireEvent.scroll(box);
+  expect(state()).toBe("following");
+  // The strip closes under the reader, the scroller grows by 40px and the offset
+  // clamps, an event that lands within the key's half second.
+  size(box, 240, 1000);
+  fireEvent.scroll(box);
+  expect(box.scrollTop).toBe(760);
+  expect(state()).toBe("following");
+});
+
 test("a small wheel up stops following", () => {
   const { box, column, state } = setup();
   size(box, 200, 1000);

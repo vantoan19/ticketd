@@ -159,6 +159,102 @@ test("each step kind has its own icon; a running step shows the spinner instead"
   expect(icon(rows[2])).toContain("chat-spin");
 });
 
+const roles = readFileSync(
+  join(__dirname, "../../components/ui/surface-roles/chats-chats.css"),
+  "utf8",
+).replace(/\/\*[\s\S]*?\*\//g, "");
+
+test("only the step that runs is marked, and its verb and command take ink", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps(
+        { kind: "read", target: "a.ts", targets: [{ text: "a.ts" }] },
+        {
+          kind: "run",
+          target: "npm test",
+          command: "npm test",
+          state: "running",
+        },
+      ),
+    },
+  ]);
+  const rows = [...document.querySelectorAll(".chat-steps")];
+  expect(rows.map((row) => row.hasAttribute("data-running"))).toEqual([
+    false,
+    true,
+  ]);
+  // The cascade is read as text (jsdom has none); the spinner and clock stay muted.
+  expect(roles).toMatch(
+    /\.chat-steps\[data-running\] \.chat-step-verb,\s*\.chat-steps\[data-running\] \.chat-step-command \{[^}]*color: var\(--foreground\)/,
+  );
+});
+
+test("the working line's spinner is in the step rows' icon box", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
+      items: steps({
+        kind: "read",
+        target: "a.ts",
+        targets: [{ text: "a.ts" }],
+      }),
+    },
+  ]);
+  await waitFor(() =>
+    expect(
+      document.querySelector(".chat-working > .chat-row-icon > .chat-spin"),
+    ).toBeTruthy(),
+  );
+});
+
+test("a turn with a work line gives back the 4px inside its 28px row", async () => {
+  await show([
+    {
+      chat: chatState({ id: "c1", title: "Limiter" }),
+      items: [
+        ...steps({ kind: "read", target: "a.ts", targets: [{ text: "a.ts" }] }),
+        {
+          id: "turn:t1",
+          at,
+          kind: "turn",
+          turn_id: "t1",
+          started_at: at,
+          ended_at: at,
+          outcome: "completed",
+        },
+        {
+          id: "r1",
+          at,
+          kind: "response",
+          state: "complete",
+          text: "Done.",
+          turn_id: "t1",
+        },
+      ],
+    },
+  ]);
+  expect(
+    document.querySelector(".chat-turnpart")?.hasAttribute("data-fold"),
+  ).toBe(true);
+  expect(css).toMatch(
+    /\.chat-turnpart \{[^}]*contain-intrinsic-block-size: auto 28px[^}]*margin: -4px -12px;\s*padding: 4px 12px/,
+  );
+  expect(css).toMatch(/\.chat-turnpart\[data-fold\] \{\s*margin-block: -8px/);
+});
+
+test("a step row is one 20px line inside its 28px", () => {
+  expect(css).toMatch(
+    /\.chat-step-words\[data-line\] \{[^}]*height: 20px[^}]*white-space: nowrap/,
+  );
+});
+
+test("a long work-line label stays on one line and ends in an ellipsis", () => {
+  expect(css).toMatch(
+    /\.chat-fold > span \{[^}]*overflow: hidden;\s*text-overflow: ellipsis;\s*white-space: nowrap/,
+  );
+});
+
 test("a described command reads its description and opens to the exact command", async () => {
   await show([
     {

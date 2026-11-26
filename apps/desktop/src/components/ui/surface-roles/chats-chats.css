@@ -326,6 +326,12 @@ button.chat-steps:hover .chat-step-command {
 .chat-path-dir {
   color: var(--muted-foreground);
 }
+/* The step that runs stands out from the finished rows above it: its verb and
+   command in ink; the spinner and the clock stay muted. */
+.chat-steps[data-running] .chat-step-verb,
+.chat-steps[data-running] .chat-step-command {
+  color: var(--foreground);
+}
 .chat-steps [data-outcome] {
   color: var(--foreground);
   font-weight: 500;

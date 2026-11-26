@@ -31,6 +31,10 @@
      records, the tray and the composer all take these two. */
   --chat-column: 600px;
   --chat-gutter: 40px;
+  /* The styled scrollbar (styles.css, 10px) takes layout width in WebKit and
+     Chromium alike. The transcript always keeps its track, and the strip, the
+     tray and the jump strip give up the same width, so every edge is shared. */
+  --chat-track: 10px;
   /* Measured by lib/width-queries (data-width), not a query container: WebKit
      restyles a container's whole subtree each time it resizes. */
   contain: inline-size layout style;
@@ -51,9 +55,10 @@
   min-height: 0;
   margin: 0;
   padding: 4px 0;
-  /* Rows never scroll sideways: `clip` has no scrollport, so nothing a row
-     paints past its end (its visually hidden words) can be scrolled to. */
-  overflow-x: clip;
+  /* Rows never scroll sideways. With a scrolling y axis `clip` computes to
+     `hidden` in every engine, so say so: no scrollbar shows, and the reader
+     cannot reach what a row paints past its end (its visually hidden words). */
+  overflow-x: hidden;
   overflow-y: auto;
 }
 /* The row's ⋯ sits over the time on line 1 and shows on hover or focus. */
@@ -266,7 +271,7 @@
   flex-direction: column;
   min-height: 0;
   padding: 16px var(--chat-gutter) 0;
-  overflow-y: auto;
+  overflow-y: scroll;
   overflow-anchor: none;
 }
 /* Jump to latest: in its own 40px strip between the transcript and the dock,
@@ -278,6 +283,7 @@
   align-items: center;
   justify-content: center;
   height: 40px;
+  padding-right: var(--chat-track);
   overflow: hidden;
 }
 .chat-jump:not([data-shown]) {
@@ -303,7 +309,8 @@
   margin: 0 auto;
   padding-bottom: 40px;
 }
-.chat-part[data-kind="user"] + * {
+.chat-part[data-kind="user"] + *,
+.chat-divider + .chat-turn-unit {
   margin-top: -24px;
 }
 .chat-turn-unit + :is(.chat-working, .chat-working-slot) {
@@ -314,7 +321,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 16px var(--chat-gutter) 18px;
+  padding: 16px calc(var(--chat-gutter) + var(--chat-track)) 18px
+    var(--chat-gutter);
 }
 .chat-dock > * {
   width: 100%;
@@ -439,7 +447,11 @@
   /* The pointer travels from the answer to the actions without leaving the turn. */
   padding-top: 4px;
 }
-/* What the turn changed: rows 28px each, no gap between them. */
+/* What the turn changed: rows 28px each, no gap between them. The 4px inside
+   a 28px row is part of the 12px text to text, so the first row takes 8px. */
+.chat-changed {
+  margin-top: -4px;
+}
 .chat-changed + .chat-changed {
   margin-top: -12px;
 }
@@ -490,6 +502,9 @@
   display: flex;
   align-items: baseline;
   gap: 6px;
+  /* One 20px line box: the 14px verb and the 13px mono name sit on one
+     baseline but would make the row 28.4px or 29px high. */
+  height: 20px;
   white-space: nowrap;
 }
 .chat-step-words[data-line] > * {
@@ -529,10 +544,11 @@
 .chat-working-slot {
   min-height: var(--text-ui-line);
 }
-/* The work line: the fold on the left, the turn's time on the right, 28px. */
+/* The work line: the fold on the left, the turn's time on the right, 28px,
+   the time on the label's baseline. */
 .chat-foldline {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   justify-content: space-between;
   gap: 12px;
   min-height: 28px;
@@ -554,18 +570,35 @@
 .chat-fold > svg {
   flex: none;
 }
+/* A long label stays on one line and gives way with an ellipsis; the chevron
+   and the time keep their place. */
+.chat-fold > span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-turnpart,
 .chat-turn-rows {
   display: flex;
   flex-direction: column;
   min-width: 0;
 }
-/* Turns out of view skip layout and paint; a long Chat holds hundreds. The
-   margin keeps focus rings unclipped. */
+/* Turns out of view skip layout and paint (which also clips to the padding
+   box); a long Chat holds hundreds. The padding is room for the hover fill and
+   the focus ring (12px sideways, 4px above and below) and the negative margin
+   takes it back, so nothing moves. A skipped turn holds its work line's 28px,
+   so scrolling up never jumps. With a work line the part also gives back the
+   4px inside its 28px row, which is how 16px, 12px and 12px read text to
+   text. */
 .chat-turnpart {
   content-visibility: auto;
-  contain-intrinsic-block-size: auto 40px;
-  overflow-clip-margin: 8px;
+  contain-intrinsic-block-size: auto 28px;
+  margin: -4px -12px;
+  padding: 4px 12px;
+}
+.chat-turnpart[data-fold] {
+  margin-block: -8px;
 }
 .chat-foldline + .chat-turn-rows {
   margin-top: 8px;
@@ -1229,7 +1262,8 @@
   position: relative;
   z-index: 1;
   flex: none;
-  padding: 6px var(--chat-gutter);
+  padding: 6px calc(var(--chat-gutter) + var(--chat-track)) 6px
+    var(--chat-gutter);
 }
 /* Once the transcript is scrolled under the strip, its edge shows (CH-10). */
 .chat-linked > div {
