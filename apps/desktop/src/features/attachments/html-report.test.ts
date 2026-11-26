@@ -12,12 +12,23 @@ test("a self-contained report keeps its styles, table and embedded image", () =>
   const prepared = prepareReport(report);
   const doc = frame(prepared.srcdoc);
   expect(prepared.unusable).toBe(false);
-  expect(doc.querySelector("style")?.textContent).toContain(":root");
+  expect(doc.querySelector("style")?.textContent).toContain("margin: 24px");
   expect(doc.querySelectorAll("style").length).toBe(2);
   expect(doc.querySelectorAll("tbody tr")).toHaveLength(40);
   expect(
     doc.querySelector("img[alt='Pass rate']")?.getAttribute("src"),
   ).toMatch(/^data:image\/svg\+xml;base64,/);
+});
+
+test("a report that asks for a dark scheme still reads as a light page on the white frame", () => {
+  const prepared = prepareReport(
+    "<!doctype html><style>:root{color-scheme:dark light}</style><meta name='color-scheme' content='dark'><h1>Dark aware</h1>",
+  );
+  const doc = frame(prepared.srcdoc);
+  // Ours is the last rule in the head and important, so the report's own cannot undo it.
+  const last = doc.head.lastElementChild;
+  expect(last?.localName).toBe("style");
+  expect(last?.textContent).toBe(":root{color-scheme:light !important}");
 });
 
 test("scripts, handlers, links and the network stay off", () => {

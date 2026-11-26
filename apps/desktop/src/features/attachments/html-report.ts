@@ -88,10 +88,13 @@ export function prepareReport(source: string): PreparedReport {
   const csp = doc.createElement("meta");
   csp.setAttribute("http-equiv", "Content-Security-Policy");
   csp.setAttribute("content", REPORT_CSP);
-  // The frame reads as a light page unless the report asks otherwise, in either theme.
+  head.prepend(csp);
+  // The frame sits on white paper in either theme, so the page must read as light: a report
+  // that opts into a dark scheme (`color-scheme: dark light`) and paints no background of its
+  // own would otherwise draw light text on that paper. Important and last, so it wins.
   const scheme = doc.createElement("style");
-  scheme.textContent = ":root{color-scheme:light}";
-  head.prepend(csp, scheme);
+  scheme.textContent = ":root{color-scheme:light !important}";
+  head.append(scheme);
 
   const body = doc.body;
   let text = false;
