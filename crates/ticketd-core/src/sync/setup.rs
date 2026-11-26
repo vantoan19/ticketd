@@ -336,6 +336,19 @@ pub struct SyncSettings {
     pub attachment_download: AttachmentDownload,
 }
 
+/// One computer of the device registry, as Settings lists the computers that share this Workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncDevice {
+    pub id: String,
+    pub name: String,
+    /// The two-letter code in the references of tickets made on that computer.
+    pub code: String,
+    /// When that computer last uploaded a change; `None` until it has.
+    pub last_synced_at: Option<String>,
+    /// Whether this is the computer the list is read on.
+    pub this: bool,
+}
+
 /// A record or Attachment named in the status.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SyncItem {
@@ -760,6 +773,58 @@ impl Workspace {
         )?;
         touch(&self.connection)?;
         self.sync_settings()
+    }
+
+    /// The computers that share this Workspace: this one first, with its name as it is now
+    /// (the registry gets a new name by the next run), then the others as the registry
+    /// stood when this computer last read it, the most recent change first. Reads only this
+    /// Workspace's copy of the registry, so it needs no sign-in and no network; before the
+    /// first run it lists this computer alone.
+    pub fn sync_devices(&self) -> Result<Vec<SyncDevice>, Error> {
+        let state = state(&self.connection)?;
+        let cached: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT content FROM sync_files WHERE kind = 'devices' AND id = ?1",
+                [REGISTRY],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let registry: Registry = match cached {
+            Some(content) => read_shared(content.as_bytes())?,
+            None => Registry::default(),
+        };
+        let mine = state.device_id.as_deref();
+        let this = |id: &str, device: Option<&RegisteredDevice>| SyncDevice {
+            id: id.to_owned(),
+            name: state.device_name.clone().unwrap_or_else(computer_name),
+            code: self.device_code().unwrap_or_default(),
+            last_synced_at: device.and_then(|device| device.last_synced_at.clone()),
+            this: true,
+        };
+        let mut others: Vec<SyncDevice> = registry
+            .devices
+            .iter()
+            .filter(|(id, _)| Some(id.as_str()) != mine)
+            .map(|(id, device)| SyncDevice {
+                id: id.clone(),
+                name: device.name.clone(),
+                code: device.code.clone(),
+                last_synced_at: device.last_synced_at.clone(),
+                this: false,
+            })
+            .collect();
+        others.sort_by(|a, b| {
+            b.last_synced_at
+                .cmp(&a.last_synced_at)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        let first = match mine {
+            Some(id) => this(id, registry.devices.get(id)),
+            None => this("", None),
+        };
+        Ok(std::iter::once(first).chain(others).collect())
     }
 
     /// The `aws` program this desktop's person chose, if any. Unlike the bucket, it is kept

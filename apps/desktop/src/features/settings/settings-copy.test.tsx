@@ -95,6 +95,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
     settings: vi.fn(),
     setSettings: vi.fn(),
     setupOptions: vi.fn(),
+    devices: vi.fn(),
     flushOnExit: vi.fn(),
   },
 }));
@@ -133,6 +134,7 @@ beforeEach(() => {
   vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
   vi.mocked(syncApi.status).mockResolvedValue(syncStatus());
   vi.mocked(syncApi.settings).mockResolvedValue(syncSettings());
+  vi.mocked(syncApi.devices).mockResolvedValue([]);
 });
 afterEach(() => {
   cleanup();

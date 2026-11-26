@@ -21,8 +21,8 @@ pub use engine::{
 pub(crate) use engine::{migrate_source_state_conflicts, removed_by_sync};
 pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, S3Binding,
-    SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem,
-    SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
+    SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDevice, SyncDirection, SyncFolder,
+    SyncItem, SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
     s3_service_changed,
 };
 
