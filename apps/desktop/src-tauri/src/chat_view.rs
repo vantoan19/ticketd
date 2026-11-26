@@ -1992,8 +1992,9 @@ mod tests {
             ..Surroundings::default()
         };
         let mut live = ChatLive::idle();
-        let paused =
-            |live| chat_state(&chat(None), live, &Tracker::default(), &around).queue_paused;
+        let paused = |live: &ChatLive| {
+            chat_state(&chat(None), live, &Tracker::default(), &around).queue_paused
+        };
         assert!(!paused(&live));
         live.prepared_queue_edits.insert("prepared".to_owned());
         assert!(paused(&live));
