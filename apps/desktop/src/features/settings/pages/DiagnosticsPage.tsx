@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FolderOpen } from "lucide-react";
+import { ExternalLink, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Switch } from "@/components/ui/switch";
+import { RevealButton } from "@/components/ui/reveal-button";
+import { StatusLabel } from "@/components/ui/status-label";
 import { Time } from "@/components/ui/time";
-import { useCopy } from "@/components/ui/use-copy";
 import {
   describeFailure,
   type FailureDescription,
@@ -19,9 +19,10 @@ import {
 import { workspaceClient } from "@/lib/api/workspace";
 import { emptyCopy } from "@/lib/empty-copy";
 import { plural } from "@/lib/format";
-import { fileManagerName } from "@/lib/platform";
+import { openBugReport } from "@/lib/issue-url";
 import { sectionMeta } from "@/features/settings/settings-sections";
-import { lineFailure, splitPath } from "@/features/settings/settings-format";
+import { setDetailedLogging } from "@/features/settings/detailed-logging";
+import { splitPath } from "@/features/settings/settings-format";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import {
@@ -68,80 +69,233 @@ function useRead<T>(read: () => Promise<T>, what: string) {
   return [state, setState, reload] as const;
 }
 
-/** What the Debug logging row says, for each state its level can be in. */
-function debugDescription(level: Loaded<LogLevel>, current: LogLevel | null) {
-  if (level.status === "loading") {
-    return (
-      <span className="flex h-4 items-center">
-        <Skeleton className="h-2 w-70" />
-      </span>
-    );
-  }
-  if (level.status === "failed") return "The log level could not be read.";
-  if (current?.env_override != null) {
-    return (
-      <>
-        <code className="font-mono">TICKETD_LOG={current.env_override}</code>{" "}
-        sets the level for this launch, so this switch has no effect.
-      </>
-    );
-  }
-  return `Level: ${current?.level}. Records more detail until ticketd restarts.`;
-}
+/** What a saved report is called and where it is, for the row that follows a save. */
+type Saved = { path: string; name: string };
 
-function LogsSection() {
+/** One thing that failed, and what to repeat to try again. */
+type Failed = {
+  failure: FailureDescription;
+  retry: (() => void) | null;
+};
+
+function ReportSection() {
   const [level, setLevel, reload] = useRead(readLogLevel, "read the log level");
-  const [pending, setPending] = useState<boolean | null>(null);
-  const [failure, setFailure] = useState<FailureDescription | null>(null);
-  async function changeDebug(enabled: boolean) {
-    setFailure(null);
-    setPending(enabled);
+  const [busy, setBusy] = useState<"start" | "cancel" | "save" | null>(null);
+  const [failed, setFailed] = useState<Failed | null>(null);
+  const [saved, setSaved] = useState<Saved | null>(null);
+  const choosing = useRef(false);
+  const lastPath = useRef("");
+  const current = level.status === "ready" ? level.value : null;
+  const startedAt = current?.report_started_at ?? null;
+  const overridden = current?.env_override != null;
+
+  // The sidebar's status line says the same thing as this row.
+  useEffect(() => {
+    if (current) setDetailedLogging(current.report_started_at);
+  }, [current]);
+
+  async function change(
+    action: "start" | "cancel",
+    command: () => Promise<LogLevel>,
+  ) {
+    setFailed(null);
+    setBusy(action);
     try {
-      const next: LogLevel = await diagnosticsClient.setDebug(enabled);
-      setLevel({ status: "ready", value: next });
+      setLevel({ status: "ready", value: await command() });
+      setSaved(null);
     } catch (reason) {
-      setFailure(describeFailure(reason, "change the log level"));
+      setFailed({
+        failure: describeFailure(
+          reason,
+          action === "start" ? "start detailed logging" : "cancel the report",
+        ),
+        retry: null,
+      });
     } finally {
-      setPending(null);
+      setBusy(null);
     }
   }
+
+  async function saveReport() {
+    // One save sheet at a time; Saving… only once a path returns.
+    if (choosing.current) return;
+    choosing.current = true;
+    setFailed(null);
+    try {
+      const path = await workspaceClient.chooseSavePath({
+        title: "Save report",
+        defaultPath:
+          lastPath.current || (await diagnosticsClient.exportFileName()),
+        filterName: "Zip archive",
+        extension: "zip",
+      });
+      // Cancelling the sheet writes nothing and leaves the report open.
+      if (path === null) return;
+      lastPath.current = path;
+      setBusy("save");
+      try {
+        const report = await diagnosticsClient.saveReport(path);
+        setSaved({ path: report.path, name: splitPath(report.path).name });
+        // Saving ends the report, so detailed logging is off again.
+        await reloadQuietly();
+      } catch (reason) {
+        setFailed({
+          failure: describeFailure(reason, "save the report"),
+          retry: () => void saveReport(),
+        });
+      }
+    } catch (reason) {
+      setFailed({
+        failure: describeFailure(reason, "open the save dialog"),
+        retry: () => void saveReport(),
+      });
+    } finally {
+      choosing.current = false;
+      setBusy(null);
+    }
+  }
+
+  async function reloadQuietly() {
+    try {
+      setLevel({ status: "ready", value: await readLogLevel() });
+    } catch {
+      // The report is saved; the page shows that, and the next read corrects the rest.
+      setDetailedLogging(null);
+    }
+  }
+
   async function openFolder() {
-    setFailure(null);
+    setFailed(null);
     try {
       await diagnosticsClient.openLogsFolder();
     } catch (reason) {
-      setFailure(describeFailure(reason, "open the logs folder"));
+      setFailed({
+        failure: describeFailure(reason, "open the logs folder"),
+        retry: null,
+      });
     }
   }
-  const current = level.status === "ready" ? level.value : null;
-  const overridden = current?.env_override != null;
-  const shown = failure ?? (level.status === "failed" ? level.failure : null);
+
+  async function openIssue() {
+    setFailed(null);
+    try {
+      await openBugReport();
+    } catch (reason) {
+      setFailed({
+        failure: describeFailure(reason, "open the issue form"),
+        retry: () => void openIssue(),
+      });
+    }
+  }
+
+  const shown =
+    failed ??
+    (level.status === "failed"
+      ? { failure: level.failure, retry: () => void reload() }
+      : null);
   return (
-    <SettingsSection title="Logs">
+    <SettingsSection title="Report a problem">
       <SettingsList>
-        <SettingsRow
-          variant="top"
-          title="Debug logging"
-          titleId="debug-logging-label"
-          descriptionId="debug-logging-description"
-          description={debugDescription(level, current)}
-          trailing={
-            <Switch
-              aria-labelledby="debug-logging-label"
-              aria-describedby="debug-logging-description"
-              checked={pending ?? current?.debug ?? false}
-              disabled={current === null || overridden || pending !== null}
-              onCheckedChange={(enabled) => void changeDebug(enabled)}
-            />
-          }
-        />
+        {saved ? (
+          <SettingsRow
+            title={<span role="status">Saved {saved.name}</span>}
+            description="Attach it to your GitHub issue."
+            trailing={
+              <>
+                <RevealButton
+                  path={saved.path}
+                  onFailure={(failure) =>
+                    setFailed(failure && { failure, retry: null })
+                  }
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void openIssue()}
+                >
+                  Open an issue
+                  <ExternalLink aria-hidden="true" />
+                </Button>
+              </>
+            }
+          />
+        ) : startedAt ? (
+          <SettingsRow
+            title={
+              <StatusLabel tone="attention">Detailed logging is on</StatusLabel>
+            }
+            description={
+              <>
+                Repeat what went wrong, then save the report. Started{" "}
+                <Time value={startedAt} />.
+              </>
+            }
+            trailing={
+              <>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() =>
+                    void change("cancel", diagnosticsClient.cancelReport)
+                  }
+                >
+                  Cancel
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  disabled={busy !== null}
+                  onClick={() => void saveReport()}
+                >
+                  {busy === "save" ? "Saving…" : "Save report…"}
+                </Button>
+              </>
+            }
+          />
+        ) : (
+          <SettingsRow
+            title="Detailed logging"
+            description={
+              level.status === "loading" ? (
+                <span className="flex h-4 items-center">
+                  <Skeleton className="h-2 w-70" />
+                </span>
+              ) : overridden ? (
+                <>
+                  <code className="font-mono">
+                    TICKETD_LOG={current?.env_override}
+                  </code>{" "}
+                  sets the level for this launch, so a report cannot turn it on.
+                </>
+              ) : (
+                "Turn it on, repeat what went wrong, then save a report to attach to a GitHub issue."
+              )
+            }
+            trailing={
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={current === null || overridden || busy !== null}
+                onClick={() =>
+                  void change("start", diagnosticsClient.startReport)
+                }
+              >
+                Start
+              </Button>
+            }
+          />
+        )}
         <SettingsRow
           title="Log files"
-          description="One file per day, and the oldest are removed automatically. They stay on this computer."
+          description="Kept for 7 days on this computer."
           trailing={
             <Button
               type="button"
-              variant="outline"
+              variant="ghost"
               size="sm"
               onClick={() => void openFolder()}
             >
@@ -150,142 +304,17 @@ function LogsSection() {
             </Button>
           }
         />
-        {shown && (
-          <SettingsListFooter>
-            <FailureAlert
-              size="compact"
-              failure={shown}
-              {...(!failure && { onRetry: () => void reload() })}
-            />
-          </SettingsListFooter>
-        )}
-      </SettingsList>
-    </SettingsSection>
-  );
-}
-
-function ReportSection() {
-  const [exporting, setExporting] = useState(false);
-  const [copying, setCopying] = useState(false);
-  const [failed, setFailed] = useState<{
-    action: "export" | "summary";
-    failure: FailureDescription;
-  } | null>(null);
-  const [savedName, setSavedName] = useState("");
-  const choosing = useRef(false);
-  const lastPath = useRef("");
-  const { copied, error, copy } = useCopy();
-
-  async function exportDiagnostics() {
-    // One save sheet at a time; Exporting… only once a path returns.
-    if (choosing.current) return;
-    choosing.current = true;
-    setFailed(null);
-    setSavedName("");
-    try {
-      const path = await workspaceClient.chooseSavePath({
-        title: "Export diagnostics",
-        defaultPath:
-          lastPath.current || (await diagnosticsClient.exportFileName()),
-        filterName: "Zip archive",
-        extension: "zip",
-      });
-      if (path === null) return;
-      lastPath.current = path;
-      setExporting(true);
-      try {
-        const exported = await diagnosticsClient.export(path);
-        setSavedName(splitPath(exported.path).name);
-      } catch (reason) {
-        setFailed({
-          action: "export",
-          failure: describeFailure(reason, "export the diagnostics"),
-        });
-      }
-    } catch (reason) {
-      setFailed({
-        action: "export",
-        failure: describeFailure(reason, "open the save dialog"),
-      });
-    } finally {
-      choosing.current = false;
-      setExporting(false);
-    }
-  }
-
-  async function copySummary() {
-    setFailed(null);
-    setCopying(true);
-    try {
-      await copy("summary", await diagnosticsClient.summary());
-    } catch (reason) {
-      setFailed({
-        action: "summary",
-        failure: describeFailure(reason, "read the summary"),
-      });
-    } finally {
-      setCopying(false);
-    }
-  }
-
-  const shown = failed?.failure ?? (error ? lineFailure(error) : null);
-  return (
-    <SettingsSection title="Report a problem">
-      <SettingsList>
-        <SettingsRow
-          title="Export diagnostics"
-          description={
-            savedName ? (
-              <span role="status">
-                Saved {savedName} and showed it in {fileManagerName()}.
-              </span>
-            ) : (
-              "A small .zip of redacted logs and Workspace health to attach to a bug report."
-            )
-          }
-          trailing={
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={exporting}
-              onClick={() => void exportDiagnostics()}
-            >
-              {exporting ? "Exporting…" : "Export diagnostics…"}
-            </Button>
-          }
-        />
-        <SettingsRow
-          title="Summary"
-          description="The version and system details an issue form asks for."
-          trailing={
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="min-w-28"
-              disabled={copying}
-              onClick={() => void copySummary()}
-            >
-              {copying ? "Copying…" : copied ? "Copied" : "Copy summary"}
-            </Button>
-          }
-        />
         <SettingsListFooter>
           {shown && (
             <FailureAlert
               size="compact"
-              failure={shown}
+              failure={shown.failure}
               className="mb-2"
-              {...(failed && {
-                onRetry: () =>
-                  void (failed.action === "export"
-                    ? exportDiagnostics()
-                    : copySummary()),
-              })}
+              {...(shown.retry && { onRetry: shown.retry })}
             />
           )}
-          Files attached to a public GitHub issue can be read by anyone.
+          Reports never hold the text of your tickets. Anyone can read files on
+          a public GitHub issue.
         </SettingsListFooter>
       </SettingsList>
     </SettingsSection>
@@ -327,7 +356,7 @@ function RecentErrorsSection() {
   return (
     <SettingsSection
       title="Recent errors"
-      caption="The last kinds of warning and error ticketd logged, from the files still kept."
+      caption="From the last 7 days of logs."
     >
       {errors.status === "failed" ? (
         <FailureAlert
@@ -376,7 +405,6 @@ function RecentErrorsSection() {
 export function DiagnosticsPage() {
   return (
     <SettingsPage {...sectionMeta("diagnostics")}>
-      <LogsSection />
       <ReportSection />
       <RecentErrorsSection />
     </SettingsPage>

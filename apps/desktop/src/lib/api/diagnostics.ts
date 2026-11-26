@@ -6,10 +6,15 @@ const logLevelSchema = lazySchema(() =>
   z.object({
     /** `info`, `debug`, or the TICKETD_LOG filter itself. */
     level: z.string(),
-    /** Debug logging is on. */
+    /** Detailed logging is on. */
     debug: z.boolean(),
-    /** The TICKETD_LOG filter that overrides the switch, if one was set at launch. */
+    /** The TICKETD_LOG filter that overrides detailed logging, if one was set at launch. */
     env_override: z.string().nullable(),
+    /**
+     * When the open report started, while one is open. Detailed logging stays on, across a
+     * restart, until the report is saved or cancelled.
+     */
+    report_started_at: z.string().nullable(),
   }),
 );
 export type LogLevel = z.infer<typeof logLevelSchema>;
@@ -33,16 +38,24 @@ const exportedSchema = lazySchema(() =>
 );
 export type DiagnosticsExport = z.infer<typeof exportedSchema>;
 
-/** Settings → Diagnostics: the local logs, and the redacted bundle made from them. */
+const issueDetailsSchema = lazySchema(() =>
+  z.object({ version: z.string(), environment: z.string() }),
+);
+/** What GitHub's bug form takes for its own `version` and `environment` fields. */
+export type IssueDetails = z.infer<typeof issueDetailsSchema>;
+
+/** Settings → Diagnostics: the local logs, and the redacted report made from them. */
 export const diagnosticsClient = {
   async logLevel() {
     return logLevelSchema.parse(await invoke("diagnostics_log_level"));
   },
-  /** Turns Debug logging on or off until ticketd restarts; resolves to the new level. */
-  async setDebug(enabled: boolean) {
-    return logLevelSchema.parse(
-      await invoke("diagnostics_set_debug", { enabled }),
-    );
+  /** Opens a report: detailed logging stays on, across a restart, until it is saved or cancelled. */
+  async startReport() {
+    return logLevelSchema.parse(await invoke("diagnostics_start_report"));
+  },
+  /** Cancels the open report and turns detailed logging off. */
+  async cancelReport() {
+    return logLevelSchema.parse(await invoke("diagnostics_cancel_report"));
   },
   /** Shows the logs folder in the file manager. */
   async openLogsFolder() {
@@ -56,14 +69,17 @@ export const diagnosticsClient = {
   async exportFileName() {
     return z.string().parse(await invoke("diagnostics_export_file_name"));
   },
-  /** The environment summary for pasting into an issue. */
-  async summary() {
-    return z.string().parse(await invoke("diagnostics_summary"));
+  /** The version and system for GitHub's bug form. */
+  async issueDetails() {
+    return issueDetailsSchema.parse(await invoke("diagnostics_issue_details"));
   },
-  /** Writes the bundle to `destination` and shows it in the file manager. */
-  async export(destination: string) {
+  /**
+   * Writes the redacted report to `destination`, then ends the open report. A report that
+   * cannot be written stays open. Nothing is sent anywhere.
+   */
+  async saveReport(destination: string) {
     return exportedSchema.parse(
-      await invoke("diagnostics_export", { destination }),
+      await invoke("diagnostics_save_report", { destination }),
     );
   },
 };

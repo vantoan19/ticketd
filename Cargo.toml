@@ -20,7 +20,7 @@ ticketd-diagnostics = { path = "crates/ticketd-diagnostics" }
 ticketd-macos-notifications = { path = "crates/ticketd-macos-notifications" }
 tracing = "0.1"
 # Only the pieces the two binaries install: the filter, the JSON and text formatters, and
-# the reload handle behind the Debug logging switch.
+# the reload handle behind detailed logging.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry", "fmt", "json", "env-filter", "smallvec", "tracing-log"] }
 tracing-log = "0.2"
 clap = { version = "4", features = ["derive"] }
