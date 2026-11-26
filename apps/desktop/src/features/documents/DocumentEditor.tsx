@@ -1032,7 +1032,10 @@ function RecoveredDocumentEditor({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   // The rail's room stays while editing (the rail itself is hidden), so the column does not move.
-  const railRoom = expanded && showsOutline(outline);
+  // Whether the Document has one is decided when Edit starts and kept until Done, so adding or
+  // removing headings while typing never moves the column.
+  const [roomAtEdit, setRoomAtEdit] = useState<boolean | null>(null);
+  const railRoom = expanded && (roomAtEdit ?? showsOutline(outline));
   const railShown = railRoom && !writing;
   // The heading line left out of the editor, while the body still starts with it.
   const head =
@@ -1043,6 +1046,7 @@ function RecoveredDocumentEditor({
     setHiddenHead(
       edit && initial ? body.slice(0, body.length - stripped.length) : "",
     );
+    setRoomAtEdit(edit ? showsOutline(outline) : null);
     setWriting(edit);
   };
   const actionsTrigger = useRef<HTMLButtonElement>(null);

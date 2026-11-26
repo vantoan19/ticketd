@@ -642,6 +642,9 @@ export function Documents({
         <Count>{unpinned(items).length}</Count>
       </h2>
     );
+  // A fold's rows are on screen only once loaded, and not while its read has failed.
+  const finishedShown = finishedOpen && finishedLoaded && !finishedError;
+  const unlinkedShown = unlinkedOpen && unlinkedLoaded && !unlinkedError;
   /** Everything the arrow keys visit, in order: Documents, and the headers that fold them. */
   const rovingItems: string[] = [];
   const visibleRows = showTrash
@@ -654,8 +657,8 @@ export function Documents({
             ...groups.flatMap((group) =>
               groupOpen(groupKey(group.plan)) ? group.documents : [],
             ),
-            ...(finishedOpen ? finished : []),
-            ...(unlinkedOpen ? unlinked : []),
+            ...(finishedShown ? finished : []),
+            ...(unlinkedShown ? unlinked : []),
           ]
         : [...groupPins, ...unpinned(sorted ? all : recent)];
   if (!showTrash && !searching && view === "current") {
@@ -667,11 +670,11 @@ export function Documents({
     }
     if (work && work.finished > 0) {
       rovingItems.push("group:finished");
-      if (finishedOpen) rovingItems.push(...finished.map((doc) => doc.id));
+      if (finishedShown) rovingItems.push(...finished.map((doc) => doc.id));
     }
     if (work && work.unlinked > 0) {
       rovingItems.push("group:unlinked");
-      if (unlinkedOpen) rovingItems.push(...unlinked.map((doc) => doc.id));
+      if (unlinkedShown) rovingItems.push(...unlinked.map((doc) => doc.id));
     }
   } else rovingItems.push(...visibleRows.map((doc) => doc.id));
   const tabRow =
