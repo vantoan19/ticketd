@@ -50,9 +50,10 @@ const WHOLE = {
   partial: false,
 };
 
-function serve(text = LOG) {
+function serve(text = LOG, firstLine = 1) {
   vi.mocked(invoke).mockImplementation(async (command) => {
     if (command === "attachment_text") return new TextEncoder().encode(text);
+    if (command === "attachment_text_first_line") return firstLine;
     throw new Error(`Unexpected ${command}`);
   });
 }
@@ -122,6 +123,38 @@ test("a log draws its numbered lines, never all of them, and says when it is onl
       "Showing the last 5 MB of 240 MB. Open it in its app for the rest.",
     ),
   ).toBeTruthy();
+});
+
+test("the end of a long log keeps the file's own line numbers", async () => {
+  serve(LOG, 3_410_207);
+  render(
+    <Stage
+      scope={{
+        total_bytes: 22 * 1024 * 1024,
+        shown_bytes: 5 * 1024 * 1024,
+        partial: true,
+      }}
+    />,
+  );
+  await screen.findByRole("document", { name: "Text of e2e-run.log" });
+  const rows = drawn();
+  expect(rows[0]!.dataset["n"]).toBe("3410207");
+  expect(rows[1]!.dataset["n"]).toBe("3410208");
+  expect(invoke).toHaveBeenCalledWith("attachment_text_first_line", {
+    workspace: "workspace",
+    id: "log-1",
+  });
+});
+
+test("a whole log is numbered from 1 without asking for a start line", async () => {
+  serve();
+  render(<Stage />);
+  await screen.findByRole("document", { name: "Text of e2e-run.log" });
+  expect(drawn()[0]!.dataset["n"]).toBe("1");
+  expect(invoke).not.toHaveBeenCalledWith(
+    "attachment_text_first_line",
+    expect.anything(),
+  );
 });
 
 test("a log that can't be read says so and retries", async () => {

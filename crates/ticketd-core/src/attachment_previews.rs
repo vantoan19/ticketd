@@ -275,6 +275,19 @@ impl Workspace {
         read_text_window(file, TEXT_WHOLE_BYTES, TEXT_TAIL_BYTES)
     }
 
+    /// The number of the first line `attachment_text` returns: 1 when it is the whole file,
+    /// otherwise the count of lines cut from its start, plus one, so the viewer can number a
+    /// log's end as the file does.
+    pub fn attachment_text_first_line(&self, workspace: &str, id: &str) -> Result<u64, Error> {
+        let attachment = self.preview_attachment(workspace, id)?;
+        if self.text_excerpt(&attachment).is_none() {
+            return Err(Error::Attachment("This file is not plain text.".into()));
+        }
+        let (_, file) = open_snapshot(&self.connection, &attachment)
+            .map_err(|failure| Error::Attachment(failure.message))?;
+        text_window_first_line(file, TEXT_WHOLE_BYTES, TEXT_TAIL_BYTES)
+    }
+
     /// Whether a stored local file starts like a PDF. A file that cannot be read is not.
     fn is_pdf(&self, attachment: &Attachment) -> bool {
         let Ok((_, file)) = open_snapshot(&self.connection, attachment) else {
@@ -498,16 +511,7 @@ fn read_text_window(mut file: File, whole: u64, tail: u64) -> Result<String, Err
     file.seek(SeekFrom::Start(start))?;
     let mut bytes = Vec::new();
     file.take(length - start).read_to_end(&mut bytes)?;
-    let mut from = 0;
-    if start > 0 {
-        while bytes.get(from).is_some_and(|b| b & 0xc0 == 0x80) {
-            from += 1;
-        }
-        let near = &bytes[from..bytes.len().min(from + TEXT_LINE_START_WINDOW)];
-        if let Some(line_break) = near.iter().position(|b| *b == b'\n') {
-            from += line_break + 1;
-        }
-    }
+    let from = if start > 0 { window_skip(&bytes) } else { 0 };
     let text = String::from_utf8_lossy(&bytes[from..]);
     let text = strip_terminal_escapes(&text);
     Ok(if text.chars().any(is_stray_control) {
@@ -517,6 +521,50 @@ fn read_text_window(mut file: File, whole: u64, tail: u64) -> Result<String, Err
     } else {
         text
     })
+}
+
+/// How many bytes of a tail window to skip so it starts on a character boundary and, when
+/// a line break is near, at the start of the next line.
+fn window_skip(bytes: &[u8]) -> usize {
+    let mut from = 0;
+    while bytes.get(from).is_some_and(|b| b & 0xc0 == 0x80) {
+        from += 1;
+    }
+    let near = &bytes[from..bytes.len().min(from + TEXT_LINE_START_WINDOW)];
+    if let Some(line_break) = near.iter().position(|b| *b == b'\n') {
+        from += line_break + 1;
+    }
+    from
+}
+
+/// The number of the first line `read_text_window` shows: 1 for a whole file, otherwise the
+/// lines before the tail plus one, so a log's end keeps the file's own line numbers.
+fn text_window_first_line(mut file: File, whole: u64, tail: u64) -> Result<u64, Error> {
+    let length = file.metadata()?.len();
+    if length <= whole {
+        return Ok(1);
+    }
+    let start = length - tail;
+    file.seek(SeekFrom::Start(start))?;
+    let mut head = Vec::new();
+    (&mut file)
+        .take(4 + TEXT_LINE_START_WINDOW as u64)
+        .read_to_end(&mut head)?;
+    let shown_from = start + window_skip(&head) as u64;
+    file.seek(SeekFrom::Start(0))?;
+    let mut remaining = shown_from;
+    let mut breaks = 0u64;
+    let mut buffer = vec![0u8; 1 << 20];
+    while remaining > 0 {
+        let want = buffer.len().min(remaining as usize);
+        let read = file.read(&mut buffer[..want])?;
+        if read == 0 {
+            break;
+        }
+        breaks += buffer[..read].iter().filter(|b| **b == b'\n').count() as u64;
+        remaining -= read as u64;
+    }
+    Ok(breaks + 1)
 }
 
 /// Removes ANSI/VT escape sequences (colours, cursor moves, titles) and the bell and

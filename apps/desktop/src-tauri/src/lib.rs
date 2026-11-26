@@ -2407,6 +2407,7 @@ pub fn run() -> Result<(), tauri::Error> {
             attachment_commands::resolve_attachment_uri,
             attachment_commands::attachment_preview,
             attachment_commands::attachment_html,
+            attachment_commands::attachment_text_first_line,
             attachment_commands::attachment_pdf,
             attachment_commands::attachment_text,
             attachment_commands::draft_retentions,

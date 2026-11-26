@@ -402,13 +402,13 @@
 }
 .attachment-text-line {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: var(--text-gutter, 64px) minmax(0, 1fr);
   min-height: 20px;
 }
 /* The line number is generated, so it is never selected or copied. */
 .attachment-text-line::before {
   content: attr(data-n);
-  padding-inline: 0 12px;
+  padding-inline: 0 12px; /* GUTTER_PADDING in TextStage.tsx */
   text-align: right;
   font-variant-numeric: tabular-nums;
   user-select: none;

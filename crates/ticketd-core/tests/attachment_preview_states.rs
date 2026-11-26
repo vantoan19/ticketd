@@ -315,6 +315,19 @@ fn a_log_over_the_limit_shows_its_last_five_megabytes_from_a_line_start() {
     assert!(text.len() as u64 > TEXT_TAIL_BYTES - 200);
     assert!(text.starts_with("2026-11-26 12:00:00 INFO request done"));
     assert!(text.ends_with("the last line\n"));
+    // The tail keeps the file's own numbering: its first line follows the dropped ones.
+    let newlines = |bytes: &[u8]| bytes.iter().filter(|b| **b == b'\n').count() as u64;
+    assert_eq!(
+        workspace
+            .attachment_text_first_line(&identity, &file.id)
+            .unwrap(),
+        newlines(&big) - newlines(text.as_bytes()) + 1
+    );
+    assert!(
+        workspace
+            .attachment_text_first_line("other", &file.id)
+            .is_err()
+    );
 
     // Exactly at the limit it is still whole.
     let at_limit = "x\n".repeat(TEXT_WHOLE_BYTES as usize / 2);
@@ -335,5 +348,12 @@ fn a_log_over_the_limit_shows_its_last_five_megabytes_from_a_line_start() {
             .unwrap()
             .len(),
         at_limit.len()
+    );
+    // A whole file starts at line 1.
+    assert_eq!(
+        workspace
+            .attachment_text_first_line(&identity, &file.id)
+            .unwrap(),
+        1
     );
 }
