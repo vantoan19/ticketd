@@ -2215,9 +2215,10 @@ async fn send_now_defers_a_linked_attachment_and_leaves_the_paused_queue_alone()
 }
 
 fn fixture_with_link_context(
+    fake: FakeAdapter,
     before_read: impl Fn() -> Result<(), String> + Send + Sync + 'static,
 ) -> Fixture {
-    let mut f = Fixture::new(FakeAdapter::codex());
+    let mut f = Fixture::new(fake);
     let path = f.path.clone();
     let context_path = path.clone();
     f.host = ChatHost::with_context(
@@ -2237,7 +2238,7 @@ fn fixture_with_link_context(
 
 #[tokio::test(start_paused = true)]
 async fn repeated_link_requests_wait_for_context_while_unrelated_input_steers() {
-    let f = fixture_with_link_context(|| Ok(()));
+    let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
     f.send("first").await;
     let link = ChatLink {
         kind: ChatLinkKind::Ticket,
@@ -2295,6 +2296,43 @@ async fn repeated_link_requests_wait_for_context_while_unrelated_input_steers() 
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_existing_link_saved_before_acknowledgement_waits_if_the_turn_cannot_steer() {
+    let f = fixture_with_link_context(FakeAdapter::without_steering(), || Ok(()));
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Already linked").unwrap().id,
+    };
+    f.core()
+        .add_chat_links(&f.chat.id, std::slice::from_ref(&link))
+        .unwrap();
+    let first = f.fake.hold_next_submit();
+    f.send("first").await;
+    assert_eq!(f.submits()[0].text, "linked records: 1\n\nfirst");
+    let linked = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Read this too",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    first.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+    assert!(f.message(&linked.id).attempts.is_empty());
+    assert_eq!(f.submits().len(), 1);
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submissions = f.submits();
+    assert_eq!(submissions[1].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[1].text, "Read this too");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    assert_eq!(f.message(&linked.id).attempts.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_failed_live_link_context_read_retries_before_dispatch() {
     linked_context_recovers_without_an_extra_attempt(LinkedContextSession::Live).await;
 }
@@ -2318,7 +2356,7 @@ enum LinkedContextSession {
 async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContextSession) {
     let failing = Arc::new(AtomicBool::new(false));
     let state = failing.clone();
-    let mut f = fixture_with_link_context(move || {
+    let mut f = fixture_with_link_context(FakeAdapter::codex(), move || {
         if state.load(Ordering::SeqCst) {
             Err("context source unavailable".to_owned())
         } else {
@@ -2393,7 +2431,7 @@ async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContext
 }
 
 async fn linked_attachment_reaches_the_session_with_context(active_mode: Option<SendMode>) {
-    let f = fixture_with_link_context(|| Ok(()));
+    let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
     if active_mode.is_some() {
         f.host.stop(&f.chat.id).await.unwrap();
         f.queue("stay paused").await;

@@ -2150,6 +2150,7 @@ impl Supervisor {
                     true
                 }
             });
+            return;
         }
         // What the person asked to send again goes alone, as a new turn.
         loop {
