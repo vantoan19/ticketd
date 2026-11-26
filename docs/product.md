@@ -198,6 +198,16 @@ opens the graph to understand dependency chains.
   external refresh. If saved content changes beneath a draft, the person chooses to
   reload or save over it; nothing merges automatically.
 
+- **Settings.** One window of pages in five groups, each page opening with its title
+  and one line saying what it is for: **Preferences** (Appearance, Attention),
+  **Workspace** (Workspace sync, Files, Backups & export), **AI** (Command line, Agent
+  skills, Agents, and Automations while Chats are on), **Connections** (Ticket sources)
+  and **Help** (Keyboard shortcuts, Diagnostics, About). A search field above the groups
+  finds a setting by name. Things you can have several of, such as a connection, are rows
+  on their page that open in place with a way back; the sidebar never lists them.
+  Backups & export is one page for where the Workspace file is, the copies to go back
+  to, and the copies to take elsewhere.
+
 The interface follows [DESIGN.md](../DESIGN.md).
 
 ## CLI and context contract
@@ -379,7 +389,7 @@ not synchronize with branches, worktrees, or CI.
 
 An **Attachment** is a reusable file identity within one Workspace, stored as an
 immutable local snapshot with its original bytes, filename, size, and a separate
-display name. The default per-file limit is 100 MiB (Settings > Attachments).
+display name. The default per-file limit is 100 MiB (Settings > Files).
 
 - Files attach to a ticket from its property rail, or insert into any editor as
   Markdown links (`ticketd://attachment/<workspace-id>/<attachment-id>`) by file
@@ -405,7 +415,7 @@ system's secure store.
   Last-known metadata survives offline and provider failures, and each access failure
   has its own recovery. Removing a reference never deletes the Drive file or changes
   sharing. CLI: `attachment drive-add`, `drive-resolve`, `drive-authorize`.
-- **Uploads.** Settings > Attachments sets one upload destination: the local Workspace
+- **Uploads.** Settings > Files sets one upload destination: the local Workspace
   or a writable Drive folder. Each upload keeps its destination through retry and
   restart, and a provider failure never silently falls back to local storage. Uploads
   are durable operations whose retry verifies provenance, size, and digest. An
@@ -422,7 +432,7 @@ workflows as GitHub. [External ticket authority](adr/0006-external-ticket-author
 
 Install another extension from a local folder with `ticketd source extension add PATH`.
 Review the program and declared hosts before approving. The provider then
-appears in Settings → Sources. Authors can link their build folder with
+appears in Settings → Ticket sources. Authors can link their build folder with
 `ticketd source extension link PATH`. The author guide covers the contract,
 the TypeScript example and conformance. [Write a ticket source extension](ticket-source-extensions.md)
 
@@ -430,7 +440,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   a personal API key that can read them. Filter discovery by assignee, labels, or
   project. ticketd syncs the issue's current state and its comments and
   timeline.
-- Add and name source connections under Settings → Sources. Several accounts can
+- Add and name source connections under Settings → Ticket sources. Several accounts can
   connect to the same provider. Connections stay on this device and are excluded
   from Workspace sync, portable backups, and JSON exports.
 - Extension credentials go in the system keychain. When a tracker rejects
@@ -446,7 +456,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   imported and refreshed through one connection. When no local connection covers
   a ticket, it shows its last synced content and says the provider isn’t connected
   on this desktop. The ticket carries the provider’s display name and icon.
-  During a manually started refresh, **Cancel sync** is available in Settings → Sources.
+  During a manually started refresh, **Cancel sync** is available in Settings → Ticket sources.
 - An **externally owned** ticket receives its title, description, confirmed closures
   and reopenings from the tracker. Progress on open issues, Plan membership,
   relationships, tags, Activities, and Documents stay in ticketd.
@@ -484,7 +494,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   [Recover a legacy GitHub issue link](cli.md#recover-a-legacy-github-issue-link)
 - A saved connection remains in Sources when its extension is uninstalled.
   You can rename or remove it while the extension is unavailable.
-- Remove a connection in Settings → Sources or with
+- Remove a connection in Settings → Ticket sources or with
   `ticketd source CONNECTION remove`. Its tickets keep their external identity,
   last synced content, status and local work, and show **Connection removed** on
   this desktop. Discovery of the same issue through a covering connection resumes
@@ -656,7 +666,7 @@ file bytes.
 
 ### Native Chats
 
-Native Chat is experimental and off by default (Settings > Chat). A Chat hosts the
+Native Chat is experimental and off by default (Settings > Agents). A Chat hosts the
 person's own installed Claude Code, Codex or Antigravity harness with its own sign-in. ticketd
 detects the installation and guides the person to the harness's login; it does not
 collect OAuth tokens, proxy model requests, or change billing.

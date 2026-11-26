@@ -8,10 +8,7 @@ import {
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { sectionMeta } from "@/features/settings/settings-sections";
-import {
-  AppliesRightAway,
-  SettingsPage,
-} from "@/features/settings/layout/SettingsPage";
+import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import "@/features/settings/pages/appearance.css";
 
@@ -79,11 +76,7 @@ export function AppearancePage() {
       />
     );
   return (
-    <SettingsPage
-      {...sectionMeta("appearance")}
-      lede="How ticketd looks on this computer."
-      endSlot={<AppliesRightAway />}
-    >
+    <SettingsPage {...sectionMeta("appearance")}>
       <SettingsSection
         title="Theme"
         caption={`System follows your operating system${systemDark === null ? "." : systemDark ? ", and is dark right now." : ", and is light right now."}`}

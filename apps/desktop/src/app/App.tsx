@@ -26,7 +26,11 @@ import {
 } from "@/features/documents/navigation";
 import type { DocumentCommands } from "@/features/documents/Documents";
 import type { AttachmentCommands } from "@/features/attachments/AttachmentLibrary";
-import type { SettingsPageId } from "@/features/settings/settings-sections";
+import {
+  resolveSettingsPage,
+  type LegacySettingsPageId,
+  type SettingsPageId,
+} from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
 import { client, type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
@@ -278,8 +282,14 @@ function AppContent() {
   const [newChatRequest, setNewChatRequest] = useState(0);
   // Menus and popovers opened in the content panel stay inside it (P3).
   const [contentPanel, setContentPanel] = useState<HTMLElement | null>(null);
-  const [settingsSection, setSettingsSection] =
+  const [settingsSection, setSettingsPage] =
     useState<SettingsPageId>("appearance");
+  // A page asked for by an old name opens the page that replaced it.
+  const setSettingsSection = useCallback(
+    (page: SettingsPageId | LegacySettingsPageId) =>
+      setSettingsPage(resolveSettingsPage(page)),
+    [],
+  );
   const [projectSource, setProjectSource] = useState<
     | ({ mode: "setup" } & ProjectSourceSetup)
     | {
@@ -353,7 +363,7 @@ function AppContent() {
   function setupProjectSource(setup: ProjectSourceSetup) {
     setProjectSource({ mode: "setup", ...setup });
     openView("settings");
-    setSettingsSection("sources");
+    setSettingsSection("ticket-sources");
   }
   useSyncNavigation({
     openSettings: () => {
@@ -958,7 +968,7 @@ function AppContent() {
                     openSettings: (connection) => {
                       openView("settings");
                       setSettingsSection(
-                        connection ? `source-${connection}` : "sources",
+                        connection ? `source-${connection}` : "ticket-sources",
                       );
                     },
                     refreshAll: () => refreshSources(),

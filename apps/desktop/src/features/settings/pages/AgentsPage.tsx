@@ -4,19 +4,15 @@ import { NotificationsCard } from "@/features/chats/NotificationsCard";
 import { useChatFeature } from "@/features/chats/use-chats";
 import { ChatHarnesses } from "@/features/settings/ChatHarnesses";
 import { sectionMeta } from "@/features/settings/settings-sections";
-import {
-  AppliesRightAway,
-  SettingsPage,
-} from "@/features/settings/layout/SettingsPage";
+import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 
-export function ChatPage() {
+/** Settings › Agents: the Chats switch and the agents on this computer. */
+export function AgentsPage() {
   const { enabled } = useChatFeature();
   return (
     <SettingsPage
-      {...sectionMeta("chat")}
+      {...sectionMeta("agents")}
       titleAccessory={<Badge variant="experimental">Experimental</Badge>}
-      lede="Work in ticketd with the coding tools installed on this computer."
-      endSlot={<AppliesRightAway />}
     >
       <ExperimentalCard />
       {enabled && <ChatHarnesses />}

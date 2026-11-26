@@ -62,13 +62,13 @@ export function SettingsStateProvider({
           (agents) => set("agent-skills", skillsNeedSetup(agents)),
           () => set("agent-skills", undefined),
         );
-      // Harnesses matter only while Chat is shown.
-      if (reads("chat")) {
-        if (!chatEnabled) set("chat", undefined);
+      // Harnesses matter only while Chats are shown.
+      if (reads("agents")) {
+        if (!chatEnabled) set("agents", undefined);
         else
           void chats.harnesses().then(
-            (harnesses) => set("chat", chatNeedsSetup(harnesses)),
-            () => set("chat", undefined),
+            (harnesses) => set("agents", chatNeedsSetup(harnesses)),
+            () => set("agents", undefined),
           );
       }
     },

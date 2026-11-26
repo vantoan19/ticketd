@@ -16,7 +16,7 @@ const preferencesSchema = z.object({
   notifyReminders: z.boolean().catch(false),
   /** The Experimental Chat switch. The desktop backend is told at startup. */
   chat: z.boolean().catch(false),
-  /** Settings > Chat > Notify me about Chats. On by default. */
+  /** Settings > Agents > Notify me about Chats. On by default. */
   notifyChats: z.boolean().catch(true),
   /** What Documents opens on: the work in progress, or the Documents opened lately. */
   documentsView: z.enum(["current", "recent"]).catch("current"),

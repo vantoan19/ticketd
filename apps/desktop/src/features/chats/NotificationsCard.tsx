@@ -16,7 +16,7 @@ import { notificationClient } from "@/lib/api/notifications";
 import { setPreference, usePreferences } from "@/lib/preferences";
 
 /**
- * Settings > Chat > Notifications: the one switch for system notifications
+ * Settings > Agents > Notifications: the one switch for system notifications
  * about Chats not in view. Per-Chat mute lives in the Chat actions menu. When
  * the system blocks ticketd the switch reads off until Check again finds it
  * allowed; the person's choice is kept meanwhile.

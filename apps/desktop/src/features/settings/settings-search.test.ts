@@ -71,19 +71,19 @@ test("splitMatch cuts text around the first match, keeping its original case", (
 
 test("search finds a row by the title its page shows", () => {
   const first = (query: string) => searchSettings(query, SETTINGS_ENTRIES)[0];
-  expect(first("Largest file")?.section).toBe("attachments");
-  expect(first("upload limit")?.section).toBe("attachments");
+  expect(first("Largest file")?.section).toBe("files");
+  expect(first("upload limit")?.section).toBe("files");
   expect(first("Check for changes every")?.section).toBe("workspace-sync");
   expect(first("Third-party notices")?.section).toBe("about");
   expect(first("Dialogs and menus")?.section).toBe("keyboard-shortcuts");
 });
 
-test("sync is found on Workspace sync by either storage, and Drive attachments stay on Google Drive", () => {
+test("sync is found on Workspace sync by either storage, and Drive uploads on Files", () => {
   const sections = (query: string) =>
     searchSettings(query, SETTINGS_ENTRIES).map((hit) => hit.section);
   for (const query of ["sync", "s3 bucket", "aws profile", "sso"])
     expect(sections(query)[0], query).toBe("workspace-sync");
-  expect(sections("attach from drive")[0]).toBe("google-drive");
+  expect(sections("google drive account")[0]).toBe("files");
 });
 
 test("no two rows on one page share a title", () => {
@@ -112,16 +112,16 @@ test("every word of a query must match", () => {
   expect(titles("restore zzzz")).toEqual([]);
 });
 
-test("harness finds the Harnesses section of the Chat page", () => {
+test("harness finds the Harnesses section of the Agents page", () => {
   const [first] = searchSettings("harness", SETTINGS_ENTRIES);
-  expect(first).toMatchObject({ title: "Harnesses", section: "chat" });
+  expect(first).toMatchObject({ title: "Harnesses", section: "agents" });
 });
 
-test("experimental finds the Chat and Automations pages as well as Show Chat", () => {
+test("experimental finds the Agents and Automations pages as well as Show Chat", () => {
   const sections = searchSettings("experimental", SETTINGS_ENTRIES).map(
     (hit) => hit.section,
   );
-  expect(sections).toEqual(expect.arrayContaining(["chat", "automations"]));
+  expect(sections).toEqual(expect.arrayContaining(["agents", "automations"]));
 });
 
 test("a description from the page finds its row", () => {
@@ -143,17 +143,17 @@ test("splitMatch marks a word start, not the middle of a word", () => {
   ]);
 });
 
-test("while Chat is off, a Chat-only word finds the Chat page, not the hidden rows", () => {
+test("while Chat is off, a Chat-only word finds the Agents page, not the hidden rows", () => {
   const off = searchSettingsFor("harness", SETTINGS_ENTRIES, false);
   expect(off).toHaveLength(1);
-  expect(off[0]).toMatchObject({ title: "Chat", section: "chat" });
+  expect(off[0]).toMatchObject({ title: "Agents", section: "agents" });
   expect(off[0]?.description).toMatch(/turn on chat.*harnesses/i);
   const on = searchSettingsFor("harness", SETTINGS_ENTRIES, true);
   expect(on.map((hit) => hit.title)).toEqual(["Harnesses"]);
   // Words that already find a visible Chat row need no stand-in.
   expect(
     searchSettingsFor("chat", SETTINGS_ENTRIES, false).filter(
-      (hit) => hit.title === "Chat" && hit.section === "chat",
+      (hit) => hit.title === "Agents" && hit.section === "agents",
     ),
   ).toEqual([]);
 });

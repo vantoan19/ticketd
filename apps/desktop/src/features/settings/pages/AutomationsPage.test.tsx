@@ -61,7 +61,6 @@ test("the page shows two runs at once by default, start at sign-in off, and what
       "While an Automation is on, closing the window keeps ticketd running in the tray, as it does for a working Chat. Quit from the tray icon to stop everything.",
     ),
   ).toBeTruthy();
-  expect(screen.getByText("Changes apply right away")).toBeTruthy();
 });
 
 test("a new runs-at-once value is saved when the field is left, and the default can be put back", async () => {

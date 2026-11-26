@@ -21,7 +21,7 @@ import {
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { SourceIcon } from "./SourceIcon";
-import { SettingsPage } from "@/features/settings/layout/SettingsPage";
+import { SettingsDrillIn } from "@/features/settings/layout/SettingsDrillIn";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import {
   SettingsList,
@@ -297,9 +297,12 @@ export function SourceCard({
   hidden = false,
   adding,
   initialRepository,
+  onBack,
   onProjectLinked,
 }: {
   entry: SourceEntry;
+  /** Returns to the Ticket sources list (Back and Escape). Adding uses its own `onCancel`. */
+  onBack?: () => void;
   adding?: {
     id: string;
     onAdded: (source: SavedSource) => void;
@@ -771,8 +774,9 @@ export function SourceCard({
     SIGNED_OUT.includes(health.error.code);
 
   return (
-    <SettingsPage
-      group="Connections"
+    <SettingsDrillIn
+      parent="ticket-sources"
+      onBack={adding ? adding.onCancel : (onBack ?? (() => {}))}
       label={
         adding
           ? `Add ${connector.name} connection`
@@ -1056,6 +1060,6 @@ export function SourceCard({
           </SettingsRow>
         </SettingsList>
       </SettingsSection>
-    </SettingsPage>
+    </SettingsDrillIn>
   );
 }

@@ -375,10 +375,7 @@ function RecentErrorsSection() {
 
 export function DiagnosticsPage() {
   return (
-    <SettingsPage
-      {...sectionMeta("diagnostics")}
-      lede="Logs for finding out what went wrong. They stay on this computer unless you attach an export to an issue."
-    >
+    <SettingsPage {...sectionMeta("diagnostics")}>
       <LogsSection />
       <ReportSection />
       <RecentErrorsSection />

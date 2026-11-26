@@ -9,8 +9,7 @@
   padding: 8px 12px 12px;
   overflow-y: auto;
 }
-/* Every entry, Search included, is one 32px row: icon, label, then a key
-   hint or a dot. Hover is --recessed on the canvas, the open page --accent. */
+/* Every entry is one 32px row: icon, label, then an optional dot. Hover is --recessed on the canvas, the open page --accent. */
 .settings-back,
 .settings-nav-row {
   display: flex;
@@ -33,8 +32,19 @@
 .settings-back {
   gap: 8px;
 }
-.settings-search-entry {
+/* The search field above the groups: a field, not a row, as wide as the nav. */
+.settings-nav-search {
+  display: flex;
   margin-top: 8px;
+}
+.settings-nav-search > .ui-search-input {
+  max-width: none;
+}
+.settings-nav-search > .ui-search-input > svg {
+  left: 12px;
+}
+.settings-nav-search > .ui-search-input > input {
+  padding-left: 36px;
 }
 .settings-nav svg {
   flex: none;

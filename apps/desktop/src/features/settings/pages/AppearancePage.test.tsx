@@ -132,7 +132,10 @@ test("an Open tickets choice that cannot be saved says so", () => {
   );
 });
 
-test("the panel bar says changes apply right away", () => {
+test("the panel bar carries no note: a choice simply takes effect", () => {
   render(<AppearancePage />);
-  expect(screen.getByText("Changes apply right away")).toBeTruthy();
+  expect(screen.queryByText("Changes apply right away")).toBeNull();
+  expect(document.querySelector(".settings-page-lede")?.textContent).toBe(
+    "How ticketd looks on this computer.",
+  );
 });

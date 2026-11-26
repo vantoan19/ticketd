@@ -4,7 +4,7 @@ import type { HarnessStatus } from "@/features/chats/client";
 
 /**
  * True when Chat is on but no harness can start a Chat: neither Claude Code
- * nor Codex is installed, compatible and usable. Settings › Chat lists why.
+ * nor Codex is installed, compatible and usable. Settings › Agents lists why.
  */
 export function chatNeedsSetup(harnesses: HarnessStatus[]) {
   return !harnesses.some((harness) => harness.usable);

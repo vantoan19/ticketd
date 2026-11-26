@@ -41,7 +41,7 @@ const feature = {
 
 function ChatDot() {
   const { needsSetup } = useSettingsState();
-  return <p>{needsSetup.chat ? "Chat needs setup" : "Chat is set up"}</p>;
+  return <p>{needsSetup.agents ? "Chat needs setup" : "Chat is set up"}</p>;
 }
 
 function renderWith(client: ReturnType<typeof createMockChatClient>) {

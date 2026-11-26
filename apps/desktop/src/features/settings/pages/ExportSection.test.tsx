@@ -6,13 +6,12 @@ import {
   render,
   screen,
   waitFor,
-  within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { client } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
-import { ExportPage } from "@/features/settings/pages/ExportPage";
+import { ExportSection } from "@/features/settings/pages/ExportSection";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
 
 vi.mock("@/lib/api/workspace", () => ({
@@ -48,7 +47,7 @@ afterEach(() => {
 function renderPage(onOpenPage = vi.fn()) {
   render(
     <SettingsStateProvider active={false} onOpenPage={onOpenPage}>
-      <ExportPage />
+      <ExportSection />
     </SettingsStateProvider>,
   );
   return onOpenPage;
@@ -123,49 +122,25 @@ test("a file manager that cannot show the file is reported", async () => {
   expect(screen.getByRole("alert").textContent).toContain("gone");
 });
 
-test("each command can be copied with its placeholders in place", async () => {
+test("the ticket export command can be copied with its placeholders in place", async () => {
   renderPage();
-  const commands: [string, string][] = [
-    ["Copy the export command", "ticketd export --file PATH"],
-    [
-      "Copy the ticket export command",
-      "ticketd export-markdown --ticket TICKET --output FOLDER",
-    ],
-    [
-      "Copy the Document export command",
-      "ticketd export-markdown --document DOCUMENT --output FOLDER",
-    ],
-  ];
-  for (const [label, command] of commands) {
-    fireEvent.click(screen.getByRole("button", { name: label }));
-    await waitFor(() => expect(writeText).toHaveBeenLastCalledWith(command));
-  }
-  expect(
-    screen.getByText(/Words in color are placeholders\. FOLDER must already/),
-  ).toBeTruthy();
-});
-
-test("Backups in the lede opens the Backups page", () => {
-  const openPage = renderPage();
-  expect(screen.getByRole("button", { name: "Backups" }).dataset.slot).toBe(
-    "settings-link",
+  fireEvent.click(
+    screen.getByRole("button", { name: "Copy the Markdown export command" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Backups" }));
-  expect(openPage).toHaveBeenCalledWith("backups");
+  await waitFor(() =>
+    expect(writeText).toHaveBeenLastCalledWith(
+      "ticketd export-markdown --ticket TICKET --output FOLDER",
+    ),
+  );
 });
 
-test("Export or back up? is a table comparing the two", () => {
+test("exports are captioned as copies that can't be restored, with no table to compare them", () => {
   renderPage();
-  const table = screen.getByRole("table", { name: "Export or back up?" });
-  const rows = within(table).getAllByRole("row");
-  expect(rows.map((row) => row.textContent)).toEqual([
-    "CompareExportBackup",
-    "Meant forReading, other tools, sharingRestoring this workspace",
-    "FormatJSON or Markdown textA ticketd workspace file",
-    "Includes TrashYesYes",
-    "Can be restoredNoYes, after a review",
-  ]);
-  expect(
-    screen.getByRole("heading", { level: 1, name: "Export" }),
-  ).toBeTruthy();
+  const section = screen.getByRole("region", { name: "Export" });
+  expect(section.textContent).toContain(
+    "Copies to take your work elsewhere, as readable files. An export can't be restored.",
+  );
+  expect(screen.getByText("Workspace as JSON")).toBeTruthy();
+  expect(screen.getByText("A ticket or Document as Markdown")).toBeTruthy();
+  expect(screen.queryByRole("table")).toBeNull();
 });

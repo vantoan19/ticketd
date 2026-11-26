@@ -323,7 +323,7 @@ test("the library opens its storage settings from the header menu", async () => 
   await screen.findByText("No attachments yet");
   await openMenu("More library actions");
   fireEvent.click(screen.getByRole("menuitem", { name: "Storage settings" }));
-  expect(settings).toHaveBeenCalledWith("attachments");
+  expect(settings).toHaveBeenCalledWith("files");
 });
 
 test("usage stays compact in the row without labeling recovery as unused", async () => {

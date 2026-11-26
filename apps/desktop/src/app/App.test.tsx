@@ -189,7 +189,7 @@ test("Attachments opens from the existing Context navigation without replacing t
   expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
 });
 
-test("Storage settings in the Attachments library opens Settings at Attachments", async () => {
+test("Storage settings in the Attachments library opens Settings at Files", async () => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
@@ -204,7 +204,7 @@ test("Storage settings in the Attachments library opens Settings at Attachments"
     name: "Settings sections",
   });
   expect(nav.querySelector("[aria-current=page]")?.textContent).toContain(
-    "Attachments",
+    "Files",
   );
 });
 
@@ -1718,7 +1718,7 @@ test("a restore reads the list once, during the restore", async () => {
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Backups" }),
+    ).getByRole("button", { name: "Backups & export" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
   fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
@@ -1782,7 +1782,7 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Backups" }),
+    ).getByRole("button", { name: "Backups & export" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
   fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
@@ -1920,7 +1920,7 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
   fireEvent.click(
     within(
       await screen.findByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Backups" }),
+    ).getByRole("button", { name: "Backups & export" }),
   );
   fireEvent.click(
     await screen.findByRole("button", { name: `Restore… ${backup}` }),
@@ -2227,13 +2227,15 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
   expect(document.activeElement).toBe(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Location" }));
+  fireEvent.click(screen.getByRole("button", { name: "Backups & export" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(
-    screen.getByRole("region", { name: "Contents" }).textContent,
-  ).toContain("Tickets1");
+    screen
+      .getByRole("region", { name: "Location" })
+      .querySelector(".settings-list-footer-text")?.textContent,
+  ).toContain("1 ticket ");
   fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Settings" }),
@@ -2244,13 +2246,15 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
   expect(document.documentElement.dataset.hoverHeld).toBeUndefined();
   tickets = 7;
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  fireEvent.click(screen.getByRole("button", { name: "Location" }));
+  fireEvent.click(screen.getByRole("button", { name: "Backups & export" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(
-    screen.getByRole("region", { name: "Contents" }).textContent,
-  ).toContain("Tickets7");
+    screen
+      .getByRole("region", { name: "Location" })
+      .querySelector(".settings-list-footer-text")?.textContent,
+  ).toContain("7 tickets");
 });
 
 test("a selection ends when the filters change, and the bar can be skipped to", async () => {
@@ -10732,7 +10736,7 @@ test("Export Retry remembers the failed path and asks the save chooser again bef
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Export" }),
+    ).getByRole("button", { name: "Backups & export" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
   fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
@@ -12868,7 +12872,9 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     await vi.waitFor(() => expect(cleanup.isConnected).toBe(false));
     await vi.waitFor(() => expect(document.activeElement).toBe(more));
     await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(await screen.findByRole("button", { name: "Backups" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Backups & export" }),
+    );
     const review = await screen.findByRole("button", {
       name: `Restore… ${backup}`,
     });
@@ -12992,11 +12998,13 @@ test("Settings navigation keeps visible focus through narrow and wide replacemen
   const nav = await screen.findByRole("navigation", {
     name: "Settings sections",
   });
-  fireEvent.click(within(nav).getByRole("button", { name: "Location" }));
+  fireEvent.click(
+    within(nav).getByRole("button", { name: "Backups & export" }),
+  );
   within(nav).getByRole("button", { name: "Appearance" }).focus();
   act(() => resizeViewport(true));
   const trigger = screen.getByRole("button", {
-    name: /^Location, Settings sections/,
+    name: /^Backups & export, Settings sections/,
   });
   expect(document.activeElement).toBe(trigger);
   fireEvent.click(trigger);
@@ -13008,11 +13016,15 @@ test("Settings navigation keeps visible focus through narrow and wide replacemen
       screen.getByRole("button", { name: "Appearance" }),
     ),
   );
-  expect(screen.getByRole("heading", { name: "Location" })).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "Backups & export" }),
+  ).toBeTruthy();
   act(() => resizeViewport(true));
   expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: /^Location, Settings sections/ }),
+    screen.getByRole("button", {
+      name: /^Backups & export, Settings sections/,
+    }),
   );
 });
 
@@ -13183,7 +13195,7 @@ test.each(["MacIntel", "Win32"])(
   },
 );
 
-test("Settings Escape and palette Reset return to visible section navigation without taking newer search focus", async () => {
+test("Settings Escape and palette Reset return to visible section navigation, and the search field gives way to its trigger", async () => {
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
     if (
       command === "plugin:window|set_background_color" ||
@@ -13228,7 +13240,6 @@ test("Settings Escape and palette Reset return to visible section navigation wit
         screen.getByRole("button", { name: "Appearance" }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
     const search = await screen.findByRole("searchbox", {
       name: "Search settings",
     });
@@ -13236,11 +13247,17 @@ test("Settings Escape and palette Reset return to visible section navigation wit
     fireEvent.change(search, {
       target: { value: "retain this settings query" },
     });
+    // The field lives in the nav, which narrow widths fold into the sheet:
+    // focus follows to the sections trigger, and the query stays.
     act(() => resizeViewport(true));
-    expect(document.activeElement).toBe(search);
+    const searchTrigger = screen.getByRole("button", {
+      name: /^Search, Settings sections/,
+    });
+    expect(document.activeElement).toBe(searchTrigger);
     act(() => resizeViewport(false));
-    expect(document.activeElement).toBe(search);
-    expect(search).toHaveProperty("value", "retain this settings query");
+    expect(
+      screen.getByRole("searchbox", { name: "Search settings" }),
+    ).toHaveProperty("value", "retain this settings query");
   } finally {
     uninstall();
   }
@@ -13495,10 +13512,10 @@ test("Settings renders the registered providers' display data as text and an iso
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  await screen.findByRole("button", { name: "GitHub" });
   fireEvent.click(
-    await screen.findByRole("button", { name: /Beacon Tracker/ }),
+    await screen.findByRole("button", { name: "Ticket sources" }),
   );
+  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
   const heading = await screen.findByRole("heading", {
     name: "Beacon Tracker",
   });
@@ -13553,7 +13570,9 @@ test("a new connection can be configured while the shared source list is refresh
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Sources" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Ticket sources" }),
+  );
   fireEvent.click(
     await screen.findByRole("button", {
       name: "Add Beacon Tracker connection",

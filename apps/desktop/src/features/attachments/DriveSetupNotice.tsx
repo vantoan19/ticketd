@@ -3,8 +3,8 @@ import { Disclosure } from "@/components/ui/disclosure";
 import type { DriveConfiguration } from "@/lib/api/attachments";
 
 /**
- * Google Drive isn't set up: one plain line and the way to Settings › Google
- * Drive (shell AT-20). The technical setup text stays folded under "Setup
+ * Google Drive isn't set up: one plain line and the way to Settings › Files
+ * (shell AT-20), where Drive is chosen for new uploads. The technical setup text stays folded under "Setup
  * instructions" for whoever builds ticketd.
  */
 export function DriveSetupNotice({
@@ -26,7 +26,7 @@ export function DriveSetupNotice({
           className="self-start"
           onClick={onOpenSettings}
         >
-          Open Google Drive settings
+          Open Files settings
         </Button>
       )}
       <Disclosure label="Setup instructions">

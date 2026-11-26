@@ -1,8 +1,8 @@
 import { useState } from "react";
 import type { SourceEntry } from "@/lib/api/sources";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
-import { SettingsPage } from "@/features/settings/layout/SettingsPage";
-import { sectionMeta } from "@/features/settings/settings-sections";
+import { SettingsDrillIn } from "@/features/settings/layout/SettingsDrillIn";
+import { CircleDot } from "lucide-react";
 import "@/features/settings/sources/sources.css";
 
 /**
@@ -13,10 +13,13 @@ import "@/features/settings/sources/sources.css";
 export function SourcePage({
   entry,
   active,
+  onBack,
   onProjectLinked,
 }: {
   entry: SourceEntry;
   active: boolean;
+  /** Returns to the Ticket sources list. */
+  onBack: () => void;
   onProjectLinked?: (projectId: string, connection: string) => void;
 }) {
   const [visited, setVisited] = useState(active);
@@ -24,10 +27,12 @@ export function SourcePage({
   if (!visited) return null;
   if (entry.unavailable)
     return active ? (
-      <SettingsPage
-        {...sectionMeta("sources")}
-        title={entry.saved?.name ?? entry.connector.name}
-        lede="The extension for this connection is unavailable. You can rename or remove the connection in Sources."
+      <SettingsDrillIn
+        parent="ticket-sources"
+        onBack={onBack}
+        label={entry.saved?.name ?? entry.connector.name}
+        icon={CircleDot}
+        lede="The extension for this connection is unavailable. You can rename or remove the connection in Ticket sources."
         children={null}
       />
     ) : null;
@@ -35,6 +40,7 @@ export function SourcePage({
     <SourceCard
       entry={entry}
       hidden={!active}
+      onBack={onBack}
       {...(onProjectLinked && { onProjectLinked })}
     />
   );
