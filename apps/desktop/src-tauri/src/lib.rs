@@ -1012,6 +1012,13 @@ fn latest_update(reference: String) -> Result<Option<LatestUpdate>, BridgeFailur
 }
 
 #[tauri::command(async)]
+fn first_agent_update() -> Result<Option<ticketd_core::AgentUpdate>, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.first_agent_update())
+        .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
 fn activity_feed(
     reference: String,
     limit: u32,
@@ -2573,6 +2580,7 @@ pub fn run() -> Result<(), tauri::Error> {
             source_conversation,
             latest_update,
             activity_feed,
+            first_agent_update,
             get_activity,
             add_activity,
             add_activity_with_details,
@@ -2604,6 +2612,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_list,
             chat_commands::chat_harnesses,
             chat_commands::chat_harness_catalog,
+            chat_commands::chat_installed_harnesses,
             chat_commands::chat_harness_options,
             chat_commands::chat_harness_skills,
             chat_commands::chat_folder_use,
@@ -2665,6 +2674,8 @@ pub fn run() -> Result<(), tauri::Error> {
             diagnostics_commands::diagnostics_issue_details,
             diagnostics_commands::diagnostics_save_report,
             sync_commands::sync_connect,
+            sync_commands::use_another_google_account,
+            sync_commands::use_sync_uploads_folder,
             s3_commands::s3_profiles,
             s3_commands::s3_choose_cli,
             s3_commands::s3_identity,

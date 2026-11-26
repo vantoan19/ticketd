@@ -814,7 +814,6 @@ export function AttachmentPicker({
                           ),
                         )
                     }
-                    onChangeLimit={openSettings?.("files")}
                   />
                 ))}
               </ul>
@@ -863,7 +862,6 @@ function UploadRow({
   onCheckDrive,
   onUploadLocally,
   onOpenDrive,
-  onChangeLimit,
 }: {
   row: UploadAttempt;
   store: boolean;
@@ -874,7 +872,6 @@ function UploadRow({
   onCheckDrive: () => void;
   onUploadLocally: () => void;
   onOpenDrive: () => void;
-  onChangeLimit: (() => void) | undefined;
 }) {
   const stopped = row.state === "failed" || row.state === "canceled";
   const total = row.stored?.size_bytes ?? (row.progress.total || null);
@@ -939,16 +936,6 @@ function UploadRow({
       <div className="attachment-upload-actions">
         {stopped && (
           <>
-            {failure?.action === "change_limit" && onChangeLimit && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onChangeLimit}
-              >
-                Change limit
-              </Button>
-            )}
             {row.destination && !row.stored && (
               <>
                 <Button

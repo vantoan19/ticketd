@@ -161,6 +161,31 @@ beforeEach(() => {
   );
 });
 
+/** Settings opens on Set up ticketd until it is hidden: tests about other pages hide it. */
+function hideSetupChecklist() {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent", setupHidden: true }),
+  );
+}
+
+test("Settings opens on Set up ticketd while it is unfinished, and on Appearance once it is hidden", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  const first = render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Hide checklist" }));
+  first.unmount();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Appearance" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Set up ticketd/ })).toBeNull();
+});
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -2205,6 +2230,7 @@ test("the narrow navigation trigger sits in the view's header and gets focus bac
 });
 
 test("Settings reads fresh data on every visit, checks the CLI at startup and again once opened, and moves focus in and out", async () => {
+  hideSetupChecklist();
   vi.useFakeTimers();
   let tickets = 1;
   const calls: string[] = [];
@@ -9540,7 +9566,7 @@ test("first run creates through the shared dialog and gives way to the ticket li
   ).toBeNull();
 });
 
-test("first-run Install skill settles successful reads and keeps Settings navigation responsive", async () => {
+test("first-run Set up ticketd settles successful reads and keeps Settings navigation responsive", async () => {
   let reads = 0;
   bridge.invoke.mockImplementation(
     async (command: string, args?: Record<string, unknown>) => {
@@ -9557,12 +9583,13 @@ test("first-run Install skill settles successful reads and keeps Settings naviga
   const guide = await screen.findByRole("region", {
     name: "Your workspace is ready",
   });
-  fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
+  fireEvent.click(
+    within(guide).getByRole("button", { name: "Set up ticketd" }),
+  );
   expect(
-    await screen.findByText(
-      "No agent found. Install Claude Code, Codex or Antigravity, then choose Check again.",
-    ),
+    await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
   ).toBeTruthy();
+  expect(await screen.findByText("Agents can use ticketd")).toBeTruthy();
   expect(reads).toBeLessThanOrEqual(6);
   fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
   expect(
@@ -9790,6 +9817,17 @@ test("Settings Command line settles successful checks and Check again updates th
 test("first run reads completed steps and opens the exact existing Settings sections", async () => {
   bridge.invoke.mockImplementation(
     async (command: string, args?: Record<string, unknown>) => {
+      // The agents step needs the command as well as the skill.
+      if (command === "check_cli")
+        return {
+          ...((await bridgeDefault(command)) as object),
+          found: true,
+          on_path: true,
+          path: "/usr/local/bin/ticketd",
+          version: "0.1.0",
+          version_matches: true,
+          workspace_matches: true,
+        };
       if (command === "agent_skills")
         return [
           {
@@ -9825,9 +9863,11 @@ test("first run reads completed steps and opens the exact existing Settings sect
       .closest('[data-slot="step"]')
       ?.getAttribute("data-state"),
   ).toBe("done");
-  fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
+  fireEvent.click(
+    within(guide).getByRole("button", { name: "Set up ticketd" }),
+  );
   expect(
-    await screen.findByRole("heading", { level: 1, name: "Agent skills" }),
+    await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
   fireEvent.click(
@@ -9875,7 +9915,7 @@ test.each(["ready", "trashed"] as const)(
     expect(
       screen.queryByRole("region", { name: "Your workspace is ready" }),
     ).toBeNull();
-    expect(screen.queryByRole("button", { name: "Install skill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Set up ticketd" })).toBeNull();
   },
 );
 test("header Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
@@ -13237,6 +13277,7 @@ test.each(["MacIntel", "Win32"])(
 );
 
 test("Settings Escape and palette Reset return to visible section navigation, and the search field gives way to its trigger", async () => {
+  hideSetupChecklist();
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
     if (
       command === "plugin:window|set_background_color" ||
@@ -13556,7 +13597,9 @@ test("Settings renders the registered providers' display data as text and an iso
   fireEvent.click(
     await screen.findByRole("button", { name: "Ticket sources" }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Beacon Tracker/ }),
+  );
   const heading = await screen.findByRole("heading", {
     name: "Beacon Tracker",
   });
@@ -13598,14 +13641,14 @@ test("a new connection can be configured while the shared source list is refresh
     complete: true,
     issues: [],
   };
-  const readAfterAdd = vi.fn(() => new Promise(() => {}));
-  let added = false;
+  const readAfterSave = vi.fn(() => new Promise(() => {}));
+  let saved = false;
   await renderReviewApp({
-    list_sources: () => (added ? readAfterAdd() : [available]),
+    list_sources: () => (saved ? readAfterSave() : [available]),
     source_check_connection: { account: "demo" },
     source_preview: preview,
-    add_source_connection: () => {
-      added = true;
+    save_source: () => {
+      saved = true;
       return { source, preview };
     },
   });
@@ -13614,30 +13657,18 @@ test("a new connection can be configured while the shared source list is refresh
   fireEvent.click(
     await screen.findByRole("button", { name: "Ticket sources" }),
   );
+  // A source with no connection yet is a row like any other; its page connects it.
   fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Add Beacon Tracker connection",
-    }),
+    await screen.findByRole("button", { name: /^Beacon Tracker/ }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
-    target: { value: source.name },
-  });
   fireEvent.change(screen.getByPlaceholderText("e.g. PLATFORM"), {
     target: { value: source.config.team },
   });
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByText(/No open issues match these rules/);
-  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
-  expect(
-    (
-      (await screen.findByRole("button", {
-        name: "Add Beacon Tracker connection",
-      })) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
-  await screen.findByRole("heading", { name: source.name });
-  await waitFor(() => expect(readAfterAdd).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(readAfterSave).toHaveBeenCalled());
+  expect(await screen.findByText("Saved configuration")).toBeTruthy();
 });
 
 const projectForRemote = {
@@ -13867,16 +13898,11 @@ test("Source refresh and its persisted failure keep raw diagnostics behind Detai
   expect(screen.getByText(raw)).toBeTruthy();
 });
 
-test("Automation settings retain a failed draft and known switch state while Details owns diagnostics", async () => {
-  let fail = true;
+test("Automation settings retain the known switch state while Details owns diagnostics", async () => {
   const raw = "RAW-AUTOMATION-SETTING-0xdead";
   await renderReviewApp({
-    automation_runs_at_once: { runs: 2, default: 2, most: 10 },
     start_at_login: true,
-    set_automation_runs_at_once: () => {
-      if (fail) throw new Error(raw);
-      return null;
-    },
+    automation_list: [],
     set_start_at_login: () => {
       throw new Error(raw);
     },
@@ -13884,28 +13910,20 @@ test("Automation settings retain a failed draft and known switch state while Det
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(
     within(
-      screen.getByRole("navigation", { name: "Settings sections" }),
+      await screen.findByRole("navigation", { name: "Settings sections" }),
     ).getByRole("button", { name: /^Automations/ }),
   );
-  const input = await screen.findByRole("spinbutton", { name: "Runs at once" });
-  fireEvent.change(input, { target: { value: "4" } });
-  fireEvent.blur(input);
+  const toggle = await screen.findByRole("switch", {
+    name: "Start ticketd when you sign in",
+  });
+  await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+  fireEvent.click(toggle);
   await act(async () => {});
-  expect(input).toHaveProperty("value", "4");
+  // The refused change leaves the known state, and the raw text waits in Details.
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
   expect(screen.getByRole("alert").textContent).not.toContain(raw);
   fireEvent.click(screen.getByRole("button", { name: "Details" }));
   expect(screen.getByText(raw)).toBeTruthy();
-  fail = false;
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  await act(async () => {});
-  expect(screen.getByText("Saved")).toBeTruthy();
-  const toggle = screen.getByRole("switch", {
-    name: "Start ticketd when you sign in",
-  });
-  fireEvent.click(toggle);
-  await act(async () => {});
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
-  expect(screen.getByRole("alert").textContent).not.toContain(raw);
 });
 
 test("a ticket run failure retains the run and retries its same action with raw text only in Details", async () => {

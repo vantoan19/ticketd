@@ -71,8 +71,8 @@ test("splitMatch cuts text around the first match, keeping its original case", (
 
 test("search finds a row by the title its page shows", () => {
   const first = (query: string) => searchSettings(query, SETTINGS_ENTRIES)[0];
-  expect(first("Largest file")?.section).toBe("files");
-  expect(first("upload limit")?.section).toBe("files");
+  expect(first("New files")?.section).toBe("files");
+  expect(first("Google account")?.section).toBe("files");
   expect(first("Check for changes every")?.section).toBe("workspace-sync");
   expect(first("Third-party notices")?.section).toBe("about");
   expect(first("Dialogs and menus")?.section).toBe("keyboard-shortcuts");
@@ -112,12 +112,12 @@ test("every word of a query must match", () => {
   expect(titles("restore zzzz")).toEqual([]);
 });
 
-test("harness finds the Harnesses section of the Agents page", () => {
+test("harness finds the agents on this computer", () => {
   const [first] = searchSettings("harness", SETTINGS_ENTRIES);
-  expect(first).toMatchObject({ title: "Harnesses", section: "agents" });
+  expect(first).toMatchObject({ title: "On this computer", section: "agents" });
 });
 
-test("experimental finds the Agents and Automations pages as well as Show Chat", () => {
+test("experimental finds the Agents and Automations pages", () => {
   const sections = searchSettings("experimental", SETTINGS_ENTRIES).map(
     (hit) => hit.section,
   );
@@ -125,8 +125,8 @@ test("experimental finds the Agents and Automations pages as well as Show Chat",
 });
 
 test("a description from the page finds its row", () => {
-  const [first] = searchSettings("all file types", SETTINGS_ENTRIES);
-  expect(first).toMatchObject({ title: "Upload limit" });
+  const [first] = searchSettings("already attached", SETTINGS_ENTRIES);
+  expect(first).toMatchObject({ title: "New files" });
 });
 
 test("splitMatch marks a word start, not the middle of a word", () => {
@@ -143,13 +143,15 @@ test("splitMatch marks a word start, not the middle of a word", () => {
   ]);
 });
 
-test("while Chat is off, a Chat-only word finds the Agents page, not the hidden rows", () => {
-  const off = searchSettingsFor("harness", SETTINGS_ENTRIES, false);
+test("while Chat is off, an Automations word finds the Agents page, not the hidden rows", () => {
+  const off = searchSettingsFor("tray", SETTINGS_ENTRIES, false);
   expect(off).toHaveLength(1);
   expect(off[0]).toMatchObject({ title: "Agents", section: "agents" });
-  expect(off[0]?.description).toMatch(/turn on chat.*harnesses/i);
-  const on = searchSettingsFor("harness", SETTINGS_ENTRIES, true);
-  expect(on.map((hit) => hit.title)).toEqual(["Harnesses"]);
+  expect(off[0]?.description).toMatch(/turn on chats.*automations/i);
+  const on = searchSettingsFor("tray", SETTINGS_ENTRIES, true);
+  expect(on.map((hit) => hit.title)).toEqual([
+    "Start ticketd when you sign in",
+  ]);
   // Words that already find a visible Chat row need no stand-in.
   expect(
     searchSettingsFor("chat", SETTINGS_ENTRIES, false).filter(

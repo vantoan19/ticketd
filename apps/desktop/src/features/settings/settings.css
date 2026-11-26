@@ -55,6 +55,19 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* Set up ticketd: a row above the groups, 12px clear of the search field, with its count at the end. */
+.settings-setup-row {
+  margin-top: 12px;
+}
+.settings-setup-count {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
 .settings-nav-dot {
   flex: none;
   display: inline-flex;

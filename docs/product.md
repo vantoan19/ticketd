@@ -205,6 +205,14 @@ opens the graph to understand dependency chains.
   and **Help** (Keyboard shortcuts, Diagnostics, About). A search field above the groups
   finds a setting by name. Things you can have several of, such as a connection, are rows
   on their page that open in place with a way back; the sidebar never lists them.
+  **Set up ticketd** sits above the groups until it is finished or hidden, with a progress
+  ring, and Settings opens on it meanwhile. Its five steps tick from real state on this
+  computer, never by hand: agents can use ticketd (the `ticketd` command is on PATH and
+  every agent found has the skill, installed together with one administrator prompt),
+  an agent has written its first update, and, optionally, a ticket source is connected,
+  Workspace sync is on and notifications are allowed. Hiding the checklist, or finishing
+  it, removes the row; searching "set up" still finds the page. Nothing is sent anywhere
+  to know a step is done.
   Backups & export is one page for where the Workspace file is, the restore points to go
   back to, and the copies to take elsewhere.
 
@@ -389,7 +397,7 @@ not synchronize with branches, worktrees, or CI.
 
 An **Attachment** is a reusable file identity within one Workspace, stored as an
 immutable local snapshot with its original bytes, filename, size, and a separate
-display name. The default per-file limit is 100 MiB (Settings > Files).
+display name. The per-file limit is 100 MiB.
 
 - Files attach to a ticket from its property rail, or insert into any editor as
   Markdown links (`ticketd://attachment/<workspace-id>/<attachment-id>`) by file
@@ -415,13 +423,31 @@ system's secure store.
   Last-known metadata survives offline and provider failures, and each access failure
   has its own recovery. Removing a reference never deletes the Drive file or changes
   sharing. CLI: `attachment drive-add`, `drive-resolve`, `drive-authorize`.
-- **Uploads.** Settings > Files sets one upload destination: the local Workspace
-  or a writable Drive folder. Each upload keeps its destination through retry and
-  restart, and a provider failure never silently falls back to local storage. Uploads
-  are durable operations whose retry verifies provenance, size, and digest. An
-  uploaded copy is not an immutable snapshot: ticketd compares its checksum and size
-  and exports its bytes only when they verify. CLI: `attachment destination`,
-  `drive-upload`, `drive-upload-status`.
+- **Uploads.** Settings > Files says where new files go: this computer (works offline,
+  included in backups) or Google Drive (not in backups). Files already attached stay
+  where they are. Each upload keeps its destination through retry and restart, and a
+  provider failure never silently falls back to local storage. Uploads are durable
+  operations whose retry verifies provenance, size, and digest. An uploaded copy is not
+  an immutable snapshot: ticketd compares its checksum and size and exports its bytes
+  only when they verify. CLI: `attachment destination`, `drive-upload`,
+  `drive-upload-status`.
+  - **One Google sign-in.** Files and Workspace sync use the same Google account and the
+    same stored credential, so one consent serves both. The Files page names the account
+    ("`sam.lee@gmail.com`, the one Workspace sync uses") with Use another account…, and
+    Workspace sync's step 3 offers the same. Switching signs both in with the new
+    account, and a dialog says what changes in each before anything does: sync stops on
+    this computer until a Workspace is chosen in the new account, and new files are kept
+    on this computer until Google Drive is chosen again. When the sign-in ends, both show
+    it, and one Sign in again resumes both. Choosing Drive on Files after sync has signed
+    in needs no second consent, and Workspace sync set up after Files used Drive signs in
+    with that account without asking again.
+  - **Where uploads go.** While Workspace sync is on Google Drive, uploads go to an
+    **Uploads** folder inside the sync folder, and the page offers no folder to choose
+    (a Drive folder chosen earlier gives way to it). While sync is off or on S3, the
+    folder is the one chosen in Drive, with Change folder…. Workspace sync treats Uploads
+    as the person's files: it never reads it as Workspace files, and Replace, Disconnect
+    and Reconnect never touch it (their dialogs say so). See
+    [sync file format](sync-file-format.md#files-that-are-not-records).
 - Backups keep remote metadata and operations, never remote bytes or credentials.
 
 ### Ticket sources
@@ -440,8 +466,10 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   a personal API key that can read them. Filter discovery by assignee, labels, or
   project. ticketd syncs the issue's current state and its comments and
   timeline.
-- Add and name source connections under Settings → Ticket sources. Several accounts can
-  connect to the same provider. Connections stay on this device and are excluded
+- Settings → Ticket sources is one table of every source with its status, what it
+  signs in with and what it brings in; selecting a row opens that source's page, where
+  you connect it, rename it or remove it. Several accounts can connect to the same
+  provider. Connections stay on this device and are excluded
   from Workspace sync, portable backups, and JSON exports.
 - Extension credentials go in the system keychain. When a tracker rejects
   authentication, **Needs sign-in** opens the credential fields for that
@@ -702,7 +730,11 @@ file bytes.
 Native Chat is experimental and off by default (Settings > Agents). A Chat hosts the
 person's own installed Claude Code, Codex or Antigravity harness with its own sign-in. ticketd
 detects the installation and guides the person to the harness's login; it does not
-collect OAuth tokens, proxy model requests, or change billing.
+collect OAuth tokens, proxy model requests, or change billing. Settings > Agents lists
+the agents found on this computer even while Chats are off (it asks each program only
+its version, never its sign-in); with Chats on it shows each one's readiness and the
+one fix a missing sign-in needs, and opening one shows its sign-in, its program and
+what New Chat last started it with.
 
 - **Identity.** A Chat is a standalone Workspace conversation that can start without a
   project or ticket and link to several projects, tickets, and Documents without being
@@ -799,4 +831,6 @@ and a flow of steps that can branch.
   model, instructions, allowed tools, and turn and time limits, run in its own Chat.
 - **Runs.** A run records its event, steps, outcome, and each agent step's Chat. Runs
   are local to the device that ran them, and an Automation is switched on or off per
-  device.
+  device. Runs go two at once; there is no setting for it. Scheduled Automations run
+  only while ticketd is running, so Settings > Automations offers "Start ticketd when
+  you sign in" and says how many scheduled Automations depend on it.

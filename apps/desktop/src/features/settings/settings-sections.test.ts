@@ -1,12 +1,14 @@
 import { expect, test } from "vitest";
 import {
   SETTINGS_SECTIONS,
+  initialSettingsPage,
   navSectionOf,
   resolveSettingsPage,
 } from "./settings-sections";
 
 test("the pages are the decided ones, each with a job line of its own", () => {
   expect(SETTINGS_SECTIONS.map(({ id }) => id)).toEqual([
+    "setup",
     "appearance",
     "attention",
     "workspace-sync",
@@ -44,8 +46,20 @@ test("current names, Search and a connection stay as they are; a name nobody kno
   expect(resolveSettingsPage("nonsense")).toBe("appearance");
 });
 
-test("a connection selects Ticket sources in the sidebar and Search selects nothing", () => {
+test("a connection selects Ticket sources in the sidebar, an agent selects Agents, and Search selects nothing", () => {
   expect(navSectionOf("source-github")).toBe("ticket-sources");
+  expect(navSectionOf("agent-claude-code")).toBe("agents");
+  expect(resolveSettingsPage("agent-codex")).toBe("agent-codex");
   expect(navSectionOf("search")).toBeNull();
   expect(navSectionOf("about")).toBe("about");
+});
+
+test("Settings opens on Set up ticketd while it is neither finished nor hidden, else on Appearance", () => {
+  expect(initialSettingsPage({ setupPending: true })).toBe("setup");
+  expect(initialSettingsPage({ setupPending: false })).toBe("appearance");
+});
+
+test("Set up ticketd is a page of its own, selected in the sidebar by its own row", () => {
+  expect(resolveSettingsPage("setup")).toBe("setup");
+  expect(navSectionOf("setup")).toBe("setup");
 });

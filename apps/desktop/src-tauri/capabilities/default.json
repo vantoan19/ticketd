@@ -50,6 +50,15 @@
         },
         {
           "url": "https://buymeacoffee.com/*"
+        },
+        {
+          "url": "https://code.claude.com/docs/*"
+        },
+        {
+          "url": "https://developers.openai.com/codex/*"
+        },
+        {
+          "url": "https://antigravity.google/docs/*"
         }
       ]
     }

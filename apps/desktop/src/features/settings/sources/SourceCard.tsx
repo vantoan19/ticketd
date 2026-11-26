@@ -1,5 +1,6 @@
 import {
   Fragment,
+  type ReactNode,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -43,6 +44,7 @@ import {
   type Draft,
 } from "@/features/settings/sources/config-values";
 import { SourceRepositoryRoutes } from "@/features/settings/sources/SourceRepositoryRoutes";
+import { SIGNED_OUT } from "@/features/settings/sources/source-rows";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { useNow } from "@/lib/use-now";
 import { formatDateTime } from "@/lib/format";
@@ -76,12 +78,6 @@ type Account =
   | { status: "settings"; key: string; failure: SourceFailure }
   | { status: "failed"; failure: FailureDescription };
 
-/** The core says these when the account itself is the problem. */
-const SIGNED_OUT: readonly string[] = [
-  "unauthenticated",
-  "not_signed_in",
-  "forbidden",
-];
 const NO_SECRETS: readonly string[] = [];
 const SESSION_NOTICE =
   "The system keyring is unavailable. These credentials last until ticketd closes.";
@@ -299,8 +295,11 @@ export function SourceCard({
   initialRepository,
   onBack,
   onProjectLinked,
+  manage,
 }: {
   entry: SourceEntry;
+  /** What a saved connection offers about itself, after Sync: rename and remove. */
+  manage?: ReactNode;
   /** Returns to the Ticket sources list (Back and Escape). Adding uses its own `onCancel`. */
   onBack?: () => void;
   adding?: {
@@ -1060,6 +1059,7 @@ export function SourceCard({
           </SettingsRow>
         </SettingsList>
       </SettingsSection>
+      {saved && !adding && manage}
     </SettingsDrillIn>
   );
 }

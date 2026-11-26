@@ -710,6 +710,12 @@ function DisconnectDialog({
           {folder ? `“${folder}” stays` : "Your files stay"}, for your other
           computers
         </dd>
+        {!s3 && (
+          <>
+            <dt>Uploads</dt>
+            <dd>Your Uploads folder stays as it is</dd>
+          </>
+        )}
       </dl>
     </DialogShell>
   );

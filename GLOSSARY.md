@@ -189,7 +189,9 @@ An Attachment uploaded by ticketd to an explicitly selected remote folder. Its
 operation, remote identity, input digest and observed checksum/version are retained
 for recovery. The provider can change the content independently; an uploaded copy
 does not promise preserved original bytes. A revision uses a new upload operation
-and attachment identity. Cancellation and removal never delete the remote file.
+and attachment identity. Cancellation and removal never delete the remote file. While
+Workspace sync is on Google Drive the folder is the **Uploads** folder inside the sync
+folder: the person's own files, which sync never reads, replaces or removes.
 
 **Purged Attachment**:
 A local Attachment whose quarantined bytes were permanently removed by explicit

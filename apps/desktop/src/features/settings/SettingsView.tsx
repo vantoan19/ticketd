@@ -10,6 +10,7 @@ import {
 import { useSources } from "@/features/settings/sources/use-sources";
 import type { SourceEntry } from "@/lib/api/sources";
 import { AboutPage } from "@/features/settings/pages/AboutPage";
+import { AgentPage } from "@/features/settings/pages/AgentPage";
 import { AgentsPage } from "@/features/settings/pages/AgentsPage";
 import { AgentSkillsPage } from "@/features/settings/pages/AgentSkillsPage";
 import { AppearancePage } from "@/features/settings/pages/AppearancePage";
@@ -22,6 +23,7 @@ import { FilesPage } from "@/features/settings/pages/FilesPage";
 import { WorkspaceSyncPage } from "@/features/settings/pages/WorkspaceSyncPage";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
 import { SearchPage } from "@/features/settings/pages/SearchPage";
+import { SetupPage } from "@/features/settings/pages/SetupPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
 import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { useFadeThrough } from "@/features/settings/fade-through";
@@ -49,6 +51,7 @@ export function SettingsView({
   onWorkspaceReplaced,
   onSourcesChanged,
   onSelect,
+  onOpenAutomations,
   projectSourceSetup,
   onProjectSourceSaved,
   onProjectSourceCancel,
@@ -59,6 +62,8 @@ export function SettingsView({
   selected?: SettingsPageId | LegacySettingsPageId;
   /** Opens another page, for links between pages and for ⌘F. */
   onSelect?: (page: SettingsPageId) => void;
+  /** Leaves Settings for the Automations view. */
+  onOpenAutomations?: () => void;
   /** Called after anything replaced the Workspace: a restore, or a download from Drive. */
   onRestore: () => Promise<void>;
   /** Called as soon as the replacement succeeds, before refreshing views. */
@@ -111,6 +116,7 @@ export function SettingsView({
       // Fading out, the page is out of reach: nothing in it takes focus or a click.
       inert={leaving || undefined}
     >
+      {selected === "setup" && <SetupPage />}
       {selected === "appearance" && <AppearancePage />}
       {selected === "attention" && <AttentionPage />}
       {selected === "files" && <FilesPage key={restores} />}
@@ -123,8 +129,18 @@ export function SettingsView({
       )}
       {selected === "command-line" && <CommandLinePage />}
       {selected === "agent-skills" && <AgentSkillsPage />}
-      {selected === "agents" && <AgentsPage />}
-      {selected === "automations" && <AutomationsPage />}
+      {selected === "agents" && (
+        <AgentsPage onOpen={(id) => onSelect?.(`agent-${id}`)} />
+      )}
+      {selected.startsWith("agent-") && (
+        <AgentPage
+          id={selected.slice("agent-".length)}
+          onBack={() => onSelect?.("agents")}
+        />
+      )}
+      {selected === "automations" && (
+        <AutomationsPage onOpenAutomations={() => onOpenAutomations?.()} />
+      )}
       {selected === "workspace-sync" && (
         <WorkspaceSyncPage
           onReplaced={() => {
@@ -160,6 +176,7 @@ export function SettingsView({
             selected === `source-${entry.saved?.id ?? entry.connector.provider}`
           }
           onBack={() => onSelect?.("ticket-sources")}
+          {...(onSourcesChanged && { onChanged: () => onSourcesChanged() })}
           {...(onProjectLinked && { onProjectLinked })}
         />
       ))}

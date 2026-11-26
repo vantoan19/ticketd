@@ -7,6 +7,7 @@ import {
   Folder,
   Info,
   Keyboard,
+  ListChecks,
   Puzzle,
   RefreshCw,
   ScrollText,
@@ -17,7 +18,7 @@ import {
 } from "lucide-react";
 
 export type SettingsGroup =
-  "Preferences" | "Workspace" | "AI" | "Connections" | "Help";
+  "Settings" | "Preferences" | "Workspace" | "AI" | "Connections" | "Help";
 
 /**
  * The Settings pages, in nav order. The nav is built from this array and every
@@ -30,6 +31,14 @@ export type SettingsGroup =
  * see `SettingsDrillIn`).
  */
 export const SETTINGS_SECTIONS = [
+  // Above the groups, with no heading, until it is finished or hidden.
+  {
+    id: "setup",
+    label: "Set up ticketd",
+    group: "Settings",
+    icon: ListChecks,
+    job: "Finish the few things that make ticketd useful with your agents.",
+  },
   {
     id: "appearance",
     label: "Appearance",
@@ -140,14 +149,27 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   "Help",
 ];
 
+/** What decides which page Settings opens on. T-UB261 adds the pages that need the person first here. */
+export interface SettingsOpening {
+  /** Set up ticketd is neither finished nor hidden. */
+  setupPending: boolean;
+}
+
+/** The page Settings opens on: the one that needs the person first, else Appearance. */
+export function initialSettingsPage(opening: SettingsOpening): SettingsPageId {
+  return opening.setupPending ? "setup" : "appearance";
+}
+
 /** The id of the search field in the nav, which ⌘F and Ctrl+F focus. */
 export const SEARCH_INPUT_ID = "settings-search-input";
 
 /**
- * A page Settings can open: a section, Search, or a connection opened in place
- * (`source-<connection id>`, shown under Ticket sources).
+ * A page Settings can open: a section, Search, a connection opened in place
+ * (`source-<connection id>`, shown under Ticket sources) or an agent opened in
+ * place (`agent-<harness id>`, shown under Agents).
  */
-export type SettingsPageId = SettingsSectionId | "search" | `source-${string}`;
+export type SettingsPageId =
+  SettingsSectionId | "search" | `source-${string}` | `agent-${string}`;
 
 /**
  * Page names that earlier versions used, in saved state, links and code that
@@ -168,17 +190,22 @@ export type LegacySettingsPageId = keyof typeof LEGACY_PAGES;
 /** The current page for an id that may be an old name; an unknown id opens Appearance. */
 export function resolveSettingsPage(page: string): SettingsPageId {
   if (page in LEGACY_PAGES) return LEGACY_PAGES[page as LegacySettingsPageId];
-  if (page === "search" || page.startsWith("source-"))
+  if (
+    page === "search" ||
+    page.startsWith("source-") ||
+    page.startsWith("agent-")
+  )
     return page as SettingsPageId;
   return SETTINGS_SECTIONS.some((section) => section.id === page)
     ? (page as SettingsSectionId)
     : "appearance";
 }
 
-/** The sidebar entry a page belongs to: a connection opens under Ticket sources, Search under none. */
+/** The sidebar entry a page belongs to: a connection opens under Ticket sources, an agent under Agents, Search under none. */
 export function navSectionOf(page: SettingsPageId): SettingsSectionId | null {
   if (page === "search") return null;
   if (page.startsWith("source-")) return "ticket-sources";
+  if (page.startsWith("agent-")) return "agents";
   return page as SettingsSectionId;
 }
 

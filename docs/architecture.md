@@ -355,8 +355,9 @@ otherwise when the Workspace changes, and at least every 30 seconds. A pass is o
 use of the Workspace. A pass asks the core to queue a run
 for each Workspace event after a switched-on Automation's cursor that matches its
 trigger and conditions, and to start queued runs, oldest event first, until as
-many are running as the device's "Runs at once" setting allows (2 unless changed,
-at most 10; read on every pass, so a change counts from the next run). A run that
+many are running as the device's runs-at-once setting allows (2 unless changed,
+at most 10; read on every pass, so a change counts from the next run; Settings no
+longer shows it). A run that
 ends also starts the next queued one, but nothing starts while the Chat host is not
 serving (Chat off, Quit, a restore): queued runs wait for it. The core
 holds the rules: an event with actor `automation` matches

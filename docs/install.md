@@ -186,8 +186,9 @@ organize it. Installing this skill does not change those choices.
 
 Distribution builds include ticketd's Google app registration. In the attachment
 picker, choose **Google Drive > Choose in Google Drive**, sign in in your default
-browser, and select the files to authorize. To upload new copies, choose a writable
-Drive folder in **Settings > Files**. Users do not need a Google Cloud project,
+browser, and select the files to authorize. To upload new copies, choose Google Drive in
+**Settings > Files**: with Workspace sync on Google Drive they go to an Uploads folder
+inside the sync folder and use the same sign-in; otherwise choose a writable Drive folder. Users do not need a Google Cloud project,
 a configuration file, or environment variables. Local attachments also work
 without signing in. A source build without a registration keeps Drive disabled
 and explains that a build with Drive enabled is needed.

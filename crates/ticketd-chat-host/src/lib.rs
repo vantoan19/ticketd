@@ -43,7 +43,7 @@ pub use contract::*;
 pub use host::*;
 #[cfg(all(debug_assertions, unix))]
 pub use recording::prepare_harness_recording;
-pub use registry::{HostResources, REGISTRATIONS, Registration, registration};
+pub use registry::{HostResources, Installation, REGISTRATIONS, Registration, registration};
 pub use subscription::{
     ChatUpdate, SUBSCRIBER_BACKLOG_BYTES, SUBSCRIBER_BACKLOG_ITEMS, Subscription,
 };

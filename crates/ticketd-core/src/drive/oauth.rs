@@ -97,6 +97,8 @@ pub struct PickerSession {
     recovery: Option<super::DriveReference>,
     /// A sign-in picks no files and learns which account signed in.
     sign_in: bool,
+    /// Choosing a folder names the account too, so Settings can say whose folder it is.
+    names_account: bool,
 }
 pub struct DriveSelection {
     pub connection_id: String,
@@ -144,6 +146,7 @@ impl PickerSession {
         url.query_pairs_mut().extend_pairs(pairs);
         session.authorization_url = url.into();
         session.sign_in = true;
+        session.names_account = true;
         Ok(session)
     }
     pub fn begin_folder(client: DesktopOAuthClient, timeout: Duration) -> Result<Self, DriveError> {
@@ -162,6 +165,7 @@ impl PickerSession {
             ("mimetypes", "application/vnd.google-apps.folder"),
         ]);
         session.authorization_url = url.into();
+        session.names_account = true;
         Ok(session)
     }
     pub fn begin(client: DesktopOAuthClient, timeout: Duration) -> Result<Self, DriveError> {
@@ -201,6 +205,7 @@ impl PickerSession {
             timeout: timeout.min(Duration::from_secs(180)),
             recovery: None,
             sign_in: false,
+            names_account: false,
         })
     }
     pub fn authorization_url(&self) -> &str {
@@ -316,7 +321,7 @@ impl PickerSession {
             }
             let account = transport.send(DriveRequest {
                 method: "GET",
-                url: if self.sign_in {
+                url: if self.names_account {
                     "https://www.googleapis.com/drive/v3/about?fields=user(permissionId,emailAddress)"
                 } else {
                     "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)"

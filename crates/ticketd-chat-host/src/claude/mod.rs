@@ -114,13 +114,22 @@ impl ClaudeAdapter {
 
     /// The installed Claude Code as an absolute path, which the bridge requires.
     fn executable(&self) -> Option<PathBuf> {
-        let is_file = |path: &Path| path.is_file();
-        let found = match &self.selected {
-            Some(selected) => is_file(selected).then(|| selected.clone()),
-            None => locate(Os::current(), &LaunchEnvironment::current(), is_file),
-        }?;
-        std::path::absolute(found).ok()
+        match &self.selected {
+            Some(selected) => selected
+                .is_file()
+                .then(|| std::path::absolute(selected).ok())
+                .flatten(),
+            None => find(),
+        }
     }
+}
+
+/// Where Claude Code is installed, found the way Chats find it, without a bridge.
+pub(crate) fn find() -> Option<PathBuf> {
+    let found = locate(Os::current(), &LaunchEnvironment::current(), |path| {
+        path.is_file()
+    })?;
+    std::path::absolute(found).ok()
 }
 
 #[async_trait]

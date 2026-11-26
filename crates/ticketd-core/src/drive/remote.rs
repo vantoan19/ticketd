@@ -13,7 +13,8 @@ use serde::de::DeserializeOwned;
 
 use super::client::{ClientError, DriveClient, Failure, ReadError, Retry};
 use super::{
-    CredentialStore, DriveError, DriveErrorKind, DriveResponse, DriveTransport, valid_file_id,
+    CredentialStore, DriveError, DriveErrorKind, DriveFolder, DriveResponse, DriveTransport,
+    SyncUploadsFolder, valid_file_id,
 };
 use crate::sync::remote::{
     RemoteCapabilities, RemoteContent, RemoteError, RemoteFile, RemoteFolder, RemoteKey,
@@ -26,8 +27,13 @@ const FOLDER: &str = "application/vnd.google-apps.folder";
 const FILE_FIELDS: &str =
     "id,name,mimeType,size,headRevisionId,sha256Checksum,createdTime,trashed,appProperties";
 
-// appProperties keys. Folders carry SYNC + ROLE, files carry KIND + ID.
+// appProperties keys. Folders carry SYNC + ROLE, files carry KIND + ID. The Uploads folder
+// carries UPLOADS alone: without SYNC it is no folder of the Workspace, so no listing of the
+// Workspace reaches it or what it holds.
 const SYNC: &str = "ticketdSync";
+const UPLOADS: &str = "ticketdUploads";
+/// The name of the folder inside a Workspace folder that holds the person's uploaded files.
+pub const UPLOADS_FOLDER: &str = "Uploads";
 const ROLE: &str = "ticketdRole";
 const KIND: &str = "ticketdKind";
 const ID: &str = "ticketdId";
@@ -149,6 +155,12 @@ pub struct DriveRemote<'a> {
     files: Mutex<HashMap<(String, RemoteKey), String>>,
 }
 
+impl SyncUploadsFolder for DriveRemote<'_> {
+    fn uploads_folder(&self, workspace_folder: &str) -> Result<DriveFolder, RemoteError> {
+        DriveRemote::uploads_folder(self, workspace_folder)
+    }
+}
+
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
@@ -223,6 +235,55 @@ impl<'a> DriveRemote<'a> {
         check(folder, None)?;
         let root = self.resolve(folder, true)?.root;
         Ok(format!("https://drive.google.com/drive/folders/{root}"))
+    }
+
+    /// The Uploads folder inside the Workspace folder: where Files kept in Google Drive go
+    /// while Workspace sync is on Google Drive. It is created once, by whichever device
+    /// needs it first, and found again by its mark, never by its name. Sync never reads it,
+    /// replaces it or removes it: it is the person's files, not Workspace files.
+    pub fn uploads_folder(&self, folder: &str) -> Result<DriveFolder, RemoteError> {
+        check(folder, None)?;
+        let root = self.resolve(folder, true)?.root;
+        let found = self.query(&format!(
+            "mimeType='{FOLDER}' and {} and '{root}' in parents and trashed=false",
+            property(UPLOADS, folder)
+        ))?;
+        // Oldest first, so every device picks the same folder among duplicates.
+        let existing = found
+            .iter()
+            .filter(|entry| entry.mime_type == FOLDER)
+            .min_by(|a, b| a.age().cmp(&b.age()));
+        let (id, name) = match existing {
+            Some(entry) => (entry.id.clone(), entry.name.clone()),
+            None => {
+                let id = self.reserve()?;
+                let metadata = serde_json::json!({
+                    "id": id,
+                    "name": UPLOADS_FOLDER,
+                    "mimeType": FOLDER,
+                    "parents": [root],
+                    "appProperties": { UPLOADS: folder },
+                });
+                let response = self.send(
+                    "POST",
+                    &format!("{API}/files?supportsAllDrives=true&fields=id"),
+                    &[(
+                        "Content-Type".into(),
+                        "application/json; charset=UTF-8".into(),
+                    )],
+                    metadata.to_string().as_bytes(),
+                )?;
+                if response.status == 404 {
+                    return Err(self.folder_gone(folder));
+                }
+                (id, UPLOADS_FOLDER.to_owned())
+            }
+        };
+        Ok(DriveFolder {
+            id,
+            name,
+            can_add_children: true,
+        })
     }
 
     /// Replace the wait between retries, so tests control time.

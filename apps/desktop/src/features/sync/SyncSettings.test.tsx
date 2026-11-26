@@ -451,6 +451,8 @@ test("Disconnect is the last row and confirms that nothing is deleted before sto
   expect(dialog.textContent).toContain(
     "“ticketd · web-app” stays, for your other computers",
   );
+  // Uploads sit inside the sync folder and are the person's own files.
+  expect(dialog.textContent).toContain("Your Uploads folder stays as it is");
   expect(api.disconnect).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
   // Setup begins again, at its first step.

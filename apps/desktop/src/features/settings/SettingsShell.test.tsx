@@ -156,6 +156,8 @@ test("the nav lists the decided groups and pages in order, with no entry per con
       ),
     ]);
   expect(groups).toEqual([
+    // Above the groups, with no heading, until it is finished or hidden.
+    ["Setup", [expect.stringMatching(/^Set up ticketd \d of 5$/)]],
     ["Preferences", ["Appearance", "Attention"]],
     ["Workspace", ["Workspace sync", "Files", "Backups & export"]],
     ["AI", ["Command line", "Agent skills", "Agents"]],
@@ -292,7 +294,7 @@ test("opening a connection shows it in place under Ticket sources, and Back and 
   });
   render(<Settings initial="ticket-sources" />);
   await act(async () => {});
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^GitHub/ }));
   expect(
     await screen.findByRole("heading", { level: 1, name: "GitHub" }),
   ).toBeTruthy();
@@ -308,7 +310,7 @@ test("opening a connection shows it in place under Ticket sources, and Back and 
     await screen.findByRole("heading", { level: 1, name: "Ticket sources" }),
   ).toBeTruthy();
 
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^GitHub/ }));
   await screen.findByRole("heading", { level: 1, name: "GitHub" });
   fireEvent.keyDown(document.body, { key: "Escape" });
   expect(
