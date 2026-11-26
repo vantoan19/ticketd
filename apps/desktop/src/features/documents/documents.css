@@ -31,27 +31,28 @@
   width: 340px;
   min-width: 0;
   min-height: 0;
-  /* WebKit's 10px scrollbar would come and go with the list's height, narrowing every title
-     and re-wrapping it when a group opens or closes; the track is always there (invisible while
-     there is nothing to scroll). WebKit ignores scrollbar-gutter next to the styled scrollbar. */
-  overflow-y: scroll;
+  /* The view clips; it is not the scroller. The header, filters and notices stay put and only
+     the body (the rows and paging) scrolls beneath them, as in the tickets lists, so the header
+     and its hairline span the whole pane and the scrollbar track starts under it. */
+  overflow: hidden;
 }
-/* The header sits in a wrapper that takes its step of the page's entrance. */
+.documents-list-view > :not(.documents-list-body) {
+  flex: none;
+}
 .documents-list-view > .documents-list-head {
   background: var(--surface);
-  position: sticky;
-  top: 0;
+  position: relative;
   z-index: 2;
-  flex: none;
   margin: 0;
 }
 /* The switch and the buttons keep the rows' 10px inset; searching, the field takes the header
-   with 8px on both sides (the board's L2). */
+   with 8px on both sides (the board's L2). The rows sit left of the scrollbar's track, so the
+   header gives that room up on the right and its buttons stay in line with the rows' counts. */
 .documents-list-head .ui-pane-header:not([data-leading]) {
-  padding-inline: 10px;
+  padding-inline: 10px calc(10px + var(--scrollbar-size));
 }
 .documents-list-head .ui-pane-header[data-title-editor]:not([data-leading]) {
-  padding-inline: 8px;
+  padding-inline: 8px calc(8px + var(--scrollbar-size));
 }
 /* The shell's notice slot keeps 28px for a failure control; searching, while it is empty, the
    field gets that room too. */
@@ -62,7 +63,14 @@
 }
 /* 4px above the first group and 16px under the last row, as the board's list. */
 .documents-list-body {
+  flex: 1 1 0;
+  min-height: 0;
   padding: 4px 0 16px;
+  /* WebKit's 10px scrollbar would come and go with the list's height, narrowing every title
+     and re-wrapping it when a group opens or closes; the track is always there (invisible while
+     there is nothing to scroll). WebKit ignores scrollbar-gutter next to the styled scrollbar. */
+  overflow-x: hidden;
+  overflow-y: scroll;
 }
 .documents-list-view [data-slot="pane-search"] {
   display: flex;
@@ -665,6 +673,11 @@
   font: inherit;
   line-height: inherit;
 }
+.document-passage .markdown-document code {
+  /* Inline code takes the passage's 12/16, so a line with code is no taller than the others. */
+  font-size: inherit;
+  line-height: inherit;
+}
 .document-passage .markdown-document .ui-reference {
   font-size: inherit;
   line-height: inherit;
@@ -1203,6 +1216,11 @@
 .document-rail-outline a:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
+  /* Rounded like the other rings (a current link's marker keeps its straight edge at rest). */
+  border-radius: var(--radius);
+}
+.document-meta time:focus-visible {
+  border-radius: var(--radius);
 }
 /* Everything is folded: the count of folded sections and Unfold all stand in for the list. */
 .document-rail-unfold .ui-button {
@@ -1271,7 +1289,9 @@
 }
 /* The rail's Linked list takes the end of the Document's place while the rail is there (not
    while editing: the rail is hidden then and only its room stays). */
-.document-main[data-rail]:not([data-writing]) .document-end [aria-label="Linked"] {
+.document-main[data-rail]:not([data-writing])
+  .document-end
+  [aria-label="Linked"] {
   display: none;
 }
 
@@ -1291,4 +1311,70 @@
   .document-end
   [aria-label="Linked"] {
   display: block;
+}
+
+/* Source Edit: the line numbers hang in the reader's left margin so the text shares the title's
+   edge (the gutter leaves the line, so its width, set by the number of digits, never moves the text).
+   Where the margin is too narrow for them (a narrow pane, or the full-width reader before it has
+   room beside the rail) they stay inside, as CodeMirror draws them. */
+.document-workspace .document-body > .markdown-editor .cm-scroller {
+  overflow: visible;
+}
+.document-workspace .document-body > .markdown-editor .cm-gutters {
+  /* CodeMirror sets the gutter's position inline. */
+  position: absolute !important;
+  top: 0;
+  right: 100%;
+  left: auto !important;
+  padding-right: 10px;
+  background: transparent;
+}
+.document-workspace .document-body > .markdown-editor .cm-line {
+  padding-inline: 0;
+}
+.document-workspace .document-body > .markdown-editor .cm-activeLineGutter {
+  background: transparent;
+}
+:where([data-width~="max-879"], [data-width~="max-479"])
+  .document-workspace
+  .document-body
+  > .markdown-editor
+  .cm-gutters,
+:where([data-width~="max-999"])
+  .document-workspace
+  .document-main[data-rail]
+  .document-body
+  > .markdown-editor
+  .cm-gutters {
+  position: sticky !important;
+  right: auto;
+  left: 0 !important;
+  padding-right: 0;
+  background: var(--recessed);
+}
+:where([data-width~="max-879"], [data-width~="max-479"])
+  .document-workspace
+  .document-body
+  > .markdown-editor
+  .cm-line,
+:where([data-width~="max-999"])
+  .document-workspace
+  .document-main[data-rail]
+  .document-body
+  > .markdown-editor
+  .cm-line {
+  padding-inline: 6px 2px;
+}
+:where([data-width~="max-879"], [data-width~="max-479"])
+  .document-workspace
+  .document-body
+  > .markdown-editor
+  .cm-activeLineGutter,
+:where([data-width~="max-999"])
+  .document-workspace
+  .document-main[data-rail]
+  .document-body
+  > .markdown-editor
+  .cm-activeLineGutter {
+  background: var(--recessed);
 }

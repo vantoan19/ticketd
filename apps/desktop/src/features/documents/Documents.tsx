@@ -128,6 +128,7 @@ export function Documents({
   const [readerCloseRequest, setReaderCloseRequest] = useState(0);
   const page = useRef<HTMLDivElement>(null);
   const navigator = useRef<HTMLDivElement>(null);
+  const listBody = useRef<HTMLDivElement>(null);
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const restoreSearchFocus = useRef(false);
@@ -546,7 +547,7 @@ export function Documents({
   const searching = Boolean(query.trim() || filter.trim());
   // Results always start at the top ("Titles"), wherever the list had been scrolled to.
   useLayoutEffect(() => {
-    if (searching && navigator.current) navigator.current.scrollTop = 0;
+    if (searching && listBody.current) listBody.current.scrollTop = 0;
   }, [searching]);
   // A word search lists the Documents whose title matches, then those that match only inside;
   // a search by tag alone has nothing to match and stays one plain list.
@@ -1290,7 +1291,7 @@ export function Documents({
             onRetry={listError.retry}
           />
         )}
-        <div className="documents-list-body" {...enter(1)}>
+        <div className="documents-list-body" ref={listBody} {...enter(1)}>
           {listError?.kind === "load" && !countKnown ? (
             <FailureState
               failure={listError.failure}
