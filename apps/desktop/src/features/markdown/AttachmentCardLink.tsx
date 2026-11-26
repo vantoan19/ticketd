@@ -36,7 +36,9 @@ export function AttachmentCardLink({
       current = false;
     };
   }, [uri]);
-  const file = found?.uri === uri ? found.file : undefined;
+  // A Replace rewrites the address in place: until the new one answers the card keeps
+  // showing the file it had, so it stays one element and focus can come back to it.
+  const file = found?.file;
   const availability = useAvailability(
     file && file.kind === "local_snapshot" ? [file.id] : [],
   );

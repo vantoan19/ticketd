@@ -313,7 +313,7 @@ function mentionBlock(tag: string) {
       alone
         ? alone.map((link, index) => (
             <AttachmentCardLink
-              key={`${index}:${link.uri}`}
+              key={index}
               uri={link.uri}
               label={link.label}
               onReplace={replacement(link.node as ExtraProps["node"], link.uri)}

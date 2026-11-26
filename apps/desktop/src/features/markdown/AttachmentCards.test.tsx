@@ -183,3 +183,16 @@ test("a text with one file opens it alone, without a position", async () => {
   expect(screen.queryByText(/ of \d/)).toBeNull();
   expect(screen.queryByRole("button", { name: /Next file/ })).toBeNull();
 });
+
+test("a card stays the same card when Replace rewrites its address, so the viewer and focus come back to it", async () => {
+  bridge();
+  const text = (id: string) => `[Run log](${uri(id)})`;
+  const view = render(
+    <MarkdownDocument source={text("log-1")} attachmentCards />,
+  );
+  await screen.findByText("Log · 2.4 MB");
+  const card = screen.getByRole("button", { name: "Run log" });
+  // The text is saved with the replacement's address while the viewer is still open.
+  view.rerender(<MarkdownDocument source={text("report-1")} attachmentCards />);
+  expect(screen.getByRole("button", { name: "Run log" })).toBe(card);
+});
