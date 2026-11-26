@@ -15,6 +15,7 @@ mod cli_status;
 mod diagnostics_commands;
 mod drive_commands;
 mod folder_probe;
+mod notification_permission;
 #[cfg(test)]
 mod runtime_trace;
 mod s3_commands;
@@ -2540,6 +2541,9 @@ pub fn run() -> Result<(), tauri::Error> {
             cli_status::check_cli,
             cli_status::install_cli,
             cli_status::install_cli_in_user_bin,
+            notification_permission::notification_permission,
+            notification_permission::request_notification_permission,
+            notification_permission::open_notification_settings,
             agent_skills::agent_skills,
             agent_skills::install_agent_skill,
             list_projects,

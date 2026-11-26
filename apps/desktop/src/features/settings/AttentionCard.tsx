@@ -1,57 +1,33 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { failureText } from "@/lib/api/describe-failure";
 import { notificationClient } from "@/lib/api/notifications";
 import {
-  loadPreferences,
-  setPreference,
-  usePreferences,
-} from "@/lib/preferences";
-import { Ticket } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+  refreshNotificationPermission,
+  useNotificationPermission,
+} from "@/lib/notification-permission";
+import { setPreference, usePreferences } from "@/lib/preferences";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { StatusLabel } from "@/components/ui/status-label";
 import { Switch } from "@/components/ui/switch";
+import { useChatFeature } from "@/features/chats/use-chats";
 import {
   SettingsList,
-  SettingsListFooter,
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import "@/features/settings/pages/attention.css";
 
-const BLOCKED_TITLE = "Notifications are blocked for ticketd";
-const BLOCKED_HELP =
-  "Allow them for ticketd in your system's notification settings, then turn this on again.";
-const PERMISSION_HELP = `${BLOCKED_TITLE}. ${BLOCKED_HELP}`;
-
-// Obviously generic example text; the real notification uses the ticket's own.
-const EXAMPLE_TITLE = "Update the onboarding checklist";
-const EXAMPLE_BODY = "T-12: reminder is due";
-
 /** Personal attention preferences; they belong to the person on this computer. */
-export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
-  const { followCreated, notifyReminders } = usePreferences();
+export function AttentionCard() {
+  const { followCreated, notifyChats } = usePreferences();
+  const { enabled: chatsOn } = useChatFeature();
+  const permission = useNotificationPermission();
+  const allowed = permission?.state === "allowed";
   const [followFailure, setFollowFailure] = useState("");
-  const [failure, setFailure] = useState("");
-  const [checking, setChecking] = useState(false);
-
-  // Permission can be withdrawn in system settings; never show a switch that
-  // promises notifications the system will drop. Checked once on opening.
-  useEffect(() => {
-    if (!loadPreferences().notifyReminders) return;
-    let current = true;
-    notificationClient
-      .permitted()
-      .then((granted) => {
-        if (current && !granted) {
-          setPreference("notifyReminders", false);
-          setFailure(PERMISSION_HELP);
-        }
-      })
-      .catch(() => {});
-    return () => {
-      current = false;
-    };
-  }, []);
+  const [chatFailure, setChatFailure] = useState("");
+  const [permissionFailure, setPermissionFailure] = useState("");
+  const [asking, setAsking] = useState(false);
 
   function changeFollow(value: boolean) {
     setFollowFailure(
@@ -61,40 +37,55 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
     );
   }
 
-  async function changeNotify(value: boolean) {
-    setFailure("");
-    if (!value) {
-      if (!setPreference("notifyReminders", false))
-        setFailure("Couldn't save the notification preference.");
-      return;
-    }
-    setChecking(true);
+  function changeChats(value: boolean) {
+    setChatFailure(
+      setPreference("notifyChats", value)
+        ? ""
+        : "Couldn't save the notification preference.",
+    );
+  }
+
+  async function allow() {
+    setPermissionFailure("");
+    setAsking(true);
     try {
-      if (!(await notificationClient.requestPermission())) {
-        setPreference("notifyReminders", false);
-        setFailure(PERMISSION_HELP);
-        return;
-      }
-      if (!setPreference("notifyReminders", true))
-        setFailure("Couldn't save the notification preference.");
+      await notificationClient.ask();
+      await refreshNotificationPermission();
     } catch (reason) {
-      setPreference("notifyReminders", false);
-      setFailure(failureText(reason, "ask for notification permission"));
+      setPermissionFailure(
+        failureText(reason, "ask for notification permission"),
+      );
     } finally {
-      setChecking(false);
+      setAsking(false);
     }
   }
 
+  async function openSettings() {
+    setPermissionFailure("");
+    try {
+      await notificationClient.openSettings();
+    } catch (reason) {
+      setPermissionFailure(failureText(reason, "open System Settings"));
+    }
+  }
+
+  const blocked = permission?.state === "blocked";
+  const what = chatsOn
+    ? "Due reminders, and Chats that need you, while ticketd is open."
+    : "Due reminders while ticketd is open.";
+
   return (
     <>
-      {/* One list for the two switches: a card per setting is a stack of boxes. */}
-      <SettingsSection title="Following and reminders">
+      <SettingsSection
+        title="Following"
+        caption="Follows and reminders stay on this computer."
+      >
         <SettingsList>
           <SettingsRow
             variant="top"
             title="Follow tickets I create"
             titleId="follow-created-label"
-            description="Tickets you create in ticketd become followed tickets. Tickets created by agents through the command line are not followed."
+            description="Changes to them reach your Inbox. Tickets agents create aren’t followed."
             trailing={
               <Switch
                 aria-labelledby="follow-created-label"
@@ -111,91 +102,81 @@ export function AttentionCard({ onOpenInbox }: { onOpenInbox: () => void }) {
               </div>
             )}
           </SettingsRow>
-          <SettingsRow
-            variant="top"
-            title="Notify me when a reminder is due"
-            titleId="notify-reminders-label"
-            description="Shows a system notification while ticketd is open. Reminders that come due while it is closed appear only in the inbox."
-            trailing={
-              <Switch
-                aria-labelledby="notify-reminders-label"
-                checked={notifyReminders}
-                disabled={checking}
-                onCheckedChange={(value) => void changeNotify(value)}
-              />
-            }
-          />
-          {failure === PERMISSION_HELP ? (
-            <div className="attention-row-extra">
-              <Alert tone="attention">
-                <AlertTitle>{BLOCKED_TITLE}</AlertTitle>
-                <AlertDescription>{BLOCKED_HELP}</AlertDescription>
-              </Alert>
-            </div>
-          ) : (
-            failure && (
-              <div className="attention-row-extra">
-                <Alert tone="error">
-                  <AlertDescription>{failure}</AlertDescription>
-                </Alert>
-              </div>
-            )
-          )}
-          {/* The preview and its help only while notifications are on. */}
-          {notifyReminders && (
-            <div className="attention-row-extra attention-example">
-              <p className="attention-example-label">
-                What a due reminder looks like
-              </p>
-              <div
-                className="attention-notification"
-                role="img"
-                aria-label={`Example notification: ${EXAMPLE_TITLE}. ${EXAMPLE_BODY}`}
-              >
-                <span
-                  className="attention-notification-icon"
-                  aria-hidden="true"
-                >
-                  <Ticket size={16} />
-                </span>
-                <span className="attention-notification-text">
-                  <span className="attention-notification-app">
-                    <span>ticketd</span>
-                    <span>now</span>
-                  </span>
-                  <span className="attention-notification-title">
-                    {EXAMPLE_TITLE}
-                  </span>
-                  <span className="attention-notification-body">
-                    {EXAMPLE_BODY}
-                  </span>
-                </span>
-              </div>
-            </div>
-          )}
-          {notifyReminders && (
-            <SettingsListFooter>
-              No notification? Allow ticketd in System Settings › Notifications.
-            </SettingsListFooter>
-          )}
         </SettingsList>
       </SettingsSection>
-      <SettingsSection title="Inbox">
+      <SettingsSection title="Notifications">
         <SettingsList>
           <SettingsRow
-            title="Attention inbox"
-            description="Followed tickets and due reminders collect here. Follows and reminders belong to the person on this computer."
-            trailing={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onOpenInbox}
-              >
-                Open the Attention inbox
-              </Button>
+            title="System notifications"
+            description={
+              blocked
+                ? "Off for ticketd in System Settings › Notifications."
+                : what
             }
-          />
+            trailing={
+              permission === null ? null : permission.state === "allowed" ? (
+                <StatusLabel tone="positive">Allowed</StatusLabel>
+              ) : permission.state === "not_asked" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={asking}
+                  onClick={() => void allow()}
+                >
+                  Allow notifications
+                </Button>
+              ) : (
+                <>
+                  <StatusLabel tone="attention">Blocked</StatusLabel>
+                  {permission.settings && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => void openSettings()}
+                    >
+                      Open System Settings
+                    </Button>
+                  )}
+                </>
+              )
+            }
+          >
+            {permissionFailure && (
+              <div className="attention-failure">
+                <Alert tone="error" size="compact">
+                  <AlertDescription>{permissionFailure}</AlertDescription>
+                </Alert>
+              </div>
+            )}
+          </SettingsRow>
+          {chatsOn && (
+            <SettingsRow
+              variant="top"
+              title="Chat notifications"
+              titleId="notify-chats-label"
+              description="Approvals, questions, failures and finished turns. Mute one Chat from its menu."
+              trailing={
+                // Never a switch that promises what the system drops: until
+                // notifications are allowed it reads off. The choice is kept.
+                <Switch
+                  aria-labelledby="notify-chats-label"
+                  checked={allowed && notifyChats}
+                  disabled={!allowed}
+                  onCheckedChange={changeChats}
+                />
+              }
+            >
+              {chatFailure && (
+                <div className="attention-failure">
+                  <Alert tone="error" size="compact">
+                    <AlertDescription>{chatFailure}</AlertDescription>
+                  </Alert>
+                </div>
+              )}
+            </SettingsRow>
+          )}
         </SettingsList>
       </SettingsSection>
     </>
