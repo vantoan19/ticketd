@@ -6,6 +6,7 @@ import {
   estimateBlocks,
   findMatches,
   firstMatchFrom,
+  lastLines,
   parseLines,
   rowsOf,
   searchIndex,
@@ -89,4 +90,13 @@ test("a selection across lines copies their text without anything around it", ()
   expect(
     selectionText(lines, { line: 3, column: 5 }, { line: 3, column: 0 }),
   ).toBe("ERROR");
+});
+
+test("a file of too many lines keeps its last lines and counts the ones before", () => {
+  expect(lastLines("a\nb\nc\n", 3)).toEqual({ text: "a\nb\nc\n", dropped: 0 });
+  expect(lastLines("a\nb\nc\n", 2)).toEqual({ text: "b\nc\n", dropped: 1 });
+  // A last line with no break counts, and \r\n is one break.
+  expect(lastLines("a\r\nb\r\nc", 2)).toEqual({ text: "b\r\nc", dropped: 1 });
+  expect(lastLines("a\nb\nc\nd", 1)).toEqual({ text: "d", dropped: 3 });
+  expect(lastLines("", 5)).toEqual({ text: "", dropped: 0 });
 });

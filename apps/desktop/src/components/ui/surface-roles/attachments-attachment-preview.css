@@ -90,6 +90,7 @@
   color: var(--background);
 }
 .attachment-text-count {
+  padding-inline: 8px;
   min-width: 7ch;
   white-space: nowrap;
 }

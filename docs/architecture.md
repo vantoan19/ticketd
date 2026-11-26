@@ -731,6 +731,19 @@ shapes, system fonts stand in for unembedded ones, and scripting and XFA forms a
 The one cost is that images using JPEG 2000 or JBIG2, and unembedded CJK fonts, may
 not draw. A PDF that cannot be parsed shows the fallback and keeps Open and Export.
 A card's first-page still is drawn from the same read for a PDF of at most 8 MiB.
+A stored plain-text file (UTF-8 with no control characters other than tab, line breaks
+and form feed, once terminal escape sequences are set aside) reports `text` in its preview:
+its total size and what the viewer shows. `Workspace::attachment_text` reads it through the
+same checked snapshot and answers with one raw binary IPC response of UTF-8: the whole file
+up to 20 MiB, otherwise the last 5 MiB, cut on a character boundary and after the next line
+break when one is within 64 KiB. ANSI escape sequences (colours, cursor moves, titles) are
+removed and a stray control character or invalid byte becomes U+FFFD, so one bad byte never
+hides a log; the same removal lets an ANSI-coloured log preview at all. The 64 KiB
+`text_excerpt` stays for other callers. The viewer draws only the lines near the view, in
+blocks of 64 whose heights are estimated from the wrap width and replaced by their measured
+height once drawn, so Find, Wrap and a 20 MB log stay responsive; a file of more than a
+million lines shows its last million, because a scrolling element tops out near 33 million
+pixels.
 External references use the same preview entry point with cached provider details,
 current-source wording and explicit Open in Drive. They never enter the local media
 route or offer an original-byte export; unknown provider size remains unknown.

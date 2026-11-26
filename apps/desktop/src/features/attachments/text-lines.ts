@@ -13,6 +13,13 @@ export const HANG = 4;
 /** The most matches Find lists; more are counted as "N+". */
 export const MATCH_CAP = 20_000;
 
+/**
+ * The most lines the stage draws. A scrolling element tops out near 33 million
+ * pixels, so a file of millions of short lines shows its last million (20
+ * million pixels) and says so.
+ */
+export const MAX_LINES = 1_000_000;
+
 export type Lines = {
   lines: string[];
   /** Where each line starts in the original text. */
@@ -40,6 +47,31 @@ export function parseLines(text: string): Lines {
     starts.push(start);
   }
   return { lines, starts: Uint32Array.from(starts) };
+}
+
+/**
+ * The last `max` lines of `text`, and how many lines came before them. It counts
+ * line breaks the way `parseLines` splits them, without building the lines.
+ */
+export function lastLines(text: string, max: number) {
+  const walk = (stopAfter: number) => {
+    let breaks = 0;
+    let start = 0;
+    for (let index = 0; index < text.length; index++) {
+      const code = text.charCodeAt(index);
+      if (code !== 10 && code !== 13) continue;
+      if (code === 13 && text.charCodeAt(index + 1) === 10) index++;
+      breaks++;
+      start = index + 1;
+      if (breaks === stopAfter) break;
+    }
+    return { breaks, start };
+  };
+  const counted = walk(Infinity);
+  const total = counted.breaks + (counted.start < text.length ? 1 : 0);
+  if (total <= max) return { text, dropped: 0 };
+  const dropped = total - max;
+  return { text: text.slice(walk(dropped).start), dropped };
 }
 
 export type Match = { line: number; start: number; end: number };

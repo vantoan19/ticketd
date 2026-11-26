@@ -34,11 +34,13 @@ import {
   BLOCK_LINES,
   HANG,
   LINE_HEIGHT,
+  MAX_LINES,
   blockAt,
   blockTops,
   estimateBlocks,
   findMatches,
   firstMatchFrom,
+  lastLines,
   parseLines,
   rowsOf,
   searchIndex,
@@ -50,7 +52,7 @@ import {
 
 type Scope = { total_bytes: number; shown_bytes: number; partial: boolean };
 type Loaded =
-  | { key: string; index: SearchIndex }
+  | { key: string; index: SearchIndex; dropped: number }
   | { key: string; failure: FailureDescription };
 
 /** The line number column, the right padding, and the line above a partial log. */
@@ -96,8 +98,13 @@ export function TextStage({
     let active = true;
     attachments.text(workspace, file.id).then(
       (text) => {
-        if (active)
-          setLoaded({ key, index: searchIndex(text, parseLines(text)) });
+        if (!active) return;
+        const { text: shown, dropped } = lastLines(text, MAX_LINES);
+        setLoaded({
+          key,
+          index: searchIndex(shown, parseLines(shown)),
+          dropped,
+        });
       },
       (reason: unknown) => {
         if (active)
@@ -126,6 +133,7 @@ export function TextStage({
       key={key}
       name={file.display_name}
       index={current.index}
+      dropped={current.dropped}
       scope={scope}
       scrollerRef={scrollerRef}
       keysRef={keysRef}
@@ -137,6 +145,7 @@ export function TextStage({
 function TextLines({
   name,
   index,
+  dropped,
   scope,
   scrollerRef,
   keysRef,
@@ -144,6 +153,8 @@ function TextLines({
 }: {
   name: string;
   index: SearchIndex;
+  /** Lines before the first one shown, when the file has too many to draw. */
+  dropped: number;
   scope: Scope;
   scrollerRef: RefObject<HTMLElement | null>;
   keysRef: StageKeys;
@@ -157,7 +168,8 @@ function TextLines({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [scrollTop, setScrollTop] = useState(0);
   const [charWidth, setCharWidth] = useState(FALLBACK_CHAR_WIDTH);
-  const origin = scope.partial ? SCOPE_LINE : 0;
+  const note = scopeNote(scope, lines.length, dropped);
+  const origin = note ? SCOPE_LINE : 0;
 
   // The stage's size, its scroll position, and the width of one character.
   useLayoutEffect(() => {
@@ -418,12 +430,7 @@ function TextLines({
 
   return (
     <>
-      {scope.partial && (
-        <p className="attachment-text-scope">
-          Showing the last {formatSize(scope.shown_bytes)} of{" "}
-          {formatSize(scope.total_bytes)}. Open it in its app for the rest.
-        </p>
-      )}
+      {note && <p className="attachment-text-scope">{note}</p>}
       <div
         ref={listRef}
         role="document"
@@ -461,6 +468,16 @@ function TextLines({
       />
     </>
   );
+}
+
+/** The line above the text when it is not the whole file, in the fewest words. */
+function scopeNote(scope: Scope, shown: number, dropped: number) {
+  const rest = "Open it in its app for the rest.";
+  if (dropped > 0)
+    return `Showing the last ${shown.toLocaleString()} lines of ${formatSize(scope.total_bytes)}. ${rest}`;
+  if (scope.partial)
+    return `Showing the last ${formatSize(scope.shown_bytes)} of ${formatSize(scope.total_bytes)}. ${rest}`;
+  return null;
 }
 
 function ViewBarFind({
