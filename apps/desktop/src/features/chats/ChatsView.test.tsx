@@ -3542,12 +3542,45 @@ test("a stretch that left the view keeps a focused step until focus moves on", a
     step.focus();
     expect(document.activeElement).toBe(step);
     // It leaves the view, but the keyboard is inside it: nothing is removed.
+    view.place.top = 900;
+    view.place.bottom = 1000;
     view.sees(false);
     expect(document.activeElement).toBe(step);
     expect(stretchRows()).toEqual([]);
     // Focus moves on: now it folds.
     act(() => step.blur());
     await waitFor(() => expect(stretchRows()).toEqual(["Ran 1 command"]));
+  } finally {
+    view.done();
+  }
+});
+
+test("focus leaving a stretch that has just scrolled back into view does not fold it", async () => {
+  const view = watching();
+  try {
+    const client = await open(
+      one({ id: "stretch-returned", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-returned", stepItem("s1", npmTest));
+      client.push("stretch-returned", inTurn(reply("n1", "The tests ran.")));
+    });
+    const step = button("Ran npm test");
+    step.focus();
+    view.place.top = 900;
+    view.place.bottom = 1000;
+    view.sees(false);
+    // It scrolls back under the reader, but the observer has not said so yet.
+    view.place.top = 100;
+    view.place.bottom = 200;
+    act(() => step.blur());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(stretchRows()).toEqual([]);
+    expect(button("Ran npm test")).toBeTruthy();
   } finally {
     view.done();
   }

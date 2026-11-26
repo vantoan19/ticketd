@@ -61,7 +61,11 @@ export function useKeptOpen(
     // After a focus move has landed: focus that only left the window is still inside.
     const left = () => {
       clearTimeout(timer);
-      timer = setTimeout(release, 0);
+      timer = setTimeout(() => {
+        // The observer may not have reported the last scroll yet: read where it is now.
+        if (scroller) visible = inView(node, scroller);
+        release();
+      }, 0);
     };
     node.addEventListener("focusout", left);
     return () => {
