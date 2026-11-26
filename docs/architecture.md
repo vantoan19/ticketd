@@ -789,7 +789,9 @@ not apply it to `about:srcdoc` frames (verified in WKWebView; WebView2 and WebKi
 are checked in the platform matrix). Reports keep inline styles and `data:` images;
 `data:` fonts are blocked by the app CSP's `font-src`. Keyboard events inside a
 sandboxed frame do not reach the viewer, so Escape closes the viewer from the stage
-and header, and Shift+Tab leaves the frame.
+and header, and Shift+Tab leaves the frame. J and K (next and previous file) behave
+the same way: they work from the stage and header, and the Previous and Next buttons
+always work.
 
 ## Document editing
 
