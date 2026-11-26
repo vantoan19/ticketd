@@ -361,22 +361,14 @@ async fn check(app: AppHandle, sequence: u64) {
                 return;
             }
         };
-        let Some(format) = offer.raw_json["format_version"]
-            .as_i64()
-            .filter(|value| *value > 0)
-        else {
-            session.check_failed(
-                &app,
-                "missing_format_version",
-                "update manifest has no workspace format version",
-            );
-            return;
-        };
         session.check_error = None;
         let info = UpdateInfo {
             release_url: format!("{RELEASES}/tag/v{}", offer.version),
             version: offer.version.clone(),
-            upgrades_workspace: format > ticketd_core::FORMAT_VERSION,
+            upgrades_workspace: upgrades_workspace(
+                &offer.raw_json,
+                ticketd_core::FORMAT_VERSION,
+            ),
         };
         tracing::info!(version = %info.version, "update check found newer release");
         if session.ready.as_ref().is_some_and(|ready| {
@@ -523,6 +515,17 @@ pub async fn updates_install(app: AppHandle, version: String) -> Result<(), Stri
     #[cfg(not(target_os = "windows"))]
     app.request_restart();
     Ok(())
+}
+
+/// Whether installing the update raises the workspace format. The release's
+/// manifest names the format it ships; a manifest that doesn't (a release from
+/// before it did, or one assembled by hand) is treated as raising it, so the
+/// person gets the warning rather than a failed check.
+fn upgrades_workspace(manifest: &serde_json::Value, installed: i64) -> bool {
+    manifest["format_version"]
+        .as_i64()
+        .filter(|format| *format > 0)
+        .is_none_or(|format| format > installed)
 }
 
 /// Quitting installs a ready update only where that needs no prompt, and only
@@ -713,6 +716,30 @@ mod tests {
             );
         }
         assert!(!should_install_on_quit("linux", Some(false)));
+    }
+
+    #[test]
+    fn the_manifest_names_whether_an_update_raises_the_workspace_format() {
+        let manifest = |format: serde_json::Value| serde_json::json!({ "format_version": format });
+        assert!(!upgrades_workspace(&manifest(5.into()), 5));
+        assert!(!upgrades_workspace(&manifest(4.into()), 5));
+        assert!(upgrades_workspace(&manifest(6.into()), 5));
+    }
+
+    #[test]
+    fn a_manifest_without_a_usable_format_is_assumed_to_raise_it() {
+        assert!(upgrades_workspace(&serde_json::json!({}), 5));
+        for format in [
+            serde_json::json!(null),
+            serde_json::json!("6"),
+            serde_json::json!(0),
+            serde_json::json!(-1),
+        ] {
+            assert!(upgrades_workspace(
+                &serde_json::json!({ "format_version": format }),
+                5
+            ));
+        }
     }
 
     #[test]

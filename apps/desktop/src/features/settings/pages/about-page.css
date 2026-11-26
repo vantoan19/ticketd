@@ -1,22 +1,4 @@
-/* About page: the promises as one unboxed caption list (icon, title,
-   sentence), then the link rows. Cards would outweigh the useful links. */
-.about-promises {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 24px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.about-promise {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.about-promise svg {
-  margin-bottom: 6px;
-  color: var(--muted-foreground);
-}
+/* About page: the link rows of Help. */
 .about-link-title {
   font-size: var(--text-ui);
   font-weight: 500;
@@ -43,7 +25,7 @@
   gap: 16px;
   width: 100%;
   min-height: 60px;
-  padding: 12px 20px;
+  padding: 12px 16px;
   border: 0;
   background: none;
   font: inherit;
@@ -64,10 +46,4 @@
 .about-link-row:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
-}
-
-@media (max-width: 639px) {
-  .about-promises {
-    grid-template-columns: minmax(0, 1fr);
-  }
 }
