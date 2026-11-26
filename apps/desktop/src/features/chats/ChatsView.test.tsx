@@ -1393,7 +1393,7 @@ test("a finished turn shows its start once, on the work line, with the exact tim
   expect(button("Worked for 2m 13s").textContent).not.toMatch(/Nov/);
   fireEvent.pointerMove(time);
   expect((await screen.findByRole("tooltip")).textContent).toMatch(
-    /^Started Nov 10, 2026, .+ · Ended .+$/,
+    /^Started Nov 10(, 2026)?, .+ · Ended .+$/,
   );
   // Your message has no time under it; Copy stays.
   expect(document.querySelector(".chat-you-part .chat-fine")).toBeNull();
@@ -1822,6 +1822,42 @@ test("a finished turn's record changes are one receipt row under it, whose more 
   expect(
     screen.getByRole("group", { name: "Worked for 30s" }).textContent,
   ).toContain("Created the Document Reset email copy");
+});
+
+test("a ticket moved twice in a turn reads as its net move in the receipt row", async () => {
+  const status = (from: string, to: string) => ({
+    kind: "status" as const,
+    reference: "T-12",
+    title: "Improve the export dialog",
+    from,
+    to,
+  });
+  await open(
+    one({ id: "netted", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [
+          status("Todo", "In progress"),
+          { kind: "update", reference: "T-12", excerpt: "Started" },
+        ],
+      }),
+      inTurn({
+        id: "rec2",
+        at,
+        kind: "records",
+        changes: [status("In progress", "In review")],
+      }),
+    ]),
+  );
+  expect(document.querySelector(".chat-records-items")?.textContent).toBe(
+    "Moved T-12 to In review · Posted an update on T-12",
+  );
+  // Two sentences: nothing more to open.
+  expect(screen.queryByRole("button", { name: /more/ })).toBeNull();
 });
 
 /** The queue's head line; its count is an element of its own. */

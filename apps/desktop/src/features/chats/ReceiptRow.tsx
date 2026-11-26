@@ -5,7 +5,7 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import type { RecordChange } from "@/features/chats/client";
-import { goneWords } from "@/features/chats/model";
+import { goneWords, netChanges } from "@/features/chats/model";
 
 /** Whole sentences shown on the row before the rest folds under `N more`. */
 const SHOWN = 2;
@@ -62,19 +62,22 @@ function Sentence({ change }: { change: RecordChange }) {
 
 /**
  * What the agent changed in ticketd during a turn, as one 28px row under the
- * response (after the files row): the first change's icon, then verb-first
+ * response (after the files row): the first sentence's icon, then verb-first
  * sentences joined by ` · `, at most two, then `N more`, which opens the
- * turn's fold, where every change is a step row. Never folded itself, and
+ * turn's fold, where every change is a step row. A ticket's status moves read
+ * as the net move (`netChanges`), so "Moved T-12 to In review" leads, not the
+ * step it passed through. Never folded itself, and
  * shown also when the turn failed or was stopped.
  */
 export function ReceiptRow({
-  changes,
+  changes: all,
   onMore,
 }: {
   changes: RecordChange[];
   /** Opens the turn's fold. */
   onMore: () => void;
 }) {
+  const changes = netChanges(all);
   const first = changes[0];
   if (!first) return null;
   const rest = changes.length - SHOWN;

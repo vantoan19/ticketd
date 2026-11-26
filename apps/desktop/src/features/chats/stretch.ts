@@ -105,16 +105,20 @@ export function stretchWords(rows: TurnRow[]): string {
       if (step.state === "failed")
         failed += step.kind === "run" ? 1 : ids.length;
       if (step.ticketd?.length) {
+        let onRecord = false;
         step.ticketd.forEach((call, index) => {
           const reference = call.words.find((word) => word.code)?.text;
           // Only a call on a record is a change or a look-up; any other (a setting,
           // an attachment destination) is just a command that ran.
-          if (!reference || !RECORD_REFERENCE.test(reference))
-            add("run", [`${row.key}:${index}`]);
-          else if (LOOKUPS.has(call.verb))
+          if (!reference || !RECORD_REFERENCE.test(reference)) return;
+          onRecord = true;
+          if (LOOKUPS.has(call.verb))
             add("lookup", [`${row.key}:${index}:${reference}`]);
           else note(reference, reference);
         });
+        // The step is one row, whatever it holds: it is one command, and none when
+        // it already counts for the records it names.
+        if (!onRecord) add("run", [row.key]);
         continue;
       }
       if (step.explored) {

@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type {
   ChatSnapshot,
+  RecordChange,
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
@@ -16,6 +17,9 @@ import {
   chatTime,
   turnClock,
   turnSpanText,
+  netChanges,
+  commandLine,
+  ticketdParts,
   composerControls,
   composerPlaceholder,
   duration,
@@ -243,8 +247,129 @@ test("a command shows its first line, and its name says its outcome", () => {
   const words = stepWords(
     step({ kind: "run", command: "python3 -c '\nprint(1)'", state: "failed" }),
   );
-  expect(words.parts[1]?.text).toBe("python3 -c '");
-  expect(words.label).toBe("Run python3 -c ', Failed");
+  // The line is cut before the quote it opens, never inside it.
+  expect(words.parts[1]?.text).toBe("python3 -c");
+  expect(words.label).toBe("Run python3 -c, Failed");
+});
+
+test("a command's first line never ends in an open quote or bracket", () => {
+  // One line is as it is, even when it looks open.
+  expect(commandLine("echo 'a")).toBe("echo 'a");
+  expect(commandLine('python3 -I -c "\nprint(1)"')).toBe("python3 -I -c");
+  expect(commandLine("node -e '\nx'")).toBe("node -e");
+  expect(commandLine("run $(\nls)")).toBe("run");
+  expect(commandLine("make test (cd a &&\n ls)")).toBe("make test");
+  expect(commandLine("cat a.txt \\\n | wc -l")).toBe("cat a.txt");
+  // Closed quotes and brackets stay, and a heredoc keeps its tag.
+  expect(commandLine("grep 'a b' (x)\nnext")).toBe("grep 'a b' (x)");
+  expect(commandLine("python3 -I - <<'EOF'\nprint(1)\nEOF")).toBe(
+    "python3 -I - <<'EOF'",
+  );
+  expect(commandLine('say "a \\" b" and\nmore')).toBe('say "a \\" b" and');
+});
+
+/** Todo -> In progress -> In review, with updates between, as a turn's calls say them. */
+const moved = (reference: string, from: string, to: string): RecordChange => ({
+  kind: "status",
+  reference,
+  title: "Demo",
+  from,
+  to,
+});
+const posted = (reference: string): RecordChange => ({
+  kind: "update",
+  reference,
+  excerpt: "Done",
+});
+
+// The same cases as `a_tickets_status_moves_net_into_one_move` in the Chat host's
+// `attention_tests.rs`: the records row and an idle list row read from one rule.
+test("a ticket's status moves net into one move where its first stood", () => {
+  expect(
+    netChanges([
+      moved("T-12", "Todo", "In progress"),
+      posted("T-12"),
+      moved("T-12", "In progress", "In review"),
+    ]),
+  ).toEqual([moved("T-12", "Todo", "In review"), posted("T-12")]);
+  // A move that ends where it began is nothing.
+  expect(
+    netChanges([
+      moved("T-12", "Todo", "In progress"),
+      moved("T-12", "In progress", "Todo"),
+      posted("T-12"),
+    ]),
+  ).toEqual([posted("T-12")]);
+  // Each ticket nets by itself and keeps the place of its first move.
+  expect(
+    netChanges([
+      moved("T-12", "Todo", "In progress"),
+      moved("T-13", "Todo", "In progress"),
+      moved("T-12", "In progress", "Done"),
+    ]),
+  ).toEqual([
+    moved("T-12", "Todo", "Done"),
+    moved("T-13", "Todo", "In progress"),
+  ]);
+  // Updates are never merged, and the calls given are not changed.
+  const given = [posted("T-12"), posted("T-12")];
+  expect(netChanges(given)).toEqual([posted("T-12"), posted("T-12")]);
+  const moves = [
+    moved("T-12", "Todo", "In progress"),
+    moved("T-12", "In progress", "Done"),
+  ];
+  netChanges(moves);
+  expect(moves[0]?.kind === "status" && moves[0].to).toBe("In progress");
+});
+
+test("the same ticketd call said again is one clause, and calls of one shape name their records together", () => {
+  const evidence = (reference: string) => ({
+    verb: "add" as const,
+    words: [{ text: "evidence to" }, { text: reference, code: true }],
+  });
+  const said = (...calls: ReturnType<typeof evidence>[]) =>
+    stepWords(step({ kind: "run", ticketd: calls, state: "done" })).label;
+  expect(said(evidence("T-12"), evidence("T-12"), evidence("T-12"))).toBe(
+    "Added evidence to T-12 (3 times)",
+  );
+  expect(said(evidence("T-12"), evidence("T-13"), evidence("T-14"))).toBe(
+    "Added evidence to T-12, T-13 and T-14",
+  );
+  expect(
+    ticketdParts([evidence("T-12"), evidence("T-12")], 0).map((p) => p.text),
+  ).toEqual(["Adding", "evidence to", "T-12", "(2 times)"]);
+});
+
+test("a ticketd sentence too long for a row reads the harness's description", () => {
+  const calls = ["T-12", "T-13", "T-14"].flatMap((reference) => [
+    { verb: "read" as const, words: [{ text: reference, code: true }] },
+    {
+      verb: "set" as const,
+      words: [{ text: reference, code: true }, { text: "to In review" }],
+    },
+    {
+      verb: "post" as const,
+      words: [{ text: "an update on" }, { text: reference, code: true }],
+    },
+  ]);
+  const long = step({
+    kind: "run",
+    ticketd: calls,
+    description: "Move three tickets to review",
+  });
+  expect(stepWords(long).parts).toEqual([
+    { text: "Move three tickets to review" },
+  ]);
+  // Without a description the sentence stays; a short one never gives way.
+  expect(stepWords({ ...long, description: undefined }).label).toContain(
+    "then set it to In review",
+  );
+  const short = step({
+    kind: "run",
+    ticketd: calls.slice(0, 1),
+    description: "Look at a ticket",
+  });
+  expect(stepWords(short).label).toBe("Read T-12");
 });
 
 test("a command with a description reads the description, and one without reads its first line", () => {
@@ -1194,20 +1319,40 @@ test("a turn's exact start and end are one sentence for its tooltip", () => {
   const start = new Date(2026, 10, 24, 14, 3);
   const sameDay = new Date(2026, 10, 24, 14, 12);
   const nextDay = new Date(2026, 10, 25, 9, 30);
-  const full = (date: Date) =>
-    date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
   const clock = (date: Date) =>
     date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
-  expect(turnSpanText(start.toISOString(), sameDay.toISOString())).toBe(
-    `Started ${full(start)} · Ended ${clock(sameDay)}`,
-  );
-  expect(turnSpanText(start.toISOString(), nextDay.toISOString())).toBe(
-    `Started ${full(start)} · Ended ${full(nextDay)}`,
-  );
-  // A turn that has not ended says only when it started.
-  expect(turnSpanText(start.toISOString(), undefined)).toBe(
-    `Started ${full(start)}`,
-  );
+  const day = (date: Date, year = false) =>
+    date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      ...(year && { year: "numeric" }),
+    });
+  const full = (date: Date, year = false) =>
+    `${day(date, year)}, ${clock(date)}`;
+  // This year: month, day and time, with no year.
+  vi.useFakeTimers({ now: new Date(2026, 10, 26, 12, 0), toFake: ["Date"] });
+  try {
+    expect(turnSpanText(start.toISOString(), sameDay.toISOString())).toBe(
+      `Started ${full(start)} · Ended ${clock(sameDay)}`,
+    );
+    expect(turnSpanText(start.toISOString(), nextDay.toISOString())).toBe(
+      `Started ${full(start)} · Ended ${full(nextDay)}`,
+    );
+    // A turn that has not ended says only when it started.
+    expect(turnSpanText(start.toISOString(), undefined)).toBe(
+      `Started ${full(start)}`,
+    );
+    expect(full(start)).not.toContain("2026");
+    // Another year says it.
+    const old = new Date(2025, 11, 30, 23, 50);
+    const later = new Date(2026, 0, 2, 8, 5);
+    expect(turnSpanText(old.toISOString(), later.toISOString())).toBe(
+      `Started ${full(old, true)} · Ended ${full(later)}`,
+    );
+    expect(full(old, true)).toContain("2025");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 /** The turn's stretches and notes as `label` words: a note by its text, a stretch by its summary. */
@@ -1414,6 +1559,26 @@ test("a stretch says what changed in ticketd and how many steps failed", () => {
       ],
     }),
   ).toBe("Ran 1 command");
+  // A ticketd step is one row and counts once, however many calls it holds.
+  const lookups = (): Step => ({
+    ...ran("ticketd help; ticketd workspace; ticketd skills"),
+    ticketd: [
+      { verb: "run", words: [{ text: "ticketd help", code: true }] },
+      { verb: "run", words: [{ text: "ticketd workspace", code: true }] },
+      { verb: "read", words: [{ text: "ticketd skills", code: true }] },
+    ],
+  });
+  expect(words(lookups(), ran("ls"))).toBe("Ran 2 commands");
+  // One that names a record counts for that record, not as a command too.
+  expect(
+    words({
+      ...lookups(),
+      ticketd: [
+        { verb: "set", words: [{ text: "T-12", code: true }] },
+        { verb: "run", words: [{ text: "ticketd workspace", code: true }] },
+      ],
+    }),
+  ).toBe("Changed T-12");
   expect(words(ran("ls"), ran("npm test", "failed"))).toBe(
     "Ran 2 commands · 1 failed",
   );
