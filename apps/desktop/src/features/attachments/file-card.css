@@ -159,7 +159,7 @@ img.file-card-still[data-paper] {
 }
 .file-card-name {
   display: -webkit-box;
-  padding: 8px 12px 0;
+  padding: 8px 10px 0;
   overflow: hidden;
   overflow-wrap: anywhere;
   font-size: var(--text-ui);
@@ -175,7 +175,7 @@ img.file-card-still[data-paper] {
 }
 .file-card-caption {
   display: block;
-  padding: 2px 12px 10px;
+  padding: 2px 10px 10px;
   overflow: hidden;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
@@ -200,21 +200,23 @@ img.file-card-still[data-paper] {
 }
 
 /* Attachment links that stand alone on their line in written text become cards;
-   consecutive ones share a row. */
+   consecutive ones share a row, 10px apart: three cards (548px) then fit the
+   550px column of an update next to the timeline's scrollbar, where 12px gaps
+   (552px) wrapped the third onto a second row. */
 .markdown-document [data-cards] {
   display: inline-flex;
   flex-wrap: wrap;
-  gap: 12px;
+  gap: 12px 10px;
   max-width: 100%;
-  margin: 0 12px 12px 0;
+  margin: 0 10px 12px 0;
   vertical-align: top;
   list-style: none;
 }
-/* A card's 12px gap belongs between cards, not after the last: the last of a
-   run takes it back, so three cards (552px) fit a 552px column even with the
-   whitespace the Markdown leaves between paragraphs. */
-.markdown-document [data-cards]:is(p, li):not(:has(+ [data-cards])) {
-  margin-inline-end: -12px;
+/* A card's gap belongs between cards, not after the last: the last of a run
+   takes it back, so the run is as wide as its cards and the gaps between them,
+   even with the whitespace the Markdown leaves between paragraphs. */
+.markdown-document [data-cards]:not(:has(+ [data-cards])) {
+  margin-inline-end: -10px;
 }
 
 /* A link in a sentence: the family glyph at 14px before the words. */

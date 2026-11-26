@@ -1,7 +1,12 @@
 import { createElement, Fragment, type ReactNode } from "react";
 
-/** The room for a name inside a 176px card: its width less 12px of padding a side. */
-const WIDTH = 152;
+/**
+ * The room for a name inside a 176px card: its width less 10px of padding a
+ * side is 156px; 2px of that is slack, so a name the canvas measures as fitting
+ * still fits the box after the browser's own rounding (WebKit sets the 154px
+ * "e2e-run-2026-11-25.log" a pixel or two wider than a canvas does).
+ */
+const WIDTH = 154;
 /** The end that always stays visible: a date, a run number, the extension. */
 const KEEP = 14;
 /** A kept end shorter than this is no use as a landmark: fall back to KEEP characters. */
