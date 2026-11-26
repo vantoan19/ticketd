@@ -2383,6 +2383,133 @@ async fn resend_of_a_live_unconfirmed_linked_input_keeps_its_context() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn stop_cancels_a_resend_waiting_on_link_context() {
+    let hold_read = Arc::new(AtomicBool::new(false));
+    let source = hold_read.clone();
+    let (reading, mut started) = tokio::sync::mpsc::unbounded_channel();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if source.swap(false, Ordering::SeqCst) {
+            let (release, permit) = std::sync::mpsc::channel();
+            let _ = reading.send(release);
+            let _ = permit.recv();
+        }
+        Ok(())
+    });
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Link for resend").unwrap().id,
+    };
+    f.fake.script_submit(SubmitReply::Timeout);
+    let original = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Unconfirmed",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    f.wait_for_submissions(1).await;
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(f.message(&original.id).awaits_decision());
+    let queued = f.queue("Leave paused").await;
+
+    hold_read.store(true, Ordering::SeqCst);
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    let release = tokio::time::timeout(Duration::from_secs(10), started.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    f.host.resend(&f.chat.id, &original.id).await.unwrap();
+    assert_eq!(f.submits().len(), 1);
+    f.host.stop(&f.chat.id).await.unwrap();
+    release.send(()).unwrap();
+
+    f.send("Ordinary after Stop").await;
+    let submissions = f.wait_for_submissions(2).await;
+    assert!(submissions[1].text.ends_with("Ordinary after Stop"));
+    assert_eq!(f.message(&original.id).attempts.len(), 1);
+    assert!(f.message(&original.id).awaits_decision());
+    assert!(f.message(&queued.id).attempts.is_empty());
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+
+    let active = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(active) = f
+                .turns()
+                .into_iter()
+                .find(|turn| turn.state == ChatTurnState::Active)
+            {
+                break active;
+            }
+            settle().await;
+        }
+    })
+    .await
+    .unwrap();
+    let turn = NativeTurnId::new(active.native_turn_id.unwrap());
+    f.emit(turn_ended(turn, TurnOutcome::Completed)).await;
+    f.host.resend(&f.chat.id, &original.id).await.unwrap();
+    let submissions = f.wait_for_submissions(3).await;
+    assert_eq!(submissions[2].text, "linked records: 1\n\nUnconfirmed");
+    assert_eq!(submissions[2].attachments, [saved_file()]);
+    assert!(f.message(&queued.id).attempts.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_different_linked_input_carries_snapshot_after_an_unconfirmed_attempt() {
+    let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Shared link").unwrap().id,
+    };
+    f.fake.script_submit(SubmitReply::Timeout);
+    let original = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Unconfirmed A",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        f.wait_for_submissions(1).await[0].text,
+        "linked records: 1\n\nUnconfirmed A"
+    );
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(f.message(&original.id).awaits_decision());
+    let queued = f.queue("Leave paused").await;
+
+    let next = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Different B",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions[1].text, "linked records: 1\n\nDifferent B");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    let original = f.message(&original.id);
+    assert!(original.awaits_decision());
+    assert_eq!(original.attempts.len(), 1);
+    assert_eq!(original.attempts[0].delivery, ChatDelivery::Uncertain);
+    assert_eq!(original.attempts[0].decision, None);
+    assert_eq!(f.message(&next.id).attempts.len(), 1);
+    assert!(f.message(&queued.id).attempts.is_empty());
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+}
+
+#[tokio::test(start_paused = true)]
 async fn resend_with_already_delivered_link_context_refreshes_once() {
     let reads = Arc::new(AtomicUsize::new(0));
     let source = reads.clone();
@@ -2962,6 +3089,55 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     f.send("fifth").await;
     f.wait_for_submissions(5).await;
     assert_eq!(texts(&f)[4], "links: T-KQ2\n\nfifth");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_explicit_link_change_in_backoff_reaches_the_next_ordinary_turn() {
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let source = unavailable.clone();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if source.load(Ordering::SeqCst) {
+            Err("context source unavailable".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    f.send("first").await;
+    f.wait_for_submissions(1).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    unavailable.store(true, Ordering::SeqCst);
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    wait_for_context_read_failure(&f).await;
+    f.send("Unrelated after read failure").await;
+    assert_eq!(
+        f.wait_for_submissions(2).await[1].text,
+        "Unrelated after read failure"
+    );
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("New external link").unwrap().id,
+    };
+    f.core().add_chat_links(&f.chat.id, &[link]).unwrap();
+    unavailable.store(false, Ordering::SeqCst);
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    f.send("After explicit link change").await;
+    assert_eq!(
+        f.submits().len(),
+        2,
+        "the newly requested reread waits through backoff"
+    );
+    let submissions = f.wait_for_submissions(3).await;
+    assert_eq!(
+        submissions[2].text,
+        "linked records: 1\n\nAfter explicit link change"
+    );
 }
 
 /// L3: what the agent changed in ticketd during a turn is kept with the turn when it

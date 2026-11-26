@@ -241,6 +241,7 @@ enum ContextRefresh {
     RetryAt {
         at: Instant,
         armed: bool,
+        scope: ContextRefreshScope,
     },
 }
 
@@ -1040,8 +1041,20 @@ impl Supervisor {
             return;
         };
         let retrying = match self.refreshing {
-            Some(ContextRefresh::RetryAt { at, .. }) if at > Instant::now() => return,
-            Some(ContextRefresh::RetryAt { .. }) => true,
+            Some(ContextRefresh::RetryAt {
+                at,
+                armed,
+                scope: previous,
+            }) => {
+                if previous == ContextRefreshScope::NextTurn {
+                    scope = previous;
+                }
+                if at > Instant::now() {
+                    self.refreshing = Some(ContextRefresh::RetryAt { at, armed, scope });
+                    return;
+                }
+                true
+            }
             Some(ContextRefresh::Reading {
                 retrying,
                 scope: previous,
@@ -1077,7 +1090,11 @@ impl Supervisor {
 
     fn context_retry_at(&self) -> Option<Instant> {
         match self.refreshing {
-            Some(ContextRefresh::RetryAt { at, armed: true }) => Some(at),
+            Some(ContextRefresh::RetryAt { at, armed, scope })
+                if armed || scope == ContextRefreshScope::NextTurn =>
+            {
+                Some(at)
+            }
             _ => None,
         }
     }
@@ -1095,6 +1112,7 @@ impl Supervisor {
         self.refreshing = Some(ContextRefresh::RetryAt {
             at: Instant::now() + LINK_CONTEXT_RETRY,
             armed: false,
+            scope: ContextRefreshScope::LinkedInput,
         });
     }
 
@@ -1460,6 +1478,7 @@ impl Supervisor {
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.clear_direct();
+        self.resend = None;
         if self.active.is_some() {
             self.interrupt();
         } else if self.unconfirmed_start.is_some()
@@ -2176,10 +2195,15 @@ impl Supervisor {
         if idle
             && matches!(
                 self.refreshing,
-                Some(ContextRefresh::Reading {
-                    scope: ContextRefreshScope::NextTurn,
-                    ..
-                })
+                Some(
+                    ContextRefresh::Reading {
+                        scope: ContextRefreshScope::NextTurn,
+                        ..
+                    } | ContextRefresh::RetryAt {
+                        scope: ContextRefreshScope::NextTurn,
+                        ..
+                    }
+                )
             )
         {
             return;
@@ -2416,7 +2440,7 @@ impl Supervisor {
         let context = if starts_turn && self.refreshing.is_none() {
             self.session_context.take().or_else(|| {
                 // A written turn can time out without having received its context.
-                if resend && message.requires_link_context {
+                if message.requires_link_context {
                     self.context_sent.clone()
                 } else {
                     None
