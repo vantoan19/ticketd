@@ -599,7 +599,7 @@ function ViewBarFind({
     ? ""
     : count === 0
       ? "No matches"
-      : `${active + 1} of ${count.toLocaleString()}${capped ? "+" : ""}`;
+      : `${(active + 1).toLocaleString()} of ${count.toLocaleString()}${capped ? "+" : ""}`;
   return (
     <ViewBar label="View">
       <ViewBarGroup label="Find">

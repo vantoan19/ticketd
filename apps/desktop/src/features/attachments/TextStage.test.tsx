@@ -227,6 +227,23 @@ test("find counts every match, marks them, steps with Enter and closes with Esc 
   expect(window.getSelection()?.toString()).toBe("status%3Dopen");
 });
 
+test("a capped match count reads in the same grouped numbers on both sides", async () => {
+  serve("x\n".repeat(20_500));
+  render(<Stage />);
+  await screen.findByRole("document");
+  const stage = screen.getByTestId("stage");
+  stage.focus();
+  press("/");
+  const field = await screen.findByRole("textbox", {
+    name: "Find in the text",
+  });
+  fireEvent.change(field, { target: { value: "x" } });
+  const status = screen.getByRole("status");
+  await waitFor(() => expect(status.textContent).toBe("1 of 20,000+"));
+  fireEvent.keyDown(field, { key: "Enter", shiftKey: true });
+  await waitFor(() => expect(status.textContent).toBe("20,000 of 20,000+"));
+});
+
 test("keys type in the Find field instead of acting, and W wraps outside it", async () => {
   serve();
   render(<Stage />);
