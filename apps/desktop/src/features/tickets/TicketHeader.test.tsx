@@ -13,6 +13,11 @@ import { TicketHeader } from "./TicketHeader";
 import { TicketListSync } from "./open-ticket";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { reminderSummary } from "./reminder-summary";
+import {
+  ChatFeatureContext,
+  NO_CHAT_OVERVIEW,
+  type ChatFeature,
+} from "@/features/chats/use-chats";
 import type { Ticket } from "@/lib/api/client";
 
 const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
@@ -66,7 +71,10 @@ afterEach(() => {
   bridge.invoke.mockReset();
   Reflect.deleteProperty(navigator, "clipboard");
 });
-function header(overrides: Partial<Parameters<typeof TicketHeader>[0]> = {}) {
+function header(
+  overrides: Partial<Parameters<typeof TicketHeader>[0]> = {},
+  requestChat?: ChatFeature["requestChat"],
+) {
   const props = {
     selected: "T-KQ1",
     ticket,
@@ -83,7 +91,23 @@ function header(overrides: Partial<Parameters<typeof TicketHeader>[0]> = {}) {
     <TestReads>
       <TicketListSync value={listed}>
         <StatusLineRegion>
-          <TicketHeader {...props} />
+          {requestChat ? (
+            <ChatFeatureContext
+              value={{
+                enabled: true,
+                requestChat,
+                setEnabled: async () => {},
+                overview: NO_CHAT_OVERVIEW,
+                revision: 0,
+                openRequest: null,
+                chatRequest: null,
+              }}
+            >
+              <TicketHeader {...props} />
+            </ChatFeatureContext>
+          ) : (
+            <TicketHeader {...props} />
+          )}
         </StatusLineRegion>
       </TicketListSync>
     </TestReads>,
@@ -100,6 +124,39 @@ async function chooseAction(name: string) {
   );
   fireEvent.click(await screen.findByRole("menuitem", { name }));
 }
+
+test("Chat about a ticket keeps the link without preselecting an archived Project checkout", async () => {
+  const requestChat = vi.fn();
+  header(
+    {
+      ticket: { ...ticket, project_id: "archived" },
+      projects: [
+        {
+          id: "archived",
+          name: "Old repo",
+          path: "/work/archive",
+          paths: ["/work/archive"],
+          archived: true,
+        },
+      ],
+    },
+    requestChat,
+  );
+  await chooseAction("Chat about this ticket");
+  expect(requestChat).toHaveBeenCalledWith({
+    kind: "new",
+    start: {
+      ticket: {
+        kind: "ticket",
+        id: "1",
+        reference: "T-KQ1",
+        title: "Ticket",
+        status: "Todo",
+      },
+      folder: null,
+    },
+  });
+});
 
 test("leads with the reference and no repeated Ticket details heading", () => {
   header();

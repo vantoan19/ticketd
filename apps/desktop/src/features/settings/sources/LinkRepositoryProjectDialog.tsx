@@ -16,6 +16,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 
 type Choices = { projects: Project[] } | { failure: FailureDescription };
 type Exit =
@@ -40,6 +41,7 @@ export function LinkRepositoryProjectDialog({
   resolveReturnFocus: () => HTMLElement | null;
 }) {
   const id = useId();
+  const version = useWorkspaceChange();
   const [choices, setChoices] = useState<Choices | null>(null);
   const [revision, setRevision] = useState(0);
   const [selected, setSelected] = useState("");
@@ -54,7 +56,10 @@ export function LinkRepositoryProjectDialog({
         if (current)
           setChoices({
             projects: projects.filter(
-              (project) => !project.remote && project.paths.length > 0,
+              (project) =>
+                !project.archived &&
+                !project.remote &&
+                project.paths.length > 0,
             ),
           });
       },
@@ -66,7 +71,7 @@ export function LinkRepositoryProjectDialog({
     return () => {
       current = false;
     };
-  }, [revision]);
+  }, [revision, version]);
 
   const projects = choices && "projects" in choices ? choices.projects : [];
   const projectId =

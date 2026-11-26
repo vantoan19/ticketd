@@ -339,6 +339,7 @@ export function TicketList({
                               ? "Mark a ticket as duplicate…"
                               : `Add ${status} ticket`
                           }
+                          data-project-add=""
                           onClick={(event) =>
                             grouping.onAdd?.(status, event.currentTarget)
                           }

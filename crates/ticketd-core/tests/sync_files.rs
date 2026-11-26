@@ -438,7 +438,7 @@ fn a_malformed_file_is_rejected_with_the_reason_and_changes_nothing() {
             good.replace("trashed: false", "parent: \"T-KQ1\""),
             "'parent'",
         ),
-        (good.replace("format: 1", "format: 5"), "newer ticketd"),
+        (good.replace("format: 1", "format: 6"), "newer ticketd"),
         (good.replace("format: 1", "format: one"), "'format'"),
         (
             good.replace("trashed: false", "source_provider: \"github\""),
@@ -652,6 +652,21 @@ fn syncing_the_same_github_issue_preserves_local_pause_and_conversation() {
 }
 
 #[test]
+fn project_sync_files_in_older_formats_read_as_active() {
+    let id = "3f2c9a1e-0000-4000-8000-000000000001";
+    let directory = tempfile::tempdir().unwrap();
+    let mut target = workspace(&directory, "target.sqlite3");
+    for format in 1..=3 {
+        let legacy =
+            format!("---\nkind: project\nformat: {format}\nid: {id}\nname: Website\n---\n");
+        let record = SyncRecord::parse(&legacy).unwrap();
+        assert_eq!(record.fields.get("archived"), Some(&SyncValue::Flag(false)));
+        assert_eq!(target.apply_sync_record(&record).unwrap(), []);
+        assert!(!target.show_project(id).unwrap().archived);
+    }
+}
+
+#[test]
 fn documents_plans_and_projects_update_by_guid() {
     let directory = tempfile::tempdir().unwrap();
     let source = populated(&directory);
@@ -741,7 +756,7 @@ fn a_summary_travels_in_the_header_beside_the_title_and_files_without_one_still_
         "{text}"
     );
     // Only a file that carries a summary needs a ticketd that reads one.
-    assert!(text.contains("format: 4\n"), "{text}");
+    assert!(text.contains("format: 5\n"), "{text}");
     let plain = source
         .export_sync_record(SyncKind::Document, &without.id)
         .unwrap()
@@ -772,13 +787,13 @@ fn a_summary_travels_in_the_header_beside_the_title_and_files_without_one_still_
     // A file that has the field and no more, or drops it, clears it.
     let dropped = edited
         .replace("summary: \"Done.\"\n", "")
-        .replace("format: 4", "format: 1");
+        .replace("format: 5", "format: 1");
     target
         .apply_sync_record(&SyncRecord::parse(&dropped).unwrap())
         .unwrap();
     assert_eq!(target.show_document(&with.id).unwrap().summary, None);
 
     // A format 1 file may not carry a field it did not have.
-    let old = text.replace("format: 4", "format: 1");
+    let old = text.replace("format: 5", "format: 1");
     assert!(SyncRecord::parse(&old).is_err());
 }

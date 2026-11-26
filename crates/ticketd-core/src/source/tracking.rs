@@ -3147,7 +3147,10 @@ fn apply_issue(
                 Some(repository) => crate::projects::find_by_remote(connection, repository)?,
                 None => None,
             };
-            let project_id = project.as_ref().map(|project| project.id.as_str());
+            let project_id = project
+                .as_ref()
+                .filter(|project| !project.archived)
+                .map(|project| project.id.as_str());
             connection.execute(
                 "INSERT INTO tickets (id, reference, title, status, body, project_id) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                 params![id, reference, title, status.to_string(), issue.body, project_id],

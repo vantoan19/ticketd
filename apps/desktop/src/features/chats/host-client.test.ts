@@ -79,7 +79,7 @@ const opened = (subscription = 7) => ({
 });
 
 describe("the desktop Chat client", () => {
-  it("offers registered checkouts and skips Projects without one", async () => {
+  it("offers registered checkouts of active Projects", async () => {
     const stub = stubBridge({
       list_projects: [
         {
@@ -89,6 +89,13 @@ describe("the desktop Chat client", () => {
           paths: ["/work/storefront", "/worktrees/storefront"],
         },
         { id: "p2", name: "On another computer", path: "", paths: [] },
+        {
+          id: "p3",
+          name: "Archived Project",
+          path: "/old",
+          paths: ["/old"],
+          archived: true,
+        },
       ],
     });
     const client = createHostChatClient(stub.bridge);

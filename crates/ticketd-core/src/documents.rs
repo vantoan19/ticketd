@@ -157,7 +157,7 @@ pub(crate) fn migrate(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
     Ok(())
 }
 
-/// Format version 100: a Document's optional one-line summary, written by its author.
+/// Format version 101: a Document's optional one-line summary, written by its author.
 pub(crate) fn migrate_summary(tx: &rusqlite::Transaction<'_>) -> Result<(), Error> {
     crate::format::add_column_if_missing(tx, "documents", "summary", "TEXT")
 }

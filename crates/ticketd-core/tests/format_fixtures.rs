@@ -54,6 +54,9 @@ fn a_backup_saved_by_older_code_validates_restores_and_migrates_to_the_current_v
         Workspace::restore(&restored, &backup).unwrap();
         let workspace = Workspace::open(&restored).unwrap();
         assert_eq!(workspace.list_tickets().unwrap().len(), 2, "v{version}");
+        let projects = workspace.list_projects().unwrap();
+        assert_eq!(projects.len(), 1, "v{version} kept its Project");
+        assert!(!projects[0].archived, "v{version} Project starts active");
         drop(workspace);
         let migrated: i64 = Connection::open(&restored)
             .unwrap()

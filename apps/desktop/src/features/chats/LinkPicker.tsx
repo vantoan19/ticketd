@@ -1,4 +1,4 @@
-import { useContext, useRef, useState } from "react";
+import { useContext, useState } from "react";
 import { FileText, Plus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -9,11 +9,20 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import { Reference } from "@/components/ui/reference";
-import { DocumentNavigation } from "@/features/documents/navigation";
+import {
+  DocumentNavigation,
+  ProjectNavigation,
+} from "@/features/documents/navigation";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
-import { useChatClient, type LinkedRecord } from "@/features/chats/client";
+import {
+  isArchivedProjectRecord,
+  useChatClient,
+  type LinkedRecord,
+} from "@/features/chats/client";
+import { useWorkspaceChange } from "@/lib/workspace-change";
+import { archivedProjectHint } from "@/features/projects/project-assignment";
 import { RecordPicker, type PickRecord } from "@/features/tickets/RecordPicker";
 
 /** The icon, reference and title of a linked ticket, Document or Project. */
@@ -52,6 +61,7 @@ export function RecordChip({
 }) {
   const openTicket = useContext(TicketNavigation);
   const openDocument = useContext(DocumentNavigation);
+  const openProject = useContext(ProjectNavigation);
   const name =
     record.kind === "ticket"
       ? `${record.reference} ${record.title}`
@@ -60,8 +70,7 @@ export function RecordChip({
         : `the Document ${record.title}`;
   return (
     <span className="chat-chip">
-      {record.kind === "project" ? (
-        // A Project is context for the agent; it has no page to open from here.
+      {record.kind === "project" && !openProject ? (
         <span className="chat-chip-label">
           <RecordLabel record={record} />
         </span>
@@ -79,7 +88,9 @@ export function RecordChip({
           onClick={() =>
             record.kind === "ticket"
               ? openTicket?.(record.reference)
-              : openDocument?.(record.id, backLabel)
+              : record.kind === "project"
+                ? openProject?.(record.id)
+                : openDocument?.(record.id, backLabel)
           }
         >
           <RecordLabel record={record} />
@@ -131,14 +142,12 @@ export function LinkPicker({
   onOpenChange?: (open: boolean) => void;
 }) {
   const client = useChatClient();
+  const revision = useWorkspaceChange();
   const [ownOpen, setOwnOpen] = useState(false);
   const controlled = openFromOutside !== undefined;
   const open = openFromOutside ?? ownOpen;
   const setOpen = (next: boolean) =>
     controlled ? onOpenChange?.(next) : setOwnOpen(next);
-  const found = useRef(new Map<string, LinkedRecord>());
-  // Results that exist but are all linked already: not the same as no match.
-  const [allLinked, setAllLinked] = useState(false);
   const exclude = linked.map(key);
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -171,38 +180,45 @@ export function LinkPicker({
         <RecordPicker
           things="tickets, Documents and Projects"
           exclude={exclude}
+          revision={revision}
           search={async (query) => {
             // The client puts a typed ticket reference first (chat CH-47).
-            const records = await client.searchRecords(query);
-            for (const record of records)
-              found.current.set(key(record), record);
-            setAllLinked(
-              records.length > 0 &&
-                records.every((record) => exclude.includes(key(record))),
+            const foundRecords = await client.searchRecords(query);
+            const records = foundRecords.filter(
+              (record) => !isArchivedProjectRecord(record),
             );
-            return [
-              {
-                ...(!query && { heading: "Recent" }),
-                records: records.map((record): PickRecord =>
-                  record.kind === "ticket"
-                    ? { ...record, key: key(record) }
-                    : {
-                        kind: record.kind,
-                        key: key(record),
-                        title: record.title,
-                      },
-                ),
-              },
-            ];
+            const archivedMatch =
+              records.length === 0 &&
+              foundRecords.find(isArchivedProjectRecord);
+            return {
+              groups: [
+                {
+                  ...(!query && { heading: "Recent" }),
+                  records: records.map(
+                    (record): PickRecord & { record: LinkedRecord } => ({
+                      ...record,
+                      key: key(record),
+                      record,
+                    }),
+                  ),
+                },
+              ],
+              ...(query &&
+                archivedMatch && {
+                  empty: (
+                    <span className="text-xs">
+                      {archivedProjectHint(archivedMatch.title)}
+                    </span>
+                  ),
+                }),
+            };
           }}
-          onPick={(picked) => {
-            const record = found.current.get(picked.key);
-            if (!record) return;
+          onPick={({ record }) => {
             onPick(record);
             setOpen(false);
           }}
-          empty={(query) =>
-            allLinked
+          empty={(query, hasMatches) =>
+            hasMatches
               ? query
                 ? "Everything with that name is already linked."
                 : "Everything recent is already linked."

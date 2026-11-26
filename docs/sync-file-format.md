@@ -53,7 +53,7 @@ Reproduced with an expired session cookie.
 
 The same record always produces the same bytes, so a file changes only when its record does.
 
-- `kind` comes first, then `format`, then `id`. A ticket with an external source uses format 3. A Document with a `summary` uses format 4, so a ticketd that does not know the field leaves its file alone. Other records use format 1.
+- `kind` comes first, then `format`, then `id`. A Project uses format 4. A ticket with an external source uses format 3. A Document with a `summary` uses format 5, so a ticketd that does not know the field leaves its file alone. Other records use format 1.
 - Fields appear in the order of the tables below. A field with no value is left out, except that a true-or-false field is always written.
 - Every text value is a double-quoted YAML string on one line. A whole number is written bare. Lists are written one item per line, sorted.
 - Times are RFC 3339 instants.
@@ -186,7 +186,7 @@ Starts with the line `<!-- ticketd:evidence -->`, then a header only.
 | Field             | Value                                                         |
 | ----------------- | ------------------------------------------------------------- |
 | `title`           | The explicit title, when the Document has one.                |
-| `summary`         | The author's one-line summary (format 4); left out when none. |
+| `summary`         | The author's one-line summary (format 5); left out when none. |
 | `created_at`      | Required.                                                     |
 | `tags`            | Lowercase tag names.                                          |
 | `origin_activity` | GUID of the Activity whose details created the Document.      |
@@ -209,11 +209,15 @@ The text after the header is the Plan's purpose.
 
 ### Project
 
-| Field  | Value                |
-| ------ | -------------------- |
-| `name` | Required, not blank. |
+| Field      | Value                            |
+| ---------- | -------------------------------- |
+| `name`     | Required, not blank.             |
+| `archived` | Whether the Project is archived. |
 
-A project file has no text after its header.
+A Project file has no text after its header. Files in formats 1 through 3 omit
+`archived` and are read as Active. Archive and reactivation merge as changes to
+the `archived` field. Existing ticket links keep the Project GUID and resolve
+once both records arrive.
 
 ### Automation agent
 
@@ -278,9 +282,9 @@ Deleting an Automation or an agent sets `trashed`; the file stays, as sync delet
 
 ## What stays on the device
 
-These are never written to a sync file: checkout folders of a project, Attention inbox entries and their read state, recently opened Documents, credentials, source connection settings, the conversation and refresh state fetched from an external source, publication attempts, automatic history entries, the time a ticket or Document last changed, tags no record uses, whether an Automation is on, how far it has read the Workspace event log, Workspace events, and Automation runs.
+These are never written to a sync file: Project checkout folders and remotes, Attention inbox entries and their read state, recently opened Documents, credentials, source connection settings, the conversation and refresh state fetched from an external source, publication attempts, automatic history entries, the time a ticket or Document last changed, tags no record uses, whether an Automation is on, how far it has read the Workspace event log, Workspace events, and Automation runs.
 
-A project that arrives from another device has no checkout folder until one is registered on this device. An Automation that arrives from another device is off until it is switched on on this device, whatever it is on the device it came from. One that is on here and arrives changed so that a step is unfinished, or deleted, is switched off here.
+A Project that arrives from another device has no checkout folder or Project remote until set on this device. An Automation that arrives from another device is off until it is switched on on this device, whatever it is on the device it came from. One that is on here and arrives changed so that a step is unfinished, or deleted, is switched off here.
 
 ## Files that are not records
 

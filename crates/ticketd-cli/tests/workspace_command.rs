@@ -407,6 +407,82 @@ fn linking_activity_details_to_a_ticket_keeps_them_through_cli() {
 }
 
 #[test]
+fn archived_projects_remain_addressable_but_are_hidden_from_the_default_list() {
+    let dir = tempfile::tempdir().unwrap();
+    let checkout = dir.path().to_str().unwrap();
+    let json = |args: &[&str]| -> serde_json::Value {
+        serde_json::from_str(&run(dir.path(), args)).unwrap()
+    };
+    let project = json(&["project", "create", "Package", checkout, "--no-remote"]);
+    let id = project["id"].as_str().unwrap();
+    let ticket = json(&["create", "Open ticket", "--project", id]);
+    assert_eq!(project["archived"], false);
+    let archived = json(&["project", "archive", id]);
+    assert_eq!(archived["archived"], true);
+    assert_eq!(json(&["project", "list"]), serde_json::json!([]));
+    assert_eq!(
+        json(&["project", "list", "--all"]),
+        serde_json::json!([archived])
+    );
+    assert_eq!(json(&["project", "show", id]), archived);
+    assert_eq!(
+        json(&["list", "--project", id])[0]["reference"],
+        ticket["reference"]
+    );
+    let create = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_ticketd"))
+            .args(["create", "From checkout"])
+            .args(args)
+            .current_dir(dir.path())
+            .env(
+                "TICKETD_TEST_WORKSPACE",
+                dir.path().join("workspace.sqlite3"),
+            )
+            .output()
+            .unwrap()
+    };
+    let explicit = create(&["--project", id]);
+    assert!(!explicit.status.success());
+    assert!(String::from_utf8_lossy(&explicit.stderr).contains("Reactivate it"));
+    let batch = dir.path().join("assignment.json");
+    std::fs::write(
+        &batch,
+        serde_json::json!([
+            {"operation": "create", "name": "first", "title": "Would roll back"},
+            {"operation": "create", "name": "second", "title": "Refused", "project_id": id}
+        ])
+        .to_string(),
+    )
+    .unwrap();
+    let refused = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .arg("batch")
+        .arg(&batch)
+        .env(
+            "TICKETD_TEST_WORKSPACE",
+            dir.path().join("workspace.sqlite3"),
+        )
+        .output()
+        .unwrap();
+    assert!(!refused.status.success());
+    assert!(String::from_utf8_lossy(&refused.stderr).contains("Reactivate it"));
+    assert_eq!(json(&["list"]).as_array().unwrap().len(), 1);
+
+    let inferred = || {
+        let output = create(&[]);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice::<serde_json::Value>(&output.stdout).unwrap()
+    };
+    assert!(inferred()["project_id"].is_null());
+    assert_eq!(json(&["project", "reactivate", id]), project);
+    assert_eq!(json(&["project", "list"]), serde_json::json!([project]));
+    assert_eq!(inferred()["project_id"], id);
+}
+
+#[test]
 fn project_create_detects_the_remote_and_show_and_list_include_it() {
     let dir = tempfile::tempdir().unwrap();
     let checkout = dir.path().join("checkout");

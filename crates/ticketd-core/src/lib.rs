@@ -170,7 +170,10 @@ pub use chats::{
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};
 pub use project_remote::{ProjectRemoteCandidate, ProjectRemoteDetection, detect_project_remote};
-pub use projects::{CheckoutRegistration, CheckoutRemoteMismatch, Project, ProjectRemoteChange};
+pub use projects::{
+    CheckoutRegistration, CheckoutRemoteMismatch, Project, ProjectArchiveOutcome,
+    ProjectRemoteChange,
+};
 pub use readiness::Readiness;
 
 mod format;
@@ -321,6 +324,8 @@ pub enum Error {
     SourceRepositoryNotListed(String),
     #[error("project '{0}' was not found")]
     ProjectNotFound(String),
+    #[error("{0} is archived. Reactivate it, or choose another project.")]
+    ProjectArchived(String),
     #[error("Set a Project remote on {0} before connecting its ticket source.")]
     ProjectRemoteRequired(String),
     #[error(

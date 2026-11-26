@@ -175,8 +175,7 @@ export function TicketCommandPicker({
               selected={selected ?? []}
               disabled={actions.pending || actions.blocked}
               options={actions.options.map((option) => ({
-                value: option.value,
-                label: option.label,
+                ...option,
                 ...(scope === "Status" && {
                   icon: <StatusIcon status={option.value} decorative />,
                 }),
@@ -184,6 +183,14 @@ export function TicketCommandPicker({
               onSelect={choose}
               query={query}
               onQueryChange={setQuery}
+              {...(actions.projectHint && {
+                empty: (
+                  <span>
+                    No matches
+                    <span className="block text-xs">{actions.projectHint}</span>
+                  </span>
+                ),
+              })}
             />
           )}
           {actions.error && (
@@ -242,7 +249,7 @@ export function TicketPropertyChoices({
   empty,
 }: {
   notice?: ReactNode;
-  empty?: string;
+  empty?: ReactNode;
   query?: string;
   onQueryChange?: (query: string) => void;
   scope: string;

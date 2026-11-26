@@ -1,4 +1,4 @@
-use ticketd_core::{ProjectRemoteChange, Workspace};
+use ticketd_core::{ChatLink, ChatLinkKind, NewChat, ProjectRemoteChange, Workspace};
 
 #[test]
 fn a_project_remote_is_reserved_case_insensitively_until_cleared() {
@@ -74,7 +74,7 @@ fn a_project_remote_is_reserved_case_insensitively_until_cleared() {
 }
 
 #[test]
-fn project_remotes_survive_workspace_export_and_backup_restore() {
+fn archived_project_and_its_links_and_configuration_survive_export_and_backup_restore() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.db");
     let backup = dir.path().join("backup.db");
@@ -85,9 +85,38 @@ fn project_remotes_survive_workspace_export_and_backup_restore() {
         .create_project_with_remote("Package", checkout, Some(remote))
         .unwrap();
 
-    assert_eq!(workspace.export().unwrap()["projects"][0]["remote"], remote);
+    let ticket = workspace
+        .create_ticket_in_context("Keep for later", Some(&project.id), None)
+        .unwrap();
+    workspace
+        .set_trashed(&ticket.reference, true, None)
+        .unwrap();
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "claude-code".into(),
+                execution_folder: checkout.into(),
+                folder_managed: false,
+                links: vec![ChatLink {
+                    kind: ChatLinkKind::Project,
+                    id: project.id.clone(),
+                }],
+            },
+        )
+        .unwrap();
+    let archived = workspace.set_project_archived(&project.id, true).unwrap();
+
+    let export = workspace.export().unwrap();
+    assert_eq!(export["projects"][0]["archived"], 1);
+    assert_eq!(export["projects"][0]["remote"], remote);
+    assert_eq!(export["project_checkouts"][0]["path"], archived.paths[0]);
+    assert_eq!(export["tickets"][0]["project_id"], project.id);
+    assert_eq!(export["chat_links"][0]["target_id"], project.id);
 
     workspace.backup(&backup).unwrap();
+    workspace.set_project_archived(&project.id, false).unwrap();
     workspace
         .edit_project_with_remote(
             &project.id,
@@ -99,6 +128,18 @@ fn project_remotes_survive_workspace_export_and_backup_restore() {
 
     drop(workspace);
     Workspace::restore(&path, &backup).unwrap();
-    let workspace = Workspace::open(&path).unwrap();
-    assert_eq!(workspace.list_projects().unwrap(), vec![project]);
+    let mut workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.list_projects().unwrap(), [archived]);
+    let restored_ticket = workspace
+        .set_trashed(&ticket.reference, false, None)
+        .unwrap();
+    assert_eq!(restored_ticket.id, ticket.id);
+    assert_eq!(
+        restored_ticket.project_id.as_deref(),
+        Some(project.id.as_str())
+    );
+    assert_eq!(
+        workspace.chat_snapshot(&chat.id, 1).unwrap().chat.links,
+        chat.links
+    );
 }
