@@ -1,5 +1,6 @@
 import { invoke } from "@/lib/api/bridge-failure";
 import { lazySchema } from "@/lib/api/lazy-schema";
+import { askForNotifications } from "@/lib/notification-permission";
 import { z } from "zod";
 
 const entrySchema = lazySchema(() =>
@@ -53,6 +54,9 @@ export const inboxClient = {
       dueAt,
       requestId,
     });
+    // A first reminder is the moment ticketd asks to notify; the system keeps
+    // the answer, so this asks once.
+    if (dueAt) void askForNotifications();
   },
   async isFollowing(reference: string) {
     return z.boolean().parse(await invoke("is_following", { reference }));

@@ -456,7 +456,6 @@ test("a lost-response submission reuses its request ID and follow choice after r
       sidebarCollapsed: false,
       ticketRows: "detailed",
       followCreated: false,
-      notifyReminders: false,
     }),
   );
   render(

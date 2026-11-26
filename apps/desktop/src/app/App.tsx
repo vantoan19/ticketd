@@ -1427,10 +1427,6 @@ function AppContent() {
                                         <SettingsView
                                           selected={settingsSection}
                                           onSelect={setSettingsSection}
-                                          onOpenInbox={() => {
-                                            setProjectSource(null);
-                                            setView("inbox");
-                                          }}
                                           onRestore={replaceWorkspace}
                                           onWorkspaceReplaced={
                                             discardChatWorkspace
