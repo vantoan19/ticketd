@@ -301,6 +301,7 @@ pub(crate) struct Supervisor {
     /// stderr lines are correlated with the Chat and do not hold a Turn's span open.
     span: tracing::Span,
     open_workspace: WorkspaceOpener,
+    workspace_generation: u64,
     adapter: Option<Arc<dyn HarnessAdapter>>,
     context: Option<ContextSource>,
     /// Set for the Chat of an Automation run: every session opens with these settings.
@@ -452,6 +453,7 @@ impl Supervisor {
             chat_id: chat.id.clone(),
             number: NEXT_SUPERVISOR.fetch_add(1, Ordering::Relaxed),
             open_workspace,
+            workspace_generation: lifecycle.workspace_generation(),
             adapter,
             context,
             unattended,
@@ -2481,6 +2483,7 @@ impl Supervisor {
         let done = self.done.clone();
         let open_workspace = self.open_workspace.clone();
         let lifecycle = self.lifecycle.clone();
+        let workspace_generation = self.workspace_generation;
         let admission = self
             .unattended
             .as_ref()
@@ -2488,6 +2491,7 @@ impl Supervisor {
                 fence: agent.prompt_fence.clone(),
                 open_workspace: open_workspace.clone(),
                 lifecycle: lifecycle.clone(),
+                workspace_generation,
                 chat_id: chat.clone(),
                 run_id: agent.settings.run_id.clone(),
             });
@@ -2497,6 +2501,7 @@ impl Supervisor {
             if outcome == DispatchOutcome::NotSent(Refusal::AutomationPromptNotAllowed)
                 && lifecycle.serving().is_ok()
                 && let Ok(mut workspace) = open_workspace()
+                && lifecycle.serves_workspace_generation(workspace_generation)
             {
                 // The actor may already be closing after the run ended. Settle
                 // known non-delivery even if it can no longer receive Done.

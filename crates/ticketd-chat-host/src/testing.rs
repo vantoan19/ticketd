@@ -64,6 +64,7 @@ struct State {
     setting_replies: VecDeque<oneshot::Receiver<SettingOutcome>>,
     submit_replies: VecDeque<ScriptedReply>,
     submit_write_holds: VecDeque<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
+    prompt_refusal_holds: VecDeque<(oneshot::Sender<Refusal>, oneshot::Receiver<()>)>,
     interrupt_outcomes: VecDeque<InterruptOutcome>,
     close_outcome: CloseOutcome,
     close_holds: VecDeque<oneshot::Receiver<()>>,
@@ -132,6 +133,7 @@ impl FakeAdapter {
                 setting_replies: VecDeque::new(),
                 submit_replies: VecDeque::new(),
                 submit_write_holds: VecDeque::new(),
+                prompt_refusal_holds: VecDeque::new(),
                 interrupt_outcomes: VecDeque::new(),
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
                 close_holds: VecDeque::new(),
@@ -255,6 +257,16 @@ impl FakeAdapter {
         let (release, permit) = oneshot::channel();
         self.state().submit_write_holds.push_back((reached, permit));
         (boundary, release)
+    }
+
+    /// Holds the adapter result after the Prompt's admission check refused a write.
+    pub fn hold_next_prompt_refusal(&self) -> (oneshot::Receiver<Refusal>, oneshot::Sender<()>) {
+        let (reached, refused) = oneshot::channel();
+        let (release, permit) = oneshot::channel();
+        self.state()
+            .prompt_refusal_holds
+            .push_back((reached, permit));
+        (refused, release)
     }
 
     /// Scripts the outcome of the next interrupt that reaches the harness. Unscripted
@@ -506,6 +518,11 @@ impl HarnessRuntime for FakeRuntime {
         if let Some(admission) = &admission
             && let Err(refusal) = admission.check()
         {
+            let hold = self.fake.state().prompt_refusal_holds.pop_front();
+            if let Some((reached, permit)) = hold {
+                let _ = reached.send(refusal.clone());
+                let _ = permit.await;
+            }
             return DispatchOutcome::NotSent(refusal);
         }
         let scripted = {

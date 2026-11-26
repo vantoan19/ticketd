@@ -213,6 +213,7 @@ pub struct AutomationPromptAdmission {
     pub(crate) fence: Arc<Mutex<()>>,
     pub(crate) open_workspace: crate::host::WorkspaceOpener,
     pub(crate) lifecycle: Arc<crate::host::HostLifecycle>,
+    pub(crate) workspace_generation: u64,
     pub(crate) chat_id: String,
     pub(crate) run_id: String,
 }
@@ -227,9 +228,17 @@ impl AutomationPromptAdmission {
         if self.lifecycle.serving().is_err() {
             return Err(Refusal::RuntimeClosed);
         }
+        let workspace = (self.open_workspace)().map_err(|_| Refusal::AutomationPromptNotAllowed)?;
+        // The lease pins the file until this check is finished. Admission also
+        // owns the input pipe, which restore must quiesce before swapping files.
+        if !self
+            .lifecycle
+            .serves_workspace_generation(self.workspace_generation)
+        {
+            return Err(Refusal::RuntimeClosed);
+        }
         if matches!(
-            (self.open_workspace)()
-                .and_then(|core| core.automation_chat_owned_by_run(&self.chat_id, &self.run_id)),
+            workspace.automation_chat_owned_by_run(&self.chat_id, &self.run_id),
             Ok(true)
         ) {
             Ok(())

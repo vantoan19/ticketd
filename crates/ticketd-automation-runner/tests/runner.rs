@@ -2068,6 +2068,103 @@ async fn takeover_in_a_sibling_chat_is_bounded_while_the_run_has_an_admitted_wri
     assert_eq!(f.core().chat_queue(first_chat).unwrap(), [saved]);
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_prompt_waiting_to_check_ownership_cannot_admit_on_a_restored_workspace() {
+    prompt_does_not_outlive_its_workspace(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_old_prompt_refusal_cannot_update_the_same_attempt_in_a_restored_workspace() {
+    prompt_does_not_outlive_its_workspace(true).await;
+}
+
+async fn prompt_does_not_outlive_its_workspace(refuse_before_restore: bool) {
+    let f = Fixture::new();
+    let (admitted, admit) = f.fake.hold_next_submit_write();
+    let (refused, finish_refusal) = f.fake.hold_next_prompt_refusal();
+    f.tag("Fix login");
+    f.tick().await;
+    tokio::time::timeout(Duration::from_secs(10), admitted)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = f.runs().remove(0);
+    let chat = f.chat();
+    let backup = f._dir.path().join("same-attempt.sqlite3");
+    let mut pending_admission = Some(admit);
+    let mut pending_refusal = Some(refused);
+    if refuse_before_restore {
+        f.core().stop_automation_run(&run.id).unwrap();
+        pending_admission.take().unwrap().send(()).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), pending_refusal.take().unwrap())
+                .await
+                .unwrap()
+                .unwrap(),
+            Refusal::AutomationPromptNotAllowed
+        );
+    }
+    assert!(f.core().backup(&backup).unwrap());
+    assert!(f.host.begin_restore().await.unwrap().is_empty());
+    let session = WorkspaceSession::for_file(&f.path).unwrap();
+    session
+        .exclusive(|path| Workspace::restore(path, &backup))
+        .unwrap();
+    f.host.finish_restore();
+    let saved_attempt = || {
+        f.core()
+            .chat_snapshot(&chat, 20)
+            .unwrap()
+            .items
+            .into_iter()
+            .find_map(|item| {
+                if let ChatItem::Message(message) = item {
+                    message.attempts.into_iter().next()
+                } else {
+                    None
+                }
+            })
+            .unwrap()
+    };
+    let before = saved_attempt();
+    assert!(matches!(
+        before.delivery,
+        ChatDelivery::Possible | ChatDelivery::Uncertain
+    ));
+
+    if refuse_before_restore {
+        let (opened, acquired) = tokio::sync::oneshot::channel();
+        let opened = Mutex::new(Some(opened));
+        *f.as_the_host_looks.lock().unwrap() = Some(Box::new(move |_| {
+            if let Some(opened) = opened.lock().unwrap().take() {
+                let _ = opened.send(());
+            }
+        }));
+        finish_refusal.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), acquired)
+            .await
+            .unwrap()
+            .unwrap();
+    } else {
+        pending_admission.take().unwrap().send(()).unwrap();
+        assert_eq!(
+            tokio::time::timeout(Duration::from_secs(10), pending_refusal.take().unwrap())
+                .await
+                .unwrap()
+                .unwrap(),
+            Refusal::RuntimeClosed
+        );
+        finish_refusal.send(()).unwrap();
+    }
+    assert_eq!(saved_attempt(), before);
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|event| matches!(event, Written::Submit(_)))
+    );
+}
+
 /// #387 5A1: a run taken over before its agent had a harness session (so there is no
 /// native session to resume) still becomes an ordinary Chat, opened as one: the open is
 /// marked as a take-over, so the adapter sends New Chat's defaults, not Claude Code's

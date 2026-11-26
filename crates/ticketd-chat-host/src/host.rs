@@ -2,7 +2,7 @@
 //! commands and a subscription. A later step maps it onto Tauri commands and events.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
@@ -416,6 +416,8 @@ pub(crate) struct HostLifecycle {
     /// Set while the workspace is being replaced by a backup. Checked where `quitting`
     /// is, so every clone of the host refuses to start or reach a supervisor.
     restoring: AtomicBool,
+    /// Detached Prompt work must never cross a restore into a replacement file.
+    workspace_generation: AtomicU64,
     /// Set while Chat is switched off in Settings, for the same reason.
     off: AtomicBool,
     // Only the old process handle survives Restore. The next supervisor reads
@@ -425,6 +427,14 @@ pub(crate) struct HostLifecycle {
 }
 
 impl HostLifecycle {
+    pub(crate) fn workspace_generation(&self) -> u64 {
+        self.workspace_generation.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn serves_workspace_generation(&self, generation: u64) -> bool {
+        self.serving().is_ok() && self.workspace_generation() == generation
+    }
+
     pub(crate) fn is_off(&self) -> bool {
         self.off.load(Ordering::SeqCst)
     }
@@ -1205,6 +1215,10 @@ impl ChatHost {
     /// running Chat. Nothing runs until `finish_restore`.
     pub async fn begin_restore(&self) -> Result<Vec<UnconfirmedCleanup>, UnconfirmedCleanup> {
         self.inner.lifecycle.restoring.store(true, Ordering::SeqCst);
+        self.inner
+            .lifecycle
+            .workspace_generation
+            .fetch_add(1, Ordering::SeqCst);
         let mut warnings = self.stop_all(StopReason::Restore).await;
         let confirmed = self.inner.lifecycle.confirm_restore_cleanup().await?;
         let mut closing = self.closing_agents();
