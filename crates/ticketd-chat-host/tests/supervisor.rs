@@ -2114,7 +2114,7 @@ async fn an_older_link_read_cannot_release_dispatch_before_the_latest_edit_conte
     ] {
         assert!(
             f.host
-                .confirm_queue_edit(&f.chat.id, &original.id, edit_id)
+                .confirm_queue_edit(&f.chat.id, &original.id, &format!("{edit_id}-hold"))
                 .await
                 .unwrap()
         );
