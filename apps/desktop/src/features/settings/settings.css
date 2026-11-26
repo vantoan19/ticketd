@@ -89,9 +89,6 @@
   grid-template-columns: 120px minmax(0, 1fr);
   margin: 0;
 }
-.cli-status-slot {
-  display: grid;
-}
 .skill-status-slot {
   display: grid;
 }
@@ -101,26 +98,13 @@
 .skill-status-reserve {
   visibility: hidden;
 }
-.cli-status-slot > * {
-  grid-area: 1 / 1;
-}
-.cli-status-reserve {
-  visibility: hidden;
-}
-.cli-check-feedback {
-  display: grid;
-  padding-top: 8px;
-}
-.cli-check-feedback > * {
-  grid-area: 1 / 1;
-}
-.cli-check-feedback-reserve {
-  visibility: hidden;
-}
 .cli-details dt,
 .cli-details dd {
   margin: 0;
   padding: 12px 20px;
+}
+.cli-details dt {
+  padding-left: 16px;
 }
 .cli-details dd {
   display: flex;

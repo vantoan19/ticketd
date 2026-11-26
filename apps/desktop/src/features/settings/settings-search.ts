@@ -124,11 +124,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "backups-export",
   },
   {
-    title: "Status",
+    title: "Command line",
     description:
       "Lets your agents and terminals run ticketd on this Workspace.",
     keywords:
-      "command-line tool path terminal install cli check again executable",
+      "command-line tool path terminal install cli check again executable password administrator replace older",
     section: "command-line",
   },
   {

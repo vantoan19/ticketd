@@ -44,16 +44,18 @@ The bundled CLI updates with the desktop. On macOS and Windows, open
 `ticketd` available on your PATH.
 
 - **On macOS**, approve the administrator prompt to create a link in
-  `/usr/local/bin`. If you decline, ticketd creates the link in `~/.local/bin`.
-  Add that directory to PATH and open a new terminal. If you move the app, use
-  **Install command-line tool** again to repair the link.
+  `/usr/local/bin`. If you decline, nothing changes; choose **Use ~/.local/bin
+  instead** for a link that needs no password, add that directory to PATH and
+  open a new terminal. If you move the app, use **Install command-line tool**
+  again to repair the link.
 - **On Ubuntu**, the `.deb` already installs `ticketd` in `/usr/bin`.
 - **On Windows**, ticketd adds the app's folder to your user PATH. Restart terminals
   and agent harnesses so they inherit the change.
 
-If an older standalone `ticketd` comes first on PATH, **Settings → Command line**
-shows its version and path. Choose **Remove it** and confirm to remove that file
-or link, or choose **Keep it**. Use **Check again** to confirm which copy is found.
+If an older, newer or different standalone `ticketd` comes first on PATH,
+**Settings → Command line** shows its version and path. Choose **Use this app's
+ticketd**: one administrator prompt removes that copy and links this app's
+copy. Use **Check again** (or return to the window) to confirm which copy is found.
 
 On machines without the desktop, download the standalone archive for your
 platform (`ticketd-cli-*-macos-arm64.tar.gz`, `ticketd-cli-*-linux-x86_64.tar.gz`,
