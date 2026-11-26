@@ -594,7 +594,7 @@ export function Choose({
           sync="choosing"
           onConfirm={() => {
             setSwitching(false);
-            void run(syncApi.useAnotherAccount, "use another account");
+            void run(syncApi.switchAccount, "use another account");
           }}
         />
       )}

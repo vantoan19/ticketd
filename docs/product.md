@@ -425,7 +425,7 @@ system's secure store.
   `drive-upload-status`.
   - **One Google sign-in.** Files and Workspace sync use the same Google account and the
     same stored credential, so one consent serves both. The Files page names the account
-    ("sam.lee@gmail.com, the one Workspace sync uses") with Use another account…, and
+    ("`sam.lee@gmail.com`, the one Workspace sync uses") with Use another account…, and
     Workspace sync's step 3 offers the same. Switching signs both in with the new
     account, and a dialog says what changes in each before anything does: sync stops on
     this computer until a Workspace is chosen in the new account, and new files are kept

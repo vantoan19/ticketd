@@ -215,7 +215,7 @@ export const syncApi = {
    * `use_another_google_account`: Google sign-in in the browser with another account,
    * for Files and Workspace sync together. Nothing changes until the sign-in has finished.
    */
-  useAnotherAccount: () => status(invoke("use_another_google_account")),
+  switchAccount: () => status(invoke("use_another_google_account")),
 
   /**
    * `sync_connect_s3`: records S3 as this Workspace's storage, signed in through

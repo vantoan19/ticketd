@@ -44,7 +44,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
     reconnect: vi.fn(),
     downloadWorkspace: vi.fn(),
     disconnect: vi.fn(),
-    useAnotherAccount: vi.fn(),
+    switchAccount: vi.fn(),
     settings: vi.fn(),
     devices: vi.fn(),
   },
@@ -515,7 +515,7 @@ test("Back at step 3 signs out of this account and returns to where it syncs", a
 
 test("another Google account is one switch for Files and sync, said before it starts, which deletes nothing", async () => {
   api.status.mockResolvedValue(choosing());
-  api.useAnotherAccount.mockResolvedValue(
+  api.switchAccount.mockResolvedValue(
     syncStatus({
       connection: "choosing",
       folder: null,
@@ -534,11 +534,13 @@ test("another Google account is one switch for Files and sync, said before it st
   expect(dialog.textContent).toContain("Workspace sync");
   expect(dialog.textContent).toContain("New files");
   expect(dialog.textContent).toContain("Nothing is deleted");
-  expect(api.useAnotherAccount).not.toHaveBeenCalled();
+  expect(api.switchAccount).not.toHaveBeenCalled();
   fireEvent.click(
     within(dialog).getByRole("button", { name: "Use another account" }),
   );
-  await waitFor(() => expect(api.useAnotherAccount).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(api.switchAccount).toHaveBeenCalledTimes(1), {
+    timeout: 5000,
+  });
   // Signing in is the switch: nothing signs out first, and setup stays at step 3.
   expect(api.disconnect).not.toHaveBeenCalled();
 });

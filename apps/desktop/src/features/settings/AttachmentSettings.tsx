@@ -78,12 +78,11 @@ export function AttachmentSettings() {
   }, []);
 
   // Workspace sync on Google Drive: the Workspace's folder, and the one Google sign-in.
-  const onDrive = status?.provider === "google_drive";
-  const syncFolder =
-    onDrive && status.connection === "connected" ? status.folder : null;
+  const drive = status?.provider === "google_drive" ? status : null;
+  const syncFolder = drive?.connection === "connected" ? drive.folder : null;
   const syncFolderId = syncFolder?.id;
-  const signedIn = onDrive && !!status.connection_id;
-  const signedOut = !!syncFolder && status.recovery === "authorization_expired";
+  const signedIn = !!drive?.connection_id;
+  const signedOut = !!syncFolder && drive?.recovery === "authorization_expired";
   const sync: SyncWithAccount = syncFolder
     ? "syncing"
     : signedIn
@@ -94,7 +93,7 @@ export function AttachmentSettings() {
   const inSyncFolder =
     !!syncFolderId && onDriveDestination?.sync_folder === syncFolderId;
   const account = signedIn
-    ? (status.account ?? null)
+    ? (drive?.account ?? null)
     : (onDriveDestination?.account ?? null);
 
   // A Drive folder chosen before sync was set up gives way to the Uploads folder inside the
@@ -162,12 +161,12 @@ export function AttachmentSettings() {
     }
   }
 
-  async function useAnotherAccount() {
+  async function switchGoogleAccount() {
     setSwitching(false);
     setFailure(null);
     setBusy(true);
     try {
-      apply(await syncApi.useAnotherAccount());
+      apply(await syncApi.switchAccount());
       // A Drive folder belongs to the account it was chosen with.
       if (active.current) setDestination(await attachments.uploadDestination());
     } catch (reason) {
@@ -308,7 +307,7 @@ export function AttachmentSettings() {
         onOpenChange={setSwitching}
         account={account}
         sync={sync}
-        onConfirm={() => void useAnotherAccount()}
+        onConfirm={() => void switchGoogleAccount()}
       />
     </SettingsSection>
   );
