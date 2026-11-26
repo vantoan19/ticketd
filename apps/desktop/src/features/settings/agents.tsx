@@ -1,7 +1,5 @@
 import type { ReactNode } from "react";
-import { Button } from "@/components/ui/button";
 import type { StatusDotTone } from "@/components/ui/status-dot";
-import { useCopy } from "@/components/ui/use-copy";
 import type { HarnessStatus } from "@/features/chats/client";
 
 /**
@@ -90,31 +88,4 @@ export function agentLine(agent: HarnessStatus): AgentLine {
     case "unknown":
       return { label: agent.word?.word ?? "Couldn't check", tone: "neutral" };
   }
-}
-
-/** A labelled button that copies a command, so the fix is never an unlabelled icon. */
-export function CopyCommand({
-  command,
-  agent,
-}: {
-  command: string;
-  agent: string;
-}) {
-  const { copied, error, copy } = useCopy();
-  return (
-    <>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        aria-label={`Copy command for ${agent}`}
-        onClick={() => void copy("command", command)}
-      >
-        {copied ? "Copied" : "Copy command"}
-      </Button>
-      <span className="sr-only" role="status">
-        {error}
-      </span>
-    </>
-  );
 }

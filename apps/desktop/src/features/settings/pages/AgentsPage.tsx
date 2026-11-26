@@ -12,7 +12,8 @@ import {
   useInstalledAgents,
   type AgentChecks,
 } from "@/features/settings/agent-checks";
-import { agentLine, CopyCommand } from "@/features/settings/agents";
+import { CopyCommand } from "@/features/settings/CopyCommand";
+import { agentLine } from "@/features/settings/agents";
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import {
   SettingsList,

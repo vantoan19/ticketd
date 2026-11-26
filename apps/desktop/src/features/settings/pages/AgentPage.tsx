@@ -22,11 +22,11 @@ import { useChatFeature } from "@/features/chats/use-chats";
 import { useAgentChecks } from "@/features/settings/agent-checks";
 import {
   agentLine,
-  CopyCommand,
   isInstalled,
   plainMessage,
   signInCommand,
 } from "@/features/settings/agents";
+import { CopyCommand } from "@/features/settings/CopyCommand";
 import { SettingsDrillIn } from "@/features/settings/layout/SettingsDrillIn";
 import {
   SettingsList,
