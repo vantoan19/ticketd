@@ -50,12 +50,12 @@ use crate::outcome::{settle, tool_state};
 use crate::subscription::{self, ChatUpdate, Publisher};
 use crate::unattended::{UnattendedChat, set_aside_first_message};
 use crate::{
-    ApprovalDecision, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EventKind,
-    HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind, InteractionRequest,
-    InteractionResolution, InteractionResponse, InterruptOutcome, InterruptRequest,
-    NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime,
-    Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
-    SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
+    ApprovalDecision, AutomationPromptAdmission, Capabilities, CloseOutcome, DeliveryEvidence,
+    DispatchOutcome, EventKind, HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind,
+    InteractionRequest, InteractionResolution, InteractionResponse, InterruptOutcome,
+    InterruptRequest, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
+    OpenedRuntime, Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart,
+    Submission, SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
 };
 
 const QUEUE_READ_RETRY: Duration = Duration::from_millis(250);
@@ -2479,8 +2479,35 @@ impl Supervisor {
             return DispatchProgress::Finished;
         }
         let done = self.done.clone();
+        let open_workspace = self.open_workspace.clone();
+        let lifecycle = self.lifecycle.clone();
+        let admission = self
+            .unattended
+            .as_ref()
+            .map(|agent| AutomationPromptAdmission {
+                fence: agent.prompt_fence.clone(),
+                open_workspace: open_workspace.clone(),
+                lifecycle: lifecycle.clone(),
+                chat_id: chat.clone(),
+                run_id: agent.settings.run_id.clone(),
+            });
         tokio::spawn(async move {
-            let outcome = handle.submit(submission).await;
+            let attempt_id = submission.submission.0.clone();
+            let outcome = handle.submit_with_admission(submission, admission).await;
+            if outcome == DispatchOutcome::NotSent(Refusal::AutomationPromptNotAllowed)
+                && lifecycle.serving().is_ok()
+                && let Ok(mut workspace) = open_workspace()
+            {
+                // The actor may already be closing after the run ended. Settle
+                // known non-delivery even if it can no longer receive Done.
+                let _ = workspace.record_chat_observations(
+                    &chat,
+                    vec![ChatObservation::SubmissionNotDelivered {
+                        attempt_id,
+                        detail: Some(Refusal::AutomationPromptNotAllowed.reason().to_owned()),
+                    }],
+                );
+            }
             let _ = done.send(Done::Dispatched { outcome });
         });
         DispatchProgress::Finished
@@ -2764,7 +2791,13 @@ impl Supervisor {
                     attempt_id,
                     detail: Some(detail.clone()),
                 }]);
-                self.not_accepted(dispatch, current, detail);
+                let prompt_cancelled = refusal == Refusal::AutomationPromptNotAllowed;
+                if current && prompt_cancelled {
+                    self.problem = Some(ChatProblem::DispatchRefused {
+                        detail: detail.clone(),
+                    });
+                }
+                self.not_accepted(dispatch, current && !prompt_cancelled, detail);
             }
             DispatchOutcome::Rejected { reason } => {
                 self.record(vec![ChatObservation::SubmissionRejected {

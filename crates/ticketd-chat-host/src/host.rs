@@ -3,14 +3,15 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use ticketd_core::{
     AutomationRun, AutomationRunStatus, ChatAttachmentContent, ChatInputChange, ChatInputReceipt,
     ChatLink, ChatMessage, ChatQueueEdit, ChatSnapshot, Error, WorkspaceGuard,
 };
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, mpsc, oneshot, watch};
+use tokio::time::timeout;
 
 use crate::supervisor::{Command, Reply, Supervisor, bounded_close};
 use crate::unattended::{UnattendedChat, set_aside_first_message};
@@ -383,6 +384,7 @@ struct Inner {
     /// The settings of each Chat that is running unattended, read when its
     /// supervisor starts.
     unattended: Mutex<HashMap<String, Arc<UnattendedChat>>>,
+    prompt_fences: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
     taking_over: Mutex<HashMap<String, watch::Receiver<bool>>>,
     closing_agents: Mutex<HashMap<String, watch::Receiver<Option<Closed>>>>,
     lifecycle: Arc<HostLifecycle>,
@@ -574,6 +576,7 @@ impl ChatHost {
                     .collect(),
                 chats: Mutex::new(HashMap::new()),
                 unattended: Mutex::new(HashMap::new()),
+                prompt_fences: Mutex::new(HashMap::new()),
                 taking_over: Mutex::new(HashMap::new()),
                 closing_agents: Mutex::new(HashMap::new()),
                 lifecycle: Arc::new(HostLifecycle::default()),
@@ -745,13 +748,12 @@ impl ChatHost {
         {
             return Ok(receipt);
         }
-        if self
-            .workspace()?
-            .automation_chat_harness(chat_id)?
-            .is_some()
-        {
+        let run_id = self.workspace()?.automation_chat_run_id(chat_id)?;
+        if let Some(run_id) = run_id {
             let gate = self.begin_take_over(chat_id)?;
             let saved = {
+                let _prompt = self.wait_for_prompt_write(&run_id).await?;
+                self.serving()?;
                 let mut workspace = self.workspace()?;
                 if let Some(harness) = workspace.automation_chat_harness(chat_id)? {
                     if let Err(refusal) = self.check_attachment_input(&harness, &attachments) {
@@ -851,6 +853,27 @@ impl ChatHost {
         })
     }
 
+    pub(crate) fn prompt_fence(&self, run_id: &str) -> Arc<AsyncMutex<()>> {
+        let mut fences = self
+            .inner
+            .prompt_fences
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        fences.retain(|_, fence| fence.strong_count() > 0);
+        if let Some(fence) = fences.get(run_id).and_then(Weak::upgrade) {
+            return fence;
+        }
+        let fence = Arc::new(AsyncMutex::new(()));
+        fences.insert(run_id.to_owned(), Arc::downgrade(&fence));
+        fence
+    }
+
+    async fn wait_for_prompt_write(&self, run_id: &str) -> Result<OwnedMutexGuard<()>, HostError> {
+        timeout(CLOSE_TIMEOUT, self.prompt_fence(run_id).lock_owned())
+            .await
+            .map_err(|_| HostError::Working)
+    }
+
     /// The person's Stop: pauses queue dispatch and asks the harness to interrupt the
     /// active turn. In the Chat of an Automation run that is going, it takes the run
     /// over, which stops the agent by closing its unattended harness. It means the
@@ -858,13 +881,14 @@ impl ChatHost {
     /// ended, it uses `end_run_agents`.
     pub async fn stop(&self, chat_id: &str) -> Result<(), HostError> {
         let mut sibling_cleanup_unconfirmed = false;
-        if self
-            .workspace()?
-            .automation_chat_harness(chat_id)?
-            .is_some()
-        {
+        let run_id = self.workspace()?.automation_chat_run_id(chat_id)?;
+        if let Some(run_id) = run_id {
             let _gate = self.begin_take_over(chat_id)?;
-            let run = self.workspace()?.take_over_automation_run(chat_id, false)?;
+            let run = {
+                let _prompt = self.wait_for_prompt_write(&run_id).await?;
+                self.serving()?;
+                self.workspace()?.take_over_automation_run(chat_id, false)?
+            };
             if let Some(run) = run {
                 let (closed, unconfirmed) = self.finish_take_over(chat_id, run).await;
                 if closed {

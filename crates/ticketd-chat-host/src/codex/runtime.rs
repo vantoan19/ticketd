@@ -12,11 +12,11 @@ use ticketd_core::ChatAttachmentContent;
 use tokio::time::timeout;
 
 use crate::{
-    ADAPTER_CLOSE_TIMEOUT, Capabilities, CloseOutcome, DispatchOutcome, EventKind, EventStream,
-    HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome, InterruptRequest,
-    LoginState, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal,
-    RespondOutcome, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome, Submission,
-    SubmissionKind,
+    ADAPTER_CLOSE_TIMEOUT, AutomationPromptAdmission, Capabilities, CloseOutcome, DispatchOutcome,
+    EventKind, EventStream, HarnessOptions, HarnessRuntime, InteractionResponse, InterruptOutcome,
+    InterruptRequest, LoginState, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail,
+    Refusal, RespondOutcome, RuntimeGeneration, SessionStart, SettingChange, SettingOutcome,
+    Submission, SubmissionKind,
 };
 
 use crate::attachment_input::AttachmentFiles;
@@ -701,6 +701,14 @@ impl HarnessRuntime for CodexRuntime {
     }
 
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        self.submit_with_admission(submission, None).await
+    }
+
+    async fn submit_with_admission(
+        &self,
+        submission: Submission,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> DispatchOutcome {
         let Submission {
             submission: id,
             generation,
@@ -788,6 +796,7 @@ impl HarnessRuntime for CodexRuntime {
                 prepare,
                 acknowledged_turn,
                 rejection_reason,
+                admission,
             )
             .await
     }

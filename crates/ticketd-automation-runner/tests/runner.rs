@@ -16,7 +16,7 @@ use ticketd_chat_host::{
 };
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
-    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatAttachmentContent,
+    AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatAttachmentContent, ChatDelivery,
     ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatQueueEdit, Error,
     NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger, Workspace, WorkspaceSession,
     sync::{
@@ -1918,6 +1918,97 @@ async fn a_run_ended_with_its_first_message_unconfirmed_does_not_offer_to_send_i
             }
         }
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn reply_and_stop_takeover_wait_for_an_admitted_prompt_write() {
+    for stop in [false, true] {
+        let f = Fixture::new();
+        let (admitted, release) = f.fake.hold_next_submit_write();
+        f.tag("Fix login");
+        f.tick().await;
+        tokio::time::timeout(Duration::from_secs(10), admitted)
+            .await
+            .unwrap()
+            .unwrap();
+        let run = f.runs().remove(0);
+        let chat = f.chat();
+        assert!(f.fake.written().is_empty());
+        assert!(f.core().chat_snapshot(&chat, 20).unwrap().items.iter().any(|item| {
+            matches!(item, ChatItem::Message(message)
+                if message.attempts.iter().any(|attempt| attempt.delivery == ChatDelivery::Possible))
+        }));
+
+        let mut takeover = Box::pin(async {
+            if stop {
+                f.host.stop(&chat).await
+            } else {
+                f.host
+                    .send(&chat, None, "Wait to take over", SendMode::Queue)
+                    .await
+                    .map(|_| ())
+            }
+        });
+        std::future::poll_fn(|cx| {
+            assert!(takeover.as_mut().poll(cx).is_pending());
+            std::task::Poll::Ready(())
+        })
+        .await;
+        assert_eq!(
+            f.core().automation_run(&run.id).unwrap().status,
+            AutomationRunStatus::Running
+        );
+        assert!(f.core().chat_queue(&chat).unwrap().is_empty());
+        assert!(f.fake.written().is_empty());
+
+        release.send(()).unwrap();
+        takeover.await.unwrap();
+        assert_eq!(
+            f.core().automation_run(&run.id).unwrap().status,
+            AutomationRunStatus::TakenOver
+        );
+        assert!(matches!(f.fake.written().first(), Some(Written::Submit(_))));
+        assert_eq!(
+            f.core().chat_queue(&chat).unwrap().len(),
+            usize::from(!stop)
+        );
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_independent_run_stop_refuses_the_pending_prompt_at_the_write_boundary() {
+    let f = Fixture::new();
+    let (admitted, release) = f.fake.hold_next_submit_write();
+    f.tag("Fix login");
+    f.tick().await;
+    tokio::time::timeout(Duration::from_secs(10), admitted)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = f.runs().remove(0);
+    let chat = f.chat();
+    assert!(f.fake.written().is_empty());
+    f.core().stop_automation_run(&run.id).unwrap();
+    release.send(()).unwrap();
+
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if f.core().chat_snapshot(&chat, 20).unwrap().items.iter().any(|item| {
+                matches!(item, ChatItem::Message(message)
+                    if message.attempts.iter().any(|attempt| attempt.delivery == ChatDelivery::NotDelivered
+                        && attempt.detail.as_deref() == Some(Refusal::AutomationPromptNotAllowed.reason())))
+            }) {
+                break;
+            }
+            settle().await;
+        }
+    }).await.unwrap();
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|event| matches!(event, Written::Submit(_)))
+    );
 }
 
 /// #387 5A1: a run taken over before its agent had a harness session (so there is no

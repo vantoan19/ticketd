@@ -63,6 +63,7 @@ struct State {
     respond_holds: VecDeque<oneshot::Receiver<()>>,
     setting_replies: VecDeque<oneshot::Receiver<SettingOutcome>>,
     submit_replies: VecDeque<ScriptedReply>,
+    submit_write_holds: VecDeque<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
     interrupt_outcomes: VecDeque<InterruptOutcome>,
     close_outcome: CloseOutcome,
     close_holds: VecDeque<oneshot::Receiver<()>>,
@@ -130,6 +131,7 @@ impl FakeAdapter {
                 respond_holds: VecDeque::new(),
                 setting_replies: VecDeque::new(),
                 submit_replies: VecDeque::new(),
+                submit_write_holds: VecDeque::new(),
                 interrupt_outcomes: VecDeque::new(),
                 close_outcome: CloseOutcome::Confirmed { exit_code: Some(0) },
                 close_holds: VecDeque::new(),
@@ -244,6 +246,15 @@ impl FakeAdapter {
             .submit_replies
             .push_back(ScriptedReply::Held(receiver));
         sender
+    }
+
+    /// Waits after a Prompt holds its run's fence, before checking ownership and
+    /// recording the write. The receiver reports that the boundary was reached.
+    pub fn hold_next_submit_write(&self) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (reached, boundary) = oneshot::channel();
+        let (release, permit) = oneshot::channel();
+        self.state().submit_write_holds.push_back((reached, permit));
+        (boundary, release)
     }
 
     /// Scripts the outcome of the next interrupt that reaches the harness. Unscripted
@@ -475,6 +486,28 @@ impl HarnessRuntime for FakeRuntime {
     }
 
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        self.submit_with_admission(submission, None).await
+    }
+
+    async fn submit_with_admission(
+        &self,
+        submission: Submission,
+        admission: Option<crate::AutomationPromptAdmission>,
+    ) -> DispatchOutcome {
+        let prompt = match &admission {
+            Some(admission) => Some(admission.lock().await),
+            None => None,
+        };
+        let hold = self.fake.state().submit_write_holds.pop_front();
+        if let Some((reached, permit)) = hold {
+            let _ = reached.send(());
+            let _ = permit.await;
+        }
+        if let Some(admission) = &admission
+            && let Err(refusal) = admission.check()
+        {
+            return DispatchOutcome::NotSent(refusal);
+        }
         let scripted = {
             let mut state = self.fake.state();
             let steering = state.capabilities.steering.behavior().is_some();
@@ -489,6 +522,7 @@ impl HarnessRuntime for FakeRuntime {
             self.fake.submissions.send_modify(|seen| *seen += 1);
             state.submit_replies.pop_front()
         };
+        drop(prompt);
         let reply = match scripted {
             None => SubmitReply::Acknowledge,
             Some(ScriptedReply::Now(reply)) => reply,

@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, OwnedMutexGuard, mpsc};
 
 /// Capacity of a runtime's event channel. The supervisor keeps receiving while
 /// commands are pending. Each adapter handles saturation in its transport.
@@ -207,6 +207,50 @@ pub struct Submission {
     pub attachments: Vec<ticketd_core::ChatAttachmentContent>,
 }
 
+/// Holds one Automation run's dispatch fence from the final ownership check
+/// through its Prompt's transport write.
+pub struct AutomationPromptAdmission {
+    pub(crate) fence: Arc<Mutex<()>>,
+    pub(crate) open_workspace: crate::host::WorkspaceOpener,
+    pub(crate) lifecycle: Arc<crate::host::HostLifecycle>,
+    pub(crate) chat_id: String,
+    pub(crate) run_id: String,
+}
+
+impl AutomationPromptAdmission {
+    pub async fn lock(&self) -> OwnedMutexGuard<()> {
+        self.fence.clone().lock_owned().await
+    }
+
+    /// Rechecks independently ended runs immediately before attempting the write.
+    pub fn check(&self) -> Result<(), Refusal> {
+        if self.lifecycle.serving().is_err() {
+            return Err(Refusal::RuntimeClosed);
+        }
+        if matches!(
+            (self.open_workspace)()
+                .and_then(|core| core.automation_chat_owned_by_run(&self.chat_id, &self.run_id)),
+            Ok(true)
+        ) {
+            Ok(())
+        } else {
+            Err(Refusal::AutomationPromptNotAllowed)
+        }
+    }
+
+    pub(crate) async fn for_write(
+        admission: Option<Self>,
+    ) -> Result<Option<OwnedMutexGuard<()>>, Refusal> {
+        if let Some(admission) = admission {
+            let guard = admission.lock().await;
+            admission.check()?;
+            Ok(Some(guard))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SubmissionKind {
     /// Expects no active turn.
@@ -290,6 +334,8 @@ pub enum Refusal {
     AttachmentUnavailable,
     /// The runtime was closed, replaced or lost before the write.
     RuntimeClosed,
+    /// The Automation no longer has confirmed ownership at the write boundary.
+    AutomationPromptNotAllowed,
 }
 
 impl Refusal {
@@ -307,6 +353,7 @@ impl Refusal {
                 "the Chat could not prepare an attachment file for the harness"
             }
             Self::RuntimeClosed => "the harness session had closed",
+            Self::AutomationPromptNotAllowed => "the Automation no longer had confirmed ownership",
         }
     }
 
@@ -1037,6 +1084,20 @@ pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
     /// Hands input to the harness after rechecking generation and expected turn
     /// immediately before the write.
     async fn submit(&self, submission: Submission) -> DispatchOutcome;
+
+    /// The built-in unattended runtimes hold the admission through the bounded
+    /// write, then release it before waiting for evidence from the harness.
+    async fn submit_with_admission(
+        &self,
+        submission: Submission,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> DispatchOutcome {
+        let _guard = match AutomationPromptAdmission::for_write(admission).await {
+            Ok(guard) => guard,
+            Err(refusal) => return DispatchOutcome::NotSent(refusal),
+        };
+        self.submit(submission).await
+    }
 
     /// Answers a live approval or question. Each request accepts one answer.
     async fn respond(&self, response: InteractionResponse) -> RespondOutcome;

@@ -24,12 +24,12 @@ use crate::stdio::{
 };
 use crate::{ADAPTER_CLOSE_TIMEOUT, WRITE_TIMEOUT};
 use crate::{
-    Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome, EVENT_BUFFER, EventKind,
-    EventStream, HarnessOptions, HarnessRuntime, Inspection, InteractionResponse, InterruptOutcome,
-    InterruptRequest, LoginState, NativeRequestId, NoticeKind, OpenRequest, OpenedRuntime, Problem,
-    ProblemKind, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration,
-    SessionStart, SettingChange, SettingKey, SettingOutcome, StartSettings, Submission,
-    SubmissionId, SubmissionKind,
+    AutomationPromptAdmission, Capabilities, CloseOutcome, DeliveryEvidence, DispatchOutcome,
+    EVENT_BUFFER, EventKind, EventStream, HarnessOptions, HarnessRuntime, Inspection,
+    InteractionResponse, InterruptOutcome, InterruptRequest, LoginState, NativeRequestId,
+    NoticeKind, OpenRequest, OpenedRuntime, Problem, ProblemKind, ProviderDetail, Refusal,
+    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SettingChange, SettingKey,
+    SettingOutcome, StartSettings, Submission, SubmissionId, SubmissionKind,
 };
 
 use super::attachment_refusal;
@@ -224,7 +224,19 @@ impl Connection {
         waits: bool,
         prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
     ) -> Result<(String, Option<oneshot::Receiver<Reply>>), WriteFailure> {
+        self.write_with_admission(waits, prepare, None).await
+    }
+
+    async fn write_with_admission(
+        &self,
+        waits: bool,
+        prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> Result<(String, Option<oneshot::Receiver<Reply>>), WriteFailure> {
         let mut stdin = self.stdin.lock().await;
+        let _prompt = AutomationPromptAdmission::for_write(admission)
+            .await
+            .map_err(WriteFailure::Refused)?;
         let (line, id, receiver) = {
             let mut state = self.state();
             if state.closed {
@@ -257,13 +269,21 @@ impl Connection {
         &self,
         prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
     ) -> CallOutcome {
+        self.call_with_admission(prepare, None).await
+    }
+
+    async fn call_with_admission(
+        &self,
+        prepare: impl FnOnce(&mut Session) -> Result<(Value, Kind), Refusal>,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> CallOutcome {
         let mut opening = false;
         let prepare = |session: &mut Session| {
             let prepared = prepare(session);
             opening = matches!(prepared, Ok((_, Kind::Open)));
             prepared
         };
-        let (id, mut receiver) = match self.write(true, prepare).await {
+        let (id, mut receiver) = match self.write_with_admission(true, prepare, admission).await {
             Ok((id, Some(receiver))) => (id, receiver),
             Ok((_, None)) | Err(WriteFailure::Lost) => return CallOutcome::Lost,
             Err(WriteFailure::Refused(refusal)) => return CallOutcome::Refused(refusal),
@@ -1029,6 +1049,14 @@ impl Drop for ClaudeRuntime {
 #[async_trait]
 impl HarnessRuntime for ClaudeRuntime {
     async fn submit(&self, submission: Submission) -> DispatchOutcome {
+        self.submit_with_admission(submission, None).await
+    }
+
+    async fn submit_with_admission(
+        &self,
+        submission: Submission,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> DispatchOutcome {
         if let Some(refusal) = self.stale(submission.generation) {
             return DispatchOutcome::NotSent(refusal);
         }
@@ -1057,29 +1085,32 @@ impl HarnessRuntime for ClaudeRuntime {
         let generation = self.connection.generation.0;
         let outcome = self
             .connection
-            .call(|session| {
-                if let Some(active) = session.active_turn() {
-                    return Err(Refusal::TurnMismatch {
-                        active: Some(active.clone()),
+            .call_with_admission(
+                |session| {
+                    if let Some(active) = session.active_turn() {
+                        return Err(Refusal::TurnMismatch {
+                            active: Some(active.clone()),
+                        });
+                    }
+                    let mut command = json!({
+                        "cmd": "submit",
+                        "generation": generation,
+                        "submission_id": submission.submission.0,
+                        "text": submission.text,
                     });
-                }
-                let mut command = json!({
-                    "cmd": "submit",
-                    "generation": generation,
-                    "submission_id": submission.submission.0,
-                    "text": submission.text,
-                });
-                if !attachments.is_empty() {
-                    command["attachments"] = Value::Array(attachments);
-                }
-                if let Some(files) = files {
-                    self.attachment_files
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .push(files);
-                }
-                Ok((command, Kind::Submit(submission.submission)))
-            })
+                    if !attachments.is_empty() {
+                        command["attachments"] = Value::Array(attachments);
+                    }
+                    if let Some(files) = files {
+                        self.attachment_files
+                            .lock()
+                            .unwrap_or_else(PoisonError::into_inner)
+                            .push(files);
+                    }
+                    Ok((command, Kind::Submit(submission.submission)))
+                },
+                admission,
+            )
             .await;
         match outcome {
             CallOutcome::Refused(refusal) => DispatchOutcome::NotSent(refusal),

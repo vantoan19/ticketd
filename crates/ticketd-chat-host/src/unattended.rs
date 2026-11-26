@@ -7,7 +7,7 @@ use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use ticketd_core::{AutomationRunStatus, ChatObservation, ChatTurn, Workspace};
-use tokio::sync::{mpsc, oneshot, watch};
+use tokio::sync::{Mutex, mpsc, oneshot, watch};
 use tokio::time::timeout;
 
 use crate::host::{Activity, ChatHost, ChatLive, ChatProblem, HostError};
@@ -18,14 +18,16 @@ use crate::{ProblemKind, StopReason, TurnEnding, Unattended};
 pub(crate) struct UnattendedChat {
     pub(crate) settings: Unattended,
     pub(crate) first_message: OnceLock<String>,
+    pub(crate) prompt_fence: Arc<Mutex<()>>,
     pub(crate) turned_off: watch::Sender<bool>,
 }
 
 impl UnattendedChat {
-    pub(crate) fn new(settings: Unattended) -> Arc<Self> {
+    pub(crate) fn new(settings: Unattended, prompt_fence: Arc<Mutex<()>>) -> Arc<Self> {
         Arc::new(Self {
             settings,
             first_message: OnceLock::new(),
+            prompt_fence,
             turned_off: watch::channel(false).0,
         })
     }
@@ -81,7 +83,8 @@ impl ChatHost {
         unattended: Unattended,
         time_limit: Duration,
     ) -> Result<TurnEnd, HostError> {
-        let unattended = UnattendedChat::new(unattended);
+        let prompt_fence = self.prompt_fence(&unattended.run_id);
+        let unattended = UnattendedChat::new(unattended, prompt_fence);
         if !self.register_unattended(chat_id, unattended.clone())? {
             return Ok(TurnEnd::TakenOver);
         }
