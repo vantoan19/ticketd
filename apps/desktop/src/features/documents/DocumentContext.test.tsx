@@ -117,6 +117,17 @@ it("says Spec of the Plan under the title when the Document is the spec of an Ar
   expect(linked.textContent).toMatch(/Old launch\s*·\s*spec\s*·\s*archived/);
 });
 
+it("names an Archived Plan in the breadcrumb, from the row, as it does an Active one", async () => {
+  vi.mocked(documents.row).mockResolvedValue(
+    row({ plans: [plan("Old launch", true, true)] }),
+  );
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  const crumb = await screen.findByRole("button", {
+    name: "Open Plan Old launch",
+  });
+  expect(crumb.closest(".document-bar")).not.toBeNull();
+});
+
 it("shows the first ticket as its status and reference, and +1 for a second", async () => {
   vi.mocked(documents.row).mockResolvedValue(
     row({ tickets: [ticket("T-KQ1", "Done"), ticket("T-KQ2")] }),
