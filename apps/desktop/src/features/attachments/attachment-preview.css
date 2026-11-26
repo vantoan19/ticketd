@@ -346,6 +346,9 @@
   transform: translateX(-50%);
   background: white;
   box-shadow: var(--shadow-medium);
+  /* Like every skeleton, only after 300ms: a fast read never flashes a white page. */
+  animation: skeleton-appear var(--dur-instant) linear var(--dur-loading-delay)
+    both;
 }
 .attachment-loading-page i {
   display: block;
