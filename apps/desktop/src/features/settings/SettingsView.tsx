@@ -10,6 +10,7 @@ import {
 import { useSources } from "@/features/settings/sources/use-sources";
 import type { SourceEntry } from "@/lib/api/sources";
 import { AboutPage } from "@/features/settings/pages/AboutPage";
+import { AgentPage } from "@/features/settings/pages/AgentPage";
 import { AgentsPage } from "@/features/settings/pages/AgentsPage";
 import { AgentSkillsPage } from "@/features/settings/pages/AgentSkillsPage";
 import { AppearancePage } from "@/features/settings/pages/AppearancePage";
@@ -49,6 +50,7 @@ export function SettingsView({
   onWorkspaceReplaced,
   onSourcesChanged,
   onSelect,
+  onOpenAutomations,
   projectSourceSetup,
   onProjectSourceSaved,
   onProjectSourceCancel,
@@ -59,6 +61,8 @@ export function SettingsView({
   selected?: SettingsPageId | LegacySettingsPageId;
   /** Opens another page, for links between pages and for ⌘F. */
   onSelect?: (page: SettingsPageId) => void;
+  /** Leaves Settings for the Automations view. */
+  onOpenAutomations?: () => void;
   /** Called after anything replaced the Workspace: a restore, or a download from Drive. */
   onRestore: () => Promise<void>;
   /** Called as soon as the replacement succeeds, before refreshing views. */
@@ -122,8 +126,18 @@ export function SettingsView({
       )}
       {selected === "command-line" && <CommandLinePage />}
       {selected === "agent-skills" && <AgentSkillsPage />}
-      {selected === "agents" && <AgentsPage />}
-      {selected === "automations" && <AutomationsPage />}
+      {selected === "agents" && (
+        <AgentsPage onOpen={(id) => onSelect?.(`agent-${id}`)} />
+      )}
+      {selected.startsWith("agent-") && (
+        <AgentPage
+          id={selected.slice("agent-".length)}
+          onBack={() => onSelect?.("agents")}
+        />
+      )}
+      {selected === "automations" && (
+        <AutomationsPage onOpenAutomations={() => onOpenAutomations?.()} />
+      )}
       {selected === "workspace-sync" && (
         <WorkspaceSyncPage
           onReplaced={() => {

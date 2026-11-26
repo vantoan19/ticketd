@@ -218,7 +218,10 @@ export const harnessStatusSchema = z.object({
   problem: problemSchema.nullish(),
   /** What was found or why the probe is uncertain: executable, version, requirement. */
   message: z.string().nullish(),
+  /** The command that fixes it, when there is one: the sign-in, never for a ready harness. */
   command: z.string().nullish(),
+  /** How the harness signs in or switches accounts ("claude /login"), whatever its state. */
+  sign_in_command: z.string().nullish(),
   help_url: z.string().nullish(),
   /** The executable that was found, to show as a path. */
   path: z.string().nullish(),
@@ -226,6 +229,21 @@ export const harnessStatusSchema = z.object({
   version: z.string().nullish(),
 });
 export type HarnessStatus = z.infer<typeof harnessStatusSchema>;
+
+/**
+ * Whether a harness's program is on this computer, and its version. Read
+ * without opening a session or checking a sign-in, so it is safe while Chats
+ * are off.
+ */
+export const harnessInstallationSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  mark_id: z.string().optional(),
+  installed: z.boolean(),
+  version: z.string().nullish(),
+  path: z.string().nullish(),
+});
+export type HarnessInstallation = z.infer<typeof harnessInstallationSchema>;
 
 export const harnessInfoSchema = z.object({
   id: z.string(),
@@ -856,8 +874,10 @@ export interface ChatClient {
   /** Fires when any Chat's summary changes; never tied to the workspace poll. */
   subscribeOverview(listener: (overview: ChatOverview) => void): Unsubscribe;
   listChats(scope: Retention): Promise<ChatSummary[]>;
-  /** Probes installation and sign-in again on every call. */
+  /** Probes installation and sign-in again on every call. Only while Chats are on. */
   harnesses(): Promise<HarnessStatus[]>;
+  /** Which programs are installed, with versions; checks no sign-in, works with Chats off. */
+  installedHarnesses(): Promise<HarnessInstallation[]>;
   /** Compiled-in harness data, without probing installations or starting Chat. */
   harnessCatalog(): Promise<HarnessInfo[]>;
   /** What a harness offers before a session; asked of the harness once per version. */

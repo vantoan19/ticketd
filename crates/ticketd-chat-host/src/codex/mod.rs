@@ -59,12 +59,18 @@ impl CodexAdapter {
     }
 
     fn executable(&self) -> Option<PathBuf> {
-        let is_file = |path: &Path| path.is_file();
         match &self.selected {
-            Some(selected) => is_file(selected).then(|| selected.clone()),
-            None => discovery::locate(Os::current(), &LaunchEnvironment::current(), is_file),
+            Some(selected) => selected.is_file().then(|| selected.clone()),
+            None => find(),
         }
     }
+}
+
+/// Where Codex is installed, found the way Chats find it.
+pub(crate) fn find() -> Option<PathBuf> {
+    discovery::locate(Os::current(), &LaunchEnvironment::current(), |path| {
+        path.is_file()
+    })
 }
 
 /// What `thread/start` and every `turn/start` are told for an unattended session:

@@ -136,47 +136,33 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "agent-skills",
   },
   {
-    title: "Show Chat",
+    title: "Chats",
     description:
-      "Adds Chats and Automations to the sidebar, where you start and follow your agents’ work.",
+      "Start your agents from ticketd and follow their work beside your tickets.",
     keywords:
-      "chat claude codex ai experimental sidebar conversations automations",
+      "show chat claude codex ai experimental beta preview not yet tested subscription plan sidebar conversations automations",
     section: "agents",
   },
   {
-    title: "Experimental",
+    title: "On this computer",
     description:
-      "Run the coding agents on this computer inside ticketd, in Chats.",
+      "Claude Code, Codex and Antigravity: which are installed, and whether each is signed in.",
     keywords:
-      "beta preview not yet qualified against real subscriptions claude codex ai",
+      "agents harness claude code codex antigravity installed detected version signed in check again copy command",
     section: "agents",
-  },
-  {
-    title: "Harnesses",
-    description: "Each harness runs on this computer with its own sign-in.",
-    keywords:
-      "harness claude code codex installed detected signed in check again copy command",
-    section: "agents",
-    needsChat: true,
-  },
-  {
-    title: "Experimental",
-    description: "Let agents and steps work on your tickets by themselves.",
-    keywords: "automation automations beta preview agents steps",
-    section: "automations",
-  },
-  {
-    title: "Runs at once",
-    description:
-      "Runs beyond this wait in a queue, in the order their events happened.",
-    keywords: "automation automations concurrency parallel limit queue agents",
-    section: "automations",
   },
   {
     title: "Start ticketd when you sign in",
-    description: "Automations run only while ticketd is running.",
+    description: "Scheduled Automations run only while ticketd is running.",
     keywords:
-      "automation automations login startup autostart launch background tray boot",
+      "automation automations login startup autostart launch background tray boot schedule",
+    section: "automations",
+  },
+  {
+    title: "Open Automations",
+    description: "Build them, and choose which ones run on this computer.",
+    keywords:
+      "automation automations build schedule agents steps experimental beta preview",
     section: "automations",
   },
   {
@@ -398,7 +384,8 @@ const chatOnly = (entry: SettingsEntry) =>
 /** Stands in for Chat-only rows while Chat is off: the Agents page is where it is turned on. */
 const CHAT_PAGE_ENTRY: SettingsEntry = {
   title: "Agents",
-  description: "Turn on Chat to set up harnesses and Automations.",
+  description:
+    "Turn on Chats to see how each agent signs in, and to use Automations.",
   section: "agents",
 };
 

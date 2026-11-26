@@ -32,7 +32,7 @@ pub(crate) fn make_adapter(_: &crate::HostResources) -> Result<Arc<dyn HarnessAd
 
 struct Antigravity;
 
-fn executable() -> Option<PathBuf> {
+pub(crate) fn executable() -> Option<PathBuf> {
     let environment = LaunchEnvironment::current();
     let names: &[&str] = if Os::current() == Os::Windows {
         &["agy.exe"]

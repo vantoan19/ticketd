@@ -163,6 +163,27 @@
   align-items: center;
   gap: 8px;
 }
+/* A row that opens something in place: the whole row answers a click, the
+   chevron is the keyboard stop. */
+.settings-list-row[data-openable] {
+  cursor: pointer;
+}
+.settings-list-row[data-openable]:hover {
+  background: var(--hover);
+}
+.settings-row-open {
+  display: inline-flex;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  color: var(--disabled-foreground);
+  cursor: inherit;
+}
+.settings-row-open:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
 .settings-list-footer {
   display: flex;
   align-items: center;

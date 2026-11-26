@@ -13,6 +13,7 @@ import {
   harnessInfoSchema,
   harnessOptionsSchema,
   harnessSkillSchema,
+  harnessInstallationSchema,
   harnessStatusSchema,
   linkedRecordSchema,
   settingChangeSchema,
@@ -236,6 +237,10 @@ export function createHostChatClient(
       z.array(chatSummarySchema).parse(await call("chat_list", { scope })),
     harnesses: async () =>
       z.array(harnessStatusSchema).parse(await call("chat_harnesses")),
+    installedHarnesses: async () =>
+      z
+        .array(harnessInstallationSchema)
+        .parse(await call("chat_installed_harnesses")),
     harnessCatalog: async () =>
       z.array(harnessInfoSchema).parse(await call("chat_harness_catalog")),
     harnessOptions: async (harnessId) =>

@@ -44,8 +44,10 @@ test("current names, Search and a connection stay as they are; a name nobody kno
   expect(resolveSettingsPage("nonsense")).toBe("appearance");
 });
 
-test("a connection selects Ticket sources in the sidebar and Search selects nothing", () => {
+test("a connection selects Ticket sources in the sidebar, an agent selects Agents, and Search selects nothing", () => {
   expect(navSectionOf("source-github")).toBe("ticket-sources");
+  expect(navSectionOf("agent-claude-code")).toBe("agents");
+  expect(resolveSettingsPage("agent-codex")).toBe("agent-codex");
   expect(navSectionOf("search")).toBeNull();
   expect(navSectionOf("about")).toBe("about");
 });

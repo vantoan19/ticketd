@@ -348,11 +348,28 @@ pub struct HarnessStatus {
     pub problem: Option<chat_view::Problem>,
     pub message: Option<String>,
     pub command: Option<String>,
+    /// How the harness signs in or switches accounts ("claude /login"), whatever its
+    /// state; `command` is the same text only while there is a sign-in to do.
+    pub sign_in_command: &'static str,
     pub help_url: Option<String>,
     /// The executable that was found.
     pub path: Option<String>,
     /// The version number it reported ("2.1.322"), when it was found and said one.
     pub version: Option<String>,
+}
+
+/// Whether a harness's program is on this computer, found without opening a session
+/// or checking a sign-in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct HarnessInstallation {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub mark_id: &'static str,
+    pub installed: bool,
+    /// The version number it reported ("2.1.322").
+    pub version: Option<String>,
+    /// The executable that was found.
+    pub path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -536,6 +553,7 @@ fn harness_status(descriptor: Harness, inspection: Inspection) -> HarnessStatus 
             .map(|kind| chat_view::Problem::for_harness(name, kind, &found)),
         message: found.message,
         command: found.command,
+        sign_in_command: descriptor.sign_in_command,
         help_url: found.help_url,
         path: found.path,
         version: match &inspection {
@@ -1535,6 +1553,7 @@ impl Chats {
                         )),
                         message: Some(reason),
                         command: None,
+                        sign_in_command: descriptor.sign_in_command,
                         help_url: None,
                         path: None,
                         version: None,
@@ -1559,6 +1578,40 @@ impl Chats {
 
     pub fn harness_catalog(&self) -> Vec<HarnessInfo> {
         self.catalog().into_iter().map(HarnessInfo::from).collect()
+    }
+
+    /// Which harness programs are on this computer, with their versions, even when
+    /// Chat is off. Each is only asked for its version: no session starts and no
+    /// sign-in is checked (`harnesses` does that, and only while Chat is on).
+    pub async fn installed_harnesses(&self) -> Vec<HarnessInstallation> {
+        let mut probes = tokio::task::JoinSet::new();
+        for (index, entry) in REGISTRATIONS.iter().enumerate() {
+            probes.spawn(async move { (index, entry.installation().await) });
+        }
+        let mut found = Vec::new();
+        while let Some(result) = probes.join_next().await {
+            // A probe that panicked is a program we could not find.
+            let Ok((index, installation)) = result else {
+                continue;
+            };
+            let descriptor = REGISTRATIONS[index].descriptor;
+            found.push((
+                index,
+                HarnessInstallation {
+                    id: descriptor.key.as_str(),
+                    name: descriptor.name,
+                    mark_id: descriptor.mark_id,
+                    installed: installation.is_some(),
+                    version: installation
+                        .as_ref()
+                        .and_then(|found| found.version.as_deref())
+                        .map(|text| version_number(text).to_owned()),
+                    path: installation.map(|found| found.executable.display().to_string()),
+                },
+            ));
+        }
+        found.sort_unstable_by_key(|(index, _)| *index);
+        found.into_iter().map(|(_, harness)| harness).collect()
     }
 
     /// What the installed harness offers before a session: its models with their
