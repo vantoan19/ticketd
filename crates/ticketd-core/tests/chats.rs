@@ -2,7 +2,7 @@ use ticketd_core::{
     CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX,
     CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery, ChatDeliveryDecision,
     ChatInputStanding, ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink, ChatLinkKind,
-    ChatListFilter, ChatMessage, ChatObservation, ChatRecord, ChatSessionOrigin,
+    ChatListFilter, ChatMessage, ChatObservation, ChatQueueEdit, ChatRecord, ChatSessionOrigin,
     ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, NewChat, Workspace,
 };
 
@@ -450,20 +450,14 @@ fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
         kind: ChatLinkKind::Ticket,
         id: workspace.create_ticket("Context").unwrap().id,
     };
-    assert!(
-        workspace
-            .add_chat_queue_edit_links(&chat.id, "edit", std::slice::from_ref(&link))
-            .unwrap()
-    );
-    workspace
-        .save_chat_input_replacing(
-            Some("edit"),
-            &chat.id,
-            "Edited",
-            &[],
-            std::slice::from_ref(&original.id),
-        )
+    let edit = ChatQueueEdit {
+        replaces: vec![original.id],
+        links: vec![link.clone()],
+    };
+    let (saved, linked) = workspace
+        .save_chat_input_with_edit(Some("edit"), &chat.id, "Edited", &[], Some(&edit))
         .unwrap();
+    assert!(linked);
     workspace
         .set_chat_link(&chat.id, link.clone(), false)
         .unwrap();
@@ -472,13 +466,18 @@ fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
     let _writer = peer
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .unwrap();
-    assert!(
-        !workspace
-            .add_chat_queue_edit_links(&chat.id, "edit", std::slice::from_ref(&link))
-            .unwrap()
+    assert_eq!(
+        workspace
+            .replay_chat_input_with_edit("edit", &chat.id, "Edited", &[], Some(&edit))
+            .unwrap(),
+        Some(saved),
     );
+    let changed = ChatQueueEdit {
+        links: Vec::new(),
+        ..edit
+    };
     assert!(matches!(
-        workspace.add_chat_queue_edit_links(&chat.id, "edit", &[]),
+        workspace.replay_chat_input_with_edit("edit", &chat.id, "Edited", &[], Some(&changed)),
         Err(Error::RequestConflict(_))
     ));
     assert!(workspace.chat(&chat.id).unwrap().links.is_empty());

@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use ticketd_core::{
     Chat, ChatAttachmentContent, ChatInputReceipt, ChatInteractionKind, ChatInteractionState,
-    ChatMessage, ChatObservation, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState,
-    ChatTurnReceipt, ChatTurnState, Error, Workspace,
+    ChatMessage, ChatObservation, ChatQueueEdit, ChatSessionOrigin, ChatSubmissionIntent,
+    ChatToolState, ChatTurnReceipt, ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::time::{Instant, sleep_until, timeout, timeout_at};
@@ -69,7 +69,7 @@ pub(crate) enum Command {
         text: String,
         mode: SendMode,
         attachments: Vec<ChatAttachmentContent>,
-        replaces: Vec<String>,
+        edit: Option<ChatQueueEdit>,
         reply: Reply<ChatInputReceipt>,
     },
     ScheduleSaved {
@@ -193,6 +193,7 @@ struct Opening {
     origin: ChatSessionOrigin,
     preamble: Option<String>,
     reply: Option<Reply<()>>,
+    context_changed: bool,
 }
 
 struct Dispatch {
@@ -737,7 +738,7 @@ impl Supervisor {
                 text,
                 mode,
                 attachments,
-                replaces,
+                edit,
                 reply,
             } => {
                 let _ = reply.send(self.send(
@@ -745,7 +746,7 @@ impl Supervisor {
                     &text,
                     mode,
                     &attachments,
-                    &replaces,
+                    edit.as_ref(),
                 ));
             }
             Command::ScheduleSaved { message_id, reply } => {
@@ -960,7 +961,14 @@ impl Supervisor {
     /// Reads the ticketd context again for the live session. Without one there is nothing
     /// to tell: the next session reads the context when it opens.
     fn refresh_context(&mut self) {
-        let (Some(runtime), Some(source)) = (&self.runtime, self.context.clone()) else {
+        let Some(source) = self.context.clone() else {
+            return;
+        };
+        if let Some(opening) = &mut self.opening {
+            opening.context_changed = true;
+            return;
+        }
+        let Some(runtime) = &self.runtime else {
             return;
         };
         let (done, chat_id, generation) =
@@ -1011,15 +1019,15 @@ impl Supervisor {
         text: &str,
         mode: SendMode,
         attachments: &[ChatAttachmentContent],
-        replaces: &[String],
+        edit: Option<&ChatQueueEdit>,
     ) -> Result<ChatInputReceipt, HostError> {
         let chat = self.chat_id.clone();
         // A lost reply can arrive after queue eligibility changed. Repeating an
         // already saved edit returns its receipt without dispatching it again.
-        if !replaces.is_empty()
+        if edit.is_some()
             && let Some(command_id) = command_id
             && let Some(saved) = self.core(|core| {
-                core.replay_chat_input_replacing(command_id, &chat, text, attachments, replaces)
+                core.replay_chat_input_with_edit(command_id, &chat, text, attachments, edit)
             })?
         {
             return Ok(saved);
@@ -1047,7 +1055,7 @@ impl Supervisor {
                     .then_some(Refusal::ImageInputUnsupported)
             });
             if let Some(refusal) = refusal {
-                if replaces.is_empty()
+                if edit.is_none()
                     && let Some(command_id) = command_id
                     && let Some(saved) = self.core(|core| {
                         core.replay_chat_input_replacing(command_id, &chat, text, attachments, &[])
@@ -1058,9 +1066,12 @@ impl Supervisor {
                 return Err(refusal.attachment_error().into());
             }
         }
-        let receipt = self.write(|core| {
-            core.save_chat_input_replacing(command_id, &chat, text, attachments, replaces)
+        let (receipt, linked) = self.write(|core| {
+            core.save_chat_input_with_edit(command_id, &chat, text, attachments, edit)
         })?;
+        if linked {
+            self.refresh_context();
+        }
         if mode == SendMode::Auto
             && let Some(message) = &receipt.message
         {
@@ -1671,6 +1682,7 @@ impl Supervisor {
             origin,
             preamble,
             reply,
+            context_changed: false,
         });
         let (done, chat_id) = (self.done.clone(), chat.id.clone());
         let chat_span = self.span.clone();
@@ -2384,6 +2396,9 @@ impl Supervisor {
                     Err(error) => self.notice(format!(
                         "ticketd could not prepare this Chat's context, so the session started without it: {error}"
                     )),
+                }
+                if opening.context_changed {
+                    self.refresh_context();
                 }
                 self.problem = None;
                 Ok(())

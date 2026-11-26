@@ -1267,6 +1267,108 @@ async fn a_new_queue_edit_receipt_binds_empty_links_without_guessing_legacy_link
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_upload_limit_refusal_leaves_the_edit_links_and_original_untouched() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let files = || {
+        vec![AttachmentInput {
+            name: "notes.txt".to_owned(),
+            data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+        }]
+    };
+    f.chats
+        .send_linking(&id, "Original", SendMode::Queue, &[], files(), None)
+        .await
+        .unwrap();
+    let original = f.core().chat_queue(&id).unwrap().remove(0);
+    let transfer = uuid::Uuid::new_v4().to_string();
+    assert!(
+        f.chats
+            .confirm_queue_edit(&id, &original.id, &transfer)
+            .await
+            .unwrap()
+    );
+    let command_id = uuid::Uuid::new_v4().to_string();
+    let request = || {
+        Some(QueueEditSave {
+            command_id: command_id.clone(),
+            message_ids: vec![original.id.clone()],
+        })
+    };
+    let ticket = |title| LinkRef {
+        kind: LinkKind::Ticket,
+        id: f.core().create_ticket(title).unwrap().id,
+    };
+    let rejected = ticket("Link from refused edit");
+    let accepted = ticket("Link from accepted edit");
+    f.core().set_attachment_upload_limit(1).unwrap();
+
+    let refusal = f
+        .chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[rejected],
+            files(),
+            request(),
+        )
+        .await
+        .unwrap_err();
+    assert!(refusal.message.contains("limit"), "{refusal:?}");
+    assert!(f.core().chat(&id).unwrap().links.is_empty());
+    let queue = f.core().chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, original.id);
+    assert!(queue[0].editing);
+    assert_eq!(
+        f.core()
+            .chat_message_attachment_contents(&id, &original.id)
+            .unwrap()[0]
+            .bytes(),
+        b"notes"
+    );
+    let pending = f
+        .chats
+        .check_queue_edits(&id, vec![command_id.clone()], Vec::new())
+        .unwrap();
+    assert!(pending.saved.is_empty());
+
+    f.core().set_attachment_upload_limit(100).unwrap();
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            std::slice::from_ref(&accepted),
+            files(),
+            request(),
+        )
+        .await
+        .unwrap();
+    f.core().set_attachment_upload_limit(1).unwrap();
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            std::slice::from_ref(&accepted),
+            files(),
+            request(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        f.core().chat(&id).unwrap().links,
+        [ChatLink::from(accepted)]
+    );
+    let edited = f.core().chat_queue(&id).unwrap();
+    assert_eq!(edited.len(), 1);
+    assert_eq!(edited[0].text, "Edited");
+    assert_ne!(edited[0].id, original.id);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_fresh_session_excludes_attachment_only_messages_from_picked_history() {
     let f = Fixture::new().await;
     let mut input = f.input("");

@@ -32,9 +32,9 @@ use ticketd_chat_host::{
 use ticketd_core::{
     AgentHarness, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition, Chat,
     ChatAttachmentContent, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem,
-    ChatMessage, ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState,
-    ChatTurn, ChatTurnState, Error, NewChat, RunAction, Step, StepAction, Trigger, Workspace,
-    WorkspaceSession,
+    ChatLink, ChatLinkKind, ChatMessage, ChatQueueEdit, ChatRecord, ChatRole, ChatSessionOrigin,
+    ChatSubmissionIntent, ChatToolState, ChatTurn, ChatTurnState, Error, NewChat, RunAction, Step,
+    StepAction, Trigger, Workspace, WorkspaceSession,
 };
 
 struct Fixture {
@@ -2016,6 +2016,65 @@ async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
 /// L4: links changed after the session started reach the agent with the next new turn,
 /// kept as context like the first delivery; a resumed native session is told only
 /// when its context differs from what it was given.
+#[tokio::test(start_paused = true)]
+async fn a_linked_edit_refreshes_context_captured_during_harness_open() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let context_path = path.clone();
+    let (read, first_context) = tokio::sync::oneshot::channel();
+    let first_read = std::sync::Mutex::new(Some(read));
+    f.host = ChatHost::with_context(
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |chat_id| {
+            let chat = Workspace::open(&context_path)
+                .and_then(|core| core.chat(chat_id))
+                .map_err(|error| error.to_string())?;
+            if let Some(read) = first_read.lock().unwrap().take() {
+                let _ = read.send(());
+            }
+            Ok(Some(format!("linked records: {}", chat.links.len())))
+        })),
+    )
+    .unwrap();
+    let open = f.fake.hold_next_open();
+    f.send("first").await;
+    first_context.await.unwrap();
+    let original = f.queue("Original").await;
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &original.id, "hold")
+            .await
+            .unwrap()
+    );
+
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f
+            .core()
+            .create_ticket("Link for the edited input")
+            .unwrap()
+            .id,
+    };
+    f.host
+        .send_with_edit(
+            &f.chat.id,
+            Some("edit"),
+            "Edited",
+            SendMode::Queue,
+            Vec::new(),
+            Some(ChatQueueEdit {
+                replaces: vec![original.id],
+                links: vec![link],
+            }),
+        )
+        .await
+        .unwrap();
+    open.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.submits()[0].text, "linked records: 1\n\nfirst");
+}
+
 #[tokio::test(start_paused = true)]
 async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_message() {
     let mut f = Fixture::new(FakeAdapter::codex());

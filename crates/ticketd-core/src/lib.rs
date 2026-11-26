@@ -159,9 +159,10 @@ pub use chats::{
     ChatCatchUp, ChatChange, ChatCreationReplay, ChatDelivery, ChatDeliveryDecision,
     ChatHistoryPage, ChatInputReceipt, ChatInputStanding, ChatInteraction, ChatInteractionKind,
     ChatInteractionState, ChatItem, ChatLink, ChatLinkKind, ChatLinkedRecord, ChatListFilter,
-    ChatMessage, ChatNotice, ChatObservation, ChatRecord, ChatRole, ChatSession, ChatSessionOrigin,
-    ChatSnapshot, ChatStartPicks, ChatSubmissionAttempt, ChatSubmissionIntent, ChatSummary,
-    ChatTool, ChatToolState, ChatTurn, ChatTurnReceipt, ChatTurnState, FolderChat, NewChat,
+    ChatMessage, ChatNotice, ChatObservation, ChatQueueEdit, ChatRecord, ChatRole, ChatSession,
+    ChatSessionOrigin, ChatSnapshot, ChatStartPicks, ChatSubmissionAttempt, ChatSubmissionIntent,
+    ChatSummary, ChatTool, ChatToolState, ChatTurn, ChatTurnReceipt, ChatTurnState, FolderChat,
+    NewChat,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};

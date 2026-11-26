@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ticketd_core::{
     AutomationRun, AutomationRunStatus, ChatAttachmentContent, ChatInputReceipt, ChatMessage,
-    ChatSnapshot, Error, WorkspaceGuard,
+    ChatQueueEdit, ChatSnapshot, Error, WorkspaceGuard,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -114,6 +114,10 @@ pub(crate) fn is_refusal(error: &Error) -> bool {
             | Error::ChatSubmissionUnresolved(_)
             | Error::RequestConflict(_)
             | Error::UploadLimit { .. }
+            | Error::NotFound(_)
+            | Error::DocumentNotFound(_)
+            | Error::ProjectNotFound(_)
+            | Error::ProjectArchived(_)
     )
 }
 
@@ -660,15 +664,32 @@ impl ChatHost {
         attachments: Vec<ChatAttachmentContent>,
         replaces: Vec<String>,
     ) -> Result<ChatInputReceipt, HostError> {
+        let edit = (!replaces.is_empty()).then_some(ChatQueueEdit {
+            replaces,
+            links: Vec::new(),
+        });
+        self.send_with_edit(chat_id, command_id, text, mode, attachments, edit)
+            .await
+    }
+
+    pub async fn send_with_edit(
+        &self,
+        chat_id: &str,
+        command_id: Option<&str>,
+        text: &str,
+        mode: SendMode,
+        attachments: Vec<ChatAttachmentContent>,
+        edit: Option<ChatQueueEdit>,
+    ) -> Result<ChatInputReceipt, HostError> {
         self.serving()?;
         if self.check_agent_cleanup(chat_id).is_err()
             && let Some(command_id) = command_id
-            && let Some(receipt) = self.workspace()?.replay_chat_input_replacing(
+            && let Some(receipt) = self.workspace()?.replay_chat_input_with_edit(
                 command_id,
                 chat_id,
                 text,
                 &attachments,
-                &replaces,
+                edit.as_ref(),
             )?
         {
             return Ok(receipt);
@@ -684,12 +705,12 @@ impl ChatHost {
                 if let Some(harness) = workspace.automation_chat_harness(chat_id)? {
                     if let Err(refusal) = self.check_attachment_input(&harness, &attachments) {
                         if let Some(command_id) = command_id
-                            && let Some(receipt) = workspace.replay_chat_input_replacing(
+                            && let Some(receipt) = workspace.replay_chat_input_with_edit(
                                 command_id,
                                 chat_id,
                                 text,
                                 &attachments,
-                                &replaces,
+                                edit.as_ref(),
                             )?
                         {
                             return Ok(receipt);
@@ -701,7 +722,7 @@ impl ChatHost {
                         chat_id,
                         text,
                         &attachments,
-                        &replaces,
+                        edit.as_ref(),
                     )?)
                 } else {
                     None
@@ -741,7 +762,7 @@ impl ChatHost {
             text,
             mode,
             attachments,
-            replaces,
+            edit,
             reply,
         })
         .await

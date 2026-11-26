@@ -430,6 +430,13 @@ pub struct ChatInputReceipt {
     pub message: Option<ChatMessage>,
 }
 
+/// The held messages a queued edit replaces and its complete set of links.
+#[derive(Debug, Clone)]
+pub struct ChatQueueEdit {
+    pub replaces: Vec<String>,
+    pub links: Vec<ChatLink>,
+}
+
 impl ChatInputReceipt {
     pub fn into_message(self) -> Result<ChatMessage, Error> {
         self.message
@@ -1297,6 +1304,55 @@ fn previous_outcome(
 
 fn automation_prompt_command_id(chat_id: &str) -> String {
     format!("{chat_id}:first")
+}
+
+#[derive(Default)]
+struct InputReplacement<'a> {
+    replaces: &'a [String],
+    links: Option<&'a [ChatLink]>,
+}
+
+impl<'a> From<Option<&'a ChatQueueEdit>> for InputReplacement<'a> {
+    fn from(edit: Option<&'a ChatQueueEdit>) -> Self {
+        edit.map_or_else(Self::default, |edit| Self {
+            replaces: &edit.replaces,
+            links: Some(&edit.links),
+        })
+    }
+}
+
+fn queue_edit_link_receipt(
+    command_id: &str,
+    chat_id: &str,
+    links: &[ChatLink],
+) -> Result<(String, String), Error> {
+    let command = format!("chat_queue_edit_links:{command_id}");
+    let mut set = links
+        .iter()
+        .map(|link| Ok((name(link.kind)?, link.id.as_str())))
+        .collect::<Result<Vec<_>, Error>>()?;
+    set.sort_unstable();
+    set.dedup();
+    let request = json!({
+        "operation": "chat_queue_edit_links",
+        "chat_id": chat_id,
+        "links": set,
+    })
+    .to_string();
+    Ok((command, request))
+}
+
+fn read_input_receipt(
+    connection: &Connection,
+    command_id: &str,
+    request: &str,
+) -> Result<Option<ChatInputReceipt>, Error> {
+    previous_outcome(connection, command_id, request)?
+        .map(|id| {
+            let message = read_message(connection, &id)?;
+            Ok(ChatInputReceipt { id, message })
+        })
+        .transpose()
 }
 
 enum InputSource<'a> {
@@ -2211,52 +2267,6 @@ impl Workspace {
         self.chat_write(|connection| add_links(connection, id, links))
     }
 
-    /// Applies an edited message's links once. The link set is part of its
-    /// request even when empty, and a historical saved edit leaves links alone.
-    pub fn add_chat_queue_edit_links(
-        &mut self,
-        id: &str,
-        command_id: &str,
-        links: &[ChatLink],
-    ) -> Result<bool, Error> {
-        let link_command = format!("chat_queue_edit_links:{command_id}");
-        let mut set = links
-            .iter()
-            .map(|link| Ok((name(link.kind)?, link.id.as_str())))
-            .collect::<Result<Vec<_>, Error>>()?;
-        set.sort_unstable();
-        set.dedup();
-        let request = json!({
-            "operation": "chat_queue_edit_links",
-            "chat_id": id,
-            "links": set,
-        })
-        .to_string();
-        let has_receipt = |connection: &Connection| {
-            if previous_outcome(connection, &link_command, &request)?.is_some() {
-                return Ok(true);
-            }
-            // Older saves did not persist their links. Keep the receipt
-            // replayable without guessing what links were supplied.
-            Ok(connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM request_outcomes WHERE id = ?1)",
-                [command_id],
-                |row| row.get(0),
-            )?)
-        };
-        if crate::read_scope::run(&self.connection, has_receipt)? {
-            return Ok(false);
-        }
-        self.chat_write(|connection| {
-            if has_receipt(connection)? {
-                return Ok(false);
-            }
-            let added = add_links(connection, id, links)?;
-            save_outcome(connection, &link_command, &request, id)?;
-            Ok(added)
-        })
-    }
-
     /// Archive hides a Chat; it does not stop its work or change its queue.
     pub fn set_chat_archived(&mut self, id: &str, archived: bool) -> Result<Chat, Error> {
         self.update_chat(id, |connection| {
@@ -2434,15 +2444,39 @@ impl Workspace {
         files: &[ChatAttachmentContent],
         replaces: &[String],
     ) -> Result<ChatInputReceipt, Error> {
-        let (receipt, _) = self.save_input(
+        let (receipt, _, _) = self.save_input(
             command_id,
             chat_id,
             text,
             files,
-            replaces,
+            InputReplacement {
+                replaces,
+                links: None,
+            },
             InputSource::Person,
         )?;
         Ok(receipt)
+    }
+
+    /// Applies the edited links and saves the input in the same write. Returns
+    /// whether new links were added so the host can refresh a running session.
+    pub fn save_chat_input_with_edit(
+        &mut self,
+        command_id: Option<&str>,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        edit: Option<&ChatQueueEdit>,
+    ) -> Result<(ChatInputReceipt, bool), Error> {
+        let (receipt, _, links_changed) = self.save_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            edit.into(),
+            InputSource::Person,
+        )?;
+        Ok((receipt, links_changed))
     }
 
     /// Saves a person's reply with the takeover of the run that owns the Chat.
@@ -2453,16 +2487,17 @@ impl Workspace {
         chat_id: &str,
         text: &str,
         files: &[ChatAttachmentContent],
-        replaces: &[String],
+        edit: Option<&ChatQueueEdit>,
     ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
-        self.save_input(
+        let (receipt, run, _) = self.save_input(
             command_id,
             chat_id,
             text,
             files,
-            replaces,
+            edit.into(),
             InputSource::AutomationReply,
-        )
+        )?;
+        Ok((receipt, run))
     }
 
     /// The run's first Prompt may only be created while it still owns this Chat.
@@ -2478,7 +2513,7 @@ impl Workspace {
             chat_id,
             text,
             &[],
-            &[],
+            InputReplacement::default(),
             InputSource::AutomationPrompt(run_id),
         )?
         .0
@@ -2491,16 +2526,32 @@ impl Workspace {
         chat_id: &str,
         text: &str,
         files: &[ChatAttachmentContent],
-        replaces: &[String],
+        replacement: InputReplacement<'_>,
         source: InputSource<'_>,
-    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>, bool), Error> {
+        let InputReplacement { replaces, links } = replacement;
+        if links.is_some() && replaces.is_empty() {
+            return Err(invalid("choose a queued message to edit"));
+        }
         if !replaces.is_empty() && command_id.is_none() {
             return Err(invalid("Editing queued input requires a command ID"));
         }
         let request = command_id.map_or(Value::Null, |_| {
             save_input_request(chat_id, text, files, replaces)
         });
+        let link_receipt = links
+            .zip(command_id)
+            .map(|(links, command_id)| {
+                queue_edit_link_receipt(command_id, chat_id, links).map(|receipt| (links, receipt))
+            })
+            .transpose()?;
         self.chat_write(|connection| {
+            let links_saved = if let Some((_, (command, request))) = &link_receipt {
+                previous_outcome(connection, command, request)?.is_some()
+            } else {
+                false
+            };
+            let mut links_changed = false;
             let mut run = None;
             if let InputSource::AutomationPrompt(run_id) = source
                 && !owns_running_chat(connection, chat_id, run_id)?
@@ -2527,6 +2578,12 @@ impl Workspace {
                     }
                     delete_queued_input(connection, original)?;
                 }
+                if let Some((links, (command, request))) = &link_receipt
+                    && !links_saved
+                {
+                    links_changed = add_links(connection, chat_id, links)?;
+                    save_outcome(connection, command, request, chat_id)?;
+                }
                 if matches!(source, InputSource::AutomationReply) {
                     run = crate::automation_runs::take_over_chat(connection, chat_id, true)?;
                 }
@@ -2547,7 +2604,7 @@ impl Workspace {
                 Ok(id)
             })?;
             let message = read_message(connection, &id)?;
-            Ok((ChatInputReceipt { id, message }, run))
+            Ok((ChatInputReceipt { id, message }, run, links_changed))
         })
     }
 
@@ -2604,12 +2661,31 @@ impl Workspace {
         replaces: &[String],
     ) -> Result<Option<ChatInputReceipt>, Error> {
         let request = save_input_request(chat_id, text, files, replaces).to_string();
-        previous_outcome(&self.connection, command_id, &request)?
-            .map(|id| {
-                let message = read_message(&self.connection, &id)?;
-                Ok(ChatInputReceipt { id, message })
-            })
-            .transpose()
+        read_input_receipt(&self.connection, command_id, &request)
+    }
+
+    /// Validates a saved edit without taking the writer or reapplying links.
+    /// A historical save with no link receipt still replays its original outcome.
+    pub fn replay_chat_input_with_edit(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        edit: Option<&ChatQueueEdit>,
+    ) -> Result<Option<ChatInputReceipt>, Error> {
+        let Some(edit) = edit else {
+            return self.replay_chat_input_replacing(command_id, chat_id, text, files, &[]);
+        };
+        if edit.replaces.is_empty() {
+            return Err(invalid("choose a queued message to edit"));
+        }
+        let request = save_input_request(chat_id, text, files, &edit.replaces).to_string();
+        let (link_command, links) = queue_edit_link_receipt(command_id, chat_id, &edit.links)?;
+        crate::read_scope::run(&self.connection, |connection| {
+            previous_outcome(connection, &link_command, &links)?;
+            read_input_receipt(connection, command_id, &request)
+        })
     }
 
     /// Withdraw queued input the person no longer wants sent. Refused once a submission

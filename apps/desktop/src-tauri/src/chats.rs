@@ -20,9 +20,9 @@ use ticketd_chat_host::{
 use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatCreationReplay, ChatDelivery,
-    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord,
-    ChatRole, ChatStartPicks, ChatSubmissionIntent, ChatTurnState, MAX_BACKUP_FILE_BYTES, NewChat,
-    Project, Workspace, WorkspaceGuard,
+    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage,
+    ChatQueueEdit, ChatRecord, ChatRole, ChatStartPicks, ChatSubmissionIntent, ChatTurnState,
+    MAX_BACKUP_FILE_BYTES, NewChat, Project, Workspace, WorkspaceGuard,
 };
 use tokio::sync::{oneshot, watch};
 
@@ -82,6 +82,7 @@ impl From<HostError> for ChatFailure {
     fn from(error: HostError) -> Self {
         match error {
             HostError::InteractionExpired => stale(error.to_string()),
+            HostError::Core(error) => error.into(),
             other => failed(other.to_string()),
         }
     }
@@ -2109,6 +2110,7 @@ impl Chats {
     /// Sends or queues a message after linking the records it mentions or quotes, so the
     /// harness is told about them with this message (spec 21.4). An invalid link
     /// refuses the whole set of links and the message.
+    /// A queued edit commits its links with the replacement message.
     pub async fn send_linking(
         &self,
         chat_id: &str,
@@ -2119,66 +2121,63 @@ impl Chats {
         queue_edit: Option<QueueEditSave>,
     ) -> Outcome<()> {
         let host = self.host()?;
-        let (command_id, replaces) = if let Some(edit) = queue_edit {
+        let links: Vec<_> = links.iter().cloned().map(ChatLink::from).collect();
+        if let Some(edit) = queue_edit {
             if edit.message_ids.is_empty() {
                 return Err(failed("choose a queued message to edit"));
             }
-            (
-                Some(queue_edit_save_id(&edit.command_id)?),
-                edit.message_ids,
+            let command_id = queue_edit_save_id(&edit.command_id)?;
+            let edit = ChatQueueEdit {
+                replaces: edit.message_ids,
+                links,
+            };
+            // A saved edit can replay after the current upload limit changed.
+            // Core checks that limit in the transaction for a new edit.
+            let attachments = Self::decode_message_attachments(text, files, MAX_BACKUP_FILE_BYTES)?;
+            {
+                let workspace = self.workspace()?;
+                if workspace.chat_queue_edit_saved(chat_id, &command_id)?
+                    && workspace
+                        .replay_chat_input_with_edit(
+                            &command_id,
+                            chat_id,
+                            text,
+                            &attachments,
+                            Some(&edit),
+                        )?
+                        .is_some()
+                {
+                    self.resync(chat_id);
+                    return Ok(());
+                }
+            }
+            host.send_with_edit(
+                chat_id,
+                Some(&command_id),
+                text,
+                mode,
+                attachments,
+                Some(edit),
             )
-        } else {
-            (None, Vec::new())
-        };
-        // A saved edit can still replay when the Workspace upload limit changed.
-        // Core checks the current limit again when it actually saves the message.
+            .await?;
+            self.resync(chat_id);
+            return Ok(());
+        }
+
         let limit = if files.is_empty() {
             0
-        } else if command_id.is_some() {
-            MAX_BACKUP_FILE_BYTES
         } else {
             self.workspace()?.attachment_upload_limit()?
         };
         let attachments = Self::decode_message_attachments(text, files, limit)?;
-        let links: Vec<_> = links.iter().cloned().map(ChatLink::from).collect();
-        let linked = if let Some(command_id) = command_id.as_deref() {
-            let mut workspace = self.workspace()?;
-            let saved = workspace.chat_queue_edit_saved(chat_id, command_id)?
-                && workspace.replay_chat_queue_edit(
-                    command_id,
-                    chat_id,
-                    text,
-                    &attachments,
-                    &replaces,
-                )?;
-            let linked = workspace.add_chat_queue_edit_links(chat_id, command_id, &links)?;
-            if saved {
-                self.resync(chat_id);
-                return Ok(());
-            }
-            linked
-        } else {
-            !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)?
-        };
-        if linked {
+        if !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)? {
             host.links_changed(chat_id).await?;
         }
-        let replacing = !replaces.is_empty();
-        if !replacing && attachments.is_empty() {
+        if attachments.is_empty() {
             return self.send(chat_id, text, mode).await;
         }
-        host.send_replacing(
-            chat_id,
-            command_id.as_deref(),
-            text,
-            mode,
-            attachments,
-            replaces,
-        )
-        .await?;
-        if replacing {
-            self.resync(chat_id);
-        }
+        host.send_with_attachments(chat_id, None, text, mode, attachments)
+            .await?;
         Ok(())
     }
 

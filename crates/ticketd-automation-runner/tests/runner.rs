@@ -17,8 +17,8 @@ use ticketd_chat_host::{
 use ticketd_core::{
     AgentHarness, Automation, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition,
     AutomationRun, AutomationRunStatus, AutomationStepStatus, ChatAttachmentContent,
-    ChatInputStanding, ChatItem, ChatLinkKind, ChatListFilter, Error, NotifyTarget, Schedule, Step,
-    StepAction, Ticket, Trigger, Workspace, WorkspaceSession,
+    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatQueueEdit, Error,
+    NotifyTarget, Schedule, Step, StepAction, Ticket, Trigger, Workspace, WorkspaceSession,
     sync::{
         AttachmentDownload,
         remote::{FakeRemote, RemoteStorage},
@@ -1012,6 +1012,69 @@ async fn an_invalid_reply_leaves_the_run_live_and_a_saved_reply_waits_for_cleanu
         Some(Written::Submit(submission))
             if submission.attachments.as_slice() == std::slice::from_ref(&file)
     ));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_automation_edit_commits_its_links_and_takeover_only_with_the_saved_reply() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let existing_links = f.core().chat(&chat).unwrap().links;
+    let original = f.core().save_chat_input(None, &chat, "Held draft").unwrap();
+    f.core()
+        .confirm_chat_queue_edit(&chat, &original.id, "hold")
+        .unwrap();
+    let file =
+        ChatAttachmentContent::from_data_url("notes.txt", "data:text/plain;base64,bm90ZXM=", 100)
+            .unwrap();
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("New context").unwrap().id,
+    };
+    let edit = ChatQueueEdit {
+        replaces: vec![original.id.clone()],
+        links: vec![link.clone()],
+    };
+    f.core().set_attachment_upload_limit(1).unwrap();
+
+    let send = |file, edit| {
+        f.host.send_with_edit(
+            &chat,
+            Some("edit"),
+            "Edited",
+            SendMode::Queue,
+            vec![file],
+            Some(edit),
+        )
+    };
+    assert!(matches!(
+        send(file.clone(), edit.clone()).await,
+        Err(HostError::Core(Error::UploadLimit { limit: 1 }))
+    ));
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    assert_eq!(f.core().chat(&chat).unwrap().links, existing_links);
+    let waiting = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(waiting[0].id, original.id);
+    assert!(waiting[0].editing);
+
+    f.core().set_attachment_upload_limit(100).unwrap();
+    let saved = send(file.clone(), edit).await.unwrap();
+    settle().await;
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    let links = f.core().chat(&chat).unwrap().links;
+    assert_eq!(links.len(), existing_links.len() + 1);
+    assert!(links.contains(&link));
+    let queue = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, saved.id);
+    assert_ne!(queue[0].id, original.id);
+    assert_eq!(
+        f.core()
+            .chat_message_attachment_contents(&chat, &saved.id)
+            .unwrap(),
+        [file]
+    );
+    assert_eq!(f.fake.opens().len(), 1);
 }
 
 #[tokio::test(start_paused = true)]
