@@ -196,6 +196,13 @@ test("resizing the stage while Fit is on keeps the same place and page in view",
     expect(stage.top()).toBeGreaterThan(1100);
     expect(stage.top()).toBeLessThan(1300);
     expect(field.value).toBe("3");
+    // The bar's dock spans what the stage shows, so it stays centered when zoomed pages
+    // scroll sideways.
+    expect(
+      document
+        .querySelector<HTMLElement>(".view-bar-dock")!
+        .style.getPropertyValue("--stage-width"),
+    ).toBe("500px");
   } finally {
     vi.unstubAllGlobals();
   }

@@ -525,7 +525,14 @@ function TextLines({
   return (
     <>
       {note && (
-        <p className="attachment-text-scope">
+        <p
+          className="attachment-text-scope"
+          style={
+            size.width
+              ? ({ "--stage-width": `${size.width}px` } as CSSProperties)
+              : undefined
+          }
+        >
           <Info aria-hidden="true" />
           {note}
         </p>
@@ -557,6 +564,7 @@ function TextLines({
         <div style={{ height: below + BAR_CLEARANCE }} aria-hidden="true" />
       </div>
       <ViewBarFind
+        stageWidth={size.width}
         finding={finding}
         wrap={wrap}
         query={query}
@@ -585,6 +593,7 @@ function scopeNote(scope: Scope, shown: number, dropped: number) {
 }
 
 function ViewBarFind({
+  stageWidth,
   finding,
   wrap,
   query,
@@ -598,6 +607,7 @@ function ViewBarFind({
   onStep,
   onWrap,
 }: {
+  stageWidth: number;
   finding: boolean;
   wrap: boolean;
   query: string;
@@ -617,7 +627,7 @@ function ViewBarFind({
       ? "No matches"
       : `${(active + 1).toLocaleString()} of ${count.toLocaleString()}${capped ? "+" : ""}`;
   return (
-    <ViewBar label="View">
+    <ViewBar label="View" stageWidth={stageWidth}>
       <ViewBarGroup label="Find">
         {finding ? (
           <>

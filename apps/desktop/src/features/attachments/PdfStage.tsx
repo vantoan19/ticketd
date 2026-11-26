@@ -279,7 +279,7 @@ function PdfPages({
           />
         ))}
       </div>
-      <ViewBar label="View">
+      <ViewBar label="View" stageWidth={width}>
         {pages.length > 1 && (
           <ViewBarGroup label="Pages">
             <IconButton
