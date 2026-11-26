@@ -129,6 +129,13 @@ it("shows the first ticket as its status and reference, and +1 for a second", as
   expect(meta()?.textContent).not.toContain("T-KQ2");
 });
 
+it("says so when the Document's context cannot be read, instead of showing none", async () => {
+  vi.mocked(documents.row).mockRejectedValue(new Error("disk unavailable"));
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("load the connections");
+});
+
 it("keeps only the time, reading time and storage state for a Document with no links", async () => {
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   await waitFor(() => expect(documents.row).toHaveBeenCalledWith("d1"));

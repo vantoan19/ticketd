@@ -2,6 +2,8 @@ import { useCallback, useMemo, useState } from "react";
 import { foldAllTargets, hiddenBy } from "@/features/markdown/folding";
 import type { OutlineHeading } from "@/features/markdown/outline";
 
+// Folds are kept per Document under their own key, not as a preference: a preference is one
+// value for the whole app, and a Workspace Document's folds are only this computer's reading state.
 const key = (documentId: string) => `ticketd.document-folds.${documentId}`;
 
 function recall(documentId: string): string[] {

@@ -381,7 +381,9 @@ function RecoveredDocumentEditor({
           rowKey.current = key;
           setRow(next);
         })
-        .catch(() => {});
+        .catch((error: unknown) =>
+          setLinkError(describeFailure(error, "load the connections")),
+        );
   };
   const refreshLinksRef = useRef(refreshLinks);
   useEffect(() => {
