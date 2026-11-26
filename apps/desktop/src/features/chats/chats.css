@@ -535,45 +535,40 @@
 .chat-step-words {
   min-width: 0;
 }
-/* A command with no description, or a row that names files or patterns: the
-   verb and the outcome on one line; the names give way with an ellipsis (a
-   file's own folder and name cut inside it). */
+/* A command with no description, or a row that names files or patterns: one
+   28px line, the verb and the outcome whole and the names giving way with an
+   ellipsis (a file's own folder and name cut inside it). Only when even the
+   shrunken names cannot fit does the row wrap onto a second line, so a file's
+   button and its focus ring are never clipped. */
 .chat-step-words[data-line] {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 6px;
   /* One 20px line box: the 14px verb and the 13px mono name sit on one
      baseline but would make the row 28.4px or 29px high. */
-  height: 20px;
+  min-height: 20px;
   white-space: nowrap;
 }
 .chat-step-words[data-line] > * {
   flex: none;
 }
-/* What follows the verb is one group the row clips: however many names it holds,
-   the row never grows past its width, and the verb and the outcome stay whole.
-   The 2px either side keeps a name's focus ring inside the clip. */
-.chat-step-words[data-line] > .chat-step-names {
-  display: flex;
-  flex: 0 1 auto;
-  align-items: baseline;
+.chat-step-words[data-line] > .chat-step-suffix {
+  display: inline-flex;
   gap: 6px;
-  min-width: 0;
-  padding: 0 2px;
-  margin: 0 -2px;
-  overflow-x: clip;
 }
-.chat-step-words[data-line] > .chat-step-names > * {
-  flex: none;
-}
-.chat-step-words[data-line] code:not(.chat-file-name) {
-  flex: 0 1 auto;
-  min-width: 0;
-}
+/* A name's flex basis is its minimum ("..." and its tail). Line breaking uses
+   that basis, so the row wraps only when the minimums do not fit; otherwise the
+   names grow and truncate on one line, up to their own full width. */
 .chat-step-words[data-line] .chat-file-name {
-  flex: 0 1 auto;
+  flex: 1 1 calc(var(--keep, 0) * 1ch + 4px);
+  max-width: max-content;
 }
+/* A command or a pattern gives way to a few characters and an ellipsis. */
 .chat-step-words[data-line] code:not(.chat-file-name) {
+  flex: 1 1 4ch;
+  min-width: 0;
+  max-width: max-content;
   overflow: hidden;
   text-overflow: ellipsis;
 }
