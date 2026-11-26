@@ -87,6 +87,29 @@ pub struct Facts<'a> {
     pub last_response: Option<&'a str>,
 }
 
+/// What a turn's changes read as, in order: each ticket's status moves netted into one
+/// (the first `from`, the last `to`, dropped when they are equal), standing where the
+/// ticket's first move stood. The Chat view's records row says these sentences, and an
+/// idle row's second line says the first of them; `netChanges` in the desktop's
+/// `model.ts` is the same rule, and both are tested with the same cases.
+pub fn net_changes(changes: &[ChatAgentChange]) -> Vec<ChatAgentChange> {
+    let mut net: Vec<ChatAgentChange> = Vec::new();
+    for change in changes {
+        if let ChatAgentChange::Status { reference, to, .. } = change
+            && let Some(ChatAgentChange::Status { to: earlier, .. }) =
+                net.iter_mut().find(|kept| {
+                    matches!(kept, ChatAgentChange::Status { reference: kept, .. } if kept == reference)
+                })
+        {
+            earlier.clone_from(to);
+        } else {
+            net.push(change.clone());
+        }
+    }
+    net.retain(|change| !matches!(change, ChatAgentChange::Status { from, to, .. } if from == to));
+    net
+}
+
 /// What the agent did to a record, verb first.
 pub fn change_line(change: &ChatAgentChange) -> String {
     match change {
