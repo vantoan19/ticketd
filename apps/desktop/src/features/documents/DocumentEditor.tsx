@@ -982,6 +982,7 @@ function RecoveredDocumentEditor({
     scroller,
     outline,
     folds.folded,
+    folds.introFolded,
   );
   /** Changes the folds and keeps the heading the reader is at where it was on screen. */
   const keepPlace = (change: () => void) => {
@@ -1740,7 +1741,7 @@ function RecoveredDocumentEditor({
             current={currentAnchor}
             scroller={scroller}
             folds={{
-              folded: folds.folded.size,
+              folded: folds.folded.size + folds.introFolded.size,
               allFolded: folds.allFolded,
               foldAll: () => keepPlace(folds.foldAll),
               unfoldAll: () => keepPlace(folds.unfoldAll),
@@ -2030,7 +2031,7 @@ function RecoveredDocumentEditor({
             headings={outline}
             current={currentAnchor}
             folds={{
-              folded: folds.folded.size,
+              folded: folds.folded.size + folds.introFolded.size,
               allFolded: folds.allFolded,
               foldAll: () => keepPlace(folds.foldAll),
               unfoldAll: () => keepPlace(folds.unfoldAll),

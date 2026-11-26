@@ -154,24 +154,48 @@ const inOutline = () => {
 it("folds every section down to its first sentence from the outline, and unfolds them all", () => {
   open();
   fireEvent.click(inOutline().getByRole("button", { name: "Fold all" }));
-  // Subsections and sections without any fold; Decisions keeps its subsections as lines.
+  // Every section is its heading and first sentence, Decisions too: its own text folds to its
+  // first sentence and its subsections stay on show, each folded.
+  expect(visible("We chose Rust. It is fast.")).toBe(false);
   expect(visible("First text. More of it.")).toBe(false);
   expect(visible("Second text. More of it.")).toBe(false);
   expect(visible("Nothing was rejected. Not one.")).toBe(false);
   const lines = screen
-    .getAllByRole("heading", { level: 3 })
-    .concat(screen.getByRole("heading", { name: "Rejected" }));
+    .getAllByRole("heading", { level: 2 })
+    .concat(screen.getAllByRole("heading", { level: 3 }));
+  expect(lines.every((line) => line.closest("[hidden]") === null)).toBe(true);
   expect(lines.map((line) => line.textContent)).toEqual([
+    "DecisionsWe chose Rust.",
+    "RejectedNothing was rejected.",
     "FirstFirst text.",
     "SecondSecond text.",
-    "RejectedNothing was rejected.",
   ]);
   const menu = inOutline();
   expect(menu.queryByRole("button", { name: "Fold all" })).toBeNull();
   fireEvent.click(menu.getByRole("button", { name: "Unfold all" }));
+  expect(visible("We chose Rust. It is fast.")).toBe(true);
   expect(visible("First text. More of it.")).toBe(true);
   expect(visible("Nothing was rejected. Not one.")).toBe(true);
+  expect(
+    within(screen.getByRole("heading", { name: "Decisions" })).queryByText(
+      "We chose Rust.",
+    ),
+  ).toBeNull();
   expect(inOutline().queryByRole("button", { name: "Unfold all" })).toBeNull();
+});
+
+it("keeps Fold all after a reload, and opening a section brings back its text before its subsections", () => {
+  const { unmount } = open();
+  fireEvent.click(inOutline().getByRole("button", { name: "Fold all" }));
+  unmount();
+  open();
+  expect(visible("We chose Rust. It is fast.")).toBe(false);
+  expect(visible("First text. More of it.")).toBe(false);
+  expect(chevron("Decisions").getAttribute("aria-expanded")).toBe("false");
+  fireEvent.click(chevron("Decisions"));
+  expect(chevron("Decisions").getAttribute("aria-expanded")).toBe("true");
+  expect(visible("We chose Rust. It is fast.")).toBe(true);
+  expect(visible("First text. More of it.")).toBe(false);
 });
 
 it("keeps folded headings in the outline and unfolds one that is chosen there", () => {

@@ -60,11 +60,7 @@ export function DocumentRail({
             <p className="document-rail-title">On this page</p>
             <span className="document-rail-actions">
               {!folds.allFolded && (
-                <Button
-                  variant="ghost"
-                  size="compact"
-                  onClick={folds.foldAll}
-                >
+                <Button variant="ghost" size="compact" onClick={folds.foldAll}>
                   Fold all
                 </Button>
               )}

@@ -22,8 +22,7 @@ export function documentRowContext(doc: DocumentSummary): string {
 export function groupRowContext(doc: DocumentSummary): string {
   if (doc.plans?.some((plan) => plan.spec && !plan.archived)) return "Spec";
   const tickets = doc.tickets ?? [];
-  const ticket =
-    tickets.find((item) => item.open) ?? tickets[0];
+  const ticket = tickets.find((item) => item.open) ?? tickets[0];
   return ticket && !doc.heading.startsWith(ticket.reference)
     ? ticket.reference
     : "";
