@@ -166,7 +166,7 @@ img.file-card-still[data-paper] {
 
 /* Attachment links that stand alone on their line in written text become cards;
    consecutive ones share a row. */
-.markdown-document [data-cards]:is(p, li) {
+.markdown-document [data-cards] {
   display: inline-flex;
   flex-wrap: wrap;
   gap: 12px;

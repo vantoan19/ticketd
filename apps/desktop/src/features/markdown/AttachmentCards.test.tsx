@@ -60,7 +60,13 @@ test("a link alone on its line becomes a card; one in a sentence stays a link wi
   expect(
     screen.getByRole("button", { name: "refund-e2e-report.html" }),
   ).toBeTruthy();
-  expect(container.querySelectorAll("p[data-cards]")).toHaveLength(2);
+  // The row of cards is a block of its own, never inside a paragraph.
+  const rows = container.querySelectorAll("[data-cards]");
+  expect(rows).toHaveLength(2);
+  for (const row of rows) {
+    expect(row.localName).toBe("div");
+    expect(row.querySelector("button")?.closest("p")).toBeNull();
+  }
   // In a sentence: words stay, with the file family's glyph in front.
   const link = screen.getByRole("button", { name: "e2e report" });
   expect(link.closest("p")?.hasAttribute("data-cards")).toBe(false);
