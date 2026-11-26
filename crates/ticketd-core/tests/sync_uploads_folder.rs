@@ -115,6 +115,10 @@ fn uploads_need_sync_on_google_drive() {
     // Signed in, no folder chosen yet.
     let error = a.use_sync_uploads_folder(&remote(&sim)).unwrap_err();
     assert!(error.to_string().contains("Workspace sync"), "{error}");
+    assert!(
+        error.to_string().contains("Settings › Workspace sync"),
+        "{error}"
+    );
     assert!(sim.items().is_empty());
 }
 

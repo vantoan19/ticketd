@@ -39,6 +39,17 @@
 .about-link-row:hover {
   background: var(--hover);
 }
+/* Rows kept in a labelled list sit in listitem wrappers, so the hairline goes between those. */
+[role="listitem"] + [role="listitem"] > .about-link-row {
+  box-shadow: inset 0 1px 0 var(--group-hairline);
+}
+/* A row with nothing to open is text only. */
+.about-link-row[data-static] {
+  cursor: default;
+}
+.about-link-row[data-static]:hover {
+  background: none;
+}
 .about-link-row > svg {
   flex: none;
   color: var(--disabled-foreground);

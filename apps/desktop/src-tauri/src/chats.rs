@@ -1053,7 +1053,7 @@ impl Chats {
     /// Must be called inside the async runtime: the host starts its tasks on it.
     fn host(&self) -> Outcome<ChatHost> {
         if !self.enabled() {
-            return Err(failed("Chat is turned off in Settings > Agents."));
+            return Err(failed("Chat is turned off in Settings › Agents."));
         }
         self.started_or_start().map_err(|error| match error {
             HostError::Restoring => failed(RESTORING_WORKSPACE),

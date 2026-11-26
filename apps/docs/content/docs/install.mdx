@@ -19,7 +19,7 @@ You can also clear the verified app’s quarantine attribute in Terminal. Use th
 /usr/bin/xattr -dr com.apple.quarantine /Applications/ticketd.app
 ```
 
-Open **Settings → Command line → Install command-line tool** in ticketd. Approving the administrator prompt links the bundled CLI in `/usr/local/bin`; if you decline, nothing changes and **Use ~/.local/bin instead** links it there without a password. Add that directory to your PATH if needed. Run the same action again if you move the app.
+Open **Settings › Command line → Install command-line tool** in ticketd. Approving the administrator prompt links the bundled CLI in `/usr/local/bin`; if you decline, nothing changes and **Use ~/.local/bin instead** links it there without a password. Add that directory to your PATH if needed. Run the same action again if you move the app.
 
 ### Ubuntu
 
@@ -27,7 +27,7 @@ Install the package with `sudo apt install ./ticketd_*.deb`. The package manager
 
 ### Windows
 
-Run the MSI installer. In **Settings → Command line**, choose **Install command-line tool** to add the app’s folder to your user PATH. Reopen terminals and agent harnesses after changing PATH. Use the native Windows toolchain for source builds.
+Run the MSI installer. In **Settings › Command line**, choose **Install command-line tool** to add the app’s folder to your user PATH. Reopen terminals and agent harnesses after changing PATH. Use the native Windows toolchain for source builds.
 
 For an unsigned preview, verify the installer against the release’s `SHA256SUMS`. SmartScreen offers **More info → Run anyway**. If Smart App Control blocks unsigned installers, follow the [source build instructions](https://github.com/vantoan19/ticketd/blob/main/docs/development.md). WSL interoperability has not been validated.
 
@@ -41,7 +41,7 @@ ticketd --help
 ticketd workspace
 ```
 
-The last command prints the workspace path and format versions without creating or migrating a database. If another CLI takes precedence on PATH, **Settings → Command line** shows its path and version and offers **Use this app’s ticketd**, which replaces it after one administrator prompt. You can also give the agent the absolute path to the intended executable.
+The last command prints the workspace path and format versions without creating or migrating a database. If another CLI takes precedence on PATH, **Settings › Command line** shows its path and version and offers **Use this app’s ticketd**, which replaces it after one administrator prompt. You can also give the agent the absolute path to the intended executable.
 
 ## Standalone CLI
 
@@ -49,7 +49,7 @@ For a machine without the desktop, use the matching standalone CLI archive when 
 
 ## Updates
 
-In a build with an updater key, the desktop checks for stable releases after launch and daily while open. It downloads and verifies an update before offering **Restart to update**. **Settings → About** lets you check on demand, turn off scheduled checks, or return to a ready update. The bundled CLI updates with the desktop.
+In a build with an updater key, the desktop checks for stable releases after launch and daily while open. It downloads and verifies an update before offering **Restart to update**. **Settings › About** lets you check on demand, turn off scheduled checks, or return to a ready update. The bundled CLI updates with the desktop.
 
 On macOS and Windows, a verified update can install on quit. On Ubuntu, restart from the update prompt and approve the package installation. Updates that raise the workspace format require an explicit restart and a backup before migration. Read the prompt before interrupting active Chats or Automation runs.
 

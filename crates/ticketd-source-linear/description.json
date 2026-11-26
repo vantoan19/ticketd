@@ -96,7 +96,7 @@
     },
     "sign_in": {
       "terminal_hint": "Set the API key with TICKETD_SOURCE_<CONNECTION>_API_KEY.",
-      "desktop_hint": "Enter a personal API key in Settings → Ticket sources.",
+      "desktop_hint": "Enter a personal API key in Settings › Ticket sources.",
       "desktop_instruction": "Create a personal API key with read access to your teams and issue creation permission if you publish from ticketd."
     },
     "target": {

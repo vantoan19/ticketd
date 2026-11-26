@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ExternalLink, FolderOpen } from "lucide-react";
+import { ChevronRight, ExternalLink, FolderOpen } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert } from "@/components/ui/failure-alert";
@@ -18,9 +18,15 @@ import {
 } from "@/lib/api/diagnostics";
 import { workspaceClient } from "@/lib/api/workspace";
 import { emptyCopy } from "@/lib/empty-copy";
-import { plural } from "@/lib/format";
+import { plural, relativeDateTime } from "@/lib/format";
+import { useNow } from "@/lib/use-now";
 import { openBugReport } from "@/lib/issue-url";
-import { sectionMeta } from "@/features/settings/settings-sections";
+import {
+  sectionMeta,
+  type SettingsSectionId as SectionId,
+} from "@/features/settings/settings-sections";
+import "@/features/settings/pages/about-page.css";
+import { useSettingsState } from "@/features/settings/use-settings-state";
 import { setDetailedLogging } from "@/features/settings/detailed-logging";
 import { splitPath } from "@/features/settings/settings-format";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
@@ -327,27 +333,71 @@ function kindTitle(kind: string) {
 }
 
 /**
- * The area of the app a log target belongs to, by the start of its module path. The
- * first match wins; anything else is the app itself.
+ * The Settings page a log target belongs to, by the start of its module path. The first match
+ * wins; anything else is the app itself, which has no setting to open.
  */
-const AREAS: ReadonlyArray<readonly [prefix: string, area: string]> = [
-  ["ticketd_desktop_lib::sync", "Workspace sync"],
-  ["ticketd_core::sync", "Workspace sync"],
-  ["ticketd_desktop_lib::automation", "Automations"],
-  ["ticketd_automation_runner", "Automations"],
-  ["ticketd_core::automation", "Automations"],
-  ["ticketd_desktop_lib::chat", "Chats"],
-  ["ticketd_chat_host", "Chats"],
-  ["ticketd_core::chat", "Chats"],
-  ["ticketd_core::source", "Sources"],
-  ["ticketd_core::inbox", "Reminders"],
+const SETTINGS_OF: ReadonlyArray<readonly [prefix: string, page: SectionId]> = [
+  ["ticketd_desktop_lib::sync", "workspace-sync"],
+  ["ticketd_core::sync", "workspace-sync"],
+  ["ticketd_desktop_lib::automation", "automations"],
+  ["ticketd_automation_runner", "automations"],
+  ["ticketd_core::automation", "automations"],
+  ["ticketd_desktop_lib::chat", "agents"],
+  ["ticketd_chat_host", "agents"],
+  ["ticketd_core::chat", "agents"],
+  ["ticketd_core::source", "ticket-sources"],
+  ["ticketd_core::inbox", "attention"],
 ];
 
-function areaOf(target: string) {
-  return AREAS.find(([prefix]) => target.startsWith(prefix))?.[1] ?? "App";
+function settingOf(target: string): SectionId | null {
+  return SETTINGS_OF.find(([prefix]) => target.startsWith(prefix))?.[1] ?? null;
+}
+
+/**
+ * One kind of error: the error, then "Setting · count, last when". A row with a setting opens
+ * its page from anywhere on it; an error of the app itself has none.
+ */
+function RecentError({
+  title,
+  setting,
+  when,
+  onOpen,
+}: {
+  title: string;
+  setting: string;
+  when: string;
+  onOpen?: () => void;
+}) {
+  const text = (
+    <span className="about-link-text">
+      <span className="about-link-title">{title}</span>
+      <span className="about-link-description">{`${setting} · ${when}`}</span>
+    </span>
+  );
+  return (
+    <div role="listitem">
+      {onOpen ? (
+        <button
+          type="button"
+          className="about-link-row"
+          aria-label={`${title}. Open ${setting}`}
+          onClick={onOpen}
+        >
+          {text}
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>
+      ) : (
+        <div className="about-link-row" data-static="">
+          {text}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function RecentErrorsSection() {
+  const { openPage } = useSettingsState();
+  const now = useNow();
   const [errors, , reload] = useRead<ErrorGroup[]>(
     readRecentErrors,
     "read the recent errors",
@@ -382,20 +432,19 @@ function RecentErrorsSection() {
         />
       ) : (
         <SettingsList role="list" aria-label="Recent errors">
-          {errors.value.slice(0, SHOWN_ERRORS).map((group) => (
-            <SettingsRow
-              key={`${group.target}:${group.kind}`}
-              role="listitem"
-              title={kindTitle(group.kind)}
-              description={`${group.level === "ERROR" ? "Error" : "Warning"} in ${areaOf(group.target)}`}
-              trailing={
-                <span className="text-xs leading-4 whitespace-nowrap text-muted-foreground tabular-nums">
-                  {plural(group.count, "time")}, last{" "}
-                  <Time value={group.last_seen} />
-                </span>
-              }
-            />
-          ))}
+          {errors.value.slice(0, SHOWN_ERRORS).map((group) => {
+            const page = settingOf(group.target);
+            const when = `${plural(group.count, "time")}, last ${relativeDateTime(group.last_seen, now)}`;
+            return (
+              <RecentError
+                key={`${group.target}:${group.kind}`}
+                title={kindTitle(group.kind)}
+                setting={page ? sectionMeta(page).label : "App"}
+                when={when}
+                {...(page && { onOpen: () => openPage(page) })}
+              />
+            );
+          })}
         </SettingsList>
       )}
     </SettingsSection>

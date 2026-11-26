@@ -957,13 +957,17 @@ fn done_canceled_duplicate_trashed_and_unconnected_tickets_are_ineligible_with_a
     let error = bare
         .publish_ticket(&f.engine, &ticket.reference, &options())
         .unwrap_err();
-    assert!(matches!(
-        publication_error(error),
+    match publication_error(error) {
         PublicationError::Ineligible {
             reason: IneligibleReason::SourceNotConnected,
+            message,
             ..
-        }
-    ));
+        } => assert!(
+            message.contains("in Settings › Ticket sources"),
+            "{message}"
+        ),
+        other => panic!("expected an ineligible source, got {other:?}"),
+    }
 }
 
 #[test]

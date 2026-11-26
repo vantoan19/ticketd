@@ -1957,7 +1957,7 @@ fn gather_tracked(
                 provider: provider.clone(),
                 failure: SourceFailure {
                     code: FailureCode::NotConfigured.as_str().into(),
-                    message: format!("{provider} is not connected on this desktop for this ticket"),
+                    message: format!("{provider} is not connected on this desktop for this ticket; connect it in Settings › Ticket sources"),
                 },
             });
             continue;

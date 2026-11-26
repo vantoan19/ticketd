@@ -454,7 +454,7 @@ export function RestoreDialog({
             showClose: false,
             blockedReason: null,
             footerNote:
-              "To undo, restore “Before restoring” in Backups & export.",
+              "To undo, restore “Before restoring” in Settings › Backups & export.",
             onSubmit: () => void reveal(phase.safetyPath),
           }
         : invalid

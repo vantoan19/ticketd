@@ -24,7 +24,7 @@ const systems = [
     architecture: "macOS 26 · Apple Silicon",
     prepare: "Install Xcode Command Line Tools and the native Rust toolchain.",
     install: "Open the DMG and drag ticketd into Applications.",
-    cli: "In Settings → Command line, choose Install command-line tool. Reopen your terminal. If you decline the password and choose ~/.local/bin instead, add it to PATH.",
+    cli: "In Settings › Command line, choose Install command-line tool. Reopen your terminal. If you decline the password and choose ~/.local/bin instead, add it to PATH.",
   },
   {
     id: "ubuntu",
@@ -44,7 +44,7 @@ const systems = [
       "Install the desktop C++ workload, WebView2 and the MSVC Rust toolchain. Use native Windows Node and Rust.",
     install:
       "Run the MSI installer. Check the release notes for the signing status and first-launch instructions.",
-    cli: "In Settings → Command line, choose Install command-line tool. Restart your terminals and agent harnesses to pick up the updated user PATH.",
+    cli: "In Settings › Command line, choose Install command-line tool. Restart your terminals and agent harnesses to pick up the updated user PATH.",
   },
 ] as const;
 export type OS = (typeof systems)[number]["id"];

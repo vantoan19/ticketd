@@ -192,6 +192,13 @@ fn assert_portable_boundary(path: &Path, folder: &Path) {
         )
         .unwrap();
     assert_eq!(failure.failures[0].code, "not_configured");
+    assert!(
+        failure.failures[0]
+            .message
+            .ends_with("connect it in Settings › Ticket sources"),
+        "{}",
+        failure.failures[0].message
+    );
 
     Workspace::restore(path, &backup).unwrap();
     let same = Workspace::open(path).unwrap();
