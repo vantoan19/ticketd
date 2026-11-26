@@ -109,7 +109,6 @@ fn posted(reference: &str) -> ChatAgentChange {
     }
 }
 
-/// The same cases as `netChanges` in `apps/desktop/src/features/chats/model.test.ts`.
 #[test]
 fn a_tickets_status_moves_net_into_one_move() {
     // Todo -> In progress -> In review, with an update between: the net move leads.

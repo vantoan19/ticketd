@@ -1825,7 +1825,7 @@ test("a finished turn's record changes are one receipt row under it, whose more 
   ).toContain("Created the Document Reset email copy");
 });
 
-test("a ticket moved twice in a turn reads as its net move in the receipt row", async () => {
+test("a ticket moved twice in a turn reads as the host's net move in the receipt row", async () => {
   const status = (from: string, to: string) => ({
     kind: "status" as const,
     reference: "T-12",
@@ -1833,6 +1833,11 @@ test("a ticket moved twice in a turn reads as its net move in the receipt row", 
     from,
     to,
   });
+  const update = {
+    kind: "update" as const,
+    reference: "T-12",
+    excerpt: "Started",
+  };
   await open(
     one({ id: "netted", title: "Limiter" }, [
       youSaid,
@@ -1841,16 +1846,16 @@ test("a ticket moved twice in a turn reads as its net move in the receipt row", 
         id: "rec1",
         at,
         kind: "records",
-        changes: [
-          status("Todo", "In progress"),
-          { kind: "update", reference: "T-12", excerpt: "Started" },
-        ],
+        changes: [status("Todo", "In progress"), update],
+        net: [status("Todo", "In progress"), update],
       }),
       inTurn({
         id: "rec2",
         at,
         kind: "records",
         changes: [status("In progress", "In review")],
+        // The host nets the whole turn on its last call.
+        net: [status("Todo", "In review"), update],
       }),
     ]),
   );
@@ -1859,6 +1864,37 @@ test("a ticket moved twice in a turn reads as its net move in the receipt row", 
   );
   // Two sentences: nothing more to open.
   expect(screen.queryByRole("button", { name: /more/ })).toBeNull();
+  // The fold still lists each change as its own step row.
+  fireEvent.click(button(/^Worked for 30s/));
+  openStretch();
+  const fold = screen.getByRole("group", { name: "Worked for 30s" });
+  expect(fold.textContent).toContain("Moved T-12 to In progress");
+  expect(fold.textContent).toContain("Moved T-12 to In review");
+});
+
+test("a receipt from an older host, with no net list, says each change", async () => {
+  const status = (from: string, to: string) => ({
+    kind: "status" as const,
+    reference: "T-12",
+    title: "Improve the export dialog",
+    from,
+    to,
+  });
+  await open(
+    one({ id: "older-host", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [status("Todo", "In progress"), status("In progress", "Done")],
+      }),
+    ]),
+  );
+  expect(document.querySelector(".chat-records-items")?.textContent).toBe(
+    "Moved T-12 to In progress · Moved T-12 to Done",
+  );
 });
 
 /** The queue's head line; its count is an element of its own. */

@@ -522,35 +522,40 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
         id,
         at,
         changes,
+        net,
         turn_id,
         ..
     } = item
     else {
         return item;
     };
-    let gone = changes
-        .iter()
-        .map(|change| {
-            let trashed = match change {
-                ChatAgentChange::Status { reference, .. }
-                | ChatAgentChange::Update { reference, .. } => workspace
-                    .show_ticket(reference)
-                    .map(|ticket| ticket.trashed),
-            };
-            match trashed {
-                Ok(true) => Some("trashed"),
-                Ok(false) => None,
-                Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
-                // Not readable now: shown as it was, linked.
-                Err(_) => None,
-            }
-        })
-        .collect();
+    let gone_of = |changes: &[ChatAgentChange]| {
+        changes
+            .iter()
+            .map(|change| {
+                let trashed = match change {
+                    ChatAgentChange::Status { reference, .. }
+                    | ChatAgentChange::Update { reference, .. } => workspace
+                        .show_ticket(reference)
+                        .map(|ticket| ticket.trashed),
+                };
+                match trashed {
+                    Ok(true) => Some("trashed"),
+                    Ok(false) => None,
+                    Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
+                    // Not readable now: shown as it was, linked.
+                    Err(_) => None,
+                }
+            })
+            .collect()
+    };
     Item::Records {
         id,
         at,
+        gone: gone_of(&changes),
+        net_gone: gone_of(&net),
         changes,
-        gone,
+        net,
         turn_id,
     }
 }

@@ -578,6 +578,11 @@ export type Turn = {
   label: string;
   rows: TurnRow[];
   /**
+   * What the turn changed in ticketd as its records row says it: the host's netted
+   * list. Older hosts send none, and each change is then its own sentence.
+   */
+  changes: RecordChange[];
+  /**
    * The same rows as the turn shows them: its notes and kept rows, and its work as
    * stretches between the notes. The last stretch of a running turn is ongoing.
    */
@@ -694,6 +699,9 @@ type DraftResponse = {
 function rowsOf(members: TranscriptItem[], running: Step["state"]) {
   const rows: (TurnRow | DraftResponse)[] = [];
   const all: Step[] = [];
+  // What the turn's records row says: the host's net list, from the turn's last
+  // records item (it holds the whole turn's).
+  let net: RecordChange[] | undefined;
   let steps: { key: string; step: Step }[] = [];
   // One line for every warning, where the first one came.
   let warnings: Extract<TurnRow, { kind: "warnings" }> | undefined;
@@ -733,7 +741,7 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
         rows.push({ kind: "reasoning", key: item.id, item });
     } else if (item.kind === "plan") {
       if (planFinished(item)) rows.push({ kind: "plan", key: item.id, item });
-    } else if (item.kind === "records")
+    } else if (item.kind === "records") {
       item.changes.forEach((change, index) =>
         rows.push({
           kind: "record",
@@ -741,7 +749,12 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
           change: { ...change, gone: item.gone?.[index] ?? null },
         }),
       );
-    else if (item.kind === "request" && item.state !== "pending")
+      if (item.net)
+        net = item.net.map((change, index) => ({
+          ...change,
+          gone: item.net_gone?.[index] ?? null,
+        }));
+    } else if (item.kind === "request" && item.state !== "pending")
       rows.push({ kind: "receipt", key: item.id, item, kept: true });
     else if (item.kind === "marker" && item.reason === "note")
       rows.push({ kind: "note", key: item.id, item, kept: true });
@@ -754,7 +767,7 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
     }
   }
   flush();
-  return { rows, steps: all };
+  return { rows, steps: all, net };
 }
 
 /** A wait shorter than this is not worth saying. */
@@ -877,7 +890,7 @@ export function turns(
     const cached = builtTurns.get(first);
     if (cached && sameInputs(cached.inputs, inputs))
       return [{ kind: "turn", turn: cached.turn }];
-    const { rows, steps } = rowsOf(
+    const { rows, steps, net } = rowsOf(
       part.members,
       !active ? "not_finished" : unconfirmedStop ? "unknown" : "running",
     );
@@ -961,6 +974,9 @@ export function turns(
       unconfirmed,
       label: [span, ...waitWords, ...counts].join(" · "),
       rows: turnRows,
+      changes:
+        net ??
+        turnRows.flatMap((row) => (row.kind === "record" ? [row.change] : [])),
       blocks: stretchesOf(turnRows, ongoing && !unconfirmed),
       ...(final && { final }),
       ...(marker && { marker }),
@@ -1062,34 +1078,6 @@ export function unseenFrom(items: TranscriptItem[]) {
 /** " (in Trash)", " (deleted)": said after a record that is no longer there to open. */
 export const goneWords = (gone: Gone | null | undefined) =>
   gone === "trashed" ? " (in Trash)" : gone === "deleted" ? " (deleted)" : "";
-
-/**
- * What a turn's changes read as: each ticket's status moves netted into one (the first
- * `from`, the last `to`, dropped when they are equal) where the ticket's first move
- * stood. The records row says these sentences and an idle list row's second line says
- * the first of them. The host words the list row from the same rule
- * (`net_changes` in the Chat host's `attention.rs`), and both are tested with the
- * same cases.
- */
-export function netChanges(changes: RecordChange[]): RecordChange[] {
-  const net: RecordChange[] = [];
-  for (const change of changes) {
-    const earlier =
-      change.kind === "status"
-        ? net.find(
-            (kept) =>
-              kept.kind === "status" && kept.reference === change.reference,
-          )
-        : undefined;
-    if (earlier?.kind === "status" && change.kind === "status") {
-      earlier.to = change.to;
-      earlier.gone = change.gone;
-    } else net.push({ ...change });
-  }
-  return net.filter(
-    (change) => change.kind !== "status" || change.from !== change.to,
-  );
-}
 
 /** What the agent did to a record, as the list row says it. */
 export function changeLine(change: RecordChange) {

@@ -5,7 +5,7 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import type { RecordChange } from "@/features/chats/client";
-import { goneWords, netChanges } from "@/features/chats/model";
+import { goneWords } from "@/features/chats/model";
 
 /** Whole sentences shown on the row before the rest folds under `N more`. */
 const SHOWN = 2;
@@ -64,20 +64,20 @@ function Sentence({ change }: { change: RecordChange }) {
  * What the agent changed in ticketd during a turn, as one 28px row under the
  * response (after the files row): the first sentence's icon, then verb-first
  * sentences joined by ` · `, at most two, then `N more`, which opens the
- * turn's fold, where every change is a step row. A ticket's status moves read
- * as the net move (`netChanges`), so "Moved T-12 to In review" leads, not the
- * step it passed through. Never folded itself, and
+ * turn's fold, where every change is a step row. The changes are the host's net
+ * list (a ticket's status moves netted into one), so "Moved T-12 to In review"
+ * leads, not the step it passed through. Never folded itself, and
  * shown also when the turn failed or was stopped.
  */
 export function ReceiptRow({
-  changes: all,
+  changes,
   onMore,
 }: {
+  /** What the host netted for the turn; not netted again here. */
   changes: RecordChange[];
   /** Opens the turn's fold. */
   onMore: () => void;
 }) {
-  const changes = netChanges(all);
   const first = changes[0];
   if (!first) return null;
   const rest = changes.length - SHOWN;

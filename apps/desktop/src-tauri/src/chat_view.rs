@@ -276,6 +276,13 @@ pub enum Item {
         /// For each change, whether its record is now `trashed` or `deleted`; such a
         /// record is named, not linked. Filled in where the workspace can be read.
         gone: Vec<Option<&'static str>>,
+        /// The turn's changes up to this call, netted by the Chat host's one rule
+        /// (`attention::net_changes`): what the records row says. `changes` stay as
+        /// they are, for the fold's step rows. The turn's last records item holds the
+        /// whole turn's.
+        net: Vec<ChatAgentChange>,
+        /// For each net change, as `gone` is for `changes`.
+        net_gone: Vec<Option<&'static str>>,
         turn_id: Option<String>,
     },
     /// When a turn started and ended, and how. It has no row of its own: the view folds
@@ -580,6 +587,8 @@ pub struct Tracker {
     changes: Vec<(String, Vec<ChatAgentChange>)>,
     /// The turn `changes` were made in.
     changes_turn: Option<String>,
+    /// What the agent changed in each turn, by call, to net a turn's records row.
+    turn_changes: HashMap<String, Vec<(String, Vec<ChatAgentChange>)>>,
     updated_at: Option<String>,
     /// Reasoning, plan and files records of the latest turn: how they read depends on
     /// whether it still runs.
@@ -702,6 +711,11 @@ impl Tracker {
                         self.changes.clear();
                         self.changes_turn = Some(tool.turn_id.clone());
                     }
+                    let calls = self.turn_changes.entry(tool.turn_id.clone()).or_default();
+                    match calls.iter_mut().find(|(id, _)| *id == tool.id) {
+                        Some((_, kept)) => kept.clone_from(&changes),
+                        None => calls.push((tool.id.clone(), changes.clone())),
+                    }
                     match self.changes.iter_mut().find(|(id, _)| *id == tool.id) {
                         Some((_, kept)) => *kept = changes,
                         None => self.changes.push((tool.id.clone(), changes)),
@@ -725,6 +739,21 @@ impl Tracker {
             .flat_map(|(_, changes)| changes.iter().cloned())
             .collect();
         attention::net_changes(&all).into_iter().next()
+    }
+
+    /// What a turn did to ticketd's records up to and including `tool`'s call, netted
+    /// by the Chat host's rule. `tool` counts whether or not it was noted yet.
+    fn turn_net(&self, tool: &ChatTool, changes: &[ChatAgentChange]) -> Vec<ChatAgentChange> {
+        let calls = self.turn_changes.get(&tool.turn_id);
+        let mut all: Vec<ChatAgentChange> = calls
+            .into_iter()
+            .flatten()
+            .flat_map(|(id, kept)| if *id == tool.id { changes } else { kept }.iter().cloned())
+            .collect();
+        if !calls.is_some_and(|calls| calls.iter().any(|(id, _)| *id == tool.id)) {
+            all.extend(changes.iter().cloned());
+        }
+        attention::net_changes(&all)
     }
 
     /// How many files the latest turn changed, from the host's record of them.
@@ -1435,13 +1464,18 @@ pub fn item(
         {
             report_item(tool, report)
         }
-        ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => Item::Records {
-            id: tool.id.clone(),
-            at: String::new(),
-            gone: vec![None; changes.len()],
-            changes,
-            turn_id: Some(tool.turn_id.clone()),
-        },
+        ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => {
+            let net = tracker.turn_net(tool, &changes);
+            Item::Records {
+                id: tool.id.clone(),
+                at: String::new(),
+                gone: vec![None; changes.len()],
+                net_gone: vec![None; net.len()],
+                net,
+                changes,
+                turn_id: Some(tool.turn_id.clone()),
+            }
+        }
         ChatItem::Tool(tool) => Item::Steps {
             id: tool.id.clone(),
             at: String::new(),
@@ -3520,6 +3554,85 @@ mod tests {
             changes("b", "t2", &format!("[{later}]")),
         ]);
         assert_eq!(wording(&next).as_deref(), Some("Posted an update on T-13"));
+    }
+
+    /// The records row says the turn's net changes (one rule, in the Chat host), and an
+    /// earlier turn's row is netted by its own calls, not the latest turn's.
+    #[test]
+    fn a_records_item_carries_its_turns_net_changes_and_keeps_the_raw_ones() {
+        use super::{ChatAgentChange, item};
+        let call = |id: &str, turn: &str, input: &str| {
+            ChatItem::Tool(ChatTool {
+                id: id.to_owned(),
+                turn_id: turn.to_owned(),
+                ..tool(
+                    ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
+                    input,
+                    ChatToolState::Completed,
+                    None,
+                )
+            })
+        };
+        let status = |reference: &str, from: &str, to: &str| {
+            format!(
+                r#"{{"kind":"status","reference":"{reference}","title":"Demo","from":"{from}","to":"{to}"}}"#
+            )
+        };
+        let posted = r#"{"kind":"update","reference":"T-12","excerpt":"Done"}"#;
+        let first = call(
+            "a",
+            "t1",
+            &format!("[{}]", status("T-12", "Todo", "In progress")),
+        );
+        let update = call("b", "t1", &format!("[{posted}]"));
+        let second = call(
+            "c",
+            "t1",
+            &format!("[{}]", status("T-12", "In progress", "In review")),
+        );
+        let later = call("d", "t2", &format!("[{}]", status("T-13", "Todo", "Done")));
+        let tracker =
+            Tracker::from_items(&[first.clone(), update.clone(), second.clone(), later.clone()]);
+        let live = ChatLive::idle();
+        let read = |record: &ChatItem| {
+            let Some(Item::Records { changes, net, .. }) =
+                item(record, &chat(None), &live, None, &tracker)
+            else {
+                panic!("a records item");
+            };
+            (changes.len(), net)
+        };
+        let moved = |reference: &str, from: &str, to: &str| ChatAgentChange::Status {
+            reference: reference.to_owned(),
+            title: "Demo".to_owned(),
+            from: from.to_owned(),
+            to: to.to_owned(),
+        };
+        // The turn's last call carries the whole turn, netted; its own change stays raw.
+        let (raw, net) = read(&second);
+        assert_eq!(raw, 1);
+        assert_eq!(
+            net,
+            [
+                moved("T-12", "Todo", "In review"),
+                serde_json::from_str::<ChatAgentChange>(posted).unwrap(),
+            ]
+        );
+        // Another turn's row is netted by that turn's calls only.
+        assert_eq!(read(&later).1, [moved("T-13", "Todo", "Done")]);
+        // A move that ends where it began is no net change.
+        let back = Tracker::from_items(&[
+            first.clone(),
+            call(
+                "e",
+                "t1",
+                &format!("[{}]", status("T-12", "In progress", "Todo")),
+            ),
+        ]);
+        let Some(Item::Records { net, .. }) = item(&first, &chat(None), &live, None, &back) else {
+            panic!("a records item");
+        };
+        assert!(net.is_empty(), "{net:?}");
     }
 
     #[test]

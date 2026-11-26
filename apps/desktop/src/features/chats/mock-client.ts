@@ -27,7 +27,7 @@ import {
   type ProjectRef,
   type TranscriptItem,
 } from "@/features/chats/client";
-import { changeLine, netChanges } from "@/features/chats/model";
+import { changeLine } from "@/features/chats/model";
 import { plainText } from "@/features/documents/graph-text";
 
 /** Words for a condition that holds now and is not a failure; as the host says them. */
@@ -183,7 +183,10 @@ function firstChange(items: TranscriptItem[]) {
     : latest
       ? [latest]
       : [];
-  return netChanges(turn.flatMap((item) => item.changes)).at(0);
+  // The host's net list: fixtures say it on the turn's last records item, and an
+  // item without one says its changes as they are.
+  const last = turn.at(-1);
+  return (last?.net ?? turn.flatMap((item) => item.changes)).at(0);
 }
 
 /**

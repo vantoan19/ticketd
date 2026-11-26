@@ -90,8 +90,8 @@ pub struct Facts<'a> {
 /// What a turn's changes read as, in order: each ticket's status moves netted into one
 /// (the first `from`, the last `to`, dropped when they are equal), standing where the
 /// ticket's first move stood. The Chat view's records row says these sentences, and an
-/// idle row's second line says the first of them; `netChanges` in the desktop's
-/// `model.ts` is the same rule, and both are tested with the same cases.
+/// idle row's second line says the first of them. The desktop's view sends the net list
+/// with each records item, so this is the one place the rule lives.
 pub fn net_changes(changes: &[ChatAgentChange]) -> Vec<ChatAgentChange> {
     let mut net: Vec<ChatAgentChange> = Vec::new();
     for change in changes {

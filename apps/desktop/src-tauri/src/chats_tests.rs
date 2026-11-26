@@ -2326,6 +2326,7 @@ async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_li
         .find(|change| change["item"]["kind"] == "records")
         .expect("a records row");
     assert_eq!(records["item"]["changes"], json!([status]));
+    assert_eq!(records["item"]["net"], json!([status]));
     let rows = f.chats.list(ChatListFilter::Active).unwrap();
     assert_eq!(
         serde_json::to_value(&rows[0]).unwrap()["first_change"],
@@ -2336,10 +2337,10 @@ async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_li
     f.core().set_trashed(&ticket.reference, true, None).unwrap();
     let (opened, _) = f.open(&id).await;
     let gone = opened.snapshot.items.iter().find_map(|item| match item {
-        Item::Records { gone, .. } => Some(gone.clone()),
+        Item::Records { gone, net_gone, .. } => Some((gone.clone(), net_gone.clone())),
         _ => None,
     });
-    assert_eq!(gone, Some(vec![Some("trashed")]));
+    assert_eq!(gone, Some((vec![Some("trashed")], vec![Some("trashed")])));
 }
 
 #[tokio::test(start_paused = true)]

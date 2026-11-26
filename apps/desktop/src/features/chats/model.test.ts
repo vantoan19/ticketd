@@ -17,7 +17,6 @@ import {
   chatTime,
   turnClock,
   turnSpanText,
-  netChanges,
   commandLine,
   ticketdParts,
   composerControls,
@@ -266,60 +265,6 @@ test("a command's first line never ends in an open quote or bracket", () => {
     "python3 -I - <<'EOF'",
   );
   expect(commandLine('say "a \\" b" and\nmore')).toBe('say "a \\" b" and');
-});
-
-/** Todo -> In progress -> In review, with updates between, as a turn's calls say them. */
-const moved = (reference: string, from: string, to: string): RecordChange => ({
-  kind: "status",
-  reference,
-  title: "Demo",
-  from,
-  to,
-});
-const posted = (reference: string): RecordChange => ({
-  kind: "update",
-  reference,
-  excerpt: "Done",
-});
-
-// The same cases as `a_tickets_status_moves_net_into_one_move` in the Chat host's
-// `attention_tests.rs`: the records row and an idle list row read from one rule.
-test("a ticket's status moves net into one move where its first stood", () => {
-  expect(
-    netChanges([
-      moved("T-12", "Todo", "In progress"),
-      posted("T-12"),
-      moved("T-12", "In progress", "In review"),
-    ]),
-  ).toEqual([moved("T-12", "Todo", "In review"), posted("T-12")]);
-  // A move that ends where it began is nothing.
-  expect(
-    netChanges([
-      moved("T-12", "Todo", "In progress"),
-      moved("T-12", "In progress", "Todo"),
-      posted("T-12"),
-    ]),
-  ).toEqual([posted("T-12")]);
-  // Each ticket nets by itself and keeps the place of its first move.
-  expect(
-    netChanges([
-      moved("T-12", "Todo", "In progress"),
-      moved("T-13", "Todo", "In progress"),
-      moved("T-12", "In progress", "Done"),
-    ]),
-  ).toEqual([
-    moved("T-12", "Todo", "Done"),
-    moved("T-13", "Todo", "In progress"),
-  ]);
-  // Updates are never merged, and the calls given are not changed.
-  const given = [posted("T-12"), posted("T-12")];
-  expect(netChanges(given)).toEqual([posted("T-12"), posted("T-12")]);
-  const moves = [
-    moved("T-12", "Todo", "In progress"),
-    moved("T-12", "In progress", "Done"),
-  ];
-  netChanges(moves);
-  expect(moves[0]?.kind === "status" && moves[0].to).toBe("In progress");
 });
 
 test("the same ticketd call said again is one clause", () => {
