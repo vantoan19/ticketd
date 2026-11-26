@@ -2,6 +2,7 @@ import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import {
   useEffect,
   useEffectEvent,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -10,14 +11,23 @@ import {
   CloudCheck,
   ArrowLeft,
   Check,
+  ChevronDown,
+  ChevronUp,
+  Clock,
   FileText,
+  Info,
   Layers,
+  Maximize2,
+  PanelLeftOpen,
   CircleDashed,
   Link2,
   MoreHorizontal,
   Network,
   Pin,
   SquarePen,
+  Tag,
+  Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import {
@@ -49,25 +59,36 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Badge } from "@/components/ui/badge";
 import { Reference } from "@/components/ui/reference";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
+import { outlineOf, showsOutline } from "@/features/markdown/outline";
+import { flushSync } from "react-dom";
+import { DocumentOutline } from "./DocumentOutline";
+import { DocumentRail } from "./DocumentRail";
+import { useSectionFolds } from "./section-folds";
+import { headingElement, useCurrentHeading } from "./use-current-heading";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
 import { useMarkdownExport } from "@/features/attachments/use-markdown-export";
 import { Kbd } from "@/components/ui/kbd";
 import { FloatingEditBar } from "@/features/markdown/FloatingEditBar";
-import { Count } from "@/components/ui/count";
-import { Time } from "@/components/ui/time";
+import { Disclosure } from "@/components/ui/disclosure";
+import { plural } from "@/lib/format";
 import { DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import {
   Popover,
+  PopoverAnchor,
   PopoverContent,
-  PopoverTrigger,
 } from "@/components/ui/popover";
 import { DocumentPicker } from "@/features/tickets/DocumentPicker";
 import { documentLinkMarkdown } from "./document-link";
-import { documents, type Document } from "./api";
+import { documents, type Document, type DocumentSummary } from "./api";
+import { DocumentMeta } from "./DocumentMeta";
+import { readingMinutes } from "./reading-time";
+import { DocumentDetails } from "./DocumentDetails";
+import { LinkedItems } from "./DocumentLinked";
 import {
   useOnWorkspaceChange,
   useWorkspaceChange,
@@ -139,29 +160,13 @@ function DocumentSurface({
     </DialogShell>
   );
 }
-function DocumentDate({ value }: { value: string }) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? (
-    value
-  ) : (
-    <Tooltip
-      content={date.toLocaleString(undefined, {
-        dateStyle: "full",
-        timeStyle: "long",
-      })}
-    >
-      <time dateTime={value} tabIndex={0}>
-        {date.toDateString() === new Date().toDateString()
-          ? `today at ${date.toLocaleTimeString(undefined, { timeStyle: "short" })}`
-          : date.toLocaleString(undefined, {
-              dateStyle: "medium",
-              timeStyle: "short",
-            })}
-      </time>
-    </Tooltip>
-  );
-}
-type Snapshot = { title: string; body: string; suggestion: string | null };
+type Snapshot = {
+  title: string;
+  body: string;
+  suggestion: string | null;
+  /** The one-line summary as typed; "" is none. */
+  summary: string;
+};
 const plain = (text: string) =>
   text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 /** A derived heading repeats the body's first line; the reader shows it once, as the heading. */
@@ -181,13 +186,37 @@ function withoutDerivedHeading(body: string, title: string, heading?: string) {
     .join("\n")
     .replace(/^\s*\n/, "");
 }
+/**
+ * What Read renders: the body without an opening heading the title already
+ * shows. Beyond the equal heading Edit also hides, an opening H1 that is only
+ * the start of the title is dropped, so the title is never seen twice. Edit and
+ * the stored Markdown keep that H1.
+ */
+function withoutOpeningTitle(body: string, title: string, heading?: string) {
+  const shown = withoutDerivedHeading(body, title, heading);
+  if (shown !== body) return shown;
+  const lines = body.split("\n");
+  const first = lines.findIndex((line) => line.trim());
+  const opening = /^#\s+(.*)$/.exec(first < 0 ? "" : (lines[first] ?? ""));
+  const start = plain(opening?.[1] ?? "");
+  const full = plain(title.trim() || heading || "");
+  if (!start || !full.startsWith(start)) return body;
+  return lines
+    .slice(first + 1)
+    .join("\n")
+    .replace(/^\s*\n/, "");
+}
 /** The core stores a whitespace-only title as NULL; the saved baseline must match what it stored. */
 const storedTitle = (title: string) => (title.trim() ? title : "");
+/** The core stores a summary trimmed on one line, and nothing when it is blank. */
+const storedSummary = (summary: string) => summary.replace(/\s+/g, " ").trim();
 type Pending = {
   id: string | null;
   title: string | null;
   body: string | null;
   titleChanged: boolean;
+  /** The summary to store, "" to clear it; null leaves the stored one. */
+  summary: string | null;
   requestId: string;
   snapshot: Snapshot;
   /** The stored revision this save was based on; the core rejects it if that moved on. */
@@ -197,12 +226,15 @@ const snapshotSchema = z.object({
   title: z.string(),
   body: z.string(),
   suggestion: z.string().nullable(),
+  // A draft kept before Documents had summaries has none.
+  summary: z.string().default(""),
 });
 const pendingSchema = z.object({
   id: z.string().nullable(),
   title: z.string().nullable(),
   body: z.string().nullable(),
   titleChanged: z.boolean(),
+  summary: z.string().nullable().default(null),
   requestId: z.string(),
   snapshot: snapshotSchema,
   revision: z.string().nullable(),
@@ -217,8 +249,27 @@ const recoverySchema = z.object({
   external: snapshotSchema.nullable(),
   externalRevision: z.string().nullable(),
 });
+/**
+ * Where the reader sits in the Documents screen: beside the list or at full
+ * width, and, at full width, the Document's place in the list it was opened from.
+ */
+export type DocumentReading = {
+  expanded: boolean;
+  /** Hides the list (full width) or brings it back (beside the list). */
+  onExpandedChange: (expanded: boolean) => void;
+  /** The place in the list as it shows now; null when the Document is not in it. */
+  place: { index: number; total: number } | null;
+  /** The Documents before and after this one in the list, if any. */
+  previous: string | null;
+  next: string | null;
+  /** The button the reader should focus when it opens, because the reader stepped with it. */
+  focus: "previous" | "next" | null;
+  onFocused: () => void;
+  onStep: (id: string, direction: "previous" | "next") => void;
+};
 type DocumentEditorProps = {
   initial: Document | null;
+  reading?: DocumentReading;
   onClose: () => void;
   currentTicket?: string | null;
   onOpenDocument?: (id: string) => void;
@@ -248,6 +299,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
 
 function RecoveredDocumentEditor({
   initial,
+  reading,
   onClose,
   currentTicket,
   onOpenDocument,
@@ -290,30 +342,62 @@ function RecoveredDocumentEditor({
     const stripped = withoutDerivedHeading(body, title, initial.heading);
     return body.slice(0, body.length - stripped.length);
   });
-  const [pickerOpen, setPickerOpen] = useState(false);
   const [ticketTitle, setTicketTitle] = useState("");
-  const [creatingFromDocument, setCreatingFromDocument] = useState(false);
   const [links, setLinks] = useState<
     Awaited<ReturnType<typeof documents.links>>
   >([[], []]);
   const [linkError, setLinkError] = useState<FailureDescription | null>(null);
+  // The same row the list shows (Plans with Archived ones, tickets, tags), read for this Document.
+  const [row, setRow] = useState<DocumentSummary | null>(null);
+  const rowKey = useRef("");
+  // The "…" menu opens one panel at a time, anchored to the menu's button.
+  const [panel, setPanel] = useState<
+    "details" | "tags" | "link" | "ticket" | null
+  >(null);
+  const [newTag, setNewTag] = useState("");
+  const [actionError, setActionError] = useState<FailureDescription | null>(
+    null,
+  );
   const [suggestion, setSuggestion] = useState(
     recovered ? recovered.draft.suggestion : (currentTicket ?? null),
   );
   const linksKey = useRef("");
+  // Each read answers only if no newer one started: an older answer never overwrites.
+  const linksRequest = useRef(0);
+  const rowRequest = useRef(0);
   const refreshLinks = () => {
-    if (initial)
+    if (initial) {
+      const request = ++linksRequest.current;
       void documents
         .links(initial.id)
         .then((next) => {
+          if (request !== linksRequest.current) return;
           const key = JSON.stringify(next);
           if (key === linksKey.current) return;
           linksKey.current = key;
           setLinks(next);
         })
-        .catch((error: unknown) =>
-          setLinkError(describeFailure(error, "load the connections")),
-        );
+        .catch((error: unknown) => {
+          if (request === linksRequest.current)
+            setLinkError(describeFailure(error, "load the connections"));
+        });
+    }
+    if (initial) {
+      const request = ++rowRequest.current;
+      void documents
+        .row(initial.id)
+        .then((next) => {
+          if (request !== rowRequest.current) return;
+          const key = JSON.stringify(next);
+          if (key === rowKey.current) return;
+          rowKey.current = key;
+          setRow(next);
+        })
+        .catch((error: unknown) => {
+          if (request === rowRequest.current)
+            setLinkError(describeFailure(error, "load the connections"));
+        });
+    }
   };
   const refreshLinksRef = useRef(refreshLinks);
   useEffect(() => {
@@ -327,6 +411,9 @@ function RecoveredDocumentEditor({
   );
   const [body, setBody] = useState(
     recovered?.draft.body ?? initial?.body ?? "",
+  );
+  const [summary, setSummary] = useState(
+    recovered?.draft.summary ?? initial?.summary ?? "",
   );
   const [status, setStatus] = useState(
     initial ? "Saved on this computer" : "Start writing. We’ll save as you go.",
@@ -375,12 +462,17 @@ function RecoveredDocumentEditor({
     return () => window.clearTimeout(timer);
   }, [discarded]);
   const externalRef = useRef<Snapshot | null>(recovered?.external ?? null);
-  const draft = useRef<Snapshot>({ title, body, suggestion });
+  const draft = useRef<Snapshot>({ title, body, suggestion, summary });
   // The editor holds typing it has not reported yet: an outside change must
   // not replace the body meanwhile.
   const editorPending = useRef(false);
   const saved = useRef<Snapshot>(
-    recovered?.saved ?? { title, body, suggestion: null },
+    recovered?.saved ?? {
+      title,
+      body,
+      suggestion: null,
+      summary: storedSummary(initial?.summary ?? ""),
+    },
   );
   const id = useRef(recovered?.id ?? initial?.id ?? null);
   const pending = useRef<Pending | null>(recovered?.pending ?? null);
@@ -395,6 +487,7 @@ function RecoveredDocumentEditor({
   const recoveryPayload = () => {
     const dirty =
       storedTitle(draft.current.title) !== saved.current.title ||
+      storedSummary(draft.current.summary) !== saved.current.summary ||
       draft.current.body !== saved.current.body ||
       draft.current.suggestion !== saved.current.suggestion;
     const payload =
@@ -438,6 +531,7 @@ function RecoveredDocumentEditor({
       recovery,
       title,
       body,
+      summary,
       suggestion,
       discarded,
       external,
@@ -470,6 +564,7 @@ function RecoveredDocumentEditor({
         externalRevision.current = snapshot.externalRevision;
         setTitle(snapshot.draft.title);
         setBody(snapshot.draft.body);
+        setSummary(snapshot.draft.summary);
         setSuggestion(snapshot.draft.suggestion);
         setExternal(snapshot.external);
         setDiscarded(snapshot.discarded);
@@ -544,10 +639,12 @@ function RecoveredDocumentEditor({
     }
     const snapshot = draft.current;
     const titleChanged = storedTitle(snapshot.title) !== saved.current.title;
+    const summaryChanged =
+      storedSummary(snapshot.summary) !== saved.current.summary;
     const bodyChanged =
       snapshot.body !== saved.current.body ||
       snapshot.suggestion !== saved.current.suggestion;
-    if (!pending.current && !titleChanged && !bodyChanged) {
+    if (!pending.current && !titleChanged && !summaryChanged && !bodyChanged) {
       if (transition.current) void finishTransition();
       else if (closeRequested.current) finish();
       return;
@@ -571,6 +668,7 @@ function RecoveredDocumentEditor({
             : snapshot.body
           : null,
       titleChanged,
+      summary: summaryChanged ? storedSummary(snapshot.summary) : null,
       requestId: crypto.randomUUID(),
       snapshot,
       revision: revision.current,
@@ -595,6 +693,7 @@ function RecoveredDocumentEditor({
         request.titleChanged,
         request.revision,
         request.requestId,
+        request.summary ?? undefined,
       );
       window.clearTimeout(slow);
       id.current = result.id;
@@ -604,6 +703,11 @@ function RecoveredDocumentEditor({
       saved.current = {
         ...request.snapshot,
         title: storedTitle(request.snapshot.title),
+        // A request that left the summary alone keeps what was stored before it.
+        summary:
+          request.summary === null
+            ? saved.current.summary
+            : storedSummary(request.snapshot.summary),
       };
       pending.current = null;
       await persistRecovery();
@@ -614,6 +718,7 @@ function RecoveredDocumentEditor({
       refreshLinks();
       if (
         storedTitle(draft.current.title) !== saved.current.title ||
+        storedSummary(draft.current.summary) !== saved.current.summary ||
         draft.current.body !== saved.current.body ||
         draft.current.suggestion !== saved.current.suggestion
       )
@@ -669,7 +774,7 @@ function RecoveredDocumentEditor({
       void saveRef.current();
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [title, body, suggestion]);
+  }, [title, body, summary, suggestion]);
   /**
    * Fold the stored Document into the editor. Returns true when it was settled (nothing
    * to resolve, or merged without touching the draft) and false when an outside change
@@ -692,6 +797,7 @@ function RecoveredDocumentEditor({
         ? document.body.slice(0, -link.length).replace(/\n\n$/, "")
         : document.body,
       suggestion: hasLink ? currentSuggestion : null,
+      summary: storedSummary(document.summary ?? ""),
     };
     const settle = () => {
       revision.current = document.updated_at;
@@ -702,29 +808,38 @@ function RecoveredDocumentEditor({
     };
     if (
       next.title === saved.current.title &&
+      next.summary === saved.current.summary &&
       next.body === saved.current.body
     ) {
       settle();
       return true;
     }
     const titleDirty = storedTitle(draft.current.title) !== saved.current.title;
+    const summaryDirty =
+      storedSummary(draft.current.summary) !== saved.current.summary;
     const bodyDirty =
       editorPending.current ||
       draft.current.body !== saved.current.body ||
       draft.current.suggestion !== saved.current.suggestion;
     const conflict =
       (titleDirty && next.title !== saved.current.title) ||
+      (summaryDirty && next.summary !== saved.current.summary) ||
       (bodyDirty &&
         (next.body !== saved.current.body ||
           next.suggestion !== saved.current.suggestion));
     if (conflict || pending.current) {
       // Preserve unrelated saved-field changes when the person chooses to
       // save over a conflicting field.
-      if (titleDirty || bodyDirty) {
+      if (titleDirty || summaryDirty || bodyDirty) {
         if (!titleDirty) {
           draft.current = { ...draft.current, title: next.title };
           saved.current = { ...saved.current, title: next.title };
           setTitle(next.title);
+        }
+        if (!summaryDirty) {
+          draft.current = { ...draft.current, summary: next.summary };
+          saved.current = { ...saved.current, summary: next.summary };
+          setSummary(next.summary);
         }
         if (!bodyDirty) {
           draft.current = {
@@ -752,10 +867,12 @@ function RecoveredDocumentEditor({
       title: titleDirty ? draft.current.title : next.title,
       body: bodyDirty ? draft.current.body : next.body,
       suggestion: bodyDirty ? draft.current.suggestion : next.suggestion,
+      summary: summaryDirty ? draft.current.summary : next.summary,
     };
     saved.current = next;
     settle();
     if (!titleDirty) setTitle(next.title);
+    if (!summaryDirty) setSummary(next.summary);
     if (!bodyDirty) {
       setBody(next.body);
       setSuggestion(next.suggestion);
@@ -870,6 +987,56 @@ function RecoveredDocumentEditor({
     savedDocument?.heading ||
     initial?.origin_brief?.trim() ||
     "Document";
+  // What Read renders, and the outline of it: the headings people can jump to.
+  const readSource = withoutOpeningTitle(body, title, savedDocument?.heading);
+  const outline = useMemo(() => outlineOf(readSource), [readSource]);
+  const [scroller, setScroller] = useState<HTMLElement | null>(null);
+  const folds = useSectionFolds(initial?.id ?? null, outline);
+  const { current: currentAnchor, goTo } = useCurrentHeading(
+    scroller,
+    outline,
+    folds.folded,
+    folds.introFolded,
+  );
+  /** Changes the folds and keeps the heading the reader is at where it was on screen. */
+  const keepPlace = (change: () => void) => {
+    const here =
+      scroller && currentAnchor && headingElement(scroller, currentAnchor);
+    const before = here ? here.getBoundingClientRect().top : 0;
+    flushSync(change);
+    const moved = here ? here.getBoundingClientRect().top - before : 0;
+    if (scroller && moved !== 0) scroller.scrollBy(0, moved);
+  };
+  const expanded = reading?.expanded ?? false;
+  const expandButton = useRef<HTMLButtonElement>(null);
+  const showListButton = useRef<HTMLButtonElement>(null);
+  const previousButton = useRef<HTMLButtonElement>(null);
+  const nextButton = useRef<HTMLButtonElement>(null);
+  // The control the pointer or keys just used leaves the bar; focus moves to its counterpart.
+  const toggled = useRef(false);
+  useEffect(() => {
+    if (!toggled.current) return;
+    toggled.current = false;
+    (expanded ? showListButton : expandButton).current?.focus();
+  }, [expanded]);
+  const stepped = reading?.focus ?? null;
+  useEffect(() => {
+    if (!stepped) return;
+    // The reader that stepped is replaced by this one: the same button takes focus again.
+    // At the end of the list the button is off, and its opposite takes the focus.
+    const button = (stepped === "next" ? nextButton : previousButton).current;
+    const other = (stepped === "next" ? previousButton : nextButton).current;
+    (button && !button.disabled ? button : other)?.focus();
+    reading?.onFocused();
+    // Only at the reader's first render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  // The rail's room stays while editing (the rail itself is hidden), so the column does not move.
+  // Whether the Document has one is decided when Edit starts and kept until Done, so adding or
+  // removing headings while typing never moves the column.
+  const [roomAtEdit, setRoomAtEdit] = useState<boolean | null>(null);
+  const railRoom = expanded && (roomAtEdit ?? showsOutline(outline));
+  const railShown = railRoom && !writing;
   // The heading line left out of the editor, while the body still starts with it.
   const head =
     writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
@@ -879,6 +1046,7 @@ function RecoveredDocumentEditor({
     setHiddenHead(
       edit && initial ? body.slice(0, body.length - stripped.length) : "",
     );
+    setRoomAtEdit(edit ? showsOutline(outline) : null);
     setWriting(edit);
   };
   const actionsTrigger = useRef<HTMLButtonElement>(null);
@@ -909,17 +1077,38 @@ function RecoveredDocumentEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [initial, active]);
-  const titleInput = (
+  const titleValue = title || (head ? heading : "");
+  const changeTitle = (value: string) => {
+    draft.current = { ...draft.current, title: value };
+    setTitle(value);
+  };
+  const titleInput = capture ? (
     <Input
       id="document-title"
       aria-label="Title"
-      variant={capture ? "capture-title" : "title"}
-      placeholder={capture ? "Document title" : "Title"}
+      variant="capture-title"
+      placeholder="Document title"
       readOnly={locked || restoringCapture}
-      value={title || (head ? heading : "")}
-      onChange={(event) => {
-        draft.current = { ...draft.current, title: event.target.value };
-        setTitle(event.target.value);
+      value={titleValue}
+      onChange={(event) => changeTitle(event.target.value)}
+    />
+  ) : (
+    // The title wraps as it does in reading, so it is a field that grows with its text; Enter
+    // leaves it for the next field, as it would end a one-line input.
+    <Textarea
+      id="document-title"
+      aria-label="Title"
+      rows={1}
+      placeholder="Title"
+      readOnly={locked || restoringCapture}
+      value={titleValue}
+      onChange={(event) =>
+        changeTitle(event.target.value.replace(/[\r\n]+/g, " "))
+      }
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        refocusEditor();
       }}
     />
   );
@@ -1035,29 +1224,34 @@ function RecoveredDocumentEditor({
     />
   );
   const connected = groupConnections(links);
-  // A Plan link with no passage is a Plan attachment: the designated spec, or (attached) a supporting
-  // Document. The Plan can also be mentioned in the body, so the two are tracked separately.
-  const planSpec = connected.find(
-    (item) => item.kind === "plan" && item.attachment && !item.attached,
-  );
-  const planSupport = planSpec
-    ? undefined
-    : connected.find(
-        (item) => item.kind === "plan" && item.attachment && item.attached,
-      );
-  const crumbPlan = planSpec ?? planSupport;
-  // Plans this Document is the spec of (or supports) have their own section; a Plan that is only
-  // attached is not a mention, and every other connection is a mention, listed once.
+  // The header names the Plan the Document belongs to: the one it is the spec of, else an Active
+  // one, else an Archived one (the core orders the row's Plans that way).
+  const crumbPlan = row?.plans?.[0];
+  // A Plan attached to the Document is listed under Linked, not as a mention.
   const isMention = (item: (typeof connected)[number]) =>
-    !item.attachment || item.passages.length > 0;
+    item.kind !== "plan" || item.passages.length > 0;
   // Reference order (T-KQ1 before T-KQ3), not the order the links were recorded in.
   const mentions = connected
     .filter(isMention)
     .sort((a, b) =>
       a.label.localeCompare(b.label, undefined, { numeric: true }),
     );
-  const attachments = connected.filter((item) => item.attachment);
-  const attachmentLabel = planSpec ? "Spec of" : "Supporting Document of";
+  const linkedPlans = row?.plans ?? [];
+  const linkedTickets = row?.tickets ?? [];
+  // The mentions stay unmounted until first opened: a long Document can have dozens of passages.
+  const [mentionsOpen, setMentionsOpen] = useState(false);
+  const [mentionsSeen, setMentionsSeen] = useState(false);
+  const mentionedBy = (kind: string, one: string, many: string) => {
+    const count = mentions.filter((item) => item.kind === kind).length;
+    return count > 0 ? plural(count, one, many) : "";
+  };
+  const mentionedLabel = `Mentioned in ${[
+    mentionedBy("ticket", "ticket", "tickets"),
+    mentionedBy("document", "Document", "Documents"),
+    mentionedBy("plan", "Plan", "Plans"),
+  ]
+    .filter(Boolean)
+    .join(" and ")}`;
   const passages = [
     ...new Set(mentions.flatMap((item) => item.passages)),
   ].filter((passage) => !bareLinkLabel(passage));
@@ -1106,6 +1300,135 @@ function RecoveredDocumentEditor({
   );
   const updatedAt = savedDocument?.updated_at ?? initial?.updated_at ?? "";
   const createdAt = savedDocument?.created_at ?? initial?.created_at ?? "";
+  const panelLabel =
+    panel === "tags"
+      ? "Add tags"
+      : panel === "link"
+        ? "Link a Document"
+        : panel === "ticket"
+          ? "Create ticket from this"
+          : "Details";
+  /** Adds or removes a tag; resolves to whether it worked. */
+  const changeTag = async (tag: string, present: boolean) => {
+    if (!initial) return false;
+    setActionError(null);
+    try {
+      await documents.tag(initial.id, tag, present);
+      refreshLinks();
+      return true;
+    } catch (error) {
+      setActionError(
+        describeFailure(
+          error,
+          present ? `add the tag ${tag.trim()}` : `remove the tag ${tag}`,
+        ),
+      );
+      return false;
+    }
+  };
+  const panelContent = initial && panel && (
+    <>
+      {panel === "details" && (
+        <DocumentDetails
+          document={initial}
+          createdAt={createdAt}
+          updatedAt={updatedAt}
+          plans={row?.plans ?? []}
+          onOpenTicket={(reference) =>
+            navigate(() => onOpenTicket?.(reference))
+          }
+        />
+      )}
+      {panel === "tags" && (
+        <form
+          className="document-panel-form"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const tag = newTag;
+            if (!tag.trim()) return;
+            void changeTag(tag, true).then((added) => {
+              if (!added) return;
+              setNewTag("");
+              setPanel(null);
+            });
+          }}
+        >
+          <Field>
+            <FieldLabel htmlFor="new-document-tag">Add tag</FieldLabel>
+            <Input
+              id="new-document-tag"
+              autoFocus
+              value={newTag}
+              onChange={(event) => setNewTag(event.target.value)}
+            />
+          </Field>
+          <Button type="submit" disabled={!newTag.trim()}>
+            Add tag
+          </Button>
+        </form>
+      )}
+      {panel === "link" && (
+        <DocumentPicker
+          exclude={[initial.id]}
+          onPick={(picked) => {
+            const link = documentLinkMarkdown(picked.id, picked.heading);
+            const next = draft.current.body
+              ? `${draft.current.body}\n\n${link}`
+              : link;
+            draft.current = { ...draft.current, body: next };
+            setBody(next);
+            setLinkError(null);
+            setPanel(null);
+          }}
+        />
+      )}
+      {panel === "ticket" && (
+        <div className="document-panel-form">
+          <Field>
+            <FieldLabel htmlFor="ticket-from-document">
+              New ticket title
+            </FieldLabel>
+            <Input
+              id="ticket-from-document"
+              autoFocus
+              value={ticketTitle}
+              onChange={(event) => setTicketTitle(event.target.value)}
+            />
+          </Field>
+          <Button
+            disabled={locked || !ticketTitle.trim()}
+            onClick={() => {
+              if (creatingTicket.current) return;
+              if (
+                !ticketRequest.current ||
+                ticketRequest.current.title !== ticketTitle
+              )
+                ticketRequest.current = {
+                  title: ticketTitle,
+                  id: crypto.randomUUID(),
+                };
+              creatingTicket.current = true;
+              setCreateError(null);
+              void documents
+                .createTicket(initial.id, ticketTitle, ticketRequest.current.id)
+                .then((ticket) =>
+                  navigate(() => onOpenTicket?.(ticket.reference)),
+                )
+                .catch((error: unknown) =>
+                  setCreateError(describeFailure(error, "create the ticket")),
+                )
+                .finally(() => {
+                  creatingTicket.current = false;
+                });
+            }}
+          >
+            Create ticket
+          </Button>
+          {createError && <FailureAlert size="compact" failure={createError} />}
+        </div>
+      )}
+    </>
+  );
   const readerFeedback = (
     <>
       {saveError}
@@ -1130,6 +1453,7 @@ function RecoveredDocumentEditor({
                 setExternal(null);
                 setBlockedLeaving(false);
                 setTitle(external.title);
+                setSummary(external.summary);
                 setBody(external.body);
                 setSuggestion(null);
                 setFailed(false);
@@ -1165,6 +1489,7 @@ function RecoveredDocumentEditor({
             onClick={() => {
               draft.current = discarded;
               setTitle(discarded.title);
+              setSummary(discarded.summary);
               setBody(discarded.body);
               setDiscarded(null);
               refocusEditor();
@@ -1216,7 +1541,21 @@ function RecoveredDocumentEditor({
       error={capture && saveError}
     >
       {initial && (
-        <header className="document-bar">
+        <header className="document-bar" data-expanded={expanded || undefined}>
+          {reading && expanded && (
+            <span className="document-show-list">
+              <IconButton
+                ref={showListButton}
+                label="Show the Documents list"
+                onClick={() => {
+                  toggled.current = true;
+                  reading.onExpandedChange(false);
+                }}
+              >
+                <PanelLeftOpen />
+              </IconButton>
+            </span>
+          )}
           <span className="document-return">
             <Button
               variant="ghost"
@@ -1233,19 +1572,76 @@ function RecoveredDocumentEditor({
               <Button
                 variant="ghost"
                 size="sm"
-                aria-label={`Open Plan ${crumbPlan.label}`}
+                aria-label={`Open Plan ${crumbPlan.name}`}
                 onClick={() => navigate(() => onOpenPlan?.(crumbPlan.id))}
               >
                 <Layers aria-hidden="true" />
-                {crumbPlan.label}
+                <span className="document-plan-crumb-name">
+                  {crumbPlan.name}
+                </span>
               </Button>
             </span>
           )}
-          <span aria-hidden="true" className="document-crumb-sep">
-            /
-          </span>
+          {/* A slash separates two crumbs: with nothing before it (full width, no Plan) it is not drawn. */}
+          {(crumbPlan || !expanded) && (
+            <span aria-hidden="true" className="document-crumb-sep">
+              /
+            </span>
+          )}
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
+            {reading && !expanded && (
+              <span className="document-expand">
+                <IconButton
+                  ref={expandButton}
+                  label="Read full width"
+                  onClick={() => {
+                    toggled.current = true;
+                    reading.onExpandedChange(true);
+                  }}
+                >
+                  <Maximize2 />
+                </IconButton>
+              </span>
+            )}
+            {reading && expanded && (
+              // The slot stays when the Document is not in the list, so the icons never move.
+              <div
+                className="document-position"
+                role="group"
+                aria-label="Position in the list"
+              >
+                <span className="document-position-text">
+                  {reading.place
+                    ? `${reading.place.index} of ${reading.place.total}`
+                    : "–"}
+                </span>
+                <IconButton
+                  ref={previousButton}
+                  label="Previous Document"
+                  disabled={!reading.previous}
+                  onClick={() =>
+                    reading.previous &&
+                    navigate(() =>
+                      reading.onStep(reading.previous!, "previous"),
+                    )
+                  }
+                >
+                  <ChevronUp />
+                </IconButton>
+                <IconButton
+                  ref={nextButton}
+                  label="Next Document"
+                  disabled={!reading.next}
+                  onClick={() =>
+                    reading.next &&
+                    navigate(() => reading.onStep(reading.next!, "next"))
+                  }
+                >
+                  <ChevronDown />
+                </IconButton>
+              </div>
+            )}
             <Button
               ref={editTrigger}
               variant="ghost"
@@ -1266,36 +1662,112 @@ function RecoveredDocumentEditor({
                 <Pin fill={pinned ? "currentColor" : "none"} />
               </IconButton>
             )}
-            {/* Kept in Trash too, with Restore, so the header never changes shape (DR-10). */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <IconButton
-                  ref={actionsTrigger}
-                  label="Document actions"
-                  disabled={transitioning}
-                >
-                  <MoreHorizontal />
-                </IconButton>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" sideOffset={4}>
-                <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
-                  History…
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={markdownExport.busy}
-                  onSelect={() => void markdownExport.run()}
-                >
-                  Export Markdown with files…
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  {...(!trashed && { variant: "destructive" as const })}
-                  onSelect={toggleTrash}
-                >
-                  {trashed ? "Restore" : "Move to Trash"}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <Popover
+              open={panel !== null}
+              onOpenChange={(open) => {
+                if (!open) setPanel(null);
+              }}
+            >
+              <PopoverAnchor asChild>
+                <span className="document-more">
+                  {/* Kept in Trash too, with Restore, so the header never changes shape (DR-10). */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <IconButton
+                        ref={actionsTrigger}
+                        label="Document actions"
+                        disabled={transitioning}
+                      >
+                        <MoreHorizontal />
+                      </IconButton>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent
+                      align="end"
+                      sideOffset={4}
+                      onCloseAutoFocus={(event) => {
+                        // A panel the menu opened keeps focus.
+                        if (panel) event.preventDefault();
+                      }}
+                    >
+                      <DropdownMenuItem onSelect={() => setPanel("details")}>
+                        <Info aria-hidden="true" />
+                        Details
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={locked}
+                        onSelect={() => setPanel("tags")}
+                      >
+                        <Tag aria-hidden="true" />
+                        Add tags…
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={locked}
+                        onSelect={() => setPanel("link")}
+                      >
+                        <Link2 aria-hidden="true" />
+                        Link a Document…
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={locked}
+                        onSelect={() => {
+                          // One step creates: the title starts as the Document's heading.
+                          if (!ticketTitle.trim()) setTicketTitle(heading);
+                          setPanel("ticket");
+                        }}
+                      >
+                        <SquarePen aria-hidden="true" />
+                        Create ticket from this
+                      </DropdownMenuItem>
+                      {onOpenGraph && (
+                        <DropdownMenuItem
+                          onSelect={() =>
+                            navigate(() => onOpenGraph(initial.id))
+                          }
+                        >
+                          <Network aria-hidden="true" />
+                          Open in graph
+                        </DropdownMenuItem>
+                      )}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onSelect={() => setHistoryOpen(true)}>
+                        <Clock aria-hidden="true" />
+                        History…
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        disabled={markdownExport.busy}
+                        onSelect={() => void markdownExport.run()}
+                      >
+                        <FileText aria-hidden="true" />
+                        Export Markdown with files…
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        {...(!trashed && { variant: "destructive" as const })}
+                        onSelect={toggleTrash}
+                      >
+                        {trashed ? (
+                          <Undo2 aria-hidden="true" />
+                        ) : (
+                          <Trash2 aria-hidden="true" />
+                        )}
+                        {trashed ? "Restore" : "Move to Trash"}
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                </span>
+              </PopoverAnchor>
+              <PopoverContent
+                align="end"
+                variant={panel === "link" ? "list" : "form"}
+                aria-label={panelLabel}
+                onCloseAutoFocus={(event) => {
+                  event.preventDefault();
+                  actionsTrigger.current?.focus();
+                }}
+              >
+                {panelContent}
+              </PopoverContent>
+            </Popover>
           </div>
           {markdownExport.element}
         </header>
@@ -1309,7 +1781,66 @@ function RecoveredDocumentEditor({
           onRestored={refreshStored}
         />
       )}
-      <div className="document-main">
+      {/* The ticks come before the text in the tab order (right after the bar); they are positioned, so they stay where they are drawn. */}
+      {initial &&
+        !writing &&
+        scroller &&
+        !railShown &&
+        showsOutline(outline) && (
+          <DocumentOutline
+            headings={outline}
+            current={currentAnchor}
+            folds={{
+              folded: folds.folded.size + folds.introFolded.size,
+              allFolded: folds.allFolded,
+              foldAll: () => keepPlace(folds.foldAll),
+              unfoldAll: () => keepPlace(folds.unfoldAll),
+            }}
+            onChoose={(heading) => {
+              // A folded section has nothing to scroll to until it is open.
+              flushSync(() => folds.reveal(heading.id));
+              goTo(heading.id);
+            }}
+          />
+        )}
+      <div
+        className="document-main"
+        ref={setScroller}
+        data-rail={(railRoom && scroller) || undefined}
+        data-writing={writing || undefined}
+      >
+        {railShown && scroller && (
+          <DocumentRail
+            headings={outline}
+            current={currentAnchor}
+            scroller={scroller}
+            folds={{
+              folded: folds.folded.size + folds.introFolded.size,
+              allFolded: folds.allFolded,
+              foldAll: () => keepPlace(folds.foldAll),
+              unfoldAll: () => keepPlace(folds.unfoldAll),
+            }}
+            onChoose={(heading) => {
+              // A folded section has nothing to scroll to until it is open.
+              flushSync(() => folds.reveal(heading.id));
+              goTo(heading.id);
+            }}
+          >
+            {(linkedPlans.length > 0 || linkedTickets.length > 0) && (
+              <section aria-label="Linked" className="document-rail-linked">
+                <h2>Linked</h2>
+                <LinkedItems
+                  plans={linkedPlans}
+                  tickets={linkedTickets}
+                  onOpenPlan={(id) => navigate(() => onOpenPlan?.(id))}
+                  onOpenTicket={(reference) =>
+                    navigate(() => onOpenTicket?.(reference))
+                  }
+                />
+              </section>
+            )}
+          </DocumentRail>
+        )}
         {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
         {trashed && (
           <div className="document-trash-notice">
@@ -1329,26 +1860,62 @@ function RecoveredDocumentEditor({
         {initial &&
           (writing ? (
             // The title edits in place at the heading's size, without a box.
-            <div className="document-title">{titleInput}</div>
+            <div className="document-title" data-value={titleValue}>
+              {titleInput}
+            </div>
           ) : (
             <h1 className="document-title">{heading}</h1>
           ))}
         {initial && (
           // Reading metadata stays in place; editing tools float outside the body.
-          <div className="document-state-row">
-            <p className="document-subtitle">
-              Updated{" "}
-              {Number.isNaN(Date.parse(updatedAt)) ? (
-                updatedAt
-              ) : (
-                <Time value={updatedAt} />
-              )}
-              {planSpec && ` · spec of the Plan ${planSpec.label}`}
-              {planSupport &&
-                ` · supporting Document of the Plan ${planSupport.label}`}
-            </p>
-            {(isSaved || reviewRequired) && statusLine}
-          </div>
+          <>
+            <DocumentMeta
+              row={row}
+              updatedAt={updatedAt}
+              minutes={readingMinutes(readSource)}
+              storage={(isSaved || reviewRequired) && statusLine}
+              tags={row?.tags ?? []}
+              tagsLocked={locked}
+              onRemoveTag={(tag) => void changeTag(tag, false)}
+              onOpenPlan={(id) => navigate(() => onOpenPlan?.(id))}
+              onOpenTicket={(reference) =>
+                navigate(() => onOpenTicket?.(reference))
+              }
+            />
+            {writing ? (
+              // The author's one-line summary edits in the place it is read.
+              // `data-value` mirrors the text so the field is as tall as the whole summary.
+              <div className="document-summary" data-value={summary}>
+                <Textarea
+                  aria-label="Summary"
+                  rows={1}
+                  placeholder="Add a one-line summary"
+                  readOnly={locked}
+                  value={summary}
+                  onChange={(event) => {
+                    // One line of text: a pasted line break becomes a space.
+                    const value = event.target.value.replace(/[\r\n]+/g, " ");
+                    draft.current = { ...draft.current, summary: value };
+                    setSummary(value);
+                  }}
+                  onKeyDown={(event) => {
+                    // Enter leaves the field for the text, as it would end a line.
+                    if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                      return;
+                    event.preventDefault();
+                    refocusEditor();
+                  }}
+                />
+              </div>
+            ) : (
+              storedSummary(summary) && (
+                <p className="document-summary">{storedSummary(summary)}</p>
+              )
+            )}
+            {actionError && (
+              <FailureAlert size="compact" failure={actionError} />
+            )}
+          </>
         )}
         {initial && (writing || saveError || external || discarded) && (
           <FloatingEditBar
@@ -1446,22 +2013,16 @@ function RecoveredDocumentEditor({
                     locked
                       ? undefined
                       : (value) => {
-                          const shown = withoutDerivedHeading(
-                            body,
-                            title,
-                            savedDocument?.heading,
-                          );
                           const next =
-                            body.slice(0, body.length - shown.length) + value;
+                            body.slice(0, body.length - readSource.length) +
+                            value;
                           draft.current = { ...draft.current, body: next };
                           setBody(next);
                         }
                   }
-                  source={withoutDerivedHeading(
-                    body,
-                    title,
-                    savedDocument?.heading,
-                  )}
+                  source={readSource}
+                  headings={outline}
+                  folding={initial ? folds : undefined}
                   select={
                     onOpenTicket
                       ? (reference) => navigate(() => onOpenTicket(reference))
@@ -1474,11 +2035,7 @@ function RecoveredDocumentEditor({
         </div>
 
         {initial && (
-          <aside className="document-rail" aria-label="Document details">
-            <header className="document-linked-header">
-              <h2>Linked</h2>
-              <Count>{connected.length}</Count>
-            </header>
+          <aside className="document-end" aria-label="Document details">
             {linkError && (
               <FailureAlert
                 size="compact"
@@ -1489,179 +2046,61 @@ function RecoveredDocumentEditor({
                 }}
               />
             )}
-            {mentions.length > 0 && (
-              <section aria-label="Mentions">
-                <h2>Mentions</h2>
-                {links.some((group) => group.length === 100) && (
-                  <p>Showing the first 100 items in each direction.</p>
-                )}
-                <ul>{mentions.map((item) => connectionRow(item))}</ul>
-                {passages.length > 0 && (
-                  <div className="document-passage-caption">
-                    <span>
-                      {passages.length === 1 && mentions.length > 1
-                        ? mentions.length === 2
-                          ? "Both from"
-                          : "All from"
-                        : "From"}{" "}
-                      “
-                    </span>
-                    {passages.map((passage) => passageView(passage))}
-                    <span aria-hidden="true">”</span>
-                  </div>
-                )}
+            {(linkedPlans.length > 0 || linkedTickets.length > 0) && (
+              <section aria-label="Linked">
+                <h2>Linked</h2>
+                <LinkedItems
+                  plans={linkedPlans}
+                  tickets={linkedTickets}
+                  onOpenPlan={(id) => navigate(() => onOpenPlan?.(id))}
+                  onOpenTicket={(reference) =>
+                    navigate(() => onOpenTicket?.(reference))
+                  }
+                />
               </section>
             )}
-            {attachments.length > 0 && (
-              <section aria-label={attachmentLabel}>
-                <h2>{attachmentLabel}</h2>
-                <ul>{attachments.map((item) => connectionRow(item))}</ul>
+            {mentions.length > 0 && (
+              <section aria-label="Mentions">
+                <Disclosure
+                  label={mentionedLabel}
+                  open={mentionsOpen}
+                  onOpenChange={(open) => {
+                    setMentionsOpen(open);
+                    if (open) setMentionsSeen(true);
+                  }}
+                >
+                  {mentionsSeen && (
+                    <>
+                      {links.some((group) => group.length === 100) && (
+                        <p>Showing the first 100 items in each direction.</p>
+                      )}
+                      <ul className="document-mentions">
+                        {mentions.map((item) => connectionRow(item))}
+                      </ul>
+                      {passages.length > 0 && (
+                        <ul className="document-passages">
+                          {passages.map((passage) => (
+                            <li key={passage}>
+                              <p className="document-passage-source">
+                                From{" "}
+                                {mentions
+                                  .filter((item) =>
+                                    item.passages.includes(passage),
+                                  )
+                                  .map((item) => item.label)
+                                  .join(", ")}
+                              </p>
+                              {passageView(passage)}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </>
+                  )}
+                </Disclosure>
               </section>
             )}
             {typeof children === "function" ? children({ trashed }) : children}
-            <section aria-label="Document properties">
-              <dl>
-                {initial.origin_ticket && (
-                  <>
-                    <dt>Origin</dt>
-                    <dd>
-                      <Button
-                        variant="link"
-                        onClick={() =>
-                          navigate(() => onOpenTicket?.(initial.origin_ticket!))
-                        }
-                      >
-                        {initial.origin_ticket} · Update details
-                      </Button>
-                    </dd>
-                  </>
-                )}
-                <dt>Visibility</dt>
-                <dd>
-                  {initial.origin_brief
-                    ? initial.kept
-                      ? "Kept in Documents"
-                      : "Hidden with its update"
-                    : "Shown in Documents"}
-                </dd>
-              </dl>
-              <p className="document-timestamps">
-                {updatedAt === createdAt ? (
-                  <>
-                    Created and updated <DocumentDate value={updatedAt} />
-                  </>
-                ) : (
-                  <>
-                    Updated <DocumentDate value={updatedAt} /> · created{" "}
-                    <DocumentDate value={createdAt} />
-                  </>
-                )}
-              </p>
-            </section>
-            <div className="document-rail-actions">
-              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-                <PopoverTrigger asChild>
-                  <Button disabled={locked} variant="ghost">
-                    <Link2 aria-hidden="true" />
-                    Link a Document
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="start">
-                  <DocumentPicker
-                    exclude={[initial.id]}
-                    onPick={(picked) => {
-                      const link = documentLinkMarkdown(
-                        picked.id,
-                        picked.heading,
-                      );
-                      const next = draft.current.body
-                        ? `${draft.current.body}\n\n${link}`
-                        : link;
-                      draft.current = { ...draft.current, body: next };
-                      setBody(next);
-                      setLinkError(null);
-                      setPickerOpen(false);
-                    }}
-                  />
-                </PopoverContent>
-              </Popover>
-              {!creatingFromDocument && (
-                <Button
-                  variant="ghost"
-                  disabled={locked}
-                  onClick={() => {
-                    // One click creates: the title starts as the Document's heading.
-                    if (!ticketTitle.trim()) setTicketTitle(heading);
-                    setCreatingFromDocument(true);
-                  }}
-                >
-                  <SquarePen aria-hidden="true" />
-                  Create ticket from this
-                </Button>
-              )}
-              {onOpenGraph && (
-                <Button
-                  variant="ghost"
-                  onClick={() => navigate(() => onOpenGraph(initial.id))}
-                >
-                  <Network aria-hidden="true" />
-                  Open graph
-                </Button>
-              )}
-            </div>
-            <div
-              hidden={!creatingFromDocument}
-              className="document-create-ticket"
-            >
-              <Field>
-                <FieldLabel htmlFor="ticket-from-document">
-                  New ticket title
-                </FieldLabel>
-                <Input
-                  id="ticket-from-document"
-                  value={ticketTitle}
-                  onChange={(event) => setTicketTitle(event.target.value)}
-                />
-              </Field>
-              <Button
-                disabled={locked || !ticketTitle.trim()}
-                onClick={() => {
-                  if (creatingTicket.current) return;
-                  if (
-                    !ticketRequest.current ||
-                    ticketRequest.current.title !== ticketTitle
-                  )
-                    ticketRequest.current = {
-                      title: ticketTitle,
-                      id: crypto.randomUUID(),
-                    };
-                  creatingTicket.current = true;
-                  setCreateError(null);
-                  void documents
-                    .createTicket(
-                      initial.id,
-                      ticketTitle,
-                      ticketRequest.current.id,
-                    )
-                    .then((ticket) =>
-                      navigate(() => onOpenTicket?.(ticket.reference)),
-                    )
-                    .catch((error: unknown) =>
-                      setCreateError(
-                        describeFailure(error, "create the ticket"),
-                      ),
-                    )
-                    .finally(() => {
-                      creatingTicket.current = false;
-                    });
-                }}
-              >
-                Create ticket
-              </Button>
-              {createError && (
-                <FailureAlert size="compact" failure={createError} />
-              )}
-            </div>
           </aside>
         )}
       </div>

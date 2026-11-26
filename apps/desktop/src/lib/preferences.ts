@@ -7,6 +7,8 @@ import { z } from "zod";
 const preferencesSchema = z.object({
   theme: z.enum(["system", "light", "dark"]).catch("system"),
   openTickets: z.enum(["split", "expanded"]).catch("split"),
+  /** Read a Document beside the list ("split") or at full width ("expanded"); the reader's toggle sets it. */
+  openDocuments: z.enum(["split", "expanded"]).catch("split"),
   ticketLayout: z.enum(["list", "board"]).catch("list"),
   sidebarCollapsed: z.boolean().catch(false),
   ticketRows: z.enum(["detailed", "simple"]).catch("simple"),
@@ -16,6 +18,12 @@ const preferencesSchema = z.object({
   chat: z.boolean().catch(false),
   /** Settings > Chat > Notify me about Chats. On by default. */
   notifyChats: z.boolean().catch(true),
+  /** What Documents opens on: the work in progress, or the Documents opened lately. */
+  documentsView: z.enum(["current", "recent"]).catch("current"),
+  /** The order of Recent. */
+  documentsSort: z.enum(["opened", "updated", "title"]).catch("opened"),
+  /** Which Current work groups are open, by Plan id or `finished`; unset follows the default. */
+  documentGroups: z.record(z.string(), z.boolean()).catch({}),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -26,6 +34,7 @@ const STORAGE_KEY = "ticketd.preferences";
 const DEFAULTS: Preferences = {
   theme: "system",
   openTickets: "split",
+  openDocuments: "split",
   ticketLayout: "list",
   sidebarCollapsed: false,
   ticketRows: "simple",
@@ -33,6 +42,9 @@ const DEFAULTS: Preferences = {
   notifyReminders: false,
   chat: false,
   notifyChats: true,
+  documentsView: "current",
+  documentsSort: "opened",
+  documentGroups: {},
 };
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

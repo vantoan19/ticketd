@@ -29,7 +29,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ("entities", "id, kind"),
     (
         "documents",
-        "id, title, body, created_at, updated_at, trashed, originating_activity_id, kept",
+        "id, title, body, created_at, updated_at, trashed, originating_activity_id, kept, summary",
     ),
     ("context_mentions", "source_id, target_id, passage"),
     (

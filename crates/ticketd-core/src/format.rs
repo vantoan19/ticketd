@@ -28,7 +28,7 @@ use crate::{
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one step to [`LADDER`]; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 103;
+pub const FORMAT_VERSION: i64 = 104;
 
 /// One change to what a Workspace stores. The second argument is the format version
 /// the run started from, `0` for a new Workspace.
@@ -165,11 +165,15 @@ const LADDER: [(i64, Step); FORMAT_VERSION as usize] = [
     (98, |tx, _| sync::migrate_provider(tx)),
     (99, |tx, _| sync::migrate_endpoint(tx)),
     (100, |tx, _| projects::migrate_archived(tx)),
-    (101, |tx, _| chats::attachments::migrate(tx)),
-    (102, |tx, _| {
+    (101, |tx, _| documents::migrate_summary(tx)),
+    (102, |tx, _| chats::attachments::migrate(tx)),
+    (103, |tx, _| {
         add_column_if_missing(tx, "chat_messages", "editing", "INTEGER NOT NULL DEFAULT 0")
     }),
-    (103, |tx, _| {
+    (104, |tx, _| {
+        // Attachment preview workspaces used formats 101 through 103 before
+        // Document summaries landed. Add the summary column if it was skipped.
+        documents::migrate_summary(tx)?;
         add_column_if_missing(
             tx,
             "chat_messages",

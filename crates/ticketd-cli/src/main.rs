@@ -295,6 +295,9 @@ enum DocumentCommand {
         /// Optional title; without one the first line of the body is its heading
         #[arg(long, allow_hyphen_values = true)]
         title: Option<String>,
+        /// The outcome in one line for people deciding whether to read on (plain text, trimmed; line breaks become one space; never generated)
+        #[arg(long, allow_hyphen_values = true)]
+        summary: Option<String>,
         /// The Markdown body
         #[arg(long, conflicts_with = "body_file", allow_hyphen_values = true)]
         body: Option<String>,
@@ -388,6 +391,9 @@ enum DocumentCommand {
         /// Remove the title so the heading comes from the body
         #[arg(long)]
         clear_title: bool,
+        /// Set the one-line summary (plain text, trimmed; line breaks become one space); an empty value removes it
+        #[arg(long, allow_hyphen_values = true)]
+        summary: Option<String>,
         /// Replace the Markdown body
         #[arg(long, conflicts_with = "body_file", allow_hyphen_values = true)]
         body: Option<String>,
@@ -1649,6 +1655,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             }
             DocumentCommand::Create {
                 title,
+                summary,
                 body,
                 body_file,
                 request_id,
@@ -1661,12 +1668,19 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 }
                 let body = read_content(body, body_file)?.unwrap_or_default();
                 match request_id {
-                    None => {
-                        serde_json::to_string(&workspace.create_document(title.as_deref(), &body)?)?
-                    }
-                    Some(id) => bare(
-                        workspace.write(Some(&id), WriteRequest::CreateDocument { title, body })?,
-                    )?,
+                    None => serde_json::to_string(&workspace.create_document_with_summary(
+                        title.as_deref(),
+                        summary.as_deref(),
+                        &body,
+                    )?)?,
+                    Some(id) => bare(workspace.write(
+                        Some(&id),
+                        WriteRequest::CreateDocument {
+                            title,
+                            summary,
+                            body,
+                        },
+                    )?)?,
                 }
             }
             DocumentCommand::Show { id } => serde_json::to_string(&workspace.show_document(&id)?)?,
@@ -1720,6 +1734,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 serde_json::to_string(&output::DocumentSlice {
                     id: &document.id,
                     title: &document.title,
+                    summary: &document.summary,
                     created_at: &document.created_at,
                     updated_at: &document.updated_at,
                     trashed: document.trashed,
@@ -1743,6 +1758,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                 id,
                 title,
                 clear_title,
+                summary,
                 body,
                 body_file,
                 request_id,
@@ -1761,11 +1777,14 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
                     } else {
                         title.map(Some)
                     },
+                    summary: summary.map(Some),
                     body: read_content(body, body_file)?,
                     expected_updated_at: None,
                 };
-                if patch.title.is_none() && patch.body.is_none() {
-                    return Err("provide --title, --clear-title, --body or --body-file".into());
+                if patch.title.is_none() && patch.summary.is_none() && patch.body.is_none() {
+                    return Err(
+                        "provide --title, --clear-title, --summary, --body or --body-file".into(),
+                    );
                 }
                 match request_id {
                     None => serde_json::to_string(&workspace.change_document(&id, patch)?)?,

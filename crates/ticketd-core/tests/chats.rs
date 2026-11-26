@@ -2690,15 +2690,19 @@ fn a_format_82_workspace_gains_the_turn_ending_column_and_keeps_its_turns() {
 }
 
 #[test]
-fn format_102_queued_edits_keep_their_message_without_a_link_context_requirement() {
+fn attachment_preview_format_102_keeps_held_files_and_gains_document_summaries() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
     old_chat_workspace(&path, 102, "completed");
     let db = rusqlite::Connection::open(&path).unwrap();
-    db.execute(
-        "INSERT INTO chat_messages (id, chat_id, position, role, text, complete, editing)
-         VALUES ('input', 'chat-1', 2, 'user', 'original text', 1, 1)",
-        [],
+    // Preview 102 had held edits and attachment snapshots, before the summary column.
+    db.execute_batch(
+        "ALTER TABLE documents DROP COLUMN summary;
+         ALTER TABLE chat_messages ADD COLUMN editing INTEGER NOT NULL DEFAULT 0;
+         INSERT INTO chat_messages (id, chat_id, position, role, text, complete, editing)
+         VALUES ('input', 'chat-1', 2, 'user', 'original text', 1, 1);
+         INSERT INTO chat_attachments (id, message_id, position, name, media_type, bytes)
+         VALUES ('file', 'input', 0, 'notes.txt', 'text/plain', x'616263');",
     )
     .unwrap();
     drop(db);
@@ -2709,6 +2713,20 @@ fn format_102_queued_edits_keep_their_message_without_a_link_context_requirement
     assert_eq!(queue[0].text, "original text");
     assert!(queue[0].editing);
     assert!(!queue[0].requires_link_context);
+    let files = workspace
+        .chat_message_attachment_contents("chat-1", "input")
+        .unwrap();
+    assert_eq!(files.len(), 1);
+    assert_eq!(files[0].bytes(), b"abc");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    let summaries: i64 = db
+        .query_row(
+            "SELECT count(*) FROM pragma_table_info('documents') WHERE name = 'summary'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(summaries, 1);
 }
 
 #[test]

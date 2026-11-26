@@ -1163,6 +1163,9 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column projects.archived
 
 ## 101
++ column documents.summary
+
+## 102
 + table chat_attachments
 + column chat_attachments.bytes
 + column chat_attachments.id
@@ -1171,8 +1174,8 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column chat_attachments.name
 + column chat_attachments.position
 
-## 102
+## 103
 + column chat_messages.editing
 
-## 103
+## 104
 + column chat_messages.requires_link_context
