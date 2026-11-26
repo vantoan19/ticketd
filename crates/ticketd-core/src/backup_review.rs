@@ -279,7 +279,12 @@ fn check_backup_file(connection: &Connection, ladder: Ladder) -> Result<BackupCh
     }
     if ladder == Ladder::Required {
         let missing = missing_objects(connection, version)?;
-        if !missing.is_empty() {
+        // Preview formats 101–103 have the next rung's Chat storage and no Document
+        // summaries. Verify the complete preview schema before step 104 fills the gap.
+        let complete_preview = (101..=103).contains(&version)
+            && missing == ["documents.summary"]
+            && missing_objects(connection, version + 1)? == ["documents.summary"];
+        if !missing.is_empty() && !complete_preview {
             return Ok(BackupCheck::MissingTables { tables: missing });
         }
     }
