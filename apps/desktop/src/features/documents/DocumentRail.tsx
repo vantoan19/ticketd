@@ -1,6 +1,13 @@
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+  type RefObject,
+} from "react";
 import { ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconButton } from "@/components/ui/icon-button";
 import { outlineView, type OutlineHeading } from "@/features/markdown/outline";
 import { readingScrollBehavior } from "./reading-scroll";
 
@@ -16,6 +23,35 @@ function usePastFirstScreen(scroller: HTMLElement | null) {
     return () => scroller.removeEventListener("scroll", measure);
   }, [scroller]);
   return past;
+}
+
+/**
+ * Which edges of `element` have more to scroll to: "top", "bottom", "both", or "" when it all
+ * fits. The rail fades those edges, so a list that scrolls on its own says so.
+ */
+function useScrollEdges(element: RefObject<HTMLElement | null>, items: number) {
+  const [edges, setEdges] = useState("");
+  useEffect(() => {
+    const node = element.current;
+    if (!node) return;
+    const measure = () => {
+      const above = node.scrollTop > 1;
+      const below = node.scrollTop + node.clientHeight < node.scrollHeight - 1;
+      setEdges(above && below ? "both" : above ? "top" : below ? "bottom" : "");
+    };
+    measure();
+    node.addEventListener("scroll", measure, { passive: true });
+    const observer =
+      typeof ResizeObserver === "undefined"
+        ? null
+        : new ResizeObserver(measure);
+    observer?.observe(node);
+    return () => {
+      node.removeEventListener("scroll", measure);
+      observer?.disconnect();
+    };
+  }, [element, items]);
+  return edges;
 }
 
 /**
@@ -51,6 +87,8 @@ export function DocumentRail({
   const { sectionAt, shown, subsections } = outlineView(headings, current);
   const past = usePastFirstScreen(scroller);
   const nav = useRef<HTMLElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  const edges = useScrollEdges(list, shown.length);
   return (
     // A zero-height track that sticks to the reader's top: the rail hangs from it.
     <div className="document-rail-track">
@@ -59,6 +97,24 @@ export function DocumentRail({
           <div className="document-rail-head">
             <p className="document-rail-title">On this page</p>
             <span className="document-rail-actions">
+              {past && (
+                <IconButton
+                  label="Back to top"
+                  size="icon-compact"
+                  className="document-rail-top"
+                  onClick={() => {
+                    if (!scroller) return;
+                    scroller.scrollTo({
+                      top: 0,
+                      behavior: readingScrollBehavior(),
+                    });
+                    // The button leaves once the reader is back at the top: focus stays in the rail.
+                    nav.current?.querySelector("a")?.focus();
+                  }}
+                >
+                  <ChevronUp aria-hidden="true" />
+                </IconButton>
+              )}
               {!folds.allFolded && (
                 <Button variant="ghost" size="compact" onClick={folds.foldAll}>
                   Fold all
@@ -75,7 +131,7 @@ export function DocumentRail({
               )}
             </span>
           </div>
-          <ul>
+          <ul ref={list} data-fade={edges}>
             {shown.map((heading) => (
               <li key={heading.id}>
                 <a
@@ -104,22 +160,6 @@ export function DocumentRail({
           </ul>
         </nav>
         {children}
-        {past && (
-          <Button
-            variant="ghost"
-            size="compact"
-            className="document-rail-top"
-            onClick={() => {
-              if (!scroller) return;
-              scroller.scrollTo({ top: 0, behavior: readingScrollBehavior() });
-              // The button leaves once the reader is back at the top: focus stays in the rail.
-              nav.current?.querySelector("a")?.focus();
-            }}
-          >
-            <ChevronUp aria-hidden="true" />
-            Back to top
-          </Button>
-        )}
       </div>
     </div>
   );

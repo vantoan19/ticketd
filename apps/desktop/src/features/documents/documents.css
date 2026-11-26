@@ -739,13 +739,22 @@
   flex-direction: column;
   gap: 24px;
   width: 200px;
+  /* The rail stays inside the window: only the outline list scrolls (below), so Linked stays
+     in view under it. */
   max-height: calc(100vh - 140px);
-  overflow-y: auto;
   font-size: var(--text-preview);
   line-height: var(--text-preview-line);
 }
+.document-rail > nav {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
 .document-rail-head {
   display: flex;
+  flex: none;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -769,11 +778,30 @@
 }
 .document-rail ul {
   display: flex;
+  flex: 0 1 auto;
   flex-direction: column;
+  min-height: 0;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
   box-shadow: inset 1px 0 0 var(--group-hairline);
+}
+/* A soft fade at the edge of the list that has more to scroll to. */
+.document-rail ul[data-fade="bottom"] {
+  mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
+}
+.document-rail ul[data-fade="top"] {
+  mask-image: linear-gradient(to top, black calc(100% - 24px), transparent);
+}
+.document-rail ul[data-fade="both"] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 24px,
+    black calc(100% - 24px),
+    transparent
+  );
 }
 .document-rail li {
   margin: 0;
@@ -802,6 +830,9 @@
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
+.document-rail-linked {
+  flex: none;
+}
 .document-rail-linked h2 {
   margin: 0 0 8px;
   color: var(--muted-foreground);
@@ -828,8 +859,8 @@
   flex: none;
   margin-top: 2px;
 }
-.document-rail-top {
-  align-self: flex-start;
+.document-rail-actions .document-rail-top {
+  width: 20px;
   padding: 0;
 }
 .document-rail-top svg {

@@ -318,7 +318,13 @@ it("offers Back to top only once the reader is past the first screen", async () 
   scrollTo(500);
   expect(screen.queryByRole("button", { name: "Back to top" })).toBeNull();
   scrollTo(1600);
-  fireEvent.click(screen.getByRole("button", { name: "Back to top" }));
+  // It sits in the rail's header beside Fold all, so a long outline list cannot push it away.
+  const top = within(outlineNav()).getByRole("button", { name: "Back to top" });
+  expect(top.parentElement).toBe(
+    within(outlineNav()).getByRole("button", { name: "Fold all" })
+      .parentElement,
+  );
+  fireEvent.click(top);
   expect(scrollTo).toBeDefined();
   expect(vi.mocked(Element.prototype.scrollTo)).toHaveBeenCalledWith(
     expect.objectContaining({ top: 0 }),
