@@ -411,7 +411,7 @@ impl Workspace {
 
     /// One Document's list row (Plans, tickets, tags, opened), for a reader that needs the
     /// same context a list row carries. A Document in Trash has a row too.
-    pub fn document_summary(&self, id: &str) -> Result<DocumentSummary, Error> {
+    pub fn document_row(&self, id: &str) -> Result<DocumentSummary, Error> {
         let columns = summary_columns();
         self.connection
             .query_row(

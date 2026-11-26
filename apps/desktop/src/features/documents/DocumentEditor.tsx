@@ -374,7 +374,7 @@ function RecoveredDocumentEditor({
         );
     if (initial)
       void documents
-        .summary(initial.id)
+        .row(initial.id)
         .then((next) => {
           const key = JSON.stringify(next);
           if (key === rowKey.current) return;

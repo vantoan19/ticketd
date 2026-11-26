@@ -91,7 +91,7 @@ beforeEach(() => {
     unlinked: 0,
     trashed: 0,
   });
-  vi.mocked(documents.summary).mockResolvedValue({
+  vi.mocked(documents.row).mockResolvedValue({
     id: "x",
     heading: "",
     plans: [],
@@ -330,7 +330,7 @@ it("offers Back to top only once the reader is past the first screen", async () 
 it("lists what the Document is linked to in the rail", async () => {
   expandedAlready();
   vi.mocked(documents.recent).mockResolvedValue([row("a")]);
-  vi.mocked(documents.summary).mockResolvedValue({
+  vi.mocked(documents.row).mockResolvedValue({
     id: "a",
     heading: "Doc a",
     plans: [{ id: "p1", name: "Launch", archived: false, spec: true }],

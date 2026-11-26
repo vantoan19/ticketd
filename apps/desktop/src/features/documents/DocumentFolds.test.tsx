@@ -47,7 +47,7 @@ const renderEditor = (ui: ReactElement) =>
 beforeEach(() => {
   localStorage.clear();
   vi.mocked(documents.links).mockResolvedValue([[], []]);
-  vi.mocked(documents.summary).mockResolvedValue({
+  vi.mocked(documents.row).mockResolvedValue({
     id: "d1",
     heading: "",
     plans: [],

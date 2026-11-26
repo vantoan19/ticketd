@@ -85,7 +85,7 @@ const emptyRow = {
 };
 beforeEach(() => {
   vi.mocked(documents.links).mockResolvedValue([[], []]);
-  vi.mocked(documents.summary).mockResolvedValue(emptyRow);
+  vi.mocked(documents.row).mockResolvedValue(emptyRow);
 });
 afterEach(() => {
   vi.useRealTimers();

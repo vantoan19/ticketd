@@ -181,13 +181,13 @@ fn one_document_reads_the_same_row_the_list_shows_trashed_ones_included() {
     workspace.set_document_tag(&doc.id, "launch", true).unwrap();
 
     let listed = row(workspace.all_documents_page(50, 0, false).unwrap(), &doc.id);
-    let single = workspace.document_summary(&doc.id).unwrap();
+    let single = workspace.document_row(&doc.id).unwrap();
     assert_eq!(single, listed);
     assert!(single.plans[0].archived && single.plans[0].spec);
     assert_eq!(single.plans[0].id, old.id);
     assert_eq!(single.tags, vec!["launch".to_owned()]);
 
     workspace.set_document_trashed(&doc.id, true).unwrap();
-    assert_eq!(workspace.document_summary(&doc.id).unwrap().id, doc.id);
-    assert!(workspace.document_summary("missing").is_err());
+    assert_eq!(workspace.document_row(&doc.id).unwrap().id, doc.id);
+    assert!(workspace.document_row("missing").is_err());
 }

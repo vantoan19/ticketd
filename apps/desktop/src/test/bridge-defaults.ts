@@ -31,7 +31,7 @@ export function bridgeDefault(
       return null;
     case "document_context_links":
       return [[], []];
-    case "document_summary":
+    case "document_row":
       return {
         id: args?.id ?? "",
         heading: "",

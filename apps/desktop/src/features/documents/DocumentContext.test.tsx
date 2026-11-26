@@ -93,7 +93,7 @@ const openMenu = () =>
 
 beforeEach(() => {
   vi.mocked(documents.links).mockResolvedValue([[], []]);
-  vi.mocked(documents.summary).mockResolvedValue(row());
+  vi.mocked(documents.row).mockResolvedValue(row());
   vi.mocked(documents.tag).mockResolvedValue(undefined);
   vi.mocked(documents.recent).mockResolvedValue([]);
   vi.mocked(documents.version).mockResolvedValue([stored.updated_at, false]);
@@ -104,7 +104,7 @@ afterEach(() => {
 });
 
 it("says Spec of the Plan under the title when the Document is the spec of an Archived Plan", async () => {
-  vi.mocked(documents.summary).mockResolvedValue(
+  vi.mocked(documents.row).mockResolvedValue(
     row({ plans: [plan("Old launch", true, true)] }),
   );
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
@@ -118,7 +118,7 @@ it("says Spec of the Plan under the title when the Document is the spec of an Ar
 });
 
 it("shows the first ticket as its status and reference, and +1 for a second", async () => {
-  vi.mocked(documents.summary).mockResolvedValue(
+  vi.mocked(documents.row).mockResolvedValue(
     row({ tickets: [ticket("T-KQ1", "Done"), ticket("T-KQ2")] }),
   );
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
@@ -131,7 +131,7 @@ it("shows the first ticket as its status and reference, and +1 for a second", as
 
 it("keeps only the time, reading time and storage state for a Document with no links", async () => {
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
-  await waitFor(() => expect(documents.summary).toHaveBeenCalledWith("d1"));
+  await waitFor(() => expect(documents.row).toHaveBeenCalledWith("d1"));
   expect(meta()?.textContent).toMatch(
     /^Updated \S+.*·\s*1 min read\s*·\s*Saved on this computer$/,
   );
@@ -149,14 +149,14 @@ it("counts the minutes to read from the words, 230 a minute", async () => {
 });
 
 it("follows the meta line with the tags as chips and removes one", async () => {
-  vi.mocked(documents.summary).mockResolvedValue(
+  vi.mocked(documents.row).mockResolvedValue(
     row({ tags: ["checkout", "design"] }),
   );
   renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
   const tags = await screen.findByRole("list", { name: "Tags" });
   expect(meta()?.contains(tags)).toBe(true);
   expect(within(tags).getAllByRole("listitem")).toHaveLength(2);
-  vi.mocked(documents.summary).mockResolvedValue(row({ tags: ["design"] }));
+  vi.mocked(documents.row).mockResolvedValue(row({ tags: ["design"] }));
   fireEvent.click(screen.getByRole("button", { name: "Remove tag checkout" }));
   await waitFor(() =>
     expect(documents.tag).toHaveBeenCalledWith("d1", "checkout", false),
@@ -169,7 +169,7 @@ it("follows the meta line with the tags as chips and removes one", async () => {
 });
 
 it("ends with Linked and one closed Mentioned in line that lists each mention with its passage", async () => {
-  vi.mocked(documents.summary).mockResolvedValue(
+  vi.mocked(documents.row).mockResolvedValue(
     row({ plans: [plan("Checkout", false, true)], tickets: [ticket("T-KQ1")] }),
   );
   vi.mocked(documents.links).mockResolvedValue([
@@ -205,7 +205,7 @@ it("ends with Linked and one closed Mentioned in line that lists each mention wi
 });
 
 it("leaves nothing of the old block under the text", async () => {
-  vi.mocked(documents.summary).mockResolvedValue(
+  vi.mocked(documents.row).mockResolvedValue(
     row({ plans: [plan("Checkout")], tags: ["a"] }),
   );
   renderEditor(
@@ -242,7 +242,7 @@ it("reaches every action from the … menu, Details first and Move to Trash last
 });
 
 it("shows the dates, visibility and supporting Plans in Details", async () => {
-  vi.mocked(documents.summary).mockResolvedValue(
+  vi.mocked(documents.row).mockResolvedValue(
     row({ plans: [plan("Checkout revamp"), plan("Old launch", true, true)] }),
   );
   renderEditor(
@@ -270,7 +270,7 @@ it("adds a tag from the menu", async () => {
   fireEvent.change(await screen.findByLabelText("Add tag"), {
     target: { value: "design" },
   });
-  vi.mocked(documents.summary).mockResolvedValue(row({ tags: ["design"] }));
+  vi.mocked(documents.row).mockResolvedValue(row({ tags: ["design"] }));
   fireEvent.click(screen.getByRole("button", { name: "Add tag" }));
   await waitFor(() =>
     expect(documents.tag).toHaveBeenCalledWith("d1", "design", true),

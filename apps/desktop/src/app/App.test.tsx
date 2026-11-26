@@ -7477,7 +7477,7 @@ test("Documents keeps pin grouping under keyboard focus, exposes exact times and
         return stored();
       if (command === "document_version") return [timestamp, trashed];
       if (command === "document_tags") return [];
-      if (command === "document_summary" && args.id === summary.id)
+      if (command === "document_row" && args.id === summary.id)
         return {
           ...summary,
           plans: [

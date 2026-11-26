@@ -42,7 +42,7 @@ beforeEach(() => {
     JSON.stringify({ documentsView: "recent" }),
   );
   vi.mocked(documents.links).mockResolvedValue([[], []]);
-  vi.mocked(documents.summary).mockResolvedValue({
+  vi.mocked(documents.row).mockResolvedValue({
     id: "d1",
     heading: "",
     plans: [],
