@@ -506,20 +506,22 @@ fn schedules_to_update(connection: &Connection, now: chrono::NaiveDateTime) -> R
     Ok(false)
 }
 
+pub(crate) fn chat_owner(connection: &Connection, chat_id: &str) -> Result<Option<String>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT automation_run_id FROM chats WHERE id = ?1 AND automation_run_id IS NOT NULL",
+            [chat_id],
+            |row| row.get(0),
+        )
+        .optional()?)
+}
+
 pub(crate) fn take_over_chat(
     connection: &Connection,
     chat_id: &str,
     replied: bool,
 ) -> Result<Option<AutomationRun>, Error> {
-    let owner: Option<String> = connection
-        .query_row(
-            "SELECT automation_run_id FROM chats WHERE id = ?1",
-            [chat_id],
-            |row| row.get(0),
-        )
-        .optional()?
-        .flatten();
-    let Some(run_id) = owner else {
+    let Some(run_id) = chat_owner(connection, chat_id)? else {
         return Ok(None);
     };
     let status = one(connection, &run_id)?.status;
@@ -528,8 +530,9 @@ pub(crate) fn take_over_chat(
     }
     crate::chats::set_aside_taken_over_prompt(connection, chat_id)?;
     connection.execute(
-        "UPDATE chats SET automation_run_id = NULL WHERE id = ?1",
-        [chat_id],
+        "UPDATE chats SET automation_run_id = NULL, queue_paused = queue_paused OR NOT ?2
+         WHERE id = ?1",
+        params![chat_id, replied],
     )?;
     // The Chat list follows the Chat log. A view of the run follows the change
     // token, which Chat tables leave alone, and for a Completed run nothing
@@ -890,14 +893,7 @@ impl Workspace {
 
     /// The owner used to coordinate dispatch and takeover across all of a run's Chats.
     pub fn automation_chat_run_id(&self, chat_id: &str) -> Result<Option<String>, Error> {
-        Ok(self
-            .connection
-            .query_row(
-                "SELECT automation_run_id FROM chats WHERE id = ?1 AND automation_run_id IS NOT NULL",
-                [chat_id],
-                |row| row.get(0),
-            )
-            .optional()?)
+        chat_owner(&self.connection, chat_id)
     }
 
     /// The person replied in (`replied`) or stopped a Chat. When a run owns the

@@ -893,14 +893,22 @@ impl ChatHost {
         let mut sibling_cleanup_unconfirmed = false;
         let run_id = self.workspace()?.automation_chat_run_id(chat_id)?;
         if let Some(run_id) = run_id {
-            let _gate = self.begin_take_over(chat_id)?;
+            let gate = self.begin_take_over(chat_id)?;
             let run = {
                 let _prompt = self.wait_for_prompt_write(&run_id).await?;
                 self.serving()?;
                 self.workspace()?.take_over_automation_run(chat_id, false)?
             };
             if let Some(run) = run {
-                let (closed, unconfirmed) = self.finish_take_over(chat_id, run).await;
+                let host = self.clone();
+                let chat_id = chat_id.to_owned();
+                // The committed takeover must close all run agents even if Stop's caller leaves.
+                let (closed, unconfirmed) = tokio::spawn(async move {
+                    let _gate = gate;
+                    host.finish_take_over(&chat_id, run).await
+                })
+                .await
+                .map_err(|_| HostError::Quitting)?;
                 if closed {
                     return if unconfirmed {
                         Err(HostError::PermissionRestartCleanupUnconfirmed)
@@ -1544,6 +1552,11 @@ pub fn problem_kind(key: &str) -> ProblemKind {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::Unattended;
+    use ticketd_core::{
+        AutomationAgentSettings, AutomationDefinition, RunAction, Step, StepAction, StepOutcome,
+        Trigger, Workspace, WorkspaceSession,
+    };
 
     fn board() -> Board {
         Board {
@@ -1593,13 +1606,7 @@ mod tests {
         assert!(board.signals().is_empty());
     }
 
-    #[tokio::test(start_paused = true)]
-    async fn a_saved_takeover_reply_waits_for_mailbox_space_before_admitting_later_sends() {
-        use ticketd_core::{
-            AutomationAgentSettings, AutomationDefinition, RunAction, Step, StepAction, Trigger,
-            Workspace, WorkspaceSession,
-        };
-
+    fn running_automation(steps: usize) -> (tempfile::TempDir, ChatHost, String, String) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
         let mut workspace = Workspace::open(&path).unwrap();
@@ -1613,14 +1620,16 @@ mod tests {
                     tag: "triage".into(),
                 }),
                 conditions: Vec::new(),
-                steps: vec![Step {
-                    id: "agent".into(),
-                    action: StepAction::RunAgent {
-                        agent_id: Some(agent.id),
-                        execution_folder: Some(dir.path().to_string_lossy().into_owned()),
-                        on_failure: None,
-                    },
-                }],
+                steps: (0..steps)
+                    .map(|index| Step {
+                        id: format!("agent-{index}"),
+                        action: StepAction::RunAgent {
+                            agent_id: Some(agent.id.clone()),
+                            execution_folder: Some(dir.path().to_string_lossy().into_owned()),
+                            on_failure: None,
+                        },
+                    })
+                    .collect(),
             })
             .unwrap();
         workspace
@@ -1641,7 +1650,101 @@ mod tests {
             Vec::new(),
         )
         .unwrap();
-        let chat = start.chat_id;
+        (dir, host, run.id, start.chat_id)
+    }
+
+    fn register_agent(host: &ChatHost, run_id: &str, chat_id: &str) {
+        let unattended = UnattendedChat::new(
+            Unattended {
+                run_id: run_id.to_owned(),
+                model: None,
+                tools: AutomationAgentSettings::default().tools,
+                turn_limit: 2,
+            },
+            host.prompt_fence(run_id),
+        );
+        assert!(host.register_unattended(chat_id, unattended).unwrap());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn stop_pauses_an_automation_chat_registered_without_a_route() {
+        let (_dir, host, run_id, chat) = running_automation(1);
+        register_agent(&host, &run_id, &chat);
+        let mut core = host.workspace().unwrap();
+        let first = core.save_chat_input(None, &chat, "First").unwrap();
+        core.save_automation_chat_prompt(&chat, &run_id, "Agent Prompt")
+            .unwrap();
+        let second = core.save_chat_input(None, &chat, "Second").unwrap();
+        assert!(!core.chat(&chat).unwrap().queue_paused);
+        assert!(!host.chats().contains_key(&chat));
+
+        host.stop(&chat).await.unwrap();
+
+        assert!(core.chat(&chat).unwrap().queue_paused);
+        assert_eq!(core.chat_queue(&chat).unwrap(), [first, second]);
+        assert_eq!(
+            core.automation_run(&run_id).unwrap().status,
+            AutomationRunStatus::TakenOver
+        );
+        assert!(!host.is_unattended(&chat));
+        assert!(!host.chats().contains_key(&chat));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn dropping_stop_keeps_closing_sibling_agents_behind_the_takeover_gate() {
+        let (_dir, host, run_id, first) = running_automation(2);
+        register_agent(&host, &run_id, &first);
+        let RunAction::RunAgent(next) = host
+            .workspace()
+            .unwrap()
+            .advance_automation_run(&run_id, Some(StepOutcome::Completed))
+            .unwrap()
+        else {
+            panic!("the run did not start its second agent");
+        };
+        register_agent(&host, &run_id, &next.chat_id);
+        let (first_route, mut first_mailbox) = mpsc::channel(1);
+        let (second_route, mut second_mailbox) = mpsc::channel(1);
+        host.chats().insert(first.clone(), first_route);
+        host.chats().insert(next.chat_id.clone(), second_route);
+
+        let stop = tokio::spawn({
+            let host = host.clone();
+            let chat = first.clone();
+            async move { host.stop(&chat).await }
+        });
+        let Some(Command::Shutdown(StopReason::TakenOver, first_reply)) =
+            tokio::time::timeout(Duration::from_secs(1), first_mailbox.recv())
+                .await
+                .unwrap()
+        else {
+            panic!("the first agent was not asked to close");
+        };
+        stop.abort();
+        assert!(stop.await.unwrap_err().is_cancelled());
+        first_reply.send(None).unwrap();
+
+        let Some(Command::Shutdown(StopReason::TakenOver, second_reply)) =
+            tokio::time::timeout(Duration::from_secs(1), second_mailbox.recv())
+                .await
+                .unwrap()
+        else {
+            panic!("the sibling agent was not asked to close");
+        };
+        assert!(matches!(host.sender(&first), Err(HostError::Working)));
+        let mut gate = host.taking_over().get(&first).unwrap().clone();
+        second_reply.send(None).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), gate.wait_for(|done| *done))
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(host.sender(&first).is_ok());
+        assert!(!host.is_unattended(&next.chat_id));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_saved_takeover_reply_waits_for_mailbox_space_before_admitting_later_sends() {
+        let (_dir, host, _run, chat) = running_automation(1);
         // An ordinary supervisor already has the route, before the run registers.
         let (sender, mut mailbox) = mpsc::channel(1);
         assert!(sender.try_send(Command::Changed).is_ok());

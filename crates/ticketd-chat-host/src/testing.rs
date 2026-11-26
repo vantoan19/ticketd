@@ -50,6 +50,7 @@ pub struct FakeAdapter {
     harness: Harness,
     state: Arc<Mutex<State>>,
     submissions: watch::Sender<usize>,
+    runtime_dropped: watch::Sender<()>,
 }
 
 #[derive(Debug)]
@@ -122,6 +123,7 @@ impl FakeAdapter {
         Self {
             harness,
             submissions: watch::channel(0).0,
+            runtime_dropped: watch::channel(()).0,
             state: Arc::new(Mutex::new(State {
                 inspection,
                 capabilities,
@@ -267,6 +269,11 @@ impl FakeAdapter {
             .prompt_refusal_holds
             .push_back((reached, permit));
         (refused, release)
+    }
+
+    /// Observes when the Host releases the last reference to a fake runtime.
+    pub fn runtime_dropped(&self) -> watch::Receiver<()> {
+        self.runtime_dropped.subscribe()
     }
 
     /// Scripts the outcome of the next interrupt that reaches the harness. Unscripted
@@ -489,6 +496,12 @@ impl HarnessAdapter for FakeAdapter {
 struct FakeRuntime {
     generation: RuntimeGeneration,
     fake: FakeAdapter,
+}
+
+impl Drop for FakeRuntime {
+    fn drop(&mut self) {
+        self.fake.runtime_dropped.send_replace(());
+    }
 }
 
 #[async_trait]

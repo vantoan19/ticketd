@@ -42,7 +42,7 @@ struct Fixture {
     as_the_host_looks: HostLooks,
 }
 
-type HostLooks = Arc<Mutex<Option<Box<dyn Fn(&mut Workspace) + Send>>>>;
+type HostLooks = Arc<Mutex<Option<Box<dyn Fn(&mut Workspace) -> Result<(), Error> + Send>>>>;
 
 fn opener(path: &Path) -> WorkspaceOpener {
     let path = path.to_owned();
@@ -126,7 +126,7 @@ impl Fixture {
             Arc::new(move || {
                 let mut workspace = WorkspaceSession::for_file(&path)?.workspace()?;
                 if let Some(happens) = looks.lock().unwrap().as_ref() {
-                    happens(&mut workspace);
+                    happens(&mut workspace)?;
                 }
                 Ok(workspace)
             })
@@ -860,7 +860,7 @@ async fn a_chat_taken_over_mid_run_goes_on_as_an_ordinary_chat_past_the_agents_l
 }
 
 #[tokio::test(start_paused = true)]
-async fn a_refused_attachment_reply_does_not_take_over_an_automation() {
+async fn a_refused_attachment_or_conflicting_receipt_does_not_take_over_an_automation() {
     let f = Fixture::new();
     f.agent_working().await;
     let chat = f.chat();
@@ -885,14 +885,14 @@ async fn a_refused_attachment_reply_does_not_take_over_an_automation() {
             .await
             .is_err()
     );
-    let replay = f
-        .host
-        .send_with_attachments(&chat, Some("saved"), "Earlier reply", SendMode::Auto, files)
-        .await
-        .unwrap();
+    assert!(matches!(
+        f.host
+            .send_with_attachments(&chat, Some("saved"), "Earlier reply", SendMode::Auto, files)
+            .await,
+        Err(HostError::Core(Error::RequestConflict(id))) if id == "saved"
+    ));
     settle().await;
 
-    assert_eq!(replay.id, saved.id);
     assert_eq!(f.core().chat_queue(&chat).unwrap(), [saved]);
     assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
     assert_eq!(written(&f), before);
@@ -1415,6 +1415,7 @@ async fn a_run_taken_over_just_as_its_next_agent_would_start_starts_no_agent() {
         if run.status == AutomationRunStatus::Running && second_has_chat {
             workspace.take_over_automation_run(&first, true).unwrap();
         }
+        Ok(())
     }));
 
     f.end_turn(TurnOutcome::Completed).await;
@@ -2069,6 +2070,58 @@ async fn takeover_in_a_sibling_chat_is_bounded_while_the_run_has_an_admitted_wri
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_unreadable_workspace_refuses_prompt_delivery_with_the_storage_diagnostic() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let f = Fixture::new();
+    f.notify_when_the_agent_fails();
+    let (runner, told) = f.counting_runner(f.host.clone());
+    let (at_write, check_ownership) = f.fake.hold_next_submit_write();
+    f.tag("Fix login");
+    runner.tick().unwrap();
+    tokio::time::timeout(Duration::from_secs(10), at_write)
+        .await
+        .unwrap()
+        .unwrap();
+    let chat = f.chat();
+    let fail = AtomicBool::new(true);
+    *f.as_the_host_looks.lock().unwrap() = Some(Box::new(move |_| {
+        if fail.swap(false, Ordering::SeqCst) {
+            return Err(Error::Directory(std::io::Error::other(
+                "workspace read failed",
+            )));
+        }
+        Ok(())
+    }));
+
+    check_ownership.send(()).unwrap();
+    settle().await;
+
+    let detail = Refusal::AutomationPromptOwnershipUnavailable.reason();
+    assert!(f.needs_attention().contains(detail));
+    assert_eq!(*told.lock().unwrap(), 0);
+    assert!(f.core().automation_chat_run_id(&chat).unwrap().is_some());
+    assert!(
+        f.core()
+            .chat_snapshot(&chat, 20)
+            .unwrap()
+            .items
+            .iter()
+            .any(|item| {
+                matches!(item, ChatItem::Message(message) if message.attempts.iter().any(|attempt|
+            attempt.delivery == ChatDelivery::NotDelivered
+                && attempt.detail.as_deref() == Some(detail)))
+            })
+    );
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|event| matches!(event, Written::Submit(_)))
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_prompt_waiting_to_check_ownership_cannot_admit_on_a_restored_workspace() {
     prompt_does_not_outlive_its_workspace(false).await;
 }
@@ -2083,6 +2136,7 @@ async fn prompt_does_not_outlive_its_workspace(refuse_before_restore: bool) {
     let f = Fixture::new();
     let (admitted, admit) = f.fake.hold_next_submit_write();
     let (refused, finish_refusal) = f.fake.hold_next_prompt_refusal();
+    let mut runtime_dropped = f.fake.runtime_dropped();
     f.tag("Fix login");
     f.tick().await;
     tokio::time::timeout(Duration::from_secs(10), admitted)
@@ -2133,20 +2187,7 @@ async fn prompt_does_not_outlive_its_workspace(refuse_before_restore: bool) {
         ChatDelivery::Possible | ChatDelivery::Uncertain
     ));
 
-    if refuse_before_restore {
-        let (opened, acquired) = tokio::sync::oneshot::channel();
-        let opened = Mutex::new(Some(opened));
-        *f.as_the_host_looks.lock().unwrap() = Some(Box::new(move |_| {
-            if let Some(opened) = opened.lock().unwrap().take() {
-                let _ = opened.send(());
-            }
-        }));
-        finish_refusal.send(()).unwrap();
-        tokio::time::timeout(Duration::from_secs(10), acquired)
-            .await
-            .unwrap()
-            .unwrap();
-    } else {
+    if !refuse_before_restore {
         pending_admission.take().unwrap().send(()).unwrap();
         assert_eq!(
             tokio::time::timeout(Duration::from_secs(10), pending_refusal.take().unwrap())
@@ -2155,8 +2196,14 @@ async fn prompt_does_not_outlive_its_workspace(refuse_before_restore: bool) {
                 .unwrap(),
             Refusal::RuntimeClosed
         );
-        finish_refusal.send(()).unwrap();
     }
+    finish_refusal.send(()).unwrap();
+    // After restore the detached dispatch owns the last runtime reference.
+    // Its drop follows handling the stale result, including any storage work.
+    tokio::time::timeout(Duration::from_secs(10), runtime_dropped.changed())
+        .await
+        .unwrap()
+        .unwrap();
     assert_eq!(saved_attempt(), before);
     assert!(
         !f.fake

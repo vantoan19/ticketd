@@ -1072,6 +1072,54 @@ async fn automation_dispatches_its_prompt_without_draining_older_ordinary_input(
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_cold_automation_prompt_waits_for_its_harness_lookup_to_recover() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let (chat, unattended) = f.automation_chat();
+    let prompt_reads = Arc::new(AtomicUsize::new(0));
+    let opener: WorkspaceOpener = {
+        let (path, chat, reads) = (f.path.clone(), chat.clone(), prompt_reads.clone());
+        Arc::new(move || {
+            let core = WorkspaceSession::for_file(&path)?.workspace()?;
+            // The cold dispatch reads the Chat, then its Automation harness.
+            if !core.chat_queue(&chat)?.is_empty() && reads.fetch_add(1, Ordering::SeqCst) == 1 {
+                return Err(Error::NoDataDirectory);
+            }
+            Ok(core)
+        })
+    };
+    let host = ChatHost::new(opener, vec![Arc::new(f.fake.clone())]).unwrap();
+    let run = tokio::spawn({
+        let chat = chat.clone();
+        async move {
+            host.run_unattended(&chat, "Run Prompt", unattended, Duration::from_secs(60))
+                .await
+        }
+    });
+    settle().await;
+    assert!(prompt_reads.load(Ordering::SeqCst) >= 2);
+    assert!(f.fake.opens().is_empty());
+    let queued = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(queued.len(), 1);
+    assert!(queued[0].attempts.is_empty());
+
+    assert_eq!(f.wait_for_submissions(1).await[0].text, "Run Prompt");
+    assert_eq!(f.fake.opens().len(), 1);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(run.await.unwrap().unwrap(), TurnEnd::Finished);
+    let items = f.core().chat_snapshot(&chat, 20).unwrap().items;
+    let messages: Vec<_> = items
+        .iter()
+        .filter_map(|item| match item {
+            ChatItem::Message(message) => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].id, queued[0].id);
+    assert_eq!(messages[0].attempts.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_unconfirmed_automation_send_takeover_remains_in_shutdown_reports() {
     automation_takeover_reports_unconfirmed_cleanup(true).await;
 }
@@ -3122,7 +3170,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_explicit_link_change_in_backoff_reaches_the_next_ordinary_turn() {
+async fn a_failed_explicit_link_refresh_waits_for_retry_before_the_next_turn() {
     let unavailable = Arc::new(AtomicBool::new(false));
     let source = unavailable.clone();
     let f = fixture_with_link_context(FakeAdapter::codex(), move || {
@@ -3134,35 +3182,28 @@ async fn an_explicit_link_change_in_backoff_reaches_the_next_ordinary_turn() {
     });
     f.send("first").await;
     f.wait_for_submissions(1).await;
-    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
-
-    unavailable.store(true, Ordering::SeqCst);
-    f.host.links_changed(&f.chat.id).await.unwrap();
-    wait_for_context_read_failure(&f).await;
-    f.send("Unrelated after read failure").await;
-    assert_eq!(
-        f.wait_for_submissions(2).await[1].text,
-        "Unrelated after read failure"
-    );
-    f.emit(turn_ended(
-        NativeTurnId::new("turn-2"),
-        TurnOutcome::Completed,
-    ))
-    .await;
-
     let link = ChatLink {
         kind: ChatLinkKind::Ticket,
         id: f.core().create_ticket("New external link").unwrap().id,
     };
     f.core().add_chat_links(&f.chat.id, &[link]).unwrap();
-    unavailable.store(false, Ordering::SeqCst);
+
+    unavailable.store(true, Ordering::SeqCst);
     f.host.links_changed(&f.chat.id).await.unwrap();
+    wait_for_context_read_failure(&f).await;
+    f.send("Steer during backoff").await;
+    let submissions = f.wait_for_submissions(2).await;
+    assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
+    assert_eq!(submissions[1].text, "Steer during backoff");
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
     f.send("After explicit link change").await;
     assert_eq!(
         f.submits().len(),
         2,
-        "the newly requested reread waits through backoff"
+        "the new turn waits for the edited links"
     );
+    unavailable.store(false, Ordering::SeqCst);
     let submissions = f.wait_for_submissions(3).await;
     assert_eq!(
         submissions[2].text,

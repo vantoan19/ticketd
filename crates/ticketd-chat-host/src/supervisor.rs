@@ -403,6 +403,13 @@ pub(crate) async fn bounded_close(handle: &dyn HarnessRuntime) -> Option<String>
     }
 }
 
+fn prompt_admission_refused(refusal: &Refusal) -> bool {
+    matches!(
+        refusal,
+        Refusal::AutomationPromptNotAllowed | Refusal::AutomationPromptOwnershipUnavailable
+    )
+}
+
 impl Supervisor {
     pub(crate) fn spawn(
         chat: &Chat,
@@ -1101,20 +1108,20 @@ impl Supervisor {
         }
     }
 
-    fn context_read_failed(&mut self, error: String, retrying: bool) {
+    fn context_read_failed(&mut self, error: String, retrying: bool, scope: ContextRefreshScope) {
         if !retrying {
             self.notice(format!(
                 "ticketd could not read this Chat's changed links, so the session was not told about them: {error}"
             ));
         }
-        self.schedule_context_retry();
+        self.schedule_context_retry(scope);
     }
 
-    fn schedule_context_retry(&mut self) {
+    fn schedule_context_retry(&mut self, scope: ContextRefreshScope) {
         self.refreshing = Some(ContextRefresh::RetryAt {
             at: Instant::now() + LINK_CONTEXT_RETRY,
             armed: false,
-            scope: ContextRefreshScope::LinkedInput,
+            scope,
         });
     }
 
@@ -2320,13 +2327,17 @@ impl Supervisor {
                 continue;
             }
             if self.runtime.is_none() {
-                if self.unattended.is_some()
-                    && !matches!(
-                        self.core(|core| core.automation_chat_harness(&chat_id)),
-                        Ok(Some(_))
-                    )
-                {
-                    return;
+                if self.unattended.is_some() {
+                    match self.core(|core| core.automation_chat_harness(&chat_id)) {
+                        Ok(Some(_)) => {}
+                        Ok(None) => return,
+                        Err(error) => {
+                            if !is_refusal(&error) {
+                                self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
+                            }
+                            return;
+                        }
+                    }
                 }
                 let (session, origin, preamble) = native_session(&chat);
                 self.open(&chat, session, origin, preamble, None);
@@ -2498,7 +2509,8 @@ impl Supervisor {
         tokio::spawn(async move {
             let attempt_id = submission.submission.0.clone();
             let outcome = handle.submit_with_admission(submission, admission).await;
-            if outcome == DispatchOutcome::NotSent(Refusal::AutomationPromptNotAllowed)
+            if let DispatchOutcome::NotSent(refusal) = &outcome
+                && prompt_admission_refused(refusal)
                 && lifecycle.serving().is_ok()
                 && let Ok(mut workspace) = open_workspace()
                 && lifecycle.serves_workspace_generation(workspace_generation)
@@ -2509,7 +2521,7 @@ impl Supervisor {
                     &chat,
                     vec![ChatObservation::SubmissionNotDelivered {
                         attempt_id,
-                        detail: Some(Refusal::AutomationPromptNotAllowed.reason().to_owned()),
+                        detail: Some(refusal.reason().to_owned()),
                     }],
                 );
             }
@@ -2534,7 +2546,7 @@ impl Supervisor {
                 let Some(ContextRefresh::Reading {
                     request: latest,
                     retrying,
-                    ..
+                    scope,
                 }) = self.refreshing
                 else {
                     return;
@@ -2550,7 +2562,7 @@ impl Supervisor {
                         self.session_context = Some(context);
                     }
                     Ok(_) => {}
-                    Err(error) => self.context_read_failed(error, retrying),
+                    Err(error) => self.context_read_failed(error, retrying, scope),
                 }
             }
             Done::Interrupted {
@@ -2693,7 +2705,7 @@ impl Supervisor {
                         self.notice(format!(
                             "ticketd could not prepare this Chat's context: {error}"
                         ));
-                        self.schedule_context_retry();
+                        self.schedule_context_retry(ContextRefreshScope::LinkedInput);
                     }
                 }
                 if let Some(scope) = opening.context_changed
@@ -2796,13 +2808,20 @@ impl Supervisor {
                     attempt_id,
                     detail: Some(detail.clone()),
                 }]);
-                let prompt_cancelled = refusal == Refusal::AutomationPromptNotAllowed;
-                if current && prompt_cancelled {
-                    self.problem = Some(ChatProblem::DispatchRefused {
-                        detail: detail.clone(),
+                let admission_refused = prompt_admission_refused(&refusal);
+                if current && admission_refused {
+                    self.problem = Some(match refusal {
+                        Refusal::AutomationPromptOwnershipUnavailable => {
+                            ChatProblem::StorageFailed {
+                                detail: detail.clone(),
+                            }
+                        }
+                        _ => ChatProblem::DispatchRefused {
+                            detail: detail.clone(),
+                        },
                     });
                 }
-                self.not_accepted(dispatch, current && !prompt_cancelled, detail);
+                self.not_accepted(dispatch, current && !admission_refused, detail);
             }
             DispatchOutcome::Rejected { reason } => {
                 self.record(vec![ChatObservation::SubmissionRejected {

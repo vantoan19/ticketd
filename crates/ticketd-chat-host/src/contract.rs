@@ -228,7 +228,8 @@ impl AutomationPromptAdmission {
         if self.lifecycle.serving().is_err() {
             return Err(Refusal::RuntimeClosed);
         }
-        let workspace = (self.open_workspace)().map_err(|_| Refusal::AutomationPromptNotAllowed)?;
+        let workspace =
+            (self.open_workspace)().map_err(|_| Refusal::AutomationPromptOwnershipUnavailable)?;
         // The lease pins the file until this check is finished. Admission also
         // owns the input pipe, which restore must quiesce before swapping files.
         if !self
@@ -237,13 +238,10 @@ impl AutomationPromptAdmission {
         {
             return Err(Refusal::RuntimeClosed);
         }
-        if matches!(
-            workspace.automation_chat_owned_by_run(&self.chat_id, &self.run_id),
-            Ok(true)
-        ) {
-            Ok(())
-        } else {
-            Err(Refusal::AutomationPromptNotAllowed)
+        match workspace.automation_chat_owned_by_run(&self.chat_id, &self.run_id) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(Refusal::AutomationPromptNotAllowed),
+            Err(_) => Err(Refusal::AutomationPromptOwnershipUnavailable),
         }
     }
 
@@ -343,8 +341,10 @@ pub enum Refusal {
     AttachmentUnavailable,
     /// The runtime was closed, replaced or lost before the write.
     RuntimeClosed,
-    /// The Automation no longer has confirmed ownership at the write boundary.
+    /// The Automation has lost ownership at the write boundary.
     AutomationPromptNotAllowed,
+    /// The Host could not read Automation ownership at the write boundary.
+    AutomationPromptOwnershipUnavailable,
 }
 
 impl Refusal {
@@ -363,6 +363,9 @@ impl Refusal {
             }
             Self::RuntimeClosed => "the harness session had closed",
             Self::AutomationPromptNotAllowed => "the Automation no longer had confirmed ownership",
+            Self::AutomationPromptOwnershipUnavailable => {
+                "ticketd could not check whether the Automation still owned this Chat"
+            }
         }
     }
 

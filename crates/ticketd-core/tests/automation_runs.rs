@@ -1,9 +1,9 @@
 use ticketd_core::{
     Automation, AutomationAgentSettings, AutomationDefinition, AutomationRun, AutomationRunScope,
     AutomationRunStatus, AutomationRunSummary, AutomationStepStatus, ChatInputChange, ChatLink,
-    ChatLinkKind, ChatListFilter, ChatSubmissionIntent, Check, Condition, NewChat, NotifyTarget,
-    RunAction, RunAnswer, RunEnd, RunningAutomationRuns, Step, StepAction, StepOutcome, Ticket,
-    Trigger, Workspace,
+    ChatLinkKind, ChatListFilter, ChatSubmissionIntent, Check, Condition, Error, NewChat,
+    NotifyTarget, RunAction, RunAnswer, RunEnd, RunningAutomationRuns, Step, StepAction,
+    StepOutcome, Ticket, Trigger, Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
@@ -1190,6 +1190,84 @@ fn replying_in_the_chat_of_a_running_run_ends_it_taken_over_with_the_rest_not_ru
     );
     // The ticket is free for a new run of the Automation.
     workspace.run_automation_again(&run.id).unwrap();
+}
+
+#[test]
+fn a_takeover_reply_has_its_own_receipt_and_can_be_retried_after_takeover() {
+    let (dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let ordinary = workspace
+        .save_chat_input(Some("ordinary"), &chat, "Same text")
+        .unwrap();
+    let takeover = |workspace: &mut Workspace, command_id| {
+        workspace.save_automation_chat_reply_with_change(
+            Some(command_id),
+            &chat,
+            "Same text",
+            &[],
+            None,
+        )
+    };
+    assert!(matches!(
+        takeover(&mut workspace, "ordinary"),
+        Err(Error::RequestConflict(id)) if id == "ordinary"
+    ));
+    assert_eq!(
+        workspace.automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::Running
+    );
+    // A legacy receipt matches its fields but cannot stand in for a new takeover.
+    let receipts = rusqlite::Connection::open(dir.path().join("runs.sqlite3")).unwrap();
+    let remove_source = |command_id| {
+        receipts
+            .execute(
+                "UPDATE request_outcomes SET request = json_remove(request, '$.input_source') WHERE id = ?1",
+                [command_id],
+            )
+            .unwrap();
+    };
+    remove_source("ordinary");
+    assert_eq!(
+        workspace
+            .save_chat_input(Some("ordinary"), &chat, "Same text")
+            .unwrap(),
+        ordinary
+    );
+    assert!(matches!(
+        takeover(&mut workspace, "ordinary"),
+        Err(Error::RequestConflict(id)) if id == "ordinary"
+    ));
+
+    let (reply, ended) = takeover(&mut workspace, "takeover").unwrap();
+    assert_eq!(ended.unwrap().status, AutomationRunStatus::TakenOver);
+    assert_eq!(
+        takeover(&mut workspace, "takeover").unwrap(),
+        (reply.clone(), None)
+    );
+    assert_eq!(
+        workspace
+            .replay_chat_input("takeover", &chat, "Same text", &[])
+            .unwrap(),
+        reply.message
+    );
+    assert_eq!(
+        workspace
+            .save_chat_input(Some("takeover"), &chat, "Same text")
+            .unwrap()
+            .id,
+        reply.id
+    );
+
+    remove_source("takeover");
+    assert_eq!(
+        takeover(&mut workspace, "takeover").unwrap(),
+        (reply.clone(), None)
+    );
+    assert_eq!(
+        workspace.chat_queue(&chat).unwrap(),
+        [ordinary, reply.into_message().unwrap()]
+    );
 }
 
 #[test]

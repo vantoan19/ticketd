@@ -1357,7 +1357,9 @@ fn saved_automation_prompt_id(
         .query_row(
             "SELECT json_extract(outcome, '$') FROM request_outcomes
              WHERE id = ?1 AND json_extract(request, '$.operation') = 'save_chat_input'
-                 AND json_extract(request, '$.chat_id') = ?2",
+                 AND json_extract(request, '$.chat_id') = ?2
+                 AND (json_type(request, '$.input_source') IS NULL
+                      OR json_extract(request, '$.input_source') = 'automation_prompt')",
             params![automation_prompt_command_id(chat_id), chat_id],
             |row| row.get(0),
         )
@@ -1418,6 +1420,8 @@ fn read_input_receipt(
     connection: &Connection,
     command_id: &str,
     request: &Value,
+    chat_id: &str,
+    source: Option<InputSource<'_>>,
 ) -> Result<Option<ChatInputReceipt>, Error> {
     let Some((previous, outcome)) = request_outcome(connection, command_id)? else {
         // Some older versions could save links before saving the input.
@@ -1428,6 +1432,7 @@ fn read_input_receipt(
     let Some(fields) = previous.as_object_mut() else {
         return Err(Error::RequestConflict(command_id.to_owned()));
     };
+    let saved_source = fields.remove("input_source");
     let legacy = !fields.contains_key("links");
     if legacy {
         fields.insert("links".to_owned(), request["links"].clone());
@@ -1438,15 +1443,49 @@ fn read_input_receipt(
     if legacy {
         validate_legacy_input_links(connection, command_id, request)?;
     }
+    let source = match source {
+        Some(source) => source,
+        None if crate::automation_runs::chat_owner(connection, chat_id)?.is_some() => {
+            InputSource::AutomationReply
+        }
+        None => InputSource::Person,
+    };
+    let same_source = match (saved_source.as_ref(), source) {
+        // Old receipts cannot prove a takeover. While the Chat still has an owner,
+        // let only a new command ID initiate one.
+        (None, InputSource::AutomationReply) => {
+            crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
+        }
+        (None, _) => true,
+        // A lost takeover reply can be retried through the now ordinary Chat.
+        (Some(saved), InputSource::Person) if saved == "automation_reply" => {
+            crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
+        }
+        (Some(saved), _) => saved == source.receipt_name(),
+    };
+    if !same_source {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    }
     let id: String = serde_json::from_str(&outcome)?;
     let message = read_message(connection, &id)?;
     Ok(Some(ChatInputReceipt { id, message }))
 }
 
+#[derive(Clone, Copy)]
 enum InputSource<'a> {
     Person,
     AutomationReply,
     AutomationPrompt(&'a str),
+}
+
+impl InputSource<'_> {
+    fn receipt_name(self) -> &'static str {
+        match self {
+            Self::Person => "person",
+            Self::AutomationReply => "automation_reply",
+            Self::AutomationPrompt(_) => "automation_prompt",
+        }
+    }
 }
 
 fn save_input_request(
@@ -2704,7 +2743,7 @@ impl Workspace {
                 return Err(invalid("the run no longer owns this Chat"));
             }
             if let Some((command_id, request)) = &request
-                && let Some(receipt) = read_input_receipt(connection, command_id, request)?
+                && let Some(receipt) = read_input_receipt(connection, command_id, request, chat_id, Some(source))?
             {
                 return Ok((receipt, None, false));
             }
@@ -2762,7 +2801,8 @@ impl Workspace {
                 advance_change_floor(connection, chat_id, position)?;
             }
             trim(connection, chat_id)?;
-            if let Some((command_id, request)) = request {
+            if let Some((command_id, mut request)) = request {
+                request["input_source"] = json!(source.receipt_name());
                 save_outcome(connection, command_id, &request.to_string(), &id)?;
             }
             let message = read_message(connection, &id)?;
@@ -2881,7 +2921,7 @@ impl Workspace {
     ) -> Result<Option<ChatInputReceipt>, Error> {
         let request = save_input_request(chat_id, text, files, replacement)?;
         crate::read_scope::run(&self.connection, |connection| {
-            read_input_receipt(connection, command_id, &request)
+            read_input_receipt(connection, command_id, &request, chat_id, None)
         })
     }
 
