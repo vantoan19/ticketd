@@ -406,6 +406,51 @@ it("says on each row where the Document belongs and never asks for links per row
   expect(documents.links).not.toHaveBeenCalled();
 });
 
+it("joins an update detail's origin to the rest of the meta line with the same dots", async () => {
+  vi.mocked(documents.recent).mockImplementation(async (_offset, include) =>
+    include
+      ? [
+          {
+            id: "a",
+            heading: "Update",
+            updated_at: "2026-11-23T23:43:00.000Z",
+            plans: [{ id: "p", name: "Launch", archived: false, spec: false }],
+            origin_ticket: "T-KQ1",
+          },
+          { id: "b", heading: "Bare update", origin_ticket: "T-KQ2" },
+        ]
+      : [],
+  );
+  renderDocuments();
+  fireEvent.pointerDown(await screen.findByRole("button", { name: "More" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitemcheckbox", {
+      name: "Show update details",
+    }),
+  );
+  const parts = async (title: string) =>
+    [
+      ...((await screen.findByRole("button", { name: title }))
+        .closest("li")
+        ?.querySelector(".document-list-meta")?.children ?? []),
+    ].map((part) => part.textContent);
+  // time, dot, context, dot, "Update details", dot, ticket: one dot between each pair.
+  const full = await parts("Update");
+  expect(full.slice(1)).toEqual([
+    "·",
+    "Launch",
+    "·",
+    "Update details",
+    "·",
+    "T-KQ1",
+  ]);
+  // With nothing before it, there is no dot before "Update details".
+  expect(await parts("Bare update")).toEqual(["Update details", "·", "T-KQ2"]);
+});
+
 it("shows a dot named Not opened yet only on Documents never opened here, and no page icon", async () => {
   vi.mocked(documents.recent).mockResolvedValue([
     { id: "a", heading: "Fresh", opened: false },

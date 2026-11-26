@@ -32,6 +32,9 @@
   min-width: 0;
   min-height: 0;
   overflow-y: auto;
+  /* WebKit's 10px scrollbar comes and goes with the list's height; its room stays, so a title
+     does not re-wrap when a group opens or closes. */
+  scrollbar-gutter: stable;
 }
 /* The header sits in a wrapper that takes its step of the page's entrance. */
 .documents-list-view > .documents-list-head {
@@ -41,6 +44,25 @@
   z-index: 2;
   flex: none;
   margin: 0;
+}
+/* The switch and the buttons keep the rows' 10px inset; searching, the field takes the header
+   with 8px on both sides (the board's L2). */
+.documents-list-head .ui-pane-header:not([data-leading]) {
+  padding-inline: 10px;
+}
+.documents-list-head .ui-pane-header[data-title-editor]:not([data-leading]) {
+  padding-inline: 8px;
+}
+/* The shell's notice slot keeps 28px for a failure control; searching, while it is empty, the
+   field gets that room too. */
+.documents-list-head
+  .ui-pane-header[data-title-editor]
+  .ui-pane-header-actions:has(> .ui-shell-notice-slot:empty) {
+  display: none;
+}
+/* 4px above the first group and 16px under the last row, as the board's list. */
+.documents-list-body {
+  padding: 4px 0 16px;
 }
 .documents-list-view [data-slot="pane-search"] {
   display: flex;
@@ -58,22 +80,37 @@
   margin: 0;
   padding: 0;
 }
+/* Pinned and Recent head their rows like a group does: 12/16 medium muted, 14px above the
+   name and 6px under it, the count on the right edge. */
 .documents-list-view h2.documents-group {
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 36px;
-  margin: 6px 8px 0;
-  padding: 0 12px;
+  margin: 0;
+  padding: 14px 18px 6px;
 }
 .documents-group svg {
+  flex: none;
   width: 14px;
   height: 14px;
+  margin-left: -4px;
 }
-/* A Current work group header: one button that folds the group (12/16, as the board's .wgrp). */
+.documents-group [data-slot="count"] {
+  margin-left: auto;
+  font-weight: 400;
+}
+/* A Current work group header (the board's .wgrp, 12/16): 14px above its name after rows, 10px
+   after another header, 6px under it. The spacing is the heading's padding and the button
+   inside is just the name's row, 8px in from each side like a Document row, so its focus ring
+   is inset and rounded like theirs and centred on the name. */
 .documents-list-view h2.documents-group-header {
   margin: 0;
-  padding: 0;
+  padding: 10px 8px 2px;
+}
+.documents-group-block:has(> .documents-group-header [aria-expanded="false"])
+  + .documents-group-block
+  h2.documents-group-header {
+  padding-top: 6px;
 }
 .documents-group-toggle {
   display: flex;
@@ -81,11 +118,19 @@
   gap: 8px;
   width: 100%;
   min-width: 0;
-  padding: 14px 18px 6px;
+  padding: 4px 10px;
   text-align: start;
 }
-.documents-group-block + .documents-group-block .documents-group-toggle {
-  padding-top: 10px;
+/* A name wraps to a second line before it is cut. */
+.documents-group-name {
+  display: -webkit-box;
+  min-width: 0;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.documents-group-toggle [data-slot="count"] {
+  font-weight: 400;
 }
 .documents-group-toggle svg {
   flex: none;
@@ -99,13 +144,17 @@
 /* The two folds of old work sit apart, under a hairline. */
 .documents-folds {
   margin-top: 10px;
-  padding-top: 6px;
+}
+.documents-folds
+  > .documents-group-block:first-child
+  h2.documents-group-header {
+  padding-top: 12px;
 }
 .documents-list-view .document-list li {
   position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr);
-  min-height: 52px;
+  min-height: 54px;
   margin: 0 8px;
   padding: 8px 10px;
 }
@@ -132,8 +181,18 @@
   gap: 6px;
   align-items: center;
   height: 16px;
-  margin: 0;
+  margin: 2px 0 0;
   overflow: hidden;
+}
+/* The time's key-focus ring fits inside the 16px line (which clips): its box takes 4px of
+   padding, cancelled by a negative margin so the text stays where it is. */
+.document-list-meta time {
+  padding-inline: 4px;
+  margin-inline: -4px;
+}
+.document-list-meta [role="img"] {
+  display: flex;
+  flex: none;
 }
 .document-list-pin,
 .document-list li > [data-restore] {
@@ -175,10 +234,16 @@
   clip-path: inset(50%);
   white-space: nowrap;
 }
+/* An unread passage hangs its dot in front: every line keeps the one left edge. */
+.document-list .document-snippet:has([role="img"]) {
+  position: relative;
+  padding-left: 12px;
+}
 .document-list .document-snippet [role="img"] {
-  display: inline-block;
-  margin-right: 6px;
-  vertical-align: middle;
+  position: absolute;
+  top: 6px;
+  left: 0;
+  display: flex;
 }
 /* The words a search matched: the accent fill and a 1.5px foreground underline (the board's
    .hit), so a match never relies on colour alone. */
@@ -189,20 +254,20 @@
   box-shadow: inset 0 -1.5px 0 var(--foreground);
   color: inherit;
 }
-/* The two groups of a word search: a 12/16 medium muted name, then its count. */
+/* The two groups of a word search (the board's .lgrp): a 12/16 muted name, 8px, its count. */
 .documents-list-view h2.documents-search-heading {
   display: flex;
   align-items: baseline;
-  gap: 6px;
+  gap: 8px;
   margin: 0;
   padding: 14px 18px 6px;
   color: var(--muted-foreground);
   font-size: 12px;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 16px;
 }
 .documents-search-group + .documents-search-group .documents-search-heading {
-  padding-top: 10px;
+  padding-top: 18px;
 }
 .documents-filters,
 .documents-restored {

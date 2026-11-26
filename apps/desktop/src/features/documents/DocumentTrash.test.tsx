@@ -166,7 +166,8 @@ it("includes Activity details on request and keeps a selected detail", async () 
     }),
   );
   fireEvent.click(await screen.findByRole("button", { name: "Update" }));
-  expect(screen.getByText("Update details · T-KQ1")).toBeTruthy();
+  expect(screen.getByText("Update details")).toBeTruthy();
+  expect(screen.getByText("T-KQ1")).toBeTruthy();
   fireEvent.click(
     await screen.findByRole("button", { name: "Keep in Documents" }),
   );
