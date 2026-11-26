@@ -1049,7 +1049,10 @@ async fn an_ordinary_linked_attachment_reply_takes_over_only_when_committed() {
     let saved = send().await.unwrap();
     assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
     assert!(f.core().chat(&chat).unwrap().links.contains(&link));
-    assert_eq!(f.core().chat_queue(&chat).unwrap(), [saved.clone()]);
+    assert_eq!(
+        f.core().chat_queue(&chat).unwrap().as_slice(),
+        std::slice::from_ref(&saved)
+    );
     assert_eq!(
         f.core()
             .chat_message_attachment_contents(&chat, &saved.id)
