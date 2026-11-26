@@ -102,13 +102,13 @@ test("a query matches the beginnings of words, never the middle of one", () => {
   expect(titles("rows")).not.toContain("Report an issue");
   expect(titles("board")).toEqual(["Lists"]);
   expect(titles("key")).toContain("Everywhere");
-  expect(titles("back")).toContain("Back up now");
+  expect(titles("back")).toContain("Restore points");
 });
 
 test("every word of a query must match", () => {
   const titles = (query: string) =>
     searchSettings(query, SETTINGS_ENTRIES).map((hit) => hit.title);
-  expect(titles("restore backup")).toContain("Restore from a backup");
+  expect(titles("restore backup")).toContain("Restore points");
   expect(titles("restore zzzz")).toEqual([]);
 });
 

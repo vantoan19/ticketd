@@ -1692,14 +1692,19 @@ test("a restore reads the list once, during the restore", async () => {
       lists += 1;
       return [bulkTicket(1)];
     },
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1714,14 +1719,17 @@ test("a restore reads the list once, during the restore", async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  await turn();
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(0);
+  });
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
     ).getByRole("button", { name: "Backups & export" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
-  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  fireEvent.click(screen.getByRole("button", { name: /^Restore…/ }));
   for (let i = 0; i < 3; i += 1) await turn();
   const before = lists;
   fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
@@ -1751,14 +1759,19 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   };
   await renderReplaceable({
     find_tickets: () => [bulkTicket(1)],
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1785,7 +1798,7 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
     ).getByRole("button", { name: "Backups & export" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
-  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  fireEvent.click(screen.getByRole("button", { name: /^Restore…/ }));
   for (let i = 0; i < 3; i += 1) await turn();
   const before = order.length;
   fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
@@ -1842,14 +1855,19 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
     failRefresh = reject;
   });
   const handlers: Record<string, unknown> = {
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1922,9 +1940,7 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).getByRole("button", { name: "Backups & export" }),
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: `Restore… ${backup}` }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: /^Restore…/ }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Replace workspace" }),
   );
@@ -2207,7 +2223,6 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
           size_bytes: 4096,
           format_version: 20,
         };
-      if (command === "last_backup") return null;
       if (command === "check_cli") throw new Error("not installed");
       return bridgeDefault(command, args);
     },
@@ -12791,15 +12806,20 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
             },
           },
         ];
-      if (command === "safety_backups")
-        return [
-          {
-            path: backup,
-            kind: "safety",
-            saved_at: doc.updated_at,
-            size_bytes: 1024,
-          },
-        ];
+      if (command === "restore_points")
+        return {
+          points: [
+            {
+              path: backup,
+              kind: "safety",
+              saved_at: doc.updated_at,
+              size_bytes: 1024,
+              summary: null,
+              problem: null,
+            },
+          ],
+          total_bytes: 1024,
+        };
       if (command === "inspect_backup")
         return {
           path: backup,
@@ -12876,7 +12896,7 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
       await screen.findByRole("button", { name: "Backups & export" }),
     );
     const review = await screen.findByRole("button", {
-      name: `Restore… ${backup}`,
+      name: /^Restore…/,
     });
     await user.click(review);
     const dialog = await screen.findByRole("dialog", {

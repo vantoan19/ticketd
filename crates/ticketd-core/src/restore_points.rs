@@ -177,9 +177,9 @@ impl Workspace {
                 saved_at: record.saved_at,
                 size_bytes,
                 summary: record.summary,
-                problem: record
-                    .problem
-                    .or_else(|| missing.then(|| "a file it keeps is missing".to_owned())),
+                problem: record.problem.or_else(|| {
+                    missing.then(|| "an attachment file it keeps is missing".to_owned())
+                }),
                 update_version: None,
             });
         }

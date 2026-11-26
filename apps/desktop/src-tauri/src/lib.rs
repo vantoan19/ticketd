@@ -28,13 +28,12 @@ mod webview_report;
 mod workspace_session;
 
 use ticketd_core::{
-    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
-    ContextGraphPage, CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
-    DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
-    MetadataSelection, Plan, PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange,
-    SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
-    TicketPatch, Workspace, WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest,
-    WriteResult,
+    Activity, ActivityPatch, BackupInspection, BatchOperation, ContextGraph, ContextGraphPage,
+    CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult, DocumentSummary,
+    Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate, MetadataSelection, Plan,
+    PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange, SidebarCounts, Status,
+    StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceGraph,
+    WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
     source::{ExtensionRegistry, RefreshControl, RefreshProgress},
 };
 
@@ -1447,19 +1446,6 @@ fn set_plan(reference: String, plan: Option<String>) -> Result<Ticket, BridgeFai
         .map_err(BridgeFailure::from)
 }
 
-/// Saves a backup. Returns whether it was also recorded as the last backup.
-#[tauri::command(async)]
-fn backup_workspace(path: String) -> Result<bool, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.backup(&path))
-        .map_err(BridgeFailure::from)
-}
-#[tauri::command(async)]
-fn last_backup() -> Result<Option<BackupRecord>, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.last_backup())
-        .map_err(BridgeFailure::from)
-}
 /// Where the workspace file is, read without opening it: the startup recovery
 /// screen names the file even when it cannot be opened.
 #[tauri::command(async)]
@@ -1478,12 +1464,6 @@ fn workspace_info() -> Result<WorkspaceInfo, BridgeFailure> {
 fn inspect_backup(path: String) -> Result<BackupInspection, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.inspect_backup(path))
-        .map_err(BridgeFailure::from)
-}
-#[tauri::command(async)]
-fn safety_backups() -> Result<Vec<SafetyBackup>, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.safety_backups())
         .map_err(BridgeFailure::from)
 }
 
@@ -2500,7 +2480,6 @@ pub fn run() -> Result<(), tauri::Error> {
             document_version,
             open_document,
             save_document,
-            backup_workspace,
             restore_points::restore_points,
             restore_points::save_restore_point,
             list_sources,
@@ -2525,12 +2504,10 @@ pub fn run() -> Result<(), tauri::Error> {
             update_source_credentials,
             rename_source_connection,
             remove_source_connection,
-            last_backup,
             workspace_info,
             workspace_location,
             chat_commands::restore_workspace,
             inspect_backup,
-            safety_backups,
             export_workspace,
             list_plans,
             show_plan,

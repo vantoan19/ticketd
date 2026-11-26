@@ -82,31 +82,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "files",
   },
   {
-    title: "Back up now",
+    title: "Restore points",
     description:
-      "Saves a checked copy to a new file you choose. It never replaces an existing file.",
-    keywords: "backup copy save last backup",
-    section: "backups-export",
-  },
-  {
-    title: "What a backup contains",
-    description: "Tickets, Documents, Plans, Projects, activity and evidence",
+      "Copies to come back to, saved on this computer every day. The last 7 are kept.",
     keywords:
-      "includes contents local attachment files integrity check google drive not included",
-    section: "backups-export",
-  },
-  {
-    title: "Restore from a backup",
-    description:
-      "Replaces this workspace after a review. A safety backup of it is saved first.",
-    keywords: "restore recover replace workspace choose backup",
-    section: "backups-export",
-  },
-  {
-    title: "Safety backups",
-    description:
-      "Saved next to the workspace before a restore or a format upgrade, with every retained local attachment file. Restore one to undo.",
-    keywords: "undo backup automatic",
+      "backup back up now copy save daily restore recover replace undo safety file earlier version",
     section: "backups-export",
   },
   {
