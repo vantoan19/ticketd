@@ -1502,6 +1502,13 @@ impl Supervisor {
             id: message_id,
             requires_link_context,
         });
+        if requires_link_context
+            && self.refreshing.is_none()
+            && self.session_context.is_none()
+            && self.context_sent.is_none()
+        {
+            self.refresh_context(ContextRefreshScope::LinkedInput);
+        }
         Ok(())
     }
 
@@ -2043,6 +2050,7 @@ impl Supervisor {
         self.turn_evidence = None;
         self.unconfirmed_deadline = None;
         self.refreshing = None;
+        self.context_sent = None;
         self.interactions.clear();
         self.text.clear();
         self.pending_tools.clear();
@@ -2406,7 +2414,14 @@ impl Supervisor {
             None
         };
         let context = if starts_turn && self.refreshing.is_none() {
-            self.session_context.take()
+            self.session_context.take().or_else(|| {
+                // A written turn can time out without having received its context.
+                if resend && message.requires_link_context {
+                    self.context_sent.clone()
+                } else {
+                    None
+                }
+            })
         } else {
             None
         };

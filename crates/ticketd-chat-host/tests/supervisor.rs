@@ -2374,6 +2374,15 @@ async fn send_now_checks_the_context_of_a_saved_queued_takeover_reply() {
 
 #[tokio::test(start_paused = true)]
 async fn resend_checks_stored_link_context_after_restarting_the_supervisor() {
+    linked_resend_preserves_context(true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn resend_of_a_live_unconfirmed_linked_input_keeps_its_context() {
+    linked_resend_preserves_context(false).await;
+}
+
+async fn linked_resend_preserves_context(restart: bool) {
     let unavailable = Arc::new(AtomicBool::new(false));
     let source = unavailable.clone();
     let f = fixture_with_link_context(FakeAdapter::codex(), move || {
@@ -2402,20 +2411,32 @@ async fn resend_checks_stored_link_context_after_restarting_the_supervisor() {
     f.wait_for_submissions(1).await;
     tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
     assert!(f.message(&saved.id).awaits_decision());
-    assert!(f.host.stop_all(StopReason::Quit).await.is_empty());
+    let later = f.queue("Keep waiting").await;
+    if restart {
+        assert!(f.host.stop_all(StopReason::Quit).await.is_empty());
+        unavailable.store(true, Ordering::SeqCst);
+    }
 
-    unavailable.store(true, Ordering::SeqCst);
     f.host.resend(&f.chat.id, &saved.id).await.unwrap();
-    wait_for_context_read_failure(&f).await;
-    assert_eq!(f.submits().len(), 1);
-    assert_eq!(f.message(&saved.id).attempts.len(), 1);
-
-    unavailable.store(false, Ordering::SeqCst);
+    if restart {
+        wait_for_context_read_failure(&f).await;
+        assert_eq!(f.submits().len(), 1);
+        assert_eq!(f.message(&saved.id).attempts.len(), 1);
+        unavailable.store(false, Ordering::SeqCst);
+    }
     let submissions = f.wait_for_submissions(2).await;
     assert_eq!(submissions[1].kind, SubmissionKind::StartTurn);
     assert_eq!(submissions[1].text, "linked records: 1\n\nRead this");
     assert_eq!(submissions[1].attachments, [saved_file()]);
-    assert_eq!(f.message(&saved.id).attempts.len(), 2);
+    let attempts = f.message(&saved.id).attempts;
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(attempts[0].delivery, ChatDelivery::Uncertain);
+    assert_eq!(attempts[0].decision, Some(ChatDeliveryDecision::Resent));
+    assert_ne!(submissions[0].submission, submissions[1].submission);
+    assert_eq!(f.queued(), ["Keep waiting"]);
+    assert!(f.message(&later.id).attempts.is_empty());
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(f.fake.opens().len(), if restart { 2 } else { 1 });
 }
 
 async fn wait_for_context_read_failure(f: &Fixture) {
@@ -2652,7 +2673,7 @@ async fn linked_attachment_reaches_the_session_with_context(active_mode: Option<
 /// L4: links changed after the session started reach the agent with the next new turn,
 /// kept as context like the first delivery; a resumed native session is told only
 /// when its context differs from what it was given.
-#[tokio::test(start_paused = true)]
+#[tokio::test]
 async fn a_linked_edit_during_open_leaves_the_unrelated_first_turn_free_to_start() {
     let mut f = Fixture::new(FakeAdapter::codex());
     let path = f.path.clone();
