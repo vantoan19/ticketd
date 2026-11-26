@@ -73,3 +73,45 @@ test("a word that changes with no dot arriving crossfades at once", async () => 
   await clock.advance(40);
   expect(Number(word("Choose one").style.opacity)).toBeGreaterThan(0);
 });
+
+test("working is the word in ink with no spinner and no dot", () => {
+  render(
+    <MotionProvider>
+      <ChatStatus status={working} activity="working" />
+    </MotionProvider>,
+  );
+  expect(word("Working")).toBeTruthy();
+  expect(line().querySelector(".chat-spin")).toBeNull();
+  expect(line().querySelector('[data-slot="status-dot"]')).toBeNull();
+  expect(line().hasAttribute("data-signal")).toBe(true);
+});
+
+test("a menu can ask for the spinner on a working row", () => {
+  render(
+    <MotionProvider>
+      <ChatStatus status={working} activity="working" spinner />
+    </MotionProvider>,
+  );
+  expect(line().querySelector(".chat-spin")).not.toBeNull();
+  expect(word("Working")).toBeTruthy();
+});
+
+test("the spinner is for working only, and a dot takes its place", () => {
+  const { rerender } = render(
+    <MotionProvider>
+      <ChatStatus status={asking} activity="idle" spinner />
+    </MotionProvider>,
+  );
+  expect(line().querySelector(".chat-spin")).toBeNull();
+  expect(line().querySelector('[data-slot="status-dot"]')).not.toBeNull();
+  rerender(
+    <MotionProvider>
+      <ChatStatus
+        status={{ rank: "idle", unseen: false, word: "Done" }}
+        activity="idle"
+        spinner
+      />
+    </MotionProvider>,
+  );
+  expect(line().querySelector(".chat-spin")).toBeNull();
+});

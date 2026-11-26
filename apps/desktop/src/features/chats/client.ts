@@ -172,7 +172,8 @@ export const chatSummarySchema = z.object({
   /** `problem` is why the last turn stopped, not a condition observed now. */
   problem_past: z.boolean().nullish(),
   interruption: interruptionSchema.nullish(),
-  last_change: recordChangeSchema.nullish(),
+  /** The first record the agent changed in its latest turn. */
+  first_change: recordChangeSchema.nullish(),
   /** The start of the last response. */
   preview: z.string().nullish(),
   updated_at: z.string(),
@@ -320,6 +321,8 @@ const stepSchema = z.object({
     .optional(),
   /** The command without its shell wrappers. */
   command: z.string().nullish(),
+  /** The harness's own one-line account of the command. Absent from older hosts and records. */
+  description: z.string().nullish(),
   exit_code: z.number().int().nullish(),
   /** Where the command ran, when that is not the Chat's folder. */
   folder: z.string().nullish(),
@@ -433,6 +436,14 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     changes: z.array(recordChangeSchema),
     /** For each change, whether its record is now trashed or deleted. */
     gone: z.array(goneSchema.nullable()).nullish(),
+    /**
+     * The turn's changes up to this call, netted by the host (a ticket's status
+     * moves become one move): what the receipt row says. `changes` stay raw, for
+     * the fold's step rows. Absent from older hosts: the row says `changes`.
+     */
+    net: z.array(recordChangeSchema).nullish(),
+    /** For each net change, as `gone` is for `changes`. */
+    net_gone: z.array(goneSchema.nullable()).nullish(),
   }),
   /** When a turn started and ended, and how. It has no row of its own. */
   z.object({

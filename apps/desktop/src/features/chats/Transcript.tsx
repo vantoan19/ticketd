@@ -72,21 +72,31 @@ import {
   failureMarkerMatches,
   workedFor,
   isLive,
+  lastOf,
   recordNamer,
   type RecordName,
   type TranscriptPart,
+  type Stretch,
   type Turn,
   type TurnRow,
+  type ViewStep,
   goneWords,
   sentence,
+  turnClock,
+  turnSpanText,
 } from "@/features/chats/model";
-import { FileName } from "@/features/chats/FileName";
+import { FileName, PathCode } from "@/features/chats/FileName";
 import {
   ChatFilesContext,
   SentLinksContext,
-  shownNames,
+  scopeIsPath,
 } from "@/features/chats/files";
 import { sentParts } from "@/features/chats/composer-mentions";
+import { inView, useKeptOpen } from "@/features/chats/use-kept-open";
+import {
+  steerCaption,
+  steersAwaitingRead,
+} from "@/features/chats/steer-caption";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { ProjectNavigation } from "@/features/documents/navigation";
 import { ImageTiles } from "@/features/chats/ImageTiles";
@@ -100,7 +110,6 @@ import {
 } from "@/features/chats/use-arrivals";
 import { Presence, Appear, Shimmer } from "@/components/ui/motion";
 import { useReading } from "@/features/chats/use-transcript-scroll";
-import { formatTime } from "@/lib/format";
 
 /** What transcript items can ask of the Chat that owns them. Keep the object stable. */
 export type TranscriptActions = {
@@ -122,21 +131,17 @@ const DELIVERY_CAPTION = {
 } as const;
 
 /**
- * The session is opening: its working line says "Starting…", so a message's
- * own "Sending…" is not said too (LIVE-6, one status row).
+ * What a sent message asks of its Chat. `opening`: the session is opening, its
+ * working line says "Starting…", so a message's own "Sending…" is not said too
+ * (LIVE-6, one status row). `waiting`: steers the harness has taken and not
+ * yet acted on, which say when they will be read.
  */
-const OpeningContext = createContext(false);
+const UserMessageContext = createContext<{
+  opening: boolean;
+  waiting: ReadonlySet<string>;
+  harness: string;
+}>({ opening: false, waiting: new Set(), harness: "" });
 
-/** "10:44": when your message was sent, as the hover line says it. */
-const sentAt = (stamp: string) => {
-  const date = new Date(stamp);
-  return Number.isNaN(date.getTime()) ? "" : formatTime(date);
-};
-
-/**
- * Your message, exactly as sent, on the right. Past four lines it folds behind
- * Show more. Its time and Copy show on hover or focus.
- */
 /** A record a sent message mentions: a link, or its name and "(in Trash)". */
 function SentMention({
   record,
@@ -199,6 +204,11 @@ function SentText({ text }: { text: string }) {
   );
 }
 
+/**
+ * Your message, exactly as sent, on the right. Past four lines it folds behind
+ * Show more. Copy shows beside it on hover or focus; the turn's time is on its
+ * work line.
+ */
 function UserMessage({
   item,
   exportAttachment,
@@ -206,11 +216,13 @@ function UserMessage({
   item: ItemOf<"user">;
   exportAttachment: TranscriptActions["exportAttachment"];
 }) {
-  const opening = useContext(OpeningContext);
+  const { opening, waiting, harness } = useContext(UserMessageContext);
   const caption =
     opening && item.delivery === "sending"
       ? ""
-      : DELIVERY_CAPTION[item.delivery];
+      : waiting.has(item.id)
+        ? steerCaption(harness)
+        : DELIVERY_CAPTION[item.delivery];
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
@@ -229,7 +241,6 @@ function UserMessage({
     observer.observe(box);
     return () => observer.disconnect();
   }, [item.text, more]);
-  const time = sentAt(item.at);
   return (
     <div className="chat-you-part">
       <Arrives id={item.id} className="flex flex-col items-end">
@@ -237,10 +248,16 @@ function UserMessage({
           <ImageTiles images={item.images} />
         )}
         {item.text && (
-          <div className="chat-you">
-            <div ref={text} data-clamped={more ? undefined : ""}>
-              <span className="sr-only">You: </span>
-              <SentText text={item.text} />
+          <div className="chat-you-box">
+            <div className="chat-you">
+              <div ref={text} data-clamped={more ? undefined : ""}>
+                <span className="sr-only">You: </span>
+                <SentText text={item.text} />
+              </div>
+            </div>
+            <div className="chat-you-actions">
+              {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
+              <CopyButton text={item.text} label="Copy message" />
             </div>
           </div>
         )}
@@ -285,26 +302,18 @@ function UserMessage({
           </Button>
         )}
         {caption && <div className="chat-caption">{caption}</div>}
-        <div className="chat-you-actions">
-          {time && <span className="chat-fine">{time}</span>}
-          {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
-          {item.text && <CopyButton text={item.text} label="Copy message" />}
-        </div>
       </Arrives>
     </div>
   );
 }
 
+/** A response's text. Its actions belong to the turn's end (ReplyActions). */
 const Response = memo(function Response({
   item,
   harness,
-  readOnly,
-  actions,
 }: {
   item: ItemOf<"response">;
   harness: string;
-  readOnly: boolean;
-  actions: TranscriptActions;
 }) {
   // Streamed text fades in chunk by chunk as it arrives; no typewriter.
   const chunkStarts = useChunkStarts(item.text, item.state === "streaming");
@@ -321,24 +330,41 @@ const Response = memo(function Response({
             saved.
           </p>
         )}
-        {item.state === "complete" && (
-          <div className="chat-actions">
-            <CopyButton text={item.text} label="Copy response" />
-            {!readOnly && (
-              <Button
-                variant="ghost"
-                size="xs"
-                onClick={() => actions.saveAsDocument(item)}
-              >
-                <FilePlus2 aria-hidden /> Save as Document
-              </Button>
-            )}
-          </div>
-        )}
       </Arrives>
     </div>
   );
 });
+
+/**
+ * Copy and Save as Document for a turn's final response. They sit in the 40px gap
+ * after the turn, shown on hover or focus without taking space (coarse pointers
+ * keep them in a row). A progress note has none.
+ */
+function ReplyActions({
+  item,
+  readOnly,
+  actions,
+}: {
+  item: ItemOf<"response">;
+  readOnly: boolean;
+  actions: TranscriptActions;
+}) {
+  if (item.state !== "complete") return null;
+  return (
+    <div className="chat-turn-actions">
+      <CopyButton text={item.text} label="Copy response" />
+      {!readOnly && (
+        <Button
+          variant="ghost"
+          size="xs"
+          onClick={() => actions.saveAsDocument(item)}
+        >
+          <FilePlus2 aria-hidden /> Save as Document
+        </Button>
+      )}
+    </div>
+  );
+}
 
 /** The current time, ticking each second while `on`. */
 function useNow(on: boolean) {
@@ -390,7 +416,7 @@ const TICKETD_ICONS: Record<TicketdCall["verb"], LucideIcon> = {
 };
 
 /** Whether a step's targets are files that can still be opened. */
-const opensFiles = (step: Step) =>
+const opensFiles = (step: ViewStep) =>
   (step.kind === "read" && step.variant !== "list") ||
   step.kind === "edit" ||
   step.kind === "create";
@@ -402,7 +428,7 @@ function StepDetail({
   harness,
 }: {
   id: string;
-  step: Step;
+  step: ViewStep;
   harness: string;
 }) {
   const targets = step.targets ?? [];
@@ -411,7 +437,10 @@ function StepDetail({
   const command = step.kind === "run" ? step.command : undefined;
   const { folder, output: readOutput } = useContext(ChatFilesContext);
   const [failure, setFailure] = useState("");
-  const files = opensFiles(step);
+  const files = opensFiles(step) || (step.explored?.files.length ?? 0) > 0;
+  // The targets of these are folders and files: the folder muted, the name in ink.
+  const pathKind =
+    (step.kind === "read" && step.variant === "list") || step.kind === "delete";
   // A step carries only its output's end; opened, it reads the whole of it.
   const toolId = step.full_output?.tool_id;
   const [whole, setWhole] = useState<{ toolId: string; text: string }>();
@@ -445,30 +474,64 @@ function StepDetail({
         />
       ) : (
         <>
-          {(targets.length > 2 ||
-            (step.omitted_files && targets.length > 0)) && (
+          {step.explored ? (
             <ul>
-              {targets.map((target, index) => (
-                <li key={index}>
+              {step.explored.files.map((target, index) => (
+                <li key={`file-${index}`}>
                   {files ? (
-                    <FileName
-                      path={target.text}
-                      shown={target.text}
-                      onFailed={setFailure}
-                    />
+                    <FileName path={target.text} onFailed={setFailure} />
                   ) : (
-                    <code>{target.text}</code>
-                  )}
-                  {target.scope && (
-                    <>
-                      {" "}
-                      in <code>{target.scope}</code>
-                    </>
+                    <PathCode path={target.text} />
                   )}
                   {target.lines && <small>{targetLines(target)}</small>}
                 </li>
               ))}
+              {step.explored.searches.map((target, index) => (
+                <li key={`search-${index}`}>
+                  Searched for <code>{target.text}</code>
+                  {target.scope && (
+                    <>
+                      {" "}
+                      in{" "}
+                      {scopeIsPath(target.scope) ? (
+                        <PathCode path={target.scope} />
+                      ) : (
+                        <code>{target.scope}</code>
+                      )}
+                    </>
+                  )}
+                </li>
+              ))}
             </ul>
+          ) : (
+            (targets.length > 2 ||
+              (step.omitted_files && targets.length > 0)) && (
+              <ul>
+                {targets.map((target, index) => (
+                  <li key={index}>
+                    {files ? (
+                      <FileName path={target.text} onFailed={setFailure} />
+                    ) : pathKind ? (
+                      <PathCode path={target.text} />
+                    ) : (
+                      <code>{target.text}</code>
+                    )}
+                    {target.scope && (
+                      <>
+                        {" "}
+                        in{" "}
+                        {scopeIsPath(target.scope) ? (
+                          <PathCode path={target.scope} />
+                        ) : (
+                          <code>{target.scope}</code>
+                        )}
+                      </>
+                    )}
+                    {target.lines && <small>{targetLines(target)}</small>}
+                  </li>
+                ))}
+              </ul>
+            )
           )}
           {output && <pre className="chat-out">{plainOutput(output)}</pre>}
         </>
@@ -491,12 +554,30 @@ function StepDetail({
   );
 }
 
+/**
+ * On a one-line row, what follows the verb (the names and the words between them) is
+ * one group the row can clip, so the verb and the outcome always stay whole.
+ */
+function wrapNames(oneLine: boolean, nodes: ReactNode[]) {
+  const [verb, ...names] = nodes;
+  if (!oneLine || names.length === 0) return nodes;
+  return [
+    verb,
+    <span key="names" className="chat-step-names">
+      {names}
+    </span>,
+  ];
+}
+
 /** One 28px line: `[icon] words`, then a chevron when it opens. */
 function RowLine({
   icon,
+  line,
   children,
 }: {
   icon?: ReactNode;
+  /** A command, or a row that names files or patterns: one line, the names cut with an ellipsis. */
+  line?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -504,7 +585,9 @@ function RowLine({
       <span className="chat-row-icon" aria-hidden="true">
         {icon}
       </span>
-      <span className="chat-step-words">{children}</span>
+      <span className="chat-step-words" data-line={line ? "" : undefined}>
+        {children}
+      </span>
     </>
   );
 }
@@ -521,7 +604,7 @@ export const StepRow = memo(function StepRow({
   decision,
   live,
 }: {
-  step: Step;
+  step: ViewStep;
   harness: string;
   decision?: string | undefined;
   live: boolean;
@@ -555,6 +638,7 @@ export const StepRow = memo(function StepRow({
     running && now - started >= 1000 ? duration(now - started) : undefined;
   const [failure, setFailure] = useState("");
   const detail =
+    Boolean(step.explored) ||
     (step.kind === "run" && Boolean(step.command)) ||
     Boolean(step.output) ||
     (step.targets?.length ?? 0) > 2 ||
@@ -562,11 +646,18 @@ export const StepRow = memo(function StepRow({
     Boolean(words.detail || step.result || step.truncated);
   // A row that opens is a button already, so its names cannot be buttons too.
   const files = !detail && opensFiles(step) ? (step.targets ?? []) : [];
-  const names = shownNames(files.map((target) => target.text));
   const call = step.kind === "run" ? step.ticketd?.[0] : undefined;
-  const Icon = call ? TICKETD_ICONS[call.verb] : STEP_ICONS[step.kind];
+  const Icon = call
+    ? TICKETD_ICONS[call.verb]
+    : STEP_ICONS[step.explored ? "read" : step.kind];
+  // A command, or a file or a pattern the step named: its row keeps to one line, and
+  // the names give way before the verb and the outcome do.
+  const oneLine =
+    words.parts.some((part) => part.command) ||
+    (!step.ticketd?.length && words.parts.some((part) => part.code));
   const line = (
     <RowLine
+      line={oneLine}
       icon={
         running ? (
           <LoaderCircle size={12} className="chat-spin" />
@@ -575,43 +666,46 @@ export const StepRow = memo(function StepRow({
         )
       }
     >
-      {words.parts.map((part, index) => {
-        const file = part.code
-          ? files.findIndex((target) => target.text === part.text)
-          : -1;
-        if (index === 0 && !part.code)
+      {wrapNames(
+        oneLine,
+        words.parts.map((part, index) => {
+          const file = part.code
+            ? files.findIndex((target) => target.text === part.text)
+            : -1;
+          if (index === 0 && !part.code)
+            return (
+              <span
+                key={index}
+                ref={verb}
+                className="chat-step-verb"
+                style={
+                  verbWidth && !running
+                    ? { minWidth: eased ? 0 : verbWidth }
+                    : undefined
+                }
+              >
+                {/* A soft light passes over the words of the step that runs. */}
+                {running ? <Shimmer>{part.text}</Shimmer> : part.text}
+              </span>
+            );
           return (
-            <span
-              key={index}
-              ref={verb}
-              className="chat-step-verb"
-              style={
-                verbWidth && !running
-                  ? { minWidth: eased ? 0 : verbWidth }
-                  : undefined
-              }
-            >
-              {/* A soft light passes over the words of the step that runs. */}
-              {running ? <Shimmer>{part.text}</Shimmer> : part.text}
-            </span>
+            <Fragment key={index}>
+              {index > 0 && part.text !== "," && " "}
+              {file >= 0 ? (
+                <FileName path={part.text} onFailed={setFailure} />
+              ) : part.path ? (
+                <PathCode path={part.text} />
+              ) : part.command ? (
+                <code className="chat-step-command">{part.text}</code>
+              ) : part.code ? (
+                <code>{part.text}</code>
+              ) : (
+                part.text
+              )}
+            </Fragment>
           );
-        return (
-          <Fragment key={index}>
-            {index > 0 && part.text !== "," && " "}
-            {file >= 0 ? (
-              <FileName
-                path={part.text}
-                shown={names[file] ?? part.text}
-                onFailed={setFailure}
-              />
-            ) : part.code ? (
-              <code>{part.text}</code>
-            ) : (
-              part.text
-            )}
-          </Fragment>
-        );
-      })}
+        }),
+      )}
       {words.suffix ? (
         <>
           <span aria-hidden> · </span>
@@ -638,6 +732,7 @@ export const StepRow = memo(function StepRow({
       type="button"
       className="chat-steps"
       data-anchor=""
+      data-running={running ? "" : undefined}
       aria-expanded={open}
       aria-controls={open ? id : undefined}
       aria-label={words.label}
@@ -658,6 +753,7 @@ export const StepRow = memo(function StepRow({
     <div
       className="chat-steps"
       data-anchor=""
+      data-running={running ? "" : undefined}
       // A row carrying a decision takes focus, so its tooltip shows from the keyboard.
       tabIndex={decision ? 0 : undefined}
       aria-describedby={decision ? described : undefined}
@@ -855,17 +951,12 @@ function Row({
           />
         </Arrives>
       );
-    case "response":
+    case "progress":
       return (
         // Keyed by the item: the fold remounts the answer outside the rows, and
         // the reading position finds it again by this key.
         <div className="chat-turn-response" data-anchor={row.item.id}>
-          <Response
-            item={row.item}
-            harness={harness}
-            readOnly={readOnly}
-            actions={actions}
-          />
+          <Response item={row.item} harness={harness} />
         </div>
       );
     case "record":
@@ -891,6 +982,121 @@ function Row({
         />
       );
   }
+}
+
+/**
+ * A stretch of a turn's work, between two progress notes. While it is in progress
+ * its steps show as they come, and when it finishes in view they stay put until it
+ * has left the view (the turn's own rule), so nothing above the newest line moves.
+ * Then it folds to one muted row, which opens to its steps. A stretch that was
+ * already done when it first showed starts folded; the person's own toggle wins.
+ */
+function StretchView({
+  stretch,
+  stretchKey,
+  harness,
+  readOnly,
+  actions,
+  live,
+  open: always,
+  revealed,
+}: {
+  stretch: Stretch;
+  stretchKey: string;
+  harness: string;
+  readOnly: boolean;
+  actions: TranscriptActions;
+  live: boolean;
+  /** Its steps show with no row of their own: the turn is its one stretch, or a stop was not confirmed. */
+  open: boolean;
+  /** Counts the times the turn's records row asked for its changes to be shown. */
+  revealed: number;
+}) {
+  const [toggled, setToggled] = useState(() => toggles.get(stretchKey));
+  // The records row opened this stretch (it is in `toggles` already): follow it.
+  const seen = useRef(revealed);
+  useEffect(() => {
+    if (seen.current === revealed) return;
+    seen.current = revealed;
+    setToggled(toggles.get(stretchKey));
+  }, [revealed, stretchKey]);
+  const reading = useReading();
+  const part = useRef<HTMLDivElement>(null);
+  const rowButton = useRef<HTMLButtonElement>(null);
+  const bodyId = useId();
+  const rowId = useId();
+  const kept = useKeptOpen(!stretch.ongoing, part, inView);
+  // Shown bare (steps only) while it is the work going on, or kept after it ends in
+  // view, so the row does not appear above steps someone is reading.
+  const bare = always || (toggled === undefined && kept);
+  const open = bare || toggled === true;
+  const toggle = () => {
+    toggles.set(stretchKey, !open);
+    setToggled(!open);
+    // The row stays where the reader clicked it.
+    if (rowButton.current) reading.keep(rowButton.current);
+    // Collapsing with focus inside leaves focus on the row.
+    if (open) rowButton.current?.focus();
+  };
+  // A stretch of one merged Explored row opens to its files, not to a row that says
+  // the same words again.
+  const only = stretch.rows.length === 1 ? stretch.rows[0] : undefined;
+  const explored =
+    only?.kind === "step" && only.step.explored ? only.step : undefined;
+  const rows = stretch.rows.map((row) => (
+    <Row
+      key={row.key}
+      row={row}
+      harness={harness}
+      readOnly={readOnly}
+      actions={actions}
+      live={live}
+    />
+  ));
+  return (
+    <div ref={part} className="chat-stretch">
+      {!bare && (
+        <button
+          ref={rowButton}
+          id={rowId}
+          type="button"
+          className="chat-fold chat-stretch-row"
+          data-anchor=""
+          aria-expanded={open}
+          aria-controls={open ? bodyId : undefined}
+          onClick={toggle}
+        >
+          <span>{stretch.label}</span>
+          {open ? (
+            <ChevronDown size={14} aria-hidden />
+          ) : (
+            <ChevronRight size={14} aria-hidden />
+          )}
+        </button>
+      )}
+      {open &&
+        (bare ? (
+          <div className="chat-turn-rows">{rows}</div>
+        ) : (
+          <div
+            id={bodyId}
+            className="chat-turn-rows chat-stretch-steps"
+            role="group"
+            aria-labelledby={rowId}
+          >
+            {explored ? (
+              <StepDetail
+                id={`${bodyId}-files`}
+                step={explored}
+                harness={harness}
+              />
+            ) : (
+              rows
+            )}
+          </div>
+        ))}
+    </div>
+  );
 }
 
 /** Fold toggles the person made, by Chat and turn; they win for the session. */
@@ -925,44 +1131,17 @@ const TurnView = memo(function TurnView({
   const bodyId = useId();
   const rowId = useId();
   // A turn that ends in view of someone reading, or with focus inside, stays open
-  // until it leaves the view. `settled` says the end has been looked at.
-  const [settled, setSettled] = useState(!turn.live);
-  const [held, setHeld] = useState(false);
+  // until it leaves the view.
+  const kept = useKeptOpen(
+    !turn.live,
+    part,
+    (element, scroller) => !reading.follows() && inView(element, scroller),
+  );
   // A turn seen running here fades its fold row in when it ends; history doesn't.
   const [endsHere] = useState(turn.live);
-  useLayoutEffect(() => {
-    if (turn.live || settled) return;
-    const element = part.current;
-    const scroller = element?.closest(".chat-scroll");
-    const readingHere =
-      element &&
-      scroller &&
-      (element.contains(document.activeElement) ||
-        (!reading.follows() &&
-          element.getBoundingClientRect().bottom >
-            scroller.getBoundingClientRect().top &&
-          element.getBoundingClientRect().top <
-            scroller.getBoundingClientRect().bottom));
-    setHeld(Boolean(readingHere));
-    setSettled(true);
-  }, [reading, settled, turn.live]);
-  useEffect(() => {
-    const element = part.current;
-    const scroller = element?.closest(".chat-scroll");
-    if (!held || !element || typeof IntersectionObserver === "undefined")
-      return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry && !entry.isIntersecting) setHeld(false);
-      },
-      { root: scroller ?? null },
-    );
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [held]);
   const folds = turn.rows.some((row) => row.kept !== true);
   const showRow = !turn.live && folds;
-  const open = !showRow || (toggled ?? (turn.unconfirmed || !settled || held));
+  const open = !showRow || (toggled ?? (turn.unconfirmed || kept));
   const toggle = () => {
     const next = !open;
     toggles.set(key, next);
@@ -973,69 +1152,99 @@ const TurnView = memo(function TurnView({
     if (!next) rowButton.current?.focus();
   };
   const rowLive = live && turn.live;
-  const changes = turn.rows.flatMap((row) =>
-    row.kind === "record" ? [row.change] : [],
+  const [revealed, setRevealed] = useState(0);
+  const row = (each: TurnRow) => (
+    <Row
+      key={each.key}
+      row={each}
+      harness={harness}
+      readOnly={readOnly}
+      actions={actions}
+      live={rowLive}
+    />
   );
-  const rows = (only: (row: TurnRow) => boolean) =>
-    turn.rows
-      .filter(only)
-      .map((row) => (
-        <Row
-          key={row.key}
-          row={row}
-          harness={harness}
-          readOnly={readOnly}
-          actions={actions}
-          live={rowLive}
-        />
-      ));
+  const blocks = turn.blocks.map((block) =>
+    block.kind === "stretch" ? (
+      <StretchView
+        key={block.key}
+        stretch={block}
+        stretchKey={`${key}:${block.key}`}
+        harness={harness}
+        readOnly={readOnly}
+        actions={actions}
+        live={rowLive}
+        open={turn.unconfirmed}
+        revealed={revealed}
+      />
+    ) : (
+      row(block)
+    ),
+  );
+  // A turn that shows nothing of its work (only its answer) has no work part.
+  const work = showRow || turn.rows.length > 0;
   return (
-    <>
-      <div
-        ref={part}
-        className="chat-turnpart"
-        data-anchor=""
-        data-seen={turn.ids.at(-1)}
-      >
-        {showRow && (
-          // A plain row, not a Button: the turn's whole fold line is the target.
-          <button
-            ref={rowButton}
-            id={rowId}
-            type="button"
-            className="chat-fold"
-            data-fresh={endsHere ? "" : undefined}
-            aria-expanded={open}
-            aria-controls={open ? bodyId : undefined}
-            onClick={toggle}
-          >
-            <span>{turn.label}</span>
-            {open ? (
-              <ChevronDown size={14} aria-hidden />
-            ) : (
-              <ChevronRight size={14} aria-hidden />
-            )}
-          </button>
-        )}
-        {open ? (
-          <div
-            id={showRow ? bodyId : undefined}
-            className="chat-turn-rows"
-            data-folded={showRow ? "" : undefined}
-            role={showRow ? "group" : undefined}
-            aria-labelledby={showRow ? rowId : undefined}
-          >
-            {rows(() => true)}
-          </div>
-        ) : (
-          // Collapsed, receipts and notes sit under the turn row in order.
-          turn.rows.some((row) => row.kept === true) && (
-            <div className="chat-turn-rows">
-              {rows((row) => row.kept === true)}
+    // One unit: its parts sit 12px apart, and 40px separates it from what
+    // follows, where its reply actions show.
+    <div className="chat-turn-unit" data-seen={turn.ids.at(-1)}>
+      {work && (
+        <div
+          ref={part}
+          className="chat-turnpart"
+          data-fold={showRow ? "" : undefined}
+          data-anchor=""
+        >
+          {showRow && (
+            <div className="chat-foldline">
+              {/* A plain row, not a Button: the turn's whole fold line is the target. */}
+              <button
+                ref={rowButton}
+                id={rowId}
+                type="button"
+                className="chat-fold"
+                data-fresh={endsHere ? "" : undefined}
+                aria-expanded={open}
+                aria-controls={open ? bodyId : undefined}
+                onClick={toggle}
+              >
+                <span>{turn.label}</span>
+                {open ? (
+                  <ChevronDown size={14} aria-hidden />
+                ) : (
+                  <ChevronRight size={14} aria-hidden />
+                )}
+              </button>
+              <TurnTime turn={turn} />
             </div>
-          )
-        )}
-      </div>
+          )}
+          {open ? (
+            <div
+              id={showRow ? bodyId : undefined}
+              className="chat-turn-rows"
+              data-folded={showRow ? "" : undefined}
+              role={showRow ? "group" : undefined}
+              aria-labelledby={showRow ? rowId : undefined}
+            >
+              {blocks}
+            </div>
+          ) : (
+            // Collapsed, receipts and notes sit under the turn row in order.
+            turn.rows.some((row) => row.kept === true) && (
+              <div className="chat-turn-rows">
+                {turn.rows.filter((each) => each.kept === true).map(row)}
+              </div>
+            )
+          )}
+        </div>
+      )}
+      {/* A finished turn with no work shows its time on a quiet line, where its
+          work line would be. */}
+      {!work && !turn.live && turn.started && turnClock(turn.started) && (
+        <div className="chat-turnpart" data-fold="" data-quiet="">
+          <div className="chat-foldline">
+            <TurnTime turn={turn} />
+          </div>
+        </div>
+      )}
       {turn.plan && (
         <div data-anchor="">
           <PlanCard
@@ -1047,18 +1256,13 @@ const TurnView = memo(function TurnView({
       )}
       {turn.final && (
         <div data-anchor={turn.final.id}>
-          <Response
-            item={turn.final}
-            harness={harness}
-            readOnly={readOnly}
-            actions={actions}
-          />
+          <Response item={turn.final} harness={harness} />
         </div>
       )}
       {/* Below the response, in order: the stop marker, then #367's changed
           files row, then #364's records row. */}
       {turn.marker && (
-        <div className="chat-below" data-anchor="">
+        <div data-anchor="">
           <StopMarker
             item={turn.marker}
             harness={harness}
@@ -1067,7 +1271,7 @@ const TurnView = memo(function TurnView({
         </div>
       )}
       {turn.files && (
-        <div className="chat-below" data-anchor="">
+        <div className="chat-changed" data-anchor="">
           <FilesSummary
             item={turn.files}
             commandEdits={turn.commandEdits ?? false}
@@ -1075,20 +1279,48 @@ const TurnView = memo(function TurnView({
           />
         </div>
       )}
-      {!turn.live && changes.length > 0 && (
-        <div className="chat-below" data-anchor="">
+      {!turn.live && turn.changes.length > 0 && (
+        <div className="chat-changed" data-anchor="">
           {/* Never folded; "N more" opens the fold, where each is a step row. */}
           <ReceiptRow
-            changes={changes}
+            changes={turn.changes}
             onMore={() => {
+              // Each change is a step row, inside the stretch that holds it: open those too.
+              for (const block of turn.blocks)
+                if (
+                  block.kind === "stretch" &&
+                  block.rows.some((each) => each.kind === "record")
+                )
+                  toggles.set(`${key}:${block.key}`, true);
+              setRevealed((count) => count + 1);
               if (!open) toggle();
             }}
           />
         </div>
       )}
-    </>
+      {turn.final && (
+        <ReplyActions item={turn.final} readOnly={readOnly} actions={actions} />
+      )}
+    </div>
   );
 });
+
+/**
+ * The turn's one time, on the right of its work line: its start ("14:03",
+ * "Yesterday 18:40", "Nov 24"), with the exact start and end in its tooltip.
+ */
+function TurnTime({ turn }: { turn: Turn }) {
+  if (!turn.started) return null;
+  const clock = turnClock(turn.started);
+  if (!clock) return null;
+  return (
+    <Tooltip content={turnSpanText(turn.started, turn.ended)}>
+      <time className="chat-turn-time" dateTime={turn.started}>
+        {clock}
+      </time>
+    </Tooltip>
+  );
+}
 
 function markerText(
   item: ItemOf<"marker">,
@@ -1188,13 +1420,12 @@ const Item = memo(function Item({
         <UserMessage item={item} exportAttachment={actions.exportAttachment} />
       );
     case "response":
+      // Outside any turn the response is its own final one.
       return (
-        <Response
-          item={item}
-          harness={harness}
-          readOnly={readOnly}
-          actions={actions}
-        />
+        <div className="chat-turn-unit">
+          <Response item={item} harness={harness} />
+          <ReplyActions item={item} readOnly={readOnly} actions={actions} />
+        </div>
       );
     case "session": {
       const label =
@@ -1246,7 +1477,12 @@ function WorkingLine({
   const worked = since ? workedFor(items, since, now) : NaN;
   return (
     <div className="chat-working">
-      {spinner && <LoaderCircle size={12} className="chat-spin" aria-hidden />}
+      {spinner && (
+        // In the step rows' 16px icon box, so the words start where theirs do.
+        <span className="chat-row-icon" aria-hidden="true">
+          <LoaderCircle size={12} className="chat-spin" />
+        </span>
+      )}
       <Words shimmer={spinner}>
         {since ? (
           Number.isNaN(worked) || worked < 1000 ? (
@@ -1438,6 +1674,16 @@ export function Transcript({
     ),
     chat.catching_up,
   );
+  const working = chat.activity === "working";
+  const opening = working && Boolean(chat.opening);
+  const waiting = useMemo(
+    () => steersAwaitingRead(items, working),
+    [items, working],
+  );
+  const userMessages = useMemo(
+    () => ({ opening, waiting, harness }),
+    [opening, waiting, harness],
+  );
   if (picked)
     return (
       <div className="chat-col" ref={contentRef}>
@@ -1483,7 +1729,9 @@ export function Transcript({
           (row.kind === "reasoning" && row.item.state === "running"),
       ),
   );
-  const working = chat.activity === "working";
+  // Words are streaming in now: the newest thing in the Chat is a response still arriving.
+  const newest = lastOf(items, (item) => item.kind !== "turn");
+  const writing = newest?.kind === "response" && newest.state === "streaming";
   const empty = items.length === 0 && !chat.catching_up && !isLive(chat);
   const asking = items.some(
     (item) => item.kind === "request" && item.state === "pending",
@@ -1492,7 +1740,7 @@ export function Transcript({
     <ArrivalsContext value={arrivals}>
       <ChatFilesContext.Provider value={files}>
         <SentLinksContext.Provider value={sentLinks}>
-          <OpeningContext.Provider value={working && Boolean(chat.opening)}>
+          <UserMessageContext.Provider value={userMessages}>
             <div className="chat-col" ref={contentRef}>
               {empty && !readOnly && (
                 <p className="chat-empty">Say what you want done.</p>
@@ -1521,6 +1769,7 @@ export function Transcript({
                     {marker}
                     <div
                       className="chat-part"
+                      data-kind={part.item.kind}
                       data-anchor=""
                       data-seen={part.item.id}
                     >
@@ -1573,7 +1822,10 @@ export function Transcript({
                   (part) => part.kind === "turn" && part.turn.unconfirmed,
                 ) ? (
                 <BetweenSteps running={stepRuns}>
-                  {chat.doing ? (
+                  {writing ? (
+                    // Words are arriving: the one live line says so, with its own clock.
+                    <WorkingLine key="writing" label="Writing" fromShown />
+                  ) : chat.doing ? (
                     <WorkingLine
                       label={chat.doing.label}
                       since={chat.doing.since}
@@ -1589,7 +1841,7 @@ export function Transcript({
                 working && <WorkingSlot />
               )}
             </div>
-          </OpeningContext.Provider>
+          </UserMessageContext.Provider>
         </SentLinksContext.Provider>
       </ChatFilesContext.Provider>
     </ArrivalsContext>

@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type {
   ChatSnapshot,
+  RecordChange,
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
@@ -14,6 +15,10 @@ import {
   type TranscriptPart,
   type Turn,
   chatTime,
+  turnClock,
+  turnSpanText,
+  commandLine,
+  ticketdParts,
   composerControls,
   composerPlaceholder,
   duration,
@@ -241,8 +246,222 @@ test("a command shows its first line, and its name says its outcome", () => {
   const words = stepWords(
     step({ kind: "run", command: "python3 -c '\nprint(1)'", state: "failed" }),
   );
-  expect(words.parts[1]?.text).toBe("python3 -c '");
-  expect(words.label).toBe("Run python3 -c ', Failed");
+  // The line is cut before the quote it opens, never inside it.
+  expect(words.parts[1]?.text).toBe("python3 -c");
+  expect(words.label).toBe("Run python3 -c, Failed");
+});
+
+test("a command's first line never ends in an open quote or bracket", () => {
+  // One line is as it is, even when it looks open.
+  expect(commandLine("echo 'a")).toBe("echo 'a");
+  expect(commandLine('python3 -I -c "\nprint(1)"')).toBe("python3 -I -c");
+  expect(commandLine("node -e '\nx'")).toBe("node -e");
+  expect(commandLine("run $(\nls)")).toBe("run");
+  expect(commandLine("make test (cd a &&\n ls)")).toBe("make test");
+  expect(commandLine("cat a.txt \\\n | wc -l")).toBe("cat a.txt");
+  // Closed quotes and brackets stay, and a heredoc keeps its tag.
+  expect(commandLine("grep 'a b' (x)\nnext")).toBe("grep 'a b' (x)");
+  expect(commandLine("python3 -I - <<'EOF'\nprint(1)\nEOF")).toBe(
+    "python3 -I - <<'EOF'",
+  );
+  expect(commandLine('say "a \\" b" and\nmore')).toBe('say "a \\" b" and');
+});
+
+test("the same ticketd call said again is one clause", () => {
+  const evidence = (reference: string) => ({
+    verb: "add" as const,
+    words: [{ text: "evidence to" }, { text: reference, code: true }],
+  });
+  const said = (...calls: ReturnType<typeof evidence>[]) =>
+    stepWords(step({ kind: "run", ticketd: calls, state: "done" })).label;
+  expect(said(evidence("T-12"), evidence("T-12"), evidence("T-12"))).toBe(
+    "Added evidence to T-12 (3 times)",
+  );
+  // Different records are different clauses, said in full.
+  expect(said(evidence("T-12"), evidence("T-13"))).toBe(
+    "Added evidence to T-12 and evidence to T-13",
+  );
+  expect(
+    ticketdParts([evidence("T-12"), evidence("T-12")], 0).map((p) => p.text),
+  ).toEqual(["Adding", "evidence to", "T-12", "(2 times)"]);
+});
+
+test("a call made again after another keeps its place in the order", () => {
+  const set = (to: string) => ({
+    verb: "set" as const,
+    words: [{ text: "T-12", code: true }, { text: `to ${to}` }],
+  });
+  const said = (...calls: ReturnType<typeof set>[]) =>
+    stepWords(step({ kind: "run", ticketd: calls, state: "done" })).label;
+  // In progress, Done, In progress is three clauses in that order, not "(2 times)" first.
+  expect(said(set("In progress"), set("Done"), set("In progress"))).not.toMatch(
+    /times/,
+  );
+  expect(
+    ticketdParts([set("In progress"), set("Done"), set("In progress")], 1)
+      .map((p) => p.text)
+      .join(" "),
+  ).toBe("Set T-12 to In progress , T-12 to Done and T-12 to In progress");
+  // Adjacent repeats still count.
+  expect(said(set("Done"), set("Done"), set("In progress"))).toContain(
+    "Done (2 times)",
+  );
+});
+
+test("a ticketd sentence too long for a row reads the harness's description", () => {
+  const calls = ["T-12", "T-13", "T-14"].flatMap((reference) => [
+    { verb: "read" as const, words: [{ text: reference, code: true }] },
+    {
+      verb: "set" as const,
+      words: [{ text: reference, code: true }, { text: "to In review" }],
+    },
+    {
+      verb: "post" as const,
+      words: [{ text: "an update on" }, { text: reference, code: true }],
+    },
+  ]);
+  const long = step({
+    kind: "run",
+    ticketd: calls,
+    description: "Move three tickets to review",
+  });
+  expect(stepWords(long).parts).toEqual([
+    { text: "Move three tickets to review" },
+  ]);
+  // Without a description the sentence stays; a short one never gives way.
+  expect(stepWords({ ...long, description: undefined }).label).toContain(
+    "then set it to In review",
+  );
+  const short = step({
+    kind: "run",
+    ticketd: calls.slice(0, 1),
+    description: "Look at a ticket",
+  });
+  expect(stepWords(short).label).toBe("Read T-12");
+});
+
+test("a command with a description reads the description, and one without reads its first line", () => {
+  const run = (over: Partial<Step>) =>
+    step({ kind: "run", target: "npm test", command: "npm test", ...over });
+  const described = run({ description: "Run the unit tests" });
+  expect(line(described)).toBe("Run the unit tests");
+  expect(stepWords(described).label).toBe("Run the unit tests");
+  // Running: the same words (the row adds the clock); failed: the outcome follows.
+  expect(line({ ...described, state: "running" })).toBe("Run the unit tests");
+  expect(line({ ...described, state: "failed" })).toBe(
+    "Run the unit tests · Failed",
+  );
+  expect(stepWords({ ...described, state: "failed" }).label).toBe(
+    "Run the unit tests, Failed",
+  );
+  // No description: the command's first line, set apart as one muted line.
+  const plain = stepWords(run({ command: "npm test\n--watch" }));
+  expect(plain.parts).toEqual([
+    { text: "Ran" },
+    { text: "npm test", code: true, command: true },
+  ]);
+  // ticketd calls keep their sentences, and a script reads the description too.
+  const ticketd = run({
+    description: "Move the ticket",
+    ticketd: [{ verb: "set", words: [{ text: "T-1", code: true }] }],
+  });
+  expect(line(ticketd)).not.toContain("Move the ticket");
+  expect(line(run({ variant: "script", description: "Check the icons" }))).toBe(
+    "Check the icons",
+  );
+});
+
+test("a path in a row is a path part, and a glob scope is not", () => {
+  const parts = (s: Step) => stepWords(s).parts;
+  expect(
+    parts(step({ kind: "read", targets: paths("gen/icons.py") }))[1],
+  ).toEqual({
+    text: "gen/icons.py",
+    code: true,
+    path: true,
+  });
+  expect(
+    parts(step({ kind: "search", targets: [{ text: "x", scope: "src" }] }))[3],
+  ).toEqual({ text: "src", code: true, path: true });
+  expect(
+    parts(
+      step({ kind: "search", targets: [{ text: "x", scope: "src/**/*.ts" }] }),
+    )[3],
+  ).toEqual({ text: "src/**/*.ts", code: true });
+  // A search's pattern is not a path.
+  expect(parts(step({ kind: "search", targets: paths("a/b") }))[1]).toEqual({
+    text: "a/b",
+    code: true,
+  });
+});
+
+test("nothing removed is not said as a count of zero", () => {
+  const edit = step({
+    kind: "create",
+    targets: paths("gen/icons.py"),
+    added_lines: 57,
+    removed_lines: 0,
+  });
+  const words = stepWords(edit);
+  expect(words.suffix?.text).toBe("+57");
+  expect(words.label).toBe("Created gen/icons.py, 57 lines added");
+  expect(stepWords({ ...edit, removed_lines: 2 }).suffix?.text).toBe("+57 −2");
+});
+
+test("a run of reads and searches is one row, 'Explored 6 files · 2 searches'", () => {
+  const read = (...files: string[]) =>
+    step({ kind: "read", targets: paths(...files), output: "x" });
+  const search = (query: string, over: Partial<Step> = {}) =>
+    step({ kind: "search", targets: [{ text: query, scope: "src" }], ...over });
+  const merged = mergeSteps([
+    read("a.ts", "b.ts"),
+    search("x"),
+    read("c.ts"),
+    read("d.ts", "e.ts", "f.ts"),
+    search("y"),
+    step({ kind: "run", command: "npm test", target: "npm test" }),
+    read("g.ts"),
+  ]);
+  expect(merged.map(line)).toEqual([
+    "Explored 6 files · 2 searches",
+    "Ran `npm test`",
+    "Read `g.ts`",
+  ]);
+  expect(merged[0]?.output).toBeUndefined();
+  // Opened, it lists what each kind named.
+  expect(merged[0]?.explored?.files.map((target) => target.text)).toEqual([
+    "a.ts",
+    "b.ts",
+    "c.ts",
+    "d.ts",
+    "e.ts",
+    "f.ts",
+  ]);
+  expect(merged[0]?.explored?.searches).toHaveLength(2);
+  // One of each is already an exploration; its words count the singular.
+  expect(mergeSteps([read("a.ts"), search("x")]).map(line)).toEqual([
+    "Explored 1 file · 1 search",
+  ]);
+  // A failure, a search that found nothing, and a folder listing keep their own rows.
+  expect(
+    mergeSteps([
+      read("a.ts"),
+      step({ kind: "read", targets: paths("b.ts"), state: "failed" }),
+      search("x", { no_matches: true }),
+      read("c.ts"),
+      step({ kind: "read", variant: "list", targets: paths("src") }),
+    ]).map(line),
+  ).toEqual([
+    "Read `a.ts`",
+    "Read `b.ts` · Failed",
+    "Searched for `x` in `src` · No matches",
+    "Read `c.ts`",
+    "Listed `src`",
+  ]);
+  // Only reads, or only searches, keep the words they had.
+  expect(
+    mergeSteps([read("a.ts"), read("b.ts"), read("c.ts")]).map(line),
+  ).toEqual(["Read 3 files"]);
 });
 
 test("a file step ends in its diffstat, and merged steps add theirs up only when each has one", () => {
@@ -361,6 +580,11 @@ test("the placeholder says what sending will do", () => {
   expect(
     composerPlaceholder({ ...working, steering: { available: false } }, false),
   ).toBe("Queue for Codex");
+  // After Deny, while the turn runs; an ended turn has nothing to redirect.
+  expect(composerPlaceholder(working, false, true)).toBe(
+    "Tell Codex what to do instead",
+  );
+  expect(composerPlaceholder(idle, false, true)).toBe("Message Codex");
 });
 
 test("only a problem observed now disables Send; why the last turn stopped does not", () => {
@@ -571,7 +795,7 @@ const rowWords = (turn: Turn) =>
   turn.rows.map((row) =>
     row.kind === "step"
       ? stepWords(row.step).label
-      : row.kind === "response"
+      : row.kind === "progress"
         ? row.item.text
         : row.kind,
   );
@@ -645,6 +869,57 @@ test("a steer starts a new segment that continues the turn", () => {
   expect(segments.map((turn) => turn.label)).toEqual([
     "Worked for 1m 25s",
     "Continued for 48s",
+  ]);
+});
+
+test("each segment's receipt says its own changes, with none said in two", () => {
+  const status = (from: string, to: string) => ({
+    kind: "status" as const,
+    reference: "T-12",
+    title: "Demo",
+    from,
+    to,
+  });
+  const update = { kind: "update" as const, reference: "T-12", excerpt: "Hi" };
+  // The host nets each segment on its own: a steer starts the next one.
+  const records = (
+    id: string,
+    changes: RecordChange[],
+    net: RecordChange[],
+  ): TranscriptItem => ({
+    id,
+    at,
+    kind: "records",
+    turn_id: "t1",
+    changes,
+    net,
+  });
+  const segments = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:02:13Z"),
+        records(
+          "c1",
+          [status("Todo", "In progress"), update],
+          [status("Todo", "In progress"), update],
+        ),
+        you("u2", "2026-11-10T10:01:25Z", true),
+        records(
+          "c2",
+          [status("In progress", "In review")],
+          [status("In progress", "In review")],
+        ),
+      ],
+      idle,
+    ),
+  );
+  expect(segments.map((turn) => turn.changes)).toEqual([
+    [
+      { ...status("Todo", "In progress"), gone: null },
+      { ...update, gone: null },
+    ],
+    [{ ...status("In progress", "In review"), gone: null }],
   ]);
 });
 
@@ -983,4 +1258,372 @@ test("streaming into the latest turn leaves every earlier turn the same object",
   expect(after[0]).toBe(before[0]);
   expect(after[1]).not.toBe(before[1]);
   expect(after[1]?.rows.at(-1)).toMatchObject({ item: { text: "Working" } });
+});
+
+test("a response with more steps after it is a progress note, never the final answer", () => {
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:00:30Z"),
+        said("r1", "Looking at the limiter."),
+        did("s1", read("a.ts")),
+        said("r2", "Added the limiter."),
+      ],
+      idle,
+    ),
+  );
+  expect(turn?.final?.id).toBe("r2");
+  expect(turn?.rows.map((row) => row.kind)).toEqual(["progress", "step"]);
+  expect(turn?.rows[0]).toMatchObject({ item: { id: "r1" } });
+});
+
+test("while a turn runs every response in it is a progress note", () => {
+  const [turn] = turnsOf(
+    turns(
+      [you("u1", at), timing("active"), did("s1", read("a.ts")), said("r1")],
+      { activity: "working", problem: null },
+    ),
+  );
+  expect(turn?.final).toBeUndefined();
+  expect(turn?.rows.map((row) => row.kind)).toEqual(["step", "progress"]);
+});
+
+test("a turn says when it started and ended", () => {
+  const [turn] = turnsOf(
+    turns(
+      [you("u1", at), timing("completed", "2026-11-10T10:02:13Z"), said("r1")],
+      idle,
+    ),
+  );
+  expect(turn).toMatchObject({
+    started: "2026-11-10T10:00:00Z",
+    ended: "2026-11-10T10:02:13Z",
+  });
+  const [steered] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:02:13Z"),
+        did("s1", read("a.ts")),
+        you("u2", "2026-11-10T10:01:25Z", true),
+        said("r1"),
+      ],
+      idle,
+    ),
+  ).slice(1);
+  // A segment after a steer starts at the steer.
+  expect(steered?.started).toBe("2026-11-10T10:01:25Z");
+});
+
+test("a turn's time reads as a clock today, Yesterday with a clock, then the day", () => {
+  const now = new Date(2026, 10, 26, 9, 0).getTime();
+  const local = (day: number, hour: number, minute: number) =>
+    new Date(2026, 10, day, hour, minute);
+  const clock = (date: Date) =>
+    date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const today = local(26, 8, 5);
+  expect(turnClock(today.toISOString(), now)).toBe(clock(today));
+  const yesterday = local(25, 18, 40);
+  expect(turnClock(yesterday.toISOString(), now)).toBe(
+    `Yesterday ${clock(yesterday)}`,
+  );
+  expect(turnClock(local(24, 14, 3).toISOString(), now)).toBe(
+    new Date(2026, 10, 24).toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+    }),
+  );
+  expect(turnClock("not a time", now)).toBe("");
+});
+
+test("Yesterday is the previous calendar day, even across a daylight-saving change", () => {
+  const zone = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  try {
+    // 00:30 on March 9, 2026: the clocks went forward on March 8, so 24 hours
+    // earlier is still March 7.
+    const now = new Date(2026, 2, 9, 0, 30).getTime();
+    const march8 = new Date(2026, 2, 8, 12, 0);
+    const march7 = new Date(2026, 2, 7, 23, 45);
+    expect(turnClock(march8.toISOString(), now)).toMatch(/^Yesterday /);
+    expect(turnClock(march7.toISOString(), now)).not.toMatch(/^Yesterday/);
+    expect(chatTime(march8.toISOString(), now)).toBe("Yesterday");
+    expect(chatTime(march7.toISOString(), now)).not.toBe("Yesterday");
+  } finally {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  }
+});
+
+test("a turn's exact start and end are one sentence for its tooltip", () => {
+  const start = new Date(2026, 10, 24, 14, 3);
+  const sameDay = new Date(2026, 10, 24, 14, 12);
+  const nextDay = new Date(2026, 10, 25, 9, 30);
+  const clock = (date: Date) =>
+    date.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
+  const day = (date: Date, year = false) =>
+    date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      ...(year && { year: "numeric" }),
+    });
+  const full = (date: Date, year = false) =>
+    `${day(date, year)}, ${clock(date)}`;
+  // This year: month, day and time, with no year.
+  vi.useFakeTimers({ now: new Date(2026, 10, 26, 12, 0), toFake: ["Date"] });
+  try {
+    expect(turnSpanText(start.toISOString(), sameDay.toISOString())).toBe(
+      `Started ${full(start)} · Ended ${clock(sameDay)}`,
+    );
+    expect(turnSpanText(start.toISOString(), nextDay.toISOString())).toBe(
+      `Started ${full(start)} · Ended ${full(nextDay)}`,
+    );
+    // A turn that has not ended says only when it started.
+    expect(turnSpanText(start.toISOString(), undefined)).toBe(
+      `Started ${full(start)}`,
+    );
+    expect(full(start)).not.toContain("2026");
+    // Another year says it.
+    const old = new Date(2025, 11, 30, 23, 50);
+    const later = new Date(2026, 0, 2, 8, 5);
+    expect(turnSpanText(old.toISOString(), later.toISOString())).toBe(
+      `Started ${full(old, true)} · Ended ${full(later)}`,
+    );
+    expect(full(old, true)).toContain("2025");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+/** The turn's stretches and notes as `label` words: a note by its text, a stretch by its summary. */
+const storyOf = (turn: Turn | undefined) =>
+  turn?.blocks.map((block) =>
+    block.kind === "stretch"
+      ? `[${block.label}]`
+      : block.kind === "progress"
+        ? block.item.text
+        : block.kind,
+  );
+const search = (query: string): Step => ({
+  kind: "search",
+  target: query,
+  targets: [{ text: query }],
+});
+const edit = (path: string): Step => ({
+  kind: "edit",
+  target: path,
+  targets: [{ text: path }],
+});
+const live = { activity: "working", problem: null } as const;
+
+test("steps before the first note, between two notes and after the last each form a stretch", () => {
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("active"),
+        did("s1", read("a.ts")),
+        said("n1", "Reading the limiter."),
+        did("s2", ran("npm test")),
+        did("s3", ran("npm run lint")),
+        said("n2", "Tests pass."),
+        did("s4", edit("b.ts")),
+      ],
+      live,
+    ),
+  );
+  expect(storyOf(turn)).toEqual([
+    "[Read 1 file]",
+    "Reading the limiter.",
+    "[Ran 2 commands]",
+    "Tests pass.",
+    "[Edited 1 file]",
+  ]);
+  // Only the stretch after the newest note is still going on.
+  expect(
+    turn?.blocks.flatMap((block) =>
+      block.kind === "stretch" ? [block.ongoing] : [],
+    ),
+  ).toEqual([false, false, true]);
+});
+
+test("a stretch is done once a note follows it, or its turn has ended", () => {
+  const [running] = turnsOf(
+    turns([you("u1", at), timing("active"), did("s1", read("a.ts"))], live),
+  );
+  expect(running?.blocks[0]).toMatchObject({ kind: "stretch", ongoing: true });
+  const [noted] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("active"),
+        did("s1", read("a.ts")),
+        said("n1", "Reading."),
+      ],
+      live,
+    ),
+  );
+  expect(noted?.blocks[0]).toMatchObject({ kind: "stretch", ongoing: false });
+  const [ended] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:00:30Z"),
+        did("s1", read("a.ts")),
+        said("r1", "Done."),
+      ],
+      idle,
+    ),
+  );
+  expect(ended?.blocks[0]).toMatchObject({ kind: "stretch", ongoing: false });
+});
+
+test("a harness that writes no progress notes gets one stretch for the turn", () => {
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:00:30Z"),
+        did("s1", read("a.ts"), ran("npm test")),
+        did("s2", edit("b.ts")),
+        said("r1", "Done."),
+      ],
+      idle,
+    ),
+  );
+  expect(storyOf(turn)).toEqual([
+    "[Read 1 file, ran 1 command and edited 1 file]",
+  ]);
+});
+
+test("a receipt or note the turn keeps ends the stretch before it", () => {
+  const [turn] = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:00:30Z"),
+        did("s1", read("a.ts")),
+        {
+          id: "q1",
+          at,
+          kind: "request",
+          state: "answered",
+          turn_id: "t1",
+        } as unknown as TranscriptItem,
+        did("s2", ran("npm test")),
+        said("r1", "Done."),
+      ],
+      idle,
+    ),
+  );
+  expect(storyOf(turn)).toEqual([
+    "[Read 1 file]",
+    "receipt",
+    "[Ran 1 command]",
+  ]);
+});
+
+test("a stretch is worded by what its steps did, in the order they began", () => {
+  const words = (...steps: Step[]) => {
+    const [turn] = turnsOf(
+      turns(
+        [
+          you("u1", at),
+          timing("completed", "2026-11-10T10:00:30Z"),
+          did("s1", ...steps),
+          said("r1", "Done."),
+        ],
+        idle,
+      ),
+    );
+    return (turn?.blocks[0] as { label: string }).label;
+  };
+  expect(words(read("a.ts"), read("b.ts"), read("c.ts"))).toBe("Read 3 files");
+  // The same file twice is one file.
+  expect(words(read("a.ts"), ran("ls"), read("a.ts"))).toBe(
+    "Read 1 file and ran 1 command",
+  );
+  expect(words(ran("ls"), edit("a.ts"), edit("b.ts"))).toBe(
+    "Ran 1 command and edited 2 files",
+  );
+  // Reads and searches alone are exploring, as the merged row says it.
+  expect(words(read("a.ts"), search("limiter"), read("b.ts"))).toBe(
+    "Explored 2 files · 1 search",
+  );
+  expect(words(read("a.ts"), search("x"), search("y"), ran("ls"))).toBe(
+    "Read 1 file, searched 2 times and ran 1 command",
+  );
+  // Past three parts the rest are counted.
+  expect(
+    words(
+      read("a.ts"),
+      ran("ls"),
+      edit("a.ts"),
+      { kind: "create", target: "n.ts", targets: [{ text: "n.ts" }] },
+      { kind: "delete", target: "o.ts", targets: [{ text: "o.ts" }] },
+    ),
+  ).toBe("Read 1 file, ran 1 command and edited 1 file · 2 more");
+});
+
+test("a stretch says what changed in ticketd and how many steps failed", () => {
+  const set = (reference: string): Step => ({
+    ...ran(`ticketd change ${reference}`),
+    ticketd: [{ verb: "set", words: [{ text: reference, code: true }] }],
+  });
+  const words = (...steps: Step[]) => {
+    const [turn] = turnsOf(
+      turns(
+        [
+          you("u1", at),
+          timing("completed", "2026-11-10T10:00:30Z"),
+          did("s1", ...steps),
+          said("r1", "Done."),
+        ],
+        idle,
+      ),
+    );
+    return (turn?.blocks[0] as { label: string }).label;
+  };
+  expect(words(set("T-12"))).toBe("Changed T-12");
+  expect(words(set("T-12"), set("T-12"))).toBe("Changed T-12");
+  expect(words(set("T-12"), set("T-13"))).toBe("Changed 2 records");
+  // A call that names no record is a command like any other.
+  expect(
+    words({
+      ...ran("ticketd attachment destination"),
+      ticketd: [
+        {
+          verb: "set",
+          words: [{ text: "attachment destination", code: true }],
+        },
+      ],
+    }),
+  ).toBe("Ran 1 command");
+  // A ticketd step is one row and counts once, however many calls it holds.
+  const lookups = (): Step => ({
+    ...ran("ticketd help; ticketd workspace; ticketd skills"),
+    ticketd: [
+      { verb: "run", words: [{ text: "ticketd help", code: true }] },
+      { verb: "run", words: [{ text: "ticketd workspace", code: true }] },
+      { verb: "read", words: [{ text: "ticketd skills", code: true }] },
+    ],
+  });
+  expect(words(lookups(), ran("ls"))).toBe("Ran 2 commands");
+  // One that names a record counts for that record, not as a command too.
+  expect(
+    words({
+      ...lookups(),
+      ticketd: [
+        { verb: "set", words: [{ text: "T-12", code: true }] },
+        { verb: "run", words: [{ text: "ticketd workspace", code: true }] },
+      ],
+    }),
+  ).toBe("Changed T-12");
+  expect(words(ran("ls"), ran("npm test", "failed"))).toBe(
+    "Ran 2 commands · 1 failed",
+  );
+  expect(words(ran("a", "failed"), ran("b", "failed"), edit("c.ts"))).toBe(
+    "Ran 2 commands and edited 1 file · 2 failed",
+  );
 });

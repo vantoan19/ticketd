@@ -6863,7 +6863,7 @@ test.each([
         expect(box).toHaveProperty("value", "1j23");
         expect(answer).not.toHaveBeenCalled();
         await user.clear(box);
-        screen.getByRole("button", { name: /^Codex, model/ }).focus();
+        screen.getByRole("button", { name: /^Codex(, effort .*)?$/ }).focus();
         await user.keyboard("{Enter}");
         await screen.findByRole("dialog", { name: "Harness and model" });
         await user.keyboard("123");
@@ -7929,9 +7929,13 @@ test("Chats distinguishes an unknown list from empty and keeps known rows after 
   );
 });
 
-test.each(["Retry", "Send"])(
-  "New Chat %s after an edit uses the intended creation request",
-  async (action) => {
+test.each([
+  { action: "Retry", edited: false },
+  { action: "Retry", edited: true },
+  { action: "Send", edited: true },
+])(
+  "New Chat $action uses the intended creation request (edited: $edited)",
+  async ({ action, edited }) => {
     const { ChatClientContext } = await import("@/features/chats/client");
     const { createMockChatClient } =
       await import("@/features/chats/mock-client");
@@ -7953,14 +7957,16 @@ test.each(["Retry", "Send"])(
     fireEvent.keyDown(input, { key: "Enter" });
     await screen.findByRole("button", { name: "Retry" });
     expect(input).toHaveProperty("value", "Keep these words");
-    fireEvent.change(input, { target: { value: "Edited words" } });
-    fireEvent.click(
-      screen.getByRole("button", {
-        name: "Claude Code, model Opus 5.5, effort Default",
-      }),
-    );
-    fireEvent.click(screen.getByRole("radio", { name: "High" }));
-    fireEvent.keyDown(document.body, { key: "Escape" });
+    if (edited) {
+      fireEvent.change(input, { target: { value: "Edited words" } });
+      fireEvent.click(
+        await screen.findByRole("button", {
+          name: "Claude Code, model Opus 5.5",
+        }),
+      );
+      fireEvent.click(screen.getByRole("radio", { name: "High" }));
+      fireEvent.keyDown(document.body, { key: "Escape" });
+    }
     fireEvent.click(screen.getByRole("button", { name: action }));
     await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
     if (action === "Send") {
@@ -7986,7 +7992,7 @@ test("New Chat exposes its complete current pick before the first message", asyn
   );
   fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
   const trigger = await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   expect(client.created).toHaveLength(0);
   fireEvent.click(trigger);

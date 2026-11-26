@@ -2249,6 +2249,67 @@ test("the list says which Chats need the person, in words as well as the dot", a
   expect(working.hasAttribute("data-attention")).toBe(false);
 });
 
+const demoTicket = {
+  kind: "ticket" as const,
+  id: "t12",
+  reference: "T-12",
+  title: "Design the attachment review",
+  status: "In progress",
+};
+
+test("a linked ticket whose title is the Chat's title shows its reference alone", async () => {
+  await open(
+    one({
+      id: "c1",
+      title: "Design the attachment review",
+      links: [demoTicket],
+    }),
+  );
+  const linked = within(screen.getByRole("group", { name: "Linked records" }));
+  const chip = linked.getByRole("button", { name: /^Open T-12/ });
+  expect(chip.textContent).toBe("T-12");
+});
+
+test("a linked ticket with another title keeps its title on the chip", async () => {
+  await open(one({ id: "c1", title: "Limiter", links: [demoTicket] }));
+  const chip = within(
+    screen.getByRole("group", { name: "Linked records" }),
+  ).getByRole("button", { name: /^Open T-12/ });
+  expect(chip.textContent).toBe("T-12Design the attachment review");
+});
+
+test("the header says the full title in a tooltip only while the title is cut", async () => {
+  const title = "A title long enough that the header has to cut it short";
+  await open(one({ id: "c1", title }));
+  const heading = screen.getByRole("heading", { name: title });
+  const measure = (cut: boolean) => {
+    Object.defineProperty(heading, "scrollWidth", {
+      configurable: true,
+      value: cut ? 400 : 100,
+    });
+    Object.defineProperty(heading, "clientWidth", {
+      configurable: true,
+      value: 200,
+    });
+    Object.defineProperty(heading, "scrollHeight", {
+      configurable: true,
+      value: 20,
+    });
+    Object.defineProperty(heading, "clientHeight", {
+      configurable: true,
+      value: 20,
+    });
+  };
+  measure(false);
+  await userEvent.hover(heading);
+  expect(await screen.queryByRole("tooltip")).toBeNull();
+  await userEvent.unhover(heading);
+  measure(true);
+  await userEvent.hover(heading);
+  const tip = await screen.findByRole("tooltip");
+  expect(tip.textContent).toBe(title);
+});
+
 test("a row's actions mark it unread or read and mute it, and say a refusal", async () => {
   const client = await open([
     { chat: chatState({ id: "c1", title: "Alert on-call" }) },
@@ -2533,9 +2594,125 @@ const failedRun: Step = {
   truncated: { kept_bytes: 1_048_576, total_bytes: 3_565_158 },
 };
 
-test("a finished turn folds under one row, its final response outside, and opens to each step's output", async () => {
+const readFile = (id: string): TranscriptItem =>
+  inTurn({
+    id,
+    at,
+    kind: "steps",
+    steps: [
+      {
+        kind: "read",
+        target: "src/auth/limiter.ts",
+        targets: [{ text: "src/auth/limiter.ts" }],
+      },
+    ],
+  });
+
+test("a finished turn with only an answer still shows its time, on a quiet line where a work line would be", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 20, 12));
+  await open(
+    one({ id: "c-quiet", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  // No work line, so no fold button; the time stands on its own line.
+  noButton(/Worked/);
+  const time = document.querySelector<HTMLElement>(".chat-turn-time")!;
+  expect(time.textContent).toMatch(/^Nov\s+10$/);
+  expect(time.closest(".chat-foldline")?.querySelector("button")).toBeNull();
+  // The line comes before the answer, as a work line does.
+  const answer = document.querySelector('[data-anchor="r1"]')!;
+  expect(
+    time.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  fireEvent.pointerMove(time);
+  expect((await screen.findByRole("tooltip")).textContent).toMatch(
+    /^Started Nov 10(, 2026)?, .+ · Ended .+$/,
+  );
+});
+
+test("a finished turn shows its start once, on the work line, with the exact times in its tooltip", async () => {
+  // Only the date is fixed, so the day label does not depend on when the suite runs.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 20, 12));
   await open(
     one({ id: "c1", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      readFile("s1"),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  const time = document.querySelector<HTMLElement>(".chat-turn-time")!;
+  expect(time.textContent).toMatch(/^Nov\s+10$/);
+  // The time is not part of the fold button's name: that stays the work line's words.
+  expect(button("Worked for 2m 13s").textContent).not.toMatch(/Nov/);
+  fireEvent.pointerMove(time);
+  expect((await screen.findByRole("tooltip")).textContent).toMatch(
+    /^Started Nov 10(, 2026)?, .+ · Ended .+$/,
+  );
+  // Your message has no time under it; Copy stays.
+  expect(document.querySelector(".chat-you-part .chat-fine")).toBeNull();
+  expect(
+    within(document.querySelector<HTMLElement>(".chat-you-part")!).getByRole(
+      "button",
+      { name: "Copy message" },
+    ),
+  ).toBeTruthy();
+});
+
+test("Copy and Save as Document belong to a turn's final response, not its progress notes", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("r1", "Reading the limiter first.")),
+      readFile("s1"),
+      inTurn(reply("r2", "The limiter is in.")),
+    ]),
+  );
+  const names = ["Copy response", "Save as Document"];
+  const count = () =>
+    names.map((name) => screen.queryAllByRole("button", { name }).length);
+  expect(count()).toEqual([1, 1]);
+  // Opening the work shows the progress note, and it still has no actions.
+  fireEvent.click(button("Worked for 2m 13s"));
+  expect(conversation().getByText("Reading the limiter first.")).toBeTruthy();
+  expect(count()).toEqual([1, 1]);
+  // The actions sit at the end of the turn, below everything it shows.
+  const unit = button("Copy response").closest(".chat-turn-unit")!;
+  expect(unit.lastElementChild?.contains(button("Copy response"))).toBe(true);
+});
+
+test("a turn still running offers no reply actions", async () => {
+  await open(
+    one({ id: "c1", title: "Limiter", activity: "working" }, [
+      youSaid,
+      turnTiming("active"),
+      inTurn(reply("r1", "Reading the limiter first.")),
+      readFile("s1"),
+    ]),
+  );
+  // A running turn's text arrives in chunks, so it is read as a whole.
+  await waitFor(() =>
+    expect(document.querySelector(".chat-col")?.textContent).toContain(
+      "Reading the limiter first.",
+    ),
+  );
+  noButton("Copy response");
+  noButton("Save as Document");
+});
+
+/** Opens the turn's one stretch row, which a turn with no progress notes still has. */
+const openStretch = () =>
+  fireEvent.click(document.querySelector<HTMLElement>(".chat-stretch-row")!);
+
+test("a finished turn folds under one row, its final response outside, and opens to each step's output", async () => {
+  await open(
+    one({ id: "finished-fold", title: "Limiter" }, [
       youSaid,
       turnTiming("completed", "2026-11-10T10:02:13Z"),
       inTurn({
@@ -2565,6 +2742,7 @@ test("a finished turn folds under one row, its final response outside, and opens
     name: "Worked for 2m 13s · 1 failed",
   });
   expect(row.getAttribute("aria-controls")).toBe(body.id);
+  openStretch();
   // A row with nothing to open is not a control; its file name is.
   expect(
     within(body)
@@ -2592,7 +2770,7 @@ test("a finished turn folds under one row, its final response outside, and opens
 
 test("a stopped turn folds too, with its stop marker below the response", async () => {
   await open(
-    one({ id: "c1", title: "Migrate" }, [
+    one({ id: "stopped-fold", title: "Migrate" }, [
       youSaid,
       turnTiming("stopped", "2026-11-10T10:00:40Z"),
       inTurn({
@@ -2606,6 +2784,7 @@ test("a stopped turn folds too, with its stop marker below the response", async 
     "Migrate",
   );
   fireEvent.click(button("Stopped after 40s · 1 not finished"));
+  openStretch();
   expect(button("Run npm run test:all, Not finished")).toBeTruthy();
   expect(
     screen.getByText("You stopped this turn. Edits already made are kept."),
@@ -2761,7 +2940,7 @@ test("an answered approval folds into its step row, which says the decision", as
 
 test("what the agent changed in ticketd is a step row, verb first", async () => {
   await open(
-    one({ id: "c1", title: "Limiter" }, [
+    one({ id: "records-step", title: "Limiter" }, [
       youSaid,
       turnTiming("completed", "2026-11-10T10:00:30Z"),
       inTurn({
@@ -2782,6 +2961,7 @@ test("what the agent changed in ticketd is a step row, verb first", async () => 
     ]),
   );
   fireEvent.click(button("Worked for 30s"));
+  openStretch();
   const body = screen.getByRole("group", { name: "Worked for 30s" });
   expect(body.textContent).toContain("Moved T-12 to In review");
   expect(body.textContent).toContain("Posted an update on T-12");
@@ -2897,9 +3077,120 @@ test("a finished turn's record changes are one receipt row under it, whose more 
     "Moved T-12 to In review · Posted an update on T-12",
   );
   fireEvent.click(button("1 more"));
+  // The turn's fold and the stretch holding the change both open: no second click.
   expect(
     screen.getByRole("group", { name: "Worked for 30s" }).textContent,
   ).toContain("Created the Document Reset email copy");
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("true");
+  // A reader who then closes the stretch is not overruled.
+  openStretch();
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("false");
+});
+
+test("more opens the stretch even when the turn's fold is already open", async () => {
+  await open(
+    one({ id: "receipt-open", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [
+          { kind: "update", reference: "T-12", excerpt: "Limiter is in" },
+          { kind: "update", reference: "T-13", excerpt: "Tests pass" },
+          { kind: "document", document_id: "d9", title: "Reset email copy" },
+        ],
+      }),
+    ]),
+  );
+  fireEvent.click(button("Worked for 30s"));
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("false");
+  fireEvent.click(button("1 more"));
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("true");
+  expect(
+    screen.getByRole("group", { name: "Worked for 30s" }).textContent,
+  ).toContain("Created the Document Reset email copy");
+});
+
+test("a ticket moved twice in a turn reads as the host's net move in the receipt row", async () => {
+  const status = (from: string, to: string) => ({
+    kind: "status" as const,
+    reference: "T-12",
+    title: "Improve the export dialog",
+    from,
+    to,
+  });
+  const update = {
+    kind: "update" as const,
+    reference: "T-12",
+    excerpt: "Started",
+  };
+  await open(
+    one({ id: "netted", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [status("Todo", "In progress"), update],
+        net: [status("Todo", "In progress"), update],
+      }),
+      inTurn({
+        id: "rec2",
+        at,
+        kind: "records",
+        changes: [status("In progress", "In review")],
+        // The host nets the whole turn on its last call.
+        net: [status("Todo", "In review"), update],
+      }),
+    ]),
+  );
+  expect(document.querySelector(".chat-records-items")?.textContent).toBe(
+    "Moved T-12 to In review · Posted an update on T-12",
+  );
+  // Two sentences: nothing more to open.
+  expect(screen.queryByRole("button", { name: /more/ })).toBeNull();
+  // The fold still lists each change as its own step row.
+  fireEvent.click(button(/^Worked for 30s/));
+  openStretch();
+  const fold = screen.getByRole("group", { name: "Worked for 30s" });
+  expect(fold.textContent).toContain("Moved T-12 to In progress");
+  expect(fold.textContent).toContain("Moved T-12 to In review");
+});
+
+test("a receipt from an older host, with no net list, says each change", async () => {
+  const status = (from: string, to: string) => ({
+    kind: "status" as const,
+    reference: "T-12",
+    title: "Improve the export dialog",
+    from,
+    to,
+  });
+  await open(
+    one({ id: "older-host", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [status("Todo", "In progress"), status("In progress", "Done")],
+      }),
+    ]),
+  );
+  expect(document.querySelector(".chat-records-items")?.textContent).toBe(
+    "Moved T-12 to In progress · Moved T-12 to Done",
+  );
 });
 
 /** The queue's head line; its count is an element of its own. */
@@ -3097,6 +3388,11 @@ test("records are linked by title and unlinked from their chip", async () => {
   await waitFor(() =>
     expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull(),
   );
+});
+
+test("the context button carries no native title; its path is the shared tooltip", async () => {
+  await open(one({ id: "c1", title: "Limiter" }));
+  expect(button(/^Folder web-app/).hasAttribute("title")).toBe(false);
 });
 
 test("Check again shows only while the harness isn't ready, and a failed recheck says so", async () => {
@@ -3702,7 +3998,7 @@ test("New Chat picks harness, model and effort in one composer picker and starts
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   // No radios: the harness is the picker's, beside Send.
   const trigger = await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   expect(screen.queryByRole("radiogroup", { name: "Harness" })).toBeNull();
   fireEvent.click(trigger);
@@ -3750,9 +4046,7 @@ test("New Chat shows why the Antigravity model check failed beside Default", asy
     { id: "antigravity", name: "Antigravity", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Antigravity, model Default" }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Antigravity" }));
 
   const picker = await screen.findByRole("dialog", {
     name: "Harness and model",
@@ -3818,7 +4112,7 @@ test("a Chat started in New Chat keeps its picks on the triggers until the sessi
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   fireEvent.click(
     await screen.findByRole("button", {
-      name: "Claude Code, model Opus 5.5, effort Default",
+      name: "Claude Code, model Opus 5.5",
     }),
   );
   fireEvent.click(await screen.findByRole("radio", { name: /^Sonnet 5/ }));
@@ -3903,9 +4197,7 @@ test("LIVE2-4: only the harness's default is tagged Default, and only once", asy
     { id: "claude-code", name: "Claude Code", status: "ready" },
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
-  fireEvent.click(
-    await screen.findByRole("button", { name: /^Claude Code, model/ }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: "Claude Code" }));
   const radios = await screen.findAllByRole("radio", {
     name: /Default|Fable|Opus/,
   });
@@ -4012,7 +4304,7 @@ test("New Chat on Claude Code sends the shown default model and permission mode,
   ]);
   fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
   await screen.findByRole("button", {
-    name: "Claude Code, model Opus 5.5, effort Default",
+    name: "Claude Code, model Opus 5.5",
   });
   // The permission trigger names the mode, not "Default".
   expect(button("Permissions: Ask before edits")).toBeTruthy();
@@ -4293,7 +4585,7 @@ test("a change held for the turn's end shows the new value with a clock, never s
 test("before its session reports, a Chat's picker shows its harness and says why there is no choice", async () => {
   // Not made in New Chat during this run, so no start of its own to show.
   await open(one({ id: "reopened", title: "Limiter" }));
-  fireEvent.click(button("Codex, model Default"));
+  fireEvent.click(button("Codex"));
   expect(
     await screen.findByText(
       "Codex lists its models once the Chat's session starts.",
@@ -4432,4 +4724,338 @@ test("with no Chat open the detail pane is New Chat, and the pencil keeps its dr
   const box = composer("Describe a task or ask a question");
   expect(box).toHaveProperty("value", "Draft the reset email");
   await waitFor(() => expect(document.activeElement).toBe(box));
+});
+
+/** A turn's step, as the host sends it; `state` makes it the one running. */
+const stepItem = (
+  id: string,
+  step: Step,
+  state: Step["state"] = "done",
+): TranscriptItem =>
+  inTurn({ id, at, kind: "steps", steps: [{ ...step, state }] });
+const readLimiter: Step = {
+  kind: "read",
+  target: "src/auth/limiter.ts",
+  targets: [{ text: "src/auth/limiter.ts" }],
+};
+const npmTest: Step = { kind: "run", target: "npm test", command: "npm test" };
+const stretchRows = () =>
+  Array.from(document.querySelectorAll<HTMLElement>(".chat-stretch-row")).map(
+    (row) => row.textContent,
+  );
+
+test("a working Chat opens with its done stretches folded and the one in progress open", async () => {
+  await open(
+    one({ id: "stretch-open", title: "Limiter", activity: "working" }, [
+      youSaid,
+      turnTiming("active"),
+      stepItem("s1", readLimiter),
+      inTurn(reply("n1", "Reading the limiter first.")),
+      stepItem("s2", npmTest),
+      inTurn(reply("n2", "The tests ran.")),
+      stepItem("s3", { ...npmTest, target: "npm run lint" }, "running"),
+    ]),
+  );
+  // The notes stay as lines of the story; each finished stretch is one row.
+  expect(stretchRows()).toEqual(["Read 1 file", "Ran 1 command"]);
+  expect(button("Read 1 file").getAttribute("aria-expanded")).toBe("false");
+  expect(screen.queryByText("src/auth/limiter.ts")).toBeNull();
+  // The stretch in progress shows its steps as they come, with no row of its own.
+  expect(button("Running npm run lint")).toBeTruthy();
+  // Only the turn is still going: no work line yet.
+  noButton(/Worked/);
+});
+
+/** What the transcript's reader sees: the scroller is 600px tall, `place` is where a stretch sits. */
+function watching() {
+  const place = { top: 100, bottom: 200 };
+  const rect = vi
+    .spyOn(Element.prototype, "getBoundingClientRect")
+    .mockImplementation(function (this: Element) {
+      const box = this.classList.contains("chat-scroll")
+        ? { top: 0, bottom: 600 }
+        : place;
+      return {
+        ...box,
+        left: 0,
+        right: 0,
+        width: 0,
+        height: 0,
+        x: 0,
+        y: 0,
+      } as DOMRect;
+    });
+  const observers: { node: Element; run: (seen: boolean) => void }[] = [];
+  vi.stubGlobal(
+    "IntersectionObserver",
+    class {
+      callback: IntersectionObserverCallback;
+      constructor(callback: IntersectionObserverCallback) {
+        this.callback = callback;
+      }
+      observe(node: Element) {
+        observers.push({
+          node,
+          run: (seen) =>
+            this.callback(
+              [{ isIntersecting: seen } as IntersectionObserverEntry],
+              this as unknown as IntersectionObserver,
+            ),
+        });
+      }
+      unobserve() {}
+      disconnect() {}
+    },
+  );
+  return {
+    place,
+    /** The view moves: what is watched is now out of it, or in it. */
+    sees: (seen: boolean) =>
+      act(() =>
+        observers
+          .filter((each) => each.node.classList.contains("chat-stretch"))
+          .forEach((each) => each.run(seen)),
+      ),
+    done: () => {
+      rect.mockRestore();
+      vi.unstubAllGlobals();
+    },
+  };
+}
+
+test("a stretch that finishes in view stays open until it has left the view, then folds", async () => {
+  const view = watching();
+  try {
+    const client = await open(
+      one({ id: "stretch-held", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-held", stepItem("s1", npmTest));
+      client.push("stretch-held", inTurn(reply("n1", "The tests ran.")));
+    });
+    // A note follows it, so it is done; but someone is looking at it.
+    expect(button("Ran npm test")).toBeTruthy();
+    expect(stretchRows()).toEqual([]);
+    // It leaves the view: only now does it fold to its row.
+    view.sees(false);
+    expect(stretchRows()).toEqual(["Ran 1 command"]);
+    expect(screen.queryByRole("button", { name: "Ran npm test" })).toBeNull();
+  } finally {
+    view.done();
+  }
+});
+
+test("a stretch that left the view keeps a focused step until focus moves on", async () => {
+  const view = watching();
+  try {
+    const client = await open(
+      one({ id: "stretch-focused", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-focused", stepItem("s1", npmTest));
+      client.push("stretch-focused", inTurn(reply("n1", "The tests ran.")));
+    });
+    const step = button("Ran npm test");
+    step.focus();
+    expect(document.activeElement).toBe(step);
+    // It leaves the view, but the keyboard is inside it: nothing is removed.
+    view.place.top = 900;
+    view.place.bottom = 1000;
+    view.sees(false);
+    expect(document.activeElement).toBe(step);
+    expect(stretchRows()).toEqual([]);
+    // Focus moves on: now it folds.
+    act(() => step.blur());
+    await waitFor(() => expect(stretchRows()).toEqual(["Ran 1 command"]));
+  } finally {
+    view.done();
+  }
+});
+
+test("focus leaving a stretch that has just scrolled back into view does not fold it", async () => {
+  const view = watching();
+  try {
+    const client = await open(
+      one({ id: "stretch-returned", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-returned", stepItem("s1", npmTest));
+      client.push("stretch-returned", inTurn(reply("n1", "The tests ran.")));
+    });
+    const step = button("Ran npm test");
+    step.focus();
+    view.place.top = 900;
+    view.place.bottom = 1000;
+    view.sees(false);
+    // It scrolls back under the reader, but the observer has not said so yet.
+    view.place.top = 100;
+    view.place.bottom = 200;
+    act(() => step.blur());
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(stretchRows()).toEqual([]);
+    expect(button("Ran npm test")).toBeTruthy();
+  } finally {
+    view.done();
+  }
+});
+
+test("a stretch that finishes out of view folds at once", async () => {
+  const view = watching();
+  // Below the scroller's 600px: nobody is looking.
+  view.place.top = 900;
+  view.place.bottom = 1000;
+  try {
+    const client = await open(
+      one({ id: "stretch-away", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-away", stepItem("s1", npmTest));
+      client.push("stretch-away", inTurn(reply("n1", "The tests ran.")));
+    });
+    expect(stretchRows()).toEqual(["Ran 1 command"]);
+  } finally {
+    view.done();
+  }
+});
+
+test("a finished turn opens to its notes and stretch rows, and a stretch opens to its steps", async () => {
+  await open(
+    one({ id: "stretch-finished", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("n1", "Reading the limiter first.")),
+      stepItem("s1", readLimiter),
+      stepItem("s2", npmTest),
+      inTurn(reply("n2", "Checking the tests.")),
+      stepItem("s3", { ...npmTest, target: "npm run lint" }, "failed"),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  expect(screen.queryByText("Reading the limiter first.")).toBeNull();
+  fireEvent.click(button("Worked for 2m 13s · 1 failed"));
+  expect(conversation().getByText("Reading the limiter first.")).toBeTruthy();
+  expect(conversation().getByText("Checking the tests.")).toBeTruthy();
+  // Not every step: one row for each stretch, the failure on the row that holds it.
+  expect(stretchRows()).toEqual([
+    "Read 1 file and ran 1 command",
+    "Ran 1 command · 1 failed",
+  ]);
+  expect(screen.queryByText("src/auth/limiter.ts")).toBeNull();
+  fireEvent.click(button("Read 1 file and ran 1 command"));
+  expect(button("Ran npm test")).toBeTruthy();
+  expect(
+    within(
+      screen.getByRole("group", { name: "Read 1 file and ran 1 command" }),
+    ).getByRole("button", { name: "Open src/auth/limiter.ts" }),
+  ).toBeTruthy();
+});
+
+test("a turn with no progress notes shows its one stretch as a row when opened", async () => {
+  await open(
+    one({ id: "stretch-single", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      stepItem("s1", readLimiter),
+      stepItem("s2", npmTest),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  fireEvent.click(button("Worked for 30s"));
+  expect(stretchRows()).toEqual(["Read 1 file and ran 1 command"]);
+  expect(screen.queryByRole("button", { name: "Ran npm test" })).toBeNull();
+  fireEvent.click(button("Read 1 file and ran 1 command"));
+  expect(button("Ran npm test")).toBeTruthy();
+});
+
+test("a stretch of one Explored row opens straight to its files, with no row repeating its words", async () => {
+  await open(
+    one({ id: "stretch-explored", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn(reply("n1", "Looking around first.")),
+      inTurn({
+        id: "s1",
+        at,
+        kind: "steps",
+        steps: [
+          { ...readLimiter, state: "done" },
+          {
+            kind: "search",
+            target: "limit",
+            targets: [{ text: "limit", scope: "src" }],
+            state: "done",
+          },
+        ],
+      }),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  fireEvent.click(button("Worked for 30s"));
+  fireEvent.click(button("Explored 1 file · 1 search"));
+  // The files are right there; the same words are not said a second time.
+  expect(button("Open src/auth/limiter.ts")).toBeTruthy();
+  expect(screen.getAllByText("Explored 1 file · 1 search")).toHaveLength(1);
+});
+
+test("the stretches you open stay as you left them for the session", async () => {
+  await open(
+    one({ id: "stretch-toggled", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("n1", "Reading the limiter first.")),
+      stepItem("s1", readLimiter),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  fireEvent.click(button("Worked for 2m 13s"));
+  fireEvent.click(button("Read 1 file"));
+  expect(button("Read 1 file").getAttribute("aria-expanded")).toBe("true");
+  // Away and back: the Chat's rows are drawn again, the toggles are kept.
+  fireEvent.click(button("Close Chat"));
+  fireEvent.click(await screen.findByRole("button", { name: /^Limiter/ }));
+  await screen.findByRole("heading", { name: "Limiter" });
+  expect(button("Read 1 file").getAttribute("aria-expanded")).toBe("true");
+  expect(
+    screen.getByRole("button", { name: "Open src/auth/limiter.ts" }),
+  ).toBeTruthy();
+  // And closing one stays closed.
+  fireEvent.click(button("Read 1 file"));
+  expect(button("Read 1 file").getAttribute("aria-expanded")).toBe("false");
+});
+
+test("between steps, while words stream, the one live line says Writing", async () => {
+  await open(
+    one({ id: "writing", title: "Limiter", activity: "working" }, [
+      youSaid,
+      turnTiming("active"),
+      stepItem("s1", npmTest),
+      inTurn({
+        id: "n1",
+        at,
+        kind: "response",
+        text: "The tests ran, now",
+        state: "streaming",
+      }),
+    ]),
+  );
+  expect(working()).toMatch(/^Writing/);
+  // Its clock counts from when it appeared, not from the turn's start.
+  expect(working()).not.toMatch(/for/);
+  expect(document.querySelectorAll(".chat-spin")).toHaveLength(1);
 });

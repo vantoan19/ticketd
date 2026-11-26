@@ -8,16 +8,20 @@ import { lead } from "@/lib/motion-tokens";
 
 /**
  * A Chat's ranked status as one line: an 8px dot (orange needsYou for you, blue
- * unread) or the 12px spinner while it works, the word, then the muted detail,
- * which truncates first. The host words it; this only draws it. When the status
+ * unread), the word, then the muted detail, which truncates first. Work is the
+ * word "Working" in ink with no spinner: the sidebar and the open Chat's live line
+ * each keep the one that moves; a menu opts in with `spinner`. The host words it; this only draws it. When the status
  * changes in view the dot arrives first, then the word crossfades.
  */
 export function ChatStatus({
   status,
   activity,
+  spinner = false,
 }: {
   status: Status;
   activity: Activity;
+  /** A menu has no live line or sidebar count beside it, so its working row keeps the spinner. */
+  spinner?: boolean;
 }) {
   const working =
     status.rank === "working" &&
@@ -37,6 +41,7 @@ export function ChatStatus({
       {dot ? (
         <StatusDot key={dot} tone={dot} />
       ) : (
+        spinner &&
         working && (
           <LoaderCircle size={12} className="chat-spin" aria-hidden="true" />
         )

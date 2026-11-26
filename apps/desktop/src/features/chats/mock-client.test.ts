@@ -1,6 +1,14 @@
 import { expect, test } from "vitest";
-import type { ChatChange, TranscriptItem } from "@/features/chats/client";
-import { chatState, createMockChatClient } from "@/features/chats/mock-client";
+import type {
+  ChatChange,
+  RecordChange,
+  TranscriptItem,
+} from "@/features/chats/client";
+import {
+  chatState,
+  createMockChatClient,
+  HARNESS_OPTIONS,
+} from "@/features/chats/mock-client";
 
 const at = "2026-11-10T10:00:00Z";
 const approval: TranscriptItem = {
@@ -201,4 +209,85 @@ test("quitting stops working Chats and says why in their history", async () => {
   const { items } = await client.openChat("c1");
   expect(items.at(-1)).toMatchObject({ kind: "marker", reason: "quit" });
   expect(client.quit).toBe(true);
+});
+
+test("an idle row says the first sentence of its latest turn's records row, with the host's netted moves", async () => {
+  const records = (
+    id: string,
+    turn: string,
+    changes: RecordChange[],
+    net?: RecordChange[],
+  ) =>
+    ({
+      id,
+      at,
+      kind: "records",
+      turn_id: turn,
+      changes,
+      net,
+    }) as TranscriptItem;
+  const moved: RecordChange = {
+    kind: "status",
+    reference: "T-12",
+    title: "Demo",
+    from: "Todo",
+    to: "In review",
+  };
+  const posted: RecordChange = {
+    kind: "update",
+    reference: "T-12",
+    excerpt: "Done",
+  };
+  const next: RecordChange = {
+    kind: "update",
+    reference: "T-13",
+    excerpt: "Hi",
+  };
+  const client = createMockChatClient({
+    chats: [
+      {
+        chat: chatState({ id: "c1", title: "One turn" }),
+        items: [records("r1", "t1", [moved, posted])],
+      },
+      {
+        chat: chatState({ id: "c3", title: "Moved twice" }),
+        items: [
+          records("r1", "t1", [
+            { ...moved, from: "Todo", to: "In progress" },
+            posted,
+          ]),
+          // The host nets the whole turn on its last call.
+          records(
+            "r2",
+            "t1",
+            [{ ...moved, from: "In progress" }],
+            [moved, posted],
+          ),
+        ],
+      },
+      {
+        chat: chatState({ id: "c2", title: "Two turns" }),
+        items: [
+          records("r1", "t1", [moved]),
+          records("r2", "t2", [next, moved]),
+        ],
+      },
+    ],
+  });
+  const rows = await client.listChats("active");
+  const line = (id: string) => rows.find((row) => row.id === id)?.status.word;
+  expect(line("c1")).toBe("Moved T-12 to In review");
+  expect(line("c2")).toBe("Posted an update on T-13");
+  // Todo -> In progress -> In review: the host's net list on the last call leads.
+  expect(line("c3")).toBe("Moved T-12 to In review");
+});
+
+test("NAV-03: every permission mode says what it can touch, in one sentence", () => {
+  for (const harness of HARNESS_OPTIONS) {
+    for (const mode of harness.permission?.options ?? []) {
+      expect(mode.description, `${harness.harness_id} ${mode.label}`).toMatch(
+        /^[^.]+\.$/,
+      );
+    }
+  }
 });

@@ -21,19 +21,26 @@ export type ChatRequest =
     }
   | { kind: "new"; start?: TicketStart };
 
+/**
+ * How a Chat started from a ticket begins: "Work on T-12: <title>". The Chat's
+ * stored title is that first line, and the Rust host reads it back by this same
+ * lead to show the ticket's own title: `WORK_ON_LEAD` in
+ * `src-tauri/src/chat_view.rs`. Change both together.
+ */
+export const WORK_ON_LEAD = "Work on ";
+
 /** The unsent prompt New Chat opens with: the ticket as a mention, then its title. */
 export function ticketPrompt(ticket: TicketRecord): {
   text: string;
   tokens: Token[];
 } {
-  const lead = "Work on ";
   return {
-    text: `${lead}${ticket.reference}: ${ticket.title}`,
+    text: `${WORK_ON_LEAD}${ticket.reference}: ${ticket.title}`,
     tokens: [
       {
         kind: "record",
-        start: lead.length,
-        end: lead.length + ticket.reference.length,
+        start: WORK_ON_LEAD.length,
+        end: WORK_ON_LEAD.length + ticket.reference.length,
         text: ticket.reference,
         record: ticket,
       },

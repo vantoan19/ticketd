@@ -29,12 +29,16 @@ import {
 import { Button } from "@/components/ui/button";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
+import { Tooltip } from "@/components/ui/tooltip";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { useStatusLine } from "@/components/ui/use-status-line";
+import {
+  useStatusLine,
+  useStatusLineAbove,
+} from "@/components/ui/use-status-line";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { ofTotal } from "@/lib/format";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
@@ -307,6 +311,7 @@ function LinkedRecords({
               key={`${record.kind}:${record.id}`}
               record={record}
               backLabel={`Back to ${chat.title}`}
+              chatTitle={chat.title}
               onRemove={() => remove(record)}
             />
           ))}
@@ -327,6 +332,7 @@ function LinkedRecords({
                       <RecordChip
                         record={record}
                         backLabel={`Back to ${chat.title}`}
+                        chatTitle={chat.title}
                         onRemove={() => remove(record)}
                       />
                     </li>
@@ -468,6 +474,10 @@ function Conversation({
   const messageBox = useRef<HTMLTextAreaElement>(null);
   const retrySend = useRef<(() => void) | null>(null);
   const dock = useRef<HTMLDivElement>(null);
+  // The pane's status line rises from the transcript, 8px above the tray, so
+  // it never covers the composer's controls (DESIGN.md section 12).
+  const [tray, setTray] = useState<HTMLDivElement | null>(null);
+  useStatusLineAbove(tray);
   // Opening a Chat whose opener left (a list row re-sorted, a pane swapped)
   // must not strand the keyboard on the page: the message box takes it.
   useEffect(() => {
@@ -644,9 +654,17 @@ function Conversation({
     event.preventDefault();
     stop();
   };
+  /** Deny was answered: the box invites what to do instead, until the next send. */
+  const [denied, setDenied] = useState(false);
+  // The turn the Deny was in has ended: the next one starts from a plain box.
+  if (denied && !isLive(chat)) setDenied(false);
   const answer = (requestId: string, response: RequestAnswer) =>
     client.answer(id, requestId, response).then(
-      () => setFailure(null),
+      () => {
+        setFailure(null);
+        if ("option_id" in response && response.option_id === "deny")
+          setDenied(true);
+      },
       (reason: unknown) => {
         // The request left the dock; say why the pick did nothing.
         if (reason instanceof ChatError && reason.code === "stale")
@@ -763,6 +781,7 @@ function Conversation({
     });
   /** Sending resumes following and clears the New marker. */
   const sent = <T,>(action: Promise<T>) => {
+    setDenied(false);
     follow();
     setNewFrom(undefined);
     setAsked(null);
@@ -1016,7 +1035,7 @@ function Conversation({
             // plan pill and the queue sit inside the composer's one ring, as
             // sections split by hairlines on one 16px inner edge. The top part
             // glides as one block when something arrives or leaves.
-            <div className="chat-tray">
+            <div className="chat-tray" ref={setTray}>
               <DockSlot className="chat-tray-top">
                 {problem && (
                   <ProblemNotice
@@ -1090,7 +1109,12 @@ function Conversation({
                 key={id}
                 framed={false}
                 inputRef={messageBox}
-                placeholder={composerPlaceholder(chat, answering, hasImages)}
+                placeholder={composerPlaceholder(
+                  chat,
+                  answering,
+                  denied && pending.length === 0,
+                  hasImages,
+                )}
                 draft={draft}
                 answeringQuestion={answering ? question?.id : undefined}
                 mentions={mentions}
@@ -1308,9 +1332,12 @@ export function ChatDetail({
               className="chat-head-mark"
             />
           )}
-          <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
-            {chat?.title ?? (title || "Chat")}
-          </h2>
+          {/* The full title, only while the header cuts it. */}
+          <Tooltip content={chat?.title ?? (title || "Chat")} overflowOnly>
+            <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
+              {chat?.title ?? (title || "Chat")}
+            </h2>
+          </Tooltip>
           {chat && (
             <ChatContext chat={chat} asOf={lastAsk(snapshot?.items ?? [])} />
           )}

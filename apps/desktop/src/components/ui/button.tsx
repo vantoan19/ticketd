@@ -32,7 +32,7 @@ const buttonVariants = cva(
         "icon-compact": "size-7",
         card: "h-auto p-0",
         "icon-sm": "size-8",
-        "icon-row-action": "ui-button-icon-row-action size-8",
+        "icon-row-action": "ui-button-icon-row-action size-6",
         "icon-lg": "size-12",
         // An action link inside a sentence or caption: no padding, the text's height.
         inline: "h-auto p-0 align-baseline",

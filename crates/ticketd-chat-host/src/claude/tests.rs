@@ -1534,6 +1534,56 @@ fn completed_tool_calls_from_a_recorded_chat_have_typed_actions() {
         bash.command.as_ref().expect("recorded command").exact,
         r"printf 'capture-first\n'; sleep 2; printf 'capture-second\n'; sleep 2; printf 'capture-third\n'"
     );
+    // The harness's own account of the command comes along; the other tools have none.
+    assert_eq!(
+        bash.description.as_deref(),
+        Some("Print three lines with pauses between them")
+    );
+    assert!(
+        [read, search, edit, write]
+            .iter()
+            .all(|step| step.description.is_none())
+    );
+}
+
+#[test]
+fn a_command_carries_the_description_claude_code_gave_it() {
+    use crate::{ToolEvidence, read_claude_steps};
+    use ticketd_core::ChatToolState;
+
+    let read = |name: &str, input: &str| {
+        let steps = read_claude_steps(ToolEvidence {
+            name,
+            input,
+            output: None,
+            state: ChatToolState::Completed,
+            working_directory: "/demo",
+        });
+        assert_eq!(steps.len(), 1);
+        steps.into_iter().next().expect("one step")
+    };
+    for tool in ["Bash", "PowerShell"] {
+        let described = read(
+            tool,
+            r#"{"command":"npm test","description":"  Run the unit tests \n"}"#,
+        );
+        assert_eq!(described.description.as_deref(), Some("Run the unit tests"));
+        // The exact command stays what it was, for when the row opens.
+        assert_eq!(described.command.expect("command").exact, "npm test");
+
+        for input in [
+            r#"{"command":"npm test"}"#,
+            r#"{"command":"npm test","description":"  "}"#,
+            r#"{"command":"npm test","description":7}"#,
+        ] {
+            assert_eq!(read(tool, input).description, None, "{tool} {input}");
+        }
+    }
+    let other = read(
+        "Read",
+        r#"{"file_path":"/demo/a.txt","description":"Look"}"#,
+    );
+    assert_eq!(other.description, None);
 }
 
 #[test]

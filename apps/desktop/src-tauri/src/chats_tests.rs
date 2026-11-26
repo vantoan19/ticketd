@@ -2084,6 +2084,57 @@ async fn repeating_a_new_chat_request_sends_its_first_message_once() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_new_title_is_cut_at_a_word_and_earlier_title_receipts_still_resume() {
+    let f = Fixture::new().await;
+    let line =
+        "Explain how the retry queue decides which Chats to send after a restart, in detail please";
+    let mut input = f.input(line);
+    let file = AttachmentInput {
+        name: "notes.txt".to_owned(),
+        data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+    };
+    let snapshot =
+        ChatAttachmentContent::from_data_url(&file.name, &file.data_url, MAX_BACKUP_FILE_BYTES)
+            .unwrap();
+    input.attachments.push(file);
+    let earlier = f
+        .core()
+        .create_chat_for_first_message(
+            &format!("{}:chat", input.command_id),
+            NewChat {
+                title: Some(line.chars().take(80).collect()),
+                harness: input.harness_id.clone(),
+                execution_folder: input.folder.clone().unwrap(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+            ChatStartPicks::default(),
+            line,
+            &[snapshot],
+        )
+        .unwrap();
+    let mut changed_text = input.clone();
+    changed_text.message.push_str("\nAnother request");
+    let mut changed_file = input.clone();
+    changed_file.attachments[0].data_url = "data:text/plain;base64,b3RoZXI=".to_owned();
+    for changed in [changed_text, changed_file] {
+        let conflict = f.chats.create(changed).await.unwrap_err();
+        assert!(conflict.message.contains("different"), "{conflict:?}");
+    }
+    let resumed = f.chats.create(input.clone()).await.unwrap();
+    assert_eq!(resumed.chat_id, earlier.id);
+    assert_eq!(resumed.send_error, None);
+    assert_eq!(f.chats.create(input).await.unwrap(), resumed);
+    assert_eq!(messages(&f.core(), &earlier.id).unwrap().len(), 1);
+
+    let fresh = f.chats.create(f.input(line)).await.unwrap();
+    assert_eq!(
+        f.core().chat(&fresh.chat_id).unwrap().title.as_deref(),
+        Some("Explain how the retry queue decides which Chats to send after a restart, in…")
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_failed_managed_folder_creation_still_binds_the_first_message() {
     let f = Fixture::new().await;
     let mut input = f.input("Same title\nOriginal message");
@@ -3191,9 +3242,10 @@ async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_li
         .find(|change| change["item"]["kind"] == "records")
         .expect("a records row");
     assert_eq!(records["item"]["changes"], json!([status]));
+    assert_eq!(records["item"]["net"], json!([status]));
     let rows = f.chats.list(ChatListFilter::Active).unwrap();
     assert_eq!(
-        serde_json::to_value(&rows[0]).unwrap()["last_change"],
+        serde_json::to_value(&rows[0]).unwrap()["first_change"],
         status
     );
 
@@ -3201,10 +3253,79 @@ async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_li
     f.core().set_trashed(&ticket.reference, true, None).unwrap();
     let (opened, _) = f.open(&id).await;
     let gone = opened.snapshot.items.iter().find_map(|item| match item {
-        Item::Records { gone, .. } => Some(gone.clone()),
+        Item::Records { gone, net_gone, .. } => Some((gone.clone(), net_gone.clone())),
         _ => None,
     });
-    assert_eq!(gone, Some(vec![Some("trashed")]));
+    assert_eq!(gone, Some((vec![Some("trashed")], vec![Some("trashed")])));
+}
+
+/// A turn longer than the list row's history window still counts its changed files:
+/// its turn record is read on its own, not from that window.
+#[tokio::test(start_paused = true)]
+async fn a_long_turn_still_says_how_many_files_it_changed_on_the_list() {
+    use ticketd_chat_host::{FileChange, FileChangeKind};
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    // More records than the list row reads, before the turn's files report.
+    for number in 0..(SUMMARY_ITEMS + 5) {
+        let item = format!("cmd-{number}");
+        f.emit(command_tool(&item, "ls", ToolStatus::Running)).await;
+        f.emit(command_tool(&item, "ls", ToolStatus::Succeeded))
+            .await;
+    }
+    f.emit(EventKind::FilesChanged {
+        turn: turn(),
+        files: vec![FileChange {
+            path: "/work/src/limiter.ts".to_owned(),
+            kind: FileChangeKind::Added,
+            added_lines: Some(48),
+            removed_lines: Some(0),
+            confirmed: true,
+        }],
+    })
+    .await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    let rows = f.chats.list(ChatListFilter::Active).unwrap();
+    let row = rows.iter().find(|row| row.id == id).unwrap();
+    assert_eq!(row.status.detail.as_deref(), Some("1 file changed"));
+}
+
+/// A failed turn older than the list row's history window is still the Chat's last
+/// turn: the row tells it, so "Check again" must be able to clear it.
+#[tokio::test(start_paused = true)]
+async fn checking_again_clears_a_failed_turn_older_than_the_history_window() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(failed_turn("turn-1", failure(ProblemKind::LoginRequired)))
+        .await;
+    // More records than the list row reads, after the turn ended.
+    for number in 0..(SUMMARY_ITEMS + 5) {
+        let item = format!("cmd-{number}");
+        f.emit(command_tool(&item, "ls", ToolStatus::Running)).await;
+        f.emit(command_tool(&item, "ls", ToolStatus::Succeeded))
+            .await;
+    }
+    let row = |f: &Fixture| f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row(&f).problem, Some(ChatProblemKind::NotSignedIn));
+
+    f.fake.set_inspection(Inspection::Installed {
+        executable: PathBuf::from("harness"),
+        version: Some("1.0".to_owned()),
+        login: LoginState::SignedIn,
+        capabilities: ticketd_chat_host::Capabilities {
+            steering: ticketd_chat_host::Capability::Unknown {
+                reason: String::new(),
+            },
+        },
+    });
+    f.chats.check_again(&id).await.unwrap();
+    settle().await;
+    assert_eq!(row(&f).problem, None, "the probe cleared what the row told");
 }
 
 #[tokio::test(start_paused = true)]
@@ -3666,6 +3787,40 @@ async fn a_long_codex_turn_reads_the_workspace_at_most_once_per_update_and_sends
         ids.len(),
         all,
         "an item is never sent twice unchanged in a row"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_row_reads_the_first_message_to_tell_a_cut_title_from_a_whole_one() {
+    let f = Fixture::new().await;
+    let mut core = f.core();
+    let make = |core: &mut Workspace, title: &str, message: &str| {
+        let chat = core
+            .create_chat(
+                None,
+                NewChat {
+                    title: Some(title.to_owned()),
+                    harness: "codex".to_owned(),
+                    execution_folder: f.dir.path().to_string_lossy().into_owned(),
+                    folder_managed: false,
+                    links: Vec::new(),
+                },
+            )
+            .unwrap();
+        core.save_chat_input(None, &chat.id, message).unwrap();
+        chat.id
+    };
+    let line = "Explain how the retry queue decides which Chats to send after a restart, in deta";
+    assert_eq!(line.chars().count(), 80);
+    let whole = make(&mut core, line, line);
+    let cut_line = format!("{line}il please");
+    let cut = make(&mut core, line, &cut_line);
+    let (_, rows, _) = f.chats.overview_digest().unwrap();
+    let title = |id: &str| rows.iter().find(|row| row.id == id).unwrap().title.clone();
+    assert_eq!(title(&whole), line);
+    assert_eq!(
+        title(&cut),
+        "Explain how the retry queue decides which Chats to send after a restart, in…"
     );
 }
 

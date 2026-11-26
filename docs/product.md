@@ -647,6 +647,13 @@ collect OAuth tokens, proxy model requests, or change billing.
   Before sending, the person picks the harness and, from what it reports, its model,
   effort, and permission mode. Full access, where the harness edits and runs
   commands without asking, is a choice for a person's Chat.
+- **Titles.** A Chat is titled by its first line, cut at a word with "…" when it runs
+  past 80 characters. A Chat started from a ticket takes the ticket's title instead of
+  repeating "Work on T-12:", and the linked chip then shows the reference alone.
+  Existing Chats read the same way; nothing stored is rewritten. A row's second line
+  says what the Chat last did (the first sentence of its last turn's records row, where a
+  ticket's status moves read as the net move; else the files it changed, or the first
+  words of its reply), and "Working" while it runs.
 - **Folder choice.** New Chat offers locally registered Project checkouts,
   recent folders, a Scratch folder, and the system folder chooser. If a Chat's
   folder goes missing, it can continue in another Project checkout or a folder
@@ -677,6 +684,25 @@ collect OAuth tokens, proxy model requests, or change billing.
   and files together. While a queued message is being edited, its original text and
   files stay saved in the queue and can be reopened after restarting ticketd. Saving
   the edited message replaces the original. Sent files can be saved from Chat history.
+- **Working turns.** A turn's progress notes (what the harness says while it
+  works) stay in the transcript as lines of its story, and the steps between two
+  notes fold into one row each, such as "Read 6 files and ran 3 commands", with
+  "· 1 failed" when a step failed. A stretch already done when the Chat opens
+  starts folded. The stretch in progress stays open, and one that finishes while
+  someone is looking at it folds only after it has left the view, so nothing above
+  the newest line moves. What the person opens or closes stays that way for the
+  session. When the turn ends its work line folds the notes and stretches together;
+  opened, it shows the notes and stretch rows, and a stretch opens to its steps. A
+  harness that writes no notes has one stretch per turn, shown as its one stretch
+  row, which opens to its steps.
+- **Steps.** Each tool call reads as one line in the words of what it did. When Claude
+  Code describes a command, the row reads that description and opens to the exact
+  command and its output; any other command reads as its first line, muted and cut to
+  one line. Paths show their folder muted before the file name, and a long path is cut
+  from its start, never its name. A run of reads and searches is one row, "Explored 6
+  files · 2 searches". The Chat host reads the description from the stored tool input
+  each time the view is built, so existing Chats read this way with no migration
+  ([ADR 0022](adr/0022-harnesses-plug-into-ticketds-chat-vocabulary.md)).
 - **Lifetime.** Execution belongs to the desktop backend, not the view: navigating away
   keeps work running, and explicit Quit stops it. One ranked status per Chat drives
   the list, sidebar count, app-icon count, and system notifications, which can be

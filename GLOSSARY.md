@@ -39,6 +39,9 @@ A turn that ended after the person last viewed its Chat is unseen until the Chat
 **Muted Chat**:
 A Chat whose outcomes never raise a system notification or count on the app icon. It still shows its status and counts in the sidebar.
 
+**Progress note**:
+A response a harness writes while a turn is still working, with more work after it. It is the harness talking to the person as it goes, not the turn's answer: it shows in the working size and has no reply actions. The turn's last response is its final response. The steps between two progress notes (or a note and the turn's start or end) are a **stretch**, shown as one row such as "Read 6 files and ran 3 commands" that opens to its steps.
+
 **Turn report**:
 What the harness reported about a turn besides its steps and final response: its reasoning, its plan and the files it changed. Each is kept in Chat history as the harness last reported it, and what it did not report is not shown.
 

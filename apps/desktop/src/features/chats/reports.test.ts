@@ -1,8 +1,8 @@
 import { expect, test } from "vitest";
 import type { TranscriptItem } from "@/features/chats/client";
 import {
+  fileCounts,
   filesSummary,
-  shortenedPath,
   reasoningWords,
   tokens,
 } from "@/features/chats/reports";
@@ -65,11 +65,23 @@ test("totals leave out unconfirmed edits and files without counts", () => {
   });
 });
 
-test("token counts and long paths read short", () => {
+test("a count of nothing removed is not said", () => {
+  const file = (added: number, removed: number) => ({
+    path: "gen/icons.py",
+    open_path: "/gen/icons.py",
+    kind: "added" as const,
+    confirmed: true,
+    added_lines: added,
+    removed_lines: removed,
+  });
+  expect(fileCounts(file(57, 0))).toBe("+57");
+  expect(fileCounts(file(19, 1))).toBe("+19 −1");
+  expect(filesSummary([file(40, 0), file(17, 0)]).counts).toBe("+57");
+  expect(filesSummary([file(40, 0), file(17, 2)]).counts).toBe("+57 −2");
+});
+
+test("token counts read short", () => {
   expect(tokens(124_400)).toBe("124k");
   expect(tokens(1_000_000)).toBe("1M");
   expect(tokens(999)).toBe("999");
-  expect(
-    shortenedPath("src/a/very/deep/folder/tree/that/goes/on/and/on/limiter.ts"),
-  ).toBe("src/a/very/deep/folder/tree/that/goes…/limiter.ts");
 });

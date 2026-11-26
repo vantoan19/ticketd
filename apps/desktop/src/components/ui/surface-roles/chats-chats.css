@@ -121,8 +121,7 @@
   transition: none;
 }
 .chat-you {
-  border-radius: var(--radius-panel) var(--radius-panel) var(--radius-segment)
-    var(--radius-panel);
+  border-radius: var(--radius-panel);
   background: var(--accent);
   color: var(--foreground);
   font-size: var(--text-doc);
@@ -132,7 +131,7 @@
 .chat-you-actions {
   opacity: 0;
 }
-.chat-you-part:hover .chat-you-actions,
+.chat-you-box:hover .chat-you-actions,
 .chat-you-actions:focus-within {
   opacity: 1;
 }
@@ -163,12 +162,23 @@
 .chat-ai p {
   white-space: pre-line;
 }
-.chat-turn .chat-actions {
+.chat-turn-actions {
   opacity: 0;
 }
-.chat-turn:hover .chat-actions,
-.chat-turn .chat-actions:focus-within {
+.chat-turn-unit:hover .chat-turn-actions,
+.chat-turn-actions:focus-within {
   opacity: 1;
+}
+@media (pointer: coarse) {
+  .chat-turn-actions {
+    opacity: 1;
+  }
+}
+.chat-turn-time {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  font-variant-numeric: tabular-nums;
 }
 .chat-steps,
 .chat-working,
@@ -218,6 +228,12 @@ button.chat-steps:hover {
 }
 .chat-steps .ui-reference {
   color: var(--foreground);
+}
+/* The mono inside a row's words (a reference, a command, a file) sits in the
+   row's own 20px line box and never makes a line taller, so every row is
+   exactly 28px. */
+.chat-step-words:not([data-line]) :is(code, .ui-reference) {
+  line-height: 0;
 }
 /* Fades up from a soft blur: each new chunk of streamed text, and a status dot. */
 @keyframes chat-soft-in {
@@ -306,6 +322,21 @@ button.chat-file-name:hover {
 button.chat-file-name:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+.chat-steps .chat-step-command {
+  color: var(--muted-foreground);
+}
+button.chat-steps:hover .chat-step-command {
+  color: var(--foreground);
+}
+.chat-path-dir {
+  color: var(--muted-foreground);
+}
+/* The step that runs stands out from the finished rows above it: its verb and
+   command in ink; the spinner and the clock stay muted. */
+.chat-steps[data-running] .chat-step-verb,
+.chat-steps[data-running] .chat-step-command {
+  color: var(--foreground);
 }
 .chat-steps [data-outcome] {
   color: var(--foreground);
@@ -808,4 +839,11 @@ button.chat-file-name:focus-visible {
   .chat-row-item:has(.chat-row-more[data-open]) .chat-row-time {
     visibility: visible;
   }
+}
+/* The path in the version line reads as the line does, not as a path in a menu. */
+.chat-pop-found > [data-slot="path-text"] {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: inherit;
 }

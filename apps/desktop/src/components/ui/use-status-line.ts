@@ -39,6 +39,8 @@ export type StatusLine = {
 export type StatusLineRegionValue = StatusLine & {
   /** Space kept free at the bottom of the pane (the bulk bar), in px. */
   setInset: (px: number) => void;
+  /** An element the line clears instead: 8px above its top, centred on it (a Chat's tray). */
+  setAbove: (element: HTMLElement | null) => void;
 };
 
 export const StatusLineContext = createContext<StatusLineRegionValue | null>(
@@ -70,4 +72,17 @@ export function useStatusLineInset(px: number) {
     region.setInset(px);
     return () => region.setInset(0);
   }, [region, px]);
+}
+
+/**
+ * Puts the line 8px above `element`'s top edge, centred on it, instead of on
+ * the pane's bottom edge: a Chat's tray, which the line must never cover.
+ */
+export function useStatusLineAbove(element: HTMLElement | null) {
+  const region = use(StatusLineContext);
+  useEffect(() => {
+    if (!region) return;
+    region.setAbove(element);
+    return () => region.setAbove(null);
+  }, [region, element]);
 }

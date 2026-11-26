@@ -562,35 +562,40 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
         id,
         at,
         changes,
+        net,
         turn_id,
         ..
     } = item
     else {
         return item;
     };
-    let gone = changes
-        .iter()
-        .map(|change| {
-            let trashed = match change {
-                ChatAgentChange::Status { reference, .. }
-                | ChatAgentChange::Update { reference, .. } => workspace
-                    .show_ticket(reference)
-                    .map(|ticket| ticket.trashed),
-            };
-            match trashed {
-                Ok(true) => Some("trashed"),
-                Ok(false) => None,
-                Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
-                // Not readable now: shown as it was, linked.
-                Err(_) => None,
-            }
-        })
-        .collect();
+    let gone_of = |changes: &[ChatAgentChange]| {
+        changes
+            .iter()
+            .map(|change| {
+                let trashed = match change {
+                    ChatAgentChange::Status { reference, .. }
+                    | ChatAgentChange::Update { reference, .. } => workspace
+                        .show_ticket(reference)
+                        .map(|ticket| ticket.trashed),
+                };
+                match trashed {
+                    Ok(true) => Some("trashed"),
+                    Ok(false) => None,
+                    Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
+                    // Not readable now: shown as it was, linked.
+                    Err(_) => None,
+                }
+            })
+            .collect()
+    };
     Item::Records {
         id,
         at,
+        gone: gone_of(&changes),
+        net_gone: gone_of(&net),
         changes,
-        gone,
+        net,
         turn_id,
     }
 }
@@ -730,6 +735,13 @@ fn surroundings(
         })
         .collect();
     let links = links(workspace, &chat.id)?;
+    let first_line = if chat_view::title_may_be_cut(chat) {
+        workspace
+            .chat_first_input_text(&chat.id)?
+            .and_then(|text| chat_view::first_line_of(&text))
+    } else {
+        None
+    };
     let trashed_links = workspace
         .chat_linked_records(&chat.id)?
         .into_iter()
@@ -741,6 +753,7 @@ fn surroundings(
         checked_turn,
         folder_missing,
         shared_with,
+        first_line,
         project: chat_project(chat, &workspace.list_projects()?),
         branch: None,
         links,
@@ -1371,10 +1384,15 @@ impl Chats {
         #[cfg(test)]
         self.rows_built.fetch_add(1, Ordering::SeqCst);
         let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
+        let mut tracker = Tracker::from_items(&items);
+        // A long turn's own record can lie outside the window; the row still says it.
+        if let Some(turn) = workspace.chat_latest_turn(&chat.id)? {
+            tracker.note(&ChatItem::Turn(turn));
+        }
         Ok(chat_view::summary(
             chat,
             live,
-            &Tracker::from_items(&items),
+            &tracker,
             &surroundings(
                 workspace,
                 chat,
@@ -1639,19 +1657,7 @@ impl Chats {
                     .to_string_lossy()
                     .into_owned(),
             };
-            let new_chat = NewChat {
-                title: input
-                    .message
-                    .trim()
-                    .lines()
-                    .next()
-                    .or_else(|| input.attachments.first().map(|file| file.name.as_str()))
-                    .map(|line| line.chars().take(80).collect()),
-                harness: input.harness_id.clone(),
-                execution_folder,
-                folder_managed: input.folder.is_none(),
-                links: input.links.into_iter().map(ChatLink::from).collect(),
-            };
+            let attachment_title = input.attachments.first().map(|file| file.name.clone());
             let has_receipt = workspace.has_chat_creation_receipt(&create)?;
             let new_limit = (!has_receipt && !input.attachments.is_empty())
                 .then(|| workspace.attachment_upload_limit())
@@ -1661,16 +1667,44 @@ impl Chats {
                 input.attachments,
                 new_limit.unwrap_or(MAX_BACKUP_FILE_BYTES),
             )?;
+            let first_line = chat_view::first_line_of(&input.message).or(attachment_title);
+            let previous_title = first_line
+                .as_ref()
+                .map(|line| line.chars().take(80).collect());
+            let mut new_chat = NewChat {
+                title: first_line
+                    .as_deref()
+                    .map(|line| chat_view::cut_at_word(line, chat_view::TITLE_LIMIT)),
+                harness: input.harness_id.clone(),
+                execution_folder,
+                folder_managed: input.folder.is_none(),
+                links: input.links.into_iter().map(ChatLink::from).collect(),
+            };
+            let receipt = if has_receipt {
+                let replay = |chat: &NewChat| {
+                    workspace.replay_chat_creation(
+                        &create,
+                        chat,
+                        requested,
+                        &input.message,
+                        &attachments,
+                    )
+                };
+                match replay(&new_chat) {
+                    Err(ticketd_core::Error::RequestConflict(_))
+                        if new_chat.title != previous_title =>
+                    {
+                        // Earlier receipts include the title cut at the character limit.
+                        new_chat.title = previous_title;
+                        replay(&new_chat)?
+                    }
+                    result => result?,
+                }
+            } else {
+                None
+            };
             let mut legacy_saved = None;
-            if has_receipt
-                && let Some(receipt) = workspace.replay_chat_creation(
-                    &create,
-                    &new_chat,
-                    requested,
-                    &input.message,
-                    &attachments,
-                )?
-            {
+            if let Some(receipt) = receipt {
                 let (chat, exact) = match receipt {
                     ChatCreationReplay::Exact(chat) => (chat, true),
                     ChatCreationReplay::Legacy(chat) => (chat, false),
@@ -2452,6 +2486,8 @@ impl Chats {
             return Err(failed("The folder is still missing.".to_owned()));
         }
         let items = workspace.chat_snapshot(chat_id, SUMMARY_ITEMS)?.items;
+        // The row reads the last turn on its own too, so this must see what the row sees.
+        let latest_turn = workspace.chat_latest_turn(chat_id)?;
         drop(workspace);
         let descriptor = self
             .catalog()
@@ -2468,7 +2504,11 @@ impl Chats {
         ) {
             host.resume(chat_id, ResumeMode::Native).await?;
         }
-        if let Some(turn) = Tracker::from_items(&items).failed_turn() {
+        let mut tracker = Tracker::from_items(&items);
+        if let Some(turn) = latest_turn {
+            tracker.note(&ChatItem::Turn(turn));
+        }
+        if let Some(turn) = tracker.failed_turn() {
             // A sign-in the probe cannot see is not shown to be in order by it.
             let signed_out = matches!(
                 TurnEnding::of(turn),
