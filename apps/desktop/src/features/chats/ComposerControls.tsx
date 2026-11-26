@@ -705,7 +705,7 @@ function PermissionPicker({
       <DropdownMenuContent
         align="start"
         side="top"
-        className="w-72"
+        className="w-80"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           inputRef.current?.focus();

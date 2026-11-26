@@ -403,13 +403,23 @@ export const HARNESS_OPTIONS: HarnessOptions[] = [
     permission: {
       options: [
         option("default", "Ask before edits", {
+          description:
+            "Reads freely; asks before it edits a file or runs a command.",
           is_default: true,
           permission: "ask",
         }),
-        option("acceptEdits", "Accept edits", { permission: "accept_edits" }),
-        option("plan", "Plan only", { permission: "read_only" }),
+        option("acceptEdits", "Accept edits", {
+          description:
+            "Edits files in this folder without asking; asks before commands.",
+          permission: "accept_edits",
+        }),
+        option("plan", "Plan only", {
+          description: "Reads and plans; changes nothing.",
+          permission: "read_only",
+        }),
         option("bypassPermissions", "Full access", {
-          description: "Runs tools and commands without asking",
+          description:
+            "Edits and runs commands without asking, anywhere your account can reach.",
           permission: "full_access",
         }),
       ],
@@ -439,9 +449,14 @@ export const HARNESS_OPTIONS: HarnessOptions[] = [
     ],
     permission: {
       options: [
-        option("own", "Codex settings", { is_default: true }),
+        option("own", "Codex settings", {
+          description:
+            "Follows your Codex settings for what it asks and what it can touch.",
+          is_default: true,
+        }),
         option("full-access", "Full access", {
-          description: "Never asks, and runs without a sandbox",
+          description:
+            "Edits and runs commands without asking or a sandbox, anywhere your account can reach.",
           permission: "full_access",
         }),
       ],
