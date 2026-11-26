@@ -45,12 +45,17 @@ export function ResumeDialog({
     },
     // With no more messages than that, it is the whole conversation: one choice (CH-42).
     ...(recent < messageCount
-      ? [{ id: "last_messages" as const, label: `The last ${recent} messages` }]
+      ? [
+          {
+            id: "last_messages" as const,
+            label: `Text from the last ${recent} messages`,
+          },
+        ]
       : []),
     {
       id: "all",
-      label: "The whole conversation",
-      hint: `${messageCount} ${messageCount === 1 ? "message" : "messages"}`,
+      label: "Text from the whole conversation",
+      hint: `${messageCount} ${messageCount === 1 ? "message" : "messages"} in this Chat`,
     },
     { id: "picked", label: "Let me pick messages…" },
   ];
@@ -110,8 +115,8 @@ export function ResumeDialog({
         ))}
       </fieldset>
       <p className="chat-fine">
-        Selected history includes message text only. Linked tickets and
-        Documents are read fresh.
+        Selected history includes message text only. Attachment-only messages
+        are skipped. Linked tickets and Documents are read fresh.
       </p>
       {error && <FailureAlert size="compact" failure={error} />}
     </DialogShell>

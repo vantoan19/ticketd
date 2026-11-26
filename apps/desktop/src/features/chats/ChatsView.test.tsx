@@ -906,6 +906,69 @@ test("an edited New Chat uses current harness picks after reopening the draft", 
   );
 });
 
+test.each([false, true])(
+  "ordinary Send after a lost New Chat reply and late options (model picked: %s)",
+  async (chooseModel) => {
+    localStorage.clear();
+    const client = await open(one({ id: "c1", title: "Limiter" }));
+    client.setHarnesses([{ id: "codex", name: "Codex", status: "ready" }]);
+    const initialOptions = client.harnessOptions;
+    let finishOptions!: () => void;
+    const loading = new Promise<void>((resolve) => {
+      finishOptions = resolve;
+    });
+    vi.spyOn(client, "harnessOptions").mockImplementation(async (harness) => {
+      await loading;
+      return initialOptions(harness);
+    });
+    const save = client.createChat;
+    const create = vi
+      .spyOn(client, "createChat")
+      .mockImplementationOnce(async (request) => {
+        await save(request);
+        throw new Error("The first reply was lost");
+      });
+
+    fireEvent.click(button("New Chat"));
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: {
+        files: [new File(["one"], "first.txt", { type: "text/plain" })],
+      },
+    });
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.click(button("Send"));
+    await screen.findByRole("button", { name: "Retry" });
+    const first = create.mock.calls[0]?.[0];
+    expect(first?.model).toBeUndefined();
+    expect(first?.attachments).toHaveLength(1);
+
+    await act(async () => finishOptions());
+    const modelPicker = await screen.findByRole("button", {
+      name: "Codex, model GPT-5.5 Codex, effort Medium",
+    });
+    if (chooseModel) {
+      fireEvent.click(modelPicker);
+      fireEvent.click(
+        await screen.findByRole("radio", { name: /Broad world knowledge/ }),
+      );
+    }
+    fireEvent.click(button("Send"));
+
+    await screen.findByRole("heading", { name: "first.txt" });
+    const second = create.mock.calls[1]?.[0];
+    if (chooseModel) {
+      expect(second?.model).toBe("gpt-5.5");
+      expect(second?.command_id).not.toBe(first?.command_id);
+      expect(client.created).toHaveLength(2);
+    } else {
+      expect(second).toEqual(first);
+      expect(client.created).toHaveLength(1);
+    }
+  },
+);
+
 test.each(["another Chat", "narrow list"])(
   "a late New Chat success leaves the current pane alone (%s)",
   async (target) => {
@@ -2022,7 +2085,7 @@ test.each([
     expect(
       within(choices).getByRole("radio", { name: /The last response/ }),
     ).toHaveProperty("checked", true);
-    expect(within(choices).getByText("2 messages")).toBeTruthy();
+    expect(within(choices).getByText("2 messages in this Chat")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Resume" }));
     expect(
       await screen.findByText("Fresh session · started with the last response"),
@@ -2069,6 +2132,9 @@ test("picking messages turns the transcript into the history picker", async () =
   );
   fireEvent.click(button("Resume in a fresh session…"));
   const dialog = await screen.findByRole("dialog");
+  expect(
+    within(dialog).getByText(/Attachment-only messages are skipped/),
+  ).toBeTruthy();
   fireEvent.click(
     within(dialog).getByRole("radio", { name: "Let me pick messages…" }),
   );

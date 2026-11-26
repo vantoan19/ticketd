@@ -312,7 +312,7 @@ export function NewChat({
   // The last pick for this harness while the harness still offers it, else
   // its listed defaults: what the picker shows is what the first turn runs on.
   const [picks, setPicks] = useState<Record<string, Pick>>({});
-  // Reopening a pending create keeps its pick through automatic harness probes.
+  // A pending create keeps its pick through automatic harness probes and reopening.
   const [restoredPick, setRestoredPick] = useState(
     () =>
       pendingCreate && {
@@ -407,6 +407,7 @@ export function NewChat({
       }
       if (keepDraft) draft.settleCreateInput(pending.submitted);
       draft.setPendingCreate(null);
+      setRestoredPick(null);
       setFailure(null);
       if (
         input.current?.isConnected &&
@@ -593,6 +594,7 @@ export function NewChat({
                     failure: null,
                   };
                   draft.setPendingCreate(pending);
+                  setRestoredPick({ harnessId: harness.id, pick });
                   setFailure(null);
                   await create(pending);
                 }}

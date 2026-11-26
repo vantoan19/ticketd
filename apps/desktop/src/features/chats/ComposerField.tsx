@@ -408,7 +408,12 @@ export function ComposerField({
   const updateTrigger = (value: string, caret: number) => {
     const found = triggerAt(value, caret);
     setTrigger(found && { ...found, text: value });
-    if (found?.start !== dismissed?.start || found?.char !== dismissed?.char)
+    if (
+      dismissed &&
+      (value.charAt(dismissed.start) !== dismissed.char ||
+        (found &&
+          (found.start !== dismissed.start || found.char !== dismissed.char)))
+    )
       setDismissed(null);
   };
 

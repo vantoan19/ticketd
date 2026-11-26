@@ -471,6 +471,13 @@ test("replacing a dismissed mention with another trigger opens its menu", async 
   expect(await screen.findByText("Files in api")).toBeTruthy();
   fireEvent.keyDown(box, { key: "Escape" });
 
+  act(() => box.focus());
+  box.setSelectionRange(2, 2);
+  fireEvent.select(box);
+  box.setSelectionRange(8, 8);
+  fireEvent.select(box);
+  expect(screen.queryByRole("listbox")).toBeNull();
+
   type(box, "see @limiter");
   expect(screen.queryByRole("listbox")).toBeNull();
   type(box, "see #rate");
