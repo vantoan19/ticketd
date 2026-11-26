@@ -7,7 +7,7 @@
 use ticketd_core::Workspace;
 use ticketd_core::drive::DriveRemote;
 use ticketd_core::s3::S3Remote;
-use ticketd_core::sync::remote::{FakeRemote, RemoteOp, RemoteStorage};
+use ticketd_core::sync::remote::{RemoteOp, RemoteStorage};
 use ticketd_core::sync::{AttachmentDownload, S3Binding, SyncConnection};
 
 #[path = "support/drive_sim.rs"]
