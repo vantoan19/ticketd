@@ -95,6 +95,8 @@ const previewSchema = lazySchema(() =>
       .optional(),
     /** A UTF-8 HTML report the viewer renders read-only; its text comes from `html()`. */
     html: z.boolean().optional(),
+    /** A stored PDF the viewer renders page by page; its bytes come from `pdf()`. */
+    pdf: z.boolean().optional(),
     usage: z.object({
       total: z.number().int().nonnegative(),
       legacy_drafts_pending: z.boolean(),
@@ -340,6 +342,15 @@ export const attachments = {
   /** The whole text of a stored HTML report, for the isolated read-only frame. */
   async html(workspace: string, id: string) {
     return z.string().parse(await invoke("attachment_html", { workspace, id }));
+  },
+  /** The bytes of a stored PDF, for the viewer to render. One raw binary response. */
+  async pdf(workspace: string, id: string): Promise<Uint8Array> {
+    const bytes = await invoke<unknown>("attachment_pdf", { workspace, id });
+    if (bytes instanceof Uint8Array) return bytes;
+    // A raw response arrives as an ArrayBuffer (compared by tag, not by realm).
+    if (Object.prototype.toString.call(bytes) === "[object ArrayBuffer]")
+      return new Uint8Array(bytes as ArrayBuffer);
+    throw new Error("The PDF did not arrive as bytes.");
   },
   mediaUrl(workspace: string, id: string) {
     return `${convertFileSrc(workspace, "attachment-media")}/${encodeURIComponent(id)}`;

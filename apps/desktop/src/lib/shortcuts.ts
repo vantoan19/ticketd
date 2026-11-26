@@ -167,6 +167,11 @@ export const SHORTCUTS = [
       ["attachments-open", [["O"]], "Open file"],
       ["attachments-more", [["."]], "More file actions"],
       ["attachments-details", [["I"]], "Show file details"],
+      [
+        "attachments-zoom",
+        [["+"], ["-"], ["0"]],
+        "Zoom a PDF in, out, or to fit the width",
+      ],
       ["attachments-back", [["Esc"]], "Back to Attachments"],
     ] as const
   ).map(([id, keys, label]) => ({

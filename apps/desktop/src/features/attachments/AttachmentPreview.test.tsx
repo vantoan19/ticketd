@@ -15,11 +15,17 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { setPreference } from "@/lib/preferences";
 import reportSource from "@/test/fixtures/attachment-report.html?raw";
+import { fakePdf } from "@/test/fake-pdf";
+import { openPdf, PdfUnreadable } from "./pdf-document";
 
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(),
   convertFileSrc: (path: string, protocol: string) =>
     `${protocol}://localhost/${path}`,
+}));
+vi.mock("./pdf-document", () => ({
+  openPdf: vi.fn(),
+  PdfUnreadable: class PdfUnreadable extends Error {},
 }));
 beforeEach(() => {
   // These tests read the facts; the viewer keeps them behind "…" until asked.
@@ -697,4 +703,112 @@ test("closing with Escape puts the ticket back where it was", async () => {
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(top).toBe(320);
   expect(document.activeElement).toBe(opener);
+});
+
+const pdfFile = {
+  ...file,
+  id: "pdf-1",
+  display_name: "Refunds API",
+  original_filename: "refunds.pdf",
+  size_bytes: 52_000,
+};
+const pdfPreview = {
+  attachment: pdfFile,
+  status: "unsupported",
+  media_type: null,
+  message: "Preview unavailable for this format.",
+  can_open: true,
+  pdf: true,
+  usage: { total: 0, entries: [], legacy_drafts_pending: false },
+};
+function servePdf() {
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_preview") return pdfPreview;
+    if (command === "attachment_pdf") return new Uint8Array([37, 80, 68, 70]);
+    return null;
+  });
+}
+
+test("a PDF opens as pages with its view bar, and the original stays exportable", async () => {
+  servePdf();
+  const pdf = fakePdf(4);
+  vi.mocked(openPdf).mockResolvedValue(pdf.document);
+  render(<AttachmentPreview target={{ id: pdfFile.id }} onClose={() => {}} />);
+  expect(await screen.findByRole("img", { name: "Page 4" })).toBeTruthy();
+  expect(screen.getByText("of 4")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Fit" })).toBeTruthy();
+  // It never goes through the passive-media protocol.
+  expect(invoke).not.toHaveBeenCalledWith(
+    "attachment_media",
+    expect.anything(),
+  );
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Export file" })
+      .disabled,
+  ).toBe(false);
+  // The stage that holds the pages is the one that takes focus on open.
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("group", { name: "Refunds API, PDF" }),
+    ),
+  );
+});
+
+test("the page number is a text field: its keys type, and Esc leaves it before the viewer", async () => {
+  setPreference("attachmentDetails", false);
+  servePdf();
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(4).document);
+  const close = vi.fn();
+  render(<AttachmentPreview target={{ id: pdfFile.id }} onClose={close} />);
+  const field = await screen.findByRole("textbox", { name: "Page" });
+  field.focus();
+  // O, I and the zoom keys are letters here, not the viewer's commands.
+  fireEvent.keyDown(field, { key: "i" });
+  expect(screen.queryByRole("complementary", { name: "Details" })).toBeNull();
+  fireEvent.keyDown(field, { key: "Escape" });
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("group", { name: "Refunds API, PDF" }),
+    ),
+  );
+  expect(close).not.toHaveBeenCalled();
+  // A second Esc, now outside the field, closes the viewer.
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("a PDF that can't render shows the fallback and keeps Open and Export", async () => {
+  servePdf();
+  vi.mocked(openPdf).mockRejectedValue(new PdfUnreadable());
+  render(<AttachmentPreview target={{ id: pdfFile.id }} onClose={() => {}} />);
+  expect(await screen.findByText("Couldn't show this PDF")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Fit" })).toBeNull();
+  for (const name of ["Open file", "Export file"])
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name }).disabled,
+    ).toBe(false);
+});
+
+test("a PDF that isn't downloaded, missing or too large never reads its bytes", async () => {
+  const states = [
+    { ...pdfPreview, pdf: false, status: "too_large" },
+    { ...pdfPreview, pdf: false, status: "missing" },
+  ];
+  for (const state of states) {
+    vi.mocked(invoke).mockImplementation(async (command) =>
+      command === "attachment_workspace_id" ? "workspace" : state,
+    );
+    const view = render(
+      <AttachmentPreview target={{ id: pdfFile.id }} onClose={() => {}} />,
+    );
+    await screen.findByRole("dialog");
+    await act(async () => {});
+    expect(invoke).not.toHaveBeenCalledWith(
+      "attachment_pdf",
+      expect.anything(),
+    );
+    view.unmount();
+  }
+  expect(openPdf).not.toHaveBeenCalled();
 });

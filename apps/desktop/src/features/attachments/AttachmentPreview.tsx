@@ -85,6 +85,7 @@ import { DriveAccessRecovery } from "./DriveAccessRecovery";
 import { ExportMarkdownButton } from "./ExportMarkdown";
 import { FileIcon } from "./AttachmentThumbnail";
 import { HtmlStage } from "./HtmlStage";
+import { PdfStage, type StageKeys } from "./PdfStage";
 import { PreviewState } from "./PreviewState";
 import { RenameAttachment } from "./RenameAttachment";
 import { fileType, purged } from "./file-words";
@@ -691,6 +692,16 @@ function PreviewStage({
   onChanged: (() => void) | undefined;
 }) {
   const { file, info, busy, error, external, awaited, failed } = preview;
+  const scroller = useRef<HTMLDivElement | null>(null);
+  const stageKeys: StageKeys = useRef(null);
+  // The stage is also the scroller the formats lay themselves out in.
+  const stage = useCallback(
+    (element: HTMLDivElement | null) => {
+      scroller.current = element;
+      if (stageRef) stageRef.current = element;
+    },
+    [stageRef],
+  );
   const type = fileType(file?.original_filename ?? "", info?.media_type);
   const storage = storageName(useSyncStatus().status?.provider);
   const notice = file?.quarantined && !preview.gone && (
@@ -716,6 +727,7 @@ function PreviewStage({
   );
   let body: ReactNode;
   let reportShown = false;
+  let pdfShown = false;
   if (external && file)
     body = (
       <DriveAccessRecovery
@@ -848,7 +860,19 @@ function PreviewStage({
         onRetry={preview.retry}
       />
     );
-  else if (info?.html && file) {
+  else if (info?.pdf && file) {
+    pdfShown = true;
+    body = (
+      <PdfStage
+        workspace={preview.workspace}
+        file={file}
+        attempt={preview.attempt}
+        onRetry={preview.retry}
+        scrollerRef={scroller}
+        keysRef={stageKeys}
+      />
+    );
+  } else if (info?.html && file) {
     reportShown = true;
     body = (
       <HtmlStage
@@ -909,14 +933,17 @@ function PreviewStage({
     );
   return (
     <div
-      ref={stageRef ?? null}
+      ref={stage}
       className="attachment-preview-stage"
+      // The format showing in the stage (a PDF's zoom keys) hears the keys first.
+      onKeyDown={(event) => stageKeys.current?.(event)}
       {...(stageRef && {
         tabIndex: -1,
         role: "group",
         "aria-label": `${file?.display_name ?? "File"}, ${type.word}`,
       })}
       data-report={reportShown ? "" : undefined}
+      data-pdf={pdfShown ? "" : undefined}
       data-image={
         type.family === "image" &&
         !preview.missing &&
@@ -1175,6 +1202,15 @@ export function AttachmentPreview({
           resolveReturnFocus: () =>
             origin.focus?.isConnected ? null : fallbackFocus(),
         })}
+        onEscapeKeyDown={(event) => {
+          // In a field of the format (the PDF's page number), Esc leaves the field first.
+          const field =
+            event.target instanceof HTMLElement &&
+            event.target.closest("[data-view-field]");
+          if (!field) return;
+          event.preventDefault();
+          stage.current?.focus({ preventScroll: true });
+        }}
         onOpenAutoFocus={(event) => {
           // The stage takes focus, so Space and the reading keys work at once.
           event.preventDefault();

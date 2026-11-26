@@ -143,6 +143,36 @@
   border: 0;
 }
 
+/* A stored PDF: one column of paper pages on the recessed stage. The column's
+   16px padding and the 72px under the last page (room for the view bar) match
+   COLUMN_PADDING and BAR_CLEARANCE in pdf-layout.ts, which lays pages out. */
+.attachment-preview-stage[data-pdf] .attachment-preview-canvas {
+  display: block;
+  padding: 0;
+}
+.attachment-pdf {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  box-sizing: border-box;
+  gap: 16px;
+  width: max-content;
+  min-width: 100%;
+  padding: 16px 16px 72px;
+}
+/* A page is white paper in both themes, with a soft shadow. */
+.attachment-pdf-page {
+  position: relative;
+  flex: none;
+  background: white;
+  box-shadow: var(--shadow-medium);
+}
+.attachment-pdf-page canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
 /* One block for every state: a 112 × 72 tile, a title, one sentence and a
    reserved 32px row, so a file moving between states never shifts it. */
 .attachment-state {
