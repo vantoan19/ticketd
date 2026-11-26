@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { documents } from "@/features/documents/api";
 import { plainText } from "@/lib/plain-text";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 
 /** Lines of the first page a card's paper shows; the rest is cropped by the frame anyway. */
 const LINES = 9;
@@ -31,7 +32,9 @@ function firstLines(body: string, title: string): string[] {
 /**
  * A Document's first page for a card's frame: its title and first lines as
  * text on white paper (the same paper as a PDF's first page). Read once the
- * card is near the viewport; a Document that cannot be read keeps the tile.
+ * card is near the viewport, and again when the Workspace changes (an edit of the
+ * Document shows without showing the ticket again); a Document that cannot be read
+ * keeps the tile.
  */
 export function DocumentPage({
   id,
@@ -45,6 +48,7 @@ export function DocumentPage({
   const [page, setPage] = useState<{ id: string; lines: string[] } | null>(
     null,
   );
+  const change = useWorkspaceChange();
   useEffect(() => {
     if (!wanted) return;
     let current = true;
@@ -52,13 +56,21 @@ export function DocumentPage({
       .show(id)
       .then((document) => {
         const lines = firstLines(document.body, title);
-        if (current) setPage({ id, lines });
+        // An unchanged first page keeps its element, so a busy Workspace repaints nothing.
+        if (current)
+          setPage((had) =>
+            had?.id === id &&
+            had.lines.length === lines.length &&
+            had.lines.every((line, index) => line === lines[index])
+              ? had
+              : { id, lines },
+          );
       })
       .catch(() => {});
     return () => {
       current = false;
     };
-  }, [wanted, id, title]);
+  }, [wanted, id, title, change]);
   if (page?.id !== id) return null;
   return (
     <span className="file-card-page" data-paper="" aria-hidden="true">
