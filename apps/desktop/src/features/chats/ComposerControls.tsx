@@ -705,7 +705,7 @@ function PermissionPicker({
       <DropdownMenuContent
         align="start"
         side="top"
-        className="w-80"
+        className="chat-permissions-menu w-80"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           inputRef.current?.focus();
