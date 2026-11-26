@@ -88,3 +88,23 @@ test("a report that renders nothing, or only stylesheets that are not here, can'
       .unusable,
   ).toBe(false);
 });
+
+test("a stylesheet's embedded data: URLs are local, whatever the quoting, and anything else is not", () => {
+  const style = (css: string) =>
+    prepareReport(`<style>${css}</style><p>hi</p>`).external;
+  for (const local of [
+    'a { background: url("data:image/png;base64,AAAA") }',
+    "a { background: url('data:image/png;base64,AAAA') }",
+    "a { background: url(data:image/png;base64,AAAA) }",
+    "a { background: url( data:image/png;base64,AAAA ) }",
+    "a { fill: url(#gradient) }",
+  ])
+    expect(style(local), local).toBe(false);
+  for (const remote of [
+    '@import "https://example.com/a.css";',
+    'a { background: url("https://example.com/a.png") }',
+    "a { background: url( https://example.com/a.png ) }",
+    "a { background: url(attachment-media://x) }",
+  ])
+    expect(style(remote), remote).toBe(true);
+});
