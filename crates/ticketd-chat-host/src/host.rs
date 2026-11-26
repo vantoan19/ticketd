@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use ticketd_core::{
     AutomationRun, AutomationRunStatus, ChatAttachmentContent, ChatInputChange, ChatInputReceipt,
-    ChatLink, ChatMessage, ChatQueueEdit, ChatSnapshot, Error, WorkspaceGuard,
+    ChatLink, ChatMessage, ChatQueueEdit, ChatSnapshot, Error, PreparedChatInput, WorkspaceGuard,
 };
 use tokio::sync::{Mutex as AsyncMutex, OwnedMutexGuard, mpsc, oneshot, watch};
 use tokio::time::timeout;
@@ -817,15 +817,16 @@ impl ChatHost {
                         }
                         return Err(refusal);
                     }
-                    let _chats = self.chats();
-                    self.serving()?;
-                    let saved = workspace.save_automation_chat_reply_with_change(
+                    let reply = PreparedChatInput::new(
                         command_id,
                         chat_id,
                         text,
                         &attachments,
                         change.as_ref(),
                     )?;
+                    let _chats = self.chats();
+                    self.serving()?;
+                    let saved = workspace.save_prepared_automation_chat_reply(reply)?;
                     if let (_, Some(run)) = &saved {
                         gate.cover_steps(run);
                     }

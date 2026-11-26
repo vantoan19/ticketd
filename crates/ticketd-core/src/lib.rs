@@ -167,7 +167,7 @@ pub use chats::{
     ChatListFilter, ChatMessage, ChatNotice, ChatObservation, ChatQueueEdit, ChatRecord, ChatRole,
     ChatSession, ChatSessionOrigin, ChatSnapshot, ChatStartPicks, ChatSubmissionAttempt,
     ChatSubmissionIntent, ChatSummary, ChatTool, ChatToolState, ChatTurn, ChatTurnReceipt,
-    ChatTurnState, FolderChat, NewChat,
+    ChatTurnState, FolderChat, NewChat, PreparedChatInput,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};

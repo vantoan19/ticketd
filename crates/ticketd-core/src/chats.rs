@@ -1411,6 +1411,58 @@ impl<'a> InputReplacement<'a> {
     }
 }
 
+/// Input and its receipt identity, prepared together before the durable write.
+/// The borrowed input cannot change between preparation and save.
+pub struct PreparedChatInput<'a> {
+    chat_id: &'a str,
+    text: &'a str,
+    files: &'a [ChatAttachmentContent],
+    replacement: InputReplacement<'a>,
+    request: Option<(&'a str, Value)>,
+}
+
+impl<'a> PreparedChatInput<'a> {
+    pub fn new(
+        command_id: Option<&'a str>,
+        chat_id: &'a str,
+        text: &'a str,
+        files: &'a [ChatAttachmentContent],
+        change: Option<&'a ChatInputChange>,
+    ) -> Result<Self, Error> {
+        Self::for_replacement(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_change(change)?,
+        )
+    }
+
+    fn for_replacement(
+        command_id: Option<&'a str>,
+        chat_id: &'a str,
+        text: &'a str,
+        files: &'a [ChatAttachmentContent],
+        replacement: InputReplacement<'a>,
+    ) -> Result<Self, Error> {
+        if !replacement.replaces.is_empty() && command_id.is_none() {
+            return Err(invalid("Editing queued input requires a command ID"));
+        }
+        let request = command_id
+            .map(|id| {
+                save_input_request(chat_id, text, files, replacement).map(|request| (id, request))
+            })
+            .transpose()?;
+        Ok(Self {
+            chat_id,
+            text,
+            files,
+            replacement,
+            request,
+        })
+    }
+}
+
 fn validate_legacy_input_links(
     connection: &Connection,
     command_id: &str,
@@ -2717,14 +2769,17 @@ impl Workspace {
         files: &[ChatAttachmentContent],
         change: Option<&ChatInputChange>,
     ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
-        let (receipt, run, _) = self.save_input(
-            command_id,
-            chat_id,
-            text,
-            files,
-            InputReplacement::for_change(change)?,
-            InputSource::AutomationReply,
-        )?;
+        self.save_prepared_automation_chat_reply(PreparedChatInput::new(
+            command_id, chat_id, text, files, change,
+        )?)
+    }
+
+    /// Saves the prepared reply and takes over the run in the same transaction.
+    pub fn save_prepared_automation_chat_reply(
+        &mut self,
+        reply: PreparedChatInput<'_>,
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>), Error> {
+        let (receipt, run, _) = self.save_prepared_input(reply, InputSource::AutomationReply)?;
         Ok((receipt, run))
     }
 
@@ -2762,16 +2817,25 @@ impl Workspace {
         replacement: InputReplacement<'_>,
         source: InputSource<'_>,
     ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>, bool), Error> {
+        let input =
+            PreparedChatInput::for_replacement(command_id, chat_id, text, files, replacement)?;
+        self.save_prepared_input(input, source)
+    }
+
+    fn save_prepared_input(
+        &mut self,
+        input: PreparedChatInput<'_>,
+        source: InputSource<'_>,
+    ) -> Result<(ChatInputReceipt, Option<crate::AutomationRun>, bool), Error> {
+        let PreparedChatInput {
+            chat_id,
+            text,
+            files,
+            replacement,
+            request,
+        } = input;
         let InputReplacement { replaces, links } = replacement;
-        if !replaces.is_empty() && command_id.is_none() {
-            return Err(invalid("Editing queued input requires a command ID"));
-        }
-        let request = command_id
-            .map(|command_id| {
-                save_input_request(chat_id, text, files, replacement)
-                    .map(|request| (command_id, request))
-            })
-            .transpose()?;
+        let command_id = request.as_ref().map(|(id, _)| *id);
         self.chat_write(|connection| {
             if let InputSource::AutomationPrompt(run_id) = source
                 && !owns_running_chat(connection, chat_id, run_id)?

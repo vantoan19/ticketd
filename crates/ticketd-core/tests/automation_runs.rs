@@ -1,9 +1,9 @@
 use ticketd_core::{
     Automation, AutomationAgentSettings, AutomationDefinition, AutomationRun, AutomationRunScope,
-    AutomationRunStatus, AutomationRunSummary, AutomationStepStatus, ChatInputChange, ChatLink,
-    ChatLinkKind, ChatListFilter, ChatSubmissionIntent, Check, Condition, Error, NewChat,
-    NotifyTarget, RunAction, RunAnswer, RunEnd, RunningAutomationRuns, Step, StepAction,
-    StepOutcome, Ticket, Trigger, Workspace,
+    AutomationRunStatus, AutomationRunSummary, AutomationStepStatus, ChatAttachmentContent,
+    ChatInputChange, ChatLink, ChatLinkKind, ChatListFilter, ChatSubmissionIntent, Check,
+    Condition, Error, NewChat, NotifyTarget, PreparedChatInput, RunAction, RunAnswer, RunEnd,
+    RunningAutomationRuns, Step, StepAction, StepOutcome, Ticket, Trigger, Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
@@ -1304,6 +1304,66 @@ fn a_takeover_reply_has_its_own_receipt_and_can_be_retried_after_takeover() {
     assert_eq!(
         workspace.chat_queue(&chat).unwrap(),
         [ordinary, reply.into_message().unwrap()]
+    );
+}
+
+#[test]
+fn a_prepared_takeover_reply_replays_only_the_same_attachment_snapshot() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let file = |encoded: &str| {
+        ChatAttachmentContent::from_data_url(
+            "notes.txt",
+            &format!("data:text/plain;base64,{encoded}"),
+            100,
+        )
+        .unwrap()
+    };
+    let original = [file("bm90ZQ==")];
+    let prepare =
+        |files| PreparedChatInput::new(Some("reply"), &chat, "Take over", files, None).unwrap();
+    let (reply, ended) = workspace
+        .save_prepared_automation_chat_reply(prepare(&original))
+        .unwrap();
+    let ended = ended.unwrap();
+    assert_eq!(ended.id, run.id);
+    assert_eq!(ended.status, AutomationRunStatus::TakenOver);
+
+    workspace.set_attachment_upload_limit(2).unwrap();
+    let same_bytes = [file("bm90ZQ==")];
+    assert_eq!(
+        workspace
+            .save_prepared_automation_chat_reply(prepare(&same_bytes))
+            .unwrap(),
+        (reply.clone(), None),
+    );
+    assert_eq!(
+        workspace
+            .save_automation_chat_reply_with_change(
+                Some("reply"),
+                &chat,
+                "Take over",
+                &same_bytes,
+                None
+            )
+            .unwrap(),
+        (reply.clone(), None),
+    );
+    let changed_bytes = [file("c3RvcA==")];
+    assert!(matches!(
+        workspace.save_prepared_automation_chat_reply(prepare(&changed_bytes)),
+        Err(Error::RequestConflict(id)) if id == "reply"
+    ));
+    assert_eq!(
+        workspace
+            .chat_message_attachment_contents(&chat, &reply.id)
+            .unwrap(),
+        original
+    );
+    assert_eq!(
+        workspace.chat_queue(&chat).unwrap(),
+        [reply.into_message().unwrap()]
     );
 }
 
