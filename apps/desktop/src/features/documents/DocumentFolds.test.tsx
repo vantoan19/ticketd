@@ -184,6 +184,22 @@ it("folds every section down to its first sentence from the outline, and unfolds
   expect(inOutline().queryByRole("button", { name: "Unfold all" })).toBeNull();
 });
 
+it("draws the chevron open where subsections show, and closed where a section is folded away", () => {
+  open();
+  const points = (heading: string) =>
+    chevron(heading).querySelector("svg")?.getAttribute("class") ?? "";
+  expect(points("Decisions")).toContain("lucide-chevron-down");
+  fireEvent.click(inOutline().getByRole("button", { name: "Fold all" }));
+  // Decisions shows its first sentence and its subsections: it still reads as open.
+  expect(points("Decisions")).toContain("lucide-chevron-down");
+  expect(points("First")).toContain("lucide-chevron-right");
+  expect(points("Rejected")).toContain("lucide-chevron-right");
+  fireEvent.click(chevron("Decisions"));
+  expect(points("Decisions")).toContain("lucide-chevron-down");
+  fireEvent.click(chevron("Rejected"));
+  expect(points("Rejected")).toContain("lucide-chevron-down");
+});
+
 it("keeps Fold all after a reload, and opening a section brings back its text before its subsections", () => {
   const { unmount } = open();
   fireEvent.click(inOutline().getByRole("button", { name: "Fold all" }));

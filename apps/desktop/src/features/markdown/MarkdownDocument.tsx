@@ -309,6 +309,10 @@ function mentionBlock(tag: string) {
     if (outlined?.foldable && folding) {
       const isFolded =
         folding.folded.has(outlined.id) || folding.introFolded.has(outlined.id);
+      // A section folded to its first sentence still shows its subsections: it reads as open.
+      const showsSubsections =
+        folding.introFolded.has(outlined.id) &&
+        !folding.folded.has(outlined.id);
       return createElement(
         tag,
         {
@@ -329,7 +333,7 @@ function mentionBlock(tag: string) {
           aria-expanded={!isFolded}
           onClick={() => folding.toggle(outlined.id)}
         >
-          {isFolded ? (
+          {isFolded && !showsSubsections ? (
             <ChevronRight aria-hidden="true" />
           ) : (
             <ChevronDown aria-hidden="true" />

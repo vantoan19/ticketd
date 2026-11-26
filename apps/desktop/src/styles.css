@@ -96,6 +96,8 @@
   --outline-hit: 10px;
   --outline-popover-width: 288px;
   --outline-scroll-margin: 24px;
+  /* The width of a scrollbar (the rule near the end of this file), for layouts that give it back. */
+  --scrollbar-size: 10px;
   --text-doc: 15px;
   --text-doc-line: 24px;
   --text-doc-title: 28px;
@@ -1841,8 +1843,8 @@ body:has([data-slot="dialog-overlay"])
    text colour so it sits quietly in both themes and widens a little on hover.
    (scrollbar-width or scrollbar-color would switch these rules off.) */
 ::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
+  width: var(--scrollbar-size);
+  height: var(--scrollbar-size);
 }
 ::-webkit-scrollbar-track,
 ::-webkit-scrollbar-corner {

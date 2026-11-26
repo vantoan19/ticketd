@@ -237,7 +237,7 @@ it("works from the keyboard: Tab reaches it, arrows move, Enter goes, Escape clo
   renderEditor(<DocumentEditor initial={long} onClose={vi.fn()} />);
   layout()(0);
   const ticks = within(outline()).getByRole("button", {
-    name: "Show outline",
+    name: "On this page, 6 headings",
   });
   act(() => ticks.focus());
   const links = within(outline()).getAllByRole("link");
@@ -257,8 +257,39 @@ it("works from the keyboard: Tab reaches it, arrows move, Enter goes, Escape clo
   fireEvent.keyDown(document.activeElement!, { key: "Escape" });
   expect(screen.queryByText("On this page")).toBeNull();
   expect(document.activeElement).toBe(
-    within(outline()).getByRole("button", { name: "Show outline" }),
+    within(outline()).getByRole("button", { name: "On this page, 6 headings" }),
   );
+});
+
+it("comes right after the bar in Tab order, before the Document's own controls", () => {
+  renderEditor(<DocumentEditor initial={long} onClose={vi.fn()} />);
+  const ticks = within(outline()).getByRole("button", {
+    name: "On this page, 6 headings",
+  });
+  const main = document.querySelector(".document-main") as HTMLElement;
+  // The ticks are positioned over the reader, so where they come in the document is only their Tab
+  // order: before the fold buttons, which would otherwise be a stop each ahead of them.
+  expect(
+    main.compareDocumentPosition(ticks) & Node.DOCUMENT_POSITION_PRECEDING,
+  ).toBeTruthy();
+  expect(
+    ticks.compareDocumentPosition(
+      screen.getByRole("button", { name: "Fold Goals" }),
+    ) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+});
+
+it("lists the sections under a heading of its own, so only the list scrolls, with no scrollbar", () => {
+  renderEditor(<DocumentEditor initial={long} onClose={vi.fn()} />);
+  layout()(0);
+  fireEvent.pointerEnter(outline());
+  const popover = document.querySelector(
+    ".document-outline-popover",
+  ) as HTMLElement;
+  const list = popover.querySelector(".document-outline-list") as HTMLElement;
+  expect(list.tagName).toBe("UL");
+  expect(list.contains(within(popover).getByText("On this page"))).toBe(false);
+  expect(within(list).getAllByRole("link")).toHaveLength(3);
 });
 
 it("does not outline while editing", () => {

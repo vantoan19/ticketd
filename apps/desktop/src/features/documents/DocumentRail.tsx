@@ -1,15 +1,10 @@
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-  type RefObject,
-} from "react";
-import { ChevronUp } from "lucide-react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { outlineView, type OutlineHeading } from "@/features/markdown/outline";
 import { readingScrollBehavior } from "./reading-scroll";
+import { useScrollEdges } from "./use-scroll-edges";
 
 /** Whether the reader has scrolled past the first screen of `scroller`. */
 function usePastFirstScreen(scroller: HTMLElement | null) {
@@ -23,35 +18,6 @@ function usePastFirstScreen(scroller: HTMLElement | null) {
     return () => scroller.removeEventListener("scroll", measure);
   }, [scroller]);
   return past;
-}
-
-/**
- * Which edges of `element` have more to scroll to: "top", "bottom", "both", or "" when it all
- * fits. The rail fades those edges, so a list that scrolls on its own says so.
- */
-function useScrollEdges(element: RefObject<HTMLElement | null>, items: number) {
-  const [edges, setEdges] = useState("");
-  useEffect(() => {
-    const node = element.current;
-    if (!node) return;
-    const measure = () => {
-      const above = node.scrollTop > 1;
-      const below = node.scrollTop + node.clientHeight < node.scrollHeight - 1;
-      setEdges(above && below ? "both" : above ? "top" : below ? "bottom" : "");
-    };
-    measure();
-    node.addEventListener("scroll", measure, { passive: true });
-    const observer =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(measure);
-    observer?.observe(node);
-    return () => {
-      node.removeEventListener("scroll", measure);
-      observer?.disconnect();
-    };
-  }, [element, items]);
-  return edges;
 }
 
 /**
@@ -84,18 +50,24 @@ export function DocumentRail({
   /** The Linked list; the rail says nothing about it when it has nothing to list. */
   children?: ReactNode;
 }) {
-  const { sectionAt, shown, subsections } = outlineView(headings, current);
+  const { sectionAt, shown } = outlineView(headings, current);
   const past = usePastFirstScreen(scroller);
   const nav = useRef<HTMLElement>(null);
   const list = useRef<HTMLUListElement>(null);
-  const edges = useScrollEdges(list, shown.length);
+  // Everything is folded: the Document reads as its headings, so the rail has no list to offer.
+  const skeleton = folds.allFolded && folds.folded > 0;
+  const edges = useScrollEdges(list, skeleton ? -1 : shown.length);
   return (
     // A zero-height track that sticks to the reader's top: the rail hangs from it.
     <div className="document-rail-track">
       <div className="document-rail">
         <nav ref={nav} aria-label={`On this page, ${headings.length} headings`}>
           <div className="document-rail-head">
-            <p className="document-rail-title">On this page</p>
+            <p className="document-rail-title">
+              {skeleton
+                ? `${folds.folded} ${folds.folded === 1 ? "section" : "sections"} folded`
+                : "On this page"}
+            </p>
             <span className="document-rail-actions">
               {past && (
                 <IconButton
@@ -107,8 +79,13 @@ export function DocumentRail({
                       top: 0,
                       behavior: readingScrollBehavior(),
                     });
-                    // The button leaves once the reader is back at the top: focus stays in the rail.
-                    nav.current?.querySelector("a")?.focus();
+                    // The button leaves once the reader is back at the top: focus stays in the rail. Moving
+                    // focus must not scroll: it would cancel the smooth scroll above.
+                    nav.current
+                      ?.querySelector<HTMLElement>(
+                        "a, .document-rail-unfold button",
+                      )
+                      ?.focus({ preventScroll: true });
                   }}
                 >
                   <ChevronUp aria-hidden="true" />
@@ -119,7 +96,7 @@ export function DocumentRail({
                   Fold all
                 </Button>
               )}
-              {folds.folded > 0 && (
+              {folds.folded > 0 && !skeleton && (
                 <Button
                   variant="ghost"
                   size="compact"
@@ -130,33 +107,38 @@ export function DocumentRail({
               )}
             </span>
           </div>
-          <ul ref={list} data-fade={edges}>
-            {shown.map((heading) => (
-              <li key={heading.id}>
-                <a
-                  href={`#${heading.id}`}
-                  data-level={heading.section ? "section" : "subsection"}
-                  data-current={heading.id === current ? "" : undefined}
-                  data-section-current={
-                    heading.id === headings[sectionAt]?.id ? "" : undefined
-                  }
-                  aria-current={heading.id === current ? "location" : undefined}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onChoose(heading);
-                  }}
-                >
-                  {heading.text}
-                  {heading.id === headings[sectionAt]?.id &&
-                    subsections > 0 && (
-                      <span className="document-outline-count">
-                        {subsections}
-                      </span>
-                    )}
-                </a>
-              </li>
-            ))}
-          </ul>
+          {skeleton ? (
+            <div className="document-rail-unfold">
+              <Button variant="ghost" size="compact" onClick={folds.unfoldAll}>
+                <ChevronDown aria-hidden="true" />
+                Unfold all
+              </Button>
+            </div>
+          ) : (
+            <ul ref={list} className="document-rail-outline" data-fade={edges}>
+              {shown.map((heading) => (
+                <li key={heading.id}>
+                  <a
+                    href={`#${heading.id}`}
+                    data-level={heading.section ? "section" : "subsection"}
+                    data-current={heading.id === current ? "" : undefined}
+                    data-section-current={
+                      heading.id === headings[sectionAt]?.id ? "" : undefined
+                    }
+                    aria-current={
+                      heading.id === current ? "location" : undefined
+                    }
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onChoose(heading);
+                    }}
+                  >
+                    {heading.text}
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )}
         </nav>
         {children}
       </div>

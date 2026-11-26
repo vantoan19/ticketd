@@ -1,6 +1,7 @@
 import { useId, useRef, useState, type KeyboardEvent } from "react";
 import { flushSync } from "react-dom";
 import { outlineView, type OutlineHeading } from "@/features/markdown/outline";
+import { useScrollEdges } from "./use-scroll-edges";
 
 /**
  * The ticks the outline shows beside the list: a section's tick is long, a
@@ -97,7 +98,7 @@ export function DocumentOutline({
         ref={button}
         type="button"
         className="document-outline-ticks"
-        aria-label="Show outline"
+        aria-label={`On this page, ${headings.length} headings`}
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
         onFocus={() => {
@@ -132,35 +133,62 @@ export function DocumentOutline({
               </span>
             )}
           </div>
-          <ul>
-            {shown.map((heading) => (
-              <li key={heading.id}>
-                <a
-                  href={`#${heading.id}`}
-                  data-level={heading.section ? "section" : "subsection"}
-                  data-current={heading.id === here ? "" : undefined}
-                  data-section-current={
-                    heading.id === headings[sectionAt]?.id ? "" : undefined
-                  }
-                  aria-current={heading.id === here ? "location" : undefined}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onChoose(heading);
-                  }}
-                >
-                  {heading.text}
-                  {heading.id === headings[sectionAt]?.id &&
-                    subsections > 0 && (
-                      <span className="document-outline-count">
-                        {subsections}
-                      </span>
-                    )}
-                </a>
-              </li>
-            ))}
-          </ul>
+          <OutlineList
+            headings={headings}
+            shown={shown}
+            here={here}
+            sectionAt={sectionAt}
+            subsections={subsections}
+            onChoose={onChoose}
+          />
         </div>
       )}
     </nav>
+  );
+}
+
+/** The popover's list: it scrolls on its own when it is taller than the window, fading at the edge with more. */
+function OutlineList({
+  headings,
+  shown,
+  here,
+  sectionAt,
+  subsections,
+  onChoose,
+}: {
+  headings: readonly OutlineHeading[];
+  shown: readonly OutlineHeading[];
+  here: string | null;
+  sectionAt: number;
+  subsections: number;
+  onChoose: (heading: OutlineHeading) => void;
+}) {
+  const list = useRef<HTMLUListElement>(null);
+  const edges = useScrollEdges(list, shown.length);
+  return (
+    <ul ref={list} className="document-outline-list" data-fade={edges}>
+      {shown.map((heading) => (
+        <li key={heading.id}>
+          <a
+            href={`#${heading.id}`}
+            data-level={heading.section ? "section" : "subsection"}
+            data-current={heading.id === here ? "" : undefined}
+            data-section-current={
+              heading.id === headings[sectionAt]?.id ? "" : undefined
+            }
+            aria-current={heading.id === here ? "location" : undefined}
+            onClick={(event) => {
+              event.preventDefault();
+              onChoose(heading);
+            }}
+          >
+            {heading.text}
+            {heading.id === headings[sectionAt]?.id && subsections > 0 && (
+              <span className="document-outline-count">{subsections}</span>
+            )}
+          </a>
+        </li>
+      ))}
+    </ul>
   );
 }
