@@ -204,6 +204,48 @@ function SentText({ text }: { text: string }) {
   );
 }
 
+function SentAttachment({
+  file,
+  exportAttachment,
+}: {
+  file: ChatAttachment;
+  exportAttachment: TranscriptActions["exportAttachment"];
+}) {
+  const [save, setSave] = useState<
+    { status: "saving" } | { status: "failed"; message: string } | null
+  >(null);
+  const errorId = useId();
+  return (
+    <li className="flex max-w-full min-w-0 flex-col items-end">
+      <Button
+        variant="secondary"
+        size="xs"
+        aria-label={`Save ${file.name}`}
+        aria-describedby={save?.status === "failed" ? errorId : undefined}
+        disabled={save?.status === "saving"}
+        onClick={() => {
+          setSave({ status: "saving" });
+          void exportAttachment(file).then(
+            () => setSave(null),
+            (error: unknown) =>
+              setSave({
+                status: "failed",
+                message: failureText(error, `save “${file.name}”`),
+              }),
+          );
+        }}
+      >
+        <Download aria-hidden /> {file.name}
+      </Button>
+      {save?.status === "failed" && (
+        <p id={errorId} role="alert" className="chat-caption wrap-anywhere">
+          {save.message}
+        </p>
+      )}
+    </li>
+  );
+}
+
 /**
  * Your message, exactly as sent, on the right. Past four lines it folds behind
  * Show more. Copy shows beside it on hover or focus; the turn's time is on its
@@ -226,7 +268,6 @@ function UserMessage({
   const text = useRef<HTMLDivElement>(null);
   const [long, setLong] = useState(false);
   const [more, setMore] = useState(false);
-  const [saveError, setSaveError] = useState("");
   // Measured again whenever the message's width changes: a pane narrowed after
   // the message was shown clamps it, and then it needs Show more. Decided by
   // rendered lines, not pixels: a mention chip overflows its line by 2px and
@@ -267,28 +308,13 @@ function UserMessage({
             aria-label="Sent attachments"
           >
             {item.attachments.map((file) => (
-              <li key={file.id}>
-                <Button
-                  variant="secondary"
-                  size="xs"
-                  aria-label={`Save ${file.name}`}
-                  onClick={() => {
-                    setSaveError("");
-                    void exportAttachment(file).catch((error: unknown) =>
-                      setSaveError(failureText(error, "save the attachment")),
-                    );
-                  }}
-                >
-                  <Download aria-hidden /> {file.name}
-                </Button>
-              </li>
+              <SentAttachment
+                key={file.id}
+                file={file}
+                exportAttachment={exportAttachment}
+              />
             ))}
           </ul>
-        )}
-        {saveError && (
-          <p role="alert" className="chat-caption">
-            {saveError}
-          </p>
         )}
         {long && (
           <Button

@@ -584,7 +584,20 @@ test("the placeholder says what sending will do", () => {
   expect(composerPlaceholder(working, false, true)).toBe(
     "Tell Codex what to do instead",
   );
-  expect(composerPlaceholder(idle, false, true)).toBe("Message Codex");
+  const textOnly = {
+    ...working,
+    steering: { available: true, images_refused: true },
+  };
+  expect(composerPlaceholder(textOnly, false, true)).toBe(
+    "Tell Codex what to do instead",
+  );
+  expect(composerPlaceholder(textOnly, false, true, true)).toBe(
+    "Queue for Codex",
+  );
+  expect(composerPlaceholder(textOnly, true, true, true)).toBe(
+    "Answer, or pick above",
+  );
+  expect(composerPlaceholder(idle, false, true, true)).toBe("Message Codex");
 });
 
 test("only a problem observed now disables Send; why the last turn stopped does not", () => {

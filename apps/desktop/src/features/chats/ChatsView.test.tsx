@@ -1105,6 +1105,35 @@ test.each([false, true])(
   },
 );
 
+test("post-Deny guidance gives way to Queue for an image that cannot steer", async () => {
+  await open(
+    one(
+      {
+        id: "c1",
+        title: "Limiter",
+        activity: "waiting",
+        steering: { available: true, images_refused: true },
+      },
+      [approval],
+    ),
+  );
+  fireEvent.click(button("Deny"));
+  const guidance = "Tell Codex what to do instead";
+  const box = await screen.findByLabelText(guidance);
+  fireEvent.change(box, { target: { value: "Use what you have" } });
+  expect(button("Steer")).toHaveProperty("disabled", false);
+
+  const file = new File([screenshotBytes], "Screen.png", { type: "image/png" });
+  fireEvent.paste(box, { clipboardData: { files: [file] } });
+  expect(await screen.findByLabelText("Queue for Codex")).toBe(box);
+  expect(button("Queue")).toHaveProperty("disabled", false);
+  expect(box).toHaveProperty("value", "Use what you have");
+
+  fireEvent.click(button("Remove Screen.png"));
+  expect(await screen.findByLabelText(guidance)).toBe(box);
+  expect(button("Steer")).toHaveProperty("disabled", false);
+});
+
 test("an image that the running turn cannot take can be queued for the next turn", async () => {
   await open(
     one({

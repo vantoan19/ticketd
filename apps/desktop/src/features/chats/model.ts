@@ -1244,10 +1244,8 @@ export function composerPlaceholder(
   const harness = chat.harness.name;
   if (!isLive(chat) || chat.stopping) return `Message ${harness}`;
   if (answering) return "Answer, or pick above";
-  if (afterDeny) return `Tell ${harness} what to do instead`;
-  return canSteer(chat, hasImages)
-    ? `Steer ${harness}`
-    : `Queue for ${harness}`;
+  if (!canSteer(chat, hasImages)) return `Queue for ${harness}`;
+  return afterDeny ? `Tell ${harness} what to do instead` : `Steer ${harness}`;
 }
 
 export type NoticeAction =

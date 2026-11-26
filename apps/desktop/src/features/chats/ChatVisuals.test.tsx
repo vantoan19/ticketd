@@ -105,6 +105,63 @@ async function show(
   return client;
 }
 
+test("a failed attachment save names its file and stays with it while another download finishes", async () => {
+  const notes = { id: "notes", name: "notes.txt", media_type: "text/plain" };
+  const summary = {
+    id: "summary",
+    name: "summary.txt",
+    media_type: "text/plain",
+  };
+  const client = await show([
+    {
+      chat: chatState({ id: "c1", title: "Files sent" }),
+      items: [
+        {
+          id: "u1",
+          at,
+          kind: "user",
+          text: "Two files",
+          delivery: "delivered",
+          attachments: [notes, summary],
+        },
+      ],
+    },
+  ]);
+  let failNotes!: (error: Error) => void;
+  let finishSummary!: () => void;
+  vi.spyOn(client, "exportAttachment")
+    .mockImplementationOnce(
+      () => new Promise<void>((_resolve, reject) => (failNotes = reject)),
+    )
+    .mockImplementationOnce(
+      () => new Promise<void>((resolve) => (finishSummary = resolve)),
+    );
+  const list = within(screen.getByRole("list", { name: "Sent attachments" }));
+  const saveNotes = list.getByRole("button", { name: "Save notes.txt" });
+  const saveSummary = list.getByRole("button", { name: "Save summary.txt" });
+  const notesRow = saveNotes.closest("li");
+  if (!notesRow) throw new Error("Missing notes attachment row.");
+  const notesTile = within(notesRow);
+
+  fireEvent.click(saveNotes);
+  fireEvent.click(saveSummary);
+  await act(async () => failNotes(new Error("Writing failed")));
+  const alert = notesTile.getByRole("alert");
+  expect(alert.textContent).toContain("Couldn't save “notes.txt”.");
+  expect(saveNotes.getAttribute("aria-describedby")).toBe(alert.id);
+  expect(saveSummary.hasAttribute("aria-describedby")).toBe(false);
+  expect(saveSummary).toHaveProperty("disabled", true);
+
+  await act(async () => finishSummary());
+  expect(saveSummary).toHaveProperty("disabled", false);
+  expect(notesTile.getByRole("alert")).toBe(alert);
+  await act(async () => fireEvent.click(saveSummary));
+  expect(notesTile.getByRole("alert")).toBe(alert);
+
+  await act(async () => fireEvent.click(saveNotes));
+  expect(notesTile.queryByRole("alert")).toBeNull();
+});
+
 /** A turn still running, so its rows show unfolded. */
 const steps = (
   ...list: Extract<TranscriptItem, { kind: "steps" }>["steps"]
