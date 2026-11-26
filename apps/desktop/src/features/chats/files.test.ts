@@ -1,6 +1,5 @@
 import { expect, test } from "vitest";
-import { scopeIsPath, splitPath } from "@/features/chats/files";
-import { tailLength } from "@/features/chats/FileName";
+import { scopeIsPath, splitPath, tailLength } from "@/features/chats/files";
 
 test("a path splits into its folder and its name", () => {
   expect(splitPath("gen/icons.py")).toEqual({

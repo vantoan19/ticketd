@@ -1,18 +1,13 @@
 import { failureText } from "@/lib/api/describe-failure";
 import { useContext, useState, type CSSProperties } from "react";
 import { ChatError } from "@/features/chats/client";
-import { ChatFilesContext, splitPath } from "@/features/chats/files";
+import {
+  ChatFilesContext,
+  splitPath,
+  tailLength,
+} from "@/features/chats/files";
 import { Tooltip } from "@/components/ui/tooltip";
 
-/**
- * The end of a name that always shows, so its extension survives: the extension
- * (at most twelve characters), or the last six of a name without one. Short of
- * room a file name gives way to "…" plus this, never less.
- */
-export const tailLength = (name: string) => {
-  const dot = name.lastIndexOf(".");
-  return dot > 0 ? Math.min(12, name.length - dot) : 6;
-};
 /** A path in a step row is cut shorter than a changed file's, so two fit on a line. */
 const STEP_PATH = 36;
 

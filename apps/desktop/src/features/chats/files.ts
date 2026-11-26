@@ -49,3 +49,13 @@ export function splitPath(
 
 // A search scope that names a place; a glob (one with * ? [ or {) is a pattern.
 export const scopeIsPath = (scope: string) => !/[*?[{]/.test(scope);
+
+/**
+ * The end of a name that always shows, so its extension survives: the extension
+ * (at most twelve characters), or the last six of a name without one. Short of
+ * room a file name gives way to "…" plus this, never less.
+ */
+export const tailLength = (name: string) => {
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? Math.min(12, name.length - dot) : 6;
+};

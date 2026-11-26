@@ -705,7 +705,9 @@ function PermissionPicker({
       <DropdownMenuContent
         align="start"
         side="top"
-        className="chat-permissions-menu w-80"
+        // A sentence for each mode and a note: as tall as its content, within the
+        // window, not the 320px menus stop at.
+        className="w-80 max-h-(--radix-dropdown-menu-content-available-height)!"
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           inputRef.current?.focus();

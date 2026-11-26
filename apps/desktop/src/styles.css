@@ -1166,11 +1166,6 @@ body:has([data-slot="dialog-overlay"])
 [data-slot="dropdown-menu-content"] {
   max-height: min(320px, var(--radix-dropdown-menu-content-available-height));
 }
-/* The Permissions menu holds a sentence for each mode and a note: it is as tall
-   as its content, within the window, instead of scrolling by a few pixels. */
-[data-slot="dropdown-menu-content"].chat-permissions-menu {
-  max-height: var(--radix-dropdown-menu-content-available-height);
-}
 [data-slot="command-item"],
 [data-slot="select-item"],
 [data-slot="dropdown-menu-item"] {
