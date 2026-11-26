@@ -1,4 +1,4 @@
-import { WorkspaceSync } from "@/features/sync/WorkspaceSync";
+import { SyncSettings } from "@/features/sync/SyncSettings";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 
@@ -10,7 +10,7 @@ export function WorkspaceSyncPage({
 }) {
   return (
     <SettingsPage {...sectionMeta("workspace-sync")}>
-      <WorkspaceSync onReplaced={onReplaced} />
+      <SyncSettings onReplaced={onReplaced} />
     </SettingsPage>
   );
 }

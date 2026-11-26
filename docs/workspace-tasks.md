@@ -32,15 +32,18 @@ Choose a workspace backup when you want to restore tickets and their history.
 ## Sync two desktops with Google Drive
 
 1. On the computer with the workspace you want to keep, open **Settings →
-   Workspace sync**, choose **Google Drive**, then **Connect Google Drive**. Sign in to the account
+   Workspace sync**, choose **Start with this Workspace**, then **Continue**.
+   Choose **Google Drive** and **Connect Google Drive**. Sign in to the account
    you will use on both computers. Sync writes readable, unencrypted files to
    that Drive, so check who can access the folder.
-2. For a workspace you're syncing for the first time, select **Upload this
-   Workspace** and choose **Start sync**. Wait for the upload to finish.
-3. On the second computer, connect the same account. Select **Download** for
-   the folder created by the first computer. Review the replacement before
-   confirming. Downloading replaces this computer's workspace after a safety
-   backup. If it holds independent work you need, back it up first.
+2. When ticketd finds no Workspace in that Drive, it starts the first upload
+   by itself. Wait for the upload to finish.
+3. On the second computer, choose **Join from another computer** and connect
+   the same account. ticketd reads the Drive first and preselects **Join** for
+   the folder the first computer created, even if this computer already holds
+   tickets. Choose **Join…** and review the replacement before confirming.
+   Joining replaces this computer's workspace after a safety backup. If it
+   holds independent work you need, back it up first.
 4. Open a ticket on the second computer and compare its reference with the
    first. Changes sync while the desktop app is open. If both computers edit
    the same field, open **Needs review** to choose the content to keep.

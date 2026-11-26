@@ -1,4 +1,3 @@
-import { revealFailureDetails } from "@/test/failure-details";
 // @vitest-environment jsdom
 import {
   cleanup,
@@ -12,15 +11,15 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { workspaceClient } from "@/lib/api/workspace";
-import { syncApi, type SyncSetupOptions } from "@/lib/sync-api";
+import { syncApi } from "@/lib/sync-api";
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
 import {
-  hostFailure,
   notConnected,
   syncSettings,
   syncStatus,
+  workspaceInfo,
 } from "./sync-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -43,13 +42,9 @@ vi.mock("@/lib/sync-api", async (original) => ({
   },
 }));
 vi.mock("@/lib/api/workspace", () => ({
-  workspaceClient: { reveal: vi.fn() },
+  workspaceClient: { reveal: vi.fn(), info: vi.fn() },
 }));
 const api = vi.mocked(syncApi);
-/** The api as shipped, over the mocked bridge. */
-const real = (
-  await vi.importActual<typeof import("@/lib/sync-api")>("@/lib/sync-api")
-).syncApi;
 
 const choosing = () =>
   syncStatus({
@@ -84,6 +79,7 @@ function show(extra?: ReactNode, onReplaced = async () => {}) {
 }
 
 beforeEach(() => {
+  vi.mocked(workspaceClient.info).mockResolvedValue(workspaceInfo());
   api.settings.mockResolvedValue(syncSettings());
   api.setupOptions.mockResolvedValue(options);
 });
@@ -106,150 +102,6 @@ test("while the status is read, the page shows the setup track and a row-shaped 
   expect(screen.queryByRole("button")).toBeNull();
 });
 
-test("before connecting, the card says files are not encrypted and offers Google sign-in", async () => {
-  api.status.mockResolvedValue(notConnected());
-  api.connect.mockResolvedValue(choosing());
-  show();
-  const note = await screen.findByRole("note");
-  expect(note.textContent).toContain("Files are not encrypted");
-  expect(note.textContent).toContain("readable Markdown file");
-  fireEvent.click(screen.getByRole("button", { name: "Connect Google Drive" }));
-  expect(
-    await screen.findByRole("radiogroup", { name: "This Workspace" }),
-  ).toBeTruthy();
-  expect(screen.getByText("Connected as you@example.com")).toBeTruthy();
-  expect(screen.getByText("Files in Drive are not encrypted.")).toBeTruthy();
-});
-
-test("a failed sign-in is reported and leaves the card as it was", async () => {
-  api.status.mockResolvedValue(notConnected());
-  api.connect.mockImplementation(real.connect);
-  vi.mocked(invoke).mockRejectedValue(hostFailure("sign-in was cancelled"));
-  show();
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Connect Google Drive" }),
-  );
-  await revealFailureDetails();
-  expect(screen.getByRole("alert").textContent).toContain(
-    "sign-in was cancelled",
-  );
-  expect(
-    screen.getByRole("button", { name: "Connect Google Drive" }),
-  ).toBeTruthy();
-});
-
-test("a build without a Drive app configuration says so up front and holds back sign-in", async () => {
-  api.status.mockResolvedValue(notConnected());
-  vi.mocked(invoke).mockImplementation(async (command) =>
-    command === "drive_configuration"
-      ? { configured: false, message: "This build does not include Drive." }
-      : undefined,
-  );
-  show();
-  expect(
-    await screen.findByText("Google Drive isn't set up on this computer"),
-  ).toBeTruthy();
-  const connect = screen.getByRole("button", { name: "Connect Google Drive" });
-  expect(connect.hasAttribute("disabled")).toBe(true);
-});
-
-test("a sign-in that cannot start names the missing configuration, not an unconfirmed result", async () => {
-  api.status.mockResolvedValue(notConnected());
-  api.connect.mockImplementation(real.connect);
-  vi.mocked(invoke).mockImplementation(async (command) => {
-    if (command === "drive_configuration")
-      return { configured: true, message: "Ready" };
-    throw {
-      code: "drive_unconfigured",
-      message:
-        "This build does not include a valid Google Drive app configuration",
-    };
-  });
-  show();
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Connect Google Drive" }),
-  );
-  const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("no Google Drive app configuration");
-  expect(alert.textContent).not.toContain("couldn't be confirmed");
-  expect(within(alert).queryByRole("button", { name: "Retry" })).toBeNull();
-});
-
-test("uploading this Workspace is the preselected setup choice", async () => {
-  api.status.mockResolvedValue(choosing());
-  api.uploadWorkspace.mockResolvedValue(
-    syncStatus({
-      state: "upload_pending",
-      first_sync: { direction: "upload", done: 14, total: 23 },
-    }),
-  );
-  show();
-  const upload = await screen.findByRole("radio", {
-    name: /Upload this Workspace/,
-  });
-  expect(upload.getAttribute("aria-checked")).toBe("true");
-  expect(upload.textContent).toContain(
-    "17 tickets and 2 Documents go to a new folder in your Drive",
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Start sync" }));
-  expect(await screen.findByText("Uploading 14 of 23 files")).toBeTruthy();
-  expect(
-    screen.getByRole("progressbar", { name: "First upload" }),
-  ).toBeTruthy();
-  expect(api.downloadWorkspace).not.toHaveBeenCalled();
-});
-
-test("a Workspace that synced with a folder of this account is offered that folder first", async () => {
-  api.status.mockResolvedValue(choosing());
-  api.setupOptions.mockResolvedValue({
-    ...options,
-    // Also when there is nothing here to upload, which otherwise preselects a download.
-    local: { tickets: 0, documents: 0, attachments: 0 },
-    reconnect: { id: "folder-1", name: "ticketd · web-app" },
-  });
-  api.reconnect.mockResolvedValue(syncStatus({ state: "upload_pending" }));
-  show();
-  const choices = await screen.findAllByRole("radio");
-  expect(choices.map((choice) => choice.textContent.split("”")[0])).toEqual([
-    "Reconnect to “ticketd · web-app",
-    "Download “ticketd · web-app",
-  ]);
-  expect(choices[0]?.getAttribute("aria-checked")).toBe("true");
-  expect(choices[0]?.textContent).toContain(
-    "Changes made here and in Drive are merged, and nothing is replaced",
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
-  expect(
-    await screen.findByRole("heading", { name: "This desktop" }),
-  ).toBeTruthy();
-  expect(api.reconnect).toHaveBeenCalled();
-  expect(api.uploadWorkspace).not.toHaveBeenCalled();
-  expect(api.downloadWorkspace).not.toHaveBeenCalled();
-});
-
-test("a download that replaces the Workspace tells the app once, after it finished", async () => {
-  api.status.mockResolvedValue(choosing());
-  api.downloadWorkspace.mockResolvedValue({
-    ...syncStatus(),
-    safety_backup: "/ticketd/workspace.sqlite3.safety-1.sqlite3",
-  });
-  const onReplaced = vi.fn(async () => {});
-  show(undefined, onReplaced);
-  fireEvent.click(
-    await screen.findByRole("radio", { name: /Download “ticketd · web-app”/ }),
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
-  const dialog = await screen.findByRole("dialog", {
-    name: "Replace this Workspace?",
-  });
-  expect(onReplaced).not.toHaveBeenCalled();
-  fireEvent.click(
-    within(dialog).getByRole("button", { name: "Replace Workspace" }),
-  );
-  await waitFor(() => expect(onReplaced).toHaveBeenCalledTimes(1));
-  expect(api.downloadWorkspace).toHaveBeenCalledTimes(1);
-});
-
 test("downloading an existing Workspace asks once before replacing this one", async () => {
   api.status.mockResolvedValue(choosing());
   api.downloadWorkspace.mockResolvedValue({
@@ -259,13 +111,13 @@ test("downloading an existing Workspace asks once before replacing this one", as
   });
   show();
   const download = await screen.findByRole("radio", {
-    name: /Download “ticketd · web-app”/,
+    name: /Join “ticketd · web-app”/,
   });
   expect(download.textContent).toContain(
-    "42 tickets and 9 Documents, last synced from Studio desktop 2 h ago",
+    "42 tickets and 9 Documents, last synced from Studio desktop 2 h ago.",
   );
   fireEvent.click(download);
-  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Join…" }));
   const dialog = await screen.findByRole("dialog", {
     name: "Replace this Workspace?",
   });
@@ -332,9 +184,9 @@ test("a download that skipped an unreadable Drive file says so on the replaced c
   );
   show();
   fireEvent.click(
-    await screen.findByRole("radio", { name: /Download “ticketd · web-app”/ }),
+    await screen.findByRole("radio", { name: /Join “ticketd · web-app”/ }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Join…" }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Replace Workspace" }),
   );
@@ -373,8 +225,9 @@ test("Disconnect confirms that nothing is deleted before stopping sync", async (
   );
   expect(api.disconnect).not.toHaveBeenCalled();
   fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  // Setup begins again, at its first step.
   expect(
-    await screen.findByRole("button", { name: "Connect Google Drive" }),
+    await screen.findByRole("radiogroup", { name: "Start or join" }),
   ).toBeTruthy();
 });
 
@@ -543,89 +396,6 @@ test("a sync failure with no state of its own is a notice with its message and R
   expect(api.recover).toHaveBeenCalled();
 });
 
-test("the setup choice has a way back, also when Drive cannot be read", async () => {
-  api.status.mockResolvedValue(choosing());
-  api.setupOptions.mockRejectedValue(new Error("Drive did not answer"));
-  api.disconnect.mockResolvedValue(notConnected());
-  show();
-  await revealFailureDetails();
-  expect(screen.getByRole("alert").textContent).toContain(
-    "Drive did not answer",
-  );
-  fireEvent.click(screen.getByRole("button", { name: "Use another account…" }));
-  // Nothing is disconnected until the person confirms.
-  const dialog = await screen.findByRole("dialog", {
-    name: "Use another Google account?",
-  });
-  expect(dialog.textContent).toContain("you@example.com");
-  expect(dialog.textContent).toContain(
-    "Nothing in Drive or on this computer is deleted.",
-  );
-  expect(api.disconnect).not.toHaveBeenCalled();
-  fireEvent.click(
-    within(dialog).getByRole("button", { name: "Use another account" }),
-  );
-  expect(
-    await screen.findByRole("button", { name: "Connect Google Drive" }),
-  ).toBeTruthy();
-  expect(api.disconnect).toHaveBeenCalledTimes(1);
-});
-
-test("cancelling Use another account keeps the account", async () => {
-  api.status.mockResolvedValue(choosing());
-  show();
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Use another account…" }),
-  );
-  fireEvent.click(await screen.findByRole("button", { name: "Cancel" }));
-  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-  expect(api.disconnect).not.toHaveBeenCalled();
-  expect(screen.getByText("Connected as you@example.com")).toBeTruthy();
-});
-
-const stage = () =>
-  screen
-    .getByRole("list", { name: "Sync setup" })
-    .querySelector('[aria-current="step"]')?.textContent;
-
-test("the step track follows setup from sign-in to in sync", async () => {
-  api.status.mockResolvedValue(notConnected());
-  api.connect.mockImplementation(() => new Promise(() => {}));
-  const view = show();
-  expect(await screen.findByText("Not connected")).toBeTruthy();
-  expect(stage()).toBe("Connect");
-  fireEvent.click(screen.getByRole("button", { name: "Connect Google Drive" }));
-  expect((await screen.findByRole("status")).textContent).toBe(
-    "Waiting for sign-in in your browser…",
-  );
-  expect(
-    screen.getByRole("button", { name: "Connect Google Drive" }),
-  ).toHaveProperty("disabled", true);
-  view.unmount();
-
-  api.status.mockResolvedValue(choosing());
-  show();
-  await screen.findByRole("radiogroup", { name: "This Workspace" });
-  expect(stage()).toBe("Choose a workspace");
-  cleanup();
-
-  api.status.mockResolvedValue(
-    syncStatus({
-      state: "upload_pending",
-      first_sync: { direction: "upload", done: 1, total: 4 },
-    }),
-  );
-  show();
-  await screen.findByText("Uploading 1 of 4 files");
-  expect(stage()).toBe("First sync");
-  cleanup();
-
-  api.status.mockResolvedValue(syncStatus());
-  show();
-  await screen.findByRole("heading", { name: "Disconnect" });
-  expect(stage()).toBe("In sync");
-});
-
 test("a first sync that stopped shows why, with its action and Disconnect", async () => {
   api.status.mockResolvedValue(
     syncStatus({
@@ -641,55 +411,4 @@ test("a first sync that stopped shows why, with its action and Disconnect", asyn
   expect(screen.getByRole("button", { name: "Disconnect…" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(api.recover).toHaveBeenCalled();
-});
-
-test("an empty Workspace beside one in Drive preselects the download, and each folder is named", async () => {
-  api.status.mockResolvedValue(choosing());
-  let answer: (read: SyncSetupOptions) => void = () => {};
-  api.setupOptions.mockReturnValue(
-    new Promise((resolve) => {
-      answer = resolve;
-    }),
-  );
-  show();
-  // Drive takes a few seconds to answer: the card says what it waits for.
-  const waiting = await screen.findByText(
-    "Looking for Workspaces in your Drive…",
-  );
-  expect(waiting.closest('[role="status"]')).toBeTruthy();
-  answer({
-    local: { tickets: 0, documents: 0, attachments: 0 },
-    existing: [
-      ...options.existing,
-      {
-        folder_id: "folder-2",
-        folder_name: "ticketd · notes",
-        last_synced_by: null,
-        last_synced_at: null,
-        counts: { tickets: 1, documents: 0, attachments: 0 },
-      },
-    ],
-    reconnect: null,
-  });
-  const first = await screen.findByRole("radio", {
-    name: /Download “ticketd · web-app”/,
-  });
-  expect(first.getAttribute("aria-checked")).toBe("true");
-  expect(screen.queryByRole("status")).toBeNull();
-  expect(
-    screen.getByRole("radio", { name: /Download “ticketd · notes”/ })
-      .textContent,
-  ).toContain("1 ticket and 0 Documents, last sync not recorded");
-  expect(screen.getByRole("button", { name: "Download…" })).toBeTruthy();
-});
-
-test("a first download that has not counted its files yet says Preparing", async () => {
-  api.status.mockResolvedValue(
-    syncStatus({ first_sync: { direction: "download", done: 0, total: 0 } }),
-  );
-  show();
-  expect((await screen.findByText("Preparing…")).textContent).toBe(
-    "Preparing…",
-  );
-  expect(screen.queryByText(/0 of 0/)).toBeNull();
 });

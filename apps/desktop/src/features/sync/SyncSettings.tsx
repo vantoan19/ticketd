@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Cloud, Download, ExternalLink, Upload } from "lucide-react";
+import { Cloud, ExternalLink } from "lucide-react";
 import {
   Alert,
   AlertActions,
@@ -12,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { PathText } from "@/components/ui/path-text";
-import { Progress } from "@/components/ui/progress";
 import { Reference } from "@/components/ui/reference";
 import { RevealButton } from "@/components/ui/reveal-button";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -24,7 +23,6 @@ import {
   SettingsRowTile,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
-import { ago } from "@/features/tickets/ticket-source";
 import { FieldError } from "@/components/ui/field";
 import {
   describeFailure,
@@ -33,38 +31,22 @@ import {
 import {
   SYNC_MIN_POLL_SECS,
   syncApi,
-  type SyncCounts,
   type SyncSettings as Settings,
   type SyncSettingsChange,
-  type SyncSetupOptions,
   type SyncStatus,
 } from "@/lib/sync-api";
 import { syncReview } from "@/lib/sync-review-api";
-import { attachments } from "@/lib/api/attachments";
-import { useNow } from "@/lib/use-now";
 import { SyncFailure as Failure } from "./SyncFailure";
 import { useCommand } from "./use-sync-command";
 import { s3Api } from "@/lib/s3-api";
 import { storageName } from "./storage-name";
 import { S3Place } from "./S3Place";
 import { recoveryCopy } from "./sync-recovery";
+import { placeOf } from "./sync-words";
+import { Choose, FirstSync, SyncSetup, type SetupIntent } from "./SyncSetup";
 import { useSyncStatus } from "./sync-status";
 import "@/features/settings/settings.css";
 import "./sync.css";
-
-/** Where the Workspace's files are, as this page speaks of it. */
-const placeOf = (provider: SyncStatus["provider"]) =>
-  provider === "s3" ? "the bucket" : "Drive";
-
-const plural = (count: number, one: string) =>
-  `${count} ${one}${count === 1 ? "" : "s"}`;
-
-const contents = (counts: SyncCounts) =>
-  [
-    plural(counts.tickets, "ticket"),
-    plural(counts.documents, "Document"),
-    plural(counts.attachments, "Attachment"),
-  ].join(", ");
 
 function ConnectedAs({
   account,
@@ -144,17 +126,23 @@ export function SyncSettings({
   const { status } = useSyncStatus();
   // Where the Workspace a download replaced was kept, while this page is open.
   const [safetyBackup, setSafetyBackup] = useState("");
+  // What step 1 of setup said, kept while the person signs in and chooses.
+  const [intent, setIntent] = useState<SetupIntent | null>(null);
   return (
     <div className="settings-sync">
       <Track status={status} />
-      {safetyBackup && <Replaced safetyBackup={plainPath(safetyBackup)} />}
+      {/* While the first sync runs, its own footer says where the old Workspace is kept. */}
+      {safetyBackup && !status?.first_sync && (
+        <Replaced safetyBackup={plainPath(safetyBackup)} />
+      )}
       {!status && <StatusSkeleton />}
       {status &&
         (status.connection === "not_connected" ? (
-          <Connect />
+          <SyncSetup intent={intent} onIntent={setIntent} />
         ) : status.connection === "choosing" ? (
           <Choose
             status={status}
+            intent={intent}
             onDownloaded={setSafetyBackup}
             onReplaced={onReplaced}
           />
@@ -209,7 +197,7 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
       <Alert role="status">
         <AlertTitle>This Workspace was replaced</AlertTitle>
         <AlertDescription>
-          A safety backup of the Workspace this desktop had before is kept.
+          A safety backup of the Workspace this computer had before is kept.
           <span className="sync-safety-path">
             <PathText path={safetyBackup} />
           </span>
@@ -227,407 +215,6 @@ function Replaced({ safetyBackup }: { safetyBackup: string }) {
         </AlertActions>
         <Failure>{failure}</Failure>
       </Alert>
-    </div>
-  );
-}
-
-function Connect() {
-  const { busy, failure, run } = useCommand();
-  // Whether this build has a Google Drive app configuration. Unknown until
-  // read; only a plain "no" holds back the button.
-  const [configured, setConfigured] = useState<boolean | null>(null);
-  useEffect(() => {
-    let current = true;
-    void attachments
-      .driveConfiguration()
-      .then((config) => {
-        if (current) setConfigured(config.configured);
-      })
-      .catch(() => {
-        // Sign-in still reports why it cannot start.
-      });
-    return () => {
-      current = false;
-    };
-  }, []);
-  return (
-    <>
-      <div className="sync-block">
-        <SettingsList>
-          <SettingsRow
-            leading={
-              <SettingsRowTile>
-                <Cloud size={20} />
-              </SettingsRowTile>
-            }
-            title={
-              <span role="status">
-                {/* Waiting is not a state yet: words without a dot. */}
-                {busy ? (
-                  <span className="sync-waiting">
-                    Waiting for sign-in in your browser…
-                  </span>
-                ) : (
-                  <StatusLabel tone="neutral">Not connected</StatusLabel>
-                )}
-              </span>
-            }
-            description="Sign-in opens in your browser. ticketd only sees the files it creates."
-            trailing={
-              <Button
-                size="sm"
-                disabled={busy || configured === false}
-                onClick={() =>
-                  void run(syncApi.connect, "connect Google Drive")
-                }
-              >
-                Connect Google Drive
-                <ExternalLink aria-hidden="true" />
-              </Button>
-            }
-          />
-        </SettingsList>
-        {configured === false && (
-          <Alert role="status" className="mt-3">
-            <AlertTitle>Google Drive isn't set up on this computer</AlertTitle>
-            <AlertDescription>
-              This build of ticketd has no Google Drive app configuration, so
-              sign-in can't start. Install a build with Google Drive enabled.
-              Your local files are unaffected.
-            </AlertDescription>
-          </Alert>
-        )}
-        <Failure>{failure}</Failure>
-      </div>
-      {/* The track above numbers the stages; these rows only explain them. */}
-      <SettingsSection title="How sync works">
-        <SettingsList>
-          <SettingsRow
-            title="Connect your Google account"
-            description="You sign in with Google in your browser, then come back here."
-          />
-          <SettingsRow
-            title="Choose a workspace"
-            description="Upload this one to a new folder, or download one your other desktop already put in Drive."
-          />
-          <SettingsRow
-            title="Keep working"
-            description="Your own changes upload right after each save. Each desktop checks Drive for the others’ changes."
-          />
-        </SettingsList>
-      </SettingsSection>
-      <div className="sync-block">
-        <Alert role="note">
-          <AlertTitle>Files are not encrypted</AlertTitle>
-          <AlertDescription>
-            Each ticket and Document is saved in your Drive as a readable
-            Markdown file. Anyone who can open that folder can read them.
-          </AlertDescription>
-        </Alert>
-      </div>
-    </>
-  );
-}
-
-const UPLOAD = "upload";
-const RECONNECT = "reconnect";
-
-function Choose({
-  status,
-  onDownloaded,
-  onReplaced,
-}: {
-  status: SyncStatus;
-  /** Told where the safety backup of the replaced Workspace is. */
-  onDownloaded: (safetyBackup: string) => void;
-  onReplaced: () => Promise<void>;
-}) {
-  const now = useNow();
-  const { busy, failure, run } = useCommand();
-  const [options, setOptions] = useState<SyncSetupOptions | null>(null);
-  const [readFailure, setReadFailure] = useState<FailureDescription | null>(
-    null,
-  );
-  const provider = status.provider;
-  // Read again when the person asks, once what the failure said is fixed.
-  const [attempt, setAttempt] = useState(0);
-  const [choice, setChoice] = useState(UPLOAD);
-  const [confirming, setConfirming] = useState(false);
-  const [switching, setSwitching] = useState(false);
-  useEffect(() => {
-    let current = true;
-    syncApi
-      .setupOptions()
-      .then((read) => {
-        if (!current) return;
-        setOptions(read);
-        // The folder this Workspace synced with is where it goes back to. Failing
-        // that, nothing here to upload and a Workspace in Drive: that one is
-        // what the person came for.
-        const [first] = read.existing;
-        if (read.reconnect) setChoice(RECONNECT);
-        else if (
-          first &&
-          Object.values(read.local).every((count) => count === 0)
-        )
-          setChoice(first.folder_id);
-      })
-      .catch((reason: unknown) => {
-        if (current)
-          // The bucket check words its refusals for people: say what to fix.
-          setReadFailure(
-            describeFailure(reason, `read ${placeOf(provider)}`, {
-              readable: provider === "s3",
-            }),
-          );
-      });
-    return () => {
-      current = false;
-    };
-  }, [provider, attempt]);
-  const download = options?.existing.find(
-    (workspace) => workspace.folder_id === choice,
-  );
-  const account = status.account ?? "this account";
-  const s3 = status.provider === "s3";
-  const place = placeOf(status.provider);
-  const storage = storageName(status.provider);
-  return (
-    <SettingsSection
-      title="This Workspace"
-      caption={<ConnectedAs account={status.account} size="caption" />}
-    >
-      {!options && !readFailure && (
-        <p role="status" className="settings-hint">
-          {s3
-            ? "Checking the bucket and looking for Workspaces…"
-            : "Looking for Workspaces in your Drive…"}
-        </p>
-      )}
-      {options && (
-        <ChoiceTiles
-          aria-label="This Workspace"
-          value={choice}
-          disabled={busy}
-          onValueChange={setChoice}
-        >
-          {options.reconnect && (
-            <ChoiceTile
-              value={RECONNECT}
-              title={<>Reconnect to “{options.reconnect.name}”</>}
-              description={`Changes made here and in ${place} are merged, and nothing is replaced`}
-            />
-          )}
-          {/* Upload would land in the folder Reconnect names, minus the merge. */}
-          {!options.reconnect && (
-            <ChoiceTile
-              value={UPLOAD}
-              title="Upload this Workspace"
-              description={`${plural(options.local.tickets, "ticket")} and ${plural(options.local.documents, "Document")} go to a new folder in ${s3 ? "the bucket" : "your Drive"}`}
-            />
-          )}
-          {options.existing.map((workspace) => {
-            const synced =
-              workspace.last_synced_at && ago(workspace.last_synced_at, now);
-            return (
-              <ChoiceTile
-                key={workspace.folder_id}
-                value={workspace.folder_id}
-                title={<>Download “{workspace.folder_name}”</>}
-                description={`${plural(workspace.counts.tickets, "ticket")} and ${plural(workspace.counts.documents, "Document")}, ${
-                  synced
-                    ? `last synced ${workspace.last_synced_by ? `from ${workspace.last_synced_by} ` : ""}${synced}`
-                    : "last sync not recorded"
-                }`}
-              />
-            );
-          })}
-        </ChoiceTiles>
-      )}
-      <div className="sync-footer">
-        <SettingsList>
-          <SettingsListFooter
-            actions={
-              <>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => setSwitching(true)}
-                >
-                  {s3 ? "Use another bucket…" : "Use another account…"}
-                </Button>
-                <Button
-                  size="sm"
-                  disabled={!options || busy}
-                  onClick={() =>
-                    download
-                      ? setConfirming(true)
-                      : void run(
-                          choice === RECONNECT
-                            ? syncApi.reconnect
-                            : syncApi.uploadWorkspace,
-                          "start sync",
-                        )
-                  }
-                >
-                  {download
-                    ? "Download…"
-                    : choice === RECONNECT
-                      ? "Reconnect"
-                      : "Start sync"}
-                </Button>
-              </>
-            }
-          >
-            {s3
-              ? "ticketd does not encrypt the files it puts in the bucket."
-              : "Files in Drive are not encrypted."}
-          </SettingsListFooter>
-        </SettingsList>
-      </div>
-      {busy && (
-        <p role="status" className="sync-status-line">
-          Starting sync…
-        </p>
-      )}
-      <Failure
-        {...(readFailure && {
-          onRetry: () => {
-            setReadFailure(null);
-            setAttempt((count) => count + 1);
-          },
-        })}
-        {...(s3 &&
-          readFailure?.action === "choose_another" && {
-            actions: (
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => setSwitching(true)}
-              >
-                Use another bucket…
-              </Button>
-            ),
-          })}
-      >
-        {readFailure ?? failure}
-      </Failure>
-      <DialogShell
-        open={switching}
-        onOpenChange={setSwitching}
-        title={s3 ? "Use another bucket?" : "Use another Google account?"}
-        description={
-          s3
-            ? "ticketd disconnects from this bucket so you can choose another bucket or profile. Nothing in the bucket or on this computer is deleted."
-            : `ticketd disconnects from ${account} so you can sign in with a different Google account. Nothing in Drive or on this computer is deleted.`
-        }
-        primaryLabel={s3 ? "Use another bucket" : "Use another account"}
-        blockedReason={null}
-        size="sm"
-        onSubmit={() => {
-          setSwitching(false);
-          void run(syncApi.disconnect, `disconnect from ${storage.full}`);
-        }}
-      >
-        <dl className="sync-summary">
-          <dt>On this computer</dt>
-          <dd>This Workspace stays as it is</dd>
-          <dt>{s3 ? "In the bucket" : "In Google Drive"}</dt>
-          <dd>Your files stay, for your other desktops</dd>
-        </dl>
-      </DialogShell>
-      {options && download && (
-        // Replacing local data is destructive, reviewed like a restore: the
-        // consequence first, then what changes, the safety net in the note
-        // slot, and a primary named for the result (set BK-10).
-        <DialogShell
-          open={confirming}
-          onOpenChange={setConfirming}
-          title="Replace this Workspace?"
-          description={`Downloads “${download.folder_name}” from ${place}.`}
-          primaryLabel="Replace Workspace"
-          primaryVariant="destructive"
-          footerNote="A safety backup is saved first."
-          blockedReason={null}
-          size="md"
-          onSubmit={() => {
-            setConfirming(false);
-            void run(async () => {
-              const replaced = await syncApi.downloadWorkspace(
-                download.folder_id,
-              );
-              onDownloaded(replaced.safety_backup);
-              void onReplaced();
-              return replaced;
-            }, "replace this Workspace");
-          }}
-        >
-          <Alert tone="attention" role="note">
-            <AlertTitle>
-              This replaces everything in this Workspace on this computer
-            </AlertTitle>
-            <AlertDescription>
-              The Workspace from {place} takes its place. What is here now is
-              kept only in the safety backup.
-            </AlertDescription>
-          </Alert>
-          <dl className="sync-summary">
-            <dt>From {place}</dt>
-            <dd>{contents(download.counts)}</dd>
-            <dt>Replaced here</dt>
-            <dd>{contents(options.local)}</dd>
-          </dl>
-        </DialogShell>
-      )}
-    </SettingsSection>
-  );
-}
-
-function FirstSync({
-  status,
-  progress,
-}: {
-  status: SyncStatus;
-  progress: NonNullable<SyncStatus["first_sync"]>;
-}) {
-  const upload = progress.direction === "upload";
-  const Icon = upload ? Upload : Download;
-  return (
-    <div className="sync-block">
-      <SettingsList>
-        <SettingsRow
-          leading={
-            <SettingsRowTile>
-              <Icon />
-            </SettingsRowTile>
-          }
-          title={
-            <span role="status">
-              {progress.total
-                ? `${upload ? "Uploading" : "Downloading"} ${progress.done} of ${progress.total} files`
-                : "Preparing…"}
-            </span>
-          }
-          description={status.account}
-          // The 64px bar beside the words that count it (set SR-09). Until
-          // the files are counted there is no share to show.
-          trailing={
-            progress.total ? (
-              <Progress
-                aria-label={upload ? "First upload" : "First download"}
-                value={progress.done}
-                max={Math.max(progress.total, 1)}
-              />
-            ) : null
-          }
-        />
-        <SettingsListFooter>
-          {upload
-            ? "You can keep working. Everything is already saved on this computer."
-            : "A safety backup of the Workspace that was here is in Settings › Backups & export."}
-        </SettingsListFooter>
-      </SettingsList>
     </div>
   );
 }

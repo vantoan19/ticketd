@@ -554,14 +554,22 @@ below applies to both unless it names one.
   Attachments are ordinary files. Content is stored unencrypted, and the live SQLite
   database is never synchronized. Inbox read state, checkout paths, credentials, source
   settings, window layout, drafts, and upload queues stay local.
-- **Setup.** Settings > Workspace sync starts with the choice of Google Drive or S3.
-  After connecting, the person uploads this Workspace or downloads an existing one
-  (after a safety backup). Independent Workspaces are never merged
-  automatically. A joining desktop takes a fresh device code when needed so references
-  never clash. Disconnecting deletes nothing, and the same account (or, for S3, the
-  same bucket and prefix) can reconnect to its folder. Restoring a backup disconnects
-  the Workspace from its storage. To move from Drive to S3, disconnect Drive and
-  upload the Workspace to a bucket; there is no migration.
+- **Setup.** Settings > Workspace sync takes four steps. First the person says whether
+  this computer starts a Workspace or joins one; Start is the default when this computer
+  holds tickets or Documents, Join when it is empty, and Join says what it would replace.
+  Then Google Drive or S3, and signing in. Then ticketd reads the storage before it writes
+  anything: when the storage already holds a Workspace, Join is preselected even if this
+  computer holds tickets, with what it holds and what it replaces here, and "Start a
+  separate Workspace" is the second option, never preselected, saying that the two can't
+  be merged later. Joining downloads the Workspace after a safety backup of this
+  computer's. A folder this computer synced before is offered first as Reconnect, which
+  merges both sides and replaces nothing. With nothing in the storage, Start goes
+  straight to the first sync. The first sync shows its progress and has no Back.
+  Independent Workspaces are never merged automatically. A joining desktop takes a fresh
+  device code when needed so references never clash. Disconnecting deletes nothing, and
+  the same account (or, for S3, the same bucket and prefix) can reconnect to its folder.
+  Restoring a backup disconnects the Workspace from its storage. To move from Drive to S3,
+  disconnect Drive and upload the Workspace to a bucket; there is no migration.
 - **When it runs.** While the desktop is open: at launch and reconnect, by polling
   the storage (every minute by default), shortly after a save, and on Sync now. Exit
   makes a bounded attempt to upload pending changes. The CLI never contacts the
