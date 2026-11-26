@@ -362,31 +362,42 @@ function RecoveredDocumentEditor({
     recovered ? recovered.draft.suggestion : (currentTicket ?? null),
   );
   const linksKey = useRef("");
+  // Each read answers only if no newer one started: an older answer never overwrites.
+  const linksRequest = useRef(0);
+  const rowRequest = useRef(0);
   const refreshLinks = () => {
-    if (initial)
+    if (initial) {
+      const request = ++linksRequest.current;
       void documents
         .links(initial.id)
         .then((next) => {
+          if (request !== linksRequest.current) return;
           const key = JSON.stringify(next);
           if (key === linksKey.current) return;
           linksKey.current = key;
           setLinks(next);
         })
-        .catch((error: unknown) =>
-          setLinkError(describeFailure(error, "load the connections")),
-        );
-    if (initial)
+        .catch((error: unknown) => {
+          if (request === linksRequest.current)
+            setLinkError(describeFailure(error, "load the connections"));
+        });
+    }
+    if (initial) {
+      const request = ++rowRequest.current;
       void documents
         .row(initial.id)
         .then((next) => {
+          if (request !== rowRequest.current) return;
           const key = JSON.stringify(next);
           if (key === rowKey.current) return;
           rowKey.current = key;
           setRow(next);
         })
-        .catch((error: unknown) =>
-          setLinkError(describeFailure(error, "load the connections")),
-        );
+        .catch((error: unknown) => {
+          if (request === rowRequest.current)
+            setLinkError(describeFailure(error, "load the connections"));
+        });
+    }
   };
   const refreshLinksRef = useRef(refreshLinks);
   useEffect(() => {

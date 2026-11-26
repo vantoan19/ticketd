@@ -408,3 +408,34 @@ it("edits the title in a field that wraps, and Enter leaves it without adding a 
   const enter = fireEvent.keyDown(title, { key: "Enter" });
   expect(enter).toBe(false);
 });
+
+it("ignores a row read that answers after a newer one, so old tags do not come back", async () => {
+  vi.mocked(documents.row).mockResolvedValue(
+    row({ tags: ["checkout", "design", "launch"] }),
+  );
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  const tags = await screen.findByRole("list", { name: "Tags" });
+  expect(within(tags).getAllByRole("listitem")).toHaveLength(3);
+  // The first edit's read is slow; the second edit's read answers first.
+  let slow!: (value: DocumentSummary) => void;
+  vi.mocked(documents.row).mockImplementationOnce(
+    () => new Promise<DocumentSummary>((resolve) => (slow = resolve)),
+  );
+  vi.mocked(documents.row).mockResolvedValue(row({ tags: ["launch"] }));
+  fireEvent.click(screen.getByRole("button", { name: "Remove tag checkout" }));
+  await waitFor(() => expect(documents.row).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole("button", { name: "Remove tag design" }));
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Remove tag design" })).toBe(
+      null,
+    ),
+  );
+  slow(row({ tags: ["design", "launch"] }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(screen.queryByRole("button", { name: "Remove tag design" })).toBe(
+    null,
+  );
+  expect(
+    screen.getByRole("button", { name: "Remove tag launch" }),
+  ).toBeTruthy();
+});

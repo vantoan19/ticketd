@@ -144,7 +144,8 @@ export function Documents({
   const pendingBrowse = useRef<{
     recent: DocumentSummary[];
     pins: DocumentSummary[];
-    work: CurrentWork;
+    /** Absent when Current work could not be read: the last one stays. */
+    work: CurrentWork | null;
   } | null>(null);
   const releaseBrowse = (
     nextFocus: EventTarget | null = document.activeElement,
@@ -158,7 +159,7 @@ export function Documents({
     if (pending) {
       setRecent(pending.recent);
       setGroupPins(pending.pins);
-      setWork(pending.work);
+      if (pending.work) setWork(pending.work);
       pendingBrowse.current = null;
     }
   };
@@ -303,29 +304,50 @@ export function Documents({
   const restoredOpen = useRef<HTMLButtonElement>(null);
   // Only mention hidden Activity details when including them would actually find something.
   const [hiddenProbe, setHiddenProbe] = useState({ key: "", found: false });
+  const refreshRequest = useRef(0);
+  // The update-details choice the shown lists were read with.
+  const shownSupport = useRef(false);
   const refresh = useCallback(() => {
+    const request = ++refreshRequest.current;
+    // Current work is read on its own: its failure must not hide Recent and Pinned.
+    const workRead = documents.currentWork(includeSupport).then(
+      (value) => ({ value }),
+      (reason: unknown) => ({ reason }),
+    );
     return Promise.all([
       upTo(recentOffset, (at) => documents.recent(at, includeSupport)),
       upTo(pinOffset, (at) => documents.pins(at)),
-      documents.currentWork(includeSupport),
+      workRead,
     ])
-      .then(([r, p, w]) => {
+      .then(([r, p, read]) => {
+        // A newer refresh owns the answer, whether this one succeeded or failed.
+        if (request !== refreshRequest.current) return;
+        const w = "value" in read ? read.value : null;
         setPins(p);
+        // Rows hold still while the person is on the list, but only for a background
+        // refresh: an explicit change of Show update details applies at once.
+        const background = shownSupport.current === includeSupport;
         if (
+          background &&
           navigator.current?.querySelector("[data-document-row]") &&
           (engaged.current ||
             navigator.current?.contains(document.activeElement))
         ) {
           pendingBrowse.current = { recent: r, pins: p, work: w };
         } else {
+          shownSupport.current = includeSupport;
+          pendingBrowse.current = null;
           setRecent(r);
           setGroupPins(p);
-          setWork(w);
+          if (w) setWork(w);
         }
         setBrowseLoaded(true);
-        setListError(null);
+        if ("reason" in read) failLoad(read.reason, "Documents");
+        else setListError(null);
       })
-      .catch((reason: unknown) => failLoad(reason, "Documents"));
+      .catch((reason: unknown) => {
+        if (request === refreshRequest.current) failLoad(reason, "Documents");
+      });
   }, [recentOffset, pinOffset, includeSupport, failLoad]);
   const loadTrash = useCallback(
     (focus?: { index: number; origin: Element | null }) => {
@@ -384,16 +406,21 @@ export function Documents({
   }, [trash, active, showTrash]);
   useEffect(() => {
     if (!active || !sorted) return;
+    let current = true;
     const read = sort === "title" ? documents.byTitle : documents.all;
-    const load = () =>
-      void upTo(allOffset, (at) => read(at, includeSupport))
-        .then((items) => {
-          setAll(items);
-          setAllLoaded(true);
-          setListError(null);
-        })
-        .catch((reason: unknown) => failLoad(reason, "Documents"));
-    load();
+    void upTo(allOffset, (at) => read(at, includeSupport))
+      .then((items) => {
+        if (!current) return;
+        setAll(items);
+        setAllLoaded(true);
+        setListError(null);
+      })
+      .catch((reason: unknown) => {
+        if (current) failLoad(reason, "Documents");
+      });
+    return () => {
+      current = false;
+    };
   }, [
     active,
     sorted,
@@ -404,37 +431,74 @@ export function Documents({
     attempt,
     failLoad,
   ]);
-  // The two folds of old work read their Documents only while open.
+  // The two folds of old work read their Documents only while open, each with its own
+  // answer, error and Retry: one fold's answer never settles the other's.
+  const [finishedError, setFinishedError] = useState<FailureDescription | null>(
+    null,
+  );
+  const [unlinkedError, setUnlinkedError] = useState<FailureDescription | null>(
+    null,
+  );
+  const [finishedAttempt, setFinishedAttempt] = useState(0);
+  const [unlinkedAttempt, setUnlinkedAttempt] = useState(0);
+  const foldOpen = active && view === "current" && !showTrash;
   useEffect(() => {
-    if (!active || view !== "current" || showTrash) return;
-    if (finishedOpen)
-      void upTo(finishedOffset, (at) => documents.finished(at, includeSupport))
-        .then((items) => {
-          setFinished(items);
-          setFinishedLoaded(true);
-          setListError(null);
-        })
-        .catch((reason: unknown) => failLoad(reason, "Finished work"));
-    if (unlinkedOpen)
-      void upTo(unlinkedOffset, (at) => documents.unlinked(at, includeSupport))
-        .then((items) => {
-          setUnlinked(items);
-          setUnlinkedLoaded(true);
-          setListError(null);
-        })
-        .catch((reason: unknown) => failLoad(reason, "Documents"));
+    if (!foldOpen || !finishedOpen) {
+      setFinishedError(null);
+      return;
+    }
+    let current = true;
+    void upTo(finishedOffset, (at) => documents.finished(at, includeSupport))
+      .then((items) => {
+        if (!current) return;
+        setFinished(items);
+        setFinishedLoaded(true);
+        setFinishedError(null);
+      })
+      .catch((reason: unknown) => {
+        if (current)
+          setFinishedError(describeFailure(reason, "load Finished work"));
+      });
+    return () => {
+      current = false;
+    };
   }, [
-    active,
-    view,
-    showTrash,
+    foldOpen,
     finishedOpen,
-    unlinkedOpen,
     finishedOffset,
+    includeSupport,
+    changeVersion,
+    finishedAttempt,
+  ]);
+  useEffect(() => {
+    if (!foldOpen || !unlinkedOpen) {
+      setUnlinkedError(null);
+      return;
+    }
+    let current = true;
+    void upTo(unlinkedOffset, (at) => documents.unlinked(at, includeSupport))
+      .then((items) => {
+        if (!current) return;
+        setUnlinked(items);
+        setUnlinkedLoaded(true);
+        setUnlinkedError(null);
+      })
+      .catch((reason: unknown) => {
+        if (current)
+          setUnlinkedError(
+            describeFailure(reason, "load Documents with no Plan or ticket"),
+          );
+      });
+    return () => {
+      current = false;
+    };
+  }, [
+    foldOpen,
+    unlinkedOpen,
     unlinkedOffset,
     includeSupport,
     changeVersion,
-    attempt,
-    failLoad,
+    unlinkedAttempt,
   ]);
   useEffect(() => {
     openGeneration.current++;
@@ -986,7 +1050,8 @@ export function Documents({
       )}
     </section>
   );
-  const currentWorkSection = (
+  // Built only when shown: building its rows claims the list's Tab stop.
+  const currentWorkSection = view === "current" && !showTrash && !searching && (
     <section aria-label="Current work">
       {work === null ? (
         <EmptyState
@@ -1030,7 +1095,13 @@ export function Documents({
                 false,
               )}
               {finishedOpen &&
-                (finishedLoaded ? (
+                (finishedError ? (
+                  <FailureAlert
+                    size="compact"
+                    failure={finishedError}
+                    onRetry={() => setFinishedAttempt((value) => value + 1)}
+                  />
+                ) : finishedLoaded ? (
                   list(finished)
                 ) : (
                   <EmptyState
@@ -1057,7 +1128,13 @@ export function Documents({
                 false,
               )}
               {unlinkedOpen &&
-                (unlinkedLoaded ? (
+                (unlinkedError ? (
+                  <FailureAlert
+                    size="compact"
+                    failure={unlinkedError}
+                    onRetry={() => setUnlinkedAttempt((value) => value + 1)}
+                  />
+                ) : unlinkedLoaded ? (
                   list(unlinked)
                 ) : (
                   <EmptyState
