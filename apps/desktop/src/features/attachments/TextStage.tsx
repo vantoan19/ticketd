@@ -391,22 +391,75 @@ function TextLines({
     }
   });
 
+  // Dragging a long way draws other lines and drops the rows the drag began on. The
+  // browser then moves that edge of the selection onto the list itself, so the last
+  // line it was seen in is kept until the selection is cleared or starts elsewhere.
+  const edges = useRef<{ anchor: Position | null; focus: Position | null }>({
+    anchor: null,
+    focus: null,
+  });
+  useEffect(() => {
+    function track() {
+      const list = listRef.current;
+      const selection = window.getSelection();
+      const { anchorNode, focusNode } = selection ?? {};
+      if (
+        !list ||
+        !selection ||
+        selection.isCollapsed ||
+        !anchorNode ||
+        !focusNode ||
+        !list.contains(anchorNode) ||
+        !list.contains(focusNode)
+      ) {
+        edges.current = { anchor: null, focus: null };
+        return;
+      }
+      const anchor = positionOf(
+        list,
+        lines,
+        anchorNode,
+        selection.anchorOffset,
+      );
+      const focus = positionOf(list, lines, focusNode, selection.focusOffset);
+      if (!anchor && !focus) return;
+      edges.current = {
+        anchor: anchor ?? edges.current.anchor,
+        focus: focus ?? edges.current.focus,
+      };
+    }
+    document.addEventListener("selectionchange", track);
+    return () => document.removeEventListener("selectionchange", track);
+  }, [lines]);
+
   function onCopy(event: ClipboardEvent) {
     const list = listRef.current;
     const selection = window.getSelection();
-    if (!list || !selection || selection.isCollapsed || !selection.rangeCount)
+    if (
+      !list ||
+      !selection ||
+      selection.isCollapsed ||
+      !selection.anchorNode ||
+      !selection.focusNode
+    )
       return;
-    const range = selection.getRangeAt(0);
-    const from = positionOf(
-      list,
-      lines,
-      range.startContainer,
-      range.startOffset,
-    );
-    const to = positionOf(list, lines, range.endContainer, range.endOffset);
+    const anchor =
+      positionOf(list, lines, selection.anchorNode, selection.anchorOffset) ??
+      edges.current.anchor;
+    const focus =
+      positionOf(list, lines, selection.focusNode, selection.focusOffset) ??
+      edges.current.focus;
     // Lines scrolled out of the drawn range still copy; the line numbers never do.
-    if (!from || !to) return;
-    event.clipboardData.setData("text/plain", selectionText(lines, from, to));
+    if (!anchor || !focus) return;
+    const forward =
+      anchor.line < focus.line ||
+      (anchor.line === focus.line && anchor.column <= focus.column);
+    event.clipboardData.setData(
+      "text/plain",
+      forward
+        ? selectionText(lines, anchor, focus)
+        : selectionText(lines, focus, anchor),
+    );
     event.preventDefault();
   }
 

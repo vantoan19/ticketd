@@ -250,3 +250,31 @@ test("copying a selection takes the text of its lines, without line numbers", as
     `${lines[3]!.slice(9)}\n${lines[4]}\n${lines[5]!.slice(0, 8)}`,
   );
 });
+
+test("a copy still starts where the drag began after that line scrolls out of the drawn rows", async () => {
+  serve();
+  render(<Stage />);
+  await screen.findByRole("document");
+  const list = document.querySelector(".attachment-text")!;
+  const rows = drawn();
+  const first = rows[3]!.querySelector(".attachment-text-content")!.firstChild!;
+  const last = rows[5]!.querySelector(".attachment-text-content")!.firstChild!;
+  const selection = window.getSelection()!;
+  selection.setBaseAndExtent(first, 9, last, 8);
+  document.dispatchEvent(new Event("selectionchange"));
+  // The browser moves the edge whose rows were taken out of the page onto the list.
+  selection.setBaseAndExtent(list, 0, last, 8);
+  document.dispatchEvent(new Event("selectionchange"));
+  const copied = new Map<string, string>();
+  const event = new Event("copy", { bubbles: true, cancelable: true });
+  Object.assign(event, {
+    clipboardData: {
+      setData: (type: string, value: string) => copied.set(type, value),
+    },
+  });
+  list.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(copied.get("text/plain")).toBe(
+    `${lines[3]!.slice(9)}\n${lines[4]}\n${lines[5]!.slice(0, 8)}`,
+  );
+});
