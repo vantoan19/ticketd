@@ -207,6 +207,14 @@ export function Activity(props: ActivityProps) {
   );
 }
 
+/**
+ * A line holding only an attachment link becomes a 176px card, which is taller
+ * than eight lines of text: such an update clamps much later, so a card is
+ * never faded out under a "Show more" that has nothing to show.
+ */
+const ALONE_LINK =
+  /^\s*(?:[-*+]\s+)?(?:<ticketd:\/\/attachment\/[^>\s]+>|\[[^\]]*\]\(ticketd:\/\/attachment\/[^)\s]+\))\s*$/m;
+
 function RecoveredActivity({
   reference,
   ticketId = reference,
@@ -1186,7 +1194,7 @@ function RecoveredActivity({
                     })}
                   >
                     <div className="markdown-preview activity-note">
-                      <Clamp>
+                      <Clamp lines={ALONE_LINK.test(item.note.brief) ? 40 : 8}>
                         <MarkdownDocument
                           source={item.note.brief}
                           select={select}
