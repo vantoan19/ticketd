@@ -322,7 +322,7 @@ test("a ticket's status moves net into one move where its first stood", () => {
   expect(moves[0]?.kind === "status" && moves[0].to).toBe("In progress");
 });
 
-test("the same ticketd call said again is one clause, and calls of one shape name their records together", () => {
+test("the same ticketd call said again is one clause", () => {
   const evidence = (reference: string) => ({
     verb: "add" as const,
     words: [{ text: "evidence to" }, { text: reference, code: true }],
@@ -332,8 +332,9 @@ test("the same ticketd call said again is one clause, and calls of one shape nam
   expect(said(evidence("T-12"), evidence("T-12"), evidence("T-12"))).toBe(
     "Added evidence to T-12 (3 times)",
   );
-  expect(said(evidence("T-12"), evidence("T-13"), evidence("T-14"))).toBe(
-    "Added evidence to T-12, T-13 and T-14",
+  // Different records are different clauses, said in full.
+  expect(said(evidence("T-12"), evidence("T-13"))).toBe(
+    "Added evidence to T-12 and evidence to T-13",
   );
   expect(
     ticketdParts([evidence("T-12"), evidence("T-12")], 0).map((p) => p.text),

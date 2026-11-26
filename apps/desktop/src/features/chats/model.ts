@@ -133,17 +133,9 @@ export function ticketdParts(
     if (again) again.times += 1;
     else said.push({ call, times: 1 });
   }
-  // Its words with each record as a blank: calls of one shape differ only in the record.
-  const shape = (call: TicketdCall | undefined) =>
-    call?.words
-      .map((word) => (word.code || word.record ? "·" : word.text))
-      .join(" ");
   said.forEach(({ call, times }, index) => {
     const before = said[index - 1]?.call;
     const repeats = before?.verb === call.verb;
-    // "Added evidence to T-1, T-2 and T-3": words that lead the record are said once.
-    const lead = repeats && shape(call) === shape(before);
-    const first = call.words.findIndex((word) => word.code || word.record);
     if (index > 0) {
       if (repeats)
         parts.push({
@@ -156,8 +148,7 @@ export function ticketdParts(
       parts.push({ text: index > 0 || lower ? verb.toLowerCase() : verb });
     }
     const it = !repeats && reference(call) === reference(before);
-    for (const [at, word] of call.words.entries()) {
-      if (lead && first > 0 && at < first) continue;
+    for (const word of call.words) {
       const title = word.record ? name(word.record, word.text) : undefined;
       parts.push(
         title
