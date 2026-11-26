@@ -2379,6 +2379,39 @@ async fn a_long_turn_still_says_how_many_files_it_changed_on_the_list() {
     assert_eq!(row.status.detail.as_deref(), Some("1 file changed"));
 }
 
+/// A failed turn older than the list row's history window is still the Chat's last
+/// turn: the row tells it, so "Check again" must be able to clear it.
+#[tokio::test(start_paused = true)]
+async fn checking_again_clears_a_failed_turn_older_than_the_history_window() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.emit(failed_turn("turn-1", failure(ProblemKind::LoginRequired)))
+        .await;
+    // More records than the list row reads, after the turn ended.
+    for number in 0..(SUMMARY_ITEMS + 5) {
+        let item = format!("cmd-{number}");
+        f.emit(command_tool(&item, "ls", ToolStatus::Running)).await;
+        f.emit(command_tool(&item, "ls", ToolStatus::Succeeded))
+            .await;
+    }
+    let row = |f: &Fixture| f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row(&f).problem, Some(ChatProblemKind::NotSignedIn));
+
+    f.fake.set_inspection(Inspection::Installed {
+        executable: PathBuf::from("harness"),
+        version: Some("1.0".to_owned()),
+        login: LoginState::SignedIn,
+        capabilities: ticketd_chat_host::Capabilities {
+            steering: ticketd_chat_host::Capability::Unknown {
+                reason: String::new(),
+            },
+        },
+    });
+    f.chats.check_again(&id).await.unwrap();
+    settle().await;
+    assert_eq!(row(&f).problem, None, "the probe cleared what the row told");
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_linked_record_in_trash_is_named_as_such() {
     let f = Fixture::new().await;

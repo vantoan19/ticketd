@@ -2165,6 +2165,8 @@ impl Chats {
             return Err(failed("The folder is still missing.".to_owned()));
         }
         let items = workspace.chat_snapshot(chat_id, SUMMARY_ITEMS)?.items;
+        // The row reads the last turn on its own too, so this must see what the row sees.
+        let latest_turn = workspace.chat_latest_turn(chat_id)?;
         drop(workspace);
         let descriptor = self
             .catalog()
@@ -2181,7 +2183,11 @@ impl Chats {
         ) {
             host.resume(chat_id, ResumeMode::Native).await?;
         }
-        if let Some(turn) = Tracker::from_items(&items).failed_turn() {
+        let mut tracker = Tracker::from_items(&items);
+        if let Some(turn) = latest_turn {
+            tracker.note(&ChatItem::Turn(turn));
+        }
+        if let Some(turn) = tracker.failed_turn() {
             // A sign-in the probe cannot see is not shown to be in order by it.
             let signed_out = matches!(
                 TurnEnding::of(turn),
