@@ -48,6 +48,7 @@ export function AttachmentCard({
   file,
   label,
   storage,
+  storageKnown = true,
   onOpen,
   action,
 }: {
@@ -55,11 +56,14 @@ export function AttachmentCard({
   /** An authored label that differs from the file's name: it names the card. */
   label?: string | undefined;
   storage?: Availability | undefined;
+  /** False until the first availability read answers: no still is asked for before it. */
+  storageKnown?: boolean;
   onOpen: () => void;
   action?: ReactNode;
 }) {
   const [ref, near] = useNearViewport<HTMLDivElement>();
-  const here = storage === undefined || storage.state === "downloaded";
+  const here =
+    storageKnown && (storage === undefined || storage.state === "downloaded");
   const still = useStill(file, near && here);
   const [broken, setBroken] = useState<string | null>(null);
   const named = label && label !== file.display_name ? label : undefined;

@@ -29,6 +29,7 @@ export function useAttachmentItems(
       <AttachmentCard
         file={file}
         storage={availability.of(file.id)}
+        storageKnown={availability.known}
         onOpen={() => onOpen(file)}
       />
     </li>
