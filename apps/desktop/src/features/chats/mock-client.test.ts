@@ -170,6 +170,60 @@ const seededNote = {
   attachments: [{ id: "notes", name: note.name, media_type: "text/plain" }],
 };
 
+test.each([false, true])(
+  "creating a Chat preserves seeded IDs and queued bytes (failed first attempt: %s)",
+  async (firstAttemptFails) => {
+    const client = createMockChatClient({
+      chats: [
+        {
+          chat: chatState({
+            id: "chat-1",
+            title: "Seeded Chat",
+            queue: [seededNote],
+            queue_paused: true,
+          }),
+          queuedFiles: { [seededNote.id]: [note] },
+        },
+      ],
+    });
+    const seed = await client.openChat("chat-1");
+    const input = {
+      command_id: "new-chat",
+      harness_id: "codex",
+      folder: null,
+      links: [],
+      message: "A new Chat",
+      attachments: [note],
+    };
+    if (firstAttemptFails) {
+      await expect(
+        client.createChat({
+          ...input,
+          attachments: [{ ...note, dataUrl: null as unknown as string }],
+        }),
+      ).rejects.toThrow();
+      expect(await client.openChat("chat-1")).toEqual(seed);
+      expect(await client.listChats("active")).toHaveLength(1);
+    }
+    const { chat_id } = await client.createChat(input);
+    expect(chat_id).not.toBe("chat-1");
+    expect(await client.openChat(chat_id)).toMatchObject({
+      items: [
+        {
+          kind: "user",
+          text: input.message,
+          attachments: [{ name: note.name }],
+        },
+      ],
+    });
+    expect(await client.openChat("chat-1")).toEqual(seed);
+    await expect(client.editQueued("chat-1", seededNote.id)).resolves.toEqual({
+      text: seededNote.text,
+      attachments: [note],
+    });
+  },
+);
+
 test.each(["Send now", "Resume"])(
   "a seeded queued attachment keeps its snapshot through Edit and %s",
   async (action) => {
@@ -638,6 +692,44 @@ test("a subscriber whose cursor is older than the kept log is told to resync", a
   const recent: ChatChange[] = [];
   client.subscribe("c1", 2, (change) => recent.push(change));
   expect(recent).toMatchObject([{ seq: 3, kind: "item" }]);
+});
+
+test("reconnecting the same callback replays each sequence once and retires the old subscription", async () => {
+  const client = createMockChatClient({
+    chats: [{ chat: chatState({ id: "c1", title: "Limiter" }) }],
+  });
+  const seen: number[] = [];
+  let stopReconnected: (() => void) | undefined;
+  const listener = (change: ChatChange) => {
+    seen.push(change.seq);
+    if (change.seq === 1) {
+      stopOriginal();
+      stopReconnected = client.subscribe("c1", change.seq, listener);
+    }
+    if (change.seq === 2) client.patch("c1", { muted: true });
+  };
+  const stopOriginal = client.subscribe("c1", 0, listener);
+  await client.send("c1", "Start a turn");
+  expect(seen).toEqual([1, 2, 3]);
+  stopOriginal();
+  client.patch("c1", { muted: false });
+  expect(seen).toEqual([1, 2, 3, 4]);
+  stopReconnected?.();
+  client.patch("c1", { muted: true });
+  expect(seen).toEqual([1, 2, 3, 4]);
+});
+
+test("a write made during initial replay reaches the subscriber after the backlog", () => {
+  const client = working();
+  client.patch("c1", { muted: true });
+  client.patch("c1", { muted: false });
+  const seen: number[] = [];
+  const stop = client.subscribe("c1", 0, (change) => {
+    seen.push(change.seq);
+    if (change.seq === 1) client.patch("c1", { muted: true });
+  });
+  stop();
+  expect(seen).toEqual([1, 2, 3]);
 });
 
 test("the overview counts Chats that need the person and Chats at work", async () => {

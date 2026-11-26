@@ -325,13 +325,15 @@ type Change =
   | { kind: "text"; item_id: string; text: string }
   | { kind: "chat"; chat: ChatState };
 
+type ChangeListener = (change: ChatChange) => void;
+
 type Stored = {
   chat: ChatState;
   items: TranscriptItem[];
   updated_at: string;
   seq: number;
   log: ChatChange[];
-  listeners: Set<(change: ChatChange) => void>;
+  listeners: Map<ChangeListener, symbol>;
   queuedFiles: Map<string, ChatAttachmentInput[]>;
   pending?: Change[];
 };
@@ -539,7 +541,7 @@ export function createMockChatClient(
       updated_at: entry.updated_at ?? now,
       seq: 0,
       log: [],
-      listeners: new Set(),
+      listeners: new Map(),
       queuedFiles: new Map(
         Object.entries(entry.queuedFiles ?? {}).map(([id, files]) => [
           id,
@@ -636,6 +638,13 @@ export function createMockChatClient(
       });
     }
   };
+  const enqueueNotification = (deliver: () => void) => {
+    notifications.push(deliver);
+    // A command from a subscriber can commit now, but its events follow this batch.
+    if (notifications.length > 1) return;
+    for (const next of notifications) next();
+    notifications.length = 0;
+  };
   const publish = (entry: Stored, changes: ChatChange[]) => {
     if (!changes.length) return;
     const listeners = [...entry.listeners];
@@ -650,19 +659,15 @@ export function createMockChatClient(
       dropping.set(entry.chat.id, drop - 1);
       return false;
     });
-    notifications.push(() => {
+    enqueueNotification(() => {
       for (const change of visible)
-        for (const listener of listeners)
-          if (entry.listeners.has(listener)) notify(listener, change);
+        for (const [listener, registration] of listeners)
+          if (entry.listeners.get(listener) === registration)
+            notify(listener, change);
       if (counts)
         for (const listener of overviewRecipients)
           if (overviewListeners.has(listener)) notify(listener, counts);
     });
-    // A command from a subscriber can commit now, but its events follow this batch.
-    if (notifications.length === 1) {
-      for (const deliver of notifications) deliver();
-      notifications.length = 0;
-    }
   };
   const parseChanges = (entry: Stored, changes: Change[]) =>
     changes.map((change, index) =>
@@ -1098,7 +1103,9 @@ export function createMockChatClient(
           "failed",
           "This harness can't take Chat attachments.",
         );
-      const id = `chat-${(created += 1)}`;
+      let id: string;
+      do id = `chat-${(created += 1)}`;
+      while (chats.has(id));
       const path = input.folder ?? `~/ticketd/chats/${id}`;
       store({
         chat: chatState({
@@ -1152,11 +1159,25 @@ export function createMockChatClient(
       const entry = get(id);
       const kept = entry.log.filter((change) => change.seq > cursor);
       // The log no longer reaches back to the cursor: only a snapshot is truthful.
-      if (kept.length < entry.seq - cursor)
-        listener({ seq: entry.seq, kind: "resync" });
-      else kept.forEach(listener);
-      entry.listeners.add(listener);
-      return () => entry.listeners.delete(listener);
+      const replay: ChatChange[] =
+        kept.length < entry.seq - cursor
+          ? [{ seq: entry.seq, kind: "resync" }]
+          : kept;
+      const registration = Symbol();
+      const current = () => entry.listeners.get(listener) === registration;
+      entry.listeners.set(listener, registration);
+      const deliver = () => {
+        for (const change of replay) {
+          if (!current()) break;
+          notify(listener, change);
+        }
+      };
+      // Replay before any live changes that its listeners create.
+      if (notifications.length) deliver();
+      else enqueueNotification(deliver);
+      return () => {
+        if (current()) entry.listeners.delete(listener);
+      };
     },
     send: (id, text, links = [], files, edit) =>
       saveDraft(send, id, text, links, files, edit),
