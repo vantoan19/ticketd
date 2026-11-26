@@ -1808,7 +1808,8 @@ pub fn chat_state(
         queue_paused: chat.queue_paused
             || around
                 .queue
-                .first()
+                .iter()
+                .find(|message| !message.editing)
                 .is_some_and(|message| live.prepared_queue_edits.contains(&message.id)),
         context: chat_reports::context(live),
         settings: chat_reports::settings(live),
@@ -1975,6 +1976,27 @@ mod tests {
             muted: false,
             created_at: String::new(),
         }
+    }
+
+    #[test]
+    fn a_prepared_edit_pauses_the_queue_after_held_messages() {
+        let queued = |id: &str, editing| Queued {
+            id: id.to_owned(),
+            text: String::new(),
+            editing,
+            attachments: Vec::new(),
+            refused_steer: None,
+        };
+        let around = Surroundings {
+            queue: vec![queued("held", true), queued("prepared", false)],
+            ..Surroundings::default()
+        };
+        let mut live = ChatLive::default();
+        let paused =
+            |live| chat_state(&chat(None), live, &Tracker::default(), &around).queue_paused;
+        assert!(!paused(&live));
+        live.prepared_queue_edits.insert("prepared".to_owned());
+        assert!(paused(&live));
     }
 
     fn tool(name: &str, input: &str, state: ChatToolState, output: Option<&str>) -> ChatTool {
