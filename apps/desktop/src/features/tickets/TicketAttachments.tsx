@@ -1,5 +1,5 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { useState, type ReactElement } from "react";
+import { useState } from "react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
@@ -7,34 +7,7 @@ import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import type { Ticket } from "@/lib/api/client";
-import { AttachmentCard } from "@/features/attachments/AttachmentCard";
-import { useAvailability } from "@/features/sync-review/availability";
 import type { TicketAttachmentsState } from "./use-ticket-attachments";
-
-/**
- * The attached files as card items, one `<li>` each so the grid can count them
- * and fold after six; each opens its preview.
- */
-export function useAttachmentItems(
-  files: Attachment[],
-  onOpen: (file: Attachment) => void,
-): ReactElement[] {
-  const availability = useAvailability(
-    files
-      .filter((file) => file.kind !== "external_reference")
-      .map((file) => file.id),
-  );
-  return files.map((file) => (
-    <li key={file.id} className="file-card-item">
-      <AttachmentCard
-        file={file}
-        storage={availability.of(file.id)}
-        storageKnown={availability.known}
-        onOpen={() => onOpen(file)}
-      />
-    </li>
-  ));
-}
 
 /** The Attach file picker and a file's preview, with Detach from ticket. */
 export function AttachmentDialogs({
