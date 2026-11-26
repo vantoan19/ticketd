@@ -46,6 +46,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
     openFolder: vi.fn(),
     settings: vi.fn(),
     setSettings: vi.fn(),
+    devices: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/workspace", () => ({
@@ -106,6 +107,7 @@ function show() {
 beforeEach(() => {
   vi.mocked(workspaceClient.info).mockResolvedValue(workspaceInfo());
   api.settings.mockResolvedValue(syncSettings());
+  api.devices.mockResolvedValue([]);
   api.setupOptions.mockResolvedValue(options);
   s3.folderLinks.mockResolvedValue({
     address: "s3://team-ticketd/ticketd/folder-1/",
@@ -261,23 +263,25 @@ test("another bucket is chosen by disconnecting, which deletes nothing", async (
   await waitFor(() => expect(api.disconnect).toHaveBeenCalled());
 });
 
-test("a connected bucket shows who this desktop is and opens the AWS console", async () => {
+test("a synced bucket names the profile and sign-in, shows its address and opens the AWS console", async () => {
   api.status.mockResolvedValue(connected());
   api.openFolder.mockResolvedValue();
   show();
-  expect(await screen.findByText(ARN)).toBeTruthy();
-  expect(
-    screen.getByText(
-      "“ticketd Workspace” in s3://team-ticketd/ticketd/ · profile work",
-    ),
-  ).toBeTruthy();
+  const status = await screen.findByRole("group", { name: "Sync status" });
+  expect(within(status).getByText("Synced")).toBeTruthy();
+  expect(status.textContent).toContain(`profile “work” · signed in as ${ARN}`);
+  expect(status.textContent).toContain(
+    "s3://team-ticketd/ticketd/ · readable files, not encrypted by ticketd.",
+  );
   fireEvent.click(
-    await screen.findByRole("button", { name: "Open in AWS console" }),
+    await within(status).findByRole("button", { name: "Open in AWS console" }),
   );
   expect(api.openFolder).toHaveBeenCalled();
   expect(screen.queryByRole("button", { name: /Copy s3/ })).toBeNull();
-  // The desktop's own settings and Disconnect are the page's, as with Drive.
-  expect(await screen.findByLabelText("Name")).toBeTruthy();
+  // The computers, the options and Disconnect are the page's, as with Drive.
+  expect(
+    await screen.findByText("This computer · tickets T-KQ1, T-KQ2…"),
+  ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Disconnect…" })).toBeTruthy();
 });
 
@@ -300,7 +304,7 @@ test("another S3 service has no console, so its address is copied", async () => 
   expect(screen.queryByRole("button", { name: /AWS console/ })).toBeNull();
 });
 
-test("an ended AWS session is signed in again through the profile", async () => {
+test("an ended AWS session is the status row, signed in again through the profile", async () => {
   const waiting = {
     kind: "ticket" as const,
     id: "t1",
@@ -311,7 +315,7 @@ test("an ended AWS session is signed in again through the profile", async () => 
     connected({
       state: "needs_attention",
       recovery: "authorization_expired",
-      pending_uploads: [waiting, waiting],
+      pending_uploads: [waiting, waiting, waiting],
     }),
   );
   let finish: (status: SyncStatus) => void = () => {};
@@ -321,20 +325,20 @@ test("an ended AWS session is signed in again through the profile", async () => 
     }),
   );
   show();
-  // A notice on the page, not a dialog.
-  const notice = await screen.findByRole("alert");
-  expect(notice.textContent).toContain("Sign in to AWS again");
-  expect(notice.textContent).toContain(
-    "Your work is saved on this computer. 2 changes upload once you sign in.",
+  // The row itself, not a dialog and not a second box.
+  const row = await screen.findByRole("alert");
+  expect(row.textContent).toContain("Signed out");
+  expect(row.textContent).toContain(
+    "The AWS CLI sign-in for profile “work” ended. 3 changes are saved here and upload after you sign in.",
   );
   expect(screen.queryByRole("dialog")).toBeNull();
   expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
 
-  fireEvent.click(within(notice).getByRole("button", { name: "Sign in" }));
+  fireEvent.click(within(row).getByRole("button", { name: /^Sign in/ }));
   await waitFor(() => expect(api.recover).toHaveBeenCalled());
   // The sign-in waits for the browser; the button says so and cannot be pressed twice.
-  const waitingButton = await within(notice).findByRole("button", {
-    name: "Waiting for sign-in…",
+  const waitingButton = await within(row).findByRole("button", {
+    name: /Waiting for sign-in…/,
   });
   expect((waitingButton as HTMLButtonElement).disabled).toBe(true);
 
@@ -351,21 +355,20 @@ const stopped = () =>
     recovery_message: SAID,
   });
 
-test("a profile that now reaches another service stops sync: not Connected, the message once, and Disconnect beside it", async () => {
+test("a profile that now reaches another service stops sync: Not syncing, the message once, and Disconnect beside it", async () => {
   api.status.mockResolvedValue(stopped());
   api.disconnect.mockResolvedValue(
     syncStatus({ connection: "not_connected", account: null, folder: null }),
   );
   show();
   const notice = await screen.findByRole("alert");
-  expect(notice.textContent).toContain("Sync stopped");
   // The sentence as the core wrote it, once, with no internal prefix.
   expect(notice.textContent).toContain(SAID);
   expect(notice.textContent).not.toMatch(/sync storage|storage:/i);
   expect(document.body.textContent?.split(SAID).length).toBe(2);
   // The page does not claim a working connection.
-  expect(screen.queryByText("Connected")).toBeNull();
-  expect(screen.getByText("Not syncing")).toBeTruthy();
+  expect(screen.queryByText("Synced")).toBeNull();
+  expect(within(notice).getByText("Not syncing")).toBeTruthy();
   // The way out the message names is next to it, behind the usual confirmation.
   fireEvent.click(within(notice).getByRole("button", { name: "Disconnect…" }));
   const dialog = await screen.findByRole("dialog");
@@ -381,25 +384,22 @@ test("a stopped service can still be retried once the profile points back", asyn
   const notice = await screen.findByRole("alert");
   fireEvent.click(within(notice).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(api.recover).toHaveBeenCalled());
-  expect(await screen.findByText("Connected")).toBeTruthy();
+  expect(await screen.findByText("Synced")).toBeTruthy();
 });
 
-test("the state of the connection agrees with the notice, and the notice sits below it so nothing above it moves", async () => {
+test("the status row agrees with the problem: Offline, not a green dot, and nothing above it moves", async () => {
   api.status.mockResolvedValue(
     connected({ state: "saved_locally", recovery: "offline" }),
   );
   show();
-  const notice = await screen.findByRole("alert");
-  const label = document.querySelector('[data-slot="status-label"]')!;
-  // Not a green Connected beside an Offline card.
+  const row = await screen.findByRole("alert");
+  const label = row.querySelector('[data-slot="status-label"]')!;
   expect(label.textContent).toBe("Offline");
   expect(label.querySelector("[data-tone]")?.getAttribute("data-tone")).toBe(
     "neutral",
   );
-  // The card is where it was; the notice comes after it, not before.
-  expect(
-    label.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING,
-  ).toBeTruthy();
+  // One row says it: no separate notice repeats it.
+  expect(screen.getAllByRole("alert")).toHaveLength(1);
 });
 
 const NO_CLI =
@@ -419,13 +419,13 @@ test("sync stopped for want of the aws program offers to choose it, then tries a
   const notice = await screen.findByRole("alert");
   expect(notice.textContent).toContain(NO_CLI);
   expect(notice.textContent).not.toMatch(/sync storage|storage:/i);
-  expect(screen.queryByText("Connected")).toBeNull();
+  expect(screen.queryByText("Synced")).toBeNull();
   fireEvent.click(
     within(notice).getByRole("button", { name: "Choose the aws program…" }),
   );
   await waitFor(() => expect(s3.chooseCli).toHaveBeenCalled());
   await waitFor(() => expect(api.recover).toHaveBeenCalled());
-  expect(await screen.findByText("Connected")).toBeTruthy();
+  expect(await screen.findByText("Synced")).toBeTruthy();
 });
 
 test("sync stopped by an old aws program names its version and the one needed", async () => {

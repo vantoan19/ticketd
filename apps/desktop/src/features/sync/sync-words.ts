@@ -35,3 +35,21 @@ export function lastSynced(iso: string | null, now: number): string | null {
   const words = ago(iso, now);
   return words === "1 d ago" ? "yesterday" : words;
 }
+
+/**
+ * When something happened, in words: "just now", "a minute ago", "3 hours ago",
+ * "yesterday". `null` when the time cannot be read.
+ */
+export function agoWords(iso: string, now: number): string | null {
+  const then = new Date(iso).getTime();
+  if (Number.isNaN(then)) return null;
+  const minutes = Math.max(0, Math.floor((now - then) / 60_000));
+  if (minutes < 1) return "just now";
+  if (minutes === 1) return "a minute ago";
+  if (minutes < 60) return `${minutes} minutes ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours === 1) return "an hour ago";
+  if (hours < 24) return `${hours} hours ago`;
+  const days = Math.floor(hours / 24);
+  return days === 1 ? "yesterday" : `${days} days ago`;
+}

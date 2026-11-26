@@ -570,6 +570,18 @@ below applies to both unless it names one.
   the same account (or, for S3, the same bucket and prefix) can reconnect to its folder.
   Restoring a backup disconnects the Workspace from its storage. To move from Drive to S3,
   disconnect Drive and upload the Workspace to a bucket; there is no migration.
+- **While syncing.** Settings > Workspace sync shows one status row: the state in a
+  word, when sync last checked, and which sign-in it uses. When sync stops (the sign-in
+  ended, the folder is missing, storage is full, offline, slowed down, a changed S3
+  service, a missing AWS CLI, or any other failure) the same row carries the cause, says
+  what is kept meanwhile ("3 changes are saved here and upload after you sign in") and
+  offers the one fix, the same as the sidebar status line. Below it, Computers lists the
+  computers that share the Workspace from the device registry as this computer last read
+  it: this one first, with Rename…, then the others with their last change and ticket
+  codes. A new name reaches the registry on the next run. Options set how often to check
+  for changes (at least 30 seconds, 60 by default) with Check now, and whether files from
+  other computers download automatically or when opened. The last row stops syncing on
+  this computer, which deletes nothing.
 - **When it runs.** While the desktop is open: at launch and reconnect, by polling
   the storage (every minute by default), shortly after a save, and on Sync now. Exit
   makes a bounded attempt to upload pending changes. The CLI never contacts the
