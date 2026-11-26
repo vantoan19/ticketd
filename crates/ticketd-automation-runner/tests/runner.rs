@@ -2011,6 +2011,63 @@ async fn an_independent_run_stop_refuses_the_pending_prompt_at_the_write_boundar
     );
 }
 
+#[tokio::test(start_paused = true)]
+async fn takeover_in_a_sibling_chat_is_bounded_while_the_run_has_an_admitted_write() {
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    let mut second = definition.steps[0].clone();
+    second.id = "second".into();
+    definition.steps.push(second);
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    f.agent_working().await;
+    let (admitted, release) = f.fake.hold_next_submit_write();
+    f.end_turn(TurnOutcome::Completed).await;
+    tokio::time::timeout(Duration::from_secs(10), admitted)
+        .await
+        .unwrap()
+        .unwrap();
+    let run = f.runs().remove(0);
+    let first_chat = run.steps[0].chat_id.as_deref().unwrap();
+    let second_chat = run.steps[1].chat_id.as_deref().unwrap();
+    assert_ne!(first_chat, second_chat);
+    let reply = || {
+        f.host.send(
+            first_chat,
+            Some("sibling-reply"),
+            "Take over",
+            SendMode::Queue,
+        )
+    };
+
+    assert!(matches!(
+        tokio::time::timeout(
+            ticketd_chat_host::CLOSE_TIMEOUT + Duration::from_secs(1),
+            reply()
+        )
+        .await
+        .unwrap(),
+        Err(HostError::Working)
+    ));
+    assert_eq!(
+        f.core().automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::Running
+    );
+    assert!(f.core().chat_queue(first_chat).unwrap().is_empty());
+
+    release.send(()).unwrap();
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_submissions(2))
+        .await
+        .unwrap();
+    let saved = reply().await.unwrap();
+    assert_eq!(
+        f.core().automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::TakenOver
+    );
+    assert_eq!(f.core().chat_queue(first_chat).unwrap(), [saved]);
+}
+
 /// #387 5A1: a run taken over before its agent had a harness session (so there is no
 /// native session to resume) still becomes an ordinary Chat, opened as one: the open is
 /// marked as a take-over, so the adapter sends New Chat's defaults, not Claude Code's
