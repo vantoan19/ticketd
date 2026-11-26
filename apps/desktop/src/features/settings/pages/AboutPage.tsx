@@ -20,9 +20,11 @@ import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { SettingsList } from "@/features/settings/layout/SettingsList";
 import { AboutUpdates } from "@/features/settings/pages/AboutUpdates";
+import { SupportCards } from "@/features/settings/pages/SupportCards";
+import { REPOSITORY_URL } from "@/lib/support-links";
 import "@/features/settings/pages/about-page.css";
 
-const REPOSITORY = "https://github.com/vantoan19/ticketd";
+const REPOSITORY = REPOSITORY_URL;
 const DOCUMENTATION_URL = `${REPOSITORY}#readme`;
 const ISSUES_URL = `${REPOSITORY}/issues`;
 const PRIVACY_URL = `${REPOSITORY}/blob/main/PRIVACY.md`;
@@ -194,6 +196,8 @@ export function AboutPage() {
           failure={failure?.list === "privacy" ? failure.failure : null}
         />
       </SettingsSection>
+
+      <SupportCards />
     </SettingsPage>
   );
 }

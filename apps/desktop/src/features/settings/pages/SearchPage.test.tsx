@@ -66,7 +66,7 @@ test("results are grouped by page with a count and open the page on choosing", (
   );
   const group = screen.getByRole("region", { name: "Backups & export" });
   expect(group.textContent).toMatch(/Workspace · \d+ settings?/);
-  fireEvent.click(within(group).getByRole("link", { name: /Back up now/ }));
+  fireEvent.click(within(group).getByRole("link", { name: /Restore points/ }));
   expect(openPage).toHaveBeenCalledWith("backups-export");
 });
 

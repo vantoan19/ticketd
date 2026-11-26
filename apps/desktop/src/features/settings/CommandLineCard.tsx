@@ -2,14 +2,7 @@ import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import { useEffect, useEffectEvent, useState, type ReactNode } from "react";
 import { CircleCheck, ExternalLink, RefreshCw, Terminal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Alert,
-  AlertActions,
-  AlertDescription,
-  AlertTitle,
-} from "@/components/ui/alert";
 import { CommandBlock } from "@/components/ui/command-block";
-import { DialogShell } from "@/components/ui/dialog-shell";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { PathText } from "@/components/ui/path-text";
@@ -22,12 +15,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import {
-  cliClient,
-  type CliInstallation,
-  type CliStatus,
-  type OlderCli,
-} from "@/lib/api/cli";
+import { cliClient, type CliInstallation, type CliStatus } from "@/lib/api/cli";
 import { homeRelative } from "@/lib/paths";
 import {
   SettingsList,
@@ -36,6 +24,11 @@ import {
   SettingsRowTile,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
+import {
+  commandLineFix,
+  commandLineKind,
+  type CommandLineKind,
+} from "@/features/settings/command-line-state";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 
 const INSTALL_GUIDE_URL =
@@ -63,6 +56,7 @@ type Check =
   | { phase: "done"; status: CliStatus };
 
 const mono = "font-mono";
+const USER_BIN = "~/.local/bin";
 
 type Failure = { failure: FailureDescription; retry: () => void };
 const CHECK_FAILURE: FailureDescription = {
@@ -96,217 +90,159 @@ function InstallGuideLink({
   );
 }
 
-/** What is wrong with an installed executable, most important first. */
-function problems(status: CliStatus): ReactNode[] {
-  const found: ReactNode[] = [];
-  if (!status.on_path && status.path !== null)
-    found.push(
-      <>
-        It was found, but that folder isn&apos;t on your PATH, so agents and
-        terminals can&apos;t run <code className={mono}>ticketd</code> by name.
-        Move it to a folder on your PATH, such as{" "}
-        <code className={mono}>{status.suggested_directory}</code>, then check
-        again.
-      </>,
-    );
-  if (status.version === null)
-    found.push("ticketd was found but did not report a version.");
-  else if (status.version_matches === false)
-    found.push(
-      `Its version ${status.version} does not match this app (${status.app_version}). Replace it with the ticketd executable built or packaged with this version of the app, then check again.`,
-    );
-  if (status.workspace_matches === false)
-    found.push(
-      `It uses a different workspace${status.workspace_path ? ` (${status.workspace_path})` : ""}. Agents would read and write tickets this app does not show. Run both as the same user and environment; on Linux, set XDG_DATA_HOME the same for both.`,
-    );
-  else if (status.workspace_matches === null)
-    found.push(
-      "It could not confirm which workspace it uses. Replace it with the ticketd executable built or packaged with this version of the app.",
-    );
-  return found;
+/** The word, its dot and the one sentence for each state. */
+function describe(
+  kind: CommandLineKind,
+  status: CliStatus,
+  fixable: boolean,
+): { tone: StatusDotTone; word: string; sentence: ReactNode } {
+  const attention = "attention" as const;
+  switch (kind) {
+    case "installed":
+      return {
+        tone: "positive",
+        word: "Installed",
+        sentence: "Matches this app and uses this Workspace.",
+      };
+    case "not-installed":
+      return {
+        tone: attention,
+        word: "Not installed",
+        sentence: "Agents and terminals can’t run ticketd yet.",
+      };
+    case "not-on-path":
+      return {
+        tone: attention,
+        word: "Found, but not on your PATH",
+        sentence: (
+          <>
+            That folder isn’t on your PATH, so agents and terminals can’t run{" "}
+            <code className={mono}>ticketd</code> by name. Move it to a folder
+            on your PATH, such as{" "}
+            <code className={mono}>{status.suggested_directory}</code>.
+          </>
+        ),
+      };
+    case "older":
+    case "newer":
+    case "different":
+      return {
+        tone: attention,
+        word: "Doesn’t match this app",
+        sentence: `Agents and terminals run ${kind === "older" ? "an older" : kind === "newer" ? "a newer" : "a different"} ticketd than this app.`,
+      };
+    case "no-version":
+      return {
+        tone: attention,
+        word: "Doesn’t match this app",
+        sentence: "Agents and terminals run a ticketd that reports no version.",
+      };
+    case "other-workspace":
+      return {
+        tone: attention,
+        word: "Uses another Workspace",
+        sentence: fixable
+          ? "Agents would read and write tickets this app doesn’t show."
+          : "Agents would read and write tickets this app doesn’t show. Run both as the same user and environment; on Linux, set XDG_DATA_HOME the same for both.",
+      };
+    case "workspace-unconfirmed":
+      return {
+        tone: attention,
+        word: "Workspace not confirmed",
+        sentence: "This ticketd couldn’t confirm which Workspace it uses.",
+      };
+  }
 }
 
-/** The terminal tile: plain; the status is the StatusLabel beside it. */
-function StatusTile() {
-  return (
-    <SettingsRowTile>
-      <Terminal />
-    </SettingsRowTile>
+/** What the fix changes, and when the system asks for a password. */
+function fixFooter(
+  status: CliStatus,
+  installation: CliInstallation | null,
+): ReactNode {
+  if (installation?.outcome === "declined")
+    return "A link in your own folder needs no password.";
+  if (installation?.next_step === "add_to_path")
+    return `Add ${USER_BIN} to your PATH, then open a new terminal.`;
+  if (installation?.next_step === "restart_terminals")
+    return "Restart terminals and agents to pick it up.";
+  const platform = status.bundled?.platform;
+  const other = status.bundled?.in_the_way;
+  const replaces = other
+    ? `Replaces ${other.version ? `ticketd ${other.version}` : "this ticketd"} with this app’s copy.`
+    : null;
+  if (platform === "windows")
+    return `${replaces ?? "Adds this app’s folder to your PATH."} Restart terminals and agents to pick it up.`;
+  if (platform === "linux")
+    return other
+      ? `Removes ${other.version ? `ticketd ${other.version}` : "this ticketd"} so this app’s copy comes first.`
+      : null;
+  return replaces ? (
+    `${replaces} macOS asks for your administrator password once.`
+  ) : (
+    <>
+      Adds ticketd to <code className={mono}>/usr/local/bin</code>. macOS asks
+      for your administrator password once.
+    </>
   );
 }
 
-function StatusRows({
-  check,
-  onGuideFailure,
-  installAction,
-}: {
-  check: Check;
-  onGuideFailure: (failure: Failure | null) => void;
-  installAction?: ReactNode;
-}) {
-  if (check.phase === "checking")
-    return (
-      <>
-        <SettingsRow
-          leading={<Skeleton className="size-10" />}
-          title={<Skeleton className="h-5 w-30" />}
-          description={<Skeleton className="h-4 w-75 max-w-full" />}
-        />
-        <SettingsRow variant="stacked">
-          <Steps>
-            {[0, 1, 2].map((index) => (
-              <Step
-                key={index}
-                title={<Skeleton className="h-5 w-48 max-w-full" />}
-                description={<Skeleton className="h-4 w-75 max-w-full" />}
-                {...(index === 0 && {
-                  action: <Skeleton className="h-8 w-40" />,
-                })}
-              />
-            ))}
-          </Steps>
-        </SettingsRow>
-      </>
-    );
-  if (check.phase === "failed")
-    return (
-      <SettingsRow
-        leading={<StatusTile />}
-        title={<StatusLabel tone="neutral">Couldn't check</StatusLabel>}
-        description="ticketd couldn't look for the command-line tool. Choose Check again to retry."
-      />
-    );
-  const { status } = check;
-  if (installAction)
-    return (
-      <SettingsRow
-        leading={<StatusTile />}
-        title={
-          status.bundled?.needs_repair
-            ? "The command-line tool’s link is broken"
-            : status.on_path
-              ? "Use the bundled command-line tool"
-              : "The command-line tool isn’t installed"
-        }
-        description="Install the copy inside this app. It updates with the app, so its version always matches."
-        trailing={installAction}
-      />
-    );
-  if (!status.found)
-    return (
-      <>
-        <SettingsRow
-          leading={<StatusTile />}
-          title={<StatusLabel tone="attention">Not found</StatusLabel>}
-          description="ticketd is not on your PATH or in the usual install folders."
-        />
-        <SettingsRow variant="stacked">
-          <Steps>
-            <Step
-              title="Get the ticketd executable"
-              description={
-                <>
-                  A packaged download includes it. From a source build, run{" "}
-                  <code className={mono}>cargo build -p ticketd-cli</code>.
-                </>
-              }
-              action={<InstallGuideLink onFailure={onGuideFailure} />}
-            />
-            <Step
-              title="Copy it into a folder on your PATH"
-              description={
-                <>
-                  Such as{" "}
-                  <code className={mono}>{status.suggested_directory}</code>, so
-                  any terminal can run <code className={mono}>ticketd</code>.
-                </>
-              }
-            />
-            <Step
-              title="Choose Check again"
-              description="ticketd confirms its version and which workspace it uses."
-            />
-          </Steps>
-        </SettingsRow>
-      </>
-    );
-  const issues = problems(status);
-  const tone: StatusDotTone = issues.length === 0 ? "positive" : "attention";
-  const versionTrouble =
-    status.version !== null && status.version_matches === false;
+/** Version, Path and Workspace of the copy that was found; only the wrong fact carries a dot. */
+function Facts({ status }: { status: CliStatus }) {
   return (
-    <>
-      <SettingsRow
-        leading={<StatusTile />}
-        title={
-          <StatusLabel tone={tone}>
-            {issues.length === 0
-              ? "Installed"
-              : status.on_path
-                ? "Installed, needs attention"
-                : "Found, but not on your PATH"}
+    <dl className="cli-details">
+      <dt>Version</dt>
+      <dd>
+        <span className="cli-code">{status.version ?? "Unknown"}</span>
+        {status.version !== null && status.version_matches === false && (
+          <StatusLabel tone="attention" size="caption">
+            {`This app has ${status.app_version}`}
           </StatusLabel>
-        }
-        description={
-          issues.length === 0 ? (
-            status.version_matches ? (
-              "It matches this app and uses this workspace."
-            ) : undefined
-          ) : (
-            <>
-              {issues.map((issue, index) => (
-                <span key={index} className="block">
-                  {issue}
-                </span>
-              ))}
-            </>
-          )
-        }
-        trailing={
-          versionTrouble || !status.on_path ? (
-            <InstallGuideLink onFailure={onGuideFailure} />
-          ) : null
-        }
-      />
-      <dl className="cli-details">
-        <dt>Version</dt>
-        <dd>
-          <span className="cli-code">{status.version ?? "Unknown"}</span>
-          {status.version_matches && (
-            <span className="text-xs leading-4 text-muted-foreground">
-              matches this app
-            </span>
-          )}
-          {versionTrouble && (
-            <StatusLabel tone="attention" size="caption">
-              differs from this app
-            </StatusLabel>
-          )}
-        </dd>
-        <dt>Path</dt>
-        <dd>
-          {status.path ? (
-            <span className="cli-path">
-              <PathText path={status.path} layout="inline" />
-            </span>
-          ) : (
-            "Unknown"
-          )}
-        </dd>
-        <dt>Workspace</dt>
-        <dd>
-          {status.workspace_matches === null ? (
-            <StatusLabel tone="neutral">Not confirmed</StatusLabel>
-          ) : status.workspace_matches ? (
-            <StatusLabel tone="positive">Uses this workspace</StatusLabel>
-          ) : (
-            <StatusLabel tone="attention">
-              Uses a different workspace
-            </StatusLabel>
-          )}
-        </dd>
-      </dl>
-    </>
+        )}
+      </dd>
+      <dt>Path</dt>
+      <dd>
+        {status.path ? (
+          <span className="cli-path">
+            <PathText path={status.path} layout="inline" />
+          </span>
+        ) : (
+          "Unknown"
+        )}
+      </dd>
+      <dt>Workspace</dt>
+      <dd>
+        {status.workspace_matches === null ? (
+          <StatusLabel tone="neutral">Not confirmed</StatusLabel>
+        ) : status.workspace_matches ? (
+          "This Workspace"
+        ) : (
+          <StatusLabel tone="attention">Another Workspace</StatusLabel>
+        )}
+      </dd>
+    </dl>
+  );
+}
+
+function CheckAgain({
+  busy,
+  checking,
+  onClick,
+}: {
+  busy: boolean;
+  checking: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      disabled={busy || checking}
+      onClick={onClick}
+    >
+      <RefreshCw aria-hidden="true" />
+      {checking ? "Checking…" : "Check again"}
+    </Button>
   );
 }
 
@@ -322,18 +258,14 @@ export function CommandLineCard({
   const [checking, setChecking] = useState(true);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [guideFailure, setGuideFailure] = useState<Failure | null>(null);
-  const [installing, setInstalling] = useState(false);
+  const [fixing, setFixing] = useState(false);
   const [installation, setInstallation] = useState<CliInstallation | null>(
     null,
   );
   const [installFailure, setInstallFailure] =
     useState<FailureDescription | null>(null);
-  const [keptCopy, setKeptCopy] = useState<OlderCli | null>(null);
-  const [confirmRemoval, setConfirmRemoval] = useState<OlderCli | null>(null);
-  const [removing, setRemoving] = useState(false);
-  const [removalFailure, setRemovalFailure] =
-    useState<FailureDescription | null>(null);
-  const load = (refreshPath = false) => {
+  /** `quiet` re-reads when the window comes back: no flicker, no failure. */
+  const load = (refreshPath = false, quiet = false) => {
     void cliClient.check(refreshPath).then(
       (status) => {
         setCheck({ phase: "done", status });
@@ -341,6 +273,7 @@ export function CommandLineCard({
         onChecked?.();
       },
       (reason: unknown) => {
+        if (quiet) return;
         setCheck((previous) =>
           previous.phase === "done" ? previous : { phase: "failed" },
         );
@@ -352,128 +285,193 @@ export function CommandLineCard({
       },
     );
   };
-  // Detect on first show; Check again picks up a later installation.
-  // Reporting the result to the nav is not a reason to start another check.
+  // Detect on first show, and again whenever the window regains focus: a
+  // person fixes PATH in a terminal, then comes back. Reporting the result to
+  // the nav is not a reason to start another check.
   const firstCheck = useEffectEvent(load);
   useEffect(() => {
     firstCheck();
   }, []);
+  const recheckOnReturn = useEffectEvent(() => load(true, true));
+  useEffect(() => {
+    const onFocus = () => recheckOnReturn();
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, []);
   const run = () => {
     setChecking(true);
     setFailure(null);
+    setInstallation(null);
     load(true);
   };
-  const install = async () => {
-    setInstalling(true);
+  const status = check.phase === "done" ? check.status : null;
+  const fix = status ? commandLineFix(status) : null;
+  /** Runs the one fix, or installs in the folder that needs no password. */
+  const apply = async (inUserBin: boolean) => {
+    setFixing(true);
     setInstallFailure(null);
     try {
-      const installed = await cliClient.install();
-      setInstallation(installed);
-      statusLine.show({
-        message:
-          installed.next_step === "restart_terminals"
-            ? "Added ticketd to your PATH"
-            : `Installed ticketd in ${homeRelative(installed.directory)}`,
-        icon: <CircleCheck />,
-      });
-      run();
+      const result = inUserBin
+        ? await cliClient.installInUserBin()
+        : await cliClient.install(fix?.other ?? null);
+      setInstallation(result);
+      if (result.outcome === "installed") {
+        statusLine.show({
+          message:
+            result.next_step === "restart_terminals"
+              ? "Added ticketd to your PATH"
+              : fix?.other && !inUserBin
+                ? "Now using this app’s ticketd"
+                : `Installed ticketd in ${homeRelative(result.directory)}`,
+          icon: <CircleCheck />,
+        });
+        setChecking(true);
+        load(true);
+      }
     } catch (reason) {
       setInstallFailure(
         describeFailure(reason, "install the command-line tool"),
       );
     } finally {
-      setInstalling(false);
+      setFixing(false);
     }
   };
-  const removeOlder = async (older: OlderCli) => {
-    setRemoving(true);
-    setRemovalFailure(null);
-    try {
-      await cliClient.removeOlder(older);
-      setConfirmRemoval(null);
-      run();
-    } catch (reason) {
-      setRemovalFailure(
-        describeFailure(reason, "remove the older command-line tool"),
-      );
-    } finally {
-      setRemoving(false);
-    }
-  };
-  const bundled = check.phase === "done" ? check.status.bundled : undefined;
-  const older = bundled?.older;
-  const showOlder =
-    older &&
-    (keptCopy?.path !== older.path || keptCopy.version !== older.version);
-  const offerInstallation =
-    bundled &&
-    bundled.platform !== "linux" &&
-    !bundled.installed &&
-    !installation;
+  const kind = status ? commandLineKind(status) : null;
+  const declined = installation?.outcome === "declined";
+  const footer =
+    status && kind && (fix || installation)
+      ? fixFooter(status, installation)
+      : null;
+  const view = status && kind ? describe(kind, status, fix !== null) : null;
   return (
     <>
-      <SettingsSection
-        title="Status"
-        actions={
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            disabled={checking || installing || removing}
-            onClick={run}
-          >
-            <RefreshCw aria-hidden="true" />
-            {checking ? "Checking…" : "Check again"}
-          </Button>
-        }
-      >
-        <div className="cli-status-slot" aria-busy={checking}>
-          {!bundled && (
-            <SettingsList className="cli-status-reserve" aria-hidden="true">
-              <StatusRows
-                check={{ phase: "checking" }}
-                onGuideFailure={() => {}}
-              />
-            </SettingsList>
-          )}
-          <SettingsList className="cli-status-content" aria-live="polite">
-            {check.phase === "checking" && (
+      <section className="settings-section" aria-label="Command line status">
+        <SettingsList aria-busy={checking} aria-live="polite">
+          {check.phase === "checking" && (
+            <>
               <span className="sr-only" role="status">
                 Checking for the command-line tool
               </span>
-            )}
-            <StatusRows
-              check={check}
-              onGuideFailure={setGuideFailure}
-              installAction={
-                offerInstallation && (
-                  <Button
-                    type="button"
-                    size="sm"
-                    disabled={installing || checking}
-                    onClick={() => void install()}
-                  >
-                    {installing ? "Installing…" : "Install command-line tool"}
-                  </Button>
-                )
+              <SettingsRow
+                leading={<Skeleton className="size-10" />}
+                title={<Skeleton className="h-5 w-30" />}
+                description={<Skeleton className="h-4 w-75 max-w-full" />}
+              />
+            </>
+          )}
+          {check.phase === "failed" && (
+            <SettingsRow
+              leading={<StatusTile />}
+              title={<StatusLabel tone="neutral">Couldn't check</StatusLabel>}
+              description="ticketd couldn't look for the command-line tool."
+              trailing={
+                <CheckAgain busy={false} checking={checking} onClick={run} />
               }
             />
-          </SettingsList>
-        </div>
-        <div className="cli-check-feedback">
-          {!bundled && (
-            <div className="cli-check-feedback-reserve" aria-hidden="true">
-              <FailureAlert
-                size="compact"
-                failure={CHECK_FAILURE}
-                onRetry={() => {}}
+          )}
+          {status && kind && view && (
+            <>
+              <SettingsRow
+                leading={<StatusTile />}
+                title={<StatusLabel tone={view.tone}>{view.word}</StatusLabel>}
+                description={declined ? "Nothing changed." : view.sentence}
+                trailing={
+                  fix ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      disabled={fixing || checking}
+                      onClick={() => void apply(false)}
+                    >
+                      {fixing
+                        ? "Working…"
+                        : kind === "not-installed"
+                          ? "Install command-line tool"
+                          : "Use this app’s ticketd"}
+                    </Button>
+                  ) : kind === "installed" || kind === "not-installed" ? (
+                    <CheckAgain
+                      busy={fixing}
+                      checking={checking}
+                      onClick={run}
+                    />
+                  ) : (
+                    <div className="flex items-center gap-2">
+                      <InstallGuideLink onFailure={setGuideFailure} />
+                      <CheckAgain
+                        busy={fixing}
+                        checking={checking}
+                        onClick={run}
+                      />
+                    </div>
+                  )
+                }
               />
-            </div>
+              {status.found && <Facts status={status} />}
+              {kind === "not-installed" && !fix && (
+                <SettingsRow variant="stacked">
+                  <Steps>
+                    <Step
+                      title="Get the ticketd executable"
+                      description={
+                        <>
+                          A packaged download includes it. From a source build,
+                          run{" "}
+                          <code className={mono}>
+                            cargo build -p ticketd-cli
+                          </code>
+                          .
+                        </>
+                      }
+                      action={<InstallGuideLink onFailure={setGuideFailure} />}
+                    />
+                    <Step
+                      title="Copy it into a folder on your PATH"
+                      description={
+                        <>
+                          Such as{" "}
+                          <code className={mono}>
+                            {status.suggested_directory}
+                          </code>
+                          , so any terminal can run{" "}
+                          <code className={mono}>ticketd</code>.
+                        </>
+                      }
+                    />
+                    <Step
+                      title="Choose Check again"
+                      description="ticketd confirms its version and which Workspace it uses."
+                    />
+                  </Steps>
+                </SettingsRow>
+              )}
+              {footer && (
+                <SettingsListFooter
+                  actions={
+                    declined && (
+                      <SettingsLink
+                        disabled={fixing}
+                        onClick={() => void apply(true)}
+                      >
+                        Use {USER_BIN} instead
+                      </SettingsLink>
+                    )
+                  }
+                >
+                  {footer}
+                </SettingsListFooter>
+              )}
+            </>
           )}
-          {failure && (
-            <FailureAlert size="compact" failure={failure} onRetry={run} />
-          )}
-        </div>
+        </SettingsList>
+        {failure && (
+          <FailureAlert
+            size="compact"
+            className="mt-3"
+            failure={failure}
+            onRetry={run}
+          />
+        )}
         {guideFailure && (
           <FailureAlert
             size="compact"
@@ -487,83 +485,10 @@ export function CommandLineCard({
             size="compact"
             className="mt-3"
             failure={installFailure}
-            onRetry={() => void install()}
+            onRetry={() => void apply(false)}
           />
         )}
-        {check.phase === "done" && showOlder && (
-          <Alert tone="attention" role="status" className="mt-3">
-            <AlertTitle>An older ticketd comes first on your PATH</AlertTitle>
-            <AlertDescription>
-              ticketd {older.version} at{" "}
-              <PathText path={older.path} layout="inline" /> would still run
-              instead of this app’s {check.status.app_version}. Remove it so
-              agents get the matching version.
-            </AlertDescription>
-            <AlertActions>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={checking || installing}
-                onClick={() => {
-                  setRemovalFailure(null);
-                  setConfirmRemoval(older);
-                }}
-              >
-                Remove it
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setKeptCopy(older)}
-              >
-                Keep it
-              </Button>
-            </AlertActions>
-          </Alert>
-        )}
-        {bundled?.platform === "macos" &&
-          offerInstallation &&
-          !installation && (
-            <p className="mt-3 text-xs text-muted-foreground">
-              On macOS, installing asks for your password once to add a link in{" "}
-              <code className={mono}>/usr/local/bin</code>. If you skip it,
-              ticketd uses <code className={mono}>~/.local/bin</code> instead.
-            </p>
-          )}
-        {installation?.next_step === "add_to_path" && (
-          <p className="mt-3 text-xs text-muted-foreground" role="status">
-            Add ~/.local/bin to your PATH, then open a new terminal.
-          </p>
-        )}
-        {installation?.next_step === "restart_terminals" && (
-          <p className="mt-3 text-xs text-muted-foreground" role="status">
-            Restart terminals and agents so they pick up the updated PATH.
-          </p>
-        )}
-      </SettingsSection>
-      <DialogShell
-        open={confirmRemoval !== null}
-        onOpenChange={(open) => !open && setConfirmRemoval(null)}
-        title="Remove the older ticketd?"
-        description="This removes the executable or link at this path."
-        size="sm"
-        primaryLabel="Remove"
-        primaryVariant="destructive"
-        blockedReason={removing ? "Removing…" : null}
-        busy={removing}
-        error={
-          removalFailure && (
-            <FailureAlert size="compact" failure={removalFailure} />
-          )
-        }
-        onSubmit={() => confirmRemoval && void removeOlder(confirmRemoval)}
-      >
-        {confirmRemoval && (
-          <PathText path={confirmRemoval.path} layout="inline" />
-        )}
-      </DialogShell>
+      </section>
       <SettingsSection
         title="Quick reference for agents"
         caption="Copy a command, then replace the words in color with your own values."
@@ -584,7 +509,7 @@ export function CommandLineCard({
           <SettingsListFooter
             actions={
               <SettingsLink onClick={() => openPage("agent-skills")}>
-                Set up Agent skills
+                Agent skills
               </SettingsLink>
             }
           >
@@ -593,5 +518,14 @@ export function CommandLineCard({
         </SettingsList>
       </SettingsSection>
     </>
+  );
+}
+
+/** The terminal tile: plain; the status is the StatusLabel beside it. */
+function StatusTile() {
+  return (
+    <SettingsRowTile>
+      <Terminal />
+    </SettingsRowTile>
   );
 }

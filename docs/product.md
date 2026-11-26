@@ -205,8 +205,8 @@ opens the graph to understand dependency chains.
   and **Help** (Keyboard shortcuts, Diagnostics, About). A search field above the groups
   finds a setting by name. Things you can have several of, such as a connection, are rows
   on their page that open in place with a way back; the sidebar never lists them.
-  Backups & export is one page for where the Workspace file is, the copies to go back
-  to, and the copies to take elsewhere.
+  Backups & export is one page for where the Workspace file is, the restore points to go
+  back to, and the copies to take elsewhere.
 
 The interface follows [DESIGN.md](../DESIGN.md).
 
@@ -674,6 +674,19 @@ Setup, IAM permissions and the lifecycle rule are in
   and leaves History intact; ticketd recommends it and never sets it.
 
 ### Backup, restore, and export
+
+**Restore points.** The first time the desktop opens each day it saves a restore point
+of the Workspace in the background, checks it as a restore would, and keeps the last 7
+(Back up now in Settings adds one at once, with no file to choose; it counts among the
+7). They are kept on this computer, in a folder beside the Workspace file, and are never
+synced, never part of the Workspace and never inside a sync folder. The Workspace's
+retained local files are kept once for all the points that hold them, so seven points
+cost about one copy of the files, and deleting an old point never removes a file a newer
+one needs. The copies saved before a restore or before an update that changes the
+Workspace format are listed with them under a label and are kept besides the 7. A point
+that fails its check is listed as one that can't be restored. Writing a point never
+holds up the window, and Back up now does not wait for it. Restoring one goes through
+the same review as restoring a file, which stays available as Restore from a file….
 
 `ticketd backup PATH` saves a consistent backup including every retained local file.
 `ticketd inspect-backup` verifies integrity and checksums without restoring, and

@@ -65,7 +65,6 @@ export function bridgeDefault(
     case "search_attachments":
     case "ticket_backlinks":
     case "inbox":
-    case "safety_backups":
     case "search_tags":
     case "source_conversation":
     case "source_repository_routes":
@@ -133,9 +132,10 @@ export function bridgeDefault(
     case "detect_project_remote":
       return { suggested: null, candidates: [] };
     case "reminder":
-    case "last_backup":
     case "project_icon": // no favicon: the letter tile
       return null;
+    case "restore_points":
+      return { points: [], total_bytes: 0 };
     case "current_work_documents":
       return { groups: [], finished: 0, unlinked: 0, trashed: 0 };
     case "workspace_info":

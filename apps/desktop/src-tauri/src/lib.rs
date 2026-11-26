@@ -16,6 +16,7 @@ mod diagnostics_commands;
 mod drive_commands;
 mod folder_probe;
 mod notification_permission;
+mod restore_points;
 #[cfg(test)]
 mod runtime_trace;
 mod s3_commands;
@@ -28,13 +29,12 @@ mod webview_report;
 mod workspace_session;
 
 use ticketd_core::{
-    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
-    ContextGraphPage, CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
-    DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
-    MetadataSelection, Plan, PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange,
-    SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
-    TicketPatch, Workspace, WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest,
-    WriteResult,
+    Activity, ActivityPatch, BackupInspection, BatchOperation, ContextGraph, ContextGraphPage,
+    CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult, DocumentSummary,
+    Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate, MetadataSelection, Plan,
+    PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange, SidebarCounts, Status,
+    StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceGraph,
+    WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
     source::{ExtensionRegistry, RefreshControl, RefreshProgress},
 };
 
@@ -1447,19 +1447,6 @@ fn set_plan(reference: String, plan: Option<String>) -> Result<Ticket, BridgeFai
         .map_err(BridgeFailure::from)
 }
 
-/// Saves a backup. Returns whether it was also recorded as the last backup.
-#[tauri::command(async)]
-fn backup_workspace(path: String) -> Result<bool, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.backup(&path))
-        .map_err(BridgeFailure::from)
-}
-#[tauri::command(async)]
-fn last_backup() -> Result<Option<BackupRecord>, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.last_backup())
-        .map_err(BridgeFailure::from)
-}
 /// Where the workspace file is, read without opening it: the startup recovery
 /// screen names the file even when it cannot be opened.
 #[tauri::command(async)]
@@ -1478,12 +1465,6 @@ fn workspace_info() -> Result<WorkspaceInfo, BridgeFailure> {
 fn inspect_backup(path: String) -> Result<BackupInspection, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.inspect_backup(path))
-        .map_err(BridgeFailure::from)
-}
-#[tauri::command(async)]
-fn safety_backups() -> Result<Vec<SafetyBackup>, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.safety_backups())
         .map_err(BridgeFailure::from)
 }
 
@@ -2373,8 +2354,10 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             updates::start(app.handle());
+            agent_skills::refresh_at_launch();
             start_periodic_refresh(coordinator, refresh_registry);
             start_reminder_timer(open_workspace);
+            restore_points::start(open_workspace);
             sync_commands::publish_status(app.handle().clone());
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
@@ -2499,7 +2482,8 @@ pub fn run() -> Result<(), tauri::Error> {
             document_version,
             open_document,
             save_document,
-            backup_workspace,
+            restore_points::restore_points,
+            restore_points::save_restore_point,
             list_sources,
             source_repository_routes,
             link_source_repository_project,
@@ -2522,12 +2506,10 @@ pub fn run() -> Result<(), tauri::Error> {
             update_source_credentials,
             rename_source_connection,
             remove_source_connection,
-            last_backup,
             workspace_info,
             workspace_location,
             chat_commands::restore_workspace,
             inspect_backup,
-            safety_backups,
             export_workspace,
             list_plans,
             show_plan,
@@ -2540,7 +2522,7 @@ pub fn run() -> Result<(), tauri::Error> {
             set_plan,
             cli_status::check_cli,
             cli_status::install_cli,
-            cli_status::remove_older_cli,
+            cli_status::install_cli_in_user_bin,
             notification_permission::notification_permission,
             notification_permission::request_notification_permission,
             notification_permission::open_notification_settings,

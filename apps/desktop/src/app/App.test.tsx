@@ -1692,14 +1692,19 @@ test("a restore reads the list once, during the restore", async () => {
       lists += 1;
       return [bulkTicket(1)];
     },
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1714,14 +1719,17 @@ test("a restore reads the list once, during the restore", async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  await turn();
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(0);
+  });
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
     ).getByRole("button", { name: "Backups & export" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
-  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  fireEvent.click(screen.getByRole("button", { name: /^Restore…/ }));
   for (let i = 0; i < 3; i += 1) await turn();
   const before = lists;
   fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
@@ -1751,14 +1759,19 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   };
   await renderReplaceable({
     find_tickets: () => [bulkTicket(1)],
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1785,7 +1798,7 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
     ).getByRole("button", { name: "Backups & export" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
-  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  fireEvent.click(screen.getByRole("button", { name: /^Restore…/ }));
   for (let i = 0; i < 3; i += 1) await turn();
   const before = order.length;
   fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
@@ -1842,14 +1855,19 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
     failRefresh = reject;
   });
   const handlers: Record<string, unknown> = {
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1922,9 +1940,7 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
       await screen.findByRole("navigation", { name: "Settings sections" }),
     ).getByRole("button", { name: "Backups & export" }),
   );
-  fireEvent.click(
-    await screen.findByRole("button", { name: `Restore… ${backup}` }),
-  );
+  fireEvent.click(await screen.findByRole("button", { name: /^Restore…/ }));
   fireEvent.click(
     await screen.findByRole("button", { name: "Replace workspace" }),
   );
@@ -2207,7 +2223,6 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
           size_bytes: 4096,
           format_version: 20,
         };
-      if (command === "last_backup") return null;
       if (command === "check_cli") throw new Error("not installed");
       return bridgeDefault(command, args);
     },
@@ -9543,11 +9558,12 @@ test("first-run Install skill settles successful reads and keeps Settings naviga
     name: "Your workspace is ready",
   });
   fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
-  await act(async () => {});
-  expect(reads).toBeLessThanOrEqual(6);
   expect(
-    screen.getByText("No supported agent was found on this computer"),
+    await screen.findByText(
+      "No agent found. Install Claude Code, Codex or Antigravity, then choose Check again.",
+    ),
   ).toBeTruthy();
+  expect(reads).toBeLessThanOrEqual(6);
   fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
   expect(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
@@ -9580,6 +9596,16 @@ test("Settings Agent skills settles reads and refreshes its setup dot after inst
         installed = true;
         return { backup: null };
       }
+      if (command === "check_cli") {
+        return {
+          ...(bridgeDefault(command, args) as object),
+          found: true,
+          on_path: true,
+          version: "0.1.0",
+          version_matches: true,
+          workspace_matches: true,
+        };
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -9587,10 +9613,10 @@ test("Settings Agent skills settles reads and refreshes its setup dot after inst
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   const nav = within(
-    screen.getByRole("navigation", { name: "Settings sections" }),
+    await screen.findByRole("navigation", { name: "Settings sections" }),
   );
   fireEvent.click(nav.getByRole("button", { name: /^Agent skills/ }));
-  await act(async () => {});
+  await screen.findByRole("button", { name: "Install for Claude Code" });
   expect(reads).toBeLessThanOrEqual(6);
   const skillNav = () =>
     within(nav.getByRole("button", { name: /^Agent skills/ }));
@@ -9642,6 +9668,16 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
           },
         ];
       }
+      if (command === "check_cli") {
+        return {
+          ...(bridgeDefault(command, args) as object),
+          found: true,
+          on_path: true,
+          version: "0.1.0",
+          version_matches: true,
+          workspace_matches: true,
+        };
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -9651,13 +9687,13 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
     screen.getByRole("navigation", { name: "Settings sections" }),
   );
   await user.click(nav.getByRole("button", { name: /^Agent skills/ }));
-  const skill = screen.getByRole("region", { name: "ticketd skill" });
+  const skill = await screen.findByRole("region", { name: "Skill status" });
   const agents = screen.getByRole("region", {
     name: "Agents on this computer",
   });
   await within(skill).findByText("Installed");
   const codex = within(agents).getByRole("listitem");
-  const check = within(agents).getByRole("button", { name: "Check again" });
+  const check = within(skill).getByRole("button", { name: "Check again" });
   const settled = reads;
   fail = true;
   await user.click(check);
@@ -9676,7 +9712,7 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog", { name: "Failure details" })).toBeNull();
   expect(document.activeElement).toBe(details);
-  expect(within(agents).getByRole("button", { name: "Check again" })).toBe(
+  expect(within(skill).getByRole("button", { name: "Check again" })).toBe(
     check,
   );
   fail = false;
@@ -9722,12 +9758,12 @@ test("Settings Command line settles successful checks and Check again updates th
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   const nav = within(
-    screen.getByRole("navigation", { name: "Settings sections" }),
+    await screen.findByRole("navigation", { name: "Settings sections" }),
   );
   fireEvent.click(nav.getByRole("button", { name: /^Command line/ }));
   await act(async () => {});
   expect(reads).toBeLessThanOrEqual(5);
-  expect(screen.getByText("Not found")).toBeTruthy();
+  expect(await screen.findByText("Not installed")).toBeTruthy();
   const cliNav = () =>
     within(nav.getByRole("button", { name: /^Command line/ }));
   expect(cliNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
@@ -9736,13 +9772,13 @@ test("Settings Command line settles successful checks and Check again updates th
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   await act(async () => {});
   expect(
-    screen.getByText("It matches this app and uses this workspace."),
+    await screen.findByText("Matches this app and uses this Workspace."),
   ).toBeTruthy();
   expect(cliNav().queryByRole("img", { name: "Needs setup" })).toBeNull();
   installed = false;
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   await act(async () => {});
-  expect(screen.getByText("Not found")).toBeTruthy();
+  expect(await screen.findByText("Not installed")).toBeTruthy();
   expect(cliNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
   expect(reads).toBeLessThanOrEqual(9);
   fireEvent.click(nav.getByRole("button", { name: "Appearance" }));
@@ -10525,7 +10561,7 @@ test("Inbox loading announces its read without guessing urgency, then retains en
   expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
 });
 
-test.each(["Command line", "Agent skills"])(
+test.each(["Command line"])(
   "Settings %s keeps its last known setup state when Check again fails",
   async (page) => {
     let fail = false;
@@ -12791,15 +12827,20 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
             },
           },
         ];
-      if (command === "safety_backups")
-        return [
-          {
-            path: backup,
-            kind: "safety",
-            saved_at: doc.updated_at,
-            size_bytes: 1024,
-          },
-        ];
+      if (command === "restore_points")
+        return {
+          points: [
+            {
+              path: backup,
+              kind: "safety",
+              saved_at: doc.updated_at,
+              size_bytes: 1024,
+              summary: null,
+              problem: null,
+            },
+          ],
+          total_bytes: 1024,
+        };
       if (command === "inspect_backup")
         return {
           path: backup,
@@ -12876,7 +12917,7 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
       await screen.findByRole("button", { name: "Backups & export" }),
     );
     const review = await screen.findByRole("button", {
-      name: `Restore… ${backup}`,
+      name: /^Restore…/,
     });
     await user.click(review);
     const dialog = await screen.findByRole("dialog", {

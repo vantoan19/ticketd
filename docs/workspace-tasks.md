@@ -2,15 +2,22 @@
 
 ## Back up and restore your workspace
 
-1. Open **Settings → Backups & export** and choose **Back up now…**. Choose a new file.
-   ticketd saves the workspace and its retained local attachment files, then
-   checks the copy. The latest backup appears in **Backups**.
-2. When you need to recover a workspace, choose **Choose backup…** on that page.
-   Review the file and the workspace it would replace. You can cancel here.
-3. Choose **Replace workspace** to restore the reviewed copy. ticketd first
-   saves a safety backup of the current workspace. After **Workspace restored**,
-   open a familiar ticket to check its content.
+The desktop saves a **restore point** the first time you open ticketd each day and keeps the
+last 7, so you can go back a few days without having done anything.
 
+1. Open **Settings → Backups & export**. **Restore points** lists them, newest first. To
+   add one before something risky, choose **Back up now**: it is saved at once, checked,
+   and needs no file.
+2. To recover, choose **Restore…** on a point. Copies saved before a restore or an update
+   are listed too, with a label. **Restore from a file…** reviews a copy made with
+   `ticketd backup` or on another computer. Review the copy and the workspace it would
+   replace. You can cancel here.
+3. Choose **Replace workspace** to restore the reviewed copy. ticketd first
+   saves a safety copy of the current workspace, which then appears in the list.
+   After **Workspace restored**, open a familiar ticket to check its content.
+
+Restore points stay on this computer: they are not synced and a copy of the Workspace file
+alone does not carry them. For a copy to keep elsewhere, run `ticketd backup PATH`.
 Drive credentials and remote files stay outside the backup. Restoring disconnects
 Workspace sync. Reconnect deliberately when you're ready to sync the restored
 data. [Backup and restore commands](../crates/ticketd-cli/skill-data/workspace.md#backup-export-and-restore)

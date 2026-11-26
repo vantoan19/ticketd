@@ -85,31 +85,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "files",
   },
   {
-    title: "Back up now",
+    title: "Restore points",
     description:
-      "Saves a checked copy to a new file you choose. It never replaces an existing file.",
-    keywords: "backup copy save last backup",
-    section: "backups-export",
-  },
-  {
-    title: "What a backup contains",
-    description: "Tickets, Documents, Plans, Projects, activity and evidence",
+      "Copies to come back to, saved on this computer every day. The last 7 are kept.",
     keywords:
-      "includes contents local attachment files integrity check google drive not included",
-    section: "backups-export",
-  },
-  {
-    title: "Restore from a backup",
-    description:
-      "Replaces this workspace after a review. A safety backup of it is saved first.",
-    keywords: "restore recover replace workspace choose backup",
-    section: "backups-export",
-  },
-  {
-    title: "Safety backups",
-    description:
-      "Saved next to the workspace before a restore or a format upgrade, with every retained local attachment file. Restore one to undo.",
-    keywords: "undo backup automatic",
+      "backup back up now copy save daily restore recover replace undo safety file earlier version",
     section: "backups-export",
   },
   {
@@ -127,11 +107,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "backups-export",
   },
   {
-    title: "Status",
+    title: "Command line",
     description:
       "Lets your agents and terminals run ticketd on this Workspace.",
     keywords:
-      "command-line tool path terminal install cli check again executable",
+      "command-line tool path terminal install cli check again executable password administrator replace older",
     section: "command-line",
   },
   {
@@ -142,7 +122,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "command-line",
   },
   {
-    title: "ticketd skill",
+    title: "Agent skills",
     description:
       "Teaches the agents on this computer to use ticketd without being told.",
     keywords: "claude code codex agent install update skill",
@@ -151,7 +131,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Agents on this computer",
     description:
-      "ticketd installs only for agents it finds. A copy that was edited or not written by ticketd is left alone until you choose Replace.",
+      "The skill calls the ticketd command from Command line. To run these agents inside ticketd, see Agents.",
     keywords: "claude codex detected replace check again",
     section: "agent-skills",
   },

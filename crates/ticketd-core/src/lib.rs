@@ -9,10 +9,12 @@ mod backup_archive;
 mod restore;
 pub use backup::BackupRecord;
 mod backup_review;
+mod restore_points;
 pub use backup_review::{
     AttachmentBackupContent, BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind,
     WorkspaceSummary,
 };
+pub use restore_points::{RESTORE_POINTS_KEPT, RestorePoint, RestorePointKind, RestorePointList};
 mod context;
 mod context_graph;
 mod device;

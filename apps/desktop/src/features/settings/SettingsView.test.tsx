@@ -11,7 +11,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { loadPreferences } from "@/lib/preferences";
 import { workspaceClient } from "@/lib/api/workspace";
-import { client } from "@/lib/api/client";
 import { cliClient } from "@/lib/api/cli";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi
@@ -28,11 +27,10 @@ vi.mock("@/lib/api/workspace", () => ({
     info: vi.fn(),
     reveal: vi.fn(),
     openLink: vi.fn(),
-    lastBackup: vi.fn(),
-    chooseSavePath: vi.fn(),
+    restorePoints: vi.fn(),
+    saveRestorePoint: vi.fn(),
     chooseBackupFile: vi.fn(),
     inspectBackup: vi.fn(),
-    safetyBackups: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
@@ -51,7 +49,6 @@ vi.mock("@/lib/api/notifications", () => ({
 }));
 vi.mock("@/lib/api/client", () => ({
   client: {
-    backupWorkspace: vi.fn(),
     exportWorkspace: vi.fn(),
     restoreWorkspace: vi.fn(),
   },
@@ -81,11 +78,12 @@ beforeEach(() => {
     suggested_directory: "~/.local/bin",
   });
   vi.mocked(workspaceClient.info).mockResolvedValue(info);
-  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
   vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
   vi.mocked(workspaceClient.openLink).mockResolvedValue(undefined);
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(null);
-  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(null);
+  vi.mocked(workspaceClient.restorePoints).mockResolvedValue({
+    points: [],
+    total_bytes: 0,
+  });
 });
 
 afterEach(() => {
@@ -180,18 +178,6 @@ test("a workspace that cannot be read shows an error instead of counts", async (
   expect(screen.queryByLabelText("Workspace path")).toBeNull();
 });
 
-test("cancelling a save dialog changes nothing and shows no error", async () => {
-  const props = { onRestore: async () => {} };
-  render(<SettingsView selected="backups-export" {...props} />);
-  await screen.findByText("No backups yet");
-  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
-  await waitFor(() =>
-    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
-  );
-  expect(client.backupWorkspace).not.toHaveBeenCalled();
-  expect(screen.queryByRole("alert")).toBeNull();
-});
-
 test("Follow tickets I create is on by default and the choice persists", () => {
   render(<SettingsView selected="attention" onRestore={async () => {}} />);
   const follow = screen.getByRole("switch", {
@@ -210,6 +196,8 @@ test("Location, Backups and Export are one page in that order", async () => {
     screen
       .getAllByRole("heading", { level: 2 })
       .map((heading) => heading.textContent)
-      .filter((text) => ["Location", "Backups", "Export"].includes(text ?? "")),
-  ).toEqual(["Location", "Backups", "Export"]);
+      .filter((text) =>
+        ["Location", "Restore points", "Export"].includes(text ?? ""),
+      ),
+  ).toEqual(["Location", "Restore points", "Export"]);
 });
