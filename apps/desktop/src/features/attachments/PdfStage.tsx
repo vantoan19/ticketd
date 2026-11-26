@@ -141,6 +141,9 @@ function PdfPages({
   const [draft, setDraft] = useState<string | null>(null);
   // The point of the document in the middle of the view, kept across a zoom.
   const anchorRef = useRef<number | null>(null);
+  // Where the view's middle was when it last scrolled: a resize that changes the Fit
+  // scale keeps the same place in view instead of landing on another page.
+  const centerRef = useRef<number | null>(null);
 
   // The stage's width, for Fit.
   useEffect(() => {
@@ -178,6 +181,9 @@ function PdfPages({
         stage.scrollTop - origin(stage),
         stage.clientHeight,
       );
+      centerRef.current =
+        (stage.scrollTop - origin(stage) + stage.clientHeight / 2) /
+        layout.total;
       setPage(index + 1);
     };
     const onScroll = () => {
@@ -203,10 +209,24 @@ function PdfPages({
   }
   useLayoutEffect(() => {
     const stage = scrollerRef.current;
-    if (!stage || anchorRef.current === null) return;
-    stage.scrollTop =
-      anchorRef.current * layout.total - stage.clientHeight / 2 + origin(stage);
+    // A zoom sets its own anchor; a new Fit scale (the stage was resized) keeps the last one.
+    const point = anchorRef.current ?? centerRef.current;
     anchorRef.current = null;
+    if (!stage || point === null) return;
+    stage.scrollTop =
+      point * layout.total - stage.clientHeight / 2 + origin(stage);
+    centerRef.current =
+      (stage.scrollTop - origin(stage) + stage.clientHeight / 2) /
+      layout.total;
+    // A scroll that did not move (clamped) fires no event, so the page is read here too.
+    setPage(
+      pageInView(
+        layout.tops,
+        layout.heights,
+        stage.scrollTop - origin(stage),
+        stage.clientHeight,
+      ) + 1,
+    );
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scale]);
 
