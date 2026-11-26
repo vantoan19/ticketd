@@ -1338,6 +1338,25 @@ test("a turn's time reads as a clock today, Yesterday with a clock, then the day
   expect(turnClock("not a time", now)).toBe("");
 });
 
+test("Yesterday is the previous calendar day, even across a daylight-saving change", () => {
+  const zone = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  try {
+    // 00:30 on March 9, 2026: the clocks went forward on March 8, so 24 hours
+    // earlier is still March 7.
+    const now = new Date(2026, 2, 9, 0, 30).getTime();
+    const march8 = new Date(2026, 2, 8, 12, 0);
+    const march7 = new Date(2026, 2, 7, 23, 45);
+    expect(turnClock(march8.toISOString(), now)).toMatch(/^Yesterday /);
+    expect(turnClock(march7.toISOString(), now)).not.toMatch(/^Yesterday/);
+    expect(chatTime(march8.toISOString(), now)).toBe("Yesterday");
+    expect(chatTime(march7.toISOString(), now)).not.toBe("Yesterday");
+  } finally {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  }
+});
+
 test("a turn's exact start and end are one sentence for its tooltip", () => {
   const start = new Date(2026, 10, 24, 14, 3);
   const sameDay = new Date(2026, 10, 24, 14, 12);
