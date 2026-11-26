@@ -9543,11 +9543,12 @@ test("first-run Install skill settles successful reads and keeps Settings naviga
     name: "Your workspace is ready",
   });
   fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
-  await act(async () => {});
-  expect(reads).toBeLessThanOrEqual(6);
   expect(
-    screen.getByText("No supported agent was found on this computer"),
+    await screen.findByText(
+      "No agent found. Install Claude Code, Codex or Antigravity, then choose Check again.",
+    ),
   ).toBeTruthy();
+  expect(reads).toBeLessThanOrEqual(6);
   fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
   expect(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
