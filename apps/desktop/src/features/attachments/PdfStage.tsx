@@ -216,8 +216,7 @@ function PdfPages({
     stage.scrollTop =
       point * layout.total - stage.clientHeight / 2 + origin(stage);
     centerRef.current =
-      (stage.scrollTop - origin(stage) + stage.clientHeight / 2) /
-      layout.total;
+      (stage.scrollTop - origin(stage) + stage.clientHeight / 2) / layout.total;
     // A scroll that did not move (clamped) fires no event, so the page is read here too.
     setPage(
       pageInView(
