@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use uuid::Uuid;
 
 use crate::{Error, Workspace};
@@ -1235,7 +1236,7 @@ fn creation_requests(
     settings_only["start_picks"] = json!(picks);
     let mut request = settings_only.clone();
     request["first_message"] = json!({
-        "text": text,
+        "text_sha256": format!("{:x}", Sha256::digest(text.as_bytes())),
         "attachments": files.iter().map(ChatAttachmentContent::identity).collect::<Vec<_>>(),
     });
     (request, settings_only, legacy)
@@ -1251,9 +1252,12 @@ fn replay_chat_creation(
     let Some((stored, outcome)) = request_outcome(connection, command_id)? else {
         return Ok(None);
     };
-    let replay = if stored == request.to_string() || stored == settings_only.to_string() {
+    let request = request.to_string();
+    let settings_only = settings_only.to_string();
+    let legacy = legacy.to_string();
+    let replay = if stored == request || stored == settings_only {
         ChatCreationReplay::Exact
-    } else if stored == legacy.to_string() {
+    } else if stored == legacy {
         ChatCreationReplay::Legacy
     } else {
         return Err(Error::RequestConflict(command_id.to_owned()));
