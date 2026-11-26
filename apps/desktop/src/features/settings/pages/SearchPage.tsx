@@ -1,13 +1,6 @@
 import { SourceIcon } from "../sources/SourceIcon";
 import { emptyCopy } from "@/lib/empty-copy";
-import {
-  Fragment,
-  useEffect,
-  useId,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { Fragment, useEffect, useId, useMemo, useRef, useState } from "react";
 import { ChevronRight, SearchX, type LucideIcon } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import {

@@ -67,7 +67,10 @@ export function showSetting(root: HTMLElement, title: string) {
     shown = element;
     element.scrollIntoView?.({ block: "center" });
     element.setAttribute("data-found", "");
-    timer = setTimeout(() => element.removeAttribute("data-found"), HIGHLIGHT_MS);
+    timer = setTimeout(
+      () => element.removeAttribute("data-found"),
+      HIGHLIGHT_MS,
+    );
     return true;
   };
   const observer = new MutationObserver(look);

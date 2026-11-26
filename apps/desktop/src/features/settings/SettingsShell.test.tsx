@@ -442,7 +442,9 @@ test("typing in the search field shows the results in place of the page and sele
   await act(async () => {});
   fireEvent.change(field(), { target: { value: "backup" } });
   expect(
-    await screen.findByRole("heading", { name: /^\d+ settings match “backup”$/ }),
+    await screen.findByRole("heading", {
+      name: /^\d+ settings match “backup”$/,
+    }),
   ).toBeTruthy();
   expect(
     within(screen.getByRole("navigation", { name: "Settings sections" }))
@@ -486,7 +488,9 @@ test("the arrows choose another result and Enter opens that one", async () => {
   const links = screen.getAllByRole("link");
   fireEvent.keyDown(field(), { key: "ArrowDown" });
   expect(links[1]?.getAttribute("aria-current")).toBe("true");
-  const title = links[1]?.querySelector(".settings-list-row-title")?.textContent;
+  const title = links[1]?.querySelector(
+    ".settings-list-row-title",
+  )?.textContent;
   fireEvent.keyDown(field(), { key: "Enter" });
   await screen.findByRole("heading", { level: 1, name: "Backups & export" });
   await vi.waitFor(() => expect(found()).not.toBeNull());
