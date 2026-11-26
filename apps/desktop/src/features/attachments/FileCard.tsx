@@ -2,6 +2,7 @@ import {
   Children,
   useEffect,
   useId,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
@@ -46,9 +47,16 @@ export function FileCard({
   ref?: Ref<HTMLDivElement>;
 }) {
   const captionId = useId();
-  const fitted = fitName(name);
+  const fitted = useMemo(() => fitName(name), [name]);
   const nameLine = (
-    <span className="file-card-name">{breakable(fitted.text)}</span>
+    <span
+      className="file-card-name"
+      data-measured={fitted.lines ? "" : undefined}
+    >
+      {fitted.lines
+        ? fitted.lines.map((line, index) => <span key={index}>{line}</span>)
+        : breakable(fitted.text)}
+    </span>
   );
   const shown = tooltip ?? (fitted.cut ? name : undefined);
   return (

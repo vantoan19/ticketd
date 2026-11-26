@@ -123,9 +123,14 @@ iframe.file-card-still {
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+/* A cut name arrives as its two lines; each stays on one line. */
+.file-card-name[data-measured] > span {
+  display: block;
+  overflow: hidden;
+  white-space: pre;
+}
 .file-card-caption {
   display: block;
-  margin-top: auto;
   padding: 2px 12px 10px;
   overflow: hidden;
   color: var(--muted-foreground);

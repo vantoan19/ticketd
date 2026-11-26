@@ -242,3 +242,18 @@ test("more than six cards fold into a +N card that opens the rest in place", () 
     screen.getByRole("button", { name: "file-6.zip" }),
   );
 });
+
+test("measured, a cut name keeps the end of its second line and its first line stays whole", () => {
+  // Seven pixels a letter: 21 letters fit a line of the card.
+  const measure = (text: string) => text.length * 7;
+  const name = "load-test-results-2026-11-25-checkout-captures-final.html";
+  const fitted = fitName(name, measure);
+  expect(fitted.cut).toBe(true);
+  const [first, second] = fitted.lines!;
+  expect(first).toBe("load-test-results-");
+  expect(name.startsWith(first)).toBe(true);
+  expect(second.endsWith("…" + name.slice(-14))).toBe(true);
+  expect(measure(second)).toBeLessThanOrEqual(152);
+  // A name that fits in two lines is not cut at all.
+  expect(fitName("refund-after-fix-before-merge.png", measure).cut).toBe(false);
+});
