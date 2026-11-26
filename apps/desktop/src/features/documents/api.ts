@@ -89,6 +89,8 @@ const summary = z.object({
         reference: z.string(),
         title: z.string(),
         status: z.string(),
+        /** The core's rule: Todo, In progress or In review. */
+        open: z.boolean().optional(),
       }),
     )
     .optional(),

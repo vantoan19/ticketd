@@ -36,10 +36,11 @@ vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
   LazyMarkdownEditor: ({ value }: { value: string }) => <p>{value}</p>,
 }));
 
-const ticket = (reference: string, status = "In progress") => ({
+const ticket = (reference: string, status = "In progress", open = true) => ({
   reference,
   title: "Work",
   status,
+  open,
 });
 const row = (
   id: string,
@@ -143,6 +144,34 @@ it("says Spec or the ticket reference on a row inside a Plan group, never the Pl
   expect(meta("Checkout spec")).toBe("Spec");
   expect(meta("Checkout log")).toBe("T-AB1");
   expect(meta("Loose brief")).toBe("T-AB9");
+});
+
+it("names the open ticket on a row in a group, as the core marks it, before a finished one", async () => {
+  vi.mocked(documents.currentWork).mockResolvedValue(
+    work({
+      groups: [
+        {
+          plan: { id: "p1", name: "Checkout" },
+          documents: [
+            row("m", "Mixed tickets", {
+              tickets: [
+                ticket("T-AB1", "Done", false),
+                ticket("T-AB2", "In review", true),
+              ],
+            }),
+          ],
+        },
+      ],
+    }),
+  );
+  renderDocuments();
+  await header(/^Checkout\s*\d$/);
+  expect(
+    screen
+      .getByRole("button", { name: "Mixed tickets" })
+      .closest("li")
+      ?.querySelector(".document-list-meta")?.textContent,
+  ).toBe("T-AB2");
 });
 
 it("loads Finished work and No Plan or ticket only when they are opened", async () => {

@@ -14,8 +14,6 @@ export function documentRowContext(doc: DocumentSummary): string {
   return reference && !doc.heading.startsWith(reference) ? reference : "";
 }
 
-const OPEN_STATUSES = ["Todo", "In progress", "In review"];
-
 /**
  * What a row says inside a Current work group, whose header already names the Plan: "Spec"
  * for the Plan's spec, else the reference of the open ticket that brings it here (the first
@@ -25,7 +23,7 @@ export function groupRowContext(doc: DocumentSummary): string {
   if (doc.plans?.some((plan) => plan.spec && !plan.archived)) return "Spec";
   const tickets = doc.tickets ?? [];
   const ticket =
-    tickets.find((item) => OPEN_STATUSES.includes(item.status)) ?? tickets[0];
+    tickets.find((item) => item.open) ?? tickets[0];
   return ticket && !doc.heading.startsWith(ticket.reference)
     ? ticket.reference
     : "";
