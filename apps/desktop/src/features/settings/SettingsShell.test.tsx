@@ -294,7 +294,7 @@ test("opening a connection shows it in place under Ticket sources, and Back and 
   });
   render(<Settings initial="ticket-sources" />);
   await act(async () => {});
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^GitHub/ }));
   expect(
     await screen.findByRole("heading", { level: 1, name: "GitHub" }),
   ).toBeTruthy();
@@ -310,7 +310,7 @@ test("opening a connection shows it in place under Ticket sources, and Back and 
     await screen.findByRole("heading", { level: 1, name: "Ticket sources" }),
   ).toBeTruthy();
 
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
+  fireEvent.click(await screen.findByRole("button", { name: /^GitHub/ }));
   await screen.findByRole("heading", { level: 1, name: "GitHub" });
   fireEvent.keyDown(document.body, { key: "Escape" });
   expect(
