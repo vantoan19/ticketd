@@ -1281,8 +1281,9 @@ type Origin = {
 };
 
 /**
- * macOS WebKit does not focus a button or link that is clicked, so the opener
- * of a mouse-opened viewer is not the focused element: it is what was last pressed.
+ * macOS WebKit does not focus a button or link that is clicked: focus stays on
+ * the body, or lands on the nearest focusable container. So the opener of a
+ * mouse-opened viewer is what was last pressed, not what has focus.
  */
 let pressed: { target: Element; at: number } | null = null;
 if (typeof document !== "undefined")
@@ -1296,17 +1297,27 @@ if (typeof document !== "undefined")
   );
 const OPENER_MS = 5000;
 
-/** Reads where the reviewer is, so closing the viewer can put them back. */
-function captureOrigin(): Origin {
+/** What opened the viewer: what has focus, or the control just pressed that took none. */
+function captureOpener(): HTMLElement | null {
   const active = document.activeElement;
-  let focus =
+  const focused =
     active instanceof HTMLElement && active !== document.body ? active : null;
-  if (!focus && pressed && performance.now() - pressed.at < OPENER_MS) {
-    const opener = pressed.target.closest<HTMLElement>(
+  if (pressed && performance.now() - pressed.at < OPENER_MS) {
+    const control = pressed.target.closest<HTMLElement>(
       "button, a[href], [role='button'], [tabindex]",
     );
-    if (opener?.isConnected) focus = opener;
+    if (
+      control?.isConnected &&
+      (!focused || (focused !== control && focused.contains(control)))
+    )
+      return control;
   }
+  return focused;
+}
+
+/** Reads where the reviewer is, so closing the viewer can put them back. */
+function captureOrigin(): Origin {
+  const focus = captureOpener();
   const scroll: [Element, number][] = [];
   for (let node: Element | null = focus; node; node = node.parentElement)
     if (node.scrollTop > 0) scroll.push([node, node.scrollTop]);

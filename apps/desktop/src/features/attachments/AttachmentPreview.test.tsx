@@ -1338,7 +1338,7 @@ test("a viewer opened with the mouse returns focus to the card that was pressed,
   function Card() {
     const [open, setOpen] = useState(false);
     return (
-      <>
+      <main tabIndex={-1} data-testid="panel">
         <button type="button" onClick={() => setOpen(true)}>
           Open the card
         </button>
@@ -1348,13 +1348,14 @@ test("a viewer opened with the mouse returns focus to the card that was pressed,
             onClose={() => setOpen(false)}
           />
         )}
-      </>
+      </main>
     );
   }
   render(<Card />);
   const card = screen.getByRole("button", { name: "Open the card" });
-  // WebKit: the press and the click leave focus on the body.
+  // WebKit: the press takes no focus itself; the panel around the card gets it.
   fireEvent.pointerDown(card);
+  screen.getByTestId("panel").focus();
   fireEvent.click(card);
   expect(document.activeElement).not.toBe(card);
   await screen.findByRole("img", { name: "refund.png" });
