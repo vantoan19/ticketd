@@ -109,7 +109,7 @@ export function PdfStage({
         <PreviewState
           family="pdf"
           label={extensionLabel(file.original_filename)}
-          title="Couldn't show this PDF"
+          title="Couldn’t show this PDF"
           sentence="It may be damaged or password-protected. Open it in its app."
         />
       </div>

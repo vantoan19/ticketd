@@ -142,7 +142,7 @@ test("the preview of a file that is not downloaded offers Download in place of t
   expect(await screen.findByText("Not downloaded")).toBeTruthy();
   expect(
     screen
-      .getByText("It's in Google Drive. Download it to preview it here.")
+      .getByText("It’s in Google Drive. Download it to preview it here.")
       .closest('[role="status"]'),
   ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Download · 193 B" })).toBeTruthy();
@@ -174,7 +174,7 @@ test("the preview of a file waiting in S3 names S3, not Google Drive", async () 
   );
   expect(
     await screen.findByText(
-      "It's in your S3 bucket. Download it to preview it here.",
+      "It’s in your S3 bucket. Download it to preview it here.",
     ),
   ).toBeTruthy();
   expect(screen.queryByText(/Google Drive/)).toBeNull();
@@ -254,7 +254,7 @@ const withSync = (status: ReturnType<typeof syncStatus>, apply = () => {}) => (
   </SyncStatusContext>
 );
 
-test("a download the runs gave up on shows Couldn't download with Retry and Details", async () => {
+test("a download the runs gave up on shows Couldn’t download with Retry and Details", async () => {
   states = [
     {
       id: "a",
@@ -264,10 +264,10 @@ test("a download the runs gave up on shows Couldn't download with Retry and Deta
     },
   ];
   render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
-  expect(await screen.findByText("Couldn't download")).toBeTruthy();
+  expect(await screen.findByText("Couldn’t download")).toBeTruthy();
   expect(
     screen.getByText(
-      "Google Drive didn't answer. Nothing changed on this computer.",
+      "Google Drive didn’t answer. Nothing changed on this computer.",
     ),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^Download/ })).toBeNull();

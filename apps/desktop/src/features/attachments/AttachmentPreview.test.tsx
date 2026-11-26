@@ -474,7 +474,7 @@ test("a failed image retains metadata and explicit actions, with retry instead o
     "attachment-media://localhost/workspace/file-1",
   );
   fireEvent.error(image);
-  expect(await screen.findByText("Couldn't show this png image")).toBeTruthy();
+  expect(await screen.findByText("Couldn’t show this png image")).toBeTruthy();
   expect(screen.getByText("screen.png")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Export file" })).toBeTruthy();
   expect(invoke).not.toHaveBeenCalledWith("open_attachment", expect.anything());
@@ -705,7 +705,7 @@ test("a report that needs scripts or files that are not attached can't show here
   render(
     <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
   );
-  expect(await screen.findByText("This report can't show here")).toBeTruthy();
+  expect(await screen.findByText("This report can’t show here")).toBeTruthy();
   expect(screen.queryByLabelText("Report: E2E report")).toBeNull();
   // Open stays in the header as the way to the full report.
   expect(
@@ -866,7 +866,7 @@ test("a PDF that can't render shows the fallback and keeps Open and Export", asy
   servePdf();
   vi.mocked(openPdf).mockRejectedValue(new PdfUnreadable());
   render(<AttachmentPreview target={{ id: pdfFile.id }} onClose={() => {}} />);
-  expect(await screen.findByText("Couldn't show this PDF")).toBeTruthy();
+  expect(await screen.findByText("Couldn’t show this PDF")).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Fit" })).toBeNull();
   for (const name of ["Open file", "Export file"])
     expect(
@@ -1024,7 +1024,7 @@ test("browsing a mixed set: each file shows its own state and recovery, J and K 
   expect(screen.getByRole("heading", { name: "Refunds API" })).toBeTruthy();
   // The unavailable file brings its own recovery and none of the PDF's controls.
   fireEvent.click(screen.getByRole("button", { name: "Next file" }));
-  expect(await screen.findByText("Couldn't read this file")).toBeTruthy();
+  expect(await screen.findByText("Couldn’t read this file")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
   expect(screen.queryByRole("button", { name: "Fit" })).toBeNull();
   expect(screen.queryByRole("img", { name: "Page 3" })).toBeNull();
@@ -1051,7 +1051,7 @@ test("browsing a mixed set: each file shows its own state and recovery, J and K 
   await waitFor(() =>
     expect(screen.getByRole("img", { name: "refund.png" })).toBeTruthy(),
   );
-  expect(screen.queryByText("Couldn't read this file")).toBeNull();
+  expect(screen.queryByText("Couldn’t read this file")).toBeNull();
   expect(header().textContent).toContain("1 of 4");
   fireEvent.keyDown(screen.getByRole("dialog"), { key: "k" });
   expect(header().textContent).toContain("1 of 4");
@@ -1273,6 +1273,6 @@ test("the scripts line carries an info glyph, and a damaged PDF sits in the cent
   servePdf();
   vi.mocked(openPdf).mockRejectedValue(new PdfUnreadable());
   render(<AttachmentPreview target={{ id: pdfFile.id }} onClose={() => {}} />);
-  const title = await screen.findByText("Couldn't show this PDF");
+  const title = await screen.findByText("Couldn’t show this PDF");
   expect(title.closest(".attachment-pdf-state")).not.toBeNull();
 });

@@ -101,8 +101,8 @@ export function HtmlStage({
       <PreviewState
         family="text"
         label={extensionLabel(file.original_filename)}
-        title="This report can't show here"
-        sentence="It needs scripts or files that aren't part of the attachment. Open it in your browser."
+        title="This report can’t show here"
+        sentence="It needs scripts or files that aren’t part of the attachment. Open it in your browser."
       />
     );
   return (

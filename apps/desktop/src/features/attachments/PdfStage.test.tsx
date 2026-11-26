@@ -201,7 +201,7 @@ test("a PDF that can't render says so, with no detail, and never shows the bar",
   vi.mocked(invoke).mockResolvedValue(new Uint8Array([1]));
   vi.mocked(openPdf).mockRejectedValue(new PdfUnreadable());
   render(<Stage />);
-  expect(await screen.findByText("Couldn't show this PDF")).toBeTruthy();
+  expect(await screen.findByText("Couldn’t show this PDF")).toBeTruthy();
   expect(
     screen.getByText(
       "It may be damaged or password-protected. Open it in its app.",

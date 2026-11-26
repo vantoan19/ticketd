@@ -347,12 +347,12 @@ function storedWord(preview: Preview) {
 /** Why neither Open nor Export can work right now, or null when the bytes are here. */
 function storedBlocked(preview: Preview): string | null {
   if (preview.gone) return "Its stored copy was deleted.";
-  if (preview.missing) return "It's missing from this computer.";
+  if (preview.missing) return "It’s missing from this computer.";
   if (preview.stored?.state === "downloading") return "Downloading…";
   if (preview.signedOut) return "Sign in to download it.";
   if (preview.awaited) return "Download it first.";
   if (!preview.external && preview.info?.status === "unavailable")
-    return "ticketd can't read the stored copy.";
+    return "ticketd can’t read the stored copy.";
   return null;
 }
 
@@ -530,7 +530,7 @@ function PreviewHeader({
         ? { message: "Copied link" }
         : {
             tone: "error",
-            message: "Couldn't copy the link. Select it and copy it instead.",
+            message: "Couldn’t copy the link. Select it and copy it instead.",
           },
     );
   };
@@ -950,8 +950,8 @@ function PreviewStage({
           family={type.family}
           label={label}
           role="alert"
-          title="Couldn't download"
-          sentence={`${storage.full} didn't answer. Nothing changed on this computer.`}
+          title="Couldn’t download"
+          sentence={`${storage.full} didn’t answer. Nothing changed on this computer.`}
           action={
             <RetryActions
               onRetry={download}
@@ -973,7 +973,7 @@ function PreviewStage({
               ? size !== null && percent !== null
                 ? formatProgress((size * Math.min(percent, 100)) / 100, size)
                 : ""
-              : `It's in ${where}. Download it to preview it here.`
+              : `It’s in ${where}. Download it to preview it here.`
           }
           action={
             downloading ? (
@@ -997,7 +997,7 @@ function PreviewStage({
         family={type.family}
         label={label}
         role="alert"
-        title={`Couldn't show this ${type.word.toLowerCase()}`}
+        title={`Couldn’t show this ${type.word.toLowerCase()}`}
         sentence="ticketd may not play how it was saved. Open it in its app, or retry."
         action={<RetryActions onRetry={preview.retry} />}
       />
@@ -1033,8 +1033,8 @@ function PreviewStage({
         family={type.family}
         label={label}
         role="alert"
-        title="Couldn't read this file"
-        sentence="ticketd can't read its stored copy on this computer."
+        title="Couldn’t read this file"
+        sentence="ticketd can’t read its stored copy on this computer."
         action={
           <RetryActions onRetry={preview.retry} details={info.message ?? ""} />
         }
@@ -1099,7 +1099,7 @@ function PreviewStage({
         family={type.family}
         label={label}
         title="Too large to preview"
-        sentence={`${file?.size_bytes != null ? `It's ${formatSize(file.size_bytes)}. ` : ""}Open it in its app to ${see}.`}
+        sentence={`${file?.size_bytes != null ? `It’s ${formatSize(file.size_bytes)}. ` : ""}Open it in its app to ${see}.`}
       />
     );
   else if (info)
@@ -1112,7 +1112,7 @@ function PreviewStage({
             ? "No preview for this file"
             : `No preview for ${type.family === "archive" ? `${type.word}s` : `${type.word} files`}`
         }
-        sentence={`Open it in its app to ${type.family === "archive" ? "see what's inside" : see}.`}
+        sentence={`Open it in its app to ${type.family === "archive" ? "see what’s inside" : see}.`}
       />
     );
   else if (error && !awaited)

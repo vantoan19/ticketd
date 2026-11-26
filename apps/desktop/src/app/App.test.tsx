@@ -8054,7 +8054,7 @@ test.each(["missing", "quarantined", "unavailable"])(
         expect.objectContaining({ id: "attachment-state" }),
       );
     } else {
-      await within(pane).findByText("Couldn't read this file");
+      await within(pane).findByText("Couldn’t read this file");
       retry = true;
       fireEvent.click(within(pane).getByRole("button", { name: "Retry" }));
       await within(pane).findByText("Recovered preview");

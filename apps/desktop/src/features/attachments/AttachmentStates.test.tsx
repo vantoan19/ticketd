@@ -169,7 +169,7 @@ test("a format with no preview says its one sentence, with its extension on the 
   );
   expect(await screen.findByText("No preview for ZIP archives")).toBeTruthy();
   expect(
-    screen.getByText("Open it in its app to see what's inside."),
+    screen.getByText("Open it in its app to see what’s inside."),
   ).toBeTruthy();
   expect(screen.getByText("ZIP", { selector: "span" })).toBeTruthy();
 });
@@ -182,7 +182,7 @@ test("a file too large to preview says its size and what to do", async () => {
   );
   expect(await screen.findByText("Too large to preview")).toBeTruthy();
   expect(
-    screen.getByText("It's 1.8 GB. Open it in its app to watch it."),
+    screen.getByText("It’s 1.8 GB. Open it in its app to watch it."),
   ).toBeTruthy();
 });
 
@@ -193,7 +193,7 @@ test("Open and Export stay disabled for a stored copy that can't be read", async
       message: "permission denied",
     }),
   );
-  expect(await screen.findByText("Couldn't read this file")).toBeTruthy();
+  expect(await screen.findByText("Couldn’t read this file")).toBeTruthy();
   for (const name of ["Open file", "Export file"])
     expect(
       screen.getByRole<HTMLButtonElement>("button", { name }).disabled,
