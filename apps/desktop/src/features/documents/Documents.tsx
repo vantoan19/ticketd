@@ -36,6 +36,7 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -543,6 +544,10 @@ export function Documents({
     );
   };
   const searching = Boolean(query.trim() || filter.trim());
+  // Results always start at the top ("Titles"), wherever the list had been scrolled to.
+  useLayoutEffect(() => {
+    if (searching && navigator.current) navigator.current.scrollTop = 0;
+  }, [searching]);
   // A word search lists the Documents whose title matches, then those that match only inside;
   // a search by tag alone has nothing to match and stays one plain list.
   const wordSearch = query.trim() !== "";
@@ -692,6 +697,8 @@ export function Documents({
       current,
       key,
     );
+  /** The dot between the parts of a row's meta line. */
+  const separator = <span aria-hidden="true">·</span>;
   /** `grouped` rows sit under a header that names their Plan, so they do not repeat it. */
   const list = (
     items: DocumentSummary[],
@@ -803,12 +810,17 @@ export function Documents({
                       </time>
                     </Tooltip>
                   )}
-                  {date && context && <span aria-hidden="true">·</span>}
+                  {date && context && separator}
                   {context && <span className="truncate">{context}</span>}
                   {doc.origin_ticket && (
-                    <span className="document-origin">
-                      Update details · {doc.origin_ticket}
-                    </span>
+                    <>
+                      {(date || context) && separator}
+                      <span className="document-origin">Update details</span>
+                      {separator}
+                      <span className="document-origin">
+                        {doc.origin_ticket}
+                      </span>
+                    </>
                   )}
                   {doc.tags?.map((tag) => (
                     <Badge key={tag} size="sm" asChild>
@@ -884,6 +896,14 @@ export function Documents({
         : sorted
           ? allLoaded
           : browseLoaded;
+  const chooseSupport = (checked: boolean) => {
+    setIncludeSupport(checked);
+    setOffset(0);
+    setRecentOffset(0);
+    setAllOffset(0);
+    setFinishedOffset(0);
+    setUnlinkedOffset(0);
+  };
   const chooseSort = (value: string) => {
     if (value !== "opened" && value !== "updated" && value !== "title") return;
     if (value === sort) return;
@@ -929,7 +949,8 @@ export function Documents({
           ) : (
             <ChevronRight aria-hidden="true" />
           )}
-          <span className="truncate">{label}</span> <Count>{count}</Count>
+          <span className="documents-group-name">{label}</span>{" "}
+          <Count>{count}</Count>
         </button>
       </h2>
     );
@@ -1086,14 +1107,7 @@ export function Documents({
         <DropdownMenuCheckboxItem
           keepOpen={false}
           checked={includeSupport}
-          onCheckedChange={(checked) => {
-            setIncludeSupport(checked);
-            setOffset(0);
-            setRecentOffset(0);
-            setAllOffset(0);
-            setFinishedOffset(0);
-            setUnlinkedOffset(0);
-          }}
+          onCheckedChange={chooseSupport}
         >
           Show update details
         </DropdownMenuCheckboxItem>
@@ -1191,9 +1205,10 @@ export function Documents({
                 />
               ) : undefined
             }
+            // While searching, the field takes the whole header (the board's L2).
             actions={
-              <>
-                {!searchOpen && (
+              searchOpen ? undefined : (
+                <>
                   <IconButton
                     ref={searchTrigger}
                     label="Search Documents"
@@ -1206,19 +1221,19 @@ export function Documents({
                   >
                     <Search />
                   </IconButton>
-                )}
-                {onCapture && (
-                  <IconButton
-                    label="New Document"
-                    shortcut={shortcutLabel("capture")}
-                    aria-keyshortcuts={ariaKeyShortcuts("capture")}
-                    onClick={onCapture}
-                  >
-                    <Plus />
-                  </IconButton>
-                )}
-                {!showTrash && optionsMenu}
-              </>
+                  {onCapture && (
+                    <IconButton
+                      label="New Document"
+                      shortcut={shortcutLabel("capture")}
+                      aria-keyshortcuts={ariaKeyShortcuts("capture")}
+                      onClick={onCapture}
+                    >
+                      <Plus />
+                    </IconButton>
+                  )}
+                  {!showTrash && optionsMenu}
+                </>
+              )
             }
           >
             {!showTrash && !searchOpen && (
@@ -1275,7 +1290,7 @@ export function Documents({
             onRetry={listError.retry}
           />
         )}
-        <div {...enter(1)}>
+        <div className="documents-list-body" {...enter(1)}>
           {listError?.kind === "load" && !countKnown ? (
             <FailureState
               failure={listError.failure}
@@ -1328,8 +1343,19 @@ export function Documents({
                   title={`No Documents match ${query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}`}
                   description={
                     !includeSupport && hiddenMatches
-                      ? "Update details are hidden; turn on Show update details from the … menu to search them."
+                      ? "Update details are hidden, and some match."
                       : "Try another word, or clear the search."
+                  }
+                  action={
+                    !includeSupport && hiddenMatches ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => chooseSupport(true)}
+                      >
+                        Show update details
+                      </Button>
+                    ) : undefined
                   }
                 />
               ) : (

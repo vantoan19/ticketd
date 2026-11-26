@@ -300,3 +300,68 @@ it("keeps a search by tag alone as one plain list with no groups or marks", asyn
   ).toBeNull();
   expect(document.querySelector("mark")).toBeNull();
 });
+
+it("starts the results at the top, wherever the list had been scrolled", async () => {
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  const list = document.querySelector(".documents-list-view") as HTMLElement;
+  list.scrollTop = 584;
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Search Documents" }),
+  );
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search Documents" }),
+    { target: { value: "attachment" } },
+  );
+  await screen.findAllByRole("heading", { name: /^(Titles|Inside Documents)/ });
+  expect(list.scrollTop).toBe(0);
+});
+
+it("gives the field the whole header while searching", async () => {
+  await renderSearch();
+  const head = document.querySelector(".documents-list-head") as HTMLElement;
+  expect(
+    within(head).queryByRole("button", { name: "New Document" }),
+  ).toBeNull();
+  expect(within(head).queryByRole("button", { name: "More" })).toBeNull();
+  expect(
+    within(head).getByRole("searchbox", { name: "Search Documents" }),
+  ).toBeTruthy();
+});
+
+it("offers Show update details when only update details match", async () => {
+  vi.mocked(documents.search).mockImplementation(async (_q, _f, _o, include) =>
+    include ? results : [],
+  );
+  render(
+    <Documents
+      active
+      capture={false}
+      onCaptureClose={vi.fn()}
+      currentTicket={null}
+      onOpenTicket={vi.fn()}
+      onOpenPlan={vi.fn()}
+      target={null}
+    />,
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Search Documents" }),
+  );
+  fireEvent.change(
+    screen.getByRole("searchbox", { name: "Search Documents" }),
+    { target: { value: "attachment" } },
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Show update details" }),
+  );
+  await screen.findAllByRole("heading", { name: /^(Titles|Inside Documents)/ });
+});
