@@ -150,7 +150,7 @@ test("Report an issue opens GitHub's bug form with the version and system filled
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("link", { name: /^Report an issue/ }));
   await waitFor(() => expect(workspaceClient.openLink).toHaveBeenCalled());
-  const url = new URL(vi.mocked(workspaceClient.openLink).mock.calls[0][0]);
+  const url = new URL(vi.mocked(workspaceClient.openLink).mock.calls[0]![0]);
   expect(url.origin + url.pathname).toBe(
     "https://github.com/vantoan19/ticketd/issues/new",
   );
