@@ -2078,6 +2078,7 @@ async fn an_old_prompt_refusal_cannot_update_the_same_attempt_in_a_restored_work
     prompt_does_not_outlive_its_workspace(true).await;
 }
 
+#[allow(clippy::unwrap_used)] // The shared fixture fails the test if setup or synchronization fails.
 async fn prompt_does_not_outlive_its_workspace(refuse_before_restore: bool) {
     let f = Fixture::new();
     let (admitted, admit) = f.fake.hold_next_submit_write();
