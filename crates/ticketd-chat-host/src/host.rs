@@ -715,7 +715,10 @@ impl ChatHost {
                     // The takeover still completes if the caller loses its reply.
                     tokio::spawn(async move {
                         let (_, unconfirmed) = host.finish_take_over(&chat_id, run).await;
-                        if !unconfirmed && let Ok(commands) = host.sender_after_take_over(&gate) {
+                        if mode == SendMode::Auto
+                            && !unconfirmed
+                            && let Ok(commands) = host.sender_after_take_over(&gate)
+                        {
                             // The reply starts a normal turn before admitting later sends.
                             let (reply, scheduled) = oneshot::channel();
                             let sent =

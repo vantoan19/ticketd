@@ -4195,6 +4195,34 @@ async fn a_permission_restart_does_not_open_when_chat_turns_off_during_close() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn chat_off_declines_an_open_that_finishes_while_storage_recovery_is_pending() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let release_open = f.fake.hold_next_open();
+    f.send("first").await;
+    assert!(f.fake.opens().is_empty());
+    f.storage_up.store(false, Ordering::SeqCst);
+
+    let warnings = f.host.turn_off().await;
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].reason.contains("still starting"));
+    assert!(f.fake.written().is_empty());
+
+    release_open.send(()).unwrap();
+    settle().await;
+    let late = f.fake.opens()[0].generation;
+    assert_eq!(f.fake.written(), [Written::Close(late)]);
+    assert!(!f.host.live()[&f.chat.id].running);
+
+    f.storage_up.store(true, Ordering::SeqCst);
+    f.host.turn_on();
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.submits()[0].text, "first");
+}
+
+#[tokio::test(start_paused = true)]
 async fn turning_chat_off_and_on_keeps_waiting_for_the_previous_permission_runtime() {
     let f = Fixture::new(FakeAdapter::new(
         &ticketd_core::harnesses::ANTIGRAVITY,

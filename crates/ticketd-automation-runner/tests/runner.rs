@@ -952,7 +952,7 @@ async fn an_invalid_reply_leaves_the_run_live_and_a_saved_reply_waits_for_cleanu
             &reply_chat,
             Some("reply"),
             "Valid once the limit is raised",
-            SendMode::Queue,
+            SendMode::Auto,
             vec![reply_file],
         )
         .await
@@ -1145,11 +1145,8 @@ async fn event_loss_before_or_during_takeover_still_requires_confirmed_harness_e
     }
 }
 
-/// #387 M2: with a harness that cannot steer, the composer sends a reply to a going
-/// run as "Queue". The turn it would wait for ends with the take-over, so the reply
-/// is the resumed Chat's first turn at once, sent once, and nothing is left paused.
 #[tokio::test(start_paused = true)]
-async fn a_reply_queued_behind_the_agents_turn_is_sent_when_it_takes_the_run_over() {
+async fn a_queued_reply_takes_the_run_over_and_waits_for_explicit_dispatch() {
     let f = Fixture::on(AgentHarness::ClaudeCode);
     f.agent_working().await;
     let chat = f.chat();
@@ -1160,13 +1157,23 @@ async fn a_reply_queued_behind_the_agents_turn_is_sent_when_it_takes_the_run_ove
         .await;
     settle().await;
 
-    f.host
+    let reply = f
+        .host
         .send(&chat, None, "Reply with hello", SendMode::Queue)
         .await
         .unwrap();
     settle().await;
 
     assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert_eq!(written(&f)[1..], ["interrupt", "close"]);
+    assert_eq!(f.fake.opens().len(), 1);
+    let queue = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, reply.id);
+    assert!(queue[0].attempts.is_empty());
+
+    f.host.resume_queue(&chat).await.unwrap();
+    settle().await;
     assert_eq!(
         written(&f)[1..],
         ["interrupt", "close", "submit: Reply with hello"]

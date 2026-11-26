@@ -497,8 +497,12 @@ impl Supervisor {
                         return;
                     }
                 },
-                Some(done) = self.finished.recv(), if !self.shutting_down => {
-                    self.turn_span().in_scope(|| self.on_done(done));
+                Some(done) = self.finished.recv() => {
+                    // A retained supervisor still releases workers that finished
+                    // after shutdown. Dropping a late open declines its runtime.
+                    if !self.shutting_down {
+                        self.turn_span().in_scope(|| self.on_done(done));
+                    }
                 }
                 event = next_event(&mut self.runtime), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_event(event));
