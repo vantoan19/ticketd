@@ -518,7 +518,7 @@ fn legacy_queue_edit_links_replay_while_another_connection_holds_the_writer() {
     assert!(linked);
     let mut peer = rusqlite::Connection::open(dir.path().join("workspace.sqlite3")).unwrap();
     peer.execute(
-        "UPDATE request_outcomes SET request = json_remove(request, '$.links') WHERE id = 'edit'",
+        "UPDATE request_outcomes SET request = json_remove(request, '$.links', '$.links_ordered') WHERE id = 'edit'",
         [],
     )
     .unwrap();
@@ -669,6 +669,105 @@ fn public_command_ids_with_the_old_link_prefix_do_not_collide_with_input_receipt
             "Public input",
         )
         .unwrap();
+}
+
+#[test]
+fn linked_input_replay_binds_first_occurrence_order_for_new_receipts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let ticket = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: workspace.create_ticket("Outcome").unwrap().id,
+    };
+    let document = ChatLink {
+        kind: ChatLinkKind::Document,
+        id: workspace.create_document(Some("Notes"), "Body").unwrap().id,
+    };
+    let original = ChatInputChange::Link(vec![ticket.clone(), document.clone(), ticket.clone()]);
+    let deduplicated = ChatInputChange::Link(vec![ticket.clone(), document.clone()]);
+    let reversed = ChatInputChange::Link(vec![document.clone(), ticket.clone()]);
+    let (saved, added) = workspace
+        .save_chat_input_with_change(Some("new"), &chat.id, "Linked input", &[], Some(&original))
+        .unwrap();
+    assert!(added);
+    let links = workspace.chat_linked_records(&chat.id).unwrap();
+    assert_eq!([&links[0].id, &links[1].id], [&ticket.id, &document.id]);
+    assert_eq!(
+        workspace
+            .replay_chat_input_with_change(
+                "new",
+                &chat.id,
+                "Linked input",
+                &[],
+                Some(&deduplicated)
+            )
+            .unwrap(),
+        Some(saved.clone())
+    );
+    assert!(matches!(
+        workspace.replay_chat_input_with_change("new", &chat.id, "Linked input", &[], Some(&reversed)),
+        Err(Error::RequestConflict(id)) if id == "new"
+    ));
+    assert!(matches!(
+        workspace.save_chat_input_with_change(Some("new"), &chat.id, "Linked input", &[], Some(&reversed)),
+        Err(Error::RequestConflict(id)) if id == "new"
+    ));
+    let wrong_kind = ChatInputChange::Link(vec![
+        ticket.clone(),
+        document,
+        ChatLink {
+            kind: ChatLinkKind::Project,
+            id: ticket.id,
+        },
+    ]);
+    assert!(matches!(
+        workspace.replay_chat_input_with_change("new", &chat.id, "Linked input", &[], Some(&wrong_kind)),
+        Err(Error::RequestConflict(id)) if id == "new"
+    ));
+
+    let (legacy, _) = workspace
+        .save_chat_input_with_change(
+            Some("legacy"),
+            &chat.id,
+            "Linked input",
+            &[],
+            Some(&reversed),
+        )
+        .unwrap();
+    let db = rusqlite::Connection::open(dir.path().join("workspace.sqlite3")).unwrap();
+    // This receipt already had input_source but wrote links in sorted order.
+    db.execute(
+        "UPDATE request_outcomes SET request = json_remove(request, '$.links_ordered') WHERE id = 'legacy'",
+        [],
+    )
+    .unwrap();
+    for change in [&original, &reversed] {
+        assert_eq!(
+            workspace
+                .replay_chat_input_with_change(
+                    "legacy",
+                    &chat.id,
+                    "Linked input",
+                    &[],
+                    Some(change)
+                )
+                .unwrap(),
+            Some(legacy.clone())
+        );
+        assert_eq!(
+            workspace
+                .save_chat_input_with_change(
+                    Some("legacy"),
+                    &chat.id,
+                    "Linked input",
+                    &[],
+                    Some(change)
+                )
+                .unwrap(),
+            (legacy.clone(), false)
+        );
+    }
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap().len(), 2);
 }
 
 #[test]

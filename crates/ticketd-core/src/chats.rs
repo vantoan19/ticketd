@@ -6,7 +6,7 @@
 //! terminal outcome are separate writes, so a saved message is never mistaken for a
 //! delivered or completed one. Nothing here dispatches work.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension, Row, params, types::Type};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -207,7 +207,7 @@ pub(crate) fn migrate_turn_ending(connection: &Connection) -> Result<(), Error> 
     Ok(())
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ChatLinkKind {
     Project,
@@ -1408,7 +1408,8 @@ fn validate_legacy_input_links(
         let previous: Value = serde_json::from_str(&previous)?;
         // A public request could use this ID even before the prefix was used for links.
         if previous["operation"] == "chat_queue_edit_links"
-            && (previous["chat_id"] != request["chat_id"] || previous["links"] != request["links"])
+            && (previous["chat_id"] != request["chat_id"]
+                || previous["links"] != sorted_input_links(request))
         {
             return Err(Error::RequestConflict(command_id.to_owned()));
         }
@@ -1421,7 +1422,7 @@ fn read_input_receipt(
     command_id: &str,
     request: &Value,
     chat_id: &str,
-    source: Option<InputSource<'_>>,
+    source: InputSource<'_>,
 ) -> Result<Option<ChatInputReceipt>, Error> {
     let Some((previous, outcome)) = request_outcome(connection, command_id)? else {
         // Some older versions could save links before saving the input.
@@ -1433,27 +1434,31 @@ fn read_input_receipt(
         return Err(Error::RequestConflict(command_id.to_owned()));
     };
     let saved_source = fields.remove("input_source");
-    let legacy = !fields.contains_key("links");
-    if legacy {
+    let links_ordered = fields.remove("links_ordered") == Some(Value::Bool(true));
+    let split_links_receipt = !fields.contains_key("links");
+    if !links_ordered {
+        // Older receipts remembered the set of links, discarding their insertion order.
+        if !split_links_receipt && fields.get("links") != Some(&sorted_input_links(request)) {
+            return Err(Error::RequestConflict(command_id.to_owned()));
+        }
         fields.insert("links".to_owned(), request["links"].clone());
     }
     if previous != *request {
         return Err(Error::RequestConflict(command_id.to_owned()));
     }
-    if legacy {
+    if split_links_receipt {
         validate_legacy_input_links(connection, command_id, request)?;
     }
-    let source = match source {
-        Some(source) => source,
-        None if crate::automation_runs::chat_owner(connection, chat_id)?.is_some() => {
-            InputSource::AutomationReply
-        }
-        None => InputSource::Person,
-    };
     let same_source = match (saved_source.as_ref(), source) {
         // Old receipts cannot prove a takeover. While the Chat still has an owner,
         // let only a new command ID initiate one.
         (None, InputSource::AutomationReply) => {
+            crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
+        }
+        // An unmarked receipt at the Prompt's reserved ID may belong to the owner.
+        (None, InputSource::Person)
+            if command_id.strip_suffix(AUTOMATION_PROMPT_REQUEST_SUFFIX) == Some(chat_id) =>
+        {
             crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
         }
         (None, _) => true,
@@ -1469,6 +1474,14 @@ fn read_input_receipt(
     let id: String = serde_json::from_str(&outcome)?;
     let message = read_message(connection, &id)?;
     Ok(Some(ChatInputReceipt { id, message }))
+}
+
+fn sorted_input_links(request: &Value) -> Value {
+    let mut links = request["links"].as_array().cloned().unwrap_or_default();
+    links.sort_unstable_by(|left, right| {
+        [left[0].as_str(), left[1].as_str()].cmp(&[right[0].as_str(), right[1].as_str()])
+    });
+    Value::Array(links)
 }
 
 #[derive(Clone, Copy)]
@@ -1495,12 +1508,12 @@ fn save_input_request(
     replacement: InputReplacement<'_>,
 ) -> Result<Value, Error> {
     let InputReplacement { links, replaces } = replacement;
-    let mut links = links
+    let mut seen = HashSet::new();
+    let links = links
         .iter()
+        .filter(|link| seen.insert((link.kind, link.id.as_str())))
         .map(|link| Ok((name(link.kind)?, link.id.as_str())))
         .collect::<Result<Vec<_>, Error>>()?;
-    links.sort_unstable();
-    links.dedup();
     let mut request = json!({
         "operation": "save_chat_input",
         "chat_id": chat_id,
@@ -2743,7 +2756,7 @@ impl Workspace {
                 return Err(invalid("the run no longer owns this Chat"));
             }
             if let Some((command_id, request)) = &request
-                && let Some(receipt) = read_input_receipt(connection, command_id, request, chat_id, Some(source))?
+                && let Some(receipt) = read_input_receipt(connection, command_id, request, chat_id, source)?
             {
                 return Ok((receipt, None, false));
             }
@@ -2803,6 +2816,7 @@ impl Workspace {
             trim(connection, chat_id)?;
             if let Some((command_id, mut request)) = request {
                 request["input_source"] = json!(source.receipt_name());
+                request["links_ordered"] = Value::Bool(true);
                 save_outcome(connection, command_id, &request.to_string(), &id)?;
             }
             let message = read_message(connection, &id)?;
@@ -2810,7 +2824,7 @@ impl Workspace {
         })
     }
 
-    /// Reads the outcome of a previously saved input. A retry can succeed even
+    /// Reads the outcome of a person's previously saved input. A retry can succeed even
     /// when the Chat has since become busy and would refuse new attachments.
     pub fn replay_chat_input(
         &self,
@@ -2872,6 +2886,7 @@ impl Workspace {
                 replaces,
                 ..InputReplacement::default()
             },
+            InputSource::Person,
         )
     }
 
@@ -2891,6 +2906,7 @@ impl Workspace {
             text,
             files,
             InputReplacement::for_edit(edit)?,
+            InputSource::Person,
         )
     }
 
@@ -2908,6 +2924,26 @@ impl Workspace {
             text,
             files,
             InputReplacement::for_change(change)?,
+            InputSource::Person,
+        )
+    }
+
+    /// Replays an Automation takeover reply without taking over the run.
+    pub fn replay_automation_chat_reply_with_change(
+        &self,
+        command_id: &str,
+        chat_id: &str,
+        text: &str,
+        files: &[ChatAttachmentContent],
+        change: Option<&ChatInputChange>,
+    ) -> Result<Option<ChatInputReceipt>, Error> {
+        self.replay_input(
+            command_id,
+            chat_id,
+            text,
+            files,
+            InputReplacement::for_change(change)?,
+            InputSource::AutomationReply,
         )
     }
 
@@ -2918,10 +2954,11 @@ impl Workspace {
         text: &str,
         files: &[ChatAttachmentContent],
         replacement: InputReplacement<'_>,
+        source: InputSource<'_>,
     ) -> Result<Option<ChatInputReceipt>, Error> {
         let request = save_input_request(chat_id, text, files, replacement)?;
         crate::read_scope::run(&self.connection, |connection| {
-            read_input_receipt(connection, command_id, &request, chat_id, None)
+            read_input_receipt(connection, command_id, &request, chat_id, source)
         })
     }
 
@@ -3019,20 +3056,21 @@ impl Workspace {
 
     /// Queued input in the order it was saved, including originals held for editing.
     pub fn chat_queue(&self, chat_id: &str) -> Result<Vec<ChatMessage>, Error> {
-        read_chat(&self.connection, chat_id)?;
-        let mut statement = self.connection.prepare(&format!(
-            "SELECT id FROM chat_messages m WHERE chat_id = ?1 AND {QUEUED_CHAT_INPUT}
-             ORDER BY position"
-        ))?;
-        let ids = statement
-            .query_map([chat_id], |row| row.get::<_, String>(0))?
-            .collect::<Result<Vec<_>, _>>()?;
-        // A message may have moved since the candidates were read.
-        let mut queue = Vec::with_capacity(ids.len());
-        for id in ids {
-            queue.extend(read_message(&self.connection, &id)?.filter(|message| message.queued));
-        }
-        Ok(queue)
+        crate::read_scope::run(&self.connection, |connection| {
+            read_chat(connection, chat_id)?;
+            let mut statement = connection.prepare(&format!(
+                "SELECT id FROM chat_messages m WHERE chat_id = ?1 AND {QUEUED_CHAT_INPUT}
+                 ORDER BY position"
+            ))?;
+            let ids = statement
+                .query_map([chat_id], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut queue = Vec::with_capacity(ids.len());
+            for id in ids {
+                queue.extend(read_message(connection, &id)?.filter(|message| message.queued));
+            }
+            Ok(queue)
+        })
     }
 
     /// Whether saved input needs linked-record context, including input awaiting resend.

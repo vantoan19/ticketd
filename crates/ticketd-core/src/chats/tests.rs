@@ -6,6 +6,69 @@ use std::sync::{
 use super::*;
 
 #[test]
+fn queue_hydration_sees_the_held_input_when_another_connection_replaces_it() {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace
+        .connection
+        .pragma_update(None, "journal_mode", "WAL")
+        .unwrap();
+    let chat = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "codex".into(),
+                execution_folder: "/work/app".into(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    let original = workspace.save_chat_input(None, &chat.id, "Held").unwrap();
+    workspace
+        .confirm_chat_queue_edit(&chat.id, &original.id, "hold")
+        .unwrap();
+
+    let mut peer = Some(Workspace::open(&path).unwrap());
+    let (reply, replaced) = std::sync::mpsc::channel();
+    let chat_id = chat.id.clone();
+    let replaces = [original.id.clone()];
+    workspace
+        .connection
+        .authorizer(Some(move |context: AuthContext<'_>| {
+            // Only the post-selection message query reads the caption.
+            if let AuthAction::Read {
+                table_name: "chat_messages",
+                column_name: "text",
+            } = context.action
+                && let Some(mut peer) = peer.take()
+            {
+                let result = peer
+                    .save_chat_input_replacing(Some("save"), &chat_id, "Edited", &[], &replaces)
+                    .map_err(|error| error.to_string());
+                let _ = reply.send(result);
+            }
+            Authorization::Allow
+        }));
+
+    let queue = workspace.chat_queue(&chat.id).unwrap();
+    let replacement = replaced
+        .try_recv()
+        .unwrap()
+        .unwrap()
+        .into_message()
+        .unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, original.id);
+    assert!(queue[0].editing);
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap(), [replacement]);
+}
+
+#[test]
 fn a_chat_creation_receipt_with_only_start_picks_still_replays() {
     let directory = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(directory.path().join("workspace.sqlite3")).unwrap();

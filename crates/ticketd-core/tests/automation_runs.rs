@@ -1200,6 +1200,25 @@ fn a_takeover_reply_has_its_own_receipt_and_can_be_retried_after_takeover() {
     let ordinary = workspace
         .save_chat_input(Some("ordinary"), &chat, "Same text")
         .unwrap();
+    let replay_takeover = |workspace: &Workspace, command_id| {
+        workspace.replay_automation_chat_reply_with_change(
+            command_id,
+            &chat,
+            "Same text",
+            &[],
+            None,
+        )
+    };
+    assert_eq!(
+        workspace
+            .replay_chat_input("ordinary", &chat, "Same text", &[])
+            .unwrap(),
+        Some(ordinary.clone())
+    );
+    assert!(matches!(
+        replay_takeover(&workspace, "ordinary"),
+        Err(Error::RequestConflict(id)) if id == "ordinary"
+    ));
     let takeover = |workspace: &mut Workspace, command_id| {
         workspace.save_automation_chat_reply_with_change(
             Some(command_id),
@@ -1230,6 +1249,12 @@ fn a_takeover_reply_has_its_own_receipt_and_can_be_retried_after_takeover() {
     remove_source("ordinary");
     assert_eq!(
         workspace
+            .replay_chat_input("ordinary", &chat, "Same text", &[])
+            .unwrap(),
+        Some(ordinary.clone())
+    );
+    assert_eq!(
+        workspace
             .save_chat_input(Some("ordinary"), &chat, "Same text")
             .unwrap(),
         ordinary
@@ -1238,12 +1263,20 @@ fn a_takeover_reply_has_its_own_receipt_and_can_be_retried_after_takeover() {
         takeover(&mut workspace, "ordinary"),
         Err(Error::RequestConflict(id)) if id == "ordinary"
     ));
+    assert!(matches!(
+        replay_takeover(&workspace, "ordinary"),
+        Err(Error::RequestConflict(id)) if id == "ordinary"
+    ));
 
     let (reply, ended) = takeover(&mut workspace, "takeover").unwrap();
     assert_eq!(ended.unwrap().status, AutomationRunStatus::TakenOver);
     assert_eq!(
         takeover(&mut workspace, "takeover").unwrap(),
         (reply.clone(), None)
+    );
+    assert_eq!(
+        replay_takeover(&workspace, "takeover").unwrap(),
+        Some(reply.clone())
     );
     assert_eq!(
         workspace
@@ -1260,6 +1293,10 @@ fn a_takeover_reply_has_its_own_receipt_and_can_be_retried_after_takeover() {
     );
 
     remove_source("takeover");
+    assert_eq!(
+        replay_takeover(&workspace, "takeover").unwrap(),
+        Some(reply.clone())
+    );
     assert_eq!(
         takeover(&mut workspace, "takeover").unwrap(),
         (reply.clone(), None)
@@ -1317,7 +1354,7 @@ fn a_linked_takeover_reply_keeps_its_context_requirement_through_backup_and_rest
 
 #[test]
 fn an_automation_can_record_only_its_saved_prompt() {
-    let (_dir, mut workspace) = workspace();
+    let (dir, mut workspace) = workspace();
     triage(&mut workspace);
     let (run, chat) = on_agent_step(&mut workspace);
     let queued = workspace
@@ -1357,6 +1394,21 @@ fn an_automation_can_record_only_its_saved_prompt() {
     let prompt = workspace
         .save_automation_chat_prompt(&chat, &run.id, "Run Prompt")
         .unwrap();
+    assert!(matches!(
+        workspace.replay_chat_input(&reserved, &chat, "Run Prompt", &[]),
+        Err(Error::RequestConflict(id)) if id == reserved
+    ));
+    rusqlite::Connection::open(dir.path().join("runs.sqlite3"))
+        .unwrap()
+        .execute(
+            "UPDATE request_outcomes SET request = json_remove(request, '$.input_source') WHERE id = ?1",
+            [&reserved],
+        )
+        .unwrap();
+    assert!(matches!(
+        workspace.replay_chat_input(&reserved, &chat, "Run Prompt", &[]),
+        Err(Error::RequestConflict(id)) if id == reserved
+    ));
     assert_eq!(
         workspace
             .save_automation_chat_prompt(&chat, &run.id, "Run Prompt")
@@ -1428,6 +1480,12 @@ fn reserving_an_automation_prompt_does_not_break_an_older_ordinary_replay() {
             .unwrap()
             .id,
         saved.id
+    );
+    assert_eq!(
+        workspace
+            .replay_chat_input(&reserved, &ordinary.id, "Earlier request", &[])
+            .unwrap(),
+        Some(saved.clone())
     );
     assert_eq!(workspace.chat_queue(&ordinary.id).unwrap(), [saved]);
     assert_eq!(

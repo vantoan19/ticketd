@@ -748,15 +748,26 @@ impl ChatHost {
         self.serving()?;
         if self.check_agent_cleanup(chat_id).is_err()
             && let Some(command_id) = command_id
-            && let Some(receipt) = self.workspace()?.replay_chat_input_with_change(
-                command_id,
-                chat_id,
-                text,
-                &attachments,
-                change.as_ref(),
-            )?
         {
-            return Ok(receipt);
+            let workspace = self.workspace()?;
+            let receipt = workspace.read(|workspace| {
+                let replay = if workspace.automation_chat_run_id(chat_id)?.is_some() {
+                    ticketd_core::Workspace::replay_automation_chat_reply_with_change
+                } else {
+                    ticketd_core::Workspace::replay_chat_input_with_change
+                };
+                replay(
+                    workspace,
+                    command_id,
+                    chat_id,
+                    text,
+                    &attachments,
+                    change.as_ref(),
+                )
+            })?;
+            if let Some(receipt) = receipt {
+                return Ok(receipt);
+            }
         }
         let run_id = self.workspace()?.automation_chat_run_id(chat_id)?;
         if let Some(run_id) = run_id {
@@ -768,13 +779,14 @@ impl ChatHost {
                 if let Some(harness) = workspace.automation_chat_harness(chat_id)? {
                     if let Err(refusal) = self.check_attachment_input(&harness, &attachments) {
                         if let Some(command_id) = command_id
-                            && let Some(receipt) = workspace.replay_chat_input_with_change(
-                                command_id,
-                                chat_id,
-                                text,
-                                &attachments,
-                                change.as_ref(),
-                            )?
+                            && let Some(receipt) = workspace
+                                .replay_automation_chat_reply_with_change(
+                                    command_id,
+                                    chat_id,
+                                    text,
+                                    &attachments,
+                                    change.as_ref(),
+                                )?
                         {
                             return Ok(receipt);
                         }
