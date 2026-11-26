@@ -175,7 +175,7 @@
   display: inline-flex;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: var(--radius-segment);
   background: none;
   color: var(--disabled-foreground);
   cursor: inherit;
