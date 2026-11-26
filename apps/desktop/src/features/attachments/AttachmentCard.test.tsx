@@ -381,3 +381,46 @@ test("a PDF that can't render, is large or isn't here keeps the tile", async () 
   expect(screen.getByText("PDF · 4 KB")).toBeTruthy();
   expect(screen.getAllByRole("button")).toHaveLength(3);
 });
+
+test("cards that left before their turn do not hold up the one still waiting behind them", async () => {
+  const arrive = viewport();
+  const releases = new Map<string, () => void>();
+  vi.mocked(invoke).mockImplementation((command, args) => {
+    if (command === "attachment_workspace_id")
+      return Promise.resolve("workspace");
+    const { id } = args as { id: string };
+    // Only the report reads wait; anything else a card asks answers at once.
+    if (command !== "attachment_html") return Promise.resolve(null);
+    return new Promise((resolve) =>
+      releases.set(id, () => resolve("<h1>Report</h1>")),
+    );
+  });
+  const reads = () =>
+    vi
+      .mocked(invoke)
+      .mock.calls.filter(([command]) => command === "attachment_html")
+      .map(([, args]) => (args as { id: string }).id);
+  const card = (id: string) => (
+    <AttachmentCard
+      key={id}
+      file={stored(id, `${id}.html`)}
+      onOpen={() => {}}
+    />
+  );
+  const ids = ["busy-a", "busy-b", "gone-c", "gone-d", "stays-e"];
+  const view = render(<>{ids.map(card)}</>);
+  arrive();
+  // Two reads run at a time; the other three wait their turn.
+  await waitFor(() => expect(reads()).toEqual(["busy-a", "busy-b"]));
+  // Two of the waiting cards leave (a ticket switch, a folded list).
+  view.rerender(<>{["busy-a", "busy-b", "stays-e"].map(card)}</>);
+  await act(async () => {
+    releases.get("busy-a")!();
+    releases.get("busy-b")!();
+  });
+  // The one left waiting is read, though both turns went first to cards that were gone.
+  await waitFor(() => expect(reads()).toContain("stays-e"));
+  expect(reads()).not.toContain("gone-c");
+  expect(reads()).not.toContain("gone-d");
+  await act(async () => releases.get("stays-e")!());
+});

@@ -51,9 +51,19 @@ const keptPages = new Map<string, { url: string; pages: number }>();
 const waiting: Array<() => void> = [];
 let running = 0;
 
+/** Starts waiting reads while there is room. A read whose card has left is dropped
+ *  without taking a turn, so it can never hold up the ones behind it. */
+function pump() {
+  while (running < CONCURRENT) {
+    const next = waiting.shift();
+    if (!next) return;
+    next();
+  }
+}
+
 function schedule<T>(task: () => Promise<T>, cancelled: () => boolean) {
   return new Promise<T | undefined>((resolve, reject) => {
-    const start = () => {
+    waiting.push(() => {
       if (cancelled()) {
         resolve(undefined);
         return;
@@ -63,11 +73,10 @@ function schedule<T>(task: () => Promise<T>, cancelled: () => boolean) {
         .then(resolve, reject)
         .finally(() => {
           running -= 1;
-          waiting.shift()?.();
+          pump();
         });
-    };
-    if (running < CONCURRENT) start();
-    else waiting.push(start);
+    });
+    pump();
   });
 }
 
