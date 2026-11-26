@@ -169,8 +169,24 @@ function hideSetupChecklist() {
   );
 }
 
+/** A command line that is set up, so no page needs the person when Settings opens. */
+const healthyCli = {
+  found: true,
+  on_path: true,
+  path: "/usr/local/bin/ticketd",
+  version: "0.1.0",
+  version_matches: true,
+  workspace_path: "/w",
+  workspace_matches: true,
+  app_version: "0.1.0",
+  app_workspace_path: "/w",
+  suggested_directory: "~/.local/bin",
+};
+const withHealthyCli: typeof bridgeDefault = (command, args) =>
+  command === "check_cli" ? healthyCli : bridgeDefault(command, args);
+
 test("Settings opens on Set up ticketd while it is unfinished, and on Appearance once it is hidden", async () => {
-  bridge.invoke.mockImplementation(bridgeDefault);
+  bridge.invoke.mockImplementation(withHealthyCli);
   const first = render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
   expect(
@@ -184,6 +200,51 @@ test("Settings opens on Set up ticketd while it is unfinished, and on Appearance
     await screen.findByRole("heading", { level: 1, name: "Appearance" }),
   ).toBeTruthy();
   expect(screen.queryByRole("button", { name: /^Set up ticketd/ })).toBeNull();
+});
+
+test("Settings opens on the page that needs the person, ahead of Set up ticketd, with its mark and its line in the sidebar", async () => {
+  // The default bridge has no ticketd command on this computer.
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {});
+  expect(
+    screen.getByRole("button", { name: "Set up the command line" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Command line" }),
+  ).toBeTruthy();
+  const nav = within(
+    screen.getByRole("navigation", { name: "Settings sections" }),
+  );
+  expect(
+    within(nav.getByRole("button", { name: /^Command line/ })).getByRole(
+      "img",
+      { name: "Needs setup" },
+    ),
+  ).toBeTruthy();
+});
+
+test("with nothing to fix, Settings opens on the page last used", async () => {
+  hideSetupChecklist();
+  bridge.invoke.mockImplementation(withHealthyCli);
+  const first = render(<App />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Appearance" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Attention" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Attention" }),
+  ).toBeTruthy();
+  first.unmount();
+  render(<App />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Attention" }),
+  ).toBeTruthy();
 });
 
 afterEach(() => {
@@ -13279,6 +13340,7 @@ test.each(["MacIntel", "Win32"])(
 test("Settings Escape and palette Reset return to visible section navigation, and the search field gives way to its trigger", async () => {
   hideSetupChecklist();
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "check_cli") return healthyCli;
     if (
       command === "plugin:window|set_background_color" ||
       command === "plugin:webview|set_webview_background_color"

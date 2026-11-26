@@ -28,9 +28,11 @@ import type { DocumentCommands } from "@/features/documents/Documents";
 import type { AttachmentCommands } from "@/features/attachments/AttachmentLibrary";
 import {
   initialSettingsPage,
+  navSectionOf,
   resolveSettingsPage,
   type LegacySettingsPageId,
   type SettingsPageId,
+  type SettingsSectionId,
 } from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
 import { client, type ContextGraph as GraphData } from "@/lib/api/client";
@@ -45,7 +47,7 @@ import {
   type View,
 } from "@/components/layout/WorkspaceSidebar";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
-import { usePreferences, useThemeSync } from "@/lib/preferences";
+import { setPreference, usePreferences, useThemeSync } from "@/lib/preferences";
 import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { ReturnCrumb, ShellSlotProvider } from "@/components/ui/list-header";
@@ -345,8 +347,17 @@ function AppContent() {
   const [documentListRequest, setDocumentListRequest] = useState(0);
   const [creatingPlan, setCreatingPlan] = useState(false);
   // Settings opens on Set up ticketd until it is finished or hidden.
-  const { setupHidden, setupFinished } = usePreferences();
+  const { setupHidden, setupFinished, settingsPage } = usePreferences();
   const setupPending = !setupHidden && !setupFinished;
+  // The first page with a problem to fix, kept by the Settings state.
+  const needsPage = useRef<SettingsSectionId | null>(null);
+  // The page last used comes back when nothing needs the person.
+  useEffect(() => {
+    if (view !== "settings") return;
+    const page = navSectionOf(settingsSection);
+    if (page && page !== "setup" && (page !== "automations" || chat.enabled))
+      setPreference("settingsPage", page);
+  }, [view, settingsSection, chat.enabled]);
   const openView = (next: typeof view) => {
     if (next === "documents") {
       // Sidebar "Documents" returns to the list, not to where a reader came from.
@@ -357,7 +368,13 @@ function AppContent() {
     }
     if (next === "settings" && view !== "settings") {
       setViewBeforeSettings(view);
-      setSettingsSection(initialSettingsPage({ setupPending }));
+      setSettingsSection(
+        initialSettingsPage({
+          setupPending,
+          needs: needsPage.current,
+          last: settingsPage,
+        }),
+      );
     }
     setView(next);
   };
@@ -1002,6 +1019,7 @@ function AppContent() {
                   <SettingsStateProvider
                     active={view === "settings"}
                     onOpenPage={setSettingsSection}
+                    needsPage={needsPage}
                   >
                     <SidebarProvider open={!sidebarCollapsed}>
                       <StatusLineSpot>

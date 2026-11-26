@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { IconTile } from "@/components/ui/icon-tile";
 import { StatusDot } from "@/components/ui/status-dot";
 import { useIsMobile } from "@/hooks/use-mobile";
+import { useNeeds } from "@/features/settings/use-needs";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import "@/features/settings/layout/settings-layout.css";
 
@@ -66,8 +67,9 @@ export function SettingsPage({
   children: ReactNode;
 }) {
   const heading = useRef<HTMLHeadingElement>(null);
-  const { navOpen = false, setNavOpen, needsSetup } = useSettingsState();
-  const setup = Object.values(needsSetup).some(Boolean);
+  const { navOpen = false, setNavOpen } = useSettingsState();
+  // The trigger carries the dot while any page does.
+  const setup = useNeeds().length > 0;
   const mobile = useIsMobile();
   // Opening a page replaces what held focus; land on its title.
   useEffect(() => {

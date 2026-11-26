@@ -1,5 +1,5 @@
 import { useContext, useEffect } from "react";
-import { StatusDot } from "@/components/ui/status-dot";
+import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
@@ -20,6 +20,64 @@ import {
 } from "@/features/settings/detailed-logging";
 import { SettingsNavigation } from "@/lib/settings-navigation";
 import { relativeDateTime } from "@/lib/format";
+import { useNeeds } from "@/features/settings/use-needs";
+import {
+  sourcesNeedYou,
+  updateNeedsYou,
+} from "@/features/settings/settings-needs";
+import { SIGNED_OUT } from "@/features/settings/sources/source-rows";
+import { useUpdates } from "@/features/updates/update-state";
+
+/**
+ * One problem on the status line: a line that opens its page, and its one
+ * action. The collapsed sidebar hides the second line, so the tooltip repeats it.
+ */
+function NeedLine({
+  id,
+  tone,
+  label,
+  detail,
+  action,
+  actionName,
+  folded,
+  onOpen,
+  onAct = onOpen,
+}: {
+  id: string;
+  tone: StatusDotTone;
+  label: string;
+  detail: string;
+  action: string;
+  /** What the action is for, when the word alone ("Set up") would be ambiguous among the lines. */
+  actionName?: string;
+  folded: boolean;
+  /** The line itself: opens the page that has the fix. */
+  onOpen: () => void;
+  /** The action; opens the same page unless it fixes the problem right here. */
+  onAct?: () => void;
+}) {
+  return (
+    <div className="sidebar-source">
+      <Tooltip content={folded ? `${label} · ${detail}` : null}>
+        <button
+          type="button"
+          className="sidebar-source-line"
+          onClick={onOpen}
+          aria-describedby={id}
+        >
+          <span className="sidebar-source-label">
+            <StatusDot tone={tone} size={10} />
+            {label}
+          </span>
+          <small id={id}>{detail}</small>
+        </button>
+      </Tooltip>
+      <Button variant="ghost" size="sm" aria-label={actionName} onClick={onAct}>
+        {action}
+      </Button>
+    </div>
+  );
+}
 
 export function SourceStatusFooter() {
   const now = useNow();
@@ -38,49 +96,120 @@ export function SourceStatusFooter() {
   useEffect(() => {
     void refreshDetailedLogging();
   }, []);
-  if (sources.length === 0 && !synced && !loggingSince) return null;
+  // What needs the person, from the one model the Settings nav marks read too.
+  const needs = useNeeds();
+  const needing = (kind: string) => needs.some((need) => need.kind === kind);
+  const updates = useUpdates();
+  const update = updateNeedsYou(updates?.snapshot ?? null);
+  const updateInfo =
+    updates && "update" in updates.snapshot && updates.snapshot.update
+      ? updates.snapshot.update
+      : null;
+  // A connection whose extension is missing has no health to show; say it here.
+  const missing = sourcesNeedYou(entries, sources).filter(
+    (row) =>
+      row.status === "Unavailable" &&
+      row.entry.saved &&
+      !sources.some((status) => status.connection_id === row.entry.saved?.id),
+  );
+  const open =
+    (page: Parameters<NonNullable<typeof openSettingsPage>>[0]) => () =>
+      openSettingsPage?.(page);
+  // Beyond the sync and source lines, what else the group says.
+  const others =
+    needing("command-line") ||
+    needing("agent-skills") ||
+    !!update ||
+    missing.length > 0;
+  if (sources.length === 0 && !synced && !loggingSince && !others) return null;
   return (
     <div
       className="sidebar-sources"
       role="group"
       aria-label={
-        !synced
-          ? sources.length > 0
-            ? "Ticket sources"
-            : "Detailed logging"
-          : sources.length > 0
-            ? "Sync and ticket sources"
-            : "Sync"
+        others
+          ? "Status"
+          : !synced
+            ? sources.length > 0
+              ? "Ticket sources"
+              : "Detailed logging"
+            : sources.length > 0
+              ? "Sync and ticket sources"
+              : "Sync"
       }
     >
       {synced && <SyncStatusLine />}
-      {loggingSince && (
-        <div className="sidebar-source">
-          <Tooltip content={folded ? "Detailed logging is on" : null}>
-            <button
-              type="button"
-              className="sidebar-source-line"
-              onClick={() => openSettingsPage?.("diagnostics")}
-              aria-describedby="sidebar-detailed-logging"
-            >
-              <span className="sidebar-source-label">
-                <StatusDot tone="attention" size={10} />
-                Detailed logging is on
-              </span>
-              <small id="sidebar-detailed-logging">
-                Started {relativeDateTime(loggingSince, now)}
-              </small>
-            </button>
-          </Tooltip>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => openSettingsPage?.("diagnostics")}
-          >
-            Save report
-          </Button>
-        </div>
+      {needing("command-line") && (
+        <NeedLine
+          id="sidebar-command-line"
+          tone="attention"
+          label="Command line needs setup"
+          detail="Agents can’t use ticketd yet"
+          action="Set up"
+          actionName="Set up the command line"
+          folded={folded}
+          onOpen={open("command-line")}
+        />
       )}
+      {needing("agent-skills") && (
+        <NeedLine
+          id="sidebar-agent-skills"
+          tone="attention"
+          label="Agent skills need setup"
+          detail="An agent doesn’t know ticketd"
+          action="Set up"
+          actionName="Set up agent skills"
+          folded={folded}
+          onOpen={open("agent-skills")}
+        />
+      )}
+      {update && updateInfo && (
+        <NeedLine
+          id="sidebar-update"
+          tone={update === "ready" ? "unread" : "attention"}
+          label={
+            update === "ready"
+              ? "Update ready"
+              : update === "available"
+                ? "Update available"
+                : "Update failed"
+          }
+          detail={`ticketd ${updateInfo.version}`}
+          action={update === "ready" ? "Restart" : "Open About"}
+          {...(update === "ready" && { actionName: "Restart to update" })}
+          folded={folded}
+          onOpen={open("about")}
+          onAct={
+            update === "ready" && updates
+              ? () => updates.openRestart(updateInfo)
+              : open("about")
+          }
+        />
+      )}
+      {loggingSince && (
+        <NeedLine
+          id="sidebar-detailed-logging"
+          tone="attention"
+          label="Detailed logging is on"
+          detail={`Started ${relativeDateTime(loggingSince, now)}`}
+          action="Save report"
+          folded={folded}
+          onOpen={open("diagnostics")}
+        />
+      )}
+      {missing.map((row) => (
+        <NeedLine
+          key={`missing-${row.id}`}
+          id={`sidebar-source-missing-${row.id}`}
+          tone="attention"
+          label={`${row.name} unavailable`}
+          detail="Its extension is missing"
+          action="Open"
+          actionName={`Open ${row.name}`}
+          folded={folded}
+          onOpen={() => openSettings(row.entry.saved?.id)}
+        />
+      ))}
       {sources.map((status) => {
         const connection = status.connection_id;
         const row = connection
@@ -98,20 +227,27 @@ export function SourceStatusFooter() {
         const warning =
           state === "unavailable" || state === "partial" || state === "delayed";
         const count = status.unavailable_tickets;
+        // The account is the problem, so the fix is signing in, not trying again.
+        const signedOut =
+          state === "unavailable" &&
+          !!status.error &&
+          SIGNED_OUT.includes(status.error.code);
         const label =
           state === "refreshing"
             ? `Refreshing ${name}…`
             : state === "synced"
               ? `${name} synced`
-              : count > 0
-                ? `${count} source ${count === 1 ? "issue" : "issues"}`
-                : state === "unavailable"
-                  ? `${name} unavailable`
-                  : state === "delayed"
-                    ? `${name} refresh delayed`
-                    : state === "partial"
-                      ? `${name} partly refreshed`
-                      : `${name} not synced yet`;
+              : signedOut
+                ? `${name} needs sign-in`
+                : count > 0
+                  ? `${count} source ${count === 1 ? "issue" : "issues"}`
+                  : state === "unavailable"
+                    ? `${name} unavailable`
+                    : state === "delayed"
+                      ? `${name} refresh delayed`
+                      : state === "partial"
+                        ? `${name} partly refreshed`
+                        : `${name} not synced yet`;
         // The line under the label; the collapsed sidebar hides it, so the
         // tooltip repeats it.
         const detail =
@@ -156,9 +292,11 @@ export function SourceStatusFooter() {
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => void refreshAll()}
+                onClick={() =>
+                  signedOut ? openSettings(connection) : void refreshAll()
+                }
               >
-                Retry
+                {signedOut ? "Sign in" : "Retry"}
               </Button>
             )}
           </div>

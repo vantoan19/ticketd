@@ -59,6 +59,48 @@ test("Settings opens on Set up ticketd while it is neither finished nor hidden, 
   expect(initialSettingsPage({ setupPending: false })).toBe("appearance");
 });
 
+test("Settings opens on the page that needs the person before anything else", () => {
+  expect(
+    initialSettingsPage({
+      setupPending: true,
+      needs: "workspace-sync",
+      last: "files",
+    }),
+  ).toBe("workspace-sync");
+  expect(
+    initialSettingsPage({ setupPending: false, needs: "ticket-sources" }),
+  ).toBe("ticket-sources");
+});
+
+test("with nothing to fix, Settings opens on the page last used, once Set up ticketd is out of the way", () => {
+  expect(initialSettingsPage({ setupPending: false, last: "files" })).toBe(
+    "files",
+  );
+  // Set up ticketd comes first while it is unfinished.
+  expect(initialSettingsPage({ setupPending: true, last: "files" })).toBe(
+    "setup",
+  );
+  // An old name resolves; a page that is gone, Search or a thing opened in place is not come back to.
+  expect(initialSettingsPage({ setupPending: false, last: "chat" })).toBe(
+    "agents",
+  );
+  expect(initialSettingsPage({ setupPending: false, last: "setup" })).toBe(
+    "appearance",
+  );
+  expect(initialSettingsPage({ setupPending: false, last: "search" })).toBe(
+    "appearance",
+  );
+  expect(
+    initialSettingsPage({ setupPending: false, last: "source-github" }),
+  ).toBe("appearance");
+  expect(initialSettingsPage({ setupPending: false, last: "nonsense" })).toBe(
+    "appearance",
+  );
+  expect(initialSettingsPage({ setupPending: false, last: null })).toBe(
+    "appearance",
+  );
+});
+
 test("Set up ticketd is a page of its own, selected in the sidebar by its own row", () => {
   expect(resolveSettingsPage("setup")).toBe("setup");
   expect(navSectionOf("setup")).toBe("setup");

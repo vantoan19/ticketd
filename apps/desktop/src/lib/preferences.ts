@@ -27,6 +27,8 @@ const preferencesSchema = z.object({
   setupHidden: z.boolean().catch(false),
   /** Every Set up ticketd step was ticked once; nothing comes back to Settings after that. */
   setupFinished: z.boolean().catch(false),
+  /** The Settings page last used; Settings opens on it when nothing needs the person. */
+  settingsPage: z.string().catch("appearance"),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -49,6 +51,7 @@ const DEFAULTS: Preferences = {
   documentGroups: {},
   setupHidden: false,
   setupFinished: false,
+  settingsPage: "appearance",
 };
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

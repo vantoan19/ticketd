@@ -25,7 +25,7 @@ import {
 } from "@/features/settings/settings-sections";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import { SetupRing } from "@/features/setup/SetupRing";
-import { useUpdates } from "@/features/updates/update-state";
+import { useNeeds } from "@/features/settings/use-needs";
 import "@/features/settings/settings.css";
 
 interface NavItem {
@@ -41,14 +41,13 @@ interface NavIndicator {
 }
 
 /**
- * The nav's items and the dot each carries: "Needs setup" (attention) on
- * Command line, Agent skills and Agents when the page would ask for a step. The
- * page says the same words in its StatusLabel.
+ * The nav's items and the dot each carries. A dot says the page needs the
+ * person (the one `useNeeds` model the sidebar's status line reads too), and
+ * the page says the same words in its own StatusLabel. Healthy pages carry none.
  */
 function useSettingsNavItems() {
-  const { needsSetup } = useSettingsState();
+  const needs = useNeeds();
   const chat = useChatFeature();
-  const update = useUpdates()?.snapshot;
   // Automations are part of Chats: their switch shows and hides both.
   // Set up ticketd has a row of its own above the groups (see SettingsNav).
   const items: NavItem[] = SETTINGS_SECTIONS.filter(
@@ -56,14 +55,12 @@ function useSettingsNavItems() {
       section.id !== "setup" && (section.id !== "automations" || chat.enabled),
   );
   const indicator = (id: SettingsSectionId): NavIndicator | null => {
-    if (id === "about" && update?.status === "ready" && update.dismissed)
-      return { label: "Update ready", tone: "unread" };
-    if (
-      (id === "command-line" || id === "agent-skills" || id === "agents") &&
-      needsSetup[id]
-    )
-      return { label: "Needs setup", tone: "attention" };
-    return null;
+    const need = needs.find((candidate) => candidate.page === id);
+    if (!need) return null;
+    return {
+      label: need.mark,
+      tone: need.kind === "update" ? "unread" : "attention",
+    };
   };
   return { items, indicator };
 }
