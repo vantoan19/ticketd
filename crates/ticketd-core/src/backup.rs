@@ -91,6 +91,8 @@ pub(crate) fn missing_objects(connection: &Connection, version: i64) -> Result<V
 pub(crate) const SAFETY_MARKER: &str = ".safety-";
 /// The marker in the file name of a copy saved before a format migration.
 pub(crate) const PRE_MIGRATION_MARKER: &str = ".pre-migration-";
+/// Between a pre-migration copy's identifier and the version of ticketd that migrated.
+pub(crate) const PRE_MIGRATION_VERSION_MARKER: &str = "-for-";
 
 /// Restore accepts exactly the files that inspecting a backup calls valid.
 pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
@@ -166,11 +168,24 @@ impl Workspace {
         std::fs::create_dir_all(&root)?;
         let _uploads = crate::attachments::lock_uploads(&root)?;
         let mut name = workspace.as_os_str().to_os_string();
-        name.push(format!("{PRE_MIGRATION_MARKER}{}.sqlite3", Uuid::new_v4()));
+        // The version that migrated the file names the update in the list of restore points.
+        name.push(format!(
+            "{PRE_MIGRATION_MARKER}{}{PRE_MIGRATION_VERSION_MARKER}{}.sqlite3",
+            Uuid::new_v4(),
+            env!("CARGO_PKG_VERSION")
+        ));
         let path = PathBuf::from(name);
         save_snapshot(connection, &root, &path, false)?;
         Ok(path)
     }
+}
+
+/// How a snapshot holds the retained attachment files.
+pub(crate) enum Packing<'a> {
+    /// Inside the snapshot, which then restores anywhere.
+    Embedded,
+    /// In this folder, shared with other snapshots: a restore point.
+    Shared(&'a Path),
 }
 
 /// Publish only a fully written single-file snapshot; never clobber another file.
@@ -179,6 +194,16 @@ pub(crate) fn save_snapshot(
     root: &Path,
     path: &Path,
     check_schema: bool,
+) -> Result<(), Error> {
+    save_snapshot_packed(source, root, path, check_schema, &Packing::Embedded)
+}
+
+pub(crate) fn save_snapshot_packed(
+    source: &Connection,
+    root: &Path,
+    path: &Path,
+    check_schema: bool,
+    packing: &Packing<'_>,
 ) -> Result<(), Error> {
     if path.exists() {
         return Err(Error::FileExists(path.to_path_buf()));
@@ -214,7 +239,12 @@ pub(crate) fn save_snapshot(
     if check_schema {
         crate::source::forget_connections(&destination)?;
     }
-    crate::backup_archive::pack(&destination, files)?;
+    match packing {
+        Packing::Embedded => crate::backup_archive::pack(&destination, files)?,
+        Packing::Shared(store) => {
+            crate::backup_archive::pack_external(&destination, files, store)?;
+        }
+    }
     if check_schema {
         // The ladder is not required of the live Workspace: see `Ladder::Unchecked`.
         validate_against(&destination, Ladder::Unchecked)?;

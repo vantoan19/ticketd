@@ -1,22 +1,27 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Minus } from "lucide-react";
-import { client } from "@/lib/api/client";
+import { Plus } from "lucide-react";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
-import { workspaceClient, type BackupRecord } from "@/lib/api/workspace";
+import {
+  workspaceClient,
+  type RestorePoint,
+  type RestorePointList,
+} from "@/lib/api/workspace";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { FailureAlert } from "@/components/ui/failure-alert";
-import { PathText } from "@/components/ui/path-text";
-import { RevealButton } from "@/components/ui/reveal-button";
+import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
-import { StatusLabel } from "@/components/ui/status-label";
-import { formatDateTime } from "@/lib/format";
-import { localDate } from "@/features/settings/settings-format";
+import { plural } from "@/lib/format";
+import {
+  formatBytes,
+  restorePointDay,
+  restorePointWhen,
+} from "@/features/settings/settings-format";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
-import { SafetyBackups } from "@/features/settings/SafetyBackups";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
+import { SettingsLink } from "@/features/settings/layout/SettingsLink";
 import {
   SettingsList,
   SettingsListFooter,
@@ -24,99 +29,81 @@ import {
 } from "@/features/settings/layout/SettingsList";
 import "@/features/settings/restore-review.css";
 
-type LastBackup =
+/** How many restore points show before "Show all". */
+const SHOWN = 3;
+/** The footer says how much disk the points use only from here. */
+const SIZE_SHOWN_FROM = 1024 ** 3;
+
+type Listing =
   | { status: "loading" }
-  | { status: "failed" }
-  | { status: "ready"; record: BackupRecord | null };
+  | { status: "failed"; failure: FailureDescription }
+  | { status: "ready"; list: RestorePointList };
 
-/** What a backup holds, in words: the icons beside them stay neutral. */
-const INCLUDED = [
-  {
-    title: "The whole workspace",
-    detail: "Tickets, Documents, Plans, Projects, activity and evidence",
-  },
-  {
-    title: "Local attachment files",
-    detail: "Every retained file stored on this computer",
-  },
-  {
-    title: "An integrity check",
-    detail: "Run on the saved copy before it is marked Checked",
-  },
-] as const;
-const NOT_INCLUDED = [
-  {
-    title: "Files in Google Drive",
-    detail: "Kept as links and their details, not copied",
-  },
-] as const;
+/** Why a point that was not a daily one was saved, or nothing for a daily one. */
+function labelOf(point: RestorePoint): string | null {
+  switch (point.kind) {
+    case "daily":
+      return null;
+    case "manual":
+      return "Saved by you";
+    case "safety":
+      return "Before restoring";
+    case "pre_migration":
+      return point.update_version
+        ? `Before the ${point.update_version} update`
+        : "Before an update";
+  }
+}
 
-/** The first row: the last backup's file and its Checked status, or why there is none. */
-function LastBackupRow({
-  last,
-  onRetry,
-  onRevealFailure,
+/** A reason from the core as a sentence: capitalized, with its full stop. */
+function sentence(reason: string) {
+  const text = reason.charAt(0).toUpperCase() + reason.slice(1);
+  return text.endsWith(".") ? text : `${text}.`;
+}
+
+function PointRow({
+  point,
+  onRestore,
 }: {
-  last: LastBackup;
-  onRetry: () => void;
-  onRevealFailure: (failure: FailureDescription | null) => void;
+  point: RestorePoint;
+  onRestore: (path: string) => void;
 }) {
-  if (last.status === "loading")
-    return (
-      <div role="status" aria-label="Checking for the last backup">
-        <SettingsRow title="Last backup">
-          <Skeleton className="mt-1 h-2.5 w-60" />
-          <Skeleton className="mt-1.5 h-2 w-40" />
-        </SettingsRow>
-      </div>
-    );
-  if (last.status === "failed")
-    return (
-      <div role="alert">
-        <SettingsRow
-          title={
-            <StatusLabel tone="attention">
-              Couldn't load the last backup
-            </StatusLabel>
-          }
-          description="The backups themselves are fine."
-          trailing={
-            <Button type="button" variant="ghost" size="sm" onClick={onRetry}>
-              Retry
-            </Button>
-          }
-        />
-      </div>
-    );
-  if (!last.record)
-    return (
-      <SettingsRow
-        title="No backups yet"
-        description="Your first backup will be listed here with its date."
-      />
-    );
-  const { record } = last;
+  const when = restorePointWhen(point.saved_at);
+  const label = labelOf(point);
+  const counts = point.summary
+    ? `${plural(point.summary.tickets, "ticket")} · ${plural(point.summary.documents, "Document")}`
+    : null;
   return (
     <SettingsRow
+      tight={!point.problem}
       title={
-        <>
-          Last backup
-          <span className="backups-when">
-            {" · "}
-            {formatDateTime(record.completed_at)}
+        label ? (
+          <span className="inline-flex items-center gap-2">
+            {when}
+            <Badge size="sm">{label}</Badge>
           </span>
-        </>
+        ) : (
+          when
+        )
       }
-      // The file name whole on line one; the folder under it gives way in the
-      // middle, with the full path on hover. The row keeps its height.
-      description={<PathText path={record.path} />}
+      description={point.problem ? sentence(point.problem) : undefined}
       trailing={
-        <>
-          <StatusLabel tone="checked" size="caption">
-            Checked
-          </StatusLabel>
-          <RevealButton path={record.path} onFailure={onRevealFailure} />
-        </>
+        point.problem ? (
+          <span className="settings-hint">Can't be restored</span>
+        ) : (
+          <>
+            {counts && <span className="settings-hint">{counts}</span>}
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              aria-label={`Restore… ${when}${label ? `, ${label}` : ""}`}
+              onClick={() => onRestore(point.path)}
+            >
+              Restore…
+            </Button>
+          </>
+        )
       }
     />
   );
@@ -127,87 +114,67 @@ export type BackupsProps = {
   onWorkspaceReplaced?: (() => void) | undefined;
 };
 
-/** Backups & export › Backups: the last backup, Back up now, Restore and the safety copies. */
+/**
+ * Backups & export › Restore points: the copies to come back to, newest first, saved every
+ * day, with Back up now and Restore… on each. Restore from a file… opens a copy made
+ * elsewhere through the same review.
+ */
 export function BackupsSection({
   onRestore,
   onWorkspaceReplaced,
 }: BackupsProps) {
-  const [last, setLast] = useState<LastBackup>({ status: "loading" });
+  const [listing, setListing] = useState<Listing>({ status: "loading" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const choosing = useRef(false);
+  const [showAll, setShowAll] = useState(false);
   const [restoring, setRestoring] = useState<string | null>(null);
-  const [restoredCount, setRestoredCount] = useState(0);
-  const loadLast = useCallback(async () => {
-    setLast({ status: "loading" });
+  const saving = useRef(false);
+  const read = useCallback(async () => {
     try {
-      setLast({ status: "ready", record: await workspaceClient.lastBackup() });
-    } catch {
-      setLast({ status: "failed" });
+      return {
+        status: "ready" as const,
+        list: await workspaceClient.restorePoints(),
+      };
+    } catch (reason) {
+      return {
+        status: "failed" as const,
+        failure: describeFailure(reason, "list the restore points"),
+      };
     }
   }, []);
+  const load = useCallback(async () => {
+    setListing({ status: "loading" });
+    setListing(await read());
+  }, [read]);
   useEffect(() => {
-    // The initial read: state starts as "loading", so only the result is set.
+    // The first read: state starts as "loading", so only the result is set.
     let current = true;
-    workspaceClient
-      .lastBackup()
-      .then((record) => {
-        if (current) setLast({ status: "ready", record });
-      })
-      .catch(() => {
-        if (current) setLast({ status: "failed" });
-      });
+    void read().then((next) => {
+      if (current) setListing(next);
+    });
     return () => {
       current = false;
     };
-  }, []);
+  }, [read]);
   async function backUp() {
-    // Only one save sheet at a time; the row says nothing until a path returns.
-    if (choosing.current) return;
-    choosing.current = true;
+    if (saving.current) return;
+    saving.current = true;
+    setBusy(true);
     setFailure(null);
     setMessage("");
     try {
-      const path = await workspaceClient.chooseSavePath({
-        title: "Back up ticketd workspace",
-        defaultPath: `ticketd-backup-${localDate()}.sqlite3`,
-        filterName: "ticketd backup",
-        extension: "sqlite3",
-      });
-      if (path === null) return;
-      setBusy(true);
-      let recorded: boolean;
-      try {
-        recorded = await client.backupWorkspace(path);
-      } catch (reason) {
-        // The core says what happened, such as an existing file at the path.
-        setFailure(describeFailure(reason, "save the backup"));
-        return;
-      }
-      // The Last backup row's Checked says it; this line is for screen
-      // readers, unless the row could not be updated.
-      setMessage(
-        recorded
-          ? "Backup saved and checked."
-          : "Backup saved and checked, but the Last backup status could not be updated.",
-      );
-      try {
-        setLast({
-          status: "ready",
-          record: await workspaceClient.lastBackup(),
-        });
-      } catch {
-        // Keep the previous status; the backup itself succeeded.
-      }
+      await workspaceClient.saveRestorePoint();
+      setMessage("Restore point saved.");
+      setListing(await read());
     } catch (reason) {
-      setFailure(describeFailure(reason, "open the save dialog"));
+      setFailure(describeFailure(reason, "save a restore point"));
     } finally {
-      choosing.current = false;
+      saving.current = false;
       setBusy(false);
     }
   }
-  async function chooseBackup() {
+  async function chooseFile() {
     setFailure(null);
     try {
       const path = await workspaceClient.chooseBackupFile({
@@ -218,98 +185,95 @@ export function BackupsSection({
       setFailure(describeFailure(reason, "open the file dialog"));
     }
   }
-  const quiet = message === "Backup saved and checked.";
+  const points = listing.status === "ready" ? listing.list.points : [];
+  const shown = showAll ? points : points.slice(0, SHOWN);
+  const older = points.length - shown.length;
+  const oldest = points.at(-1);
+  const size =
+    listing.status === "ready" && listing.list.total_bytes > SIZE_SHOWN_FROM
+      ? formatBytes(listing.list.total_bytes)
+      : null;
+  const summary = [
+    older > 0 && oldest
+      ? `${older} older, back to ${restorePointDay(oldest.saved_at)}`
+      : null,
+    size,
+  ].filter(Boolean);
   return (
     <>
-      <SettingsSection title="Backups">
-        <SettingsList aria-label="Backups" role="group">
-          <LastBackupRow
-            last={last}
-            onRetry={() => void loadLast()}
-            onRevealFailure={setFailure}
+      <SettingsSection
+        title="Restore points"
+        caption="Copies to come back to, saved on this computer every day. The last 7 are kept."
+        actions={
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            disabled={busy}
+            onClick={() => void backUp()}
+          >
+            <Plus aria-hidden="true" />
+            {busy ? "Backing up…" : "Back up now"}
+          </Button>
+        }
+      >
+        {listing.status === "failed" ? (
+          <FailureState
+            size="inline"
+            failure={listing.failure}
+            onRetry={() => void load()}
           />
-          <SettingsRow
-            title="Back up now"
-            description={
-              <span aria-live="polite">
-                {busy
-                  ? "Copying the workspace and its local attachment files, then checking the copy."
-                  : "Saves a checked copy to a new file you choose. It never replaces an existing file."}
-              </span>
-            }
-            trailing={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy || last.status === "loading"}
-                onClick={() => void backUp()}
-              >
-                {busy ? "Backing up…" : "Back up now…"}
-              </Button>
-            }
-          />
-          <SettingsRow
-            title="Restore from a backup"
-            description="Replaces this workspace after a review. A safety backup of it is saved first."
-            trailing={
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={busy}
-                onClick={() => void chooseBackup()}
-              >
-                Choose backup…
-              </Button>
-            }
-          />
-          {(failure || (message && !quiet)) && (
-            <SettingsListFooter>
+        ) : (
+          <SettingsList aria-label="Restore points" role="group">
+            {listing.status === "loading" && (
+              <div role="status" aria-label="Listing the restore points">
+                <SettingsRow tight>
+                  <Skeleton className="h-2.5 w-45" />
+                </SettingsRow>
+              </div>
+            )}
+            {listing.status === "ready" && points.length === 0 && (
+              <SettingsRow
+                title="No restore points yet"
+                description="One is saved the first time ticketd opens each day."
+              />
+            )}
+            {shown.map((point) => (
+              <PointRow
+                key={point.path}
+                point={point}
+                onRestore={setRestoring}
+              />
+            ))}
+            <SettingsListFooter
+              actions={
+                <SettingsLink onClick={() => void chooseFile()}>
+                  Restore from a file…
+                </SettingsLink>
+              }
+            >
               {failure ? (
                 <FailureAlert size="compact" failure={failure} />
               ) : (
-                message
+                <>
+                  {summary.join(" · ")}
+                  {points.length > SHOWN && (
+                    <>
+                      {summary.length > 0 && " · "}
+                      <SettingsLink onClick={() => setShowAll(!showAll)}>
+                        {showAll ? "Show fewer" : "Show all"}
+                      </SettingsLink>
+                    </>
+                  )}
+                </>
               )}
             </SettingsListFooter>
-          )}
-        </SettingsList>
+          </SettingsList>
+        )}
         <p role="status" className="sr-only">
-          {quiet ? message : ""}
+          {message}
         </p>
       </SettingsSection>
-
-      <SettingsSection title="What a backup contains">
-        <SettingsList>
-          <div className="backups-contains">
-            {[
-              { heading: "Included", items: INCLUDED, Icon: Check },
-              { heading: "Not included", items: NOT_INCLUDED, Icon: Minus },
-            ].map(({ heading, items, Icon }) => (
-              <div key={heading} className="backups-contains-column">
-                <p className="backups-contains-heading">{heading}</p>
-                <ul aria-label={heading}>
-                  {items.map((item) => (
-                    <li key={item.title}>
-                      <Icon size={16} aria-hidden="true" />
-                      <span>
-                        <span className="backups-contains-title">
-                          {item.title}
-                        </span>
-                        <span className="backups-contains-detail">
-                          {item.detail}
-                        </span>
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </SettingsList>
-      </SettingsSection>
-
-      <SafetyBackups key={restoredCount} onRestore={setRestoring} />
 
       {restoring !== null && (
         <RestoreDialog
@@ -317,8 +281,7 @@ export function BackupsSection({
           onClose={() => setRestoring(null)}
           onWorkspaceReplaced={onWorkspaceReplaced}
           onRestored={async () => {
-            setRestoredCount((count) => count + 1);
-            await loadLast();
+            await load();
             await onRestore();
           }}
         />

@@ -152,7 +152,7 @@ fn has_column(connection: &Connection, table: &str, column: &str) -> Result<bool
     )?)
 }
 
-fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
+pub(crate) fn summarize(connection: &Connection) -> Result<WorkspaceSummary, Error> {
     let tickets = if has_column(connection, "tickets", "trashed")? {
         scalar(connection, "SELECT COUNT(*) FROM tickets WHERE trashed = 0")?
     } else {
