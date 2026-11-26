@@ -300,22 +300,22 @@ test("a linked edit commits its input, queue replacement, and receipt before a s
     | {
         snapshot: ReturnType<typeof client.openChat>;
         edits: ReturnType<typeof client.checkQueueEdits>;
-        trash: ReturnType<typeof client.trash>;
       }
     | undefined;
+  let trash: ReturnType<typeof client.trash> | undefined;
   const unlisten = client.subscribe("c1", cursor, (change) => {
     if (observed || change.kind !== "chat" || !change.chat.links.length) return;
     observed = {
       snapshot: client.openChat("c1"),
       edits: client.checkQueueEdits("c1", [command.commandId], [queued.id]),
-      trash: client.trash("c1"),
     };
+    trash = client.trash("c1");
   });
   const unlistenObserver = client.subscribe("c1", cursor, (change) =>
     changes.push(change),
   );
   await client.send("c1", "Edited caption", links, [note], command);
-  await observed?.trash;
+  await trash;
   unlisten();
   unlistenObserver();
   expect(await observed?.snapshot).toMatchObject({
