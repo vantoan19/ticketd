@@ -145,6 +145,11 @@ const availabilitySchema = z.object({
   state: z.enum(["downloaded", "downloading", "not_downloaded"]),
   /** Percent downloaded while `downloading`, when known. */
   progress: z.number().nullable(),
+  /**
+   * Set while `not_downloaded` once runs gave up fetching the file: the
+   * storage's words for why, or "" when none was kept.
+   */
+  failure: z.string().nullable().optional(),
 });
 export type Availability = z.infer<typeof availabilitySchema>;
 

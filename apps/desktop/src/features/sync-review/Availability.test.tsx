@@ -142,7 +142,7 @@ test("the preview of a file that is not downloaded offers Download in place of t
   expect(await screen.findByText("Not downloaded")).toBeTruthy();
   expect(
     screen
-      .getByText("This file is in your Google Drive.")
+      .getByText("It's in Google Drive. Download it to preview it here.")
       .closest('[role="status"]'),
   ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Download · 193 B" })).toBeTruthy();
@@ -173,7 +173,9 @@ test("the preview of a file waiting in S3 names S3, not Google Drive", async () 
     </SyncStatusContext>,
   );
   expect(
-    await screen.findByText("This file is in your S3 bucket."),
+    await screen.findByText(
+      "It's in your S3 bucket. Download it to preview it here.",
+    ),
   ).toBeTruthy();
   expect(screen.queryByText(/Google Drive/)).toBeNull();
 });
@@ -236,4 +238,90 @@ test("availability that cannot be read again keeps what was last known", async (
   );
   await act(async () => {});
   expect(screen.getAllByText("Not downloaded · 193 B")).toHaveLength(2);
+});
+
+const withSync = (status: ReturnType<typeof syncStatus>, apply = () => {}) => (
+  <SyncStatusContext
+    value={{
+      status,
+      apply,
+      refresh: () => Promise.reject(new Error("unused")),
+      openSettings: () => {},
+      openReview: () => {},
+    }}
+  >
+    <AttachmentPreview target={{ id: "a" }} onClose={() => {}} />
+  </SyncStatusContext>
+);
+
+test("a download the runs gave up on shows Couldn't download with Retry and Details", async () => {
+  states = [
+    {
+      id: "a",
+      state: "not_downloaded",
+      progress: null,
+      failure: "the storage did not answer",
+    },
+  ];
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  expect(await screen.findByText("Couldn't download")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Google Drive didn't answer. Nothing changed on this computer.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Download/ })).toBeNull();
+  // Open and Export wait for the bytes, so they stay in place, disabled.
+  for (const name of ["Open file", "Export file"])
+    expect(
+      screen.getByRole<HTMLButtonElement>("button", { name }).disabled,
+    ).toBe(true);
+  await revealFailureDetails();
+  expect(screen.getByText("the storage did not answer")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  await waitFor(() => expect(syncReview.download).toHaveBeenCalledWith("a"));
+});
+
+test("a file whose storage needs sign-in offers Sign in through the sync recovery", async () => {
+  const apply = vi.fn();
+  const signedIn = syncStatus();
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "sync_recover") return signedIn;
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "sync_settings")
+      return {
+        desktop_name: "Laptop",
+        device_code: "KQ",
+        poll_interval_secs: 60,
+        attachment_download: mode,
+      };
+    return {
+      attachment: files[0],
+      status: "missing",
+      media_type: "video/mp4",
+      message: null,
+      can_open: false,
+      usage: { total: 0, entries: [], legacy_drafts_pending: false },
+    };
+  });
+  render(withSync(syncStatus({ recovery: "authorization_expired" }), apply));
+  expect(await screen.findByText("Needs sign-in")).toBeTruthy();
+  expect(
+    screen.getByText("Sign in to Google to download this file."),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
+      .disabled,
+  ).toBe(true);
+  fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+  await waitFor(() => expect(apply).toHaveBeenCalledWith(signedIn));
+});
+
+test("a download in progress reads as one measure and never as fractions of a byte", async () => {
+  states = [{ id: "a", state: "downloading", progress: 18 }];
+  render(<AttachmentPreview target={{ id: "a" }} onClose={() => {}} />);
+  // 18% of 193 B is 34.74 bytes.
+  expect(await screen.findByText("35 of 193 B")).toBeTruthy();
+  expect(screen.getByText("Downloading…", { selector: "h3" })).toBeTruthy();
+  expect(screen.queryByText(/\.\d+ B/)).toBeNull();
 });

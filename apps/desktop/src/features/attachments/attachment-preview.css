@@ -192,44 +192,77 @@
 }
 
 /* One block for every state: a 112 × 72 tile, a title, one sentence and a
-   reserved 32px row, so a file moving between states never shifts it. */
+   reserved 32px row, anchored at the same height so a file moving between
+   states never shifts it. */
 .attachment-state {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  align-self: flex-start;
+  gap: 4px;
   max-width: 360px;
+  margin-top: clamp(40px, 12dvh, 120px);
   text-align: center;
 }
 .attachment-state-tile {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   width: 112px;
   height: 72px;
-  margin-bottom: 4px;
+  margin-bottom: 12px;
+  border-radius: var(--radius-card);
+  background: var(--surface);
+  box-shadow: var(--shadow-border-base);
+  color: var(--muted-foreground);
 }
 .attachment-state-tile svg {
   width: 22px;
   height: 22px;
 }
-.attachment-state p {
+.attachment-state-label {
+  font-family: var(--font-mono);
+  font-size: var(--text-caption);
+  font-weight: 500;
+  line-height: var(--text-caption-line);
+  color: var(--foreground);
+}
+.attachment-state p,
+.attachment-state-title {
   margin: 0;
+}
+.attachment-state-title {
+  font-size: inherit;
+  font-weight: 500;
+  line-height: inherit;
+}
+.attachment-state-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  border-radius: 50%;
+  background: var(--status-blocked);
+  vertical-align: 1px;
 }
 .attachment-state-sentence {
   min-height: calc(2 * var(--text-ui-line));
+  color: var(--muted-foreground);
 }
 .attachment-state-action {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: center;
+  gap: 8px;
   min-height: 32px;
+  margin-top: 8px;
 }
-.attachment-state-progress {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 4px;
+/* The board's bar is wider than the shared 64px one: it is the state's whole action. */
+.attachment-state-progress [data-slot="progress"] {
+  width: 200px;
 }
 .attachment-preview-canvas {
   display: flex;
@@ -260,6 +293,32 @@
   align-self: stretch;
   width: 100%;
   height: 100%;
+}
+/* A page that is still being read: paper with a title bar, lines and a figure,
+   top-aligned and running past the stage's edge like the pages that follow. */
+.attachment-preview-loading[data-shape="page"] {
+  position: relative;
+  overflow: hidden;
+}
+.attachment-loading-page {
+  position: absolute;
+  top: 24px;
+  left: 50%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(calc(100% - 128px), 640px);
+  height: 120%;
+  padding: 36px 40px;
+  transform: translateX(-50%);
+  background: white;
+  box-shadow: var(--shadow-medium);
+}
+.attachment-loading-page i {
+  display: block;
+  /* Paper stays white in both themes, so its bars are black at low strength. */
+  background: black;
+  opacity: 0.08;
 }
 /* Images sit on a checkerboard, so a white or transparent one stays visible on
    the light stage; a tiny one is drawn at least 128px (shell AT-09). */

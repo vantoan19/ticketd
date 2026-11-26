@@ -11,7 +11,6 @@ import { Button } from "@/components/ui/button";
 import { FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
-import { Skeleton } from "@/components/ui/skeleton";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import {
   describeFailure,
@@ -27,7 +26,8 @@ import {
   pageTops,
   stepZoom,
 } from "./pdf-layout";
-import { PreviewState } from "./PreviewState";
+import { extensionLabel } from "./file-words";
+import { PreviewLoading, PreviewState } from "./PreviewState";
 import { ViewBar, ViewBarGroup } from "./ViewBar";
 
 type Loaded =
@@ -96,22 +96,14 @@ export function PdfStage({
     };
   }, [key, workspace, file.id]);
   const current = loaded?.key === key ? loaded : null;
-  if (!current)
-    return (
-      <div
-        role="status"
-        aria-label="Loading preview"
-        className="attachment-preview-loading"
-      >
-        <Skeleton className="h-full w-full" />
-      </div>
-    );
+  if (!current) return <PreviewLoading shape="page" />;
   if ("failure" in current)
     return <FailureState failure={current.failure} onRetry={onRetry} />;
   if ("unreadable" in current)
     return (
       <PreviewState
         family="pdf"
+        label={extensionLabel(file.original_filename)}
         title="Couldn't show this PDF"
         sentence="It may be damaged or password-protected. Open it in its app."
       />

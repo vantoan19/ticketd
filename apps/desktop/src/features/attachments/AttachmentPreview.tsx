@@ -20,12 +20,7 @@ import {
   Link,
   X,
 } from "lucide-react";
-import {
-  Alert,
-  AlertActions,
-  AlertTitle,
-  AlertDescription,
-} from "@/components/ui/alert";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { CopyButton } from "@/components/ui/copy-button";
@@ -44,7 +39,6 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { EmptyState } from "@/components/ui/empty-state";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import { PaneHeader } from "@/components/ui/list-header";
 import {
@@ -58,7 +52,6 @@ import { useCopy } from "@/components/ui/use-copy";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { setPreference, usePreferences } from "@/lib/preferences";
 import { RecordLink } from "@/components/ui/record-link";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Time } from "@/components/ui/time";
 import { Tooltip } from "@/components/ui/tooltip";
 import {
@@ -89,10 +82,10 @@ import { FileIcon } from "./AttachmentThumbnail";
 import { HtmlStage } from "./HtmlStage";
 import { PdfStage, type StageKeys } from "./PdfStage";
 import { TextStage } from "./TextStage";
-import { PreviewState } from "./PreviewState";
+import { PreviewLoading, PreviewState, RetryActions } from "./PreviewState";
 import { RenameAttachment } from "./RenameAttachment";
-import { fileType, purged } from "./file-words";
-import { formatSize } from "./format-size";
+import { extensionLabel, fileType, purged } from "./file-words";
+import { formatProgress, formatSize } from "./format-size";
 import "./attachment-preview.css";
 
 export type AttachmentPreviewCommands = {
@@ -218,6 +211,13 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
   // yet. Once they arrive the preview is read again.
   const awaited = stored !== undefined && stored.state !== "downloaded";
   const absent = stored?.state === "not_downloaded" ? stored.id : "";
+  const sync = useSyncStatus();
+  // The storage wants the person back before it hands the file over.
+  const signedOut =
+    absent !== "" &&
+    (sync.status?.recovery === "authorization_expired" ||
+      error?.code === "not_signed_in" ||
+      error?.code === "unauthenticated");
   const { download } = availability;
   // Where Attachments download when opened, opening one is what fetches it:
   // once per file, so a download that failed waits for the Download button.
@@ -233,7 +233,7 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
           : undefined,
       )
       .catch((reason: unknown) =>
-        setError(describeFailure(reason, "download the file")),
+        setError(describeFailure(reason, "download")),
       );
   }, [absent, download]);
   useEffect(() => {
@@ -325,6 +325,7 @@ function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
     availability,
     stored,
     awaited,
+    signedOut,
     external,
     uploadedCopy,
     gone: file ? purged(file) : false,
@@ -353,7 +354,11 @@ function storedWord(preview: Preview) {
 function storedBlocked(preview: Preview): string | null {
   if (preview.gone) return "Its stored copy was deleted.";
   if (preview.missing) return "It's missing from this computer.";
+  if (preview.stored?.state === "downloading") return "Downloading…";
+  if (preview.signedOut) return "Sign in to download it.";
   if (preview.awaited) return "Download it first.";
+  if (!preview.external && preview.info?.status === "unavailable")
+    return "ticketd can't read the stored copy.";
   return null;
 }
 
@@ -778,6 +783,7 @@ function PreviewStage({
   onChanged: (() => void) | undefined;
 }) {
   const { file, info, busy, error, external, awaited, failed } = preview;
+  const { apply, status: syncStatus } = useSyncStatus();
   const scroller = useRef<HTMLDivElement | null>(null);
   const stageKeys: StageKeys = useRef(null);
   // The stage is also the scroller the formats lay themselves out in.
@@ -789,7 +795,16 @@ function PreviewStage({
     [stageRef],
   );
   const type = fileType(file?.original_filename ?? "", info?.media_type);
-  const storage = storageName(useSyncStatus().status?.provider);
+  const provider = syncStatus?.provider;
+  const storage = storageName(provider);
+  const label = extensionLabel(file?.original_filename ?? "");
+  // What the one sentence says a person can do with a file that has no preview.
+  const see =
+    type.family === "video"
+      ? "watch it"
+      : type.family === "audio"
+        ? "listen to it"
+        : "see it";
   const notice = file?.quarantined && !preview.gone && (
     <Alert size="compact">
       <AlertDescription>
@@ -822,43 +837,49 @@ function PreviewStage({
         onRefresh={preview.refreshDrive}
         uploadedCopy={preview.uploadedCopy}
         copy={preview.copy}
+        family={type.family}
+        label={`${label === "FILE" ? "DRIVE" : label} ↗`}
       />
     );
   else if (file?.purge_state === "purged")
     body = (
-      <EmptyState
+      <PreviewState
+        family={type.family}
+        label={label}
         title="Deleted permanently"
-        description="Its name stays in ticketd. The file itself can only come back from an older backup."
-        {...(onRestoreBackup && {
-          action: (
+        sentence="Its name stays in ticketd. The file itself can only come back from an older backup."
+        action={
+          onRestoreBackup && (
             <Button variant="outline" size="sm" onClick={onRestoreBackup}>
               Restore from a backup…
             </Button>
-          ),
-        })}
+          )
+        }
       />
     );
   else if (file?.purge_state === "pending")
     body = (
-      <EmptyState
+      <PreviewState
+        family={type.family}
+        label={label}
         title="Deleting permanently"
-        description="ticketd started deleting its stored copy. Finish deleting it from the Attachments library."
+        sentence="ticketd started deleting its stored copy. Finish deleting it from the Attachments library."
       />
     );
   else if (preview.missing)
     body = (
-      <Alert tone="attention" className="max-w-120">
-        <AlertTitle>
-          {info?.status === "incomplete"
-            ? "This file is incomplete on this computer"
-            : "This file is missing from this computer"}
-        </AlertTitle>
-        <AlertDescription>
-          It may have been moved or deleted outside ticketd. Its name and the
-          places that use it are kept.
-        </AlertDescription>
-        {(onReplace || onRestoreBackup) && (
-          <AlertActions>
+      <PreviewState
+        family={type.family}
+        label={label}
+        attention
+        title={
+          info?.status === "incomplete"
+            ? "Incomplete on this computer"
+            : "Missing from this computer"
+        }
+        sentence="It may have been moved or deleted outside ticketd. Its name and the places that use it are kept."
+        action={
+          <>
             {onReplace && (
               <Button variant="outline" size="sm" onClick={onReplace}>
                 Replace file…
@@ -869,35 +890,91 @@ function PreviewStage({
                 Restore from a backup…
               </Button>
             )}
-          </AlertActions>
-        )}
-      </Alert>
+          </>
+        }
+      />
     );
   else if (awaited && file) {
     const downloading = preview.stored?.state === "downloading";
     const size = file.size_bytes;
     const percent = preview.stored?.progress ?? null;
     const download = () =>
-      void preview.action("download the file", () =>
+      void preview.action("download", () =>
         preview.availability.download(file.id),
       );
-    body =
-      error && !downloading ? (
-        <FailureState failure={error} onRetry={download} />
-      ) : (
+    const failure = preview.stored?.failure ?? null;
+    const where = provider === "s3" ? storage.place : storage.full;
+    if (preview.signedOut && !downloading)
+      body = (
         <PreviewState
           family={type.family}
+          label={label}
           role="status"
-          title={storageWord(preview.stored)}
-          sentence={`This file is in ${storage.place}.`}
+          attention
+          title="Needs sign-in"
+          sentence={`Sign in to ${provider === "s3" ? "AWS" : "Google"} to download this file.`}
+          action={
+            <Button
+              size="sm"
+              disabled={busy}
+              onClick={() =>
+                void preview.action("sign in", async () => {
+                  apply(await syncApi.recover());
+                })
+              }
+            >
+              Sign in
+            </Button>
+          }
+          extra={error && <FailureAlert size="compact" failure={error} />}
+        />
+      );
+    else if (error && !downloading)
+      body = (
+        <PreviewState
+          family={type.family}
+          label={label}
+          role="alert"
+          title={error.title}
+          sentence={error.sentence}
+          action={<RetryActions onRetry={download} details={error.details} />}
+        />
+      );
+    else if (failure !== null && !downloading)
+      body = (
+        <PreviewState
+          family={type.family}
+          label={label}
+          role="alert"
+          title="Couldn't download"
+          sentence={`${storage.full} didn't answer. Nothing changed on this computer.`}
+          action={
+            <RetryActions
+              onRetry={download}
+              details={failure}
+              disabled={busy}
+            />
+          }
+        />
+      );
+    else
+      body = (
+        <PreviewState
+          family={type.family}
+          label={label}
+          role="status"
+          title={downloading ? "Downloading…" : "Not downloaded"}
+          sentence={
+            downloading
+              ? size !== null && percent !== null
+                ? formatProgress((size * Math.min(percent, 100)) / 100, size)
+                : ""
+              : `It's in ${where}. Download it to preview it here.`
+          }
           action={
             downloading ? (
               size !== null && percent !== null ? (
                 <span className="attachment-state-progress">
-                  <span>
-                    {formatSize((size * Math.min(percent, 100)) / 100)} of{" "}
-                    {formatSize(size)}
-                  </span>
                   <Progress value={percent} aria-label="Download progress" />
                 </span>
               ) : null
@@ -912,16 +989,13 @@ function PreviewStage({
       );
   } else if (failed && file)
     body = (
-      <FailureState
-        failure={{
-          code: "failed",
-          title: `Couldn't show this ${type.word.toLowerCase()}`,
-          sentence:
-            "ticketd may not play how it was saved. Open it in its app, or retry.",
-          action: "retry",
-          details: "",
-        }}
-        onRetry={preview.retry}
+      <PreviewState
+        family={type.family}
+        label={label}
+        role="alert"
+        title={`Couldn't show this ${type.word.toLowerCase()}`}
+        sentence="ticketd may not play how it was saved. Open it in its app, or retry."
+        action={<RetryActions onRetry={preview.retry} />}
       />
     );
   else if (info?.status === "available" && file && info.media_type)
@@ -936,15 +1010,15 @@ function PreviewStage({
     );
   else if (info?.status === "unavailable")
     body = (
-      <FailureState
-        failure={{
-          code: "failed",
-          title: "Couldn't read this file",
-          sentence: "ticketd can't read its stored copy on this computer.",
-          action: "retry",
-          details: info.message ?? "",
-        }}
-        onRetry={preview.retry}
+      <PreviewState
+        family={type.family}
+        label={label}
+        role="alert"
+        title="Couldn't read this file"
+        sentence="ticketd can't read its stored copy on this computer."
+        action={
+          <RetryActions onRetry={preview.retry} details={info.message ?? ""} />
+        }
       />
     );
   else if (info?.pdf && file) {
@@ -1002,36 +1076,30 @@ function PreviewStage({
     );
   else if (info?.status === "too_large")
     body = (
-      <EmptyState
-        icon={<FileIcon family={type.family} />}
+      <PreviewState
+        family={type.family}
+        label={label}
         title="Too large to preview"
-        description="Open it in its app to see it."
+        sentence={`${file?.size_bytes != null ? `It's ${formatSize(file.size_bytes)}. ` : ""}Open it in its app to ${see}.`}
       />
     );
   else if (info)
     body = (
-      <EmptyState
-        icon={<FileIcon family={type.family} />}
+      <PreviewState
+        family={type.family}
+        label={label}
         title={
           type.family === "file"
             ? "No preview for this file"
-            : `No preview for ${type.word} files`
+            : `No preview for ${type.family === "archive" ? `${type.word}s` : `${type.word} files`}`
         }
-        description="Open it in its app to see it."
+        sentence={`Open it in its app to ${type.family === "archive" ? "see what's inside" : see}.`}
       />
     );
   else if (error && !awaited)
     body = <FailureState failure={error} onRetry={preview.retry} />;
   else
-    body = (
-      <div
-        role="status"
-        aria-label="Loading preview"
-        className="attachment-preview-loading"
-      >
-        <Skeleton className="h-full w-full" />
-      </div>
-    );
+    body = <PreviewLoading shape={type.family === "pdf" ? "page" : "block"} />;
   return (
     <div
       ref={stage}

@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
 import { FailureState } from "@/components/ui/failure-alert";
-import { Skeleton } from "@/components/ui/skeleton";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { prepareReport, type PreparedReport } from "./html-report";
-import { PreviewState } from "./PreviewState";
+import { extensionLabel } from "./file-words";
+import { PreviewLoading, PreviewState } from "./PreviewState";
 
 type Loaded =
   | { key: string; report: PreparedReport }
@@ -91,16 +91,7 @@ export function HtmlStage({
     };
   }, [key, workspace, file.id]);
   const current = loaded?.key === key ? loaded : null;
-  if (!current)
-    return (
-      <div
-        role="status"
-        aria-label="Loading preview"
-        className="attachment-preview-loading"
-      >
-        <Skeleton className="h-full w-full" />
-      </div>
-    );
+  if (!current) return <PreviewLoading />;
   if ("failure" in current)
     return <FailureState failure={current.failure} onRetry={onRetry} />;
   const { report } = current;
@@ -108,6 +99,7 @@ export function HtmlStage({
     return (
       <PreviewState
         family="text"
+        label={extensionLabel(file.original_filename)}
         title="This report can't show here"
         sentence="It needs scripts or files that aren't part of the attachment. Open it in your browser."
       />
