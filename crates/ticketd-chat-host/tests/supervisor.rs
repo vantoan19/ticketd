@@ -2076,6 +2076,92 @@ async fn a_linked_edit_refreshes_context_captured_during_harness_open() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_older_link_read_cannot_release_dispatch_before_the_latest_edit_context() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let context_path = path.clone();
+    let (reading, mut reads) = tokio::sync::mpsc::unbounded_channel();
+    f.host = ChatHost::with_context(
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |chat_id| {
+            let chat = Workspace::open(&context_path)
+                .and_then(|core| core.chat(chat_id))
+                .map_err(|error| error.to_string())?;
+            let count = chat.links.len();
+            if count != 0 {
+                let (resume, permit) = std::sync::mpsc::channel();
+                let (finished, finished_read) = tokio::sync::oneshot::channel();
+                if reading.send((count, resume, finished_read)).is_err() || permit.recv().is_err() {
+                    return Ok(None);
+                }
+                let _ = finished.send(());
+            }
+            Ok(Some(format!("linked records: {count}")))
+        })),
+    )
+    .unwrap();
+
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    let older = f.queue("Original one").await;
+    let newer = f.queue("Original two").await;
+    let mut refreshes = std::collections::VecDeque::new();
+    for (original, text, edit_id) in [
+        (older, "Edited one", "edit-one"),
+        (newer, "Edited two", "edit-two"),
+    ] {
+        assert!(
+            f.host
+                .confirm_queue_edit(&f.chat.id, &original.id, edit_id)
+                .await
+                .unwrap()
+        );
+        let link = ChatLink {
+            kind: ChatLinkKind::Ticket,
+            id: f.core().create_ticket(text).unwrap().id,
+        };
+        f.host
+            .send_with_edit(
+                &f.chat.id,
+                Some(edit_id),
+                text,
+                SendMode::Queue,
+                Vec::new(),
+                Some(ChatQueueEdit {
+                    replaces: vec![original.id],
+                    links: vec![link],
+                }),
+            )
+            .await
+            .unwrap();
+        refreshes.push_back(reads.recv().await.unwrap());
+    }
+    let (count, older, older_finished) = refreshes.pop_front().unwrap();
+    assert_eq!(count, 1);
+    let (count, newer, newer_finished) = refreshes.pop_front().unwrap();
+    assert_eq!(count, 2);
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+
+    older.send(()).unwrap();
+    older_finished.await.unwrap();
+    tokio::time::advance(Duration::from_millis(1)).await;
+    f.host.attach(&f.chat.id).await.unwrap();
+    assert_eq!(
+        f.submits().len(),
+        1,
+        "the newest link read still holds dispatch"
+    );
+
+    newer.send(()).unwrap();
+    newer_finished.await.unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(f.submits()[1].text, "linked records: 2\n\nEdited one");
+}
+
+#[tokio::test(start_paused = true)]
 async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_message() {
     let mut f = Fixture::new(FakeAdapter::codex());
     let path = f.path.clone();

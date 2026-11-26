@@ -135,6 +135,7 @@ enum Done {
     /// The ticketd context read again for the live session after its links changed.
     Context {
         generation: RuntimeGeneration,
+        request: Uuid,
         context: Result<Option<String>, String>,
     },
     Interrupted {
@@ -329,7 +330,7 @@ pub(crate) struct Supervisor {
     unpublished: bool,
     /// The context of the live session is being read again; nothing is dispatched until
     /// it is, so the next message carries it.
-    refreshing: Option<RuntimeGeneration>,
+    refreshing: Option<Uuid>,
     /// The person's picks for the next session, new or resumed: New Chat's, or a change
     /// made while no session ran. Kept until one opens.
     start_settings: StartSettings,
@@ -982,7 +983,8 @@ impl Supervisor {
         };
         let (done, chat_id, generation) =
             (self.done.clone(), self.chat_id.clone(), runtime.generation);
-        self.refreshing = Some(generation);
+        let request = Uuid::new_v4();
+        self.refreshing = Some(request);
         tokio::spawn(async move {
             // It runs the CLI and can take seconds: off the async threads.
             let context = tokio::task::spawn_blocking(move || source(&chat_id))
@@ -990,6 +992,7 @@ impl Supervisor {
                 .unwrap_or_else(|error| Err(error.to_string()));
             let _ = done.send(Done::Context {
                 generation,
+                request,
                 context,
             });
         });
@@ -2242,18 +2245,20 @@ impl Supervisor {
             Done::Dispatched { outcome } => self.on_dispatched(outcome),
             Done::Context {
                 generation,
+                request,
                 context,
             } => {
-                if self.refreshing != Some(generation) {
+                if self.refreshing != Some(request) {
                     return;
                 }
                 self.refreshing = None;
                 let current = self.runtime.as_ref().map(|runtime| runtime.generation);
+                if current != Some(generation) {
+                    return;
+                }
                 match context {
                     // Told with the next new turn, and only when it is news to the session.
-                    Ok(Some(context))
-                        if current == Some(generation)
-                            && self.context_given().as_ref() != Some(&context) =>
+                    Ok(Some(context)) if self.context_given().as_ref() != Some(&context) =>
                     {
                         self.session_context = Some(context);
                     }
