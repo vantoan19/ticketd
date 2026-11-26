@@ -19,7 +19,7 @@ You can also clear the verified app’s quarantine attribute in Terminal. Use th
 /usr/bin/xattr -dr com.apple.quarantine /Applications/ticketd.app
 ```
 
-Open **Settings → Command line → Install command-line tool** in ticketd. Approving the administrator prompt links the bundled CLI in `/usr/local/bin`. The per-user option uses `~/.local/bin`. Add that directory to your PATH if needed. Run the same action again if you move the app.
+Open **Settings → Command line → Install command-line tool** in ticketd. Approving the administrator prompt links the bundled CLI in `/usr/local/bin`; if you decline, nothing changes and **Use ~/.local/bin instead** links it there without a password. Add that directory to your PATH if needed. Run the same action again if you move the app.
 
 ### Ubuntu
 
@@ -41,7 +41,7 @@ ticketd --help
 ticketd workspace
 ```
 
-The last command prints the workspace path and format versions without creating or migrating a database. If another CLI takes precedence on PATH, **Settings → Command line** shows its path and version. You can also give the agent the absolute path to the intended executable.
+The last command prints the workspace path and format versions without creating or migrating a database. If another CLI takes precedence on PATH, **Settings → Command line** shows its path and version and offers **Use this app’s ticketd**, which replaces it after one administrator prompt. You can also give the agent the absolute path to the intended executable.
 
 ## Standalone CLI
 

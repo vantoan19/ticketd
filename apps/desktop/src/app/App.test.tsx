@@ -9722,12 +9722,12 @@ test("Settings Command line settles successful checks and Check again updates th
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   const nav = within(
-    screen.getByRole("navigation", { name: "Settings sections" }),
+    await screen.findByRole("navigation", { name: "Settings sections" }),
   );
   fireEvent.click(nav.getByRole("button", { name: /^Command line/ }));
   await act(async () => {});
   expect(reads).toBeLessThanOrEqual(5);
-  expect(screen.getByText("Not found")).toBeTruthy();
+  expect(await screen.findByText("Not installed")).toBeTruthy();
   const cliNav = () =>
     within(nav.getByRole("button", { name: /^Command line/ }));
   expect(cliNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
@@ -9736,13 +9736,13 @@ test("Settings Command line settles successful checks and Check again updates th
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   await act(async () => {});
   expect(
-    screen.getByText("It matches this app and uses this workspace."),
+    await screen.findByText("Matches this app and uses this Workspace."),
   ).toBeTruthy();
   expect(cliNav().queryByRole("img", { name: "Needs setup" })).toBeNull();
   installed = false;
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   await act(async () => {});
-  expect(screen.getByText("Not found")).toBeTruthy();
+  expect(await screen.findByText("Not installed")).toBeTruthy();
   expect(cliNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
   expect(reads).toBeLessThanOrEqual(9);
   fireEvent.click(nav.getByRole("button", { name: "Appearance" }));

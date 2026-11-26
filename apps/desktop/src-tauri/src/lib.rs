@@ -2540,7 +2540,7 @@ pub fn run() -> Result<(), tauri::Error> {
             set_plan,
             cli_status::check_cli,
             cli_status::install_cli,
-            cli_status::remove_older_cli,
+            cli_status::install_cli_in_user_bin,
             notification_permission::notification_permission,
             notification_permission::request_notification_permission,
             notification_permission::open_notification_settings,
