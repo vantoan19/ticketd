@@ -2,14 +2,14 @@ import { useContext } from "react";
 import { FileText, MessageSquareText, Pencil, X } from "lucide-react";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { IconButton } from "@/components/ui/icon-button";
-import { FileRow } from "./FileRow";
+import { FileCard } from "@/features/attachments/FileCard";
 import type { DocumentLink } from "@/features/documents/api";
 
 /**
- * A Document in the rail's Files: its title on one line, a caption naming
- * where it comes from ("Linked", "In the description", "In an update"), and
- * one action revealed on hover: Remove, Edit the description, or Go to the
- * update that mentions it.
+ * A Document in the rail's Files: the same card as a file, its title for the
+ * name and a caption naming where it comes from ("Document · Linked", "Document ·
+ * In the description"), with one action revealed on hover: Remove, Edit the
+ * description, or Go to the update that mentions it.
  */
 export function DocumentRow({
   link,
@@ -66,12 +66,15 @@ export function DocumentRow({
     </IconButton>
   );
   return (
-    <FileRow
-      icon={<FileText aria-hidden="true" />}
-      name={link.target_label}
-      caption={caption}
-      onOpen={() => openDocument?.(link.target_id)}
-      action={action}
-    />
+    <li className="file-card-item">
+      <FileCard
+        glyph={<FileText aria-hidden="true" />}
+        label="DOC"
+        name={link.target_label}
+        caption={`Document · ${caption}`}
+        onOpen={() => openDocument?.(link.target_id)}
+        action={action}
+      />
+    </li>
   );
 }

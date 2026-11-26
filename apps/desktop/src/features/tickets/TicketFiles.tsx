@@ -20,11 +20,11 @@ import type { Attachment } from "@/lib/api/attachments";
 import { useOpenTicket } from "./open-ticket";
 import { DocumentPicker } from "./DocumentPicker";
 import { RailRow, RailSection } from "./RailSection";
+import { FileGrid } from "@/features/attachments/FileCard";
 import { AttachmentDialogs, AttachmentRows } from "./TicketAttachments";
 import { useTicketAttachments } from "./use-ticket-attachments";
 import { DocumentRow } from "./TicketDocuments";
 import { useTicketDocuments } from "./use-ticket-documents";
-import "./ticket-files.css";
 
 /**
  * The rail's Files (S12): the ticket's Documents and attached files in one
@@ -142,7 +142,7 @@ export function TicketFiles({
             />
           )}
           {!empty && (
-            <ul className="rail-files" aria-label="Files">
+            <FileGrid label="Files">
               {(docs.links ?? []).map((link) => (
                 <DocumentRow
                   key={link.target_id}
@@ -160,7 +160,7 @@ export function TicketFiles({
                   setSelected(file);
                 }}
               />
-            </ul>
+            </FileGrid>
           )}
           {empty &&
             !emptyTarget &&

@@ -132,9 +132,9 @@ test("a ticket's attached files say whether they are downloaded", async () => {
       <TicketFiles />
     </TestOpenTicket>,
   );
-  expect(await screen.findByText("193 B · Not downloaded")).toBeTruthy();
-  expect(screen.getByText("193 B · Downloading…")).toBeTruthy();
-  expect(screen.getByText("193 B · On this computer")).toBeTruthy();
+  expect(await screen.findByText("Not downloaded · 193 B")).toBeTruthy();
+  expect(screen.getByText("Downloading… · 193 B")).toBeTruthy();
+  expect(screen.getByText("Markdown · 193 B")).toBeTruthy();
 });
 
 test("the preview of a file that is not downloaded offers Download in place of the file", async () => {
@@ -222,7 +222,7 @@ test("availability that cannot be read again keeps what was last known", async (
       <TicketFiles />
     </TestOpenTicket>,
   );
-  await screen.findAllByText("193 B · Not downloaded");
+  await screen.findAllByText("Not downloaded · 193 B");
   expect(syncReview.availability).toHaveBeenCalledTimes(1);
 
   vi.mocked(syncReview.availability).mockRejectedValue(new Error("busy"));
@@ -235,5 +235,5 @@ test("availability that cannot be read again keeps what was last known", async (
     },
   );
   await act(async () => {});
-  expect(screen.getAllByText("193 B · Not downloaded")).toHaveLength(2);
+  expect(screen.getAllByText("Not downloaded · 193 B")).toHaveLength(2);
 });

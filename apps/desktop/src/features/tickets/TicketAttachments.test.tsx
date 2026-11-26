@@ -9,6 +9,7 @@ import {
   waitFor,
 } from "@testing-library/react";
 import { beforeEach, afterEach, expect, test, vi } from "vitest";
+import userEvent from "@testing-library/user-event";
 import { invoke } from "@tauri-apps/api/core";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { TicketFiles as TicketAttachments } from "./TicketFiles";
@@ -20,6 +21,8 @@ vi.mock("@tauri-apps/api/core", () => ({
   Channel: class {
     onmessage = () => {};
   },
+  convertFileSrc: (value: string) =>
+    `http://attachment-media.localhost/${value}`,
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
 beforeEach(() => {
@@ -350,4 +353,66 @@ test("detaching the open file lands focus on the Files heading", async () => {
       screen.getByRole("heading", { name: "Files" }),
     ),
   );
+});
+
+test("Files shows cards for a mixed set, with a tile for the file that has no still, and the keyboard opens the viewer", async () => {
+  const user = userEvent.setup();
+  const shot = {
+    ...file,
+    id: "shot",
+    display_name: "refund-after-fix.png",
+    original_filename: "refund-after-fix.png",
+    size_bytes: 99328,
+  };
+  const away = {
+    ...file,
+    id: "away",
+    display_name: "load-test.html",
+    original_filename: "load-test.html",
+    size_bytes: 3563110,
+  };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") return [shot, file, away];
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_availability")
+      return [{ id: "away", state: "not_downloaded", progress: null }];
+    if (command === "attachment_preview") {
+      const picture = (args as { id?: string }).id === "shot";
+      return {
+        attachment: picture ? shot : file,
+        status: picture ? "available" : "unsupported",
+        media_type: picture ? "image/png" : null,
+        message: null,
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    }
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const cards = await screen.findAllByRole("button", { name: /\.|Trace/ });
+  expect(cards.map((card) => card.getAttribute("aria-label"))).toEqual([
+    "refund-after-fix.png",
+    "Trace",
+    "load-test.html",
+  ]);
+  expect(screen.getByText("PNG image · 97 KB")).toBeTruthy();
+  expect(screen.getByText("Log · 7 B")).toBeTruthy();
+  // A file that isn't here keeps its labeled tile and says why.
+  await screen.findByText("Not downloaded · 3.4 MB");
+  expect(invoke).not.toHaveBeenCalledWith("attachment_html", expect.anything());
+  // Tab reaches a card and Enter opens the viewer; Esc returns focus to it.
+  await user.tab();
+  await user.tab();
+  const log = screen.getByRole("button", { name: "Trace" });
+  while (document.activeElement !== log) await user.tab();
+  await user.keyboard("{Enter}");
+  await screen.findByRole("dialog");
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(log);
 });

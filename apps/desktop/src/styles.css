@@ -4414,22 +4414,6 @@ kbd,
 .ui-comment-row-meta time:focus-visible {
   outline-offset: -2px;
 }
-.ui-card-file.rail-file-open {
-  height: 44px;
-  min-height: 44px;
-  grid-template-rows: var(--text-preview-line) var(--text-ui);
-  align-content: center;
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-border-base);
-  font-size: var(--text-ui);
-}
-.ui-card-file .rail-file-name {
-  line-height: var(--text-preview-line);
-}
-.ui-card-file .rail-file-caption {
-  line-height: var(--text-ui);
-}
-
 .ticket-header-title {
   color: var(--muted-foreground);
   font-size: var(--text-caption);
@@ -4450,15 +4434,6 @@ kbd,
 .ui-comment-row-meta time {
   display: inline-block;
 }
-
-.ui-card-file.rail-file-open > svg {
-  width: 28px;
-  height: 28px;
-  padding: 6px;
-  border-radius: var(--radius);
-  background: var(--recessed);
-}
-
 /* Triage shares the Card surface; its reading hierarchy sits above a Ticket. */
 .ui-card-triage {
   background: var(--well);

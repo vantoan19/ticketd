@@ -1,6 +1,5 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useState } from "react";
-import { File } from "lucide-react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
@@ -8,15 +7,11 @@ import { AttachmentPreview } from "@/features/attachments/AttachmentPreview";
 import { AttachmentPicker } from "@/features/attachments/AttachmentPicker";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import type { Ticket } from "@/lib/api/client";
-import { formatSize } from "@/features/attachments/format-size";
-import {
-  storageWord,
-  useAvailability,
-} from "@/features/sync-review/availability";
-import { FileRow } from "./FileRow";
+import { AttachmentCard } from "@/features/attachments/AttachmentCard";
+import { useAvailability } from "@/features/sync-review/availability";
 import type { TicketAttachmentsState } from "./use-ticket-attachments";
 
-/** The attached files as rows; each opens its preview. */
+/** The attached files as cards; each opens its preview. */
 export function AttachmentRows({
   files,
   onOpen,
@@ -30,19 +25,13 @@ export function AttachmentRows({
       .map((file) => file.id),
   );
   return files.map((file) => (
-    <FileRow
-      key={file.id}
-      icon={<File aria-hidden="true" />}
-      name={file.display_name}
-      caption={
-        file.kind === "external_reference"
-          ? file.uploaded_copy
-            ? "Google Drive · Uploaded copy"
-            : "Google Drive · External reference"
-          : `${formatSize(file.size_bytes)} · ${storageWord(availability.of(file.id))}`
-      }
-      onOpen={() => onOpen(file)}
-    />
+    <li key={file.id} className="file-card-item">
+      <AttachmentCard
+        file={file}
+        storage={availability.of(file.id)}
+        onOpen={() => onOpen(file)}
+      />
+    </li>
   ));
 }
 
