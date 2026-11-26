@@ -25,7 +25,8 @@ records recency, while `show` just reads the Document after opening the workspac
 ## Documents and Activities
 
 ```sh
-ticketd document create --title "Example document" --body-file detail.md
+ticketd document create --title "Example document" --summary "What changed, in one line." --body-file detail.md
+ticketd document change DOCUMENT_ID --summary "A new one-line summary."
 ticketd document search "search text" --limit 20
 ticketd document link-ticket DOCUMENT_ID T-KQ1
 ticketd activity add T-KQ1 --brief "Example update" --document DOCUMENT_ID --agent agent-name
@@ -54,6 +55,17 @@ and pin/tag commands are available under `document --help`.
 
 For retryable Activity and Document writes and guarded body edits, load
 `ticketd skills get writes`.
+
+## Write Documents people can skim
+
+People decide in seconds whether to read a Document, so make the point easy to find.
+
+- State the outcome in `--summary`: one plain line, no line breaks (they become a
+  space). It is yours to write; ticketd never makes one. `--summary ""` removes it.
+- Use one heading per section, and keep a section to one idea.
+- Write commit hashes short (`a1b2c3d`), not in full.
+- Bold only the lead words of an item, not whole sentences.
+- Put open questions together under a "To decide" heading.
 
 ## Plans
 

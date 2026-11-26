@@ -28,7 +28,7 @@ use crate::{
 
 /// The workspace format version this application reads and writes. The next
 /// format change bumps this and adds one step to [`LADDER`]; nothing else holds the number.
-pub const FORMAT_VERSION: i64 = 100;
+pub const FORMAT_VERSION: i64 = 101;
 
 /// One change to what a Workspace stores. The second argument is the format version
 /// the run started from, `0` for a new Workspace.
@@ -165,6 +165,7 @@ const LADDER: [(i64, Step); FORMAT_VERSION as usize] = [
     (98, |tx, _| sync::migrate_provider(tx)),
     (99, |tx, _| sync::migrate_endpoint(tx)),
     (100, |tx, _| projects::migrate_archived(tx)),
+    (101, |tx, _| documents::migrate_summary(tx)),
 ];
 
 /// Takes a Workspace at format version `from` to the current one, or creates it when

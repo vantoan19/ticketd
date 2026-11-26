@@ -1161,3 +1161,6 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 ## 100
 + column projects.archive_change
 + column projects.archived
+
+## 101
++ column documents.summary

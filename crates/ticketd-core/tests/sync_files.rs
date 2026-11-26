@@ -438,7 +438,7 @@ fn a_malformed_file_is_rejected_with_the_reason_and_changes_nothing() {
             good.replace("trashed: false", "parent: \"T-KQ1\""),
             "'parent'",
         ),
-        (good.replace("format: 1", "format: 5"), "newer ticketd"),
+        (good.replace("format: 1", "format: 6"), "newer ticketd"),
         (good.replace("format: 1", "format: one"), "'format'"),
         (
             good.replace("trashed: false", "source_provider: \"github\""),
@@ -736,4 +736,64 @@ fn every_example_file_in_the_format_document_parses_as_written() {
             ))
         );
     }
+}
+
+#[test]
+fn a_summary_travels_in_the_header_beside_the_title_and_files_without_one_still_read() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut source = workspace(&directory, "source.sqlite3");
+    let with = source
+        .create_document_with_summary(Some("Report"), Some("Shipped; one open question."), "Body")
+        .unwrap();
+    let without = source.create_document(Some("Plain"), "Body").unwrap();
+
+    let text = source
+        .export_sync_record(SyncKind::Document, &with.id)
+        .unwrap()
+        .to_markdown();
+    assert!(
+        text.contains("title: \"Report\"\nsummary: \"Shipped; one open question.\"\n"),
+        "{text}"
+    );
+    // Only a file that carries a summary needs a ticketd that reads one.
+    assert!(text.contains("format: 5\n"), "{text}");
+    let plain = source
+        .export_sync_record(SyncKind::Document, &without.id)
+        .unwrap()
+        .to_markdown();
+    assert!(
+        plain.contains("format: 1\n") && !plain.contains("summary"),
+        "{plain}"
+    );
+
+    // Round trip, and a change on the other computer arrives as one more field.
+    let mut target = workspace(&directory, "target.sqlite3");
+    import_all(&mut target, &export_all(&source));
+    assert_eq!(
+        target.show_document(&with.id).unwrap().summary.as_deref(),
+        Some("Shipped; one open question.")
+    );
+    assert_eq!(target.show_document(&without.id).unwrap().summary, None);
+    assert_eq!(export_all(&target), export_all(&source));
+    let edited = text.replace("Shipped; one open question.", "Done.");
+    target
+        .apply_sync_record(&SyncRecord::parse(&edited).unwrap())
+        .unwrap();
+    assert_eq!(
+        target.show_document(&with.id).unwrap().summary.as_deref(),
+        Some("Done.")
+    );
+
+    // A file that has the field and no more, or drops it, clears it.
+    let dropped = edited
+        .replace("summary: \"Done.\"\n", "")
+        .replace("format: 5", "format: 1");
+    target
+        .apply_sync_record(&SyncRecord::parse(&dropped).unwrap())
+        .unwrap();
+    assert_eq!(target.show_document(&with.id).unwrap().summary, None);
+
+    // A format 1 file may not carry a field it did not have.
+    let old = text.replace("format: 5", "format: 1");
+    assert!(SyncRecord::parse(&old).is_err());
 }
