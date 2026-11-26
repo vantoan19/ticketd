@@ -258,24 +258,24 @@ test("measured, a cut name keeps the end of its second line and its first line s
   expect(name.startsWith(first)).toBe(true);
   // The cut falls between words: the kept end starts at a word, whole.
   expect(second.endsWith("…final.html")).toBe(true);
-  expect(measure(second)).toBeLessThanOrEqual(152);
+  expect(measure(second)).toBeLessThanOrEqual(154);
   // A name that fits in two lines is not cut at all.
   expect(fitName("refund-after-fix-before-merge.png", measure).cut).toBe(false);
 });
 
 test("a wide-script name keeps its end from the second line, and the cut line still fits", () => {
-  // CJK letters are twice as wide: 10 fit a line of the card.
+  // CJK letters are twice as wide: 11 fit a line of the card.
   const measure = (text: string) =>
     [...text].reduce((sum, c) => sum + (c.charCodeAt(0) > 255 ? 14 : 7), 0);
-  // 21 distinct letters: the first line takes 10, the other 11 do not fit under it.
-  const name = Array.from({ length: 21 }, (_, i) =>
+  // 23 distinct letters: the first line takes 11, the other 12 do not fit under it.
+  const name = Array.from({ length: 23 }, (_, i) =>
     String.fromCharCode(0x4e00 + i),
   ).join("");
   const fitted = fitName(name, measure);
   expect(fitted.cut).toBe(true);
   const [first, second] = fitted.lines!;
   const rest = name.slice(first.length);
-  expect(measure(second)).toBeLessThanOrEqual(152);
+  expect(measure(second)).toBeLessThanOrEqual(154);
   // Nothing of line one is repeated on line two.
   const [head, end] = second.split("…") as [string, string];
   expect(rest.startsWith(head) && rest.endsWith(end)).toBe(true);

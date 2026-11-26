@@ -2,8 +2,8 @@ import { expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
 import { breakable, fitName, fitTitle } from "./file-name";
 
-// Seven pixels a letter: 21 letters fit a line of the card.
-const measure = (text: string) => text.length * 7;
+// Just over seven pixels a letter: 21 letters fit the 154px a line of the card allows.
+const measure = (text: string) => text.length * 7.3;
 
 test("the extension stays with the words before it, never alone on a line", () => {
   // The browser may break after "-", "_" and ".", but not before the extension.
@@ -48,14 +48,14 @@ test("unmeasured, a cut name still ends at a whole word", () => {
 });
 
 test("a wide script keeps its end inside the second line, taken from that line", () => {
-  // Every character is 14 wide, so 14 of them overflow a 152px line.
+  // Every character is 14 wide, so 14 of them overflow a 154px line.
   const wide = (text: string) => [...text].length * 14;
   const name = "退款流程修复前后的完整录屏记录文件第一份第二份第三份最终版.mov";
   const fitted = fitName(name, wide);
   const [first, second] = fitted.lines!;
   const end = second!.split("…")[1]!;
   expect(fitted.cut).toBe(true);
-  expect(wide(second!)).toBeLessThanOrEqual(152);
+  expect(wide(second!)).toBeLessThanOrEqual(154);
   expect(name.startsWith(first!)).toBe(true);
   expect(name.endsWith(end)).toBe(true);
   expect(end.endsWith(".mov")).toBe(true);
