@@ -2,16 +2,23 @@ import { useEffect, useState } from "react";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { prepareReport } from "./html-report";
 import { purged } from "./file-words";
+import { openPdf } from "./pdf-document";
 
 /** A picture's still is the picture itself, up to the inline limit. */
 const IMAGE_LIMIT = 5 * 1024 * 1024;
 /** A report is read whole for its still, so the larger ones keep their tile. */
 const HTML_LIMIT = 2 * 1024 * 1024;
+/** A PDF is read whole for its first page, so only the smaller ones get a still. */
+const PDF_LIMIT = 8 * 1024 * 1024;
+/** The first page is drawn this wide: the paper in a card is 109px, at 2x with room. */
+const PAPER_WIDTH = 240;
+const PAPER_MAX_HEIGHT = 480;
 const IMAGE = /\.(png|jpe?g|gif|webp|bmp)$/i;
 const HTML = /\.html?$/i;
+const PDF = /\.pdf$/i;
 
 /** What a card could show in place of its tile, from the file alone. */
-export function stillKind(file: Attachment): "image" | "html" | null {
+export function stillKind(file: Attachment): "image" | "html" | "pdf" | null {
   if (
     file.kind !== "local_snapshot" ||
     file.quarantined ||
@@ -23,12 +30,15 @@ export function stillKind(file: Attachment): "image" | "html" | null {
     return "image";
   if (HTML.test(file.original_filename) && file.size_bytes <= HTML_LIMIT)
     return "html";
+  if (PDF.test(file.original_filename) && file.size_bytes <= PDF_LIMIT)
+    return "pdf";
   return null;
 }
 
 export type Still =
   | { id: string; kind: "image"; url: string }
-  | { id: string; kind: "html"; srcdoc: string };
+  | { id: string; kind: "html"; srcdoc: string }
+  | { id: string; kind: "pdf"; url: string; pages: number };
 
 // Reports are read whole, one or two at a time, and the last few are kept so
 // folding a list or revisiting a ticket does not read them again. A replaced
@@ -36,6 +46,7 @@ export type Still =
 const CONCURRENT = 2;
 const KEPT = 8;
 const kept = new Map<string, string | null>();
+const keptPages = new Map<string, { url: string; pages: number } | null>();
 const waiting: Array<() => void> = [];
 let running = 0;
 
@@ -78,6 +89,38 @@ async function reportStill(
   return srcdoc;
 }
 
+/** The first page of a stored PDF, drawn once as a small image. */
+async function pdfStill(
+  workspace: string,
+  id: string,
+  cancelled: () => boolean,
+) {
+  const key = `${workspace}/${id}`;
+  if (keptPages.has(key)) return keptPages.get(key) ?? null;
+  const still = await schedule(async () => {
+    const document = await openPdf(await attachments.pdf(workspace, id));
+    try {
+      const first = document.pages[0]!;
+      const scale = Math.min(
+        PAPER_WIDTH / first.width,
+        PAPER_MAX_HEIGHT / first.height,
+      );
+      const canvas = window.document.createElement("canvas");
+      await document.render(0, canvas, scale).done;
+      return {
+        url: canvas.toDataURL("image/png"),
+        pages: document.pages.length,
+      };
+    } finally {
+      document.destroy();
+    }
+  }, cancelled).catch(() => null);
+  if (still === undefined) return null;
+  keptPages.set(key, still);
+  if (keptPages.size > KEPT) keptPages.delete(keptPages.keys().next().value!);
+  return still;
+}
+
 /**
  * The still for a card, asked for only once `wanted` (the card is near the
  * viewport). A failure, an unsupported file or a report that cannot show leaves
@@ -103,6 +146,11 @@ export function useStill(file: Attachment, wanted: boolean): Still | null {
             kind,
             url: attachments.mediaUrl(workspace, file.id),
           });
+        return;
+      }
+      if (kind === "pdf") {
+        const page = await pdfStill(workspace, file.id, () => !current);
+        if (current && page) setStill({ id: file.id, kind, ...page });
         return;
       }
       const srcdoc = await reportStill(workspace, file.id, () => !current);

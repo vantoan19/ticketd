@@ -12,6 +12,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { AttachmentCard } from "./AttachmentCard";
 import { FileGrid } from "./FileCard";
 import { fitName } from "./file-name";
+import { openPdf } from "./pdf-document";
+import { fakePdf } from "@/test/fake-pdf";
 import type { Attachment } from "@/lib/api/attachments";
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -21,6 +23,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     `http://attachment-media.localhost/${value}`,
 }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(), save: vi.fn() }));
+vi.mock("./pdf-document", () => ({ openPdf: vi.fn() }));
 afterEach(() => {
   cleanup();
   vi.resetAllMocks();
@@ -256,4 +259,68 @@ test("measured, a cut name keeps the end of its second line and its first line s
   expect(measure(second)).toBeLessThanOrEqual(152);
   // A name that fits in two lines is not cut at all.
   expect(fitName("refund-after-fix-before-merge.png", measure).cut).toBe(false);
+});
+
+test("a PDF's still is its first page as paper, and the caption gains the page count", async () => {
+  const arrive = viewport();
+  const file = stored("pdf", "refunds.pdf", 1.1 * 1048576);
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_workspace_id"
+      ? "workspace"
+      : new Uint8Array([37, 80, 68, 70]),
+  );
+  const pdf = fakePdf(12);
+  vi.mocked(openPdf).mockResolvedValue(pdf.document);
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
+    "data:image/png;base64,AAAA",
+  );
+  render(<AttachmentCard file={file} onOpen={() => {}} />);
+  // The tile and the plain caption come first; nothing is read until it is near.
+  expect(screen.getByText("PDF · 1.1 MB")).toBeTruthy();
+  expect(invoke).not.toHaveBeenCalledWith("attachment_pdf", expect.anything());
+  arrive();
+  const paper = await screen.findByRole("presentation", { hidden: true });
+  expect(paper.getAttribute("src")).toBe("data:image/png;base64,AAAA");
+  expect(paper.hasAttribute("data-paper")).toBe(true);
+  expect(screen.getByText("PDF · 12 pages · 1.1 MB")).toBeTruthy();
+  // Only the first page is drawn, small, and the parsed file is let go.
+  expect(pdf.renders).toHaveLength(1);
+  expect(pdf.renders[0]![0]).toBe(0);
+  expect(pdf.renders[0]![1]).toBeCloseTo(240 / 612);
+  expect(pdf.destroy).toHaveBeenCalled();
+});
+
+test("a PDF that can't render, is large or isn't here keeps the tile", async () => {
+  const arrive = viewport();
+  vi.mocked(invoke).mockImplementation(async (command) =>
+    command === "attachment_workspace_id"
+      ? "workspace"
+      : new Uint8Array([37, 80, 68, 70]),
+  );
+  vi.mocked(openPdf).mockRejectedValue(new Error("password"));
+  const { container } = render(
+    <>
+      <AttachmentCard file={stored("bad", "locked.pdf")} onOpen={() => {}} />
+      <AttachmentCard
+        file={stored("big", "scan.pdf", 9 * 1048576)}
+        onOpen={() => {}}
+      />
+      <AttachmentCard
+        file={stored("away", "away.pdf")}
+        storage={{ id: "away", state: "not_downloaded", progress: null }}
+        onOpen={() => {}}
+      />
+    </>,
+  );
+  arrive();
+  await waitFor(() => expect(openPdf).toHaveBeenCalledTimes(1));
+  await act(async () => {});
+  expect(container.querySelector("img")).toBeNull();
+  for (const id of ["big", "away"])
+    expect(invoke).not.toHaveBeenCalledWith(
+      "attachment_pdf",
+      expect.objectContaining({ id }),
+    );
+  expect(screen.getByText("PDF · 4 KB")).toBeTruthy();
+  expect(screen.getAllByRole("button")).toHaveLength(3);
 });

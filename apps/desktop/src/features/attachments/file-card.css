@@ -99,6 +99,15 @@ iframe.file-card-still {
   transform: scale(calc(176 / 1280));
   transform-origin: top left;
 }
+/* A PDF's first page, as paper: 62% of the frame's width, centered and
+   top-aligned, with a soft shadow. The page is white in both themes. */
+img.file-card-still[data-paper] {
+  inset: 0 auto auto 19%;
+  width: 62%;
+  height: auto;
+  background: white;
+  box-shadow: var(--shadow-medium);
+}
 @keyframes file-card-fade {
   from {
     opacity: 0;

@@ -22,7 +22,7 @@ function tileLabel(file: Attachment) {
  * storage replaces the type word only when the file isn't simply on this
  * computer: "Not downloaded · 3.4 MB", "Quarantined · 2.1 MB".
  */
-function cardCaption(file: Attachment, storage?: Availability) {
+function cardCaption(file: Attachment, storage?: Availability, pages?: number) {
   if (file.kind === "external_reference")
     return file.uploaded_copy
       ? "Google Drive · Uploaded copy"
@@ -34,7 +34,9 @@ function cardCaption(file: Attachment, storage?: Availability) {
       : storage?.state === "not_downloaded"
         ? "Not downloaded"
         : fileType(file.original_filename).word);
-  return `${lead} · ${formatSize(file.size_bytes)}`;
+  // A PDF's page count is known once its first page has been read.
+  const count = pages ? ` · ${pages} ${pages === 1 ? "page" : "pages"}` : "";
+  return `${lead}${count} · ${formatSize(file.size_bytes)}`;
 }
 
 /**
@@ -66,7 +68,11 @@ export function AttachmentCard({
       ref={ref}
       name={named ?? file.display_name}
       tooltip={named ? file.display_name : undefined}
-      caption={cardCaption(file, storage)}
+      caption={cardCaption(
+        file,
+        storage,
+        still?.kind === "pdf" ? still.pages : undefined,
+      )}
       glyph={<FileIcon family={fileType(file.original_filename).family} />}
       label={tileLabel(file)}
       still={
@@ -76,6 +82,14 @@ export function AttachmentCard({
             src={still.url}
             alt=""
             loading="lazy"
+            onError={() => setBroken(still.id)}
+          />
+        ) : still?.kind === "pdf" && broken !== still.id ? (
+          <img
+            className="file-card-still"
+            data-paper=""
+            src={still.url}
+            alt=""
             onError={() => setBroken(still.id)}
           />
         ) : still?.kind === "html" ? (
