@@ -22,6 +22,7 @@ export const failureCodes = [
   "conflict",
   "invalid_project_remote",
   "project_remote_taken",
+  "project_archived",
   "project_source_host_mismatch",
   "project_checkout_required",
   "source_repository_not_listed",

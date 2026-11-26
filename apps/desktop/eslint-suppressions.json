@@ -52,11 +52,6 @@
       "count": 4
     }
   },
-  "src/features/projects/Projects.tsx": {
-    "shadcn/no-restyle": {
-      "count": 1
-    }
-  },
   "src/features/tickets/Duplicates.tsx": {
     "shadcn/no-restyle": {
       "count": 1

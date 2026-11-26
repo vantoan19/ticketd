@@ -701,14 +701,18 @@
   flex-wrap: wrap;
 }
 @media (max-width: 640px) {
-  .ui-management-page-centered .ui-page-header {
+  .ui-management-page-centered .ui-page-header,
+  .ui-page-header[data-wrap-actions] {
     flex-wrap: wrap;
   }
-  .ui-management-page-centered .ui-page-header-text {
+  .ui-management-page-centered .ui-page-header-text,
+  .ui-page-header[data-wrap-actions] .ui-page-header-text {
     flex-basis: 100%;
   }
-  .ui-management-page-centered .ui-page-header-actions {
+  .ui-management-page-centered .ui-page-header-actions,
+  .ui-page-header[data-wrap-actions] .ui-page-header-actions {
     width: 100%;
+    flex-wrap: wrap;
     justify-content: flex-end;
   }
   .ui-management-page-centered {

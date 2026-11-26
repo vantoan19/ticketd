@@ -848,3 +848,83 @@ fn entering_duplicate_needs_a_canonical_ticket_through_every_entry() {
         "{error:?}"
     );
 }
+
+#[test]
+fn archived_projects_refuse_new_assignments_and_roll_back_the_batch() {
+    let mut world = world(|_, _, _| {});
+    let workspace = &mut world.workspace;
+    let patch = TicketPatch {
+        project_id: Some(Some(world.project.clone())),
+        ..Default::default()
+    };
+    workspace
+        .change_ticket(&world.subject, patch.clone())
+        .unwrap();
+    workspace
+        .set_project_archived(&world.project, true)
+        .unwrap();
+
+    assert!(matches!(
+        workspace.create_ticket_in_project("Refused", Some(&world.project)),
+        Err(Error::ProjectArchived(name)) if name == "Website"
+    ));
+    assert!(matches!(
+        workspace.change_ticket(&world.other, patch.clone()),
+        Err(Error::ProjectArchived(_))
+    ));
+    let change = TicketChange {
+        patch: patch.clone(),
+        ..Default::default()
+    };
+    assert!(matches!(
+        workspace.apply_ticket_change(&world.other, change.clone()),
+        Err(Error::BatchOperation { index: 0, source }) if matches!(*source, Error::ProjectArchived(_))
+    ));
+    assert!(matches!(
+        workspace.apply_batch(vec![
+            BatchOperation::Create {
+                name: "first".into(),
+                title: "Rolled back".into(),
+                project_id: None,
+            },
+            BatchOperation::Change {
+                ticket: world.other.clone(),
+                change: Box::new(change),
+            },
+        ]),
+        Err(Error::BatchOperation { index: 1, source }) if matches!(*source, Error::ProjectArchived(_))
+    ));
+    assert_eq!(workspace.active_tickets(10).unwrap().len(), 2);
+    assert!(
+        workspace
+            .show_ticket(&world.other)
+            .unwrap()
+            .project_id
+            .is_none()
+    );
+
+    let updated = workspace
+        .change_ticket(
+            &world.subject,
+            TicketPatch {
+                title: Some("Still editable".into()),
+                ..patch
+            },
+        )
+        .unwrap();
+    assert_eq!(updated.title, "Still editable");
+    assert_eq!(updated.project_id.as_deref(), Some(world.project.as_str()));
+    assert!(
+        workspace
+            .change_ticket(
+                &world.subject,
+                TicketPatch {
+                    project_id: Some(None),
+                    ..Default::default()
+                },
+            )
+            .unwrap()
+            .project_id
+            .is_none()
+    );
+}

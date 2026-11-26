@@ -9,6 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { client } from "@/lib/api/client";
 import { workspaceClient } from "@/lib/api/workspace";
@@ -123,6 +124,173 @@ test("empty state explains and offers New project", () => {
   ).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "New project" }));
   expect(screen.getByRole("dialog", { name: "New project" })).toBeTruthy();
+});
+
+test("archives, undoes and reactivates from the Archived view", async () => {
+  let saved = project as typeof project & { archived?: boolean };
+  const update = vi
+    .spyOn(client, "setProjectArchived")
+    .mockImplementation(async (_id, archived) => {
+      saved = { ...project, archived };
+      return { project: saved, change: archived ? "archived" : "reactivated" };
+    });
+  function Page() {
+    const [projects, setProjects] = useState([saved]);
+    const [archived, setArchived] = useState(false);
+    return (
+      <Projects
+        {...props}
+        projects={projects}
+        archived={archived}
+        onArchivedChange={setArchived}
+        onChange={async () => setProjects([saved])}
+      />
+    );
+  }
+  render(
+    <StatusLineRegion>
+      <Page />
+    </StatusLineRegion>,
+  );
+
+  await chooseAction("Archive project");
+  expect(await screen.findByText("No active projects")).toBeTruthy();
+  const undo = screen.getByRole("button", { name: "Undo" });
+  undo.focus();
+  fireEvent.click(undo);
+  expect(update).toHaveBeenLastCalledWith(project.id, false, "archived");
+  const actions = await screen.findByRole("button", {
+    name: "Actions for Original",
+  });
+  expect(document.activeElement).toBe(actions);
+  vi.spyOn(Date, "now").mockReturnValue(Date.now() + 401);
+  await chooseAction("Archive project");
+  await screen.findByText("No active projects");
+  fireEvent.click(screen.getByText("Archived", { exact: true }));
+  expand();
+  expect(screen.queryByRole("button", { name: "Remove checkout" })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Copy path /other/checkout" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Reactivate Original" }));
+  expect(await screen.findByText("No archived projects")).toBeTruthy();
+  expect(screen.getByText("Reactivated Original")).toBeTruthy();
+});
+
+test("archiving a Project keeps its expanded controls disabled while saving", async () => {
+  let finish!: (value: typeof project & { archived: boolean }) => void;
+  vi.spyOn(client, "setProjectArchived").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = (saved) => resolve({ project: saved, change: "archived" });
+      }),
+  );
+  render(<Projects {...props} onOpenTickets={vi.fn()} />);
+  expand();
+  await chooseAction("Archive project");
+  expect(await screen.findByText("Archiving…")).toBeTruthy();
+  for (const name of [
+    /^Original/,
+    "Open tickets of Original",
+    "Actions for Original",
+    "Copy path /other/checkout",
+    "Remove checkout",
+    /^Show in /,
+  ]) {
+    const buttons = screen.getAllByRole("button", { name });
+    for (const button of buttons)
+      expect(button).toHaveProperty("disabled", true);
+  }
+  await act(async () => finish({ ...project, archived: true }));
+});
+
+test.each(["Edit project", "Register checkout"])(
+  "an external archive closes %s and reactivation leaves it closed",
+  async (name) => {
+    const { rerender } = render(<Projects {...props} />);
+    await chooseAction(String(name) + "…");
+    await screen.findByRole("dialog", { name });
+    rerender(
+      <Projects {...props} projects={[{ ...project, archived: true }]} />,
+    );
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog", { name })).toBeNull(),
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("heading", { name: "Projects" }),
+      ),
+    );
+    rerender(<Projects {...props} />);
+    await screen.findByRole("button", { name: "Actions for Original" });
+    expect(screen.queryByRole("dialog", { name })).toBeNull();
+  },
+);
+
+test.each([false, true])(
+  "an external archive restores focus with neighbor archived = %s",
+  (archiveNeighbor) => {
+    const other = { ...project, id: "p2", name: "Another" };
+    const last = { ...project, id: "p3", name: "Third" };
+    const { rerender } = render(
+      <Projects {...props} projects={[project, other, last]} />,
+    );
+    screen.getByRole("button", { name: /^Original/ }).focus();
+    rerender(
+      <Projects
+        {...props}
+        projects={[
+          { ...project, archived: true },
+          { ...other, archived: archiveNeighbor },
+          last,
+        ]}
+      />,
+    );
+    const target = archiveNeighbor
+      ? screen.getByRole("heading", { name: "Projects" })
+      : screen.getByRole("button", { name: "Actions for Another" });
+    expect(document.activeElement).toBe(target);
+  },
+);
+
+test("an edit failure after external archive stays out of the next Project dialog", async () => {
+  const other = { ...project, id: "p2", name: "Another" };
+  let reject!: (reason: Error) => void;
+  const edit = vi.spyOn(client, "editProject").mockImplementation(
+    () =>
+      new Promise((_, fail) => {
+        reject = fail;
+      }),
+  );
+  const { rerender } = render(
+    <Projects {...props} projects={[project, other]} />,
+  );
+  await chooseAction("Edit project…");
+  const dialog = () => screen.getByRole("dialog", { name: "Edit project" });
+  fireEvent.change(within(dialog()).getByLabelText("Project name"), {
+    target: { value: "Draft rename" },
+  });
+  const save = within(dialog()).getByRole("button", { name: "Save project" });
+  await waitFor(() => expect(save).toHaveProperty("disabled", false));
+  fireEvent.click(save);
+  expect(edit).toHaveBeenCalledWith(project.id, "Draft rename", project.path);
+
+  rerender(
+    <Projects {...props} projects={[{ ...project, archived: true }, other]} />,
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await chooseAction("Edit project…", "Another");
+  await act(async () => reject(new Error("Stale save failure")));
+  expect(within(dialog()).queryByRole("alert")).toBeNull();
+  expect(within(dialog()).getByLabelText("Project name")).toHaveProperty(
+    "value",
+    "Another",
+  );
+  await waitFor(() =>
+    expect(
+      within(dialog()).getByRole("button", { name: "Save project" }),
+    ).toHaveProperty("disabled", false),
+  );
 });
 
 test("a new project waits for a folder, fills its name from it, then saves", async () => {
@@ -411,6 +579,40 @@ test("registers a checkout by choosing a folder", async () => {
   await waitFor(() =>
     expect(register).toHaveBeenCalledWith("p1", "/work/tree"),
   );
+});
+
+test("a completed registration cannot close a different checkout dialog", async () => {
+  const other = { ...project, id: "p2", name: "Another" };
+  vi.spyOn(workspaceClient, "chooseFolder").mockResolvedValue("/work/tree");
+  let finish!: (saved: typeof project) => void;
+  const register = vi.spyOn(client, "registerCheckout").mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const { rerender } = render(
+    <Projects {...props} projects={[project, other]} />,
+  );
+  await chooseAction("Register checkout…");
+  const dialog = () =>
+    screen.getByRole("dialog", { name: "Register checkout" });
+  fireEvent.click(within(dialog()).getByRole("button", { name: "Choose…" }));
+  const submit = within(dialog()).getByRole("button", {
+    name: "Register checkout",
+  });
+  await waitFor(() => expect(submit).toHaveProperty("disabled", false));
+  fireEvent.click(submit);
+  expect(register).toHaveBeenCalledWith("p1", "/work/tree");
+
+  rerender(
+    <Projects {...props} projects={[{ ...project, archived: true }, other]} />,
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  await chooseAction("Register checkout…", "Another");
+  expect(dialog().textContent).toContain("Another");
+  await act(async () => finish(project));
+  expect(dialog().textContent).toContain("Another");
 });
 
 test("removing a checkout acts at once and Undo registers it again", async () => {

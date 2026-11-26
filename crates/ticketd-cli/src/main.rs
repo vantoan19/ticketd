@@ -1091,8 +1091,12 @@ enum ProjectCommand {
         #[arg(long)]
         clear_remote: bool,
     },
-    /// Show a project
+    /// Show a project, including an archived project
     Show { id: String },
+    /// Archive a project and keep its existing links and settings
+    Archive { id: String },
+    /// Return an archived project to active use
+    Reactivate { id: String },
     /// Add the Project remote to discovery and link its existing unlinked tickets
     ConnectSource {
         /// The project's ID
@@ -1107,8 +1111,12 @@ enum ProjectCommand {
         #[arg(long, required_unless_present = "preview", conflicts_with = "preview")]
         expect: Option<String>,
     },
-    /// List projects
-    List,
+    /// List active projects
+    List {
+        /// Include archived projects
+        #[arg(long)]
+        all: bool,
+    },
     /// Register another checkout path for a project
     Register {
         id: String,
@@ -1956,7 +1964,19 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
             ProjectCommand::Unregister { id, path } => {
                 serde_json::to_string(&workspace.remove_checkout(&id, &path)?)?
             }
-            ProjectCommand::List => serde_json::to_string(&workspace.list_projects()?)?,
+            ProjectCommand::Archive { id } => {
+                serde_json::to_string(&workspace.set_project_archived(&id, true)?)?
+            }
+            ProjectCommand::Reactivate { id } => {
+                serde_json::to_string(&workspace.set_project_archived(&id, false)?)?
+            }
+            ProjectCommand::List { all } => {
+                let mut projects = workspace.list_projects()?;
+                if !all {
+                    projects.retain(|project| !project.archived);
+                }
+                serde_json::to_string(&projects)?
+            }
         },
         Command::Create {
             title,

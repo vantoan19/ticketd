@@ -14,6 +14,7 @@ import userEvent from "@testing-library/user-event";
 import {
   ChatClientContext,
   type HarnessSetting,
+  type LinkedRecord,
   type Step,
   type TranscriptItem,
 } from "@/features/chats/client";
@@ -2228,8 +2229,9 @@ test("a signed-out Antigravity Chat shows one sign-in instruction and holds its 
   );
 });
 
-test("a Project is linked like a ticket or Document and has no page to open", async () => {
-  await open(one({ id: "c1", title: "Limiter" }));
+test("a linked Project opens its ticket scope and can still be unlinked", async () => {
+  const openProject = vi.fn();
+  await open(one({ id: "c1", title: "Limiter" }), undefined, openProject);
   await linkFromMenu();
   fireEvent.change(
     await screen.findByLabelText(
@@ -2242,7 +2244,10 @@ test("a Project is linked like a ticket or Document and has no page to open", as
     await screen.findByRole("group", { name: "Linked records" }),
   );
   expect(await links.findByText("Storefront")).toBeTruthy();
-  expect(links.queryByRole("button", { name: /Open/ })).toBeNull();
+  fireEvent.click(
+    links.getByRole("button", { name: "Open the Project Storefront" }),
+  );
+  expect(openProject).toHaveBeenCalledWith("p1");
   fireEvent.click(
     links.getByRole("button", {
       name: "Remove the link to the Project Storefront",
@@ -2251,6 +2256,50 @@ test("a Project is linked like a ticket or Document and has no page to open", as
   await waitFor(() =>
     expect(screen.queryByRole("group", { name: "Linked records" })).toBeNull(),
   );
+});
+
+test("a late Chat link search cannot replace the current archived-only explanation", async () => {
+  const client = await open(
+    one({
+      id: "c1",
+      title: "Limiter",
+      links: [{ kind: "project", id: "p1", title: "Storefront" }],
+    }),
+  );
+  let resolveOlder!: (value: LinkedRecord[]) => void;
+  const search = vi
+    .spyOn(client, "searchRecords")
+    .mockImplementation((query) => {
+      if (query === "store")
+        return new Promise((resolve) => {
+          resolveOlder = resolve;
+        });
+      if (query === "archive")
+        return Promise.resolve([
+          { kind: "project", id: "old", title: "Old archive", archived: true },
+        ]);
+      return Promise.resolve([]);
+    });
+  await linkFromMenu();
+  const field = screen.getByLabelText(
+    "Search tickets, Documents and Projects by title or reference",
+  );
+  fireEvent.change(field, { target: { value: "store" } });
+  await waitFor(() => expect(search).toHaveBeenCalledWith("store"));
+  fireEvent.change(field, { target: { value: "archive" } });
+  const hint =
+    "Old archive is archived. Reactivate it on the Projects page to link it.";
+  await screen.findByText(hint);
+  expect(
+    screen.queryByText("No ticket, Document or Project has that in its name."),
+  ).toBeNull();
+  await act(async () => {
+    resolveOlder([{ kind: "project", id: "p1", title: "Storefront" }]);
+  });
+  expect(screen.getByText(hint)).toBeTruthy();
+  expect(
+    screen.queryByText("Everything with that name is already linked."),
+  ).toBeNull();
 });
 
 test("a managed folder reads as the Scratch folder, and its popover says ticketd keeps it", async () => {
@@ -2588,6 +2637,46 @@ test("linking a Project with a folder in New Chat starts the Chat there", async 
   expect(
     await screen.findByRole("button", { name: "Folder: /work/storefront" }),
   ).toBeTruthy();
+});
+
+test("New Chat keeps its Project link and removes it from mentions when the Project is archived", async () => {
+  const project = { id: "p1", name: "Storefront", path: "", paths: [] };
+  const client = createMockChatClient({
+    enabled: true,
+    records: [
+      { kind: "project", id: project.id, title: project.name },
+      { kind: "document", id: "d1", title: "Deployment notes" },
+    ],
+  });
+  function Draft({ archived }: { archived: boolean }) {
+    return (
+      <ChatClientContext value={client}>
+        <ChatProvider>
+          <StatusLineRegion>
+            <ChatsView projects={[{ ...project, archived }]} />
+          </StatusLineRegion>
+        </ChatProvider>
+      </ChatClientContext>
+    );
+  }
+  const { rerender } = render(<Draft archived={false} />);
+  fireEvent.click(await screen.findByRole("button", { name: "New Chat" }));
+  fireEvent.click(button("Link a ticket, Document or Project"));
+  fireEvent.click(await screen.findByRole("option", { name: /Storefront/ }));
+  type("", "Describe a task or ask a question");
+  fireEvent.change(composer("Describe a task or ask a question"), {
+    target: { value: "#", selectionStart: 1 },
+  });
+  expect(
+    await screen.findByRole("option", { name: /Storefront/ }),
+  ).toBeTruthy();
+
+  rerender(<Draft archived />);
+  await waitFor(() =>
+    expect(screen.queryByRole("option", { name: /Storefront/ })).toBeNull(),
+  );
+  expect(button("Remove the link to the Project Storefront")).toBeTruthy();
+  type("", "Describe a task or ask a question");
 });
 
 test("New Chat on Claude Code sends the shown default model and permission mode, untouched", async () => {

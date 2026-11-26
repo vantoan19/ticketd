@@ -1485,6 +1485,63 @@ fn opening_waits_for_a_migration_or_restore_longer_than_for_workspaces_open_else
 }
 
 #[test]
+fn archive_undo_does_not_reverse_a_later_transition_of_the_same_project() {
+    let dir = tempfile::tempdir().unwrap();
+    let db = dir.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&db).unwrap();
+    let project = workspace
+        .create_project("App", dir.path().to_str().unwrap())
+        .unwrap();
+
+    let first = workspace
+        .change_project_archive(&project.id, true, None)
+        .unwrap();
+    let first_change = first.change.as_deref().unwrap();
+    assert!(first.project.archived);
+
+    let mut other = Workspace::open(&db).unwrap();
+    let repeated = other
+        .change_project_archive(&project.id, true, None)
+        .unwrap();
+    assert!(repeated.change.is_none());
+
+    other.set_project_archived(&project.id, false).unwrap();
+    let later = other
+        .change_project_archive(&project.id, true, None)
+        .unwrap();
+    assert_ne!(first.change, later.change);
+
+    let stale = workspace
+        .change_project_archive(&project.id, false, Some(first_change))
+        .unwrap();
+    assert!(stale.project.archived);
+    assert!(stale.change.is_none());
+
+    let undo = workspace
+        .change_project_archive(&project.id, false, later.change.as_deref())
+        .unwrap();
+    assert!(!undo.project.archived);
+    assert!(undo.change.is_some());
+
+    let active_record = workspace
+        .export_sync_record(ticketd_core::SyncKind::Project, &project.id)
+        .unwrap();
+    let local_archive = workspace
+        .change_project_archive(&project.id, true, None)
+        .unwrap();
+    let archived_record = workspace
+        .export_sync_record(ticketd_core::SyncKind::Project, &project.id)
+        .unwrap();
+    workspace.apply_sync_record(&active_record).unwrap();
+    workspace.apply_sync_record(&archived_record).unwrap();
+    let stale = workspace
+        .change_project_archive(&project.id, false, local_archive.change.as_deref())
+        .unwrap();
+    assert!(stale.project.archived);
+    assert!(stale.change.is_none());
+}
+
+#[test]
 fn concurrent_project_moves_remove_the_previous_checkout() {
     use std::{sync::mpsc, thread, time::Duration};
     let dir = tempfile::tempdir().unwrap();

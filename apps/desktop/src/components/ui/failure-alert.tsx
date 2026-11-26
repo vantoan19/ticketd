@@ -271,8 +271,10 @@ export function FailureCaption({
   detailsVariant = "inline",
   retryLabel,
   detailsIconOnly = false,
+  showSentence = false,
 }: {
   detailsIconOnly?: boolean;
+  showSentence?: boolean;
   detailsVariant?: "inline" | "popover";
   retryLabel?: string;
   failure: FailureDescription;
@@ -287,11 +289,19 @@ export function FailureCaption({
       className={cn("ui-failure-inline", className)}
     >
       <StatusLabel tone="attention" size="caption">
-        {label}
+        {showSentence ? (
+          <span className="whitespace-normal">
+            {failure.title}. {failure.sentence}
+          </span>
+        ) : (
+          label
+        )}
       </StatusLabel>
-      <span className="sr-only">
-        {failure.title}. {failure.sentence}
-      </span>
+      {!showSentence && (
+        <span className="sr-only">
+          {failure.title}. {failure.sentence}
+        </span>
+      )}
       {onRetry && failure.action === "retry" && (
         <>
           <span aria-hidden="true" className="ui-failure-inline-separator">

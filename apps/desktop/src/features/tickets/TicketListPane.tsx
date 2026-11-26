@@ -9,7 +9,14 @@ import {
 import { m } from "motion/react";
 import { Presence } from "@/components/ui/motion";
 import { blur, exitTransition } from "@/lib/motion-tokens";
-import { Layers, SearchX, Ticket as TicketIcon, Trash2, X } from "lucide-react";
+import {
+  ArchiveRestore,
+  Layers,
+  SearchX,
+  Ticket as TicketIcon,
+  Trash2,
+  X,
+} from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Kbd } from "@/components/ui/kbd";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
@@ -18,7 +25,9 @@ import { Button } from "@/components/ui/button";
 import { Pager } from "@/components/ui/pager";
 import { Count } from "@/components/ui/count";
 import { IconButton } from "@/components/ui/icon-button";
-import { PaneHeader } from "@/components/ui/list-header";
+import { Badge } from "@/components/ui/badge";
+import { useProjectLifecycle } from "@/features/projects/useProjectLifecycle";
+import { PaneHeader, PaneHeaderButton } from "@/components/ui/list-header";
 import { StatusLineRegion } from "@/components/ui/status-line";
 import { useStatusLineInset } from "@/components/ui/use-status-line";
 import { emptyCopy } from "@/lib/empty-copy";
@@ -149,7 +158,49 @@ function TicketListBody({
   const scopedPlan = plans.find((item) => item.id === planScope);
   // An archived Plan is read-only: no new tickets into it, no removing from it.
   const planWritable = scopedPlan !== undefined && !scopedPlan.archived;
-  const addDisabled = scopedPlan?.archived === true;
+  const scopedProject =
+    !trash && !scopedPlan
+      ? projects.find((project) => project.id === navigation.project)
+      : undefined;
+  const archivedProject = scopedProject?.archived ? scopedProject : undefined;
+  const addDisabled = scopedPlan?.archived === true || Boolean(archivedProject);
+  const projectLifecycle = useProjectLifecycle(
+    workspace.refreshCurrentScope,
+    workspace.patchProject,
+  );
+  const focusFilter = useRef<{ id: string; owner: HTMLElement } | null>(null);
+  const lastFocused = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    const activation = focusFilter.current;
+    const reactivated =
+      activation &&
+      projects.some(
+        (project) => project.id === activation.id && !project.archived,
+      );
+    if (reactivated) focusFilter.current = null;
+    if (!list || list.closest("[hidden]")) return;
+    if (
+      archivedProject &&
+      lastFocused.current?.matches("[data-project-add]") &&
+      !lastFocused.current.isConnected &&
+      document.activeElement === document.body
+    ) {
+      list.focus();
+    }
+    if (reactivated && scopedProject?.id === activation.id) {
+      if (
+        document.activeElement !== activation.owner &&
+        document.activeElement !== document.body
+      )
+        return;
+      (
+        list.querySelector<HTMLButtonElement>(
+          "[data-ticket-filters-trigger]",
+        ) ?? list
+      ).focus();
+    }
+  }, [archivedProject, listRef, projects, scopedProject]);
   const filtered =
     navigation.plan !== plan ||
     status !== (navigation.kind === "progress" ? "In progress" : "") ||
@@ -319,15 +370,23 @@ function TicketListBody({
   ) : navigation.project !== "all" ? (
     <EmptyState
       icon={<TicketIcon />}
-      {...copyProps(emptyCopy("tickets-project", { name: scopeName }))}
+      {...copyProps(
+        emptyCopy(
+          archivedProject ? "tickets-project-archived" : "tickets-project",
+          { name: scopeName },
+        ),
+      )}
       action={
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={(event) => onCreate(event.currentTarget)}
-        >
-          New ticket
-        </Button>
+        !archivedProject && (
+          <Button
+            variant="outline"
+            size="sm"
+            data-project-add=""
+            onClick={(event) => onCreate(event.currentTarget)}
+          >
+            New ticket
+          </Button>
+        )
       }
     />
   ) : (
@@ -354,6 +413,9 @@ function TicketListBody({
       ref={listRef}
       tabIndex={-1}
       aria-labelledby="tickets-heading"
+      onFocusCapture={(event) => {
+        lastFocused.current = event.target;
+      }}
     >
       {/* A Plan's own header, above both panes, holds its controls. */}
       {!scopedPlan && (
@@ -382,6 +444,22 @@ function TicketListBody({
           }
           actions={
             <>
+              {archivedProject && (
+                <PaneHeaderButton
+                  variant="outline"
+                  icon={<ArchiveRestore />}
+                  label="Reactivate"
+                  disabled={projectLifecycle.pending.has(archivedProject.id)}
+                  onClick={(event) => {
+                    const owner = event.currentTarget;
+                    void projectLifecycle.change(archivedProject, false, {
+                      beforeRefresh: () => {
+                        focusFilter.current = { id: archivedProject.id, owner };
+                      },
+                    });
+                  }}
+                />
+              )}
               {configuredSources.length > 0 && (
                 <SourceRefresh
                   providers={configuredSources}
@@ -389,10 +467,10 @@ function TicketListBody({
                   tickets={tickets}
                 />
               )}
-              {!trash && !bare && (
+              {!trash && (!bare || scopedProject) && (
                 <TicketFilters part="controls" {...filterProps} />
               )}
-              {!bare && (
+              {(!bare || archivedProject) && (
                 <DisplayMenu
                   onError={workspace.setError}
                   rowsOnly={trash || Boolean(navigation.plan)}
@@ -400,7 +478,9 @@ function TicketListBody({
               )}
             </>
           }
-        />
+        >
+          {archivedProject && <Badge size="sm">Archived</Badge>}
+        </PaneHeader>
       )}
       {!trash && !scopedPlan && projectNotice}
       {!trash && <TicketFilters part="chips" {...filterProps} />}
