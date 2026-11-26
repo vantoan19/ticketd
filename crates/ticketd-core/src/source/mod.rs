@@ -54,7 +54,9 @@ pub use conversation::ConversationEntry;
 pub(crate) use credentials::migrate as migrate_source_secret_references;
 pub use engine::{DiscoveryPreview, DiscoverySummary, Engine, PreviewIssue};
 pub use extension::{
-    ExtensionConsent, ExtensionRegistry, PreparedExtension, RegisteredExtension, contract_schema,
+    AddError, ExtensionConsent, ExtensionRegistry, ExtensionState, FolderRefusal, PendingConsent,
+    PendingExtensions, PreparedExtension, RegisteredExtension, check_extension_folder,
+    contract_schema,
 };
 pub use freshness::{SourceHealth, SourceStatus, SourceUnavailable};
 pub(crate) use github::{

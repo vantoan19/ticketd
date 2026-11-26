@@ -456,9 +456,13 @@ GitHub Issues is built in. Linear ships with the desktop app as a ticket
 source extension. Extensions use the same ticket authority and refresh
 workflows as GitHub. [External ticket authority](adr/0006-external-ticket-authority.md)
 
-Install another extension from a local folder with `ticketd source extension add PATH`.
-Review the program and declared hosts before approving. The provider then
-appears in Settings → Ticket sources. Authors can link their build folder with
+Install another extension from a local folder with `ticketd source extension add PATH`,
+or from Settings → Ticket sources with **Add a custom source**. Both show the
+program, its arguments and its declared hosts, ask once, and leave the same
+registration. A folder that cannot be added (no `ticketd-source.json`, or a
+manifest that needs a newer ticketd) says why before anything is shown. The
+provider then appears in Ticket sources with a Custom tag; if its files change
+it is listed as stopped until it is added again, from the app or the CLI. Authors can link their build folder with
 `ticketd source extension link PATH`. The author guide covers the contract,
 the TypeScript example and conformance. [Write a ticket source extension](ticket-source-extensions.md)
 
