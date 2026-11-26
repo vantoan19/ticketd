@@ -65,6 +65,27 @@ fn describe(agent: &'static Agent, home: &Path) -> AgentSkill {
     }
 }
 
+/// Rewrites the copies ticketd installed and nobody edited, so an update never
+/// leaves an agent with an old skill. Runs once per launch, in the background;
+/// edited copies and agents without a copy are left alone.
+pub fn refresh_at_launch() {
+    tauri::async_runtime::spawn_blocking(|| {
+        let Ok(home) = agent_skills::user_home() else {
+            return;
+        };
+        for refreshed in agent_skills::refresh_unedited(&home, harness_env) {
+            match refreshed.result {
+                Ok(()) => tracing::info!(agent = refreshed.agent.name, "updated the ticketd skill"),
+                Err(error) => tracing::warn!(
+                    agent = refreshed.agent.name,
+                    %error,
+                    "could not update the ticketd skill"
+                ),
+            }
+        }
+    });
+}
+
 /// Reports the ticketd skill's state for every supported agent.
 #[tauri::command]
 pub async fn agent_skills() -> Result<Vec<AgentSkill>, String> {

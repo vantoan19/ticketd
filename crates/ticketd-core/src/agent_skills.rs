@@ -256,6 +256,39 @@ fn write_marker(directory: &Path) {
     );
 }
 
+/// What happened to one agent's copy when ticketd refreshed its skills.
+#[derive(Debug)]
+pub struct Refreshed {
+    pub agent: &'static Agent,
+    pub result: Result<(), InstallError>,
+}
+
+/// Rewrites every copy ticketd installed and nobody edited, for all agents.
+///
+/// "Unedited" is exactly [`SkillState::UpdateAvailable`]: the marker's hash is
+/// the hash of the `SKILL.md` ticketd wrote, and the file on disk still has
+/// that hash. A copy that is missing, current, newer, edited, someone else's or
+/// not a file is skipped, so this never creates a copy in a new agent and never
+/// touches anything the person changed. Run it after ticketd updates; it is safe
+/// to run at any time.
+pub fn refresh_unedited(
+    user_home: &Path,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Vec<Refreshed> {
+    AGENTS
+        .iter()
+        .filter_map(|agent| {
+            let directory = agent.skill_directory(user_home, &env);
+            let result = match skill_state(&directory) {
+                Ok(SkillState::UpdateAvailable) => install_skill(&directory, false).map(drop),
+                Ok(_) => return None,
+                Err(error) => Err(error.into()),
+            };
+            Some(Refreshed { agent, result })
+        })
+        .collect()
+}
+
 /// The user's home folder.
 pub fn user_home() -> std::io::Result<PathBuf> {
     directories::BaseDirs::new()
@@ -436,5 +469,57 @@ mod tests {
             codex.skill_directory(home, config),
             home.join(".agents").join("skills").join("ticketd")
         );
+    }
+
+    #[test]
+    fn refreshing_rewrites_only_copies_ticketd_wrote_and_nobody_edited() {
+        let home = tempfile::tempdir().unwrap();
+        let unset = |_: &str| None;
+        let folder = |id: &str| Agent::find(id).unwrap().skill_directory(home.path(), unset);
+        let (claude, codex, antigravity) = (
+            folder("claude-code"),
+            folder("codex"),
+            folder("antigravity"),
+        );
+        for directory in [&claude, &codex, &antigravity] {
+            install_skill(directory, false).unwrap();
+        }
+        // Claude Code: an older ticketd copy nobody touched.
+        std::fs::write(claude.join(SKILL_FILE), "older ticketd skill").unwrap();
+        std::fs::write(claude.join(MARKER_FILE), hash(b"older ticketd skill")).unwrap();
+        // Codex: the same, then edited by hand.
+        std::fs::write(codex.join(SKILL_FILE), "older ticketd skill").unwrap();
+        std::fs::write(codex.join(MARKER_FILE), hash(b"older ticketd skill")).unwrap();
+        std::fs::write(codex.join(SKILL_FILE), "my edit").unwrap();
+
+        let refreshed = refresh_unedited(home.path(), unset);
+
+        assert_eq!(refreshed.len(), 1);
+        assert_eq!(refreshed[0].agent.key.as_str(), "claude-code");
+        assert!(refreshed[0].result.is_ok());
+        assert_eq!(skill_state(&claude).unwrap(), SkillState::Installed);
+        assert_eq!(
+            std::fs::read_to_string(codex.join(SKILL_FILE)).unwrap(),
+            "my edit"
+        );
+        assert_eq!(skill_state(&codex).unwrap(), SkillState::Edited);
+        assert_eq!(skill_state(&antigravity).unwrap(), SkillState::Installed);
+        // Nothing is left to do, and no backup was made for the unedited rewrite.
+        assert!(refresh_unedited(home.path(), unset).is_empty());
+        assert!(std::fs::read_dir(&claude).unwrap().all(|entry| {
+            !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .contains("backup")
+        }));
+    }
+
+    #[test]
+    fn refreshing_never_installs_into_an_agent_that_has_no_copy() {
+        let home = tempfile::tempdir().unwrap();
+        assert!(refresh_unedited(home.path(), |_| None).is_empty());
+        assert!(!home.path().join(".claude").exists());
+        assert!(!home.path().join(".gemini").exists());
     }
 }
