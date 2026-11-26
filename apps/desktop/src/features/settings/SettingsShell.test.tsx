@@ -53,8 +53,11 @@ vi.mock("@/lib/api/agent-skills", () => ({
 }));
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
-    permitted: vi.fn(),
-    requestPermission: vi.fn(),
+    permission: vi.fn(async () => ({
+      state: "allowed",
+      reported: true,
+      settings: true,
+    })),
     notify: vi.fn(),
   },
 }));
@@ -125,7 +128,6 @@ function Settings({ initial = "appearance" }: { initial?: SettingsPageId }) {
         selected={selected}
         onSelect={setSelected}
         onRestore={async () => {}}
-        onOpenInbox={() => {}}
       />
     </SettingsStateProvider>
   );

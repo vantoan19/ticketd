@@ -745,7 +745,9 @@ collect OAuth tokens, proxy model requests, or change billing.
 - **Lifetime.** Execution belongs to the desktop backend, not the view: navigating away
   keeps work running, and explicit Quit stops it. One ranked status per Chat drives
   the list, sidebar count, app-icon count, and system notifications, which can be
-  muted.
+  muted. Settings › Attention holds the one system permission for every
+  notification (due reminders and Chats): ticketd asks once, never again, and shows
+  Allowed, Allow notifications or Blocked where the system reports it.
 - **Durable results.** The records, not the transcript, are the shared context. Agents
   read linked records and write progress back through the CLI as ordinary Activities,
   Documents, evidence, and status changes under native permission rules. Messages never

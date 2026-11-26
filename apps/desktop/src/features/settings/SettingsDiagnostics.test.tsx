@@ -109,13 +109,7 @@ afterEach(() => {
 });
 
 async function renderPage() {
-  render(
-    <SettingsView
-      selected="diagnostics"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="diagnostics" onRestore={async () => {}} />);
   // The page reads the level and the recent errors when it opens.
   await screen.findByText(/Level: |sets the level/);
   await screen.findAllByText(/No recent errors|Error in|Warning in/);
@@ -402,13 +396,7 @@ test("with no errors Recent errors is one muted line", async () => {
 
 test("recent errors that cannot be read offer Retry without hiding the rest", async () => {
   answer({ diagnostics_recent_errors: () => Promise.reject("busy") });
-  render(
-    <SettingsView
-      selected="diagnostics"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="diagnostics" onRestore={async () => {}} />);
   await revealFailureDetails();
   expect(screen.getByRole("alert").textContent).toContain("busy");
   expect(screen.getByRole("switch", { name: "Debug logging" })).toBeTruthy();

@@ -19,6 +19,9 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatProvider } from "@/features/chats/ChatProvider";
+import { notificationClient } from "@/lib/api/notifications";
+import { resetNotificationPermission } from "@/lib/notification-permission";
+import { setPreference } from "@/lib/preferences";
 import { addQuote, clearQuotes } from "@/features/chats/quotes";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { StatusLineRegion } from "@/components/ui/status-line";
@@ -39,6 +42,9 @@ window.ResizeObserver = class {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  vi.restoreAllMocks();
+  resetNotificationPermission();
+  localStorage.clear();
 });
 
 const at = "2026-11-10T10:00:00Z";
@@ -824,6 +830,38 @@ test.each(["send", "queue"] as const)(
     expect(screen.queryByText("original.txt")).toBeNull();
   },
 );
+
+test("the first Chat message asks the system for notifications once, and not when Chat notifications are off", async () => {
+  const permission = vi
+    .spyOn(notificationClient, "permission")
+    .mockResolvedValue({ state: "not_asked", reported: true, settings: true });
+  const ask = vi
+    .spyOn(notificationClient, "ask")
+    .mockResolvedValue({ state: "allowed", reported: true, settings: true });
+  const client = await open(one({ id: "c1", title: "Limiter" }));
+  vi.spyOn(client, "createChat").mockReturnValue(new Promise(() => {}));
+  const description = "Describe a task or ask a question";
+  const send = async (text: string) => {
+    fireEvent.click(button("New Chat"));
+    type(text, description);
+    await waitFor(() =>
+      expect(button("Send")).toHaveProperty("disabled", false),
+    );
+    fireEvent.keyDown(composer(description), { key: "Enter" });
+  };
+  setPreference("notifyChats", false);
+  await send("Quiet");
+  await act(async () => {});
+  expect(ask).not.toHaveBeenCalled();
+  cleanup();
+  resetNotificationPermission();
+  localStorage.clear();
+  const again = await open(one({ id: "c1", title: "Limiter" }));
+  vi.spyOn(again, "createChat").mockReturnValue(new Promise(() => {}));
+  await send("Loud");
+  await waitFor(() => expect(ask).toHaveBeenCalledTimes(1));
+  expect(permission).toHaveBeenCalled();
+});
 
 test("New Chat keeps a pending first message and its retry identity across navigation", async () => {
   const client = await open(one({ id: "c1", title: "Limiter" }));

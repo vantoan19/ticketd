@@ -811,7 +811,7 @@ test("the section list has no entry for a connection, available or saved", async
 
 test("opening a source focuses its page title, named for the source", async () => {
   vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
-  const props = { onRestore: async () => {}, onOpenInbox: () => {} };
+  const props = { onRestore: async () => {} };
   const { rerender } = render(
     <SettingsView {...props} selected="appearance" />,
   );
@@ -825,7 +825,7 @@ test("opening a source focuses its page title, named for the source", async () =
 test("switching settings sections retains the source draft and its preview", async () => {
   vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
   vi.mocked(sourcesClient.preview).mockResolvedValue(preview);
-  const props = { onRestore: async () => {}, onOpenInbox: () => {} };
+  const props = { onRestore: async () => {} };
   const { rerender, unmount } = render(
     <SettingsView {...props} selected="source-github" />,
   );
@@ -884,11 +884,7 @@ test("opening a source for the first time uses its latest saved configuration", 
         refreshAll: async () => {},
       }}
     >
-      <SettingsView
-        selected={selected}
-        onRestore={async () => {}}
-        onOpenInbox={() => {}}
-      />
+      <SettingsView selected={selected} onRestore={async () => {}} />
     </SourceActivityContext.Provider>
   );
   const { rerender } = render(view("before", "appearance"));
