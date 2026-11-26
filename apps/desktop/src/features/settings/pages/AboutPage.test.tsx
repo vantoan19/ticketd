@@ -159,3 +159,14 @@ test("Keyboard shortcuts opens that page", () => {
   fireEvent.click(screen.getByRole("button", { name: /^Keyboard shortcuts/ }));
   expect(openPage).toHaveBeenCalledWith("keyboard-shortcuts");
 });
+
+test("About ends with a Support ticketd section that stars the repository", async () => {
+  renderPage();
+  expect(screen.getByRole("heading", { name: "Support ticketd" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Star on GitHub" }));
+  await waitFor(() =>
+    expect(workspaceClient.openLink).toHaveBeenCalledWith(
+      "https://github.com/vantoan19/ticketd",
+    ),
+  );
+});
