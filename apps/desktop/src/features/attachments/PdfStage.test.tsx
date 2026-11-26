@@ -164,6 +164,31 @@ test("the page number follows the scroll, and typing a number jumps to that page
   expect(field.value).toBe("11");
 });
 
+test("a render that was cancelled by a zoom never replaces the newer canvas", async () => {
+  const pdf = serve(1);
+  const canvases: HTMLCanvasElement[] = [];
+  const finish: Array<() => void> = [];
+  pdf.document.render = (_index, canvas) => {
+    canvases.push(canvas);
+    // Cancelling does not reject: `done` still resolves, as it does for pdf.js.
+    return {
+      done: new Promise<void>((resolve) => finish.push(resolve)),
+      cancel() {},
+    };
+  };
+  render(<Stage />);
+  const page = await screen.findByRole("img", { name: "Page 1" });
+  await waitFor(() => expect(canvases).toHaveLength(1));
+  fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+  await waitFor(() => expect(canvases).toHaveLength(2));
+  await act(async () => {
+    finish[1]!();
+    finish[0]!();
+  });
+  expect(page.querySelectorAll("canvas")).toHaveLength(1);
+  expect(page.querySelector("canvas")).toBe(canvases[1]);
+});
+
 test("a one-page PDF has a zoom but no page controls", async () => {
   serve(1);
   render(<Stage />);

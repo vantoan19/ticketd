@@ -372,12 +372,19 @@ function PdfPage({
     const canvas = globalThis.document.createElement("canvas");
     const density = outputScale(size, scale, window.devicePixelRatio || 1);
     const render = document.render(index, canvas, scale * density);
+    // A cancelled render still resolves `done`; only a live one may swap in.
+    let live = true;
     render.done.then(
-      () => element.replaceChildren(canvas),
+      () => {
+        if (live) element.replaceChildren(canvas);
+      },
       // A page that does not draw stays blank paper; the others still read.
       () => {},
     );
-    return () => render.cancel();
+    return () => {
+      live = false;
+      render.cancel();
+    };
   }, [near, document, index, size, scale]);
   return (
     <div
