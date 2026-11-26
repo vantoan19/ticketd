@@ -10,7 +10,8 @@ import {
  * Whether something that has just finished stays open for now. A turn, or a stretch
  * of it, that ends while someone is reading it (`holds` says so, or focus is inside)
  * stays open until it has left the scroller's view, and only then folds, so nothing
- * the reader is looking at moves. What was already done when it first showed is
+ * the reader is looking at moves; it never folds around a focused control, but
+ * waits until focus has left it. What was already done when it first showed is
  * not kept. `done` says the work has ended; `element` is what folds.
  */
 export function useKeptOpen(
@@ -41,14 +42,33 @@ export function useKeptOpen(
     const node = element.current;
     const scroller = node?.closest(".chat-scroll");
     if (!held || !node || typeof IntersectionObserver === "undefined") return;
+    // Folding removes what is inside, so it waits while focus is in there: it
+    // folds once the view has left it and focus has too, whichever comes last.
+    let visible = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const release = () => {
+      if (!visible && !node.contains(document.activeElement)) setHeld(false);
+    };
     const observer = new IntersectionObserver(
       ([entry]) => {
-        if (entry && !entry.isIntersecting) setHeld(false);
+        if (!entry) return;
+        visible = entry.isIntersecting;
+        release();
       },
       { root: scroller ?? null },
     );
     observer.observe(node);
-    return () => observer.disconnect();
+    // After a focus move has landed: focus that only left the window is still inside.
+    const left = () => {
+      clearTimeout(timer);
+      timer = setTimeout(release, 0);
+    };
+    node.addEventListener("focusout", left);
+    return () => {
+      clearTimeout(timer);
+      node.removeEventListener("focusout", left);
+      observer.disconnect();
+    };
   }, [held, element]);
   return !settled || held;
 }

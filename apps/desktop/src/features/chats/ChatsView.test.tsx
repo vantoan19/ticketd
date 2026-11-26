@@ -3424,6 +3424,35 @@ test("a stretch that finishes in view stays open until it has left the view, the
   }
 });
 
+test("a stretch that left the view keeps a focused step until focus moves on", async () => {
+  const view = watching();
+  try {
+    const client = await open(
+      one({ id: "stretch-focused", title: "Limiter", activity: "working" }, [
+        youSaid,
+        turnTiming("active"),
+        stepItem("s1", npmTest, "running"),
+      ]),
+    );
+    act(() => {
+      client.push("stretch-focused", stepItem("s1", npmTest));
+      client.push("stretch-focused", inTurn(reply("n1", "The tests ran.")));
+    });
+    const step = button("Ran npm test");
+    step.focus();
+    expect(document.activeElement).toBe(step);
+    // It leaves the view, but the keyboard is inside it: nothing is removed.
+    view.sees(false);
+    expect(document.activeElement).toBe(step);
+    expect(stretchRows()).toEqual([]);
+    // Focus moves on: now it folds.
+    act(() => step.blur());
+    await waitFor(() => expect(stretchRows()).toEqual(["Ran 1 command"]));
+  } finally {
+    view.done();
+  }
+});
+
 test("a stretch that finishes out of view folds at once", async () => {
   const view = watching();
   // Below the scroller's 600px: nobody is looking.
