@@ -159,3 +159,10 @@
 .activity-note .markdown-image img {
   max-height: 240px;
 }
+
+/* A card's ring and focus outline reach 2px outside its box, and a clamped
+   update clips at its own edge: give them that room, with the text unmoved. */
+.activity-note [data-slot="clamp"] > .ui-clamp-body {
+  margin: -2px;
+  padding: 2px;
+}

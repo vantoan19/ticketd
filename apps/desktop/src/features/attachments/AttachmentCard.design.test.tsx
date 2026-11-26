@@ -175,3 +175,13 @@ test("a run of cards in a text keeps the document's 12px block gap above and bel
     /\.markdown-document > \[data-cards\] \+ :not\(\[data-cards\]\) \{\s*margin-top: 0;/,
   );
 });
+
+test("a clamped update leaves a card's ring and focus outline room inside its clip", () => {
+  const css = readFileSync(
+    join(__dirname, "..", "tickets", "activity.css"),
+    "utf8",
+  );
+  expect(css).toMatch(
+    /\.activity-note \[data-slot="clamp"\] > \.ui-clamp-body \{\s*margin: -2px;\s*padding: 2px;/,
+  );
+});
