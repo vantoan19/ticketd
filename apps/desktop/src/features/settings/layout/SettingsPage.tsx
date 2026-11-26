@@ -20,6 +20,7 @@ export function SettingsPage({
   iconContent,
   title = label,
   lede,
+  ledeNote,
   drillIn,
   endSlot,
   titleAccessory,
@@ -43,6 +44,8 @@ export function SettingsPage({
    * command with backticks.
    */
   lede?: ReactNode;
+  /** About: a second quiet line under the lede, such as the promises. */
+  ledeNote?: string;
   /**
    * Set when this page opened in place from `parent`'s list (`SettingsDrillIn`
    * fills it in): the panel bar gets a back control and the breadcrumb a
@@ -149,6 +152,7 @@ export function SettingsPage({
                   {typeof lede === "string" ? <JobLine text={lede} /> : lede}
                 </p>
               )}
+              {ledeNote && <p className="settings-page-lede">{ledeNote}</p>}
             </div>
           </header>
         ) : null}

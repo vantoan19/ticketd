@@ -9,18 +9,19 @@ last 7, so you can go back a few days without having done anything.
    add one before something risky, choose **Back up now**: it is saved at once, checked,
    and needs no file.
 2. To recover, choose **Restore…** on a point. Copies saved before a restore or an update
-   are listed too, with a label. **Restore from a file…** reviews a copy made with
-   `ticketd backup` or on another computer. Review the copy and the workspace it would
-   replace. You can cancel here.
-3. Choose **Replace workspace** to restore the reviewed copy. ticketd first
-   saves a safety copy of the current workspace, which then appears in the list.
+   are listed too, with a label. The dialog sets the Workspace you have now beside the
+   point (tickets, Documents, Activities and the last change) and says whether Workspace
+   sync turns off here. You can cancel here. **Restore from a file…** reviews a copy made
+   with `ticketd backup` or on another computer, with its file check.
+3. Choose **Replace Workspace** to restore it. ticketd first saves the current Workspace
+   as a restore point, labelled **Before restoring**, so you can go back.
    After **Workspace restored**, open a familiar ticket to check its content.
 
 Restore points stay on this computer: they are not synced and a copy of the Workspace file
 alone does not carry them. For a copy to keep elsewhere, run `ticketd backup PATH`.
 Drive credentials and remote files stay outside the backup. Restoring disconnects
-Workspace sync. Reconnect deliberately when you're ready to sync the restored
-data. [Backup and restore commands](../crates/ticketd-cli/skill-data/workspace.md#backup-export-and-restore)
+Workspace sync. Workspace sync then offers **Reconnect** to the folder you used; the two
+sides are merged and differing values go to review. [Backup and restore commands](../crates/ticketd-cli/skill-data/workspace.md#backup-export-and-restore)
 
 ## Share a ticket as Markdown
 

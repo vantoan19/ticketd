@@ -89,9 +89,13 @@ next launch. On Linux, choose **Restart to update** to install it.
 
 The restart prompt shows any running Chats and Automation runs that will stop.
 Interrupted Automation runs are marked as needing attention when ticketd reopens.
-If the release raises the Workspace format version, the prompt warns you before
-installing, and quitting doesn't install it: choose **Restart to update** when
-you're ready. ticketd saves a safety copy before migrating the Workspace. Update any
+If the release raises the Workspace format version, **Settings › About** says so
+on the update ("It upgrades your Workspace, and older versions can't open it
+after"), and with Workspace sync on it asks you to update your other computers
+too. The prompt warns you again before installing, and quitting doesn't install
+it: choose **Restart to update** when you're ready. The release publishes its
+Workspace format version in `latest.json` as `format_version`. If a release's
+`latest.json` has none, ticketd assumes the update raises the format and warns. ticketd saves a safety copy before migrating the Workspace. Update any
 older copies that need to open the migrated Workspace, including other Sync
 devices and standalone CLI installations.
 

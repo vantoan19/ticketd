@@ -27,6 +27,7 @@ import { SettingsStateProvider } from "@/features/settings/settings-state";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 import { agentSkillsClient } from "@/lib/api/agent-skills";
 import { cliClient } from "@/lib/api/cli";
+import { notificationClient } from "@/lib/api/notifications";
 import { sourcesClient } from "@/lib/api/sources";
 import { workspaceClient } from "@/lib/api/workspace";
 
@@ -54,6 +55,13 @@ beforeEach(() => {
   vi.mocked(sourcesClient.list).mockResolvedValue([]);
   vi.mocked(cliClient.check).mockRejectedValue(new Error("no"));
   vi.mocked(agentSkillsClient.list).mockRejectedValue(new Error("no"));
+  // Set up ticketd reads the permission with the other settings states.
+  vi.mocked(notificationClient.permission).mockResolvedValue({
+    state: "not_asked",
+    reported: true,
+    settings: true,
+  });
+  vi.mocked(workspaceClient.openLink).mockResolvedValue(undefined);
   Object.assign(navigator, {
     clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
   });

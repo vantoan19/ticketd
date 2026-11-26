@@ -59,6 +59,12 @@ The Release workflow assembles the updater files. It renames the macOS
 signature, since a signature covers the bytes and not the name. It then runs the
 build commit's manifest generator, which writes `latest.json` with the release
 version, Workspace format version, and each platform's download URL and signature.
+The format version is `format_version`, read from `FORMAT_VERSION` in
+`crates/ticketd-core/src/format.rs`. Installed copies read it before offering an
+update: when it is higher than their own, About and the restart prompt warn that
+the update upgrades the Workspace and older versions can't open it, and the update
+never installs when the app quits. A `latest.json` without `format_version` is
+treated the same way, so a hand-made manifest must include it.
 A release draft requires all three signed updater files.
 
 If the workflow cannot run, assemble a draft by hand from a Package run instead.

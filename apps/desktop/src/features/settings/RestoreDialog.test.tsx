@@ -293,7 +293,7 @@ test("Replace workspace shows the safety backup, reloads views, and lists it aft
   expect(reload).toHaveBeenCalledTimes(1);
   expect(dialog.textContent).toContain("121 tickets, 342 activities");
   expect(dialog.textContent).toContain(
-    "restore the safety backup from Settings › Backups & export.",
+    "restore “Before restoring” in Settings › Backups & export.",
   );
   fireEvent.click(copy);
   await waitFor(() => expect(write).toHaveBeenCalledWith(safety));

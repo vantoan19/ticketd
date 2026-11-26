@@ -132,6 +132,51 @@ const savedSourceSchema = lazySchema(() =>
 );
 export type SavedSource = z.infer<typeof savedSourceSchema>;
 
+/** A program a person added as a source: what it runs, where it connects, where it came from. */
+const registeredExtensionSchema = lazySchema(() =>
+  z.object({
+    id: z.string(),
+    version: z.string(),
+    /** The registry's own copy of the folder. */
+    path: z.string(),
+    development: z.boolean(),
+    hosts: z.array(z.string()),
+    /** The program and its arguments as the manifest names them: `node dist/index.js`. */
+    command: z.string(),
+    /** The folder it was added from, when known. */
+    origin: z.string().optional(),
+  }),
+);
+export type RegisteredExtension = z.infer<typeof registeredExtensionSchema>;
+
+const extensionStateSchema = lazySchema(() =>
+  registeredExtensionSchema.extend({
+    /** Its files changed since they were approved, so it is stopped until added again. */
+    stopped: z.boolean(),
+    bundled: z.boolean(),
+  }),
+);
+export type ExtensionState = z.infer<typeof extensionStateSchema>;
+
+/** A folder read but not run, and the one approval that adds exactly it. */
+const extensionConsentSchema = lazySchema(() =>
+  z.object({
+    token: z.string(),
+    extension: registeredExtensionSchema,
+    executable: z.string(),
+    args: z.array(z.string()),
+  }),
+);
+export type ExtensionConsent = z.infer<typeof extensionConsentSchema>;
+
+/** The codes of a folder that cannot be added, said before any consent. */
+export const FOLDER_REFUSALS = [
+  "not_a_folder",
+  "no_manifest",
+  "needs_newer_ticketd",
+  "invalid_manifest",
+] as const;
+
 const sourceEntrySchema = lazySchema(() =>
   z.object({
     connector: connectorSchema,
@@ -139,6 +184,7 @@ const sourceEntrySchema = lazySchema(() =>
     next_id: z.string().optional(),
     development: z.boolean().optional(),
     unavailable: z.boolean().optional(),
+    extension: extensionStateSchema.optional(),
   }),
 );
 export type SourceEntry = z.infer<typeof sourceEntrySchema>;
@@ -627,5 +673,28 @@ export const sourcesClient = {
   },
   async remove(connection: string) {
     await structured(invoke("remove_source_connection", { connection }));
+  },
+  /**
+   * Reads a folder without running it. Resolves to what the person must approve;
+   * a folder that cannot be added rejects with one of `FOLDER_REFUSALS`.
+   */
+  async prepareExtension(path: string) {
+    return extensionConsentSchema.parse(
+      await structured(invoke("source_extension_prepare", { path })),
+    );
+  },
+  /** Approves what `prepareExtension` showed, the way `ticketd source extension add` does. */
+  async addExtension(token: string) {
+    return registeredExtensionSchema.parse(
+      await structured(invoke("source_extension_add", { token })),
+    );
+  },
+  /** Drops a prepared folder that was not approved. */
+  async cancelExtension(token: string) {
+    await structured(invoke("source_extension_cancel", { token }));
+  },
+  /** Removes the program of a source that was added. Its connections stay saved. */
+  async removeExtension(id: string) {
+    await structured(invoke("source_extension_remove", { id }));
   },
 };
