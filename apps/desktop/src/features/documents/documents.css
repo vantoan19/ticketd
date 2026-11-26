@@ -154,7 +154,8 @@
   }
 }
 /* The passage a word search matched in, under the title (the board's .lrow-s): 13/18 muted,
-   two lines before it is cut. A row with a passage drops its meta line. */
+   two lines before it is cut. A row with a passage shows the unread dot before it and keeps
+   its meta line for assistive technology. */
 .document-list .document-snippet {
   display: -webkit-box;
   margin: 2px 0 0;
@@ -165,8 +166,19 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+/* Hidden to the eye only: the row's button names it as its description. */
 .document-list-content:has(.document-snippet) .document-list-meta {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.document-list .document-snippet [role="img"] {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 /* The words a search matched: the accent fill and a 1.5px foreground underline (the board's
    .hit), so a match never relies on colour alone. */

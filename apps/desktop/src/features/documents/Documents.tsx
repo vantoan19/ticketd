@@ -713,6 +713,15 @@ export function Documents({
           passages && doc.snippet && !sameText(doc.snippet, doc.heading)
             ? doc.snippet
             : "";
+        const unread = doc.opened === false && !openedHere.has(doc.id);
+        // A row with a passage hides its meta line; the button describes itself with it instead,
+        // and the unread dot moves in front of the passage.
+        const metaId = snippet ? `document-meta-${doc.id}` : undefined;
+        const dot = unread && (
+          <span role="img" aria-label="Not opened yet">
+            <StatusDot tone="unread" size={6} />
+          </span>
+        );
         return (
           // A row at ticket density (DL-06): the title, then one meta line
           // (origin, tags, date); the snippet only in search results.
@@ -726,6 +735,7 @@ export function Documents({
                   type="button"
                   className="document-list-open"
                   aria-current={selected?.id === doc.id || undefined}
+                  aria-describedby={metaId}
                   data-document-row={doc.id}
                   tabIndex={tabStop ? 0 : -1}
                   onFocus={() => setFocusedRow(doc.id)}
@@ -748,10 +758,12 @@ export function Documents({
                       );
                     } else if (matchesShortcut(event, "documents-time")) {
                       event.preventDefault();
-                      event.currentTarget
-                        .closest("li")
-                        ?.querySelector<HTMLElement>("time")
-                        ?.focus();
+                      // A row with a passage keeps its time out of sight: nothing to focus.
+                      if (!snippet)
+                        event.currentTarget
+                          .closest("li")
+                          ?.querySelector<HTMLElement>("time")
+                          ?.focus();
                     } else if (event.key === "Enter") {
                       event.preventDefault();
                       open(doc.id);
@@ -763,12 +775,8 @@ export function Documents({
                     {highlight(doc.heading, mark)}
                   </span>
                 </button>
-                <p className="document-list-meta">
-                  {doc.opened === false && !openedHere.has(doc.id) && (
-                    <span role="img" aria-label="Not opened yet">
-                      <StatusDot tone="unread" size={6} />
-                    </span>
-                  )}
+                <p className="document-list-meta" id={metaId}>
+                  {!snippet && dot}
                   {date && doc.updated_at && (
                     <Tooltip content={formatDateTime(doc.updated_at)}>
                       <time
@@ -819,7 +827,10 @@ export function Documents({
                   ))}
                 </p>
                 {snippet && (
-                  <p className="document-snippet">{highlight(snippet, mark)}</p>
+                  <p className="document-snippet">
+                    {dot}
+                    {highlight(snippet, mark)}
+                  </p>
                 )}
               </div>
               {inTrash ? (
