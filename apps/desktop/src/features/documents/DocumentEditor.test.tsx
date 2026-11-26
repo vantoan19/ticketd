@@ -45,7 +45,7 @@ vi.mock("./api", () => ({
     version: vi.fn(),
     setTrashed: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi.fn(),
+    row: vi.fn(),
     tag: vi.fn(),
     createTicket: vi.fn(),
     linkMarkdown: vi.fn(),
@@ -85,7 +85,7 @@ const emptyRow = {
 };
 beforeEach(() => {
   vi.mocked(documents.links).mockResolvedValue([[], []]);
-  vi.mocked(documents.summary).mockResolvedValue(emptyRow);
+  vi.mocked(documents.row).mockResolvedValue(emptyRow);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -320,7 +320,7 @@ it("opens a connected ticket after saving a document draft", async () => {
   fireEvent.click(
     await screen.findByRole("button", { name: "Mentioned in 1 ticket" }),
   );
-  await screen.findByText(/^From\s*“/);
+  await screen.findByText(/^From\s+T-KQ4$/);
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Updated" },
@@ -1111,7 +1111,8 @@ it("quotes a passage shared by several connections once", async () => {
   );
   await screen.findByRole("button", { name: "T-KQ1" });
   expect(screen.getAllByText(/See\s+T-KQ1/)).toHaveLength(2);
-  expect(screen.getAllByText(/^Both from\s*“/)).toHaveLength(1);
+  // One row for the shared passage, naming both sources.
+  expect(screen.getAllByText(/^From\s+T-KQ1, T-KQ3$/)).toHaveLength(1);
 });
 
 it("opens the Document's History from its actions, and says when it Needs review", async () => {
@@ -1186,7 +1187,7 @@ it("shows the restored text at once after a History restore", async () => {
 // The Document's one-line summary: shown under the meta line, edited under the title.
 const summarized = { ...stored, summary: "Ship the reader on Friday." };
 const summaryField = () =>
-  screen.getByRole<HTMLInputElement>("textbox", { name: "Summary" });
+  screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Summary" });
 it("shows the summary under the meta line, and nothing when there is none", () => {
   const { container, unmount } = renderEditor(
     <DocumentEditor initial={summarized} onClose={vi.fn()} />,
@@ -1210,6 +1211,16 @@ it("offers a one-line field for the summary in Edit, even when empty", () => {
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(summaryField().placeholder).toBe("Add a one-line summary");
   expect(summaryField().value).toBe("");
+});
+it("wraps a long summary in a growing field and never takes a line break", () => {
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  // A text area, so the whole summary shows; a pasted line break becomes a space.
+  expect(summaryField().tagName).toBe("TEXTAREA");
+  fireEvent.change(summaryField(), { target: { value: "First line\nSecond" } });
+  expect(summaryField().value).toBe("First line Second");
+  const enter = fireEvent.keyDown(summaryField(), { key: "Enter" });
+  expect(enter).toBe(false);
 });
 it("saves a typed summary with the loaded revision and leaves the title and body alone", async () => {
   vi.useFakeTimers();

@@ -37,7 +37,7 @@ vi.mock("./api", () => ({
     version: vi.fn(),
     setTrashed: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi.fn().mockResolvedValue({
+    row: vi.fn().mockResolvedValue({
       id: "d1",
       heading: "",
       plans: [],

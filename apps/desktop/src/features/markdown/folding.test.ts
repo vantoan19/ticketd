@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { foldAllTargets, hiddenBy } from "./folding";
+import { foldAllIntros, foldAllTargets, hiddenBy } from "./folding";
 import { outlineOf } from "./outline";
 
 const headings = outlineOf(
@@ -8,6 +8,10 @@ const headings = outlineOf(
 
 it("folds the sections that hold no subsection, so every heading stays on show", () => {
   expect(foldAllTargets(headings)).toEqual(["a1", "a2", "b", "c1"]);
+});
+
+it("folds the sections that hold subsections to their first sentence only", () => {
+  expect(foldAllIntros(headings)).toEqual(["a", "c"]);
 });
 
 it("names the folded sections that hide a heading, nearest first", () => {

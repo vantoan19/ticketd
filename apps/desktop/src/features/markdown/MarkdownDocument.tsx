@@ -89,6 +89,8 @@ const HeadingAnchors = createContext<ReadonlyMap<
 /** Which sections are folded, and how a heading's chevron changes that. */
 export type SectionFolding = {
   folded: ReadonlySet<string>;
+  /** Sections shown as their first sentence only, their subsections still on show. */
+  introFolded: ReadonlySet<string>;
   toggle: (id: string) => void;
 };
 const Folding = createContext<SectionFolding | null>(null);
@@ -305,7 +307,8 @@ function mentionBlock(tag: string) {
     const marked =
       mark !== null && isMentionBlock(node as PositionedNode, mark);
     if (outlined?.foldable && folding) {
-      const isFolded = folding.folded.has(outlined.id);
+      const isFolded =
+        folding.folded.has(outlined.id) || folding.introFolded.has(outlined.id);
       return createElement(
         tag,
         {
@@ -484,7 +487,8 @@ function replaceDestination(
 
 /**
  * Hides what each folded section holds: every block after its heading, up to the
- * next heading of its level or a shallower one. The blocks are the rendered
+ * next heading of its level or a shallower one. A section folded to its first
+ * sentence only hides its own blocks, up to the next heading of any level. The blocks are the rendered
  * Markdown's own elements, so they are marked here instead of wrapped, which
  * keeps the text column where it is. Without folds everything is shown.
  */
@@ -492,9 +496,11 @@ function hideFolded(
   root: HTMLElement,
   headings: readonly OutlineHeading[],
   folded: ReadonlySet<string> | undefined,
+  introFolded: ReadonlySet<string> | undefined,
 ) {
   const byId = new Map(headings.map((heading) => [heading.id, heading]));
   let hidingBelow: number | null = null;
+  let hidingIntro = false;
   let followsFolded = false;
   for (const element of Array.from(root.children)) {
     const heading = /^H[1-4]$/.test(element.tagName)
@@ -502,7 +508,8 @@ function hideFolded(
       : undefined;
     if (heading && hidingBelow !== null && heading.level <= hidingBelow)
       hidingBelow = null;
-    const hidden = hidingBelow !== null;
+    if (/^H[1-6]$/.test(element.tagName)) hidingIntro = false;
+    const hidden = hidingBelow !== null || hidingIntro;
     (element as HTMLElement).hidden = hidden;
     // The heading that follows a folded one sits close under it: folded lines stack.
     element.toggleAttribute("data-after-folded", !hidden && followsFolded);
@@ -510,6 +517,9 @@ function hideFolded(
     followsFolded = false;
     if (heading && folded?.has(heading.id)) {
       hidingBelow = heading.level;
+      followsFolded = true;
+    } else if (heading && introFolded?.has(heading.id)) {
+      hidingIntro = true;
       followsFolded = true;
     }
   }
@@ -608,8 +618,8 @@ export function MarkdownDocument({
   const root = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (root.current && headings)
-      hideFolded(root.current, headings, folding?.folded);
-  }, [rendered, headings, folding?.folded]);
+      hideFolded(root.current, headings, folding?.folded, folding?.introFolded);
+  }, [rendered, headings, folding?.folded, folding?.introFolded]);
   return (
     <div className="markdown-document" ref={root}>
       <TicketNavigation.Provider value={{ select, revision }}>

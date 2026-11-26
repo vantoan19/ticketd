@@ -308,9 +308,9 @@ fn show_document(id: String) -> Result<Document, BridgeFailure> {
         .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]
-fn document_summary(id: String) -> Result<DocumentSummary, BridgeFailure> {
+fn document_row(id: String) -> Result<DocumentSummary, BridgeFailure> {
     open_workspace()
-        .and_then(|w| w.document_summary(&id))
+        .and_then(|w| w.document_row(&id))
         .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]
@@ -2460,7 +2460,7 @@ pub fn run() -> Result<(), tauri::Error> {
             documents_by_title,
             set_document_trashed,
             show_document,
-            document_summary,
+            document_row,
             document_version,
             open_document,
             save_document,

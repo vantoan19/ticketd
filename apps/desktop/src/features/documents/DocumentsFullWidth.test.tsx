@@ -32,7 +32,7 @@ vi.mock("@/lib/sync-review-api", () => ({
 vi.mock("./api", () => ({
   documents: {
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi.fn(),
+    row: vi.fn(),
     recent: vi.fn(),
     all: vi.fn(),
     byTitle: vi.fn(),
@@ -91,7 +91,7 @@ beforeEach(() => {
     unlinked: 0,
     trashed: 0,
   });
-  vi.mocked(documents.summary).mockResolvedValue({
+  vi.mocked(documents.row).mockResolvedValue({
     id: "x",
     heading: "",
     plans: [],
@@ -318,7 +318,13 @@ it("offers Back to top only once the reader is past the first screen", async () 
   scrollTo(500);
   expect(screen.queryByRole("button", { name: "Back to top" })).toBeNull();
   scrollTo(1600);
-  fireEvent.click(screen.getByRole("button", { name: "Back to top" }));
+  // It sits in the rail's header beside Fold all, so a long outline list cannot push it away.
+  const top = within(outlineNav()).getByRole("button", { name: "Back to top" });
+  expect(top.parentElement).toBe(
+    within(outlineNav()).getByRole("button", { name: "Fold all" })
+      .parentElement,
+  );
+  fireEvent.click(top);
   expect(scrollTo).toBeDefined();
   expect(vi.mocked(Element.prototype.scrollTo)).toHaveBeenCalledWith(
     expect.objectContaining({ top: 0 }),
@@ -330,7 +336,7 @@ it("offers Back to top only once the reader is past the first screen", async () 
 it("lists what the Document is linked to in the rail", async () => {
   expandedAlready();
   vi.mocked(documents.recent).mockResolvedValue([row("a")]);
-  vi.mocked(documents.summary).mockResolvedValue({
+  vi.mocked(documents.row).mockResolvedValue({
     id: "a",
     heading: "Doc a",
     plans: [{ id: "p1", name: "Launch", archived: false, spec: true }],

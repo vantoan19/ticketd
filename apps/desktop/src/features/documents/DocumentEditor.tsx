@@ -57,6 +57,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Badge } from "@/components/ui/badge";
 import { Reference } from "@/components/ui/reference";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
@@ -374,14 +375,16 @@ function RecoveredDocumentEditor({
         );
     if (initial)
       void documents
-        .summary(initial.id)
+        .row(initial.id)
         .then((next) => {
           const key = JSON.stringify(next);
           if (key === rowKey.current) return;
           rowKey.current = key;
           setRow(next);
         })
-        .catch(() => {});
+        .catch((error: unknown) =>
+          setLinkError(describeFailure(error, "load the connections")),
+        );
   };
   const refreshLinksRef = useRef(refreshLinks);
   useEffect(() => {
@@ -980,6 +983,7 @@ function RecoveredDocumentEditor({
     scroller,
     outline,
     folds.folded,
+    folds.introFolded,
   );
   /** Changes the folds and keeps the heading the reader is at where it was on screen. */
   const keepPlace = (change: () => void) => {
@@ -1738,7 +1742,7 @@ function RecoveredDocumentEditor({
             current={currentAnchor}
             scroller={scroller}
             folds={{
-              folded: folds.folded.size,
+              folded: folds.folded.size + folds.introFolded.size,
               allFolded: folds.allFolded,
               foldAll: () => keepPlace(folds.foldAll),
               unfoldAll: () => keepPlace(folds.unfoldAll),
@@ -1805,19 +1809,19 @@ function RecoveredDocumentEditor({
             />
             {writing ? (
               // The author's one-line summary edits in the place it is read.
-              <div className="document-summary">
-                <Input
+              // `data-value` mirrors the text so the field is as tall as the whole summary.
+              <div className="document-summary" data-value={summary}>
+                <Textarea
                   aria-label="Summary"
-                  variant="title"
+                  rows={1}
                   placeholder="Add a one-line summary"
                   readOnly={locked}
                   value={summary}
                   onChange={(event) => {
-                    draft.current = {
-                      ...draft.current,
-                      summary: event.target.value,
-                    };
-                    setSummary(event.target.value);
+                    // One line of text: a pasted line break becomes a space.
+                    const value = event.target.value.replace(/[\r\n]+/g, " ");
+                    draft.current = { ...draft.current, summary: value };
+                    setSummary(value);
                   }}
                   onKeyDown={(event) => {
                     // Enter leaves the field for the text, as it would end a line.
@@ -1997,18 +2001,22 @@ function RecoveredDocumentEditor({
                       )}
                       <ul>{mentions.map((item) => connectionRow(item))}</ul>
                       {passages.length > 0 && (
-                        <div className="document-passage-caption">
-                          <span>
-                            {passages.length === 1 && mentions.length > 1
-                              ? mentions.length === 2
-                                ? "Both from"
-                                : "All from"
-                              : "From"}{" "}
-                            “
-                          </span>
-                          {passages.map((passage) => passageView(passage))}
-                          <span aria-hidden="true">”</span>
-                        </div>
+                        <ul className="document-passages">
+                          {passages.map((passage) => (
+                            <li key={passage}>
+                              <p className="document-passage-source">
+                                From{" "}
+                                {mentions
+                                  .filter((item) =>
+                                    item.passages.includes(passage),
+                                  )
+                                  .map((item) => item.label)
+                                  .join(", ")}
+                              </p>
+                              {passageView(passage)}
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </>
                   )}
@@ -2028,7 +2036,7 @@ function RecoveredDocumentEditor({
             headings={outline}
             current={currentAnchor}
             folds={{
-              folded: folds.folded.size,
+              folded: folds.folded.size + folds.introFolded.size,
               allFolded: folds.allFolded,
               foldAll: () => keepPlace(folds.foldAll),
               unfoldAll: () => keepPlace(folds.unfoldAll),

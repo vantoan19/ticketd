@@ -89,6 +89,8 @@ const summary = z.object({
         reference: z.string(),
         title: z.string(),
         status: z.string(),
+        /** The core's rule: Todo, In progress or In review. */
+        open: z.boolean().optional(),
       }),
     )
     .optional(),
@@ -152,8 +154,8 @@ export const documents = {
       }),
     ),
   /** One Document's row: the same Plans, tickets and tags a list row carries. */
-  summary: async (id: string) =>
-    summary.parse(await invoke("document_summary", { id })),
+  row: async (id: string) =>
+    summary.parse(await invoke("document_row", { id })),
   keep: async (id: string, requestId: string) =>
     schema.parse(await invoke("keep_document", { id, requestId })),
   pin: async (id: string, pinned: boolean) =>

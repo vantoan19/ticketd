@@ -1,7 +1,13 @@
 import { useCallback, useMemo, useState } from "react";
-import { foldAllTargets, hiddenBy } from "@/features/markdown/folding";
+import {
+  foldAllIntros,
+  foldAllTargets,
+  hiddenBy,
+} from "@/features/markdown/folding";
 import type { OutlineHeading } from "@/features/markdown/outline";
 
+// Folds are kept per Document under their own key, not as a preference: a preference is one
+// value for the whole app, and a Workspace Document's folds are only this computer's reading state.
 const key = (documentId: string) => `ticketd.document-folds.${documentId}`;
 
 function recall(documentId: string): string[] {
@@ -25,11 +31,19 @@ function remember(documentId: string, ids: readonly string[]) {
   }
 }
 
+// A section with subsections can also be folded to its first sentence while its subsections
+// stay on show (Fold all does that). That state is kept beside the whole folds under
+// "intro:{anchor}": an anchor is made of letters, digits and hyphens, so the two never collide.
+const INTRO = "intro:";
+
 export type SectionFolds = {
-  /** Anchors of the folded sections. */
+  /** Anchors of the sections folded away whole. */
   folded: ReadonlySet<string>;
+  /** Anchors of the sections folded to their first sentence, their subsections still shown. */
+  introFolded: ReadonlySet<string>;
+  /** Folds an open section, or opens a folded one (a section folded to its first sentence gets its text back). */
   toggle: (id: string) => void;
-  /** Folds every section that holds no folded-away subsection. */
+  /** Folds every section to its heading and first sentence, subsections shown folded. */
   foldAll: () => void;
   unfoldAll: () => void;
   /** Unfolds whatever hides this heading, so it can be scrolled to. */
@@ -57,13 +71,22 @@ export function useSectionFolds(
     setStored({ documentId, ids });
   }
   // A heading that was renamed or removed leaves its fold behind; it is ignored.
-  const folded = useMemo(() => {
+  const [folded, introFolded] = useMemo(() => {
     const live = new Set(
       headings.filter((heading) => heading.foldable).map((h) => h.id),
     );
-    return new Set(ids.filter((id) => live.has(id)));
+    return [
+      new Set(ids.filter((id) => live.has(id))),
+      new Set(
+        ids
+          .filter((id) => id.startsWith(INTRO))
+          .map((id) => id.slice(INTRO.length))
+          .filter((id) => live.has(id)),
+      ),
+    ];
   }, [ids, headings]);
   const targets = useMemo(() => foldAllTargets(headings), [headings]);
+  const intros = useMemo(() => foldAllIntros(headings), [headings]);
 
   const change = useCallback(
     (next: readonly string[]) => {
@@ -72,20 +95,41 @@ export function useSectionFolds(
     },
     [documentId],
   );
+  const entries = (
+    wholeFolds: Iterable<string>,
+    introFolds: Iterable<string>,
+  ) => [...wholeFolds, ...[...introFolds].map((id) => `${INTRO}${id}`)];
   return {
     folded,
-    toggle: (id) =>
+    introFolded,
+    toggle: (id) => {
+      const without = (set: ReadonlySet<string>) =>
+        [...set].filter((other) => other !== id);
+      if (folded.has(id)) change(entries(without(folded), introFolded));
+      else if (introFolded.has(id))
+        change(entries(folded, without(introFolded)));
+      else change(entries([...folded, id], introFolded));
+    },
+    foldAll: () =>
       change(
-        folded.has(id)
-          ? [...folded].filter((other) => other !== id)
-          : [...folded, id],
+        entries(
+          new Set([...folded, ...targets]),
+          new Set([...introFolded, ...intros]),
+        ),
       ),
-    foldAll: () => change([...new Set([...folded, ...targets])]),
     unfoldAll: () => change([]),
     reveal: (id) => {
       const hiding = new Set(hiddenBy(headings, id, folded));
-      if (hiding.size > 0) change([...folded].filter((o) => !hiding.has(o)));
+      if (hiding.size > 0)
+        change(
+          entries(
+            [...folded].filter((o) => !hiding.has(o)),
+            introFolded,
+          ),
+        );
     },
-    allFolded: targets.every((id) => folded.has(id)),
+    allFolded:
+      targets.every((id) => folded.has(id)) &&
+      intros.every((id) => introFolded.has(id)),
   };
 }

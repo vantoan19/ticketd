@@ -39,13 +39,15 @@ pub struct CurrentWork {
 /// `?1` includes Activity details, as in every other browsing read.
 const CLASSIFIED: &str = "SELECT d.id AS id, d.updated_at AS updated_at,
     (SELECT id FROM (SELECT p.id AS id, p.name AS name, coalesce(p.spec_document_id = d.id, 0) AS spec FROM plan_documents pd JOIN plans p ON p.id = pd.plan_id WHERE pd.document_id = d.id AND p.archived = 0) ORDER BY spec DESC, name, id LIMIT 1) AS own_plan,
-    (SELECT p.id FROM tickets t JOIN plans p ON p.id = t.plan_id WHERE t.trashed = 0 AND t.status IN ('Todo', 'In progress', 'In review') AND p.archived = 0 AND t.id IN (SELECT m.source_id FROM {MENTIONS} m WHERE m.target_id = d.id) ORDER BY p.name, p.id LIMIT 1) AS ticket_plan,
-    EXISTS (SELECT 1 FROM tickets t WHERE t.trashed = 0 AND t.status IN ('Todo', 'In progress', 'In review') AND t.id IN (SELECT m.source_id FROM {MENTIONS} m WHERE m.target_id = d.id)) AS open_ticket,
+    (SELECT p.id FROM tickets t JOIN plans p ON p.id = t.plan_id WHERE t.trashed = 0 AND t.status IN ({OPEN}) AND p.archived = 0 AND t.id IN (SELECT m.source_id FROM {MENTIONS} m WHERE m.target_id = d.id) ORDER BY p.name, p.id LIMIT 1) AS ticket_plan,
+    EXISTS (SELECT 1 FROM tickets t WHERE t.trashed = 0 AND t.status IN ({OPEN}) AND t.id IN (SELECT m.source_id FROM {MENTIONS} m WHERE m.target_id = d.id)) AS open_ticket,
     (EXISTS (SELECT 1 FROM plan_documents pd WHERE pd.document_id = d.id) OR EXISTS (SELECT 1 FROM tickets t WHERE t.trashed = 0 AND t.id IN (SELECT m.source_id FROM {MENTIONS} m WHERE m.target_id = d.id))) AS linked
     FROM documents d WHERE d.trashed = 0 AND (?1 OR d.originating_activity_id IS NULL OR d.kept = 1)";
 
 fn classified() -> String {
-    CLASSIFIED.replace("{MENTIONS}", crate::document_links::DOCUMENT_MENTIONS)
+    CLASSIFIED
+        .replace("{MENTIONS}", crate::document_links::DOCUMENT_MENTIONS)
+        .replace("{OPEN}", crate::documents::OPEN_TICKET_STATUSES)
 }
 
 impl Workspace {

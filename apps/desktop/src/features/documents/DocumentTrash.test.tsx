@@ -14,7 +14,7 @@ vi.mock("./api", () => ({
   documents: {
     currentWork: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi.fn().mockResolvedValue({
+    row: vi.fn().mockResolvedValue({
       id: "d1",
       heading: "",
       plans: [],
@@ -42,7 +42,7 @@ beforeEach(() => {
     JSON.stringify({ documentsView: "recent" }),
   );
   vi.mocked(documents.links).mockResolvedValue([[], []]);
-  vi.mocked(documents.summary).mockResolvedValue({
+  vi.mocked(documents.row).mockResolvedValue({
     id: "d1",
     heading: "",
     plans: [],

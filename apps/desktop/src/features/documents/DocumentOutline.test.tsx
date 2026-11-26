@@ -35,7 +35,7 @@ vi.mock("./api", () => ({
     version: vi.fn(),
     setTrashed: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi.fn(),
+    row: vi.fn(),
     recent: vi.fn(),
     search: vi.fn(),
   },
@@ -47,7 +47,7 @@ const renderEditor = (ui: ReactElement) =>
   render(<TickingChanges>{ui}</TickingChanges>);
 beforeEach(() => {
   vi.mocked(documents.links).mockResolvedValue([[], []]);
-  vi.mocked(documents.summary).mockResolvedValue({
+  vi.mocked(documents.row).mockResolvedValue({
     id: "d1",
     heading: "",
     plans: [],

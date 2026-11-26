@@ -560,6 +560,18 @@ export function Documents({
     (sum, group) => sum + group.documents.length,
     0,
   );
+  /** Recent's rows without the Documents the Pinned group already lists. */
+  const unpinned = (items: DocumentSummary[]) =>
+    items.filter((doc) => !groupPins.some((pin) => pin.id === doc.id));
+  /** "Recent" over the rows below the Pinned group, so the two groups read apart. */
+  const recentHeading = (items: DocumentSummary[]) =>
+    groupPins.length > 0 && (
+      <h2 className="documents-group">
+        <Clock aria-hidden="true" />
+        Recent
+        <Count>{unpinned(items).length}</Count>
+      </h2>
+    );
   /** Everything the arrow keys visit, in order: Documents, and the headers that fold them. */
   const rovingItems: string[] = [];
   const visibleRows = showTrash
@@ -575,14 +587,7 @@ export function Documents({
             ...(finishedOpen ? finished : []),
             ...(unlinkedOpen ? unlinked : []),
           ]
-        : sorted
-          ? all
-          : [
-              ...groupPins,
-              ...recent.filter(
-                (doc) => !groupPins.some((pin) => pin.id === doc.id),
-              ),
-            ];
+        : [...groupPins, ...unpinned(sorted ? all : recent)];
   if (!showTrash && !searching && view === "current") {
     rovingItems.push(...groupPins.map((doc) => doc.id));
     for (const group of groups) {
@@ -708,6 +713,15 @@ export function Documents({
           passages && doc.snippet && !sameText(doc.snippet, doc.heading)
             ? doc.snippet
             : "";
+        const unread = doc.opened === false && !openedHere.has(doc.id);
+        // A row with a passage hides its meta line; the button describes itself with it instead,
+        // and the unread dot moves in front of the passage.
+        const metaId = snippet ? `document-meta-${doc.id}` : undefined;
+        const dot = unread && (
+          <span role="img" aria-label="Not opened yet">
+            <StatusDot tone="unread" size={6} />
+          </span>
+        );
         return (
           // A row at ticket density (DL-06): the title, then one meta line
           // (origin, tags, date); the snippet only in search results.
@@ -721,6 +735,7 @@ export function Documents({
                   type="button"
                   className="document-list-open"
                   aria-current={selected?.id === doc.id || undefined}
+                  aria-describedby={metaId}
                   data-document-row={doc.id}
                   tabIndex={tabStop ? 0 : -1}
                   onFocus={() => setFocusedRow(doc.id)}
@@ -743,10 +758,12 @@ export function Documents({
                       );
                     } else if (matchesShortcut(event, "documents-time")) {
                       event.preventDefault();
-                      event.currentTarget
-                        .closest("li")
-                        ?.querySelector<HTMLElement>("time")
-                        ?.focus();
+                      // A row with a passage keeps its time out of sight: nothing to focus.
+                      if (!snippet)
+                        event.currentTarget
+                          .closest("li")
+                          ?.querySelector<HTMLElement>("time")
+                          ?.focus();
                     } else if (event.key === "Enter") {
                       event.preventDefault();
                       open(doc.id);
@@ -758,12 +775,8 @@ export function Documents({
                     {highlight(doc.heading, mark)}
                   </span>
                 </button>
-                <p className="document-list-meta">
-                  {doc.opened === false && !openedHere.has(doc.id) && (
-                    <span role="img" aria-label="Not opened yet">
-                      <StatusDot tone="unread" size={6} />
-                    </span>
-                  )}
+                <p className="document-list-meta" id={metaId}>
+                  {!snippet && dot}
                   {date && doc.updated_at && (
                     <Tooltip content={formatDateTime(doc.updated_at)}>
                       <time
@@ -814,7 +827,10 @@ export function Documents({
                   ))}
                 </p>
                 {snippet && (
-                  <p className="document-snippet">{highlight(snippet, mark)}</p>
+                  <p className="document-snippet">
+                    {dot}
+                    {highlight(snippet, mark)}
+                  </p>
                 )}
               </div>
               {inTrash ? (
@@ -876,7 +892,11 @@ export function Documents({
     setAllOffset(0);
     setPreference("documentsSort", value);
   };
-  /** A header that folds a group: a button naming the group, its count, and open or closed. */
+  /**
+   * A header that folds a group: a button naming the group, its count, and open or closed.
+   * Custom rather than a Disclosure: its trigger cannot join the list's roving focus (one tab
+   * stop, J/K and arrows move between headers and rows), and the group's rows are not its body.
+   */
   const groupHeader = (
     key: string,
     label: string,
@@ -928,25 +948,22 @@ export function Documents({
         {list(items, query, false, false, !titles)}
       </section>
     );
-  const pinnedSection = !showTrash &&
-    !searching &&
-    groupPins.length > 0 &&
-    (view === "current" || !sorted) && (
-      <section aria-label="Pinned">
-        <h2 className="documents-group">
-          <Pin aria-hidden="true" />
-          Pinned
-          <Count>{groupPins.length}</Count>
-        </h2>
-        {list(groupPins)}
-        {pins.length >= pinOffset + 50 && (
-          <Pager
-            noun="pinned Documents"
-            onMore={() => setPinOffset(pinOffset + 50)}
-          />
-        )}
-      </section>
-    );
+  const pinnedSection = !showTrash && !searching && groupPins.length > 0 && (
+    <section aria-label="Pinned">
+      <h2 className="documents-group">
+        <Pin aria-hidden="true" />
+        Pinned
+        <Count>{groupPins.length}</Count>
+      </h2>
+      {list(groupPins)}
+      {pins.length >= pinOffset + 50 && (
+        <Pager
+          noun="pinned Documents"
+          onMore={() => setPinOffset(pinOffset + 50)}
+        />
+      )}
+    </section>
+  );
   const currentWorkSection = (
     <section aria-label="Current work">
       {work === null ? (
@@ -1351,6 +1368,7 @@ export function Documents({
                 currentWorkSection
               ) : sorted ? (
                 <section aria-label="All Documents">
+                  {recentHeading(all)}
                   {!allLoaded ? (
                     <EmptyState
                       size="inline"
@@ -1366,7 +1384,7 @@ export function Documents({
                       />
                     )
                   )}
-                  {list(all)}
+                  {list(unpinned(all))}
                   {all.length >= allOffset + 50 && (
                     <Pager
                       noun="Documents"
@@ -1376,20 +1394,7 @@ export function Documents({
                 </section>
               ) : (
                 <section aria-label="Recently opened">
-                  {groupPins.length > 0 && (
-                    <h2 className="documents-group">
-                      <Clock aria-hidden="true" />
-                      Recent
-                      <Count>
-                        {
-                          recent.filter(
-                            (doc) =>
-                              !groupPins.some((pin) => pin.id === doc.id),
-                          ).length
-                        }
-                      </Count>
-                    </h2>
-                  )}
+                  {recentHeading(recent)}
                   {!browseLoaded ? (
                     <EmptyState
                       size="inline"
@@ -1405,11 +1410,7 @@ export function Documents({
                       />
                     )
                   )}
-                  {list(
-                    recent.filter(
-                      (doc) => !groupPins.some((p) => p.id === doc.id),
-                    ),
-                  )}
+                  {list(unpinned(recent))}
                   {recent.length >= recentOffset + 50 && (
                     <Pager
                       noun="recent Documents"

@@ -3,6 +3,7 @@ import {
   currentHeading,
   type OutlineHeading,
 } from "@/features/markdown/outline";
+import { readingScrollBehavior } from "./reading-scroll";
 
 /** How far below the top of the column the reading line sits, in px. A heading brought to the top (24px) is above it. */
 export const READING_LINE = 48;
@@ -29,6 +30,7 @@ export function useCurrentHeading(
   headings: readonly OutlineHeading[],
   /** Sections folded away: their headings are not on the page, and a fold moves the rest. */
   folded?: ReadonlySet<string>,
+  introFolded?: ReadonlySet<string>,
 ): { current: string | null; goTo: (id: string) => void } {
   const [live, setLive] = useState<string | null>(null);
   const [chosen, setChosen] = useState<string | null>(null);
@@ -67,17 +69,14 @@ export function useCurrentHeading(
       for (const type of ["wheel", "touchstart", "keydown", "pointerdown"])
         scroller.removeEventListener(type, release);
     };
-  }, [scroller, headings, folded]);
+  }, [scroller, headings, folded, introFolded]);
   const goTo = (id: string) => {
     if (!scroller) return;
     held.current = id;
     setChosen(id);
-    const reduced = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
     headingElement(scroller, id)?.scrollIntoView({
       block: "start",
-      behavior: reduced ? "auto" : "smooth",
+      behavior: readingScrollBehavior(),
     });
   };
   const current = chosen ?? live;

@@ -67,6 +67,9 @@ pub struct DocumentTicketContext {
     pub reference: String,
     pub title: String,
     pub status: String,
+    /// The ticket is open: Todo, In progress or In review.
+    #[serde(default)]
+    pub open: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -112,7 +115,7 @@ pub struct DocumentPatch {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_title"
+        deserialize_with = "present_field"
     )]
     pub title: Option<Option<String>>,
     pub body: Option<String>,
@@ -120,7 +123,7 @@ pub struct DocumentPatch {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_title"
+        deserialize_with = "present_field"
     )]
     pub summary: Option<Option<String>>,
     /// The `updated_at` the caller last saw. When present and stale the change is rejected, so
@@ -141,7 +144,7 @@ pub(crate) fn one_line_summary(summary: &str) -> Option<String> {
     (!line.is_empty()).then_some(line)
 }
 
-fn present_title<'de, D: serde::Deserializer<'de>>(
+fn present_field<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)
@@ -192,11 +195,14 @@ pub(crate) fn summary_columns() -> String {
 /// A row's Plans (Archived included) as a JSON array, the one it is the spec of first.
 const PLANS_JSON: &str = "(SELECT json_group_array(json_object('id', id, 'name', name, 'archived', json(CASE archived WHEN 0 THEN 'false' ELSE 'true' END), 'spec', json(CASE spec WHEN 0 THEN 'false' ELSE 'true' END))) FROM (SELECT p.id AS id, p.name AS name, p.archived AS archived, coalesce(p.spec_document_id = d.id, 0) AS spec FROM plan_documents pd JOIN plans p ON p.id = pd.plan_id WHERE pd.document_id = d.id ORDER BY spec DESC, p.archived, p.name, p.id))";
 
+/// The statuses of an open ticket, as a SQL list; the one definition of "open" for Documents.
+pub(crate) const OPEN_TICKET_STATUSES: &str = "'Todo', 'In progress', 'In review'";
+
 /// A row's tickets, in Trash excluded, as a JSON array: those whose description mentions the
 /// Document and those it is attached to.
 fn tickets_json() -> String {
     format!(
-        "(SELECT json_group_array(json_object('reference', reference, 'title', title, 'status', status)) FROM (SELECT t.reference AS reference, t.title AS title, t.status AS status FROM tickets t WHERE t.trashed = 0 AND t.id IN (SELECT m.source_id FROM {} m WHERE m.target_id = d.id) ORDER BY t.number))",
+        "(SELECT json_group_array(json_object('reference', reference, 'title', title, 'status', status, 'open', json(CASE open WHEN 0 THEN 'false' ELSE 'true' END))) FROM (SELECT t.reference AS reference, t.title AS title, t.status AS status, t.status IN ({OPEN_TICKET_STATUSES}) AS open FROM tickets t WHERE t.trashed = 0 AND t.id IN (SELECT m.source_id FROM {} m WHERE m.target_id = d.id) ORDER BY t.number))",
         crate::document_links::DOCUMENT_MENTIONS
     )
 }
@@ -411,7 +417,7 @@ impl Workspace {
 
     /// One Document's list row (Plans, tickets, tags, opened), for a reader that needs the
     /// same context a list row carries. A Document in Trash has a row too.
-    pub fn document_summary(&self, id: &str) -> Result<DocumentSummary, Error> {
+    pub fn document_row(&self, id: &str) -> Result<DocumentSummary, Error> {
         let columns = summary_columns();
         self.connection
             .query_row(

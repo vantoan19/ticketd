@@ -181,13 +181,50 @@ fn one_document_reads_the_same_row_the_list_shows_trashed_ones_included() {
     workspace.set_document_tag(&doc.id, "launch", true).unwrap();
 
     let listed = row(workspace.all_documents_page(50, 0, false).unwrap(), &doc.id);
-    let single = workspace.document_summary(&doc.id).unwrap();
+    let single = workspace.document_row(&doc.id).unwrap();
     assert_eq!(single, listed);
     assert!(single.plans[0].archived && single.plans[0].spec);
     assert_eq!(single.plans[0].id, old.id);
     assert_eq!(single.tags, vec!["launch".to_owned()]);
 
     workspace.set_document_trashed(&doc.id, true).unwrap();
-    assert_eq!(workspace.document_summary(&doc.id).unwrap().id, doc.id);
-    assert!(workspace.document_summary("missing").is_err());
+    assert_eq!(workspace.document_row(&doc.id).unwrap().id, doc.id);
+    assert!(workspace.document_row("missing").is_err());
+}
+
+#[test]
+fn a_row_marks_each_ticket_open_when_it_is_todo_in_progress_or_in_review() {
+    let (_dir, mut workspace) = open_workspace();
+    let doc = workspace.create_document(Some("Brief"), "body").unwrap();
+    let mut expected = Vec::new();
+    for (title, status, open) in [
+        ("Waiting", Status::Todo, true),
+        ("Underway", Status::InProgress, true),
+        ("Checking", Status::InReview, true),
+        ("Finished", Status::Done, false),
+        ("Dropped", Status::Canceled, false),
+    ] {
+        let ticket = workspace.create_ticket(title).unwrap();
+        workspace
+            .set_ticket_document(&ticket.reference, &doc.id, true)
+            .unwrap();
+        workspace
+            .change_ticket(
+                &ticket.reference,
+                TicketPatch {
+                    status: Some(status),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        expected.push((title, open));
+    }
+
+    let found = workspace.document_row(&doc.id).unwrap();
+    let marked: Vec<_> = found
+        .tickets
+        .iter()
+        .map(|ticket| (ticket.title.as_str(), ticket.open))
+        .collect();
+    assert_eq!(marked, expected);
 }

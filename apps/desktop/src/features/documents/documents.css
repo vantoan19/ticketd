@@ -154,7 +154,8 @@
   }
 }
 /* The passage a word search matched in, under the title (the board's .lrow-s): 13/18 muted,
-   two lines before it is cut. A row with a passage drops its meta line. */
+   two lines before it is cut. A row with a passage shows the unread dot before it and keeps
+   its meta line for assistive technology. */
 .document-list .document-snippet {
   display: -webkit-box;
   margin: 2px 0 0;
@@ -165,8 +166,19 @@
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
+/* Hidden to the eye only: the row's button names it as its description. */
 .document-list-content:has(.document-snippet) .document-list-meta {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.document-list .document-snippet [role="img"] {
+  display: inline-block;
+  margin-right: 6px;
+  vertical-align: middle;
 }
 /* The words a search matched: the accent fill and a 1.5px foreground underline (the board's
    .hit), so a match never relies on colour alone. */
@@ -284,14 +296,41 @@
   line-height: 27px;
   overflow-wrap: anywhere;
 }
-.document-summary [data-slot="input"] {
-  height: 27px;
-  padding: 0;
-  color: inherit;
+/* The edit field wraps and grows to show the whole summary: a copy of the text (data-value) sits
+   in the same grid cell, unseen, and sets the height. Like the title, its edge takes 8px of inset
+   cancelled by a negative margin, so the text stays where it is read. The edge shows on hover;
+   focus uses the field's own outline. */
+.document-summary:has([data-slot="textarea"]) {
+  display: grid;
+}
+.document-summary:has([data-slot="textarea"])::after,
+.document-summary [data-slot="textarea"] {
+  grid-area: 1 / 1;
+  width: calc(100% + 16px);
+  min-height: 27px;
+  margin-inline: -8px;
+  padding: 0 8px;
   font-size: inherit;
   font-weight: 400;
   letter-spacing: normal;
   line-height: inherit;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.document-summary:has([data-slot="textarea"])::after {
+  content: attr(data-value) " ";
+  visibility: hidden;
+}
+.document-summary [data-slot="textarea"] {
+  display: block;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  resize: none;
+}
+.document-summary [data-slot="textarea"]:hover:not(:focus-visible, :read-only) {
+  box-shadow: inset var(--shadow-border-base);
 }
 .document-meta-item,
 .document-meta-part {
@@ -404,11 +443,20 @@
 .document-passage {
   overflow-wrap: anywhere;
 }
-.document-end .document-passage-caption .document-passage,
-.document-end .document-passage-caption .document-passage * {
-  display: inline;
-  margin: 0;
+/* Each mention's passage is a row of its own: the source as a small label, then the quote. */
+.document-passages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 0;
   padding: 0;
+  list-style: none;
+}
+.document-end .document-passage-source {
+  margin: 0 0 2px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
 }
 :where([data-width~="max-879"]) .documents-page {
   grid-template-columns: minmax(0, 1fr);
@@ -727,13 +775,22 @@
   flex-direction: column;
   gap: 24px;
   width: 200px;
+  /* The rail stays inside the window: only the outline list scrolls (below), so Linked stays
+     in view under it. */
   max-height: calc(100vh - 140px);
-  overflow-y: auto;
   font-size: var(--text-preview);
   line-height: var(--text-preview-line);
 }
+.document-rail > nav {
+  display: flex;
+  flex: 0 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
 .document-rail-head {
   display: flex;
+  flex: none;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
@@ -749,27 +806,38 @@
   display: flex;
   gap: 2px;
 }
-.document-rail-actions button {
+.document-rail-actions .ui-button {
   height: 20px;
   padding: 0 4px;
-  border: 0;
   border-radius: var(--radius-segment);
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
   font-size: var(--text-caption);
-}
-.document-rail-actions button:hover {
-  background: var(--hover);
-  color: var(--foreground);
 }
 .document-rail ul {
   display: flex;
+  flex: 0 1 auto;
   flex-direction: column;
+  min-height: 0;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
   box-shadow: inset 1px 0 0 var(--group-hairline);
+}
+/* A soft fade at the edge of the list that has more to scroll to. */
+.document-rail ul[data-fade="bottom"] {
+  mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
+}
+.document-rail ul[data-fade="top"] {
+  mask-image: linear-gradient(to top, black calc(100% - 24px), transparent);
+}
+.document-rail ul[data-fade="both"] {
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black 24px,
+    black calc(100% - 24px),
+    transparent
+  );
 }
 .document-rail li {
   margin: 0;
@@ -793,11 +861,12 @@
   color: var(--foreground);
   box-shadow: inset 2px 0 0 var(--foreground);
 }
-.document-rail-actions button:focus-visible,
-.document-rail a:focus-visible,
-.document-rail-top:focus-visible {
+.document-rail a:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
+}
+.document-rail-linked {
+  flex: none;
 }
 .document-rail-linked h2 {
   margin: 0 0 8px;
@@ -825,21 +894,11 @@
   flex: none;
   margin-top: 2px;
 }
-.document-rail-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  align-self: flex-start;
+.document-rail-actions [data-size="icon-compact"] {
+  width: 20px;
   padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
 }
-.document-rail-top:hover {
-  color: var(--foreground);
-}
-.document-rail-top svg {
+.document-rail-actions svg {
   width: 14px;
   height: 14px;
 }

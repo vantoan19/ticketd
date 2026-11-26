@@ -1,18 +1,36 @@
 import type { OutlineHeading } from "./outline";
 
 /**
- * What "Fold all" folds: every section that has no folded-away subsection of its
- * own, so the Document reads as its headings, each with its first sentence. A
- * section that holds subsections stays open and shows them folded.
+ * What "Fold all" folds whole: every section that has no subsection of its own, so the
+ * Document reads as its headings, each with its first sentence. A section that holds
+ * subsections is folded to its first sentence by [`foldAllIntros`] and keeps them on show.
  */
 export function foldAllTargets(headings: readonly OutlineHeading[]): string[] {
-  const foldable = headings.filter((heading) => heading.foldable);
-  return foldable
-    .filter((heading, index) => {
-      const next = foldable[index + 1];
-      return next === undefined || next.level <= heading.level;
-    })
+  return foldableSections(headings)
+    .filter((heading) => !heading.parent)
     .map((heading) => heading.id);
+}
+
+/**
+ * What "Fold all" folds to its first sentence only: the sections that hold subsections. Their
+ * text before the first subsection steps aside; the subsections stay on show, each folded.
+ */
+export function foldAllIntros(headings: readonly OutlineHeading[]): string[] {
+  return foldableSections(headings)
+    .filter((heading) => heading.parent)
+    .map((heading) => heading.id);
+}
+
+/** Each foldable heading, and whether a foldable subsection follows it. */
+function foldableSections(headings: readonly OutlineHeading[]) {
+  const foldable = headings.filter((heading) => heading.foldable);
+  return foldable.map((heading, index) => {
+    const next = foldable[index + 1];
+    return {
+      id: heading.id,
+      parent: next !== undefined && next.level > heading.level,
+    };
+  });
 }
 
 /**

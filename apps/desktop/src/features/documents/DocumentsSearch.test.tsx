@@ -14,7 +14,7 @@ vi.mock("./api", () => ({
   documents: {
     currentWork: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi.fn().mockResolvedValue({
+    row: vi.fn().mockResolvedValue({
       id: "d1",
       heading: "",
       plans: [],
@@ -82,7 +82,7 @@ const renderSearch = async (query = "attachment") => {
     screen.getByRole("searchbox", { name: "Search Documents" }),
     { target: { value: query } },
   );
-  await screen.findByRole("heading", { name: /^Titles/ });
+  await screen.findAllByRole("heading", { name: /^(Titles|Inside Documents)/ });
 };
 
 beforeEach(() => {
@@ -131,6 +131,64 @@ it("shows the passage under a body-only match and none under a title match", asy
     inside.getByText(/intermittent .*preview error during Undo/).tagName,
   ).toBe("P");
   expect(inside.getByText(/Windows .*snapshot race/)).toBeTruthy();
+});
+
+it("keeps the unread dot, time and context of a row that shows a passage", async () => {
+  vi.mocked(documents.search).mockResolvedValue([
+    {
+      id: "body-1",
+      heading: "Harness plug-ins live QA",
+      snippet:
+        "…records the intermittent attachment preview error during Undo.",
+      updated_at: "2026-11-23T23:43:00.000Z",
+      opened: false,
+      plans: [
+        { id: "p1", name: "Harness plug-ins", archived: false, spec: false },
+      ],
+    },
+  ]);
+  await renderSearch();
+  const row = within(
+    screen.getByRole("region", { name: "Inside Documents" }),
+  ).getByRole("button", { name: "Harness plug-ins live QA" });
+  const item = row.closest("li") as HTMLElement;
+  // The dot comes before the passage, where it can be seen.
+  const dot = within(item).getByRole("img", { name: "Not opened yet" });
+  const passage = within(item).getByText(/intermittent/);
+  expect(passage.contains(dot)).toBe(true);
+  // The time and context are the row's description, so a screen reader still gets them.
+  const described = document.getElementById(
+    row.getAttribute("aria-describedby") ?? "",
+  );
+  expect(described?.textContent).toContain("Harness plug-ins");
+  expect(described?.querySelector("time")).not.toBeNull();
+});
+
+it("shows the normal meta line on a search row that has no passage", async () => {
+  vi.mocked(documents.search).mockResolvedValue([
+    {
+      id: "part-1",
+      heading: "Attachment spec",
+      snippet: "Attachment spec",
+      updated_at: "2026-11-23T23:43:00.000Z",
+      opened: false,
+      plans: [
+        { id: "p1", name: "Chat attachments", archived: false, spec: true },
+      ],
+    },
+  ]);
+  await renderSearch("attachment review");
+  const row = within(
+    screen.getByRole("region", { name: "Inside Documents" }),
+  ).getByRole("button", { name: "Attachment spec" });
+  const meta = (row.closest("li") as HTMLElement).querySelector(
+    ".document-list-meta",
+  ) as HTMLElement;
+  expect(meta.textContent).toContain("Spec of Chat attachments");
+  expect(
+    within(meta).getByRole("img", { name: "Not opened yet" }),
+  ).toBeTruthy();
+  expect(row.hasAttribute("aria-describedby")).toBe(false);
 });
 
 it("marks the query in titles and passages", async () => {
