@@ -1,7 +1,6 @@
 import { expect, test, vi } from "vitest";
 import type {
   ChatSnapshot,
-  RecordChange,
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
