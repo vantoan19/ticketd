@@ -289,3 +289,30 @@ pub(crate) fn feed(
         })?
         .collect::<Result<Vec<_>, _>>()?)
 }
+
+/// The first update an agent wrote, for Set up ticketd's "An agent has picked
+/// up a ticket" step.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AgentUpdate {
+    pub reference: String,
+    pub editing_agent: String,
+    pub reported_at: String,
+}
+
+/// The oldest Activity (by insertion) that has an author name, which is how an
+/// agent's write differs from a person's. It stops at the first match.
+pub(crate) fn first_by_agent(conn: &Connection) -> Result<Option<AgentUpdate>, Error> {
+    Ok(conn
+        .query_row(
+            "SELECT t.reference, a.editing_agent, a.reported_at FROM activities a JOIN tickets t ON t.id = a.ticket_id WHERE a.editing_agent IS NOT NULL AND a.editing_agent != '' ORDER BY a.number LIMIT 1",
+            [],
+            |row| {
+                Ok(AgentUpdate {
+                    reference: row.get(0)?,
+                    editing_agent: row.get(1)?,
+                    reported_at: row.get(2)?,
+                })
+            },
+        )
+        .optional()?)
+}

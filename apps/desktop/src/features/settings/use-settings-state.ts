@@ -1,8 +1,12 @@
 import { createContext, useContext } from "react";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
+import type { SetupState } from "@/features/setup/setup-state";
 
 /** Which nav indicators a page can ask to read again after it changed them. */
 export type IndicatorSection = "command-line" | "agent-skills" | "agents";
+
+/** What `refreshIndicators` can read again: the indicators, and what Set up ticketd ticks from. */
+export type SettingsRead = IndicatorSection | "agent-update";
 
 export interface SettingsState {
   /** The Search page's query; the nav's Search entry shows it. */
@@ -17,7 +21,22 @@ export interface SettingsState {
    * the nav dot follows a change. Pages call it after a check or an install;
    * no argument reads all of them.
    */
-  refreshIndicators: (section?: IndicatorSection) => void;
+  refreshIndicators: (
+    section?: SettingsRead,
+    options?: { refreshPath?: boolean },
+  ) => void;
+  /**
+   * Set up ticketd's five steps, ticked from this computer. Null where Settings
+   * is rendered without its provider.
+   */
+  setup?: SetupState | null;
+  /**
+   * Whether the sidebar shows the Set up ticketd row: not once the checklist
+   * was hidden, and not once it finished before Settings was opened.
+   */
+  setupRow?: boolean;
+  /** Takes the row off the sidebar. The page stays, and Search still finds it. */
+  hideSetup?: () => void;
   /**
    * Below 768px the nav is a sheet; the panel bar's page trigger opens it.
    * Absent where a page is rendered alone.
@@ -32,6 +51,9 @@ export const SettingsStateContext = createContext<SettingsState>({
   openPage: () => {},
   needsSetup: {},
   refreshIndicators: () => {},
+  setup: null,
+  setupRow: false,
+  hideSetup: () => {},
   navOpen: false,
   setNavOpen: () => {},
 });

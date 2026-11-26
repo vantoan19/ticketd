@@ -7,6 +7,7 @@ import {
   Folder,
   Info,
   Keyboard,
+  ListChecks,
   Puzzle,
   RefreshCw,
   ScrollText,
@@ -17,7 +18,7 @@ import {
 } from "lucide-react";
 
 export type SettingsGroup =
-  "Preferences" | "Workspace" | "AI" | "Connections" | "Help";
+  "Settings" | "Preferences" | "Workspace" | "AI" | "Connections" | "Help";
 
 /**
  * The Settings pages, in nav order. The nav is built from this array and every
@@ -30,6 +31,14 @@ export type SettingsGroup =
  * see `SettingsDrillIn`).
  */
 export const SETTINGS_SECTIONS = [
+  // Above the groups, with no heading, until it is finished or hidden.
+  {
+    id: "setup",
+    label: "Set up ticketd",
+    group: "Settings",
+    icon: ListChecks,
+    job: "Finish the few things that make ticketd useful with your agents.",
+  },
   {
     id: "appearance",
     label: "Appearance",
@@ -139,6 +148,17 @@ export const SETTINGS_GROUPS: SettingsGroup[] = [
   "Connections",
   "Help",
 ];
+
+/** What decides which page Settings opens on. T-UB261 adds the pages that need the person first here. */
+export interface SettingsOpening {
+  /** Set up ticketd is neither finished nor hidden. */
+  setupPending: boolean;
+}
+
+/** The page Settings opens on: the one that needs the person first, else Appearance. */
+export function initialSettingsPage(opening: SettingsOpening): SettingsPageId {
+  return opening.setupPending ? "setup" : "appearance";
+}
 
 /** The id of the search field in the nav, which ⌘F and Ctrl+F focus. */
 export const SEARCH_INPUT_ID = "settings-search-input";

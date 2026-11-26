@@ -6,8 +6,15 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { agentSkillsClient } from "@/lib/api/agent-skills";
-import { cliClient } from "@/lib/api/cli";
+import { agentSkillsClient, type AgentSkill } from "@/lib/api/agent-skills";
+import { client, type AgentUpdate } from "@/lib/api/client";
+import { cliClient, type CliStatus } from "@/lib/api/cli";
+import { useNotificationPermission } from "@/lib/notification-permission";
+import { setPreference, usePreferences } from "@/lib/preferences";
+import { useOnWorkspaceChange } from "@/lib/workspace-change";
+import { useSyncStatus } from "@/features/sync/sync-status";
+import { useSources } from "@/features/settings/sources/use-sources";
+import { deriveSetup } from "@/features/setup/setup-state";
 import { useChatClient } from "@/features/chats/client";
 import { useChatFeature } from "@/features/chats/use-chats";
 import {
@@ -20,6 +27,7 @@ import type { SettingsPageId } from "@/features/settings/settings-sections";
 import {
   SettingsStateContext,
   type IndicatorSection,
+  type SettingsRead,
 } from "@/features/settings/use-settings-state";
 
 /** Holds what the nav and the pages share while Settings is open. */
@@ -39,10 +47,17 @@ export function SettingsStateProvider({
   const [needsSetup, setNeedsSetup] = useState<
     Partial<Record<IndicatorSection, boolean>>
   >({});
+  // What Set up ticketd ticks from. The command line and the skills are the
+  // same readings as the nav dots; the first agent update is read apart.
+  const [cli, setCli] = useState<CliStatus | null>(null);
+  const [skills, setSkills] = useState<AgentSkill[] | null>(null);
+  const [agentUpdate, setAgentUpdate] = useState<
+    AgentUpdate | null | undefined
+  >(undefined);
   const chats = useChatClient();
   const { enabled: chatEnabled } = useChatFeature();
   const refreshIndicators = useCallback(
-    (section?: IndicatorSection) => {
+    (section?: SettingsRead, options?: { refreshPath?: boolean }) => {
       const set = (key: IndicatorSection, value: boolean | undefined) =>
         setNeedsSetup((current) => {
           const next = { ...current };
@@ -50,18 +65,38 @@ export function SettingsStateProvider({
           else next[key] = value;
           return next;
         });
-      const reads = (key: IndicatorSection) =>
+      const reads = (key: SettingsRead) =>
         section === undefined || section === key;
       if (reads("command-line"))
-        void cliClient.check().then(
-          (status) => set("command-line", cliNeedsSetup(status)),
-          () => set("command-line", undefined),
+        void cliClient.check(options?.refreshPath).then(
+          (status) => {
+            setCli(status);
+            set("command-line", cliNeedsSetup(status));
+          },
+          () => {
+            setCli(null);
+            set("command-line", undefined);
+          },
         );
       if (reads("agent-skills"))
         void agentSkillsClient.list().then(
-          (agents) => set("agent-skills", skillsNeedSetup(agents)),
-          () => set("agent-skills", undefined),
+          (agents) => {
+            setSkills(agents);
+            set("agent-skills", skillsNeedSetup(agents));
+          },
+          () => {
+            setSkills(null);
+            set("agent-skills", undefined);
+          },
         );
+      if (reads("agent-update"))
+        void (async () => {
+          try {
+            setAgentUpdate(await client.firstAgentUpdate());
+          } catch {
+            // Unread: the step stays unticked and the next reading tries again.
+          }
+        })();
       // Harnesses matter only while Chats are shown.
       if (reads("agents")) {
         if (!chatEnabled) set("agents", undefined);
@@ -84,6 +119,63 @@ export function SettingsStateProvider({
     read.current = true;
     refreshIndicators();
   }, [active, refreshIndicators]);
+  // An agent that writes an update changes the Workspace: look again for the
+  // first one until it is found. A person who runs one in a terminal and comes
+  // back also changed the command line and the skills.
+  useOnWorkspaceChange(
+    () => refreshIndicators("agent-update"),
+    agentUpdate === null,
+  );
+  useEffect(() => {
+    if (!active) return;
+    const onFocus = () => {
+      refreshIndicators("command-line");
+      refreshIndicators("agent-skills");
+      refreshIndicators("agent-update");
+    };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [active, refreshIndicators]);
+
+  const sources = useSources();
+  const { status: sync } = useSyncStatus();
+  const notifications = useNotificationPermission();
+  const setup = useMemo(
+    () =>
+      deriveSetup({
+        cli,
+        skills,
+        agentUpdate,
+        sources: sources.loading ? null : sources.entries,
+        sync,
+        notifications,
+      }),
+    [
+      cli,
+      skills,
+      agentUpdate,
+      sources.loading,
+      sources.entries,
+      sync,
+      notifications,
+    ],
+  );
+  // Once every step has been ticked, the checklist is finished for good.
+  const { setupHidden, setupFinished } = usePreferences();
+  useEffect(() => {
+    if (setup.complete && !setupFinished) setPreference("setupFinished", true);
+  }, [setup.complete, setupFinished]);
+  // The row leaves the sidebar when Settings is closed after finishing, not
+  // under the person's eyes: whether it was finished is read as Settings opens.
+  const [wasActive, setWasActive] = useState(active);
+  const [finishedOnOpen, setFinishedOnOpen] = useState(setupFinished);
+  if (active !== wasActive) {
+    setWasActive(active);
+    if (active) setFinishedOnOpen(setupFinished);
+  }
+  const setupRow = !setupHidden && !finishedOnOpen;
+  const hideSetup = useCallback(() => setPreference("setupHidden", true), []);
+
   const value = useMemo(
     () => ({
       query,
@@ -91,10 +183,22 @@ export function SettingsStateProvider({
       openPage: onOpenPage,
       needsSetup,
       refreshIndicators,
+      setup,
+      setupRow,
+      hideSetup,
       navOpen,
       setNavOpen,
     }),
-    [query, onOpenPage, needsSetup, refreshIndicators, navOpen],
+    [
+      query,
+      onOpenPage,
+      needsSetup,
+      refreshIndicators,
+      setup,
+      setupRow,
+      hideSetup,
+      navOpen,
+    ],
   );
   return (
     <SettingsStateContext.Provider value={value}>

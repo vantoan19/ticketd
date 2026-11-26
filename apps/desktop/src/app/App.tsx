@@ -27,6 +27,7 @@ import {
 import type { DocumentCommands } from "@/features/documents/Documents";
 import type { AttachmentCommands } from "@/features/attachments/AttachmentLibrary";
 import {
+  initialSettingsPage,
   resolveSettingsPage,
   type LegacySettingsPageId,
   type SettingsPageId,
@@ -81,6 +82,10 @@ import { SyncStatusProvider } from "@/features/sync/SyncStatusProvider";
 import { useSyncNavigation } from "@/features/sync/sync-status";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { SettingsNavigation } from "@/lib/settings-navigation";
+import {
+  SetupActionsContext,
+  type SetupActions,
+} from "@/features/setup/setup-actions";
 import {
   useDraftRecovery,
   useDraftRecoveryGeneration,
@@ -339,6 +344,9 @@ function AppContent() {
     useState<DocumentCommands | null>(null);
   const [documentListRequest, setDocumentListRequest] = useState(0);
   const [creatingPlan, setCreatingPlan] = useState(false);
+  // Settings opens on Set up ticketd until it is finished or hidden.
+  const { setupHidden, setupFinished } = usePreferences();
+  const setupPending = !setupHidden && !setupFinished;
   const openView = (next: typeof view) => {
     if (next === "documents") {
       // Sidebar "Documents" returns to the list, not to where a reader came from.
@@ -349,7 +357,7 @@ function AppContent() {
     }
     if (next === "settings" && view !== "settings") {
       setViewBeforeSettings(view);
-      setSettingsSection("appearance");
+      setSettingsSection(initialSettingsPage({ setupPending }));
     }
     setView(next);
   };
@@ -910,6 +918,20 @@ function AppContent() {
     // Without it a run's Inbox entry opens its ticket instead.
     <RunNavigation value={chat.enabled ? openRun : null}>
       <ShellNavigation
+        setup={{
+          newTicket: (trigger) => {
+            createTriggerRef.current = trigger;
+            setCreateStatus(undefined);
+            setCreating(true);
+          },
+          startChat: chat.enabled
+            ? () => {
+                setNewChatRequest((count) => count + 1);
+                openView("chats");
+              }
+            : null,
+          newTicketDisabledReason: createDisabledReason,
+        }}
         graph={(id, options) => {
           // A ticket's graph opened from its header or rail starts on its
           // dependencies; anything else shows all connections.
@@ -1814,17 +1836,22 @@ function PreferenceFailure({
 function ShellNavigation({
   graph,
   settings,
+  setup,
   children,
 }: {
   graph: ContextType<typeof ContextGraphNavigation>;
   settings: (page: SettingsPageId) => void;
+  /** What Set up ticketd starts outside Settings. */
+  setup: SetupActions;
   children: ReactNode;
 }) {
   return (
     <SettingsNavigation.Provider value={settings}>
-      <ContextGraphNavigation.Provider value={graph}>
-        {children}
-      </ContextGraphNavigation.Provider>
+      <SetupActionsContext.Provider value={setup}>
+        <ContextGraphNavigation.Provider value={graph}>
+          {children}
+        </ContextGraphNavigation.Provider>
+      </SetupActionsContext.Provider>
     </SettingsNavigation.Provider>
   );
 }

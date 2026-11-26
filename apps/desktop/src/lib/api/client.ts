@@ -536,7 +536,22 @@ export type BulkChange = {
   add_tags?: string[];
   remove_tags?: string[];
 };
+/** The first update an agent wrote: Set up ticketd's "An agent has picked up a ticket". */
+const agentUpdateSchema = lazySchema(() =>
+  z.object({
+    reference: z.string(),
+    editing_agent: z.string(),
+    reported_at: z.string(),
+  }),
+);
+export type AgentUpdate = z.infer<typeof agentUpdateSchema>;
 export const client = {
+  /** The oldest Activity with an author name (an agent's), or null while no agent has written one. */
+  async firstAgentUpdate() {
+    return agentUpdateSchema
+      .nullable()
+      .parse(await invoke("first_agent_update"));
+  },
   async workspaceGraph(request: WorkspaceGraphRequest) {
     return workspaceGraphSchema.parse(
       await invoke("workspace_graph", { request }),

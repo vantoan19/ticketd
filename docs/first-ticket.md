@@ -19,9 +19,11 @@ the desktop steps without connecting an agent, GitHub, or Google Drive.
 
 ## Ask an agent to post an update
 
-1. Make the [CLI available](install.md#command-line-tool). For Claude Code or
-   Codex, open **Settings → Agent skills** and [install the discovery skill](install.md#agent-cli-skill).
-   Start a fresh agent session so it can discover the skill and the executable.
+1. Open **Settings → Set up ticketd** and choose **Install for** your agents.
+   It makes the [CLI available](install.md#command-line-tool) and
+   [installs the discovery skill](install.md#agent-cli-skill) for Claude Code,
+   Codex and the other agents it finds, asking for your password once. Start a
+   fresh agent session so it can discover the skill and the executable.
 2. On the ticket, choose **Copy reference**. Send the prompt below to your
    agent, replacing `TICKET_REFERENCE` with the reference you copied.
 

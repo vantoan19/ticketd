@@ -147,6 +147,8 @@ export function bridgeDefault(
         size_bytes: 4096,
         format_version: 26,
       };
+    case "first_agent_update":
+      return null;
     case "check_cli":
       return {
         found: false,
