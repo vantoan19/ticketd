@@ -31,6 +31,10 @@
      records, the tray and the composer all take these two. */
   --chat-column: 600px;
   --chat-gutter: 40px;
+  /* The styled scrollbar (styles.css, 10px) takes layout width in WebKit and
+     Chromium alike. The transcript always keeps its track, and the strip, the
+     tray and the jump strip give up the same width, so every edge is shared. */
+  --chat-track: 10px;
   /* Measured by lib/width-queries (data-width), not a query container: WebKit
      restyles a container's whole subtree each time it resizes. */
   contain: inline-size layout style;
@@ -266,7 +270,7 @@
   flex-direction: column;
   min-height: 0;
   padding: 16px var(--chat-gutter) 0;
-  overflow-y: auto;
+  overflow-y: scroll;
   overflow-anchor: none;
 }
 /* Jump to latest: in its own 40px strip between the transcript and the dock,
@@ -278,6 +282,7 @@
   align-items: center;
   justify-content: center;
   height: 40px;
+  padding-right: var(--chat-track);
   overflow: hidden;
 }
 .chat-jump:not([data-shown]) {
@@ -314,7 +319,8 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 16px var(--chat-gutter) 18px;
+  padding: 16px calc(var(--chat-gutter) + var(--chat-track)) 18px
+    var(--chat-gutter);
 }
 .chat-dock > * {
   width: 100%;
@@ -1229,7 +1235,8 @@
   position: relative;
   z-index: 1;
   flex: none;
-  padding: 6px var(--chat-gutter);
+  padding: 6px calc(var(--chat-gutter) + var(--chat-track)) 6px
+    var(--chat-gutter);
 }
 /* Once the transcript is scrolled under the strip, its edge shows (CH-10). */
 .chat-linked > div {
