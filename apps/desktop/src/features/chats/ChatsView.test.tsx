@@ -1379,6 +1379,32 @@ const readFile = (id: string): TranscriptItem =>
     ],
   });
 
+test("a finished turn with only an answer still shows its time, on a quiet line where a work line would be", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 20, 12));
+  await open(
+    one({ id: "c-quiet", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:02:13Z"),
+      inTurn(reply("r1", "The limiter is in.")),
+    ]),
+  );
+  // No work line, so no fold button; the time stands on its own line.
+  noButton(/Worked/);
+  const time = document.querySelector<HTMLElement>(".chat-turn-time")!;
+  expect(time.textContent).toMatch(/^Nov\s+10$/);
+  expect(time.closest(".chat-foldline")?.querySelector("button")).toBeNull();
+  // The line comes before the answer, as a work line does.
+  const answer = document.querySelector('[data-anchor="r1"]')!;
+  expect(
+    time.compareDocumentPosition(answer) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  fireEvent.pointerMove(time);
+  expect((await screen.findByRole("tooltip")).textContent).toMatch(
+    /^Started Nov 10(, 2026)?, .+ · Ended .+$/,
+  );
+});
+
 test("a finished turn shows its start once, on the work line, with the exact times in its tooltip", async () => {
   // Only the date is fixed, so the day label does not depend on when the suite runs.
   vi.useFakeTimers({ toFake: ["Date"] });

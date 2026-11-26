@@ -605,7 +605,13 @@
 }
 .chat-turn-time {
   flex: none;
+  margin-left: auto;
   white-space: nowrap;
+}
+/* A turn with no work has no fold on its line, only the time: centered in the
+   same 28px, as the fold's label is. */
+.chat-turnpart[data-quiet] .chat-foldline {
+  align-items: center;
 }
 .chat-fold > svg {
   flex: none;

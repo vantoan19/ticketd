@@ -1178,6 +1178,15 @@ const TurnView = memo(function TurnView({
           )}
         </div>
       )}
+      {/* A finished turn with no work shows its time on a quiet line, where its
+          work line would be. */}
+      {!work && !turn.live && turn.started && turnClock(turn.started) && (
+        <div className="chat-turnpart" data-fold="" data-quiet="">
+          <div className="chat-foldline">
+            <TurnTime turn={turn} />
+          </div>
+        </div>
+      )}
       {turn.plan && (
         <div data-anchor="">
           <PlanCard
