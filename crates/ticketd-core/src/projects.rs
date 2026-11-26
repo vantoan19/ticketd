@@ -15,6 +15,30 @@ pub struct Project {
     pub paths: Vec<String>,
     #[serde(default)]
     pub remote: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ProjectArchiveOutcome {
+    pub project: Project,
+    /// Identifies a transition this write made, so Undo can check it later.
+    pub change: Option<String>,
+}
+
+impl Project {
+    /// The first active Project, in list order, that holds this folder.
+    pub fn for_folder<'a>(projects: &'a [Self], folder: &Path) -> Option<&'a Self> {
+        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        projects
+            .iter()
+            .filter(|project| !project.archived)
+            .find(|project| {
+                std::iter::once(&project.path)
+                    .chain(&project.paths)
+                    .any(|path| !path.is_empty() && folder.starts_with(path))
+            })
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -61,6 +85,14 @@ pub(crate) fn migrate_remote(tx: &Transaction<'_>) -> Result<(), Error> {
     Ok(())
 }
 
+pub(crate) fn migrate_archived(tx: &Transaction<'_>) -> Result<(), Error> {
+    tx.execute_batch(
+        "ALTER TABLE projects ADD COLUMN archived INTEGER NOT NULL DEFAULT 0;
+         ALTER TABLE projects ADD COLUMN archive_change TEXT;",
+    )?;
+    Ok(())
+}
+
 impl Workspace {
     pub fn register_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
         self.register_normalized_checkout(id, &normalize(path)?)
@@ -87,7 +119,7 @@ impl Workspace {
 
     fn register_normalized_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
         crate::write_scope::run(&self.connection, |tx| {
-            let project = find(tx, id)?;
+            let project = ensure_active(tx, id)?;
             ensure_path_free(tx, path, id)?;
             tx.execute(
                 "INSERT OR IGNORE INTO project_checkouts (project_id, path) VALUES (?1, ?2)",
@@ -107,7 +139,7 @@ impl Workspace {
     pub fn remove_checkout(&mut self, id: &str, path: &str) -> Result<Project, Error> {
         let tx = self.connection.savepoint()?;
         crate::write_scope::lock(&tx)?;
-        let project = find(&tx, id)?;
+        let project = ensure_active(&tx, id)?;
         // The folder may be gone already, which is why it is being unregistered.
         let normalized = normalize(path).unwrap_or_else(|_| path.trim().to_owned());
         let removed = tx.execute(
@@ -136,7 +168,11 @@ impl Workspace {
     pub fn resolve_project(&self, directory: &std::path::Path) -> Result<Option<Project>, Error> {
         let directory = std::fs::canonicalize(directory)?;
         let mut matches = Vec::new();
-        for project in self.list_projects()? {
+        for project in self
+            .list_projects()?
+            .into_iter()
+            .filter(|project| !project.archived)
+        {
             if project.paths.iter().any(|path| {
                 std::fs::canonicalize(path).is_ok_and(|root| directory.starts_with(root))
             }) {
@@ -183,11 +219,11 @@ impl Workspace {
         remote: ProjectRemoteChange<'_>,
     ) -> Result<Project, Error> {
         let (name, path) = (name.trim(), path.trim());
-        if name.is_empty() {
-            return Err(Error::EmptyProject);
-        }
         crate::write_scope::run(&self.connection, |tx| {
-            let old = find(tx, id)?;
+            let old = ensure_active(tx, id)?;
+            if name.is_empty() {
+                return Err(Error::EmptyProject);
+            }
             // Moving the checkout needs a folder that exists. Sending the path back
             // unchanged is a rename: it must still work after the folder was moved away.
             let target = match normalize(path) {
@@ -237,6 +273,39 @@ impl Workspace {
         })
     }
 
+    pub fn set_project_archived(&mut self, id: &str, archived: bool) -> Result<Project, Error> {
+        Ok(self.change_project_archive(id, archived, None)?.project)
+    }
+
+    /// With an expected change, apply Undo only if the same transition is still current.
+    pub fn change_project_archive(
+        &mut self,
+        id: &str,
+        archived: bool,
+        expected_change: Option<&str>,
+    ) -> Result<ProjectArchiveOutcome, Error> {
+        crate::write_scope::run(&self.connection, |tx| {
+            let mut project = find(tx, id)?;
+            let change = if project.archived == archived {
+                None
+            } else {
+                let change = Uuid::new_v4().to_string();
+                let updated = tx.execute(
+                    "UPDATE projects SET archived = ?1, archive_change = ?2
+                     WHERE id = ?3 AND (?4 IS NULL OR archive_change = ?4)",
+                    params![archived, change, id, expected_change],
+                )?;
+                if updated == 1 {
+                    project.archived = archived;
+                    Some(change)
+                } else {
+                    None
+                }
+            };
+            Ok(ProjectArchiveOutcome { project, change })
+        })
+    }
+
     pub fn show_project(&self, id: &str) -> Result<Project, Error> {
         find(&self.connection, id)
     }
@@ -244,19 +313,14 @@ impl Workspace {
     /// The Project one of whose checkouts holds `folder`. Checkout paths are stored
     /// canonical, so the folder is resolved first when it exists.
     pub fn project_for_folder(&self, folder: &std::path::Path) -> Result<Option<Project>, Error> {
-        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        Ok(self.list_projects()?.into_iter().find(|project| {
-            std::iter::once(&project.path)
-                .chain(&project.paths)
-                .any(|path| !path.is_empty() && folder.starts_with(path))
-        }))
+        Ok(Project::for_folder(&self.list_projects()?, folder).cloned())
     }
 
     pub fn list_projects(&self) -> Result<Vec<Project>, Error> {
         self.read(|_| {
-            let mut statement = self
-                .connection
-                .prepare("SELECT id, name, path, remote FROM projects ORDER BY name, id")?;
+            let mut statement = self.connection.prepare(
+                "SELECT id, name, path, remote, archived FROM projects ORDER BY name, id",
+            )?;
             let rows = statement
                 .query_map([], row)?
                 .collect::<Result<Vec<_>, _>>()?;
@@ -279,6 +343,7 @@ pub(crate) fn prepare_create(name: &str, path: &str) -> Result<Project, Error> {
         paths: vec![path.clone()],
         path,
         remote: None,
+        archived: false,
     })
 }
 
@@ -322,7 +387,7 @@ pub(crate) fn link_remote_if_unset(
     id: &str,
     remote: &str,
 ) -> Result<Project, Error> {
-    let mut project = find(tx, id)?;
+    let mut project = ensure_active(tx, id)?;
     if project.remote.is_some() {
         return Err(Error::ProjectAlreadyHasRemote(project.name));
     }
@@ -374,13 +439,14 @@ fn row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Project> {
         path: row.get(2)?,
         paths: Vec::new(),
         remote: row.get(3)?,
+        archived: row.get(4)?,
     })
 }
 
 pub(crate) fn find(connection: &Connection, id: &str) -> Result<Project, Error> {
     let mut project = connection
         .query_row(
-            "SELECT id, name, path, remote FROM projects WHERE id = ?1",
+            "SELECT id, name, path, remote, archived FROM projects WHERE id = ?1",
             [id],
             row,
         )
@@ -390,13 +456,21 @@ pub(crate) fn find(connection: &Connection, id: &str) -> Result<Project, Error> 
     Ok(project)
 }
 
+pub(crate) fn ensure_active(connection: &Connection, id: &str) -> Result<Project, Error> {
+    let project = find(connection, id)?;
+    if project.archived {
+        return Err(Error::ProjectArchived(project.name));
+    }
+    Ok(project)
+}
+
 pub(crate) fn find_by_remote(
     connection: &Connection,
     remote: &str,
 ) -> Result<Option<Project>, Error> {
     let mut project = connection
         .query_row(
-            "SELECT id, name, path, remote FROM projects WHERE remote = ?1",
+            "SELECT id, name, path, remote, archived FROM projects WHERE remote = ?1",
             [remote],
             row,
         )

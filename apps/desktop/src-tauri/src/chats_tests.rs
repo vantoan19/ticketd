@@ -1642,7 +1642,8 @@ async fn a_project_can_be_linked_found_and_named_to_the_agent_without_moving_the
         found,
         [LinkedRecord::Project {
             id: project.id.clone(),
-            title: "Storefront".to_owned()
+            title: "Storefront".to_owned(),
+            archived: false,
         }]
     );
 
@@ -1747,6 +1748,102 @@ async fn a_chat_names_its_folders_project_and_branch_and_its_row_names_its_ticke
         [first.reference.as_str(), second.reference.as_str()]
     );
     assert_eq!(row.tickets[0].status, "Todo");
+}
+
+#[tokio::test(start_paused = true)]
+async fn project_archive_updates_open_chat_contexts_and_cached_rows_in_place() {
+    let f = Fixture::new().await;
+    let folder = f.dir.path().join("web-app");
+    std::fs::create_dir(&folder).unwrap();
+    let folder = folder.to_string_lossy().into_owned();
+    let mut workspace = f.core();
+    let project = workspace.create_project("Web App", &folder).unwrap();
+    let make_chat = |workspace: &mut Workspace, links| {
+        workspace
+            .create_chat(
+                None,
+                NewChat {
+                    title: Some("Quiet".to_owned()),
+                    harness: "codex".to_owned(),
+                    execution_folder: folder.clone(),
+                    folder_managed: false,
+                    links,
+                },
+            )
+            .unwrap()
+            .id
+    };
+    let inferred = make_chat(&mut workspace, Vec::new());
+    let explicit = make_chat(
+        &mut workspace,
+        vec![ChatLink {
+            id: project.id.clone(),
+            kind: ChatLinkKind::Project,
+        }],
+    );
+    assert!(f.chats.refresh_projects().unwrap());
+    let (_, inferred_feed) = f.open(&inferred).await;
+    let (_, explicit_feed) = f.open(&explicit).await;
+    settle().await;
+    let (_, before, _) = f.chats.overview_digest().unwrap();
+    assert!(
+        before
+            .iter()
+            .all(|row| row.project.as_ref().unwrap().title == "Web App")
+    );
+    let built = f.chats.rows_built.load(Ordering::SeqCst);
+
+    workspace.create_ticket("An unrelated ticket").unwrap();
+    assert!(!f.chats.refresh_projects().unwrap());
+    workspace.set_project_archived(&project.id, true).unwrap();
+    assert!(f.chats.refresh_projects().unwrap());
+    settle().await;
+
+    let latest = |feed: &Mutex<Vec<Value>>| {
+        let feed = feed.lock().unwrap();
+        assert!(feed.iter().all(|change| change["kind"] != "resync"));
+        feed.iter()
+            .rev()
+            .find(|change| change["kind"] == "chat")
+            .unwrap()["chat"]
+            .clone()
+    };
+    assert!(latest(&inferred_feed)["folder"]["project"].is_null());
+    let explicit_state = latest(&explicit_feed);
+    assert_eq!(explicit_state["links"][0]["title"], "Web App (archived)");
+    assert_eq!(explicit_state["links"][0]["archived"], true);
+    assert_eq!(
+        explicit_state["folder"]["project"]["title"],
+        "Web App (archived)"
+    );
+    let (_, rows, _) = f.chats.overview_digest().unwrap();
+    assert!(
+        rows.iter()
+            .find(|row| row.id == inferred)
+            .unwrap()
+            .project
+            .is_none()
+    );
+    assert_eq!(
+        rows.iter()
+            .find(|row| row.id == explicit)
+            .unwrap()
+            .project
+            .as_ref()
+            .unwrap()
+            .title,
+        "Web App (archived)"
+    );
+    assert_eq!(f.chats.rows_built.load(Ordering::SeqCst), built);
+
+    workspace.set_project_archived(&project.id, false).unwrap();
+    assert!(f.chats.refresh_projects().unwrap());
+    settle().await;
+    assert_eq!(
+        latest(&inferred_feed)["folder"]["project"]["title"],
+        "Web App"
+    );
+    assert_eq!(latest(&explicit_feed)["links"][0]["archived"], false);
 }
 
 fn failure(kind: ProblemKind) -> Problem {

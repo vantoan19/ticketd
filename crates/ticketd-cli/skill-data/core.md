@@ -16,7 +16,8 @@ The default workspace is per OS user/environment, outside repositories. A projec
 registration scopes tickets; it does not select a different workspace. Desktop
 and CLI must use the same OS user/environment to see the same data.
 
-`ticketd project list` discovers project IDs and registered checkout paths.
+`ticketd project list` discovers active project IDs and registered checkout paths.
+`ticketd project list --all` includes archived projects.
 Only direct `ticketd create` infers a project from the current directory.
 `list`, `search`, and JSON writes do not. Supply the intended project explicitly
 where supported. Tickets without a project are valid. Keep returned ticket

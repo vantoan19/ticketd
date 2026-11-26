@@ -1033,11 +1033,13 @@ or run health. Saving changed rules invalidates match membership until the next
 complete discovery walk.
 
 When a connector reports a repository, the import write matches its normalized
-`host/owner/name` against the Project remote. It saves the matching project link
-and a project membership history entry in the same transaction as the new ticket.
-Refresh preserves existing project membership. It retains a previously observed
-repository while the issue's locator and URL stay the same. A changed location
-without a repository report clears the old observation. For an externally owned
+`host/owner/name` against the Project remote. It saves a Project link and history
+entry only for an active Project, in the same transaction as the new ticket.
+The offline routing preview applies the same rule and identifies any archived
+Project that still claims the remote. Refresh preserves existing Project
+membership. It retains a previously observed repository while the issue's
+locator and URL stay the same. A changed location without a repository report
+clears the old observation. For an externally owned
 ticket, refresh can follow a GitHub repository transfer even if its REST ID changes.
 This requires a permanent redirect from the saved issue path within the same API
 and a destination response that corroborates the new location and agrees with
@@ -1078,13 +1080,14 @@ remote, the selected connection, and the exact set of eligible ticket identities
 It matches stored repositories on the connection's host independently of the
 discovery filters and fingerprints the effect. The fingerprint also captures
 saved discovery rules and the account when confirmation would add a repository.
-`Workspace::connect_source` checks this
-fingerprint before contacting the provider, then rechecks under the write lock.
+`Workspace::connect_source` checks the fingerprint and the Project's active
+state before contacting the provider, then rechecks both under the write lock.
 When adding a repository, it shares the validation and persistence path of
 `save_source`. If the bounded preview stops early, a separate preview checks the
 added repository with the same filters. Provider validation and discovery preview
-finish before the lock. The transaction saves the new rules, invalidates discovery membership, and applies
-the reviewed project links using the ordinary history path. If the rules already
+finish before the lock. The transaction saves the new rules, invalidates
+discovery membership, and applies the reviewed Project links using the ordinary
+history path. If the rules already
 list the repository, the transaction only applies the links and can run offline.
 A separate bounded match count for the new repository keeps the saved assignee
 and label filters and has no effect on the fingerprint or the confirmation.

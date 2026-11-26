@@ -76,6 +76,20 @@ fn saved_discovery_repositories_report_their_routed_project_on_the_source_host()
     assert_eq!(project.name, "Matching checkout");
     assert_eq!(routes[1].repository, "other/repo");
     assert!(routes[1].project.is_none());
+    assert_eq!(routes[1].archived_project_name, None);
+
+    f.workspace
+        .set_project_archived(&matching.id, true)
+        .unwrap();
+    let routes = f
+        .workspace
+        .source_repository_routes(&f.engine, "fake")
+        .unwrap();
+    assert!(routes[0].project.is_none());
+    assert_eq!(
+        routes[0].archived_project_name.as_deref(),
+        Some("Matching checkout")
+    );
 
     let missing = f
         .workspace
@@ -619,6 +633,59 @@ fn connecting_rechecks_the_exact_ticket_set_after_remote_validation() {
 }
 
 #[test]
+fn archiving_during_source_validation_refuses_backfill_and_leaves_discovery_unchanged() {
+    let mut f = Fixture::new();
+    f.publish(
+        reported_issue("example.test", "o/r", 1, "Imported issue"),
+        true,
+    );
+    assert_eq!(f.refresh().imported, ["T-KQ1"]);
+    let config = json!({"repositories": ["o/other"]});
+    let saved = f
+        .workspace
+        .save_source(&f.engine, "fake", config.as_object().unwrap())
+        .unwrap()
+        .source;
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Backend",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/o/r"),
+        )
+        .unwrap();
+    let preview = f
+        .workspace
+        .preview_connect_source(&f.engine, "fake", &project.id)
+        .unwrap();
+    assert_eq!(preview.source, ConnectSourceAction::AddRepository);
+    assert_eq!(preview.tickets, ["T-KQ1"]);
+
+    let path = f.path();
+    let id = project.id.clone();
+    f.remote(|remote| {
+        remote.before_discovery = Some(Arc::new(move || {
+            Workspace::open(&path)
+                .unwrap()
+                .set_project_archived(&id, true)
+                .unwrap();
+        }));
+    });
+    assert!(matches!(
+        f.workspace
+            .connect_source(&f.engine, "fake", &project.id, &preview.fingerprint),
+        Err(Error::ProjectArchived(name)) if name == "Backend"
+    ));
+    assert_eq!(f.workspace.saved_source("fake").unwrap(), Some(saved));
+    assert_eq!(f.ticket(1).project_id, None);
+    assert!(matches!(
+        f.workspace
+            .preview_connect_source(&f.engine, "fake", &project.id),
+        Err(Error::ProjectArchived(name)) if name == "Backend"
+    ));
+}
+
+#[test]
 fn connecting_without_a_saved_source_previews_setup_and_requires_a_compatible_remote() {
     let dir = tempfile::tempdir().unwrap();
     let checkout = dir.path().to_str().unwrap();
@@ -707,6 +774,84 @@ fn new_imports_route_to_the_project_claiming_the_whole_repository_identity() {
         .find(|identity| identity["ticket_id"] == ticket.id)
         .unwrap();
     assert_eq!(identity["repository"], "example.test/o/r");
+}
+
+#[test]
+fn archived_project_remotes_stay_reserved_and_route_only_after_reactivation() {
+    let mut f = Fixture::new();
+    let project = f
+        .workspace
+        .create_project_with_remote(
+            "Backend",
+            f.dir.path().to_str().unwrap(),
+            Some("example.test/O/R"),
+        )
+        .unwrap();
+    f.publish(
+        reported_issue("example.test", "o/r", 1, "First issue"),
+        true,
+    );
+    assert_eq!(f.refresh().imported, ["T-KQ1"]);
+
+    f.workspace.set_project_archived(&project.id, true).unwrap();
+    let competing_checkout = tempfile::tempdir().unwrap();
+    assert!(matches!(
+        f.workspace.create_project_with_remote(
+            "Competing project",
+            competing_checkout.path().to_str().unwrap(),
+            Some("EXAMPLE.test/o/r"),
+        ),
+        Err(Error::ProjectRemoteTaken { project, .. }) if project == "Backend"
+    ));
+
+    let mut updated = reported_issue("example.test", "o/r", 1, "Updated while archived");
+    updated.updated_at = "2026-02-02T00:00:00Z".into();
+    f.publish(updated, true);
+    f.publish(
+        reported_issue("example.test", "o/r", 2, "Arrived while archived"),
+        true,
+    );
+    let refresh = f.refresh_at("2026-02-02T00:00:00Z");
+    assert_eq!(refresh.imported, ["T-KQ2"]);
+    assert_eq!(refresh.updated, ["T-KQ1"]);
+    assert!(refresh.failures.is_empty());
+    assert_eq!(f.ticket(1).title, "Updated while archived");
+    assert_eq!(f.ticket(1).project_id.as_deref(), Some(project.id.as_str()));
+    assert_eq!(f.ticket(2).project_id, None);
+
+    let manual = f
+        .workspace
+        .create_project(
+            "Competing project",
+            competing_checkout.path().to_str().unwrap(),
+        )
+        .unwrap();
+    f.workspace
+        .change_ticket(
+            "T-KQ2",
+            TicketPatch {
+                project_id: Some(Some(manual.id.clone())),
+                ..TicketPatch::default()
+            },
+        )
+        .unwrap();
+    f.publish(
+        reported_issue("example.test", "o/r", 3, "Also arrived while archived"),
+        true,
+    );
+    assert_eq!(f.refresh_at("2026-02-03T00:00:00Z").imported, ["T-KQ3"]);
+
+    f.workspace
+        .set_project_archived(&project.id, false)
+        .unwrap();
+    f.publish(
+        reported_issue("example.test", "o/r", 4, "Arrived after reactivation"),
+        true,
+    );
+    assert_eq!(f.refresh_at("2026-02-04T00:00:00Z").imported, ["T-KQ4"]);
+    assert_eq!(f.ticket(2).project_id, Some(manual.id));
+    assert_eq!(f.ticket(3).project_id, None);
+    assert_eq!(f.ticket(4).project_id, Some(project.id));
 }
 
 #[test]

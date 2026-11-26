@@ -1,3 +1,4 @@
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import { useSources } from "@/features/settings/sources/use-sources";
 import { useEffect, useEffectEvent, useId, useRef, useState } from "react";
 import {
@@ -269,9 +270,23 @@ export function AutomationEditor({
   const onSwitch = useRef<HTMLButtonElement>(null);
   /** For the project conditions: their names, and the ones to choose from. */
   const [projects, setProjects] = useState<Project[]>([]);
+  const workspaceChange = useWorkspaceChange();
   useEffect(() => {
-    void reported("projects", client.listProjects(), onRead, setProjects);
-  }, [onRead]);
+    let current = true;
+    void reported(
+      "projects",
+      client.listProjects(),
+      (...result) => {
+        if (current) onRead(...result);
+      },
+      (next) => {
+        if (current) setProjects(next);
+      },
+    );
+    return () => {
+      current = false;
+    };
+  }, [onRead, workspaceChange]);
 
   /** Its runs that are queued or running, as the core has them now. */
   const activeRuns = () =>

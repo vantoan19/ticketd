@@ -438,7 +438,7 @@ fn a_malformed_file_is_rejected_with_the_reason_and_changes_nothing() {
             good.replace("trashed: false", "parent: \"T-KQ1\""),
             "'parent'",
         ),
-        (good.replace("format: 1", "format: 4"), "newer ticketd"),
+        (good.replace("format: 1", "format: 5"), "newer ticketd"),
         (good.replace("format: 1", "format: one"), "'format'"),
         (
             good.replace("trashed: false", "source_provider: \"github\""),
@@ -649,6 +649,21 @@ fn syncing_the_same_github_issue_preserves_local_pause_and_conversation() {
     assert_eq!(source.id, "@example.test:8443:9");
     assert_ne!(source.unavailable.unwrap().code, "connection_removed");
     assert!(workspace.source_conversation(reference).unwrap().is_empty());
+}
+
+#[test]
+fn project_sync_files_in_older_formats_read_as_active() {
+    let id = "3f2c9a1e-0000-4000-8000-000000000001";
+    let directory = tempfile::tempdir().unwrap();
+    let mut target = workspace(&directory, "target.sqlite3");
+    for format in 1..=3 {
+        let legacy =
+            format!("---\nkind: project\nformat: {format}\nid: {id}\nname: Website\n---\n");
+        let record = SyncRecord::parse(&legacy).unwrap();
+        assert_eq!(record.fields.get("archived"), Some(&SyncValue::Flag(false)));
+        assert_eq!(target.apply_sync_record(&record).unwrap(), []);
+        assert!(!target.show_project(id).unwrap().archived);
+    }
 }
 
 #[test]

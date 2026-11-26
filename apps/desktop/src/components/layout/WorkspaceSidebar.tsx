@@ -1,3 +1,5 @@
+import { m } from "motion/react";
+import { arrival, departure, rowTokens } from "@/components/ui/row-motion";
 import { ArrivingGroup } from "./ArrivingGroup";
 import { FoldingGroup } from "./FoldingGroup";
 import { useInboxAttention } from "@/features/tickets/use-inbox-attention";
@@ -45,7 +47,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { CrossfadeText } from "@/components/ui/motion";
+import { CrossfadeText, Presence } from "@/components/ui/motion";
 import { Tooltip } from "@/components/ui/tooltip";
 import { IconButton } from "@/components/ui/icon-button";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -67,6 +69,8 @@ import { useChatFeature } from "@/features/chats/use-chats";
 import { Button } from "@/components/ui/button";
 import { Kbd } from "@/components/ui/kbd";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
+
+const ProjectSidebarItem = m.create(SidebarMenuItem);
 
 /** A secondary, trailing count; it is part of the row's name for assistive technology. */
 function SidebarCount({ value }: { value: number }) {
@@ -188,6 +192,7 @@ const projectIcon = (unlinked = false) => (
 export type View =
   | "tickets"
   | "projects"
+  | "archived-projects"
   | "plans"
   | "archived-plans"
   | "settings"
@@ -295,14 +300,17 @@ export function WorkspaceSidebar({
   ].filter((part): part is string => Boolean(part));
   const chatsLabel = ["Chats", ...chatCounts].join(" · ");
   const chatsName = ["Chats", ...chatCounts].join(", ");
+  const projectRowTokens = rowTokens();
   const projectEntries: GroupEntry[] = [
-    ...projects.map((p) => ({
-      key: p.id,
-      label: p.name,
-      active: navigation.project === p.id && view === "tickets",
-      icon: projectIcon(),
-      onSelect: () => scope("all", p.id),
-    })),
+    ...projects
+      .filter((project) => !project.archived)
+      .map((p) => ({
+        key: p.id,
+        label: p.name,
+        active: navigation.project === p.id && view === "tickets",
+        icon: projectIcon(),
+        onSelect: () => scope("all", p.id),
+      })),
     {
       key: "unlinked",
       label: "No project",
@@ -551,7 +559,8 @@ export function WorkspaceSidebar({
                         entries={projectEntries}
                         manage={{
                           label: "All projects",
-                          current: view === "projects",
+                          current:
+                            view === "projects" || view === "archived-projects",
                           onSelect: () => setView("projects"),
                         }}
                       />
@@ -561,24 +570,32 @@ export function WorkspaceSidebar({
               >
                 <GroupHeading
                   label="Projects"
-                  current={view === "projects"}
+                  current={view === "projects" || view === "archived-projects"}
                   onOpen={() => setView("projects")}
                 />
                 <nav aria-label="Project scopes" className="sidebar-nav">
                   <SidebarMenu>
-                    {projectEntries.map((entry) => (
-                      <SidebarMenuItem key={entry.key}>
-                        <SidebarMenuButton
-                          isActive={entry.active}
-                          onClick={entry.onSelect}
+                    <Presence initial={false}>
+                      {projectEntries.map((entry) => (
+                        <ProjectSidebarItem
+                          key={entry.key}
+                          {...arrival(0, { space: true }, projectRowTokens)}
+                          {...departure({ space: true }, projectRowTokens)}
                         >
-                          {entry.icon}{" "}
-                          <Tooltip content={entry.label} overflowOnly>
-                            <span className="sidebar-label">{entry.label}</span>
-                          </Tooltip>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    ))}
+                          <SidebarMenuButton
+                            isActive={entry.active}
+                            onClick={entry.onSelect}
+                          >
+                            {entry.icon}{" "}
+                            <Tooltip content={entry.label} overflowOnly>
+                              <span className="sidebar-label">
+                                {entry.label}
+                              </span>
+                            </Tooltip>
+                          </SidebarMenuButton>
+                        </ProjectSidebarItem>
+                      ))}
+                    </Presence>
                   </SidebarMenu>
                 </nav>
               </FoldingGroup>

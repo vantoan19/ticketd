@@ -1,5 +1,11 @@
 import { failureText } from "@/lib/api/describe-failure";
-import { useEffect, useEffectEvent, useState } from "react";
+import {
+  useEffect,
+  useEffectEvent,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import { FileText, Folder } from "lucide-react";
 import { ChoiceList, type ChoiceGroup } from "@/components/ui/choice-list";
 import { StatusIcon } from "./StatusIcon";
@@ -23,7 +29,16 @@ export type PickRecord =
     };
 
 /** A titled group of records: "Linked to this ticket", "Recent", or results. */
-export type RecordGroup = { heading?: string; records: PickRecord[] };
+type RecordGroup<Record> = { heading?: string; records: Record[] };
+
+type SearchResult<Record> = {
+  groups: RecordGroup<Record>[];
+  empty?: ReactNode;
+};
+
+type SearchResponse<Record> =
+  | { result: SearchResult<Record>; error?: never }
+  | { error: string; result?: never };
 
 const DELAY_MS = 150;
 
@@ -39,7 +54,7 @@ const DELAY_MS = 150;
  * The caller owns the data: `search` is the host's record search, the
  * Documents API, or anything that answers a query with groups.
  */
-export function RecordPicker({
+export function RecordPicker<Record extends PickRecord>({
   search,
   onPick,
   things,
@@ -47,44 +62,60 @@ export function RecordPicker({
   empty,
   autoFocus = true,
   rows = 6,
+  revision = 0,
 }: {
-  search: (query: string) => Promise<RecordGroup[]>;
-  onPick: (record: PickRecord) => void;
+  search: (query: string) => Promise<SearchResult<Record>>;
+  onPick: (record: Record) => void;
   /** What is searched, for the placeholder and the list name: "Documents". */
   things: string;
   /** Keys already chosen; they are not offered again. */
   exclude?: readonly string[];
   /** The empty row's words for a query ("" while nothing is typed). */
-  empty?: (query: string) => string;
+  empty?: (query: string, hasMatches: boolean) => ReactNode;
   autoFocus?: boolean;
   rows?: number;
+  revision?: number;
 }) {
   const [query, setQuery] = useState("");
-  const [groups, setGroups] = useState<RecordGroup[]>([]);
-  const [error, setError] = useState("");
+  const request = useMemo(
+    () => ({ query, things, revision }),
+    [query, things, revision],
+  );
+  const [answer, setAnswer] = useState<{
+    request: typeof request;
+    response: SearchResponse<Record>;
+  }>();
   const find = useEffectEvent(search);
   useEffect(() => {
     let current = true;
     const timer = window.setTimeout(
       () => {
-        find(query.trim()).then(
+        find(request.query.trim()).then(
           (found) => {
             if (!current) return;
-            setGroups(found);
-            setError("");
+            setAnswer({ request, response: { result: found } });
           },
           (reason: unknown) => {
-            if (current) setError(failureText(reason, `search ${things}`));
+            if (current)
+              setAnswer({
+                request,
+                response: {
+                  error: failureText(reason, `search ${request.things}`),
+                },
+              });
           },
         );
       },
-      query ? DELAY_MS : 0,
+      request.query ? DELAY_MS : 0,
     );
     return () => {
       current = false;
       window.clearTimeout(timer);
     };
-  }, [query, things]);
+  }, [request]);
+  const response = answer?.request === request ? answer.response : undefined;
+  const result = response?.result;
+  const groups = result?.groups ?? [];
   const byKey = new Map(
     groups.flatMap((group) => group.records).map((r) => [r.key, r]),
   );
@@ -121,10 +152,20 @@ export function RecordPicker({
         const record = byKey.get(key);
         if (record) onPick(record);
       }}
-      {...(error && { notice: error })}
+      notice={
+        !response ? (
+          <span role="status">Searching…</span>
+        ) : response.error ? (
+          <span role="alert">{response.error}</span>
+        ) : undefined
+      }
       empty={
-        empty ??
-        ((text) => (text ? `No ${things} match “${text}”` : `No ${things} yet`))
+        result
+          ? (text) =>
+              result.empty ??
+              empty?.(text, byKey.size > 0) ??
+              (text ? `No ${things} match “${text}”` : `No ${things} yet`)
+          : null
       }
     />
   );
