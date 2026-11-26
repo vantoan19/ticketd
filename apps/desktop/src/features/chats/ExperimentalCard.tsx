@@ -4,8 +4,7 @@ import {
   type FailureDescription,
 } from "@/lib/api/describe-failure";
 import { useState } from "react";
-import { FlaskConical } from "lucide-react";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -20,7 +19,7 @@ import { stoppingText } from "@/features/chats/model";
 import { useChatFeature } from "@/features/chats/use-chats";
 
 /**
- * Settings > Agents: the notice and the Show Chat switch. Off by default. Turning it off
+ * Settings > Agents: the Chats switch, marked Experimental. Off by default. Turning it off
  * hides Chat and keeps every Chat; Chats that are working and runs that are
  * going are stopped first, and only after the person confirms.
  */
@@ -66,38 +65,34 @@ export function ExperimentalCard() {
       : null;
   return (
     <>
-      <Alert role="note" className="mt-10">
-        <AlertTitle>
-          <FlaskConical aria-hidden="true" size={16} />
-          Not yet qualified against real subscriptions
-        </AlertTitle>
-        <AlertDescription>
-          If something breaks, tell us from{" "}
-          <SettingsLink onClick={() => openPage("about")}>
-            About › Report an issue
-          </SettingsLink>
-          .
-        </AlertDescription>
-      </Alert>
-      {/* The page is Chat already: its one row needs no "Chat" heading (LIVE-21). */}
-      <div className="settings-section">
+      <section className="settings-section">
         <SettingsList>
           <SettingsRow
             variant="top"
-            title="Show Chat"
-            titleId="show-chat-title"
-            description="Adds Chats and Automations to the sidebar, where you start and follow your agents’ work."
+            title={
+              <span className="flex items-center gap-2">
+                Chats
+                <Badge variant="experimental">Experimental</Badge>
+              </span>
+            }
+            titleId="chats-title"
+            description="Start your agents from ticketd and follow their work beside your tickets."
             trailing={
               <Switch
-                aria-labelledby="show-chat-title"
+                aria-labelledby="chats-title"
                 checked={enabled}
                 onCheckedChange={(value) => void change(value)}
               />
             }
           />
-          <SettingsListFooter>
-            Turning Chat off hides Chats and Automations and keeps them. Running
-            Chats and runs are stopped first, after you confirm.
+          <SettingsListFooter
+            actions={
+              <SettingsLink onClick={() => openPage("about")}>
+                Report an issue
+              </SettingsLink>
+            }
+          >
+            Not yet tested with every subscription plan.
           </SettingsListFooter>
         </SettingsList>
         {failure && (
@@ -107,7 +102,7 @@ export function ExperimentalCard() {
             onRetry={() => void apply(failure.value)}
           />
         )}
-      </div>
+      </section>
       <DialogShell
         open={confirming !== null}
         onOpenChange={(open) => {

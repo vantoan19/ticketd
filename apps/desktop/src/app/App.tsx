@@ -1449,6 +1449,9 @@ function AppContent() {
                                         <SettingsView
                                           selected={settingsSection}
                                           onSelect={setSettingsSection}
+                                          onOpenAutomations={() =>
+                                            setView("automations")
+                                          }
                                           onRestore={replaceWorkspace}
                                           onWorkspaceReplaced={
                                             discardChatWorkspace

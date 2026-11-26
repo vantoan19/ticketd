@@ -13898,16 +13898,11 @@ test("Source refresh and its persisted failure keep raw diagnostics behind Detai
   expect(screen.getByText(raw)).toBeTruthy();
 });
 
-test("Automation settings retain a failed draft and known switch state while Details owns diagnostics", async () => {
-  let fail = true;
+test("Automation settings retain the known switch state while Details owns diagnostics", async () => {
   const raw = "RAW-AUTOMATION-SETTING-0xdead";
   await renderReviewApp({
-    automation_runs_at_once: { runs: 2, default: 2, most: 10 },
     start_at_login: true,
-    set_automation_runs_at_once: () => {
-      if (fail) throw new Error(raw);
-      return null;
-    },
+    automation_list: [],
     set_start_at_login: () => {
       throw new Error(raw);
     },
@@ -13915,28 +13910,20 @@ test("Automation settings retain a failed draft and known switch state while Det
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(
     within(
-      screen.getByRole("navigation", { name: "Settings sections" }),
+      await screen.findByRole("navigation", { name: "Settings sections" }),
     ).getByRole("button", { name: /^Automations/ }),
   );
-  const input = await screen.findByRole("spinbutton", { name: "Runs at once" });
-  fireEvent.change(input, { target: { value: "4" } });
-  fireEvent.blur(input);
+  const toggle = await screen.findByRole("switch", {
+    name: "Start ticketd when you sign in",
+  });
+  await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+  fireEvent.click(toggle);
   await act(async () => {});
-  expect(input).toHaveProperty("value", "4");
+  // The refused change leaves the known state, and the raw text waits in Details.
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
   expect(screen.getByRole("alert").textContent).not.toContain(raw);
   fireEvent.click(screen.getByRole("button", { name: "Details" }));
   expect(screen.getByText(raw)).toBeTruthy();
-  fail = false;
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  await act(async () => {});
-  expect(screen.getByText("Saved")).toBeTruthy();
-  const toggle = screen.getByRole("switch", {
-    name: "Start ticketd when you sign in",
-  });
-  fireEvent.click(toggle);
-  await act(async () => {});
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
-  expect(screen.getByRole("alert").textContent).not.toContain(raw);
 });
 
 test("a ticket run failure retains the run and retries its same action with raw text only in Details", async () => {

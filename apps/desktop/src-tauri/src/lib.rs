@@ -2612,6 +2612,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_list,
             chat_commands::chat_harnesses,
             chat_commands::chat_harness_catalog,
+            chat_commands::chat_installed_harnesses,
             chat_commands::chat_harness_options,
             chat_commands::chat_harness_skills,
             chat_commands::chat_folder_use,

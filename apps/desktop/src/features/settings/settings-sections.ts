@@ -164,10 +164,12 @@ export function initialSettingsPage(opening: SettingsOpening): SettingsPageId {
 export const SEARCH_INPUT_ID = "settings-search-input";
 
 /**
- * A page Settings can open: a section, Search, or a connection opened in place
- * (`source-<connection id>`, shown under Ticket sources).
+ * A page Settings can open: a section, Search, a connection opened in place
+ * (`source-<connection id>`, shown under Ticket sources) or an agent opened in
+ * place (`agent-<harness id>`, shown under Agents).
  */
-export type SettingsPageId = SettingsSectionId | "search" | `source-${string}`;
+export type SettingsPageId =
+  SettingsSectionId | "search" | `source-${string}` | `agent-${string}`;
 
 /**
  * Page names that earlier versions used, in saved state, links and code that
@@ -188,17 +190,22 @@ export type LegacySettingsPageId = keyof typeof LEGACY_PAGES;
 /** The current page for an id that may be an old name; an unknown id opens Appearance. */
 export function resolveSettingsPage(page: string): SettingsPageId {
   if (page in LEGACY_PAGES) return LEGACY_PAGES[page as LegacySettingsPageId];
-  if (page === "search" || page.startsWith("source-"))
+  if (
+    page === "search" ||
+    page.startsWith("source-") ||
+    page.startsWith("agent-")
+  )
     return page as SettingsPageId;
   return SETTINGS_SECTIONS.some((section) => section.id === page)
     ? (page as SettingsSectionId)
     : "appearance";
 }
 
-/** The sidebar entry a page belongs to: a connection opens under Ticket sources, Search under none. */
+/** The sidebar entry a page belongs to: a connection opens under Ticket sources, an agent under Agents, Search under none. */
 export function navSectionOf(page: SettingsPageId): SettingsSectionId | null {
   if (page === "search") return null;
   if (page.startsWith("source-")) return "ticket-sources";
+  if (page.startsWith("agent-")) return "agents";
   return page as SettingsSectionId;
 }
 
