@@ -1,0 +1,31 @@
+/* Custom sources: the add row stretches its one button over the whole row. */
+.custom-source-add {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.settings-list-row:has(.custom-source-add) {
+  position: relative;
+}
+.custom-source-add::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+.custom-source-add:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  border-radius: var(--radius);
+}
+.custom-source-chevron {
+  display: inline-flex;
+  color: var(--disabled-foreground);
+}
+.program-facts dt:first-of-type,
+.program-facts dt:first-of-type + dd {
+  box-shadow: none;
+}

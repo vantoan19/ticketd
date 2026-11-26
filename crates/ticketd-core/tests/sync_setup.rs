@@ -1042,7 +1042,7 @@ fn renaming_an_attachment_that_is_not_downloaded_here_reaches_the_other_desks() 
 }
 
 #[test]
-fn restoring_a_backup_disconnects_sync_until_upload_or_download_is_chosen_again() {
+fn restoring_a_backup_turns_sync_off_and_offers_to_reconnect_to_the_folder_it_used() {
     let desks = desks();
     let (mut a, _, _) = desks.uploaded("Desk A");
     let path = desks.directory.path().join("Desk A");
@@ -1066,14 +1066,75 @@ fn restoring_a_backup_disconnects_sync_until_upload_or_download_is_chosen_again(
     assert!(matches!(a.sync_now(&desks.remote), Err(Error::Sync(_))));
     assert_eq!(titles(&a), ["Login"]);
 
-    // Choosing to upload merges with the folder as a first sync does.
+    // The folder it used is offered to go back to, beside Upload and Download.
+    let options = a.sync_setup_options(&desks.remote).unwrap();
+    let offered = options.reconnect.unwrap();
+    assert_eq!(
+        (offered.id.as_str(), offered.name.as_str()),
+        (desks.folder().as_str(), "ticketd Home")
+    );
+    // Going back merges what is here with the folder: what the restore went back
+    // on returns, nothing is replaced.
+    a.sync_reconnect(&desks.remote).unwrap();
+    let status = a.sync_now(&desks.remote).unwrap();
+    assert_eq!(status.recovery, None);
+    let mut merged = titles(&a);
+    merged.sort();
+    assert_eq!(merged, ["After the backup", "Login"]);
+}
+
+#[test]
+fn a_restore_point_from_before_sync_still_offers_the_folder_the_replaced_workspace_used() {
+    let desks = desks();
+    let path = desks.directory.path().join("Desk A");
+    let mut a = Workspace::open(&path).unwrap();
+    a.create_ticket("Login").unwrap();
+    // Saved before this Workspace ever synced: no sign-in, no folder.
+    let before = desks.directory.path().join("before-sync.sqlite3");
+    a.backup(&before).unwrap();
+    a.set_sync_settings("Desk A", 60, AttachmentDownload::Automatic)
+        .unwrap();
+    a.sync_connect("connection-1", "person@example.com")
+        .unwrap();
     a.sync_upload_workspace(&desks.remote, "ticketd Home")
         .unwrap();
-    let status = a.sync_now(&desks.remote).unwrap();
-    assert_eq!(recovered(&status), (None, SyncState::Uploaded));
-    let mut restored = titles(&a);
-    restored.sort();
-    assert_eq!(restored, ["After the backup", "Login"]);
+    a.sync_now(&desks.remote).unwrap();
+    drop(a);
+
+    Workspace::restore(&path, &before).unwrap();
+    let a = Workspace::open(&path).unwrap();
+
+    // This computer's own sign-in stays with it; only the content went back.
+    let status = a.sync_status().unwrap();
+    assert_eq!(
+        (status.connection, status.account.as_deref()),
+        (SyncConnection::Choosing, Some("person@example.com"))
+    );
+    let offered = a
+        .sync_setup_options(&desks.remote)
+        .unwrap()
+        .reconnect
+        .unwrap();
+    assert_eq!(offered.name, "ticketd Home");
+}
+
+#[test]
+fn a_backup_of_another_workspace_is_not_offered_the_folder_of_the_replaced_one() {
+    let desks = desks();
+    let (a, _, _) = desks.uploaded("Desk A");
+    let other = desks.desk("Desk C");
+    let backup = desks.directory.path().join("other.sqlite3");
+    other.backup(&backup).unwrap();
+    drop(other);
+    drop(a);
+    let path = desks.directory.path().join("Desk A");
+
+    Workspace::restore(&path, &backup).unwrap();
+    let a = Workspace::open(&path).unwrap();
+
+    // It is not the Workspace that folder belongs to: merging it in would mix the two.
+    assert_eq!(a.sync_setup_options(&desks.remote).unwrap().reconnect, None);
+    assert_eq!(a.sync_binding().unwrap(), None);
 }
 
 #[test]
@@ -2064,7 +2125,7 @@ fn reconnecting_to_the_folder_last_synced_merges_both_sides_and_keeps_this_deskt
 }
 
 #[test]
-fn reconnect_is_not_offered_to_another_account_a_missing_folder_or_a_restored_workspace() {
+fn reconnect_is_not_offered_to_another_account_or_a_missing_folder() {
     let desks = desks();
     let (mut a, _, _) = desks.uploaded("Desk A");
     let offered = |desk: &Workspace| desk.sync_setup_options(&desks.remote).unwrap().reconnect;
@@ -2086,18 +2147,6 @@ fn reconnect_is_not_offered_to_another_account_a_missing_folder_or_a_restored_wo
     a.sync_connect("connection-3", "person@example.com")
         .unwrap();
     assert!(offered(&a).is_some());
-
-    // A backup made while disconnected is restored: upload or download, as
-    // after any restore.
-    let path = desks.directory.path().join("Desk A");
-    let backup = desks.directory.path().join("backup.sqlite3");
-    a.backup(&backup).unwrap();
-    drop(a);
-    Workspace::restore(&path, &backup).unwrap();
-    let mut a = Workspace::open(&path).unwrap();
-    a.sync_connect("connection-3", "person@example.com")
-        .unwrap();
-    assert_eq!(offered(&a), None);
 
     let mut b = desks.joined("Desk B", AttachmentDownload::Automatic);
     b.sync_now(&desks.remote).unwrap();
