@@ -365,7 +365,14 @@ it("names no subsection count in the rail, and gives Linked its own plain list",
   vi.mocked(documents.row).mockResolvedValue({
     id: "a",
     heading: "Doc a",
-    plans: [{ id: "p1", name: "A Plan with a long name", archived: false }],
+    plans: [
+      {
+        id: "p1",
+        name: "A Plan with a long name",
+        archived: false,
+        spec: false,
+      },
+    ],
     tickets: [],
     tags: [],
   });
