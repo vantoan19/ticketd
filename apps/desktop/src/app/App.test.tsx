@@ -9543,11 +9543,12 @@ test("first-run Install skill settles successful reads and keeps Settings naviga
     name: "Your workspace is ready",
   });
   fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
-  await act(async () => {});
-  expect(reads).toBeLessThanOrEqual(6);
   expect(
-    screen.getByText("No supported agent was found on this computer"),
+    await screen.findByText(
+      "No agent found. Install Claude Code, Codex or Antigravity, then choose Check again.",
+    ),
   ).toBeTruthy();
+  expect(reads).toBeLessThanOrEqual(6);
   fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
   expect(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
@@ -9580,6 +9581,16 @@ test("Settings Agent skills settles reads and refreshes its setup dot after inst
         installed = true;
         return { backup: null };
       }
+      if (command === "check_cli") {
+        return {
+          ...(bridgeDefault(command, args) as object),
+          found: true,
+          on_path: true,
+          version: "0.1.0",
+          version_matches: true,
+          workspace_matches: true,
+        };
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -9587,10 +9598,10 @@ test("Settings Agent skills settles reads and refreshes its setup dot after inst
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   const nav = within(
-    screen.getByRole("navigation", { name: "Settings sections" }),
+    await screen.findByRole("navigation", { name: "Settings sections" }),
   );
   fireEvent.click(nav.getByRole("button", { name: /^Agent skills/ }));
-  await act(async () => {});
+  await screen.findByRole("button", { name: "Install for Claude Code" });
   expect(reads).toBeLessThanOrEqual(6);
   const skillNav = () =>
     within(nav.getByRole("button", { name: /^Agent skills/ }));
@@ -9642,6 +9653,16 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
           },
         ];
       }
+      if (command === "check_cli") {
+        return {
+          ...(bridgeDefault(command, args) as object),
+          found: true,
+          on_path: true,
+          version: "0.1.0",
+          version_matches: true,
+          workspace_matches: true,
+        };
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -9651,13 +9672,13 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
     screen.getByRole("navigation", { name: "Settings sections" }),
   );
   await user.click(nav.getByRole("button", { name: /^Agent skills/ }));
-  const skill = screen.getByRole("region", { name: "ticketd skill" });
+  const skill = await screen.findByRole("region", { name: "Skill status" });
   const agents = screen.getByRole("region", {
     name: "Agents on this computer",
   });
   await within(skill).findByText("Installed");
   const codex = within(agents).getByRole("listitem");
-  const check = within(agents).getByRole("button", { name: "Check again" });
+  const check = within(skill).getByRole("button", { name: "Check again" });
   const settled = reads;
   fail = true;
   await user.click(check);
@@ -9676,7 +9697,7 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog", { name: "Failure details" })).toBeNull();
   expect(document.activeElement).toBe(details);
-  expect(within(agents).getByRole("button", { name: "Check again" })).toBe(
+  expect(within(skill).getByRole("button", { name: "Check again" })).toBe(
     check,
   );
   fail = false;
@@ -10525,7 +10546,7 @@ test("Inbox loading announces its read without guessing urgency, then retains en
   expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
 });
 
-test.each(["Command line", "Agent skills"])(
+test.each(["Command line"])(
   "Settings %s keeps its last known setup state when Check again fails",
   async (page) => {
     let fail = false;

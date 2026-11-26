@@ -161,7 +161,7 @@ was started from the Finder or Dock.
 ticketd writes a `.ticketd-managed` marker beside each `SKILL.md` it installs,
 holding the hash of what it wrote and its version. Re-running installation updates a
 copy an older or the same ticketd wrote and nobody changed, and leaves an identical
-one, or one a newer ticketd wrote, alone. A copy edited after installation, or one ticketd did not
+one, or one a newer ticketd wrote, alone. The desktop app does this on its own each time it starts, for every agent that already has a copy ticketd wrote and nobody changed (the marker's hash still matches the file); it never installs into an agent that has no copy yet. A copy edited after installation, or one ticketd did not
 write, is reported and left intact. Review it, then choose Replace in Settings or
 pass `--replace`: the existing `SKILL.md` is saved beside the new one as
 `SKILL.md.backup-<seconds>`. Adjacent files and project instructions are preserved.

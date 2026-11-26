@@ -142,7 +142,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "command-line",
   },
   {
-    title: "ticketd skill",
+    title: "Agent skills",
     description:
       "Teaches the agents on this computer to use ticketd without being told.",
     keywords: "claude code codex agent install update skill",
@@ -151,7 +151,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Agents on this computer",
     description:
-      "ticketd installs only for agents it finds. A copy that was edited or not written by ticketd is left alone until you choose Replace.",
+      "The skill calls the ticketd command from Command line. To run these agents inside ticketd, see Agents.",
     keywords: "claude codex detected replace check again",
     section: "agent-skills",
   },

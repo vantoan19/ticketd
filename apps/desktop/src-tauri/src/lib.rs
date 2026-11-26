@@ -2373,6 +2373,7 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             updates::start(app.handle());
+            agent_skills::refresh_at_launch();
             start_periodic_refresh(coordinator, refresh_registry);
             start_reminder_timer(open_workspace);
             sync_commands::publish_status(app.handle().clone());
