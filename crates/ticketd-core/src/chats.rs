@@ -1224,30 +1224,55 @@ fn create_chat_request(chat: &NewChat) -> Value {
     json!({"operation": "create_chat", "chat": chat})
 }
 
-fn creation_requests(chat: &NewChat, picks: ChatStartPicks<'_>) -> (Value, Value) {
+fn creation_requests(
+    chat: &NewChat,
+    picks: ChatStartPicks<'_>,
+    text: &str,
+    files: &[ChatAttachmentContent],
+) -> (Value, Value, Value) {
     let legacy = create_chat_request(chat);
-    let mut request = legacy.clone();
-    request["start_picks"] = json!(picks);
-    (request, legacy)
+    let mut settings_only = legacy.clone();
+    settings_only["start_picks"] = json!(picks);
+    let mut request = settings_only.clone();
+    request["first_message"] = json!({
+        "text": text,
+        "attachments": files.iter().map(ChatAttachmentContent::identity).collect::<Vec<_>>(),
+    });
+    (request, settings_only, legacy)
 }
 
 fn replay_chat_creation(
     connection: &Connection,
     command_id: &str,
     request: &Value,
+    settings_only: &Value,
     legacy: &Value,
 ) -> Result<Option<ChatCreationReplay>, Error> {
-    match previous_outcome(connection, command_id, &request.to_string()) {
-        Ok(id) => id
-            .map(|id| read_chat(connection, &id).map(ChatCreationReplay::Exact))
-            .transpose(),
-        Err(Error::RequestConflict(_)) => {
-            previous_outcome(connection, command_id, &legacy.to_string())?
-                .map(|id| read_chat(connection, &id).map(ChatCreationReplay::Legacy))
-                .transpose()
-        }
-        Err(error) => Err(error),
-    }
+    let Some((stored, outcome)) = request_outcome(connection, command_id)? else {
+        return Ok(None);
+    };
+    let replay = if stored == request.to_string() || stored == settings_only.to_string() {
+        ChatCreationReplay::Exact
+    } else if stored == legacy.to_string() {
+        ChatCreationReplay::Legacy
+    } else {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    };
+    let id: String = serde_json::from_str(&outcome)?;
+    Ok(Some(replay(read_chat(connection, &id)?)))
+}
+
+fn request_outcome(
+    connection: &Connection,
+    command_id: &str,
+) -> Result<Option<(String, String)>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT request, outcome FROM request_outcomes WHERE id = ?1",
+            [command_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()?)
 }
 
 fn once(
@@ -1286,14 +1311,7 @@ fn previous_outcome(
     command_id: &str,
     request: &str,
 ) -> Result<Option<String>, Error> {
-    let stored: Option<(String, String)> = connection
-        .query_row(
-            "SELECT request, outcome FROM request_outcomes WHERE id = ?1",
-            [command_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
-        )
-        .optional()?;
-    if let Some((previous, outcome)) = stored {
+    if let Some((previous, outcome)) = request_outcome(connection, command_id)? {
         if previous != request {
             return Err(Error::RequestConflict(command_id.to_owned()));
         }
@@ -2020,32 +2038,56 @@ impl Workspace {
         self.chat_write(|connection| create_chat_in(connection, command_id, chat))
     }
 
+    /// Whether the command already has a receipt, so a replay can decode attachments
+    /// against the backup limit even if the Workspace upload limit has since fallen.
+    pub fn has_chat_creation_receipt(&self, command_id: &str) -> Result<bool, Error> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM request_outcomes WHERE id = ?1)",
+            [command_id],
+            |row| row.get(0),
+        )?)
+    }
+
     /// Finds the Chat created by this request without starting a new write.
     pub fn replay_chat_creation(
         &self,
         command_id: &str,
         chat: &NewChat,
         picks: ChatStartPicks<'_>,
+        text: &str,
+        files: &[ChatAttachmentContent],
     ) -> Result<Option<ChatCreationReplay>, Error> {
-        let (request, legacy) = creation_requests(chat, picks);
+        let (request, settings_only, legacy) = creation_requests(chat, picks, text, files);
         crate::read_scope::run(&self.connection, |connection| {
-            replay_chat_creation(connection, command_id, &request, &legacy)
+            replay_chat_creation(connection, command_id, &request, &settings_only, &legacy)
         })
     }
 
-    /// Stores the selected start settings as part of the create request's identity.
-    pub fn create_chat_with_picks(
+    /// Binds the selected settings and first input before the host prepares the
+    /// execution folder and saves the input itself.
+    pub fn create_chat_for_first_message(
         &mut self,
         command_id: &str,
         chat: NewChat,
         picks: ChatStartPicks<'_>,
+        text: &str,
+        files: &[ChatAttachmentContent],
     ) -> Result<Chat, Error> {
-        let (request, legacy) = creation_requests(&chat, picks);
+        let (request, settings_only, legacy) = creation_requests(&chat, picks, text, files);
         self.chat_write(|connection| {
             if let Some(ChatCreationReplay::Exact(chat) | ChatCreationReplay::Legacy(chat)) =
-                replay_chat_creation(connection, command_id, &request, &legacy)?
+                replay_chat_creation(connection, command_id, &request, &settings_only, &legacy)?
             {
                 return Ok(chat);
+            }
+            if text.trim().is_empty() && files.is_empty() {
+                return Err(invalid("Chat input must not be empty"));
+            }
+            if !files.is_empty() {
+                let limit = crate::attachments::upload_limit(connection)?;
+                for file in files {
+                    file.ensure_fits(limit)?;
+                }
             }
             create_chat_with_request(connection, Some(command_id), chat, request)
         })

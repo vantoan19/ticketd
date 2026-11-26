@@ -1645,8 +1645,8 @@ impl Chats {
                 folder_managed: input.folder.is_none(),
                 links: input.links.into_iter().map(ChatLink::from).collect(),
             };
-            let existing = workspace.replay_chat_creation(&create, &new_chat, requested)?;
-            let new_limit = (existing.is_none() && !input.attachments.is_empty())
+            let has_receipt = workspace.has_chat_creation_receipt(&create)?;
+            let new_limit = (!has_receipt && !input.attachments.is_empty())
                 .then(|| workspace.attachment_upload_limit())
                 .transpose()?;
             let attachments = Self::decode_message_attachments(
@@ -1655,7 +1655,15 @@ impl Chats {
                 new_limit.unwrap_or(MAX_BACKUP_FILE_BYTES),
             )?;
             let mut legacy_saved = None;
-            if let Some(receipt) = existing {
+            if has_receipt
+                && let Some(receipt) = workspace.replay_chat_creation(
+                    &create,
+                    &new_chat,
+                    requested,
+                    &input.message,
+                    &attachments,
+                )?
+            {
                 let (chat, exact) = match receipt {
                     ChatCreationReplay::Exact(chat) => (chat, true),
                     ChatCreationReplay::Legacy(chat) => (chat, false),
@@ -1719,9 +1727,13 @@ impl Chats {
             return Ok(created);
         }
         // The Chat is stored first: a request the core refuses leaves no folder behind.
-        let chat = self
-            .workspace()?
-            .create_chat_with_picks(&create, new_chat, requested)?;
+        let chat = self.workspace()?.create_chat_for_first_message(
+            &create,
+            new_chat,
+            requested,
+            &input.message,
+            &attachments,
+        )?;
         let created = |send_error| Created {
             chat_id: chat.id.clone(),
             send_error,

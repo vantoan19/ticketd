@@ -6,6 +6,51 @@ use std::sync::{
 use super::*;
 
 #[test]
+fn a_chat_creation_receipt_with_only_start_picks_still_replays() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(directory.path().join("workspace.sqlite3")).unwrap();
+    let new_chat = NewChat {
+        title: Some("First message".into()),
+        harness: "codex".into(),
+        execution_folder: "/work/app".into(),
+        folder_managed: false,
+        links: Vec::new(),
+    };
+    let command_id = "request:chat";
+    let mut prior_request = create_chat_request(&new_chat);
+    prior_request["start_picks"] = json!({"model": "model-a", "effort": null, "permission": null});
+    let first = workspace
+        .chat_write(|connection| {
+            create_chat_with_request(
+                connection,
+                Some(command_id),
+                new_chat.clone(),
+                prior_request,
+            )
+        })
+        .unwrap();
+    let picks = ChatStartPicks {
+        model: Some("model-a"),
+        ..ChatStartPicks::default()
+    };
+
+    assert!(matches!(
+        workspace.replay_chat_creation(command_id, &new_chat, picks, "First message", &[]),
+        Ok(Some(ChatCreationReplay::Exact(chat))) if chat == first
+    ));
+    assert!(matches!(
+        workspace.replay_chat_creation(
+            command_id,
+            &new_chat,
+            ChatStartPicks::default(),
+            "First message",
+            &[],
+        ),
+        Err(Error::RequestConflict(_))
+    ));
+}
+
+#[test]
 fn capturing_a_short_turn_skips_unrelated_tickets_and_feed_rows() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();

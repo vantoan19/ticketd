@@ -1884,6 +1884,24 @@ async fn a_failed_first_send_returns_the_chat_and_a_retry_makes_no_second_one() 
         id: "no-such-ticket".to_owned(),
     }];
     assert!(f.chats.create(linked).await.is_err());
+
+    let mut workspace = f.core();
+    let project = workspace
+        .create_project("Archived Project", &f.dir.path().to_string_lossy())
+        .unwrap();
+    workspace.set_project_archived(&project.id, true).unwrap();
+    drop(workspace);
+    let mut archived = f.input("first");
+    archived.folder = None;
+    archived.links = vec![LinkRef {
+        kind: LinkKind::Project,
+        id: project.id,
+    }];
+    assert_eq!(
+        f.chats.create(archived).await.unwrap_err().code,
+        "project_archived"
+    );
+
     let managed = format!("{}.chats", f.core().workspace_info().unwrap().path);
     assert!(
         !Path::new(&managed).exists(),
@@ -1925,6 +1943,58 @@ async fn repeating_a_new_chat_request_sends_its_first_message_once() {
         ..f.input("first")
     };
     assert!(f.chats.create(not_a_uuid).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_managed_folder_creation_still_binds_the_first_message() {
+    let f = Fixture::new().await;
+    let mut input = f.input("Same title\nOriginal message");
+    input.folder = None;
+    input.attachments = vec![AttachmentInput {
+        name: "notes.txt".to_owned(),
+        data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+    }];
+    let managed = managed_chat_folders(&f.core()).unwrap();
+    let path = managed.join(&input.command_id);
+    std::fs::create_dir_all(managed).unwrap();
+    std::fs::write(&path, b"blocks the directory").unwrap();
+
+    let first = f.chats.create(input.clone()).await.unwrap();
+    assert!(first.send_error.unwrap().contains("could not create"));
+    assert!(messages(&f.core(), &first.chat_id).unwrap().is_empty());
+    std::fs::remove_file(&path).unwrap();
+
+    let mut changed_bytes = input.clone();
+    changed_bytes.attachments[0].data_url = "data:text/plain;base64,b3RoZXI=".to_owned();
+    let changed_text = NewChatInput {
+        message: "Same title\nDifferent message".to_owned(),
+        ..input.clone()
+    };
+    for changed in [changed_bytes, changed_text] {
+        let conflict = f.chats.create(changed).await.unwrap_err();
+        assert!(conflict.message.contains("different"), "{conflict:?}");
+        assert!(!path.exists());
+    }
+
+    // An equivalent data URL carries the same normalized media type and bytes.
+    input.attachments[0].data_url = "data:text/plain;charset=utf-8;base64,bm90ZXM=".to_owned();
+    assert_eq!(
+        f.chats.create(input).await.unwrap(),
+        Created {
+            chat_id: first.chat_id.clone(),
+            send_error: None,
+        }
+    );
+    settle().await;
+    assert!(path.is_dir());
+    let workspace = f.core();
+    let saved = messages(&workspace, &first.chat_id).unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].text, "Same title\nOriginal message");
+    let files = workspace
+        .chat_message_attachment_contents(&first.chat_id, &saved[0].id)
+        .unwrap();
+    assert_eq!(files[0].bytes(), b"notes");
 }
 
 #[tokio::test(start_paused = true)]
