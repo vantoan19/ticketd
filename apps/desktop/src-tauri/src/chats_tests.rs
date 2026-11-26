@@ -1276,11 +1276,11 @@ async fn a_new_queue_edit_receipt_binds_empty_links_without_guessing_legacy_link
                 request(),
             )
             .await;
-        if legacy {
-            retry.unwrap();
-        } else {
-            assert!(retry.unwrap_err().message.contains("different"));
-        }
+        assert!(retry.unwrap_err().message.contains("different"));
+        f.chats
+            .send_linking(&id, "Edited", SendMode::Queue, &[], Vec::new(), request())
+            .await
+            .unwrap();
         assert!(f.core().chat(&id).unwrap().links.is_empty());
         assert_eq!(f.core().chat_queue(&id).unwrap(), queue);
         let status = f

@@ -619,6 +619,53 @@ fn a_replacement_only_save_binds_empty_links_even_after_withdrawal() {
 }
 
 #[test]
+fn a_saved_legacy_input_with_no_link_receipt_replays_only_without_links() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let text = "Legacy input";
+    let saved = workspace.save_chat_input(None, &chat.id, text).unwrap();
+    let request =
+        serde_json::json!({"operation": "save_chat_input", "chat_id": chat.id, "text": text});
+    rusqlite::Connection::open(dir.path().join("workspace.sqlite3"))
+        .unwrap()
+        .execute(
+            "INSERT INTO request_outcomes (id, request, outcome) VALUES ('legacy', ?1, ?2)",
+            [
+                request.to_string(),
+                serde_json::to_string(&saved.id).unwrap(),
+            ],
+        )
+        .unwrap();
+
+    let linked = ChatInputChange::Link(vec![ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: workspace.create_ticket("New link").unwrap().id,
+    }]);
+    assert!(matches!(
+        workspace.replay_chat_input_with_change("legacy", &chat.id, text, &[], Some(&linked)),
+        Err(Error::RequestConflict(id)) if id == "legacy"
+    ));
+    assert!(matches!(
+        workspace.save_chat_input_with_change(Some("legacy"), &chat.id, text, &[], Some(&linked)),
+        Err(Error::RequestConflict(id)) if id == "legacy"
+    ));
+    assert_eq!(
+        workspace
+            .replay_chat_input("legacy", &chat.id, text, &[])
+            .unwrap(),
+        Some(saved.clone())
+    );
+    assert_eq!(
+        workspace
+            .save_chat_input(Some("legacy"), &chat.id, text)
+            .unwrap(),
+        saved
+    );
+    assert!(workspace.chat(&chat.id).unwrap().links.is_empty());
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap(), [saved]);
+}
+
+#[test]
 fn public_command_ids_with_the_old_link_prefix_do_not_collide_with_input_receipts() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

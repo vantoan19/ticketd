@@ -1349,19 +1349,32 @@ fn automation_prompt_command_id(chat_id: &str) -> String {
     format!("{chat_id}{AUTOMATION_PROMPT_REQUEST_SUFFIX}")
 }
 
-fn saved_automation_prompt_id(
+enum AutomationPromptReceipt {
+    Marked(String),
+    Unmarked(String),
+}
+
+fn automation_prompt_receipt(
     connection: &Connection,
     chat_id: &str,
-) -> Result<Option<String>, Error> {
+) -> Result<Option<AutomationPromptReceipt>, Error> {
     Ok(connection
         .query_row(
-            "SELECT json_extract(outcome, '$') FROM request_outcomes
+            "SELECT json_extract(outcome, '$'), json_type(request, '$.input_source') IS NOT NULL
+             FROM request_outcomes
              WHERE id = ?1 AND json_extract(request, '$.operation') = 'save_chat_input'
                  AND json_extract(request, '$.chat_id') = ?2
                  AND (json_type(request, '$.input_source') IS NULL
                       OR json_extract(request, '$.input_source') = 'automation_prompt')",
             params![automation_prompt_command_id(chat_id), chat_id],
-            |row| row.get(0),
+            |row| {
+                let id = row.get(0)?;
+                Ok(if row.get(1)? {
+                    AutomationPromptReceipt::Marked(id)
+                } else {
+                    AutomationPromptReceipt::Unmarked(id)
+                })
+            },
         )
         .optional()?)
 }
@@ -1402,19 +1415,21 @@ fn validate_legacy_input_links(
     connection: &Connection,
     command_id: &str,
     request: &Value,
-) -> Result<(), Error> {
+) -> Result<bool, Error> {
     let key = format!("chat_queue_edit_links:{command_id}");
     if let Some((previous, _)) = request_outcome(connection, &key)? {
         let previous: Value = serde_json::from_str(&previous)?;
         // A public request could use this ID even before the prefix was used for links.
-        if previous["operation"] == "chat_queue_edit_links"
-            && (previous["chat_id"] != request["chat_id"]
-                || previous["links"] != sorted_input_links(request))
-        {
-            return Err(Error::RequestConflict(command_id.to_owned()));
+        if previous["operation"] == "chat_queue_edit_links" {
+            if previous["chat_id"] != request["chat_id"]
+                || previous["links"] != sorted_input_links(request)
+            {
+                return Err(Error::RequestConflict(command_id.to_owned()));
+            }
+            return Ok(true);
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 fn read_input_receipt(
@@ -1446,8 +1461,11 @@ fn read_input_receipt(
     if previous != *request {
         return Err(Error::RequestConflict(command_id.to_owned()));
     }
-    if split_links_receipt {
-        validate_legacy_input_links(connection, command_id, request)?;
+    if split_links_receipt
+        && !validate_legacy_input_links(connection, command_id, request)?
+        && request["links"] != json!([])
+    {
+        return Err(Error::RequestConflict(command_id.to_owned()));
     }
     let same_source = match (saved_source.as_ref(), source) {
         // Old receipts cannot prove a takeover. While the Chat still has an owner,
@@ -1455,13 +1473,9 @@ fn read_input_receipt(
         (None, InputSource::AutomationReply) => {
             crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
         }
-        // An unmarked receipt at the Prompt's reserved ID may belong to the owner.
-        (None, InputSource::Person)
-            if command_id.strip_suffix(AUTOMATION_PROMPT_REQUEST_SUFFIX) == Some(chat_id) =>
-        {
-            crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
-        }
-        (None, _) => true,
+        // A historical receipt can recover ordinary input but cannot authorize a Prompt.
+        (None, InputSource::AutomationPrompt(_)) => false,
+        (None, InputSource::Person) => true,
         // A lost takeover reply can be retried through the now ordinary Chat.
         (Some(saved), InputSource::Person) if saved == "automation_reply" => {
             crate::automation_runs::chat_owner(connection, chat_id)?.is_none()
@@ -1987,14 +2001,23 @@ fn set_aside_input(
     Ok(())
 }
 
-/// The reserved save receipt identifies the Prompt even before its supervisor
-/// returns the save outcome. Late delivery evidence still takes precedence.
+/// The marked receipt identifies the Prompt before its supervisor returns the save
+/// outcome. Late delivery evidence still takes precedence.
 pub(crate) fn set_aside_taken_over_prompt(
     connection: &Connection,
     chat_id: &str,
 ) -> Result<(), Error> {
-    let Some(id) = saved_automation_prompt_id(connection, chat_id)? else {
-        return Ok(());
+    let id = match automation_prompt_receipt(connection, chat_id)? {
+        Some(AutomationPromptReceipt::Marked(id)) => id,
+        Some(AutomationPromptReceipt::Unmarked(id)) => {
+            // The ID alone cannot distinguish the person's input from an old Prompt.
+            // Keep the row for review without automatically dispatching it on takeover.
+            if read_message(connection, &id)?.is_some_and(|message| message.queued) {
+                connection.execute("UPDATE chats SET queue_paused = 1 WHERE id = ?1", [chat_id])?;
+            }
+            return Ok(());
+        }
+        None => return Ok(()),
     };
     let Some(message) = read_message(connection, &id)? else {
         return Ok(());
@@ -3145,7 +3168,10 @@ impl Workspace {
                 if !owns_running_chat(connection, chat_id, run_id)? {
                     return Ok(None);
                 }
-                if saved_automation_prompt_id(connection, chat_id)?.as_deref() != Some(message_id) {
+                if !matches!(
+                    automation_prompt_receipt(connection, chat_id)?,
+                    Some(AutomationPromptReceipt::Marked(id)) if id == message_id
+                ) {
                     return Err(invalid("only the Automation Prompt can be submitted"));
                 }
             }
