@@ -80,7 +80,10 @@ pub fn check_extension_folder(path: &Path) -> Result<(), FolderRefusal> {
     let Some(fields) = value.as_object() else {
         return Err(invalid("it must be a JSON object"));
     };
-    if fields.keys().any(|key| !KNOWN_FIELDS.contains(&key.as_str())) {
+    if fields
+        .keys()
+        .any(|key| !KNOWN_FIELDS.contains(&key.as_str()))
+    {
         return Err(FolderRefusal::NeedsNewerTicketd);
     }
     Manifest::read(path)
@@ -178,7 +181,10 @@ impl std::fmt::Display for AddError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Refused(refusal) => refusal.fmt(formatter),
-            Self::Expired => write!(formatter, "This request is out of date. Choose the folder again"),
+            Self::Expired => write!(
+                formatter,
+                "This request is out of date. Choose the folder again"
+            ),
             Self::Source(error) => write!(formatter, "{}", message(error)),
         }
     }

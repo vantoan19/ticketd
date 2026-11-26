@@ -653,20 +653,19 @@ fn a_changed_source_stays_stopped_until_it_is_added_again_in_the_app_or_the_cli(
     let fixture = fixture_folder();
     let config = configuration("valid");
     let pending = PendingExtensions::default();
-    let by_app = |registry: &ExtensionRegistry| {
-        let shown = pending.prepare(registry, &fixture).unwrap();
-        pending.approve(registry, &shown.token).unwrap()
+    let add = |name: &str, registry: &ExtensionRegistry| {
+        if name == "app" {
+            let shown = pending.prepare(registry, &fixture).unwrap();
+            pending.approve(registry, &shown.token).unwrap()
+        } else {
+            registry
+                .add(registry.prepare_add(&fixture).unwrap())
+                .unwrap()
+        }
     };
-    let by_cli = |registry: &ExtensionRegistry| {
-        registry
-            .add(registry.prepare_add(&fixture).unwrap())
-            .unwrap()
-    };
-    let adders: [(&str, &dyn Fn(&ExtensionRegistry) -> RegisteredExtension); 2] =
-        [("app", &by_app), ("cli", &by_cli)];
-    for (name, add) in adders {
+    for name in ["app", "cli"] {
         let registry = ExtensionRegistry::new(scratch.path().join(name));
-        let installed = add(&registry);
+        let installed = add(name, &registry);
         let states = registry.states().unwrap();
         assert_eq!(states.len(), 1);
         assert!(!states[0].stopped, "{name}: untouched");
@@ -678,15 +677,24 @@ fn a_changed_source_stays_stopped_until_it_is_added_again_in_the_app_or_the_cli(
             .unwrap()
             .for_connection("scripted", "scripted", &config);
         let error = engine.check_connection("scripted", &config).unwrap_err();
-        assert!(error.to_string().contains("add it again"), "{name}: {error}");
+        assert!(
+            error.to_string().contains("add it again"),
+            "{name}: {error}"
+        );
 
-        add(&registry);
-        assert!(!registry.states().unwrap()[0].stopped, "{name}: added again");
+        add(name, &registry);
+        assert!(
+            !registry.states().unwrap()[0].stopped,
+            "{name}: added again"
+        );
         let engine = registry
             .engine()
             .unwrap()
             .for_connection("scripted", "scripted", &config);
-        assert!(engine.check_connection("scripted", &config).is_ok(), "{name}");
+        assert!(
+            engine.check_connection("scripted", &config).is_ok(),
+            "{name}"
+        );
     }
 }
 

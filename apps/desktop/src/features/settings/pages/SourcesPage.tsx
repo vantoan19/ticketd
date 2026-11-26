@@ -52,9 +52,11 @@ export function SourcesPage({
   const [opening, setOpening] = useState<string | null>(null);
   useEffect(() => {
     if (!opening) return;
-    const entry = entries.find(({ connector }) => connector.provider === opening);
+    const entry = entries.find(
+      ({ connector }) => connector.provider === opening,
+    );
     if (!entry) return;
-    setOpening(null);
+    // The page leaves with the navigation, so there is nothing to reset.
     onOpen(entry.saved?.id ?? opening);
   }, [opening, entries, onOpen]);
   const { sources: health } = useSourceActivity();

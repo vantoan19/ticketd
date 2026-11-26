@@ -226,17 +226,20 @@ test.each([
     "invalid_manifest",
     "ticketd-source.json can't be used: the manifest needs a version",
   ],
-])("a folder that can't be added (%s) says why and never opens the dialog", async (code, message) => {
-  vi.mocked(sourcesClient.prepareExtension).mockRejectedValue(
-    failure(code, message),
-  );
-  showTable();
-  await pickFolder();
-  expect(await screen.findByRole("alert")).toBeTruthy();
-  expect(screen.getByRole("alert").textContent).toBe(message);
-  expect(screen.queryByRole("dialog")).toBeNull();
-  expect(sourcesClient.addExtension).not.toHaveBeenCalled();
-});
+])(
+  "a folder that can't be added (%s) says why and never opens the dialog",
+  async (code, message) => {
+    vi.mocked(sourcesClient.prepareExtension).mockRejectedValue(
+      failure(code, message),
+    );
+    showTable();
+    await pickFolder();
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("alert").textContent).toBe(message);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(sourcesClient.addExtension).not.toHaveBeenCalled();
+  },
+);
 
 test("closing the folder chooser changes nothing", async () => {
   vi.mocked(workspaceClient.chooseFolder).mockResolvedValue(null);
@@ -277,11 +280,12 @@ test("an added source opens as Custom, not connected yet, with its program", asy
   expect(screen.getByText("Not connected yet")).toBeTruthy();
   expect(
     screen.getByText(
-      "Sign in with an API token, then choose the projects that come in.",
+      "Sign in with a Jira API token, then choose the projects that come in.",
     ),
   ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Add a connection" })).toBeTruthy();
-  const program = screen.getByRole("heading", { level: 2, name: "Program" })
+  const program = screen
+    .getByRole("heading", { level: 2, name: "Program" })
     .closest("section")!;
   expect(
     within(program)

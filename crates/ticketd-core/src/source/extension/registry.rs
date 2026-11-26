@@ -713,11 +713,9 @@ impl ExtensionRegistry {
         registry_files(&self.folder)?
             .into_iter()
             .map(|(path, bytes)| {
-                let launch = decode_record(path.file_stem().and_then(OsStr::to_str), &bytes)?.launch;
-                let bundled = matches!(
-                    launch.mode,
-                    LaunchMode::Installed { bundled: true, .. }
-                );
+                let launch =
+                    decode_record(path.file_stem().and_then(OsStr::to_str), &bytes)?.launch;
+                let bundled = matches!(launch.mode, LaunchMode::Installed { bundled: true, .. });
                 Ok(ExtensionState {
                     stopped: !bundled && launch.verify_trust().is_err(),
                     bundled,

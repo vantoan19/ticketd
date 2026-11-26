@@ -29,6 +29,12 @@ export type SourceRow = {
 
 const BUILT_IN = new Set(["github", "linear"]);
 
+/** "example-tracker" reads "Example tracker": the program's ID is all that is known before it runs. */
+export function nameOfId(id: string): string {
+  const words = id.replace(/-/g, " ");
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function withArticle(phrase: string): string {
   return `${/^[aeiou]/i.test(phrase) ? "An" : "A"} ${phrase}`;
 }

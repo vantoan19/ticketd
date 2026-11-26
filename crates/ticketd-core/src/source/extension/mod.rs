@@ -26,8 +26,8 @@ use host::{Definition, Host};
 use registry::Launch;
 use wire::{Call, ConnectionParams, IssueParams};
 
-pub(super) use process::password_output;
 pub use add::{AddError, FolderRefusal, PendingConsent, PendingExtensions, check_extension_folder};
+pub(super) use process::password_output;
 pub use registry::{
     ExtensionConsent, ExtensionRegistry, ExtensionState, PreparedExtension, RegisteredExtension,
 };

@@ -10,15 +10,14 @@ import {
   SettingsListFooter,
 } from "@/features/settings/layout/SettingsList";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
-import {
-  ProgramFacts,
-  useAddCustomSource,
-} from "@/features/settings/sources/custom-source";
+import { ProgramFacts } from "@/features/settings/sources/custom-source";
+import { useAddCustomSource } from "@/features/settings/sources/use-add-custom-source";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
 import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import {
   plural,
   signsInWith,
+  withArticle,
 } from "@/features/settings/sources/source-rows";
 import { useSourceActivity } from "@/features/tickets/source-activity";
 import { describeFailure } from "@/lib/api/describe-failure";
@@ -132,8 +131,8 @@ export function ProgramSection({
           onSubmit={() => void remove()}
         >
           <p className="text-sm text-muted-foreground">
-            The copy ticketd keeps of {name} is deleted. Tickets it brought
-            in stay.
+            The copy ticketd keeps of {name} is deleted. Tickets it brought in
+            stay.
           </p>
         </DialogShell>
       )}
@@ -178,10 +177,14 @@ export function CustomSourceEmpty({
     );
   const target = connector.presentation?.target;
   const signs = signsInWith(entry);
+  // "An API token" reads "a Jira API token" here: this page is about one source.
+  const phrase = signs.replace(/^An? /, "");
+  const named = /^(API )?(key|token)$/i.test(phrase)
+    ? withArticle(`${connector.name} ${phrase}`)
+    : signs;
+  const lowered = named.charAt(0).toLowerCase() + named.slice(1);
   const sentence = [
-    signs === "No sign-in"
-      ? null
-      : `Sign in with ${signs.charAt(0).toLowerCase()}${signs.slice(1)}`,
+    signs === "No sign-in" ? null : `Sign in with ${lowered}`,
     target
       ? `choose the ${plural(target.label.toLowerCase(), 2)} that come in`
       : "choose what comes in",
