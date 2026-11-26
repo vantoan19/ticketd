@@ -962,7 +962,10 @@ fn done_canceled_duplicate_trashed_and_unconnected_tickets_are_ineligible_with_a
             reason: IneligibleReason::SourceNotConnected,
             message,
             ..
-        } => assert!(message.contains("in Settings › Ticket sources"), "{message}"),
+        } => assert!(
+            message.contains("in Settings › Ticket sources"),
+            "{message}"
+        ),
         other => panic!("expected an ineligible source, got {other:?}"),
     }
 }

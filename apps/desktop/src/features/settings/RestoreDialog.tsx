@@ -336,7 +336,8 @@ export function RestoreDialog({
             cancelLabel: "Done",
             showClose: false,
             blockedReason: null,
-            footerNote: "To undo, restore the safety backup from Settings › Backups & export.",
+            footerNote:
+              "To undo, restore the safety backup from Settings › Backups & export.",
             onSubmit: () => void reveal(phase.safetyPath),
           }
         : invalid

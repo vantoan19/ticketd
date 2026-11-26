@@ -998,7 +998,8 @@ test("connecting the source in Settings makes a local ticket publishable without
             eligibility: {
               kind: "ineligible",
               reason: "source_not_connected",
-              message: "connect GitHub in Settings › Ticket sources before publishing",
+              message:
+                "connect GitHub in Settings › Ticket sources before publishing",
             },
           };
     return [];

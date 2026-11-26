@@ -436,7 +436,10 @@ test("Recent errors names the setting of the app, not the module", async () => {
 test("a recent error opens the setting it names", async () => {
   errors = [
     group({ kind: "the remote file changed" }),
-    group({ target: "ticketd_core::source::tracking", kind: "refresh timed out" }),
+    group({
+      target: "ticketd_core::source::tracking",
+      kind: "refresh timed out",
+    }),
     group({ target: "ticketd::webview", kind: "TypeError" }),
   ];
   answer();
