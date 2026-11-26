@@ -119,6 +119,135 @@ test("sending mid-turn is queued when the harness cannot be steered", async () =
   expect(items.some((item) => item.kind === "user")).toBe(false);
 });
 
+const note = {
+  name: "notes.txt",
+  dataUrl: "data:text/plain;base64,bm90ZXM=",
+};
+
+async function queuedNote(client: ReturnType<typeof createMockChatClient>) {
+  await client.queue("c1", "Read the notes", [], [{ ...note }]);
+  const queued = (await client.openChat("c1")).chat.queue[0];
+  if (!queued) throw new Error("The queued input is missing.");
+  return queued;
+}
+
+test("concurrent retries save one queued edit and reject changed input for the same command", async () => {
+  const client = working();
+  const queued = await queuedNote(client);
+  const edit = { commandId: "save-edit", messageIds: [queued.id] };
+  await client.confirmQueueEdit("c1", queued.id, "hold-edit");
+
+  const first = client.queue("c1", "Revised caption", [], [note], edit);
+  const replay = client.queue("c1", "Revised caption", [], [{ ...note }], edit);
+  await expect(
+    client.queue("c1", "Different caption", [], [note], edit),
+  ).rejects.toMatchObject({ code: "failed" });
+  await Promise.all([first, replay]);
+
+  const { chat } = await client.openChat("c1");
+  expect(chat.queue).toEqual([
+    {
+      id: expect.any(String),
+      text: "Revised caption",
+      attachments: [
+        { id: expect.any(String), name: note.name, media_type: "text/plain" },
+      ],
+    },
+  ]);
+  expect(chat.queue[0]?.id).not.toBe(queued.id);
+  await expect(
+    client.checkQueueEdits("c1", [edit.commandId], [queued.id]),
+  ).resolves.toEqual({ saved: [edit.commandId], removed: [queued.id] });
+
+  await client.send("c1", "Revised caption", [], [note], edit);
+  await expect(
+    client.queue(
+      "c1",
+      "Revised caption",
+      [],
+      [{ ...note, dataUrl: "data:text/plain;base64,ZXh0cmE=" }],
+      edit,
+    ),
+  ).rejects.toMatchObject({ code: "failed" });
+  expect(await client.openChat("c1")).toMatchObject({
+    chat: { queue: chat.queue },
+    items: [approval],
+  });
+});
+
+test("a rejected queue edit leaves its command free for a later retry", async () => {
+  const client = working();
+  const queued = await queuedNote(client);
+  const edit = { commandId: "save-edit", messageIds: [queued.id] };
+
+  await expect(
+    client.queue("c1", "Revised caption", [], [note], edit),
+  ).rejects.toMatchObject({ code: "stale" });
+  await expect(
+    client.checkQueueEdits("c1", [edit.commandId], []),
+  ).resolves.toEqual({ saved: [], removed: [] });
+  await client.confirmQueueEdit("c1", queued.id, "hold-edit");
+  await client.queue("c1", "Revised caption", [], [note], edit);
+  expect((await client.openChat("c1")).chat.queue).toMatchObject([
+    { text: "Revised caption" },
+  ]);
+});
+
+test("queued files are independent of both the request and editor attachment objects", async () => {
+  const client = working();
+  const notes = { ...note };
+  const files = [notes];
+  await client.queue("c1", "Read the notes", [], files);
+  const queued = (await client.openChat("c1")).chat.queue[0];
+  if (!queued) throw new Error("The queued input is missing.");
+
+  notes.name = "Changed request.txt";
+  files.pop();
+  const editor = await client.editQueued("c1", queued.id);
+  expect(editor.attachments).toEqual([note]);
+  const edited = editor.attachments.pop();
+  if (!edited) throw new Error("The saved attachment is missing.");
+  edited.dataUrl = "data:text/plain;base64,ZXh0cmE=";
+  await expect(client.editQueued("c1", queued.id)).resolves.toEqual({
+    text: "Read the notes",
+    attachments: [note],
+  });
+});
+
+test("Send now accepts the original input before concurrent Trash can stop it", async () => {
+  const client = working();
+  const queued = await queuedNote(client);
+  await Promise.all([
+    client.sendQueuedNow("c1", queued.id),
+    client.trash("c1"),
+  ]);
+  const { chat, items } = await client.openChat("c1");
+  expect(chat).toMatchObject({ retention: "trashed", queue: [] });
+  expect(items.filter((item) => item.kind === "user")).toMatchObject([
+    {
+      text: "Read the notes",
+      attachments: [{ name: note.name, media_type: "text/plain" }],
+    },
+  ]);
+});
+
+test("Send now refused in Trash keeps the queued text and attachment bytes after Restore", async () => {
+  const client = working();
+  const queued = await queuedNote(client);
+  await client.trash("c1");
+  await expect(client.sendQueuedNow("c1", queued.id)).rejects.toThrow(
+    "This Chat is in Trash.",
+  );
+  await client.restore("c1");
+  const { chat, items } = await client.openChat("c1");
+  expect(chat.queue).toEqual([queued]);
+  expect(items.filter((item) => item.kind === "user")).toEqual([]);
+  await expect(client.editQueued("c1", queued.id)).resolves.toEqual({
+    text: "Read the notes",
+    attachments: [note],
+  });
+});
+
 test("trash stops the work and restore never restarts it", async () => {
   const client = working();
   await client.queue("c1", "next");
