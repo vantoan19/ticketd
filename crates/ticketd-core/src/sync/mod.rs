@@ -64,6 +64,16 @@ pub(crate) fn forget_folder(connection: &rusqlite::Connection) -> Result<(), cra
     setup::forget_folder(connection)
 }
 
+/// After a restore: remember the folder the replaced Workspace synced with, so that Workspace
+/// sync can offer to go back to it. The restored Workspace still syncs nowhere; it keeps this
+/// computer's own sign-in. Nothing is remembered from a backup of another Workspace.
+pub(crate) fn remember_replaced_folder(
+    restored: &rusqlite::Connection,
+    replaced: &rusqlite::Connection,
+) -> Result<(), crate::Error> {
+    setup::remember_replaced_folder(restored, replaced)
+}
+
 /// Format version 60.
 pub(crate) fn migrate_recovery(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::migrate_recovery(connection)

@@ -596,7 +596,7 @@ below applies to both unless it names one.
   Independent Workspaces are never merged automatically. A joining desktop takes a fresh
   device code when needed so references never clash. Disconnecting deletes nothing, and
   the same account (or, for S3, the same bucket and prefix) can reconnect to its folder.
-  Restoring a backup disconnects the Workspace from its storage. To move from Drive to S3,
+  Restoring a backup disconnects the Workspace from its storage, and says so first; afterwards setup offers Reconnect to the folder it used. To move from Drive to S3,
   disconnect Drive and upload the Workspace to a bucket; there is no migration.
 - **While syncing.** Settings > Workspace sync shows one status row: the state in a
   word, when sync last checked, and which sign-in it uses. When sync stops (the sign-in

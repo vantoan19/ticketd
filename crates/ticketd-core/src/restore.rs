@@ -121,8 +121,10 @@ impl Workspace {
     ///
     /// The restored Workspace is not connected to a sync folder, whatever the
     /// backup or the replaced Workspace was: a run against the folder would
-    /// bring back what the restore went back on, so the person chooses upload
-    /// or download again.
+    /// bring back what the restore went back on. It remembers the folder the
+    /// replaced Workspace used, with this computer's sign-in, so the person
+    /// chooses between going back to it (a merge, with differing values sent to
+    /// review) and uploading or downloading again.
     pub fn restore(
         workspace: impl AsRef<Path>,
         backup: impl AsRef<Path>,
@@ -255,6 +257,9 @@ impl Workspace {
                             })
                         })
                 });
+        if !keep_sync_folder && backup::table_exists(&restored, "sync_state")? {
+            crate::sync::remember_replaced_folder(&restored, &current)?;
+        }
         if !local_recovery {
             crate::source::forget_connections(&restored)?;
             crate::source::retain_connections(&mut restored, &current)?;

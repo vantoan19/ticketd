@@ -22,9 +22,15 @@ import {
 } from "@/lib/api/workspace";
 import { fileManagerName } from "@/lib/platform";
 import { formatDateTime } from "@/lib/format";
-import { splitPath } from "@/features/settings/settings-format";
+import {
+  restorePointWhen,
+  splitPath,
+} from "@/features/settings/settings-format";
+import { SettingsLink } from "@/features/settings/layout/SettingsLink";
+import { useSyncStatus } from "@/features/sync/sync-status";
 import { useDraftRecovery } from "@/lib/draft-recovery-context";
 import "@/features/settings/restore-review.css";
+import "@/features/sync/sync.css";
 
 type Phase =
   | { name: "checking" }
@@ -37,6 +43,8 @@ type Phase =
       safetyPath: string;
       /** What could not be confirmed around a restore that did happen. */
       warning: string;
+      /** Workspace sync was on, so it is off here now. */
+      wasSyncing: boolean;
       reloadFailure: FailureDescription | null;
     };
 
@@ -46,6 +54,10 @@ const LAST_CHANGE =
 /** The footer note while the review is open: the safety net, then the one ask. */
 const SAFETY_NOTE =
   "A safety backup of this workspace is saved first. Pause ticketd commands until it finishes.";
+/** A restore point's footer: what is here now is kept, as one more point. */
+const POINT_NOTE = "What is here now is saved first, as a restore point.";
+const SYNC_TURNS_OFF =
+  "Turns off here, so your other computers keep their copy. You choose later whether this one rejoins them.";
 
 function formatWhen(timestamp: string | null) {
   return timestamp ? formatDateTime(timestamp) : "No changes yet";
@@ -183,6 +195,83 @@ function Comparison({
   );
 }
 
+/** "Today, 08:52" read inside a sentence: "today, 08:52". */
+function inSentence(when: string) {
+  return /^(Today|Yesterday),/.test(when)
+    ? `${when.charAt(0).toLowerCase()}${when.slice(1)}`
+    : when;
+}
+
+/** This Workspace now beside a restore point: the four numbers that say what a restore costs. */
+function PointComparison({
+  current,
+  backup,
+  when,
+}: {
+  current: WorkspaceSummary | null;
+  backup: WorkspaceSummary | null;
+  when: string;
+}) {
+  const cell = (summary: WorkspaceSummary | null, value: () => string) =>
+    summary ? value() : <Skeleton className="h-2.5 w-12" />;
+  const differs = (key: "tickets" | "documents" | "activities") =>
+    current && backup ? backup[key] !== current[key] : undefined;
+  const changed = (summary: WorkspaceSummary | null) =>
+    summary?.last_change
+      ? restorePointWhen(summary.last_change)
+      : formatWhen(null);
+  return (
+    <table className="restore-compare">
+      <caption className="sr-only">
+        This Workspace now, beside the restore point
+      </caption>
+      <thead>
+        <tr>
+          <td />
+          <th scope="col">Now</th>
+          <th scope="col">{when}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {(
+          [
+            ["tickets", "Tickets"],
+            ["documents", "Documents"],
+            ["activities", "Activities"],
+          ] as const
+        ).map(([key, label]) => (
+          <tr key={key}>
+            <th scope="row">{label}</th>
+            <td>{cell(current, () => String(current?.[key]))}</td>
+            <td data-differs={differs(key)}>
+              {cell(backup, () => String(backup?.[key]))}
+            </td>
+          </tr>
+        ))}
+        <tr>
+          <th scope="row">
+            <Tooltip content={LAST_CHANGE}>
+              <span tabIndex={0} aria-description={LAST_CHANGE}>
+                Last change
+              </span>
+            </Tooltip>
+          </th>
+          <td>{cell(current, () => changed(current))}</td>
+          <td
+            data-differs={
+              current && backup
+                ? backup.last_change !== current.last_change
+                : undefined
+            }
+          >
+            {cell(backup, () => changed(backup))}
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  );
+}
+
 /**
  * Reviews a backup before it replaces the workspace (DESIGN section 10): the
  * consequence first as an attention notice, then this workspace beside the
@@ -193,17 +282,28 @@ function Comparison({
  */
 export function RestoreDialog({
   path,
+  point,
   onClose,
   onRestored,
   onWorkspaceReplaced,
+  onOpenSync,
 }: {
   path: string;
+  /**
+   * The restore point this file is: a smaller review, since a point needs no file path and
+   * no file check. Without it the review is of a file the person chose.
+   */
+  point?: { saved_at: string };
   onClose: () => void;
   /** Reloads open views from the restored workspace. */
   onRestored: () => Promise<void>;
   onWorkspaceReplaced?: (() => void) | undefined;
+  /** Opens Workspace sync, where a restore that turned sync off offers to rejoin. */
+  onOpenSync?: (() => void) | undefined;
 }) {
   const presence = useDialogPresence(onClose);
+  const sync = useSyncStatus();
+  const syncing = sync.status?.connection === "connected";
   const [file, setFile] = useState(path);
   const [phase, setPhase] = useState<Phase>({ name: "checking" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
@@ -255,6 +355,7 @@ export function RestoreDialog({
   async function replace(inspection: BackupInspection) {
     setFailure(null);
     setPhase({ name: "restoring", inspection });
+    const wasSyncing = syncing;
     let safetyPath: string;
     let warning: string;
     try {
@@ -269,6 +370,8 @@ export function RestoreDialog({
       return;
     }
     onWorkspaceReplaced?.();
+    // Sync is off here now: the status every page shows must not stay the old one.
+    void sync.refresh().catch(() => {});
     let reloadFailure: FailureDescription | null = null;
     try {
       try {
@@ -284,7 +387,14 @@ export function RestoreDialog({
           "The restore finished. Restart ticketd to see the restored data.",
       };
     }
-    setPhase({ name: "done", inspection, safetyPath, warning, reloadFailure });
+    setPhase({
+      name: "done",
+      inspection,
+      safetyPath,
+      warning,
+      wasSyncing,
+      reloadFailure,
+    });
   }
 
   async function reveal(target: string) {
@@ -312,23 +422,30 @@ export function RestoreDialog({
 
   // A file that cannot be restored offers the way forward, not a dead button.
   const invalid = phase.name === "unreadable" || issue !== null;
+  // A restore point that reads well is the small review; anything else is the file review.
+  const review = point !== undefined && !invalid;
+  const when = point ? restorePointWhen(point.saved_at) : "";
   return (
     <DialogShell
       {...presence.dialog}
-      size="lg"
+      size={review ? "md" : "lg"}
       busy={phase.name === "restoring"}
       title={
         done
           ? "Workspace restored"
           : invalid
             ? "Review backup"
-            : "Replace this workspace?"
+            : review
+              ? "Replace this Workspace?"
+              : "Replace this workspace?"
       }
-      bodyBoundary="divider"
+      bodyBoundary={review ? "none" : "divider"}
       description={
         done
           ? "The workspace now matches the backup."
-          : `${name}. Nothing changes until you replace the workspace.`
+          : review
+            ? `With the restore point from ${inSentence(when)}. Changes made since then are replaced.`
+            : `${name}. Nothing changes until you replace the workspace.`
       }
       {...(done
         ? {
@@ -336,7 +453,8 @@ export function RestoreDialog({
             cancelLabel: "Done",
             showClose: false,
             blockedReason: null,
-            footerNote: "To undo, restore the safety backup from Settings.",
+            footerNote:
+              "To undo, restore “Before restoring” in Backups & export.",
             onSubmit: () => void reveal(phase.safetyPath),
           }
         : invalid
@@ -347,7 +465,11 @@ export function RestoreDialog({
             }
           : {
               primaryLabel:
-                phase.name === "restoring" ? "Replacing…" : "Replace workspace",
+                phase.name === "restoring"
+                  ? "Replacing…"
+                  : review
+                    ? "Replace Workspace"
+                    : "Replace workspace",
               primaryVariant: "destructive" as const,
               blockedReason:
                 phase.name === "checking"
@@ -355,7 +477,7 @@ export function RestoreDialog({
                   : phase.name === "restoring"
                     ? SAFETY_NOTE
                     : null,
-              footerNote: SAFETY_NOTE,
+              footerNote: review ? POINT_NOTE : SAFETY_NOTE,
               onSubmit: () => inspection && void replace(inspection),
             })}
       {...((failure ?? revealFailure) && {
@@ -387,7 +509,26 @@ export function RestoreDialog({
 
       {/* The consequence first, then the comparison. Checking reserves the
           same layout, so the dialog does not grow when the check returns. */}
-      {(phase.name === "checking" || valid) && (
+      {review && (phase.name === "checking" || valid) && (
+        <>
+          <PointComparison
+            current={inspection?.current ?? null}
+            backup={valid?.summary ?? null}
+            when={when}
+          />
+          <dl className="sync-summary restore-facts">
+            {syncing && (
+              <>
+                <dt>Workspace sync</dt>
+                <dd>{SYNC_TURNS_OFF}</dd>
+              </>
+            )}
+            <dt>Also replaced</dt>
+            <dd>Follows, reminders and Inbox state</dd>
+          </dl>
+        </>
+      )}
+      {!review && (phase.name === "checking" || valid) && (
         <>
           <Alert tone="attention" role="note">
             <AlertTitle>This replaces everything in this workspace</AlertTitle>
@@ -405,7 +546,7 @@ export function RestoreDialog({
         </>
       )}
 
-      {!done && (
+      {!done && !review && (
         <div className="restore-file">
           <span className="restore-file-path" aria-label="Chosen backup file">
             <PathText path={file} />
@@ -434,7 +575,7 @@ export function RestoreDialog({
         </div>
       )}
 
-      {valid && attachments && (
+      {valid && attachments && !review && (
         <Disclosure
           label="Attachment details"
           onOpenChange={(open) => {
@@ -497,6 +638,25 @@ export function RestoreDialog({
               subject={phase.safetyPath}
             />
           </div>
+          {phase.wasSyncing && (
+            <p>
+              Workspace sync is off on this computer. It offers to rejoin on the
+              Workspace sync page.
+              {onOpenSync && (
+                <>
+                  {" "}
+                  <SettingsLink
+                    onClick={() => {
+                      onOpenSync();
+                      onClose();
+                    }}
+                  >
+                    Open Workspace sync
+                  </SettingsLink>
+                </>
+              )}
+            </p>
+          )}
           {phase.warning && (
             <Alert tone="attention" size="compact">
               <AlertDescription>{phase.warning}</AlertDescription>

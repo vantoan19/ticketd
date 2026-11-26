@@ -66,7 +66,7 @@ function PointRow({
   onRestore,
 }: {
   point: RestorePoint;
-  onRestore: (path: string) => void;
+  onRestore: (point: RestorePoint) => void;
 }) {
   const when = restorePointWhen(point.saved_at);
   const label = labelOf(point);
@@ -98,7 +98,7 @@ function PointRow({
               variant="ghost"
               size="sm"
               aria-label={`Restore… ${when}${label ? `, ${label}` : ""}`}
-              onClick={() => onRestore(point.path)}
+              onClick={() => onRestore(point)}
             >
               Restore…
             </Button>
@@ -112,6 +112,8 @@ function PointRow({
 export type BackupsProps = {
   onRestore: () => Promise<void>;
   onWorkspaceReplaced?: (() => void) | undefined;
+  /** Opens Workspace sync, where a restore that turned sync off offers to rejoin. */
+  onOpenSync?: (() => void) | undefined;
 };
 
 /**
@@ -122,13 +124,18 @@ export type BackupsProps = {
 export function BackupsSection({
   onRestore,
   onWorkspaceReplaced,
+  onOpenSync,
 }: BackupsProps) {
   const [listing, setListing] = useState<Listing>({ status: "loading" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [showAll, setShowAll] = useState(false);
-  const [restoring, setRestoring] = useState<string | null>(null);
+  // What the review is of: a restore point, or a file the person chose.
+  const [restoring, setRestoring] = useState<{
+    path: string;
+    point?: RestorePoint;
+  } | null>(null);
   const saving = useRef(false);
   const read = useCallback(async () => {
     try {
@@ -180,7 +187,7 @@ export function BackupsSection({
       const path = await workspaceClient.chooseBackupFile({
         title: "Choose a ticketd backup",
       });
-      if (path !== null) setRestoring(path);
+      if (path !== null) setRestoring({ path });
     } catch (reason) {
       setFailure(describeFailure(reason, "open the file dialog"));
     }
@@ -242,7 +249,9 @@ export function BackupsSection({
               <PointRow
                 key={point.path}
                 point={point}
-                onRestore={setRestoring}
+                onRestore={(chosen) =>
+                  setRestoring({ path: chosen.path, point: chosen })
+                }
               />
             ))}
             <SettingsListFooter
@@ -277,9 +286,11 @@ export function BackupsSection({
 
       {restoring !== null && (
         <RestoreDialog
-          path={restoring}
+          path={restoring.path}
+          {...(restoring.point && { point: restoring.point })}
           onClose={() => setRestoring(null)}
           onWorkspaceReplaced={onWorkspaceReplaced}
+          onOpenSync={onOpenSync}
           onRestored={async () => {
             await load();
             await onRestore();

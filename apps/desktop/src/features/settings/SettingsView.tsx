@@ -124,6 +124,7 @@ export function SettingsView({
         <BackupsExportPage
           onRestore={replaced}
           onWorkspaceReplaced={onWorkspaceReplaced}
+          onOpenSync={() => onSelect?.("workspace-sync")}
         />
       )}
       {selected === "command-line" && <CommandLinePage />}
