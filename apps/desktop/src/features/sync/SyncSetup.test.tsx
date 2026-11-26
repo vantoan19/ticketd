@@ -45,6 +45,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
     downloadWorkspace: vi.fn(),
     disconnect: vi.fn(),
     settings: vi.fn(),
+    devices: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/workspace", () => ({
@@ -113,6 +114,7 @@ async function signInThrough(choice?: RegExp) {
 }
 
 beforeEach(() => {
+  api.devices.mockResolvedValue([]);
   api.settings.mockResolvedValue(syncSettings());
   api.status.mockResolvedValue(notConnected());
   api.setupOptions.mockResolvedValue(holdsWorkspace);
@@ -430,7 +432,7 @@ test("a folder this computer synced before is offered first, and nothing is repl
   expect(screen.queryByRole("radio", { name: /separate/ })).toBeNull();
   press("Reconnect");
   expect(
-    await screen.findByRole("heading", { name: "This desktop" }),
+    await screen.findByRole("heading", { name: "Computers" }),
   ).toBeTruthy();
   expect(api.reconnect).toHaveBeenCalled();
   expect(api.uploadWorkspace).not.toHaveBeenCalled();
@@ -634,6 +636,6 @@ test("the step track follows setup from step 1 to in sync", async () => {
 
   api.status.mockResolvedValue(syncStatus());
   show();
-  await screen.findByRole("heading", { name: "Disconnect" });
+  await screen.findByRole("heading", { name: "Options" });
   expect(stage()).toBe("In sync");
 });

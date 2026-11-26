@@ -2682,6 +2682,7 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::sync_disconnect,
             sync_commands::sync_open_folder,
             sync_commands::sync_settings,
+            sync_commands::sync_devices,
             sync_commands::set_sync_settings,
             sync_commands::attachment_availability,
             sync_commands::download_attachment

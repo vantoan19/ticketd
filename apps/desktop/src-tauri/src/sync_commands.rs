@@ -19,8 +19,8 @@ use ticketd_core::{
     },
     sync::{
         AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, S3Binding, SetupOptions,
-        SyncChoice, SyncConflict, SyncConnection, SyncItem, SyncNotice, SyncProvider, SyncRecovery,
-        SyncResolution, SyncSettings, SyncStatus,
+        SyncChoice, SyncConflict, SyncConnection, SyncDevice, SyncItem, SyncNotice, SyncProvider,
+        SyncRecovery, SyncResolution, SyncSettings, SyncStatus,
         remote::{RemoteError, RemoteKey, RemoteKind, RemoteRevision, RemoteStorage},
     },
 };
@@ -1226,6 +1226,12 @@ pub fn sync_open_folder(app: tauri::AppHandle) -> Outcome<()> {
 #[tauri::command(async)]
 pub fn sync_settings() -> Outcome<SyncSettings> {
     Ok(open_workspace()?.sync_settings()?)
+}
+
+/// The computers that share this Workspace, from this computer's copy of the device registry.
+#[tauri::command(async)]
+pub fn sync_devices() -> Outcome<Vec<SyncDevice>> {
+    Ok(open_workspace()?.sync_devices()?)
 }
 
 #[derive(Debug, Deserialize)]
