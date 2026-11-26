@@ -146,7 +146,8 @@ function HarnessGroup({ chat }: { chat: ChatState }) {
   }, [client, known, id, checks]);
   const word = status?.word;
   const ready = status != null && !word;
-  const found = [status?.version, status?.path].filter(Boolean);
+  const version = status?.version;
+  const executable = status?.path;
   return (
     <section aria-label="Harness">
       <div className="chat-pop-harness">
@@ -171,9 +172,13 @@ function HarnessGroup({ chat }: { chat: ChatState }) {
           )}
         </span>
       </div>
-      {found.length > 0 ? (
-        <small className="chat-mono chat-pop-truncate">
-          {found.join(" · ")}
+      {version || executable ? (
+        // The version stays whole; a long executable path shortens in its
+        // middle, with the full path in its tooltip (NAV-05).
+        <small className="chat-mono chat-pop-found">
+          {version && <span className="chat-pop-version">{version}</span>}
+          {version && executable && <span aria-hidden="true"> · </span>}
+          {executable && <PathText path={executable} layout="folder" />}
         </small>
       ) : (
         // The version line's place while the first check runs, so the

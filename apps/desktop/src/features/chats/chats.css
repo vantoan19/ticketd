@@ -63,8 +63,10 @@
   isolation: isolate;
 }
 .chat-row-more {
+  /* A 24px button centred on line 1 (the row's 8px padding and 20px line), so
+     it covers the time and never line 2 or the chip. */
   position: absolute;
-  top: 8px;
+  top: 6px;
   right: 18px;
 }
 /* Keyboard focus shows it (Right Arrow reaches it); a click that leaves focus
@@ -169,6 +171,24 @@
 .chat-status-word {
   flex: none;
 }
+/* With no detail after it the word is the whole line (an idle outcome), and it
+   ends in "…" like any other line two instead of being clipped (NAV-01). */
+.chat-status-word:last-child {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+/* The crossfade is an inline grid, which text-overflow cannot reach; as a
+   block grid its cell takes the word's width and cuts the text itself. */
+.chat-status-word:last-child > .ui-crossfade {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+}
+.chat-status-word:last-child > .ui-crossfade > * {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .chat-status-detail {
   flex: 0 1 auto;
   min-width: 0;
@@ -219,6 +239,26 @@
   > button:not([data-context])
   > span {
   display: none;
+}
+/* The mark and the title are 10px apart (the title group's 6px gap and 4px). */
+.chat-head-mark + .chat-head-title {
+  margin-left: 4px;
+}
+/* A pane under 640px takes the column's 16px gutter, and so does the header's
+   first item: the mark's edge, or a leading control's glyph inside its 28px
+   (icon button) or 12px (crumb) inset. */
+.chat-pane[data-width~="max-640"] > .detail-header {
+  padding-left: 16px;
+}
+.chat-pane[data-width~="max-640"]
+  > .detail-header:has(> .detail-title-group > button:first-child) {
+  padding-left: 10px;
+}
+.chat-pane[data-width~="max-640"]
+  > .detail-header:has(
+    > .detail-title-group > [data-slot="return-crumb"]:first-child
+  ) {
+  padding-left: 4px;
 }
 /* The header's one context button (#368): the Project icon (else a folder),
    the folder's name capped at 18ch, and the chevron. It holds nothing else, so
@@ -1367,6 +1407,26 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The version and the executable, on one line: the path gives way in its middle. */
+.chat-pop-found {
+  display: flex;
+  min-width: 0;
+  white-space: pre;
+}
+.chat-pop-found > [data-slot="path-text"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: inherit;
+}
+.chat-pop-found > .chat-pop-version {
+  flex: none;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .chat-pop-harness {
   display: flex;
   align-items: center;
@@ -1609,7 +1669,8 @@
 
 /* Group labels stay inside the one keyboard-navigable Chat list. */
 .chat-list-group {
-  padding: 16px 16px 6px;
+  /* Left: the row's 8px margin and 10px padding, so label and row marks share an edge. */
+  padding: 16px 16px 6px 18px;
 }
 
 /* Touch has a permanent trailing lane, so More never covers the time or subline. */
