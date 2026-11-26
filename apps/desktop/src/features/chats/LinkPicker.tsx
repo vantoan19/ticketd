@@ -25,8 +25,18 @@ import { useWorkspaceChange } from "@/lib/workspace-change";
 import { archivedProjectHint } from "@/features/projects/project-assignment";
 import { RecordPicker, type PickRecord } from "@/features/tickets/RecordPicker";
 
-/** The icon, reference and title of a linked ticket, Document or Project. */
-export function RecordLabel({ record }: { record: LinkedRecord }) {
+/**
+ * The icon, reference and title of a linked ticket, Document or Project. A
+ * ticket whose title is the Chat's own shows its reference alone: the header
+ * already says the title.
+ */
+export function RecordLabel({
+  record,
+  chatTitle,
+}: {
+  record: LinkedRecord;
+  chatTitle?: string | undefined;
+}) {
   if (record.kind === "project")
     return (
       <>
@@ -38,7 +48,9 @@ export function RecordLabel({ record }: { record: LinkedRecord }) {
     <>
       <StatusIcon status={record.status} size={14} decorative />
       <Reference>{record.reference}</Reference>
-      <span className="chat-chip-title">{record.title}</span>
+      {record.title !== chatTitle && (
+        <span className="chat-chip-title">{record.title}</span>
+      )}
     </>
   ) : (
     <>
@@ -52,11 +64,14 @@ export function RecordLabel({ record }: { record: LinkedRecord }) {
 export function RecordChip({
   record,
   backLabel,
+  chatTitle,
   onRemove,
 }: {
   record: LinkedRecord;
   /** Names where a Document reader returns to. */
   backLabel?: string;
+  /** The Chat's title, which a ticket of the same title does not repeat. */
+  chatTitle?: string;
   onRemove: () => void;
 }) {
   const openTicket = useContext(TicketNavigation);
@@ -93,7 +108,7 @@ export function RecordChip({
                 : openDocument?.(record.id, backLabel)
           }
         >
-          <RecordLabel record={record} />
+          <RecordLabel record={record} chatTitle={chatTitle} />
         </button>
       )}
       {/* The chip's 14px remove mark; an IconButton (32px) does not fit inside it. */}

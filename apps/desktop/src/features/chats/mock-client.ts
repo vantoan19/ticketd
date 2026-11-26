@@ -171,6 +171,24 @@ function settled(chat: ChatState): ChatState {
   };
 }
 
+/** The first sentence of the latest turn's records row: its first net change. */
+function firstChange(items: TranscriptItem[]) {
+  const records = items.filter(
+    (item): item is Extract<TranscriptItem, { kind: "records" }> =>
+      item.kind === "records",
+  );
+  const latest = records.at(-1);
+  const turn = latest?.turn_id
+    ? records.filter((item) => item.turn_id === latest.turn_id)
+    : latest
+      ? [latest]
+      : [];
+  // The host's net list: fixtures say it on the turn's last records item, and an
+  // item without one says its changes as they are.
+  const last = turn.at(-1);
+  return (last?.net ?? turn.flatMap((item) => item.changes)).at(0);
+}
+
 /**
  * The host's ranked status (spec 21.3), simplified for fixtures: the mock has no
  * turns, so a Failed or finished Chat is unseen until it is opened.
@@ -233,13 +251,7 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     );
   const condition = problem && !problem.past && CONDITION_WORDS[problem.kind];
   if (condition) return make("idle", condition);
-  const change = items
-    .filter(
-      (item): item is Extract<TranscriptItem, { kind: "records" }> =>
-        item.kind === "records",
-    )
-    .at(-1)
-    ?.changes.at(-1);
+  const change = firstChange(items);
   const response = items
     .filter(
       (item): item is Extract<TranscriptItem, { kind: "response" }> =>
@@ -396,13 +408,23 @@ export const HARNESS_OPTIONS: HarnessOptions[] = [
     permission: {
       options: [
         option("default", "Ask before edits", {
+          description:
+            "Reads freely; asks before it edits a file or runs a command.",
           is_default: true,
           permission: "ask",
         }),
-        option("acceptEdits", "Accept edits", { permission: "accept_edits" }),
-        option("plan", "Plan only", { permission: "read_only" }),
+        option("acceptEdits", "Accept edits", {
+          description:
+            "Edits files in this folder without asking; asks before commands.",
+          permission: "accept_edits",
+        }),
+        option("plan", "Plan only", {
+          description: "Reads and plans; changes nothing.",
+          permission: "read_only",
+        }),
         option("bypassPermissions", "Full access", {
-          description: "Runs tools and commands without asking",
+          description:
+            "Edits and runs commands without asking, anywhere your account can reach.",
           permission: "full_access",
         }),
       ],
@@ -432,9 +454,14 @@ export const HARNESS_OPTIONS: HarnessOptions[] = [
     ],
     permission: {
       options: [
-        option("own", "Codex settings", { is_default: true }),
+        option("own", "Codex settings", {
+          description:
+            "Follows your Codex settings for what it asks and what it can touch.",
+          is_default: true,
+        }),
         option("full-access", "Full access", {
-          description: "Never asks, and runs without a sandbox",
+          description:
+            "Edits and runs commands without asking or a sandbox, anywhere your account can reach.",
           permission: "full_access",
         }),
       ],
@@ -570,7 +597,7 @@ export function createMockChatClient(
             : marker?.reason === "stop_unconfirmed"
               ? "unconfirmed"
               : null,
-      last_change: last("records")?.changes.at(-1) ?? null,
+      first_change: firstChange(items) ?? null,
       preview: last("response")?.text.slice(0, 120) ?? null,
       updated_at: entry.updated_at,
     });

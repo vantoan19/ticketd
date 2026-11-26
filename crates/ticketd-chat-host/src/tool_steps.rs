@@ -22,6 +22,8 @@ pub type StepReader = for<'a> fn(ToolEvidence<'a>) -> Vec<ToolStep>;
 pub struct ToolStep {
     pub action: StepAction,
     pub command: Option<CommandEvidence>,
+    /// The harness's own one-line account of a command, when it gave one.
+    pub description: Option<String>,
     pub outcome: Option<StepOutcomeOverride>,
     pub omitted_files: Option<OmittedFiles>,
 }
@@ -143,6 +145,7 @@ impl From<StepAction> for ToolStep {
         Self {
             action,
             command: None,
+            description: None,
             outcome: None,
             omitted_files: None,
         }
@@ -275,6 +278,7 @@ pub(crate) fn shell_step(
             timed_out: facts.timed_out,
             ticketd_calls,
         }),
+        description: None,
         outcome,
         omitted_files: None,
     }

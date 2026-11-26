@@ -1,7 +1,7 @@
 //! What the Chat screens read: stored Chat records and the host's live state, worded and
 //! shaped for display. Nothing here is a harness wire format, and nothing here decides
 //! what runs; it only describes what the core and the host already know.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
@@ -165,6 +165,10 @@ pub struct Step {
     pub omitted_files: Option<OmittedFilesView>,
     /// The command without its shell wrappers, for a command step.
     pub command: Option<String>,
+    /// The harness's own one-line account of a command, when it gave one. Absent from
+    /// the record, so a view that predates it reads the same row.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
     pub exit_code: Option<i64>,
     /// Where the command ran, when that is not the Chat's folder.
     pub folder: Option<String>,
@@ -272,6 +276,13 @@ pub enum Item {
         /// For each change, whether its record is now `trashed` or `deleted`; such a
         /// record is named, not linked. Filled in where the workspace can be read.
         gone: Vec<Option<&'static str>>,
+        /// The turn's changes up to this call, netted by the Chat host's one rule
+        /// (`attention::net_changes`): what the records row says. `changes` stay as
+        /// they are, for the fold's step rows. The turn's last records item holds the
+        /// whole turn's.
+        net: Vec<ChatAgentChange>,
+        /// For each net change, as `gone` is for `changes`.
+        net_gone: Vec<Option<&'static str>>,
         turn_id: Option<String>,
     },
     /// When a turn started and ended, and how. It has no row of its own: the view folds
@@ -510,8 +521,8 @@ pub struct Summary {
     /// `problem` is why the last turn stopped, not a condition observed now.
     pub problem_past: bool,
     pub interruption: Option<&'static str>,
-    /// The latest change the agent made in ticketd.
-    pub last_change: Option<ChatAgentChange>,
+    /// The first change the agent made in ticketd in its latest turn.
+    pub first_change: Option<ChatAgentChange>,
     pub preview: Option<String>,
     pub updated_at: String,
     /// The ranked status every Chat surface shows (spec 21.3).
@@ -536,6 +547,9 @@ pub struct Surroundings {
     /// The other Chats that use the same folder.
     pub shared_with: Vec<SharedChat>,
     pub links: Vec<LinkedRecord>,
+    /// The first line of the Chat's first message, read only when its title could
+    /// have been cut from it (`title_may_be_cut`).
+    pub first_line: Option<String>,
     pub queue: Vec<Queued>,
     pub project: Option<ProjectRef>,
     /// Read only for an open Chat; list rows do not show it.
@@ -568,13 +582,30 @@ pub struct Tracker {
     /// Assistant messages that are not complete; they stop streaming when their turn ends.
     open: HashMap<String, ChatMessage>,
     last_response: Option<String>,
-    last_change: Option<ChatAgentChange>,
-    /// The turn `last_change` was made in.
-    last_change_turn: Option<String>,
+    /// What the agent changed in ticketd in the latest turn that changed anything, by the
+    /// record of each call (a call shown again replaces its own).
+    changes: Vec<(String, Vec<ChatAgentChange>)>,
+    /// The turn `changes` were made in.
+    changes_turn: Option<String>,
+    /// What the agent changed in each turn, by call and by the segment of the turn the
+    /// call ran in, to net each segment's records row.
+    turn_changes: HashMap<String, Vec<CallChanges>>,
+    /// How many steers each turn has taken: a steer starts the turn's next segment.
+    steers: HashMap<String, usize>,
+    /// The steering messages already counted; one shown again is not a second steer.
+    steer_messages: HashSet<String>,
     updated_at: Option<String>,
     /// Reasoning, plan and files records of the latest turn: how they read depends on
     /// whether it still runs.
     reports: HashMap<String, ChatTool>,
+}
+
+/// What one ticketd call changed, and the segment of its turn it ran in.
+#[derive(Debug, Clone)]
+struct CallChanges {
+    tool_id: String,
+    segment: usize,
+    changes: Vec<ChatAgentChange>,
 }
 
 /// How user input that was submitted at least once, or that the host holds to send,
@@ -627,7 +658,8 @@ impl Tracker {
                 {
                     self.last_turn = Some(turn.clone());
                 }
-                self.updated_at = Some(turn.ended_at.clone().unwrap_or(turn.started_at.clone()));
+                self.touch(Some(turn.started_at.as_str()));
+                self.touch(turn.ended_at.as_deref());
             }
             ChatItem::Message(message) if message.role == ChatRole::User => {
                 if message.awaits_decision() {
@@ -637,21 +669,40 @@ impl Tracker {
                     self.uncertain = None;
                     self.uncertain_text = None;
                 }
-                self.updated_at = Some(message.created_at.clone());
+                self.touch(Some(message.created_at.as_str()));
+                // A steer starts the next segment of the turn it joined.
+                if message
+                    .attempts
+                    .last()
+                    .is_some_and(|attempt| attempt.intent == ChatSubmissionIntent::Steer)
+                    && let Some(turn_id) = message
+                        .attempts
+                        .iter()
+                        .rev()
+                        .find_map(|attempt| attempt.turn_id.clone())
+                        .or(message.turn_id.clone())
+                        .or_else(|| self.last_turn.as_ref().map(|turn| turn.id.clone()))
+                    && self.steer_messages.insert(message.id.clone())
+                {
+                    *self.steers.entry(turn_id).or_default() += 1;
+                }
             }
             ChatItem::Message(message) => {
+                self.touch(Some(message.created_at.as_str()));
                 if message.complete {
                     self.open.remove(&message.id);
                 } else {
                     self.open.insert(message.id.clone(), message.clone());
                 }
                 // A change from an earlier turn is not what the Chat last did.
-                if message.turn_id != self.last_change_turn {
-                    self.last_change = None;
+                if message.turn_id != self.changes_turn {
+                    self.changes.clear();
                 }
                 self.last_response = Some(message.text.clone());
             }
             ChatItem::Interaction(interaction) => {
+                self.touch(interaction.asked_at.as_deref());
+                self.touch(interaction.resolved_at.as_deref());
                 let was = self.pending.contains_key(&interaction.id);
                 if interaction.state == ChatInteractionState::Pending {
                     self.pending
@@ -675,16 +726,34 @@ impl Tracker {
                 }
             }
             ChatItem::Tool(tool) if chat_reports::is_report(tool) => {
+                self.touch(tool.started_at.as_deref());
                 // Only the latest turn can still be running.
                 self.reports.retain(|_, kept| kept.turn_id == tool.turn_id);
                 self.reports.insert(tool.id.clone(), tool.clone());
             }
             ChatItem::Tool(tool) => {
+                self.touch(tool.started_at.as_deref());
                 if let Some(changes) = agent_changes(tool)
-                    && let Some(change) = changes.last()
+                    && !changes.is_empty()
                 {
-                    self.last_change = Some(change.clone());
-                    self.last_change_turn = Some(tool.turn_id.clone());
+                    if self.changes_turn.as_ref() != Some(&tool.turn_id) {
+                        self.changes.clear();
+                        self.changes_turn = Some(tool.turn_id.clone());
+                    }
+                    let segment = self.steers.get(&tool.turn_id).copied().unwrap_or(0);
+                    let calls = self.turn_changes.entry(tool.turn_id.clone()).or_default();
+                    match calls.iter_mut().find(|call| call.tool_id == tool.id) {
+                        Some(call) => call.changes.clone_from(&changes),
+                        None => calls.push(CallChanges {
+                            tool_id: tool.id.clone(),
+                            segment,
+                            changes: changes.clone(),
+                        }),
+                    }
+                    match self.changes.iter_mut().find(|(id, _)| *id == tool.id) {
+                        Some((_, kept)) => *kept = changes,
+                        None => self.changes.push((tool.id.clone(), changes)),
+                    }
                 }
                 // Only the latest turn's calls can still be asked about.
                 self.turn_tools
@@ -693,6 +762,89 @@ impl Tracker {
             }
             ChatItem::Session(_) | ChatItem::Notice(_) => {}
         }
+    }
+
+    /// What the latest turn did to ticketd's records, the first sentence of the records
+    /// row the person sees last: the net (`attention::net_changes`) of the latest
+    /// segment that changed anything, in order.
+    pub fn first_change(&self) -> Option<ChatAgentChange> {
+        let calls = self.turn_changes.get(self.changes_turn.as_ref()?)?;
+        let segment_of = |tool_id: &str| {
+            calls
+                .iter()
+                .find(|call| call.tool_id == tool_id)
+                .map_or(0, |call| call.segment)
+        };
+        let latest = self.changes.iter().map(|(id, _)| segment_of(id)).max()?;
+        let all: Vec<ChatAgentChange> = self
+            .changes
+            .iter()
+            .filter(|(id, _)| segment_of(id) == latest)
+            .flat_map(|(_, changes)| changes.iter().cloned())
+            .collect();
+        attention::net_changes(&all).into_iter().next()
+    }
+
+    /// What the segment of a turn `tool` ran in did to ticketd's records, netted by the
+    /// Chat host's rule: what that segment's records row says. A steer starts a new
+    /// segment, so the changes before it are not netted in again. `tool` counts
+    /// whether or not it was noted yet.
+    fn turn_net(&self, tool: &ChatTool, changes: &[ChatAgentChange]) -> Vec<ChatAgentChange> {
+        let calls = self.turn_changes.get(&tool.turn_id);
+        let noted = calls.and_then(|calls| calls.iter().find(|call| call.tool_id == tool.id));
+        let segment = noted.map_or_else(
+            || self.steers.get(&tool.turn_id).copied().unwrap_or(0),
+            |call| call.segment,
+        );
+        let mut all: Vec<ChatAgentChange> = calls
+            .into_iter()
+            .flatten()
+            .filter(|call| call.segment == segment)
+            .flat_map(|call| {
+                if call.tool_id == tool.id {
+                    changes
+                } else {
+                    &call.changes
+                }
+                .iter()
+                .cloned()
+            })
+            .collect();
+        if noted.is_none() {
+            all.extend(changes.iter().cloned());
+        }
+        attention::net_changes(&all)
+    }
+
+    /// How many files the latest turn changed, from the host's record of them.
+    fn files_changed(&self) -> Option<usize> {
+        let latest = self.last_turn.as_ref()?;
+        self.reports
+            .values()
+            .filter(|tool| tool.turn_id == latest.id)
+            .find_map(|tool| {
+                ticketd_chat_host::records::read::<ticketd_chat_host::records::FilesRecord>(
+                    &tool.name,
+                    ticketd_chat_host::records::FILES_RECORD_NAME,
+                    &tool.input,
+                )
+            })
+            .map(|record| record.files.len())
+    }
+
+    /// The newest time any record of the Chat carries: a working row's time counts
+    /// from here, so a long turn does not read as the day it started.
+    fn touch(&mut self, at: Option<&str>) {
+        if let Some(at) = at
+            && self.updated_at.as_deref().is_none_or(|newest| at > newest)
+        {
+            self.updated_at = Some(at.to_owned());
+        }
+    }
+
+    #[cfg(test)]
+    fn updated_at(&self) -> Option<&str> {
+        self.updated_at.as_deref()
     }
 
     /// Streamed text arrived for a message that has no record yet. Returns whether the
@@ -1180,6 +1332,7 @@ fn word_tool_step(action: ToolStep, base: &Step, folder: &str, home: Option<&str
             .as_deref()
             .and_then(chat_ticketd::sentences);
         step.command = Some(command.display);
+        step.description = action.description;
         step.folder = command
             .working_directory
             .map(|folder| path(&folder))
@@ -1209,6 +1362,7 @@ fn steps(tool: &ChatTool, harness: &str, chat: &Chat, home: Option<&str>) -> Vec
         targets: vec![target(&tool.name)],
         omitted_files: None,
         command: None,
+        description: None,
         exit_code: None,
         folder: None,
         timed_out: false,
@@ -1370,13 +1524,18 @@ pub fn item(
         {
             report_item(tool, report)
         }
-        ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => Item::Records {
-            id: tool.id.clone(),
-            at: String::new(),
-            gone: vec![None; changes.len()],
-            changes,
-            turn_id: Some(tool.turn_id.clone()),
-        },
+        ChatItem::Tool(tool) if let Some(changes) = agent_changes(tool) => {
+            let net = tracker.turn_net(tool, &changes);
+            Item::Records {
+                id: tool.id.clone(),
+                at: String::new(),
+                gone: vec![None; changes.len()],
+                net_gone: vec![None; net.len()],
+                net,
+                changes,
+                turn_id: Some(tool.turn_id.clone()),
+            }
+        }
         ChatItem::Tool(tool) => Item::Steps {
             id: tool.id.clone(),
             at: String::new(),
@@ -1732,6 +1891,121 @@ pub(crate) fn title(chat: &Chat) -> String {
     chat.title.clone().unwrap_or("Untitled Chat".to_owned())
 }
 
+/// The longest title a Chat is given from its first line.
+pub const TITLE_LIMIT: usize = 80;
+
+/// `text` as it is when it fits `limit` characters, else cut at a word and ended with
+/// "…", the whole result within `limit`. One long word is cut where it stands.
+pub fn cut_at_word(text: &str, limit: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    if chars.len() <= limit {
+        return text.to_owned();
+    }
+    let room = limit.saturating_sub(1);
+    let head: String = chars[..room].iter().collect();
+    // The next character starts a word: the head already ends at one.
+    if chars[room].is_whitespace() {
+        return ellipsis(&head);
+    }
+    ellipsis(before_last_word(&head))
+}
+
+/// `text` cut short: without the dash, colon, comma or semicolon its last word was
+/// followed by, then "…".
+fn ellipsis(text: &str) -> String {
+    let text = text.trim_end_matches(|c: char| c.is_whitespace() || "-–—:,;".contains(c));
+    format!("{text}…")
+}
+
+/// `text` without its last, possibly partial, word; all of it when it has only one.
+fn before_last_word(text: &str) -> &str {
+    match text.trim_end().rfind(char::is_whitespace) {
+        Some(at) if at > 0 => text[..at].trim_end(),
+        _ => text,
+    }
+}
+
+/// How a Chat started from a ticket begins, "Work on T-12: <title>". The UI writes
+/// that first line (`WORK_ON_LEAD` in `src/features/chats/ticket-chat.ts`) and
+/// `display_title` reads it back. Change both together.
+const WORK_ON_LEAD: &str = "Work on ";
+
+/// Whether the stored title is long enough to be a cut of the first line (a title a
+/// word cut ended says so with "…", and a shorter one was never cut). The first
+/// message is read only for these.
+pub(crate) fn title_may_be_cut(chat: &Chat) -> bool {
+    chat.title
+        .as_deref()
+        .is_some_and(|title| title.chars().count() >= TITLE_LIMIT - 1 && !title.ends_with('…'))
+}
+
+/// The first line of a Chat's first message, which its title is made from.
+pub(crate) fn first_line_of(message: &str) -> Option<String> {
+    message.trim().lines().next().map(str::to_owned)
+}
+
+/// Whether `line` is a ticket's title followed by the prompt: the title, then ": " or
+/// " - " (or that cut short), as "Work on <reference>: <title><separator><prompt>".
+fn names_title(line: &str, title: &str) -> bool {
+    !title.is_empty()
+        && line.strip_prefix(title).is_some_and(|after| {
+            let after = after.trim_end_matches('…');
+            after.starts_with(": ") || after.starts_with(" - ") || matches!(after, ":" | " -" | " ")
+        })
+}
+
+/// The title the Chat view shows (U-chat titles). A title that starts with
+/// "Work on <reference>: " for a ticket linked to the Chat is the rest of the line,
+/// and the ticket's own title when the stored line was cut short of it. A title the
+/// old 80-character limit cut mid-word, which is a strict prefix of the first line,
+/// is cut again at a word. Nothing stored changes.
+pub(crate) fn display_title(chat: &Chat, around: &Surroundings) -> String {
+    let stored = title(chat);
+    let Some(chat_title) = chat.title.as_deref() else {
+        return stored;
+    };
+    // The limit cut it: the first line goes on past it. A title of the limit's length
+    // that is the whole line was never cut; one that lost a trimmed space still is.
+    let rest_of_line = around
+        .first_line
+        .as_deref()
+        .and_then(|line| line.strip_prefix(chat_title))
+        .filter(|rest| !rest.is_empty());
+    let cut = rest_of_line.is_some();
+    // It ended at a word's end, so that word is whole.
+    let at_word_end = rest_of_line.is_some_and(|rest| rest.starts_with(char::is_whitespace))
+        || chat_title.ends_with(char::is_whitespace);
+    let ticket = around.links.iter().find_map(|link| match link {
+        LinkedRecord::Ticket {
+            reference, title, ..
+        } => chat_title
+            .strip_prefix(&format!("{WORK_ON_LEAD}{reference}: "))
+            .filter(|rest| !rest.trim().is_empty())
+            .map(|rest| (rest, title.as_str())),
+        LinkedRecord::Document { .. } | LinkedRecord::Project { .. } => None,
+    });
+    let (rest, ticket_title) = match ticket {
+        Some((rest, ticket_title)) => (rest, Some(ticket_title)),
+        None => (chat_title, None),
+    };
+    // A line a cut ended, and its ticket's title that goes on from it; or a line that
+    // starts with the ticket's title and goes on with the prompt ("<title>: <prompt>").
+    let ended = rest.trim_end_matches('…');
+    if let Some(full) = ticket_title.filter(|full| {
+        ((cut || ended.len() < rest.len()) && full.starts_with(ended)) || names_title(rest, full)
+    }) {
+        return cut_at_word(full, TITLE_LIMIT);
+    }
+    if cut {
+        let whole = rest.trim_end();
+        if at_word_end && whole.chars().count() < TITLE_LIMIT {
+            return ellipsis(whole);
+        }
+        return ellipsis(before_last_word(rest));
+    }
+    rest.to_owned()
+}
+
 pub fn chat_state(
     chat: &Chat,
     live: &ChatLive,
@@ -1748,7 +2022,7 @@ pub fn chat_state(
             .is_some_and(|problem| !problem.past && problem.kind.removes_composer());
     ChatState {
         id: chat.id.clone(),
-        title: title(chat),
+        title: display_title(chat, around),
         harness: HarnessRef {
             id: chat.harness.clone(),
             name: name.to_owned(),
@@ -1827,6 +2101,7 @@ fn opening(activity: &str, origin: Option<ChatSessionOrigin>) -> Option<&'static
 }
 
 pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroundings) -> Summary {
+    let first_change = tracker.first_change();
     let activity = activity(live, tracker);
     let problem = problem(chat, live, tracker, around);
     let harness = harness_name(&chat.harness);
@@ -1843,7 +2118,8 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
             .and_then(|problem| problem.message.as_deref()),
         activity,
         opening: opening(activity, live.opening).is_some(),
-        last_change: tracker.last_change.as_ref(),
+        first_change: first_change.as_ref(),
+        files_changed: tracker.files_changed(),
         last_response: tracker.last_response.as_deref(),
     });
     let interruption = match tracker.last_turn.as_ref().and_then(TurnEnding::of) {
@@ -1855,7 +2131,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
     };
     Summary {
         id: chat.id.clone(),
-        title: title(chat),
+        title: display_title(chat, around),
         harness_id: chat.harness.clone(),
         harness_name: harness.to_owned(),
         // A managed folder is named by an id and never shared: the row leaves it out.
@@ -1885,7 +2161,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         problem_past: problem.as_ref().is_some_and(|problem| problem.past),
         problem: problem.map(|problem| problem.kind),
         interruption,
-        last_change: tracker.last_change.clone(),
+        first_change,
         preview: tracker
             .last_response
             .as_ref()
@@ -2214,6 +2490,34 @@ mod tests {
             None,
         ));
         assert_eq!(untold.added_lines, None);
+    }
+
+    /// A Claude Code command's own description reaches the view; one without it, and
+    /// every other tool, carries none, and serializes without the field.
+    #[test]
+    fn a_commands_description_reaches_the_step() {
+        let done = ChatToolState::Completed;
+        let described = claude_step(&tool(
+            "Bash",
+            r#"{"command":"npm test","description":"Run the unit tests"}"#,
+            done,
+            None,
+        ));
+        assert_eq!(described.description.as_deref(), Some("Run the unit tests"));
+        assert_eq!(described.command.as_deref(), Some("npm test"));
+        assert_eq!(
+            serde_json::to_value(&described).expect("a step serializes")["description"],
+            "Run the unit tests"
+        );
+        let plain = claude_step(&tool("Bash", r#"{"command":"npm test"}"#, done, None));
+        assert_eq!(plain.description, None);
+        assert!(
+            serde_json::to_value(&plain)
+                .expect("a step serializes")
+                .get("description")
+                .is_none(),
+            "an older record still parses without it"
+        );
     }
 
     #[test]
@@ -3063,5 +3367,520 @@ mod tests {
             (step.state, step.started_at.as_deref()),
             ("running", Some("2026-11-10T10:00:05Z"))
         );
+    }
+
+    fn ticket(reference: &str, title: &str) -> super::LinkedRecord {
+        super::LinkedRecord::Ticket {
+            id: format!("id-{reference}"),
+            reference: reference.to_owned(),
+            title: title.to_owned(),
+            status: "Todo".to_owned(),
+        }
+    }
+
+    fn titled(title: &str) -> Chat {
+        Chat {
+            title: Some(title.to_owned()),
+            ..chat(None)
+        }
+    }
+
+    /// What the Chat view makes of a stored title, the Chat's links and its first line.
+    fn shown(title: &str, links: &[super::LinkedRecord], first_line: Option<&str>) -> String {
+        let around = super::Surroundings {
+            links: links.to_vec(),
+            first_line: first_line.map(str::to_owned),
+            ..Default::default()
+        };
+        super::display_title(&titled(title), &around)
+    }
+
+    #[test]
+    fn a_title_starting_with_a_linked_reference_is_the_rest_of_the_line() {
+        let linked = [ticket("T-12", "Design the attachment review UI")];
+        assert_eq!(
+            shown(
+                "Work on T-12: Design the attachment review UI",
+                &linked,
+                None
+            ),
+            "Design the attachment review UI"
+        );
+        // The reference is another ticket's, or no ticket is linked: nothing to drop.
+        assert_eq!(
+            shown("Work on T-99: Design it", &linked, None),
+            "Work on T-99: Design it"
+        );
+        assert_eq!(
+            shown("Work on T-12: Design it", &[], None),
+            "Work on T-12: Design it"
+        );
+        assert_eq!(shown("Fix the login", &linked, None), "Fix the login");
+        // Only the lead is dropped; a title that is only the lead stays whole.
+        assert_eq!(shown("Work on T-12: ", &linked, None), "Work on T-12: ");
+    }
+
+    #[test]
+    fn a_title_that_starts_with_the_linked_tickets_title_is_that_title() {
+        // "Work on <ref>: <ticket title><sep><prompt>", with either separator.
+        let linked = [ticket("T-12", "Improve the export dialog")];
+        for line in [
+            "Work on T-12: Improve the export dialog: also add a progress bar",
+            "Work on T-12: Improve the export dialog - also add a progress bar",
+        ] {
+            assert_eq!(
+                shown(line, &linked, Some(line)),
+                "Improve the export dialog"
+            );
+        }
+        // The prompt cut it inside the separator.
+        assert_eq!(
+            shown("Work on T-12: Improve the export dialog:", &linked, None),
+            "Improve the export dialog"
+        );
+        // Not the ticket's title, or no separator after it: the rest of the line.
+        assert_eq!(
+            shown("Work on T-12: Improve the export dialogs", &linked, None),
+            "Improve the export dialogs"
+        );
+        assert_eq!(
+            shown(
+                "Work on T-12: Make it faster: also add a progress bar",
+                &linked,
+                None
+            ),
+            "Make it faster: also add a progress bar"
+        );
+        // A ticket title longer than the limit is cut at a word, as for a cut line.
+        let long =
+            "Design the attachment review experience for every kind of record a Chat can link to";
+        let linked = [ticket("T-12", long)];
+        let line = format!("Work on T-12: {long}: and then the settings page");
+        let title = shown(&line, &linked, Some(&line));
+        assert!(
+            title.ends_with('…') && title.chars().count() <= 80,
+            "{title}"
+        );
+        assert!(long.starts_with(title.trim_end_matches('…')), "{title}");
+    }
+
+    #[test]
+    fn a_cut_title_never_ends_in_punctuation_before_the_ellipsis() {
+        // Not linked: a legacy title cut mid-word, whose last whole word is a dash.
+        let line = format!("{}- andromeda and more", "word ".repeat(15));
+        let stored: String = line.chars().take(80).collect();
+        let title = shown(&stored, &[], Some(&line));
+        assert!(title.ends_with('…'), "{title}");
+        assert!(
+            !title
+                .trim_end_matches('…')
+                .ends_with([' ', '-', '–', '—', ':', ',', ';']),
+            "{title}"
+        );
+        // A new title cut at a word keeps no colon or dash either.
+        let long = format!(
+            "{}: {}",
+            "Explain the retry queue and its limits",
+            "x".repeat(60)
+        );
+        assert_eq!(
+            super::cut_at_word(&long, 42),
+            "Explain the retry queue and its limits…"
+        );
+        assert_eq!(
+            super::cut_at_word("Explain the retry queue and its limits - and more", 41),
+            "Explain the retry queue and its limits…"
+        );
+    }
+
+    #[test]
+    fn a_title_cut_mid_word_at_eighty_characters_is_cut_again_at_a_word() {
+        let line = "Work on T-12: Design the attachment review UI for this user flow and the settings page";
+        let stored: String = line.chars().take(80).collect();
+        assert_eq!(stored.chars().count(), 80);
+        // The linked ticket's own title starts the same: it is the title.
+        let linked = [ticket(
+            "T-12",
+            "Design the attachment review UI for this user flow and the settings page",
+        )];
+        assert_eq!(
+            shown(&stored, &linked, Some(line)),
+            "Design the attachment review UI for this user flow and the settings page"
+        );
+        // Not linked: the cut falls back to a word.
+        let line =
+            "Explain how the retry queue decides which Chats to send after a restart, in detail";
+        let plain: String = line.chars().take(80).collect();
+        let shown_title = shown(&plain, &[], Some(line));
+        assert_eq!(
+            shown_title,
+            "Explain how the retry queue decides which Chats to send after a restart, in…"
+        );
+        assert!(shown_title.chars().count() <= 80);
+        // A short title, or one a word cut already ended, is left alone.
+        assert_eq!(shown("Short one", &[], Some("Short one")), "Short one");
+        let cut = super::cut_at_word(&"word ".repeat(30), 80);
+        assert_eq!(shown(&cut, &[], Some(&"word ".repeat(30))), cut);
+    }
+
+    #[test]
+    fn a_first_line_of_exactly_eighty_characters_was_never_cut() {
+        let whole =
+            "Explain how the retry queue decides which Chats to send after a restart, in deta";
+        assert_eq!(whole.chars().count(), 80);
+        assert_eq!(shown(whole, &[], Some(whole)), whole);
+        // With no first message to compare, the title is what is stored.
+        assert_eq!(shown(whole, &[], None), whole);
+    }
+
+    #[test]
+    fn a_legacy_title_that_lost_its_trailing_space_is_still_a_cut() {
+        // Cut at 80 characters, then trimmed to 79 by the space that ended it: its
+        // last word was whole.
+        let stored = format!("{}abcd", "word ".repeat(15));
+        assert_eq!(stored.chars().count(), 79);
+        let line = format!("{stored} and the rest of the line");
+        assert_eq!(shown(&stored, &[], Some(&line)), format!("{stored}…"));
+    }
+
+    #[test]
+    fn a_turn_is_worded_by_the_first_record_the_agent_changed() {
+        let changes = |id: &str, turn: &str, input: &str| {
+            ChatItem::Tool(ChatTool {
+                id: id.to_owned(),
+                turn_id: turn.to_owned(),
+                ..tool(
+                    ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
+                    input,
+                    ChatToolState::Completed,
+                    None,
+                )
+            })
+        };
+        let moved =
+            r#"{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"In review"}"#;
+        let posted = r#"{"kind":"update","reference":"T-12","excerpt":"Done"}"#;
+        let later = r#"{"kind":"update","reference":"T-13","excerpt":"Next"}"#;
+        let wording = |tracker: &Tracker| {
+            tracker
+                .first_change()
+                .as_ref()
+                .map(ticketd_chat_host::attention::change_line)
+        };
+        // Moved, then posted an update: in one call, and across two.
+        let one_call = Tracker::from_items(&[changes("a", "t1", &format!("[{moved},{posted}]"))]);
+        assert_eq!(
+            wording(&one_call).as_deref(),
+            Some("Moved T-12 to In review")
+        );
+        let two_calls = Tracker::from_items(&[
+            changes("a", "t1", &format!("[{moved}]")),
+            changes("b", "t1", &format!("[{posted}]")),
+        ]);
+        assert_eq!(
+            wording(&two_calls).as_deref(),
+            Some("Moved T-12 to In review")
+        );
+        // Todo -> In progress -> In review, with an update between: the row says the net
+        // move, and a call shown again is not counted twice.
+        let progress = r#"{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"In progress"}"#;
+        let review = r#"{"kind":"status","reference":"T-12","title":"Demo","from":"In progress","to":"In review"}"#;
+        let mut netted = Tracker::from_items(&[
+            changes("a", "t1", &format!("[{progress}]")),
+            changes("b", "t1", &format!("[{posted}]")),
+            changes("c", "t1", &format!("[{review}]")),
+            changes("c", "t1", &format!("[{review}]")),
+        ]);
+        assert_eq!(wording(&netted).as_deref(), Some("Moved T-12 to In review"));
+        // A move that ends where it began leaves the update to lead.
+        netted.note(&changes(
+            "d",
+            "t1",
+            &format!(
+                "[{}]",
+                review.replace(
+                    r#""from":"In progress","to":"In review""#,
+                    r#""from":"In review","to":"Todo""#,
+                )
+            ),
+        ));
+        assert_eq!(
+            wording(&netted).as_deref(),
+            Some("Posted an update on T-12")
+        );
+        // The next turn is worded by its own first change.
+        let next = Tracker::from_items(&[
+            changes("a", "t1", &format!("[{moved}]")),
+            changes("b", "t2", &format!("[{later}]")),
+        ]);
+        assert_eq!(wording(&next).as_deref(), Some("Posted an update on T-13"));
+    }
+
+    /// The records row says the turn's net changes (one rule, in the Chat host), and an
+    /// earlier turn's row is netted by its own calls, not the latest turn's.
+    #[test]
+    fn a_records_item_carries_its_turns_net_changes_and_keeps_the_raw_ones() {
+        use super::{ChatAgentChange, item};
+        let call = |id: &str, turn: &str, input: &str| {
+            ChatItem::Tool(ChatTool {
+                id: id.to_owned(),
+                turn_id: turn.to_owned(),
+                ..tool(
+                    ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
+                    input,
+                    ChatToolState::Completed,
+                    None,
+                )
+            })
+        };
+        let status = |reference: &str, from: &str, to: &str| {
+            format!(
+                r#"{{"kind":"status","reference":"{reference}","title":"Demo","from":"{from}","to":"{to}"}}"#
+            )
+        };
+        let posted = r#"{"kind":"update","reference":"T-12","excerpt":"Done"}"#;
+        let first = call(
+            "a",
+            "t1",
+            &format!("[{}]", status("T-12", "Todo", "In progress")),
+        );
+        let update = call("b", "t1", &format!("[{posted}]"));
+        let second = call(
+            "c",
+            "t1",
+            &format!("[{}]", status("T-12", "In progress", "In review")),
+        );
+        let later = call("d", "t2", &format!("[{}]", status("T-13", "Todo", "Done")));
+        let tracker =
+            Tracker::from_items(&[first.clone(), update.clone(), second.clone(), later.clone()]);
+        let live = ChatLive::idle();
+        let read = |record: &ChatItem| {
+            let Some(Item::Records { changes, net, .. }) =
+                item(record, &chat(None), &live, None, &tracker)
+            else {
+                panic!("a records item");
+            };
+            (changes.len(), net)
+        };
+        let moved = |reference: &str, from: &str, to: &str| ChatAgentChange::Status {
+            reference: reference.to_owned(),
+            title: "Demo".to_owned(),
+            from: from.to_owned(),
+            to: to.to_owned(),
+        };
+        // The turn's last call carries the whole turn, netted; its own change stays raw.
+        let (raw, net) = read(&second);
+        assert_eq!(raw, 1);
+        assert_eq!(
+            net,
+            [
+                moved("T-12", "Todo", "In review"),
+                serde_json::from_str::<ChatAgentChange>(posted).unwrap(),
+            ]
+        );
+        // Another turn's row is netted by that turn's calls only.
+        assert_eq!(read(&later).1, [moved("T-13", "Todo", "Done")]);
+        // A move that ends where it began is no net change.
+        let back = Tracker::from_items(&[
+            first.clone(),
+            call(
+                "e",
+                "t1",
+                &format!("[{}]", status("T-12", "In progress", "Todo")),
+            ),
+        ]);
+        let Some(Item::Records { net, .. }) = item(&first, &chat(None), &live, None, &back) else {
+            panic!("a records item");
+        };
+        assert!(net.is_empty(), "{net:?}");
+    }
+
+    /// A steer starts a new segment of its turn, and each segment's records row says
+    /// only its own changes; the list row says the first sentence of the last one.
+    #[test]
+    fn a_steer_splits_a_turns_net_changes_into_segments() {
+        use super::{ChatAgentChange, item};
+        use ticketd_core::{
+            ChatDelivery, ChatMessage, ChatRole, ChatSubmissionAttempt, ChatSubmissionIntent,
+        };
+        let call = |id: &str, input: &str| {
+            ChatItem::Tool(ChatTool {
+                id: id.to_owned(),
+                turn_id: "t1".to_owned(),
+                ..tool(
+                    ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
+                    input,
+                    ChatToolState::Completed,
+                    None,
+                )
+            })
+        };
+        let status = |from: &str, to: &str| {
+            format!(
+                r#"{{"kind":"status","reference":"T-12","title":"Demo","from":"{from}","to":"{to}"}}"#
+            )
+        };
+        let posted = r#"{"kind":"update","reference":"T-12","excerpt":"Done"}"#;
+        let steer = ChatItem::Message(ChatMessage {
+            id: "m".to_owned(),
+            position: 3,
+            role: ChatRole::User,
+            text: "Also post an update".to_owned(),
+            complete: true,
+            turn_id: Some("t1".to_owned()),
+            queued: false,
+            attempts: vec![ChatSubmissionAttempt {
+                id: "a".to_owned(),
+                intent: ChatSubmissionIntent::Steer,
+                delivery: ChatDelivery::Acknowledged,
+                turn_id: Some("t1".to_owned()),
+                detail: None,
+                decision: None,
+                recorded_at: String::new(),
+            }],
+            created_at: String::new(),
+        });
+        let first = call(
+            "a",
+            &format!("[{},{posted}]", status("Todo", "In progress")),
+        );
+        let second = call("b", &format!("[{}]", status("In progress", "In review")));
+        let records = [first.clone(), steer.clone(), second.clone()];
+        let live = ChatLive::idle();
+        // A snapshot reads the whole history, a live view one record at a time: the
+        // same segments either way, and a steer shown again is not a second one.
+        let mut streamed = Tracker::default();
+        for record in &records {
+            streamed.note(record);
+        }
+        streamed.note(&steer);
+        for tracker in [Tracker::from_items(&records), streamed] {
+            let net = |record: &ChatItem| {
+                let Some(Item::Records { net, .. }) =
+                    item(record, &chat(None), &live, None, &tracker)
+                else {
+                    panic!("a records item");
+                };
+                net
+            };
+            let moved = |from: &str, to: &str| ChatAgentChange::Status {
+                reference: "T-12".to_owned(),
+                title: "Demo".to_owned(),
+                from: from.to_owned(),
+                to: to.to_owned(),
+            };
+            assert_eq!(
+                net(&first),
+                [
+                    moved("Todo", "In progress"),
+                    serde_json::from_str::<ChatAgentChange>(posted).unwrap()
+                ]
+            );
+            // Not netted with the first segment's move or its update.
+            assert_eq!(net(&second), [moved("In progress", "In review")]);
+            assert_eq!(
+                tracker
+                    .first_change()
+                    .as_ref()
+                    .map(ticketd_chat_host::attention::change_line)
+                    .as_deref(),
+                Some("Moved T-12 to In review")
+            );
+        }
+    }
+
+    #[test]
+    fn a_new_chats_title_is_cut_at_a_word_with_an_ellipsis() {
+        assert_eq!(super::cut_at_word("Fix the login", 80), "Fix the login");
+        let long = "Explain how the retry queue decides which Chats to send after a restart, in detail please";
+        let cut = super::cut_at_word(long, 80);
+        assert_eq!(
+            cut,
+            "Explain how the retry queue decides which Chats to send after a restart, in…"
+        );
+        // A cut right after a word keeps that word.
+        let exact = format!("{} tail", "a".repeat(79));
+        assert_eq!(
+            super::cut_at_word(&exact, 80),
+            format!("{}…", "a".repeat(79))
+        );
+        // One long word has no word to cut at.
+        let one = "x".repeat(120);
+        assert_eq!(super::cut_at_word(&one, 80), format!("{}…", "x".repeat(79)));
+    }
+
+    #[test]
+    fn a_working_chats_time_counts_from_its_newest_activity() {
+        use ticketd_core::{ChatMessage, ChatRole};
+        let turn = ChatTurn {
+            id: "turn".to_owned(),
+            position: 1,
+            native_turn_id: None,
+            state: ChatTurnState::Active,
+            detail: None,
+            problem: None,
+            problem_resets_at: None,
+            ending: None,
+            started_at: "2026-11-24T22:00:00Z".to_owned(),
+            ended_at: None,
+        };
+        let message = ChatMessage {
+            id: "m".to_owned(),
+            position: 2,
+            role: ChatRole::Assistant,
+            text: "Looking".to_owned(),
+            complete: true,
+            turn_id: Some("turn".to_owned()),
+            queued: false,
+            attempts: Vec::new(),
+            created_at: "2026-11-25T09:30:00Z".to_owned(),
+        };
+        let mut running = tool("Read", "", ChatToolState::Running, None);
+        running.started_at = Some("2026-11-25T09:41:00Z".to_owned());
+        let mut tracker = Tracker::default();
+        for item in [
+            ChatItem::Turn(turn),
+            ChatItem::Message(message),
+            ChatItem::Tool(running),
+        ] {
+            tracker.note(&item);
+        }
+        assert_eq!(tracker.updated_at(), Some("2026-11-25T09:41:00Z"));
+        // An older record seen later never moves it back.
+        let mut older = tool("Read", "", ChatToolState::Completed, None);
+        older.started_at = Some("2026-11-25T09:00:00Z".to_owned());
+        tracker.note(&ChatItem::Tool(older));
+        assert_eq!(tracker.updated_at(), Some("2026-11-25T09:41:00Z"));
+    }
+
+    #[test]
+    fn the_files_a_turn_changed_are_counted_for_the_list_row() {
+        let files = json!({"files": [
+            {"path": "a.ts", "kind": "added", "from": null, "added_lines": 3, "removed_lines": 0, "confirmed": true},
+            {"path": "b.ts", "kind": "modified", "from": null, "added_lines": null, "removed_lines": null, "confirmed": false},
+        ]});
+        let record = tool(
+            ticketd_chat_host::records::FILES_RECORD_NAME,
+            &files.to_string(),
+            ChatToolState::Completed,
+            None,
+        );
+        let ended = ticketd_core::ChatTurn {
+            id: "turn".to_owned(),
+            position: 1,
+            native_turn_id: None,
+            state: ChatTurnState::Completed,
+            detail: None,
+            problem: None,
+            problem_resets_at: None,
+            ending: None,
+            started_at: String::new(),
+            ended_at: None,
+        };
+        let mut tracker = Tracker::default();
+        assert_eq!(tracker.files_changed(), None);
+        tracker.note(&ChatItem::Turn(ended));
+        tracker.note(&ChatItem::Tool(record));
+        assert_eq!(tracker.files_changed(), Some(2));
     }
 }

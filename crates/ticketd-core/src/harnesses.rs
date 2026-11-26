@@ -188,7 +188,7 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "default",
             label: "Ask before edits",
-            description: None,
+            description: Some("Reads freely; asks before it edits a file or runs a command."),
             semantics: PermissionSemantics::Ask,
             availability: PermissionAvailability::Adapter,
             is_default: true,
@@ -196,7 +196,7 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "acceptEdits",
             label: "Accept edits",
-            description: None,
+            description: Some("Edits files in this folder without asking; asks before commands."),
             semantics: PermissionSemantics::AcceptEdits,
             availability: PermissionAvailability::Adapter,
             is_default: false,
@@ -204,7 +204,7 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "plan",
             label: "Plan only",
-            description: None,
+            description: Some("Reads and plans; changes nothing."),
             semantics: PermissionSemantics::ReadOnly,
             availability: PermissionAvailability::Adapter,
             is_default: false,
@@ -212,7 +212,9 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "bypassPermissions",
             label: "Full access",
-            description: Some("Runs tools and commands without asking"),
+            description: Some(
+                "Edits and runs commands without asking, anywhere your account can reach.",
+            ),
             semantics: PermissionSemantics::FullAccess,
             availability: PermissionAvailability::Adapter,
             is_default: false,
@@ -246,7 +248,9 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "own",
             label: "Codex settings",
-            description: None,
+            description: Some(
+                "Follows your Codex settings for what it asks and what it can touch.",
+            ),
             semantics: PermissionSemantics::OwnSettings,
             availability: PermissionAvailability::Adapter,
             is_default: true,
@@ -254,7 +258,9 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "full-access",
             label: "Full access",
-            description: Some("Never asks, and runs without a sandbox"),
+            description: Some(
+                "Edits and runs commands without asking or a sandbox, anywhere your account can reach.",
+            ),
             semantics: PermissionSemantics::FullAccess,
             availability: PermissionAvailability::Adapter,
             is_default: false,
@@ -281,7 +287,9 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "own",
             label: "Antigravity settings",
-            description: None,
+            description: Some(
+                "Follows your Antigravity settings for what it asks and what it can touch.",
+            ),
             semantics: PermissionSemantics::OwnSettings,
             availability: PermissionAvailability::Adapter,
             is_default: true,
@@ -289,7 +297,7 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "default",
             label: "Ask for approval",
-            description: None,
+            description: Some("Reads freely; asks before it edits a file or runs a command."),
             semantics: PermissionSemantics::Ask,
             availability: PermissionAvailability::Native,
             is_default: false,
@@ -297,7 +305,7 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "accept-edits",
             label: "Accept edits",
-            description: None,
+            description: Some("Edits files in this folder without asking; asks before commands."),
             semantics: PermissionSemantics::AcceptEdits,
             availability: PermissionAvailability::Native,
             is_default: false,
@@ -305,7 +313,7 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "plan",
             label: "Plan only",
-            description: None,
+            description: Some("Reads and plans; changes nothing."),
             semantics: PermissionSemantics::ReadOnly,
             availability: PermissionAvailability::Native,
             is_default: false,
@@ -313,7 +321,9 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         PermissionChoice {
             id: "full-access",
             label: "Full access",
-            description: Some("Runs tools and commands without asking"),
+            description: Some(
+                "Edits and runs commands without asking, anywhere your account can reach.",
+            ),
             semantics: PermissionSemantics::FullAccess,
             availability: PermissionAvailability::Adapter,
             is_default: false,
@@ -335,4 +345,24 @@ pub fn find_descriptor<'a>(
         .iter()
         .copied()
         .find(|descriptor| descriptor.key.as_str() == key)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Every mode a Chat can pick says in one sentence what it can touch, so the
+    /// Permissions menu never shows a bare name next to a described one.
+    #[test]
+    fn every_permission_mode_has_a_one_sentence_description() {
+        for harness in HARNESS_DESCRIPTORS {
+            for choice in harness.permissions {
+                let text = choice.description.unwrap_or_else(|| {
+                    panic!("{} / {} has no description", harness.name, choice.label)
+                });
+                assert!(text.ends_with('.'), "{}: {text}", choice.label);
+                assert_eq!(text.matches(". ").count(), 0, "one sentence: {text}");
+            }
+        }
+    }
 }

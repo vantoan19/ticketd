@@ -111,6 +111,9 @@ export function useTranscriptScroll(
   const anchor = useRef<Anchor>(null);
   // The offset after the last scroll, ours or the reader's.
   const lastTop = useRef(0);
+  // The scroller's height at the last scroll or resize: a taller one (the Jump
+  // strip closing at the end) clamps the offset, which is not the reader.
+  const lastHeight = useRef(0);
   const opened = useRef("");
   // When the reader last used the wheel, touch or keys here, or holds the
   // pointer down (dragging the scrollbar or a selection).
@@ -157,6 +160,7 @@ export function useTranscriptScroll(
     else box.scrollTop = box.scrollHeight;
     follows.current = atBottom(box);
     lastTop.current = box.scrollTop;
+    lastHeight.current = box.clientHeight;
     remember(chatId, follows.current, box);
     read(box);
     // The opening position decides whether the control shows from the first paint.
@@ -223,6 +227,13 @@ export function useTranscriptScroll(
         if (moved) box.scrollTop += moved;
         lastTop.current = box.scrollTop;
       }
+      // The scroller's new height is seen here, whether or not a scroll event
+      // follows: a resize that moves nothing must not make a later scroll up
+      // read as a clamp. Its offset is the new baseline too.
+      if (box.clientHeight !== lastHeight.current) {
+        lastHeight.current = box.clientHeight;
+        lastTop.current = box.scrollTop;
+      }
       remember(chatId, follows.current, box);
       read(box);
     });
@@ -235,7 +246,9 @@ export function useTranscriptScroll(
     const box = root.current;
     if (!box) return;
     const top = box.scrollTop;
-    const up = top < lastTop.current - 1;
+    const grew = box.clientHeight > lastHeight.current;
+    lastHeight.current = box.clientHeight;
+    const up = top < lastTop.current - 1 && !grew;
     lastTop.current = top;
     // Following stops only when the reader moves up; it resumes at the bottom.
     if (follows.current) {

@@ -25,7 +25,7 @@ pub fn read_claude_steps(mut evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
     let step = match evidence.name {
         "Bash" | "PowerShell" if let Some(command) = field("command") => {
             let exit_code = number("exitCode");
-            shell_step(
+            let mut step = shell_step(
                 evidence,
                 command,
                 CommandFacts {
@@ -34,7 +34,13 @@ pub fn read_claude_steps(mut evidence: ToolEvidence<'_>) -> Vec<ToolStep> {
                     timed_out: evidence.state == ChatToolState::Failed && exit_code == Some(124),
                     ..CommandFacts::default()
                 },
-            )
+            );
+            // Claude Code describes most commands in its own words.
+            step.description = field("description")
+                .map(str::trim)
+                .filter(|description| !description.is_empty())
+                .map(str::to_owned);
+            step
         }
         "Read" => {
             let lines = number("limit")
