@@ -2000,18 +2000,22 @@ function RecoveredDocumentEditor({
                       )}
                       <ul>{mentions.map((item) => connectionRow(item))}</ul>
                       {passages.length > 0 && (
-                        <div className="document-passage-caption">
-                          <span>
-                            {passages.length === 1 && mentions.length > 1
-                              ? mentions.length === 2
-                                ? "Both from"
-                                : "All from"
-                              : "From"}{" "}
-                            “
-                          </span>
-                          {passages.map((passage) => passageView(passage))}
-                          <span aria-hidden="true">”</span>
-                        </div>
+                        <ul className="document-passages">
+                          {passages.map((passage) => (
+                            <li key={passage}>
+                              <p className="document-passage-source">
+                                From{" "}
+                                {mentions
+                                  .filter((item) =>
+                                    item.passages.includes(passage),
+                                  )
+                                  .map((item) => item.label)
+                                  .join(", ")}
+                              </p>
+                              {passageView(passage)}
+                            </li>
+                          ))}
+                        </ul>
                       )}
                     </>
                   )}

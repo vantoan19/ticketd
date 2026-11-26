@@ -416,11 +416,20 @@
 .document-passage {
   overflow-wrap: anywhere;
 }
-.document-end .document-passage-caption .document-passage,
-.document-end .document-passage-caption .document-passage * {
-  display: inline;
-  margin: 0;
+/* Each mention's passage is a row of its own: the source as a small label, then the quote. */
+.document-passages {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 12px 0 0;
   padding: 0;
+  list-style: none;
+}
+.document-end .document-passage-source {
+  margin: 0 0 2px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
 }
 :where([data-width~="max-879"]) .documents-page {
   grid-template-columns: minmax(0, 1fr);

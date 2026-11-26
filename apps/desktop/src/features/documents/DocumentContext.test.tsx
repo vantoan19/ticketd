@@ -209,6 +209,14 @@ it("ends with Linked and one closed Mentioned in line that lists each mention wi
   expect(
     within(mentions).getAllByRole("button", { name: /T-KQ|Research/ }),
   ).toHaveLength(3);
+  // Each passage is a row of its own that names its source, so passages never run together.
+  const rows = within(mentions)
+    .getAllByText(/^From /)
+    .map((label) => label.closest("li")?.textContent ?? "");
+  expect(rows).toHaveLength(3);
+  // In reference order: the Document, then the tickets.
+  expect(rows[0]).toMatch(/^From Research\s*Builds on this\./);
+  expect(rows[1]).toMatch(/^From T-KQ1\s*See the checkout flow\./);
 });
 
 it("leaves nothing of the old block under the text", async () => {
