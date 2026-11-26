@@ -35,6 +35,7 @@ fn start(id: &str, generation: RuntimeGeneration) -> Submission {
         generation,
         kind: SubmissionKind::StartTurn,
         text: "hello".to_owned(),
+        attachments: Vec::new(),
     }
 }
 

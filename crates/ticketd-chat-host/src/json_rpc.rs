@@ -21,8 +21,8 @@ use crate::stdio::{
     write_bounded,
 };
 use crate::{
-    CloseOutcome, EVENT_BUFFER, EventKind, EventStream, Harness, Refusal, RuntimeEvent,
-    RuntimeGeneration, WRITE_TIMEOUT,
+    AutomationPromptAdmission, CloseOutcome, EVENT_BUFFER, EventKind, EventStream, Harness,
+    Refusal, RuntimeEvent, RuntimeGeneration, WRITE_TIMEOUT,
 };
 
 /// Largest protocol frame kept. A completed item can carry a whole command output.
@@ -347,8 +347,12 @@ impl<P: Peer> Connection<P> {
     async fn write_checked<T, Frames: IntoIterator<Item = Value>>(
         &self,
         prepare: impl FnOnce(&mut State<P>) -> Result<(Frames, T), Refusal>,
+        admission: Option<AutomationPromptAdmission>,
     ) -> Result<T, WriteFailure> {
         let mut stdin = self.stdin.lock().await;
+        let _prompt = AutomationPromptAdmission::for_write(admission)
+            .await
+            .map_err(WriteFailure::Refused)?;
         let (frames, prepared) = {
             let mut state = self.state();
             if state.closed {
@@ -379,7 +383,7 @@ impl<P: Peer> Connection<P> {
         &self,
         prepare: impl FnOnce(&mut P) -> Result<Frames, Refusal>,
     ) -> Result<(), WriteFailure> {
-        self.write_checked(|state| Ok((prepare(&mut state.peer)?, ())))
+        self.write_checked(|state| Ok((prepare(&mut state.peer)?, ())), None)
             .await
     }
 
@@ -390,7 +394,18 @@ impl<P: Peer> Connection<P> {
         method: &str,
         prepare: impl FnOnce(&mut P) -> Result<(Value, P::Call), Refusal>,
     ) -> CallOutcome {
-        let written = self.send_request(method, prepare).await;
+        self.call_with_admission(method, prepare, None).await
+    }
+
+    pub(crate) async fn call_with_admission(
+        &self,
+        method: &str,
+        prepare: impl FnOnce(&mut P) -> Result<(Value, P::Call), Refusal>,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> CallOutcome {
+        let written = self
+            .send_request_with_admission(method, prepare, admission)
+            .await;
         let (id, mut receiver) = match written {
             Ok(registered) => registered,
             Err(WriteFailure::Refused(refusal)) => return CallOutcome::Refused(refusal),
@@ -415,14 +430,27 @@ impl<P: Peer> Connection<P> {
         method: &str,
         prepare: impl FnOnce(&mut P) -> Result<(Value, P::Call), Refusal>,
     ) -> Result<(u64, oneshot::Receiver<Reply>), WriteFailure> {
-        self.write_checked(|state| {
-            let (params, call) = prepare(&mut state.peer)?;
-            let id = state.next_id;
-            state.next_id += 1;
-            let receiver = state.pending.register(id, call);
-            let frame = json!({"id": id, "method": method, "params": params});
-            Ok(([frame], (id, receiver)))
-        })
+        self.send_request_with_admission(method, prepare, None)
+            .await
+    }
+
+    async fn send_request_with_admission(
+        &self,
+        method: &str,
+        prepare: impl FnOnce(&mut P) -> Result<(Value, P::Call), Refusal>,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> Result<(u64, oneshot::Receiver<Reply>), WriteFailure> {
+        self.write_checked(
+            |state| {
+                let (params, call) = prepare(&mut state.peer)?;
+                let id = state.next_id;
+                state.next_id += 1;
+                let receiver = state.pending.register(id, call);
+                let frame = json!({"id": id, "method": method, "params": params});
+                Ok(([frame], (id, receiver)))
+            },
+            admission,
+        )
         .await
     }
 

@@ -11,6 +11,7 @@ import {
   ChatFeatureContext,
   NO_CHAT_OVERVIEW,
 } from "@/features/chats/use-chats";
+import { discardChatDrafts } from "@/features/chats/drafts";
 import { SelectionAddToChat } from "@/features/chats/SelectionAddToChat";
 import type { ChatRequest } from "@/features/chats/ticket-chat";
 import { usePreferences } from "@/lib/preferences";
@@ -101,6 +102,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       revision,
       openRequest,
       chatRequest,
+      replaceWorkspace: () => {
+        discardChatDrafts(client);
+        setOpenRequest(null);
+        setChatRequest(null);
+      },
       requestChat: (request: ChatRequest) =>
         setChatRequest((last) => ({ request, n: (last?.n ?? 0) + 1 })),
       setEnabled: async (value: boolean) => {

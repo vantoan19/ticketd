@@ -1775,7 +1775,10 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   // The window opening played it once.
   expect(order.filter((step) => step === "launch")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  await turn();
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(0);
+  });
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
@@ -1796,6 +1799,160 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   expect(after.filter((step) => step === "launch")).toHaveLength(1);
   expect(after.indexOf("token")).toBeGreaterThanOrEqual(0);
   expect(after.indexOf("launch")).toBeGreaterThan(after.lastIndexOf("token"));
+});
+
+test("a completed Workspace restore clears Chat drafts even when recovery cannot refresh", async () => {
+  const { ChatClientContext } = await import("@/features/chats/client");
+  const { chatState, createMockChatClient } =
+    await import("@/features/chats/mock-client");
+  const { draftOf } = await import("@/features/chats/drafts");
+  const { addQuote } = await import("@/features/chats/quotes");
+  const chatId = "restored-common";
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [
+      { chat: chatState({ id: chatId, title: "Common Chat" }), items: [] },
+    ],
+  });
+  vi.spyOn(client, "captureAttachment").mockResolvedValue({
+    name: "old.txt",
+    dataUrl: "data:text/plain;base64,b2xk",
+  });
+  let finish!: (value: Awaited<ReturnType<typeof client.createChat>>) => void;
+  const creating = new Promise<Awaited<ReturnType<typeof client.createChat>>>(
+    (resolve) => {
+      finish = resolve;
+    },
+  );
+  const create = vi.spyOn(client, "createChat").mockReturnValueOnce(creating);
+  const backup = "/tmp/chat-restore.ticketd-backup";
+  const summary = {
+    last_change: null,
+    tickets: 0,
+    documents: 0,
+    activities: 0,
+    evidence: 0,
+    projects: 0,
+    plans: 0,
+  };
+  let replaced = false;
+  let refreshStarted = false;
+  let failRefresh!: (reason: Error) => void;
+  const refreshing = new Promise<never>((_, reject) => {
+    failRefresh = reject;
+  });
+  const handlers: Record<string, unknown> = {
+    safety_backups: [
+      {
+        path: backup,
+        kind: "safety",
+        saved_at: "2026-11-01T00:00:00Z",
+        size_bytes: 1024,
+      },
+    ],
+    inspect_backup: {
+      path: backup,
+      current: summary,
+      check: { status: "valid", format_version: 19, summary },
+    },
+    restore_workspace: () => {
+      replaced = true;
+      return { safety_path: "/tmp/safety.sqlite3" };
+    },
+    draft_retentions: () => {
+      if (replaced) {
+        refreshStarted = true;
+        return refreshing;
+      }
+      return [];
+    },
+    draft_cutover_pending: false,
+  };
+  bridge.invoke.mockImplementation((command: string, args?: never) => {
+    if (!(command in handlers)) return bridgeDefault(command, args);
+    const handler = handlers[command];
+    return typeof handler === "function" ? handler(args) : handler;
+  });
+  render(
+    <DraftRecoveryProvider>
+      <ChatClientContext value={client}>
+        <App />
+      </ChatClientContext>
+    </DraftRecoveryProvider>,
+  );
+  const chat = () => screen.findByRole("button", { name: /^Common Chat,/ });
+  fireEvent.click(await screen.findByRole("button", { name: "Chats" }));
+  fireEvent.click(await chat());
+  const message = () => screen.findByRole("textbox", { name: /Message/ });
+  fireEvent.change(await message(), { target: { value: "Old Chat draft" } });
+  await act(async () => {
+    addQuote(chatId, {
+      source: "Old workspace",
+      text: "Old quoted words",
+      record: null,
+    });
+    fireEvent.change(screen.getByLabelText("Choose files to attach"), {
+      target: { files: [new File(["old"], "old.txt", { type: "text/plain" })] },
+    });
+  });
+  expect(screen.getByRole("button", { name: "Remove old.txt" })).toBeTruthy();
+  const oldDraft = draftOf(client, chatId);
+
+  fireEvent.click(screen.getByRole("button", { name: "New Chat" }));
+  fireEvent.change(
+    await screen.findByRole("textbox", {
+      name: "Describe a task or ask a question",
+    }),
+    {
+      target: { value: "Earlier pending create" },
+    },
+  );
+  await waitFor(() =>
+    expect(screen.getByRole("button", { name: "Send" })).toHaveProperty(
+      "disabled",
+      false,
+    ),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Send" }));
+  expect(create).toHaveBeenCalledTimes(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(
+    within(
+      await screen.findByRole("navigation", { name: "Settings sections" }),
+    ).getByRole("button", { name: "Backups" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: `Restore… ${backup}` }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Replace workspace" }),
+  );
+  await waitFor(() => expect(refreshStarted).toBe(true));
+  expect(draftOf(client, chatId)).not.toBe(oldDraft);
+  await act(async () => finish({ chat_id: chatId, send_error: "Too late" }));
+  expect(draftOf(client, chatId).snapshot().text).toBe("");
+  await act(async () => failRefresh(new Error("Recovery refresh failed")));
+  expect(
+    await screen.findByText(
+      "The restore finished. Restart ticketd to see the restored data.",
+    ),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Done" }));
+
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Back to Chats/i }),
+  );
+  expect(
+    await screen.findByRole("textbox", {
+      name: "Describe a task or ask a question",
+    }),
+  ).toHaveProperty("value", "");
+  fireEvent.click(await chat());
+  expect(await message()).toHaveProperty("value", "");
+  expect(screen.queryByRole("button", { name: "Remove old.txt" })).toBeNull();
+  expect(screen.queryByText("Old quoted words")).toBeNull();
+  expect(screen.queryByText(/Too late/)).toBeNull();
 });
 
 test("sets an Plan in one request and shows how many selected tickets already have each", async () => {
@@ -7794,9 +7951,13 @@ test("Chats distinguishes an unknown list from empty and keeps known rows after 
   );
 });
 
-test.each([false, true])(
-  "New Chat Retry keeps the draft and creation identity follows payload edits (%s)",
-  async (edited) => {
+test.each([
+  { action: "Retry", edited: false },
+  { action: "Retry", edited: true },
+  { action: "Send", edited: true },
+])(
+  "New Chat $action uses the intended creation request (edited: $edited)",
+  async ({ action, edited }) => {
     const { ChatClientContext } = await import("@/features/chats/client");
     const { createMockChatClient } =
       await import("@/features/chats/mock-client");
@@ -7816,21 +7977,21 @@ test.each([false, true])(
     });
     fireEvent.change(input, { target: { value: "Keep these words" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    const retry = await screen.findByRole("button", { name: "Retry" });
+    await screen.findByRole("button", { name: "Retry" });
     expect(input).toHaveProperty("value", "Keep these words");
     if (edited) {
       fireEvent.change(input, { target: { value: "Edited words" } });
       fireEvent.click(
-        screen.getByRole("button", {
+        await screen.findByRole("button", {
           name: "Claude Code, model Opus 5.5",
         }),
       );
       fireEvent.click(screen.getByRole("radio", { name: "High" }));
       fireEvent.keyDown(document.body, { key: "Escape" });
     }
-    fireEvent.click(retry);
+    fireEvent.click(screen.getByRole("button", { name: action }));
     await vi.waitFor(() => expect(create).toHaveBeenCalledTimes(2));
-    if (edited) {
+    if (action === "Send") {
       expect(create.mock.calls[1]?.[0].command_id).not.toBe(
         create.mock.calls[0]?.[0].command_id,
       );

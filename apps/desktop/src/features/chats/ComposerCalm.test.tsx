@@ -16,7 +16,6 @@ import { ChatProvider } from "@/features/chats/ChatProvider";
 import { ChatsView } from "@/features/chats/ChatsView";
 import { StatusLineContext } from "@/components/ui/use-status-line";
 import { StatusLineRegion } from "@/components/ui/status-line";
-import { drafts } from "@/features/chats/drafts";
 import {
   chatState,
   createMockChatClient,
@@ -31,10 +30,7 @@ window.ResizeObserver = class {
   disconnect() {}
 };
 
-afterEach(() => {
-  cleanup();
-  drafts.clear();
-});
+afterEach(cleanup);
 
 const at = "2026-11-10T10:00:00Z";
 const approval: TranscriptItem = {

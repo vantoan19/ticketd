@@ -308,6 +308,89 @@ fn start_turn(id: &str, text: &str) -> Submission {
         generation: GENERATION,
         kind: SubmissionKind::StartTurn,
         text: text.to_owned(),
+        attachments: Vec::new(),
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_screenshot_is_native_visual_input_with_or_without_text() {
+    let url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+    let image =
+        ticketd_core::ChatAttachmentContent::from_image_data_url("Screenshot.png", url).unwrap();
+    for (text, expected) in [
+        ("", json!([{"type": "image", "url": url}])),
+        (
+            "Which color?",
+            json!([
+                {"type": "text", "text": "Which color?", "text_elements": []},
+                {"type": "image", "url": url},
+            ]),
+        ),
+    ] {
+        let (mut peer, runtime, _events) = open().await;
+        let submission = Submission {
+            attachments: vec![image.clone()],
+            ..start_turn("sub-1", text)
+        };
+        let (outcome, ()) = tokio::join!(runtime.submit(submission), async {
+            let written = peer.written().await;
+            assert_eq!(written["method"], "turn/start");
+            assert_eq!(written["params"]["input"], expected);
+        });
+        assert_eq!(outcome, DispatchOutcome::Written);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_local_file_reaches_codex_as_a_readable_copy_of_the_snapshot() {
+    let source = tempfile::tempdir().unwrap();
+    let path = source.path().join("details.txt");
+    std::fs::write(&path, b"original bytes\r\n").unwrap();
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "details.txt",
+        "data:text/plain;base64,b3JpZ2luYWwgYnl0ZXMNCg==",
+        100,
+    )
+    .unwrap();
+    std::fs::write(&path, b"changed after capture").unwrap();
+
+    for text in ["", "What does details.txt say?"] {
+        let (mut peer, runtime, _events) = open().await;
+        let submission = Submission {
+            attachments: vec![file.clone()],
+            ..start_turn("sub-1", text)
+        };
+        let (outcome, written) = tokio::join!(runtime.submit(submission), peer.written());
+        assert_eq!(outcome, DispatchOutcome::Written);
+        assert_eq!(written["method"], "turn/start");
+        assert!(written["params"]["sandboxPolicy"].is_null());
+        let input = written["params"]["input"].as_array().unwrap();
+        if !text.is_empty() {
+            assert_eq!(input[0]["text"], text);
+        }
+        assert_eq!(input.len(), 1 + usize::from(!text.is_empty()));
+        let reference = input.last().unwrap();
+        assert_eq!(reference["type"], "text");
+        let reference: Value = serde_json::from_str(
+            reference["text"]
+                .as_str()
+                .unwrap()
+                .strip_prefix("Read this Chat attachment snapshot: ")
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(reference["name"], "details.txt");
+        let staged = Path::new(reference["path"].as_str().unwrap());
+        assert_ne!(staged, path);
+        assert!(staged.is_absolute());
+        // The runtime returned from submission; the harness can still open it.
+        assert_eq!(std::fs::read(staged).unwrap(), b"original bytes\r\n");
+        let (closed, ()) = tokio::join!(runtime.close(), async {
+            assert!(peer.stdin_closed().await);
+            peer.exit(0);
+        });
+        assert!(matches!(closed, CloseOutcome::Confirmed { .. }));
+        assert!(!staged.exists());
     }
 }
 
@@ -322,6 +405,60 @@ fn steer(id: &str, expected_turn: &str, text: &str) -> Submission {
 
 fn turn(id: &str) -> NativeTurnId {
     NativeTurnId::new(id)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_steer_carries_text_native_images_and_readable_file_snapshots_in_order() {
+    let (mut peer, runtime, _events) = open().await;
+    peer.load(fixture!("steer"));
+    submit(&mut peer, &runtime, start_turn("sub-1", "Start")).await;
+    let url = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+    let image =
+        ticketd_core::ChatAttachmentContent::from_image_data_url("Screenshot.png", url).unwrap();
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "details.txt",
+        "data:text/plain;base64,c2F2ZWQgYnl0ZXM=",
+        100,
+    )
+    .unwrap();
+    let submission = Submission {
+        attachments: vec![file, image],
+        ..steer("sub-2", "turn_1", "Read both")
+    };
+    let sending = runtime.submit(submission);
+    tokio::pin!(sending);
+    let written = tokio::select! {
+        outcome = &mut sending => panic!("steer finished before writing: {outcome:?}"),
+        written = peer.written() => written,
+    };
+    let reply = json!({"id": written["id"], "result": {"turnId": "turn_1"}});
+    peer.send(&format!("{reply}\n")).await;
+    let outcome = sending.await;
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+    assert_eq!(written["method"], "turn/steer");
+    assert_eq!(written["params"]["expectedTurnId"], "turn_1");
+    let input = written["params"]["input"].as_array().unwrap();
+    assert_eq!(input.len(), 3);
+    assert_eq!(input[0]["text"], "Read both");
+    assert_eq!(input[2], json!({"type": "image", "url": url}));
+    let reference: Value = serde_json::from_str(
+        input[1]["text"]
+            .as_str()
+            .unwrap()
+            .strip_prefix("Read this Chat attachment snapshot: ")
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(reference["name"], "details.txt");
+    assert_eq!(
+        std::fs::read(reference["path"].as_str().unwrap()).unwrap(),
+        b"saved bytes"
+    );
 }
 
 fn answer(request: &str, answer: InteractionAnswer) -> InteractionResponse {
@@ -1086,7 +1223,37 @@ async fn full_access_goes_out_with_each_turn_and_leaving_it_restores_the_threads
         runtime.change_setting(change).await,
         crate::SettingOutcome::Applied
     );
-    let outcome = submit(&mut peer, &runtime, start_turn("sub-3", "Careful now")).await;
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "details.txt",
+        "data:text/plain;base64,c2F2ZWQ=",
+        100,
+    )
+    .unwrap();
+    let (outcome, ()) = tokio::join!(
+        runtime.submit(Submission {
+            attachments: vec![file],
+            ..start_turn("sub-3", "Careful now")
+        }),
+        async {
+            let written = peer.written().await;
+            assert_eq!(written["method"], "turn/start");
+            let params = &written["params"];
+            assert_eq!(params["clientUserMessageId"], "sub-3");
+            assert_eq!(params["approvalPolicy"], "on-request");
+            assert_eq!(
+                params["sandboxPolicy"],
+                json!({"type":"workspaceWrite","writableRoots":[],"networkAccess":false,"excludeTmpdirEnvVar":false,"excludeSlashTmp":false})
+            );
+            assert_eq!(params["input"][0]["text"], "Careful now");
+            assert!(
+                params["input"][1]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("details.txt")
+            );
+            peer.play().await;
+        }
+    );
     assert!(matches!(outcome, DispatchOutcome::Acknowledged { .. }));
     // The turn that carried the change records it with the Chat.
     let rerecorded = drain(&mut opened.events)
@@ -2094,6 +2261,7 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
         setting,
         value: value.to_owned(),
     };
+    assert_eq!(runtime.supports_image_input(), Some(true));
     assert_eq!(
         runtime
             .change_setting(change(crate::SettingKey::Model, "gpt-b"))
@@ -2106,6 +2274,21 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
             .await,
         crate::SettingOutcome::Unsupported
     );
+    let image = ticketd_core::ChatAttachmentContent::from_image_data_url(
+        "Screenshot.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+    ).unwrap();
+    let refused = runtime
+        .submit(Submission {
+            attachments: vec![image.clone()],
+            ..start_turn("with-attachment", "Look at this")
+        })
+        .await;
+    assert_eq!(
+        refused,
+        DispatchOutcome::NotSent(Refusal::ImageInputUnsupported)
+    );
+    peer.assert_nothing_written().await;
     // Nothing was written for the change: the next turn carries it.
     let outcome = submit(&mut peer, &runtime, start_turn("sub-1", "Go")).await;
     assert_eq!(
@@ -2114,6 +2297,87 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
             turn: turn("turn_1")
         }
     );
+    assert_eq!(
+        runtime
+            .change_setting(change(crate::SettingKey::Model, "gpt-a"))
+            .await,
+        crate::SettingOutcome::Applied
+    );
+    assert_eq!(runtime.supports_image_input(), Some(true));
+    assert_eq!(runtime.supports_steer_image_input(), Some(false));
+    assert_eq!(
+        runtime
+            .submit(Submission {
+                attachments: vec![image.clone()],
+                ..steer("unsupported-steer", "turn_1", "Look at this")
+            })
+            .await,
+        DispatchOutcome::NotSent(Refusal::ImageInputUnsupported)
+    );
+    peer.assert_nothing_written().await;
+    assert_eq!(
+        runtime
+            .change_setting(change(crate::SettingKey::Model, "gpt-b"))
+            .await,
+        crate::SettingOutcome::Applied
+    );
+    let rerouted = json!({"method": "model/rerouted", "params": {
+        "threadId": "thr_1", "turnId": "turn_1", "fromModel": "gpt-b", "toModel": "gpt-a"
+    }});
+    peer.send(&format!("{rerouted}\n")).await;
+    drain(&mut opened.events).await;
+    assert_eq!(runtime.supports_image_input(), Some(false));
+    assert_eq!(runtime.supports_steer_image_input(), Some(true));
+    let (outcome, ()) = tokio::join!(
+        runtime.submit(Submission {
+            attachments: vec![image],
+            ..steer("with-attachment", "turn_1", "Look at this")
+        }),
+        async {
+            let written = peer.written().await;
+            assert_eq!(written["method"], "turn/steer");
+            assert_eq!(written["params"]["input"][1]["type"], "image");
+            let reply = json!({"id": written["id"], "result": {"turnId": "turn_1"}});
+            peer.send(&format!("{reply}\n")).await;
+        }
+    );
+    assert_eq!(
+        outcome,
+        DispatchOutcome::Acknowledged {
+            turn: turn("turn_1")
+        }
+    );
+}
+
+#[test]
+fn image_steering_uses_the_active_turn_model_and_observes_model_updates() {
+    let mut session = Session::default();
+    session
+        .reports
+        .thread_opened(&json!({"model": "text-only"}));
+    session.reports.models_listed(Ok(&json!({"data": [
+        {"id": "text-only", "inputModalities": ["text"]},
+        {"id": "vision", "inputModalities": ["text", "image"]}
+    ]})));
+    session
+        .reports
+        .override_setting(crate::SettingKey::Model, "vision");
+    session.reports.turn_start_written();
+    session.notification("turn/started", &json!({"turn": {"id": "turn_1"}}));
+    session
+        .reports
+        .override_setting(crate::SettingKey::Model, "text-only");
+
+    assert_eq!(session.reports.supports_image_input(false), Some(false));
+    assert_eq!(session.reports.supports_image_input(true), Some(true));
+
+    session.notification(
+        "thread/settings/updated",
+        &json!({
+            "threadSettings": {"model": "text-only"}
+        }),
+    );
+    assert_eq!(session.reports.supports_image_input(true), Some(false));
 }
 
 #[test]

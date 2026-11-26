@@ -5352,6 +5352,7 @@ dependencies = [
 name = "ticketd-desktop"
 version = "0.2.0"
 dependencies = [
+ "gtk",
  "rusqlite",
  "semver",
  "serde",
@@ -5372,6 +5373,7 @@ dependencies = [
  "tokio",
  "tracing",
  "uuid",
+ "webkit2gtk",
 ]
 
 [[package]]

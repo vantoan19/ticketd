@@ -31,9 +31,23 @@ export function addQuote(chatId: string, quote: Omit<Quote, "id">) {
   changed();
 }
 
-export function clearQuotes(chatId: string) {
-  if (!store.has(chatId)) return;
-  store.delete(chatId);
+export function quoteDraft(chatId: string) {
+  return store.get(chatId) ?? NONE;
+}
+
+export function clearQuoteDrafts() {
+  if (!store.size) return;
+  store.clear();
+  changed();
+}
+
+export function clearQuotes(chatId: string, sent?: Quote[]) {
+  const current = store.get(chatId);
+  if (!current) return;
+  const left = sent ? current.filter((quote) => !sent.includes(quote)) : [];
+  if (left.length === current.length) return;
+  if (left.length) store.set(chatId, left);
+  else store.delete(chatId);
   changed();
 }
 
@@ -44,7 +58,7 @@ export function useQuotes(chatId: string) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    () => store.get(chatId) ?? NONE,
+    () => quoteDraft(chatId),
   );
   const remove = useCallback(
     (id: string) => {

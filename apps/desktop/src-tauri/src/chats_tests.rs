@@ -94,17 +94,29 @@ impl Fixture {
     }
 
     async fn with_adapter(fake: FakeAdapter) -> Self {
+        Self::with_adapters(fake, None).await
+    }
+
+    async fn with_adapters(fake: FakeAdapter, claude: Option<FakeAdapter>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
         // The desktop creates its workspace before its session opens it.
         drop(Workspace::open(&path).unwrap());
-        let chats = Chats::new(
-            Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
-            vec![Arc::new(fake.clone())],
-            vec![(
+        let mut adapters: Vec<Arc<dyn HarnessAdapter>> = vec![Arc::new(fake.clone())];
+        let unavailable = match claude {
+            Some(claude) => {
+                adapters.push(Arc::new(claude));
+                Vec::new()
+            }
+            None => vec![(
                 "claude-code",
                 "Claude Code is unavailable: the bridge is missing.".to_owned(),
             )],
+        };
+        let chats = Chats::new(
+            Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
+            adapters,
+            unavailable,
             None,
         );
         chats.set_enabled(true).await;
@@ -122,6 +134,7 @@ impl Fixture {
             folder: Some(self.dir.path().to_string_lossy().into_owned()),
             links: Vec::new(),
             message: message.to_owned(),
+            attachments: Vec::new(),
             model: None,
             effort: None,
             permission: None,
@@ -415,11 +428,14 @@ fn closing_keeps_chats_running_only_when_some_are_working_and_quit_asks_before_s
 /// once, beside the working Chats.
 #[tokio::test(start_paused = true)]
 async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_chats() {
-    let f = Fixture::new().await;
+    // Each fake owns one event stream. The Automation and ordinary Chat
+    // need independent runtimes to be working at the same time.
+    let claude = FakeAdapter::claude();
+    let f = Fixture::with_adapters(FakeAdapter::codex(), Some(claude.clone())).await;
     let mut core = f.core();
     let agent = core
         .create_automation_agent(ticketd_core::AutomationAgentSettings {
-            harness: ticketd_core::AgentHarness::Codex,
+            harness: ticketd_core::AgentHarness::ClaudeCode,
             ..Default::default()
         })
         .unwrap();
@@ -468,11 +484,20 @@ async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_cha
             .await;
     });
     settle().await;
+    assert!(
+        claude
+            .emit(EventKind::TurnStarted {
+                turn: NativeTurnId::new("agent-turn"),
+            })
+            .await
+    );
+    settle().await;
     assert_eq!(f.chats.working(), 1, "the run's agent is working");
     assert_eq!(f.chats.stopping(), Stopping { chats: 0, runs: 1 });
     assert_eq!(f.chats.overview().unwrap().working, 0, "the old count");
 
     f.chat().await;
+    assert_eq!(f.chats.working(), 2, "both harnesses are working");
     assert_eq!(f.chats.stopping(), Stopping { chats: 1, runs: 1 });
 
     f.chats.set_enabled(false).await;
@@ -1059,6 +1084,435 @@ async fn a_fresh_session_starts_with_the_history_the_person_selected_and_replays
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    f.chats
+        .send(&id, "Original", SendMode::Queue)
+        .await
+        .unwrap();
+    let original = f.core().chat_queue(&id).unwrap().remove(0);
+    let transfer = uuid::Uuid::new_v4().to_string();
+    assert!(
+        f.chats
+            .confirm_queue_edit(&id, &original.id, &transfer)
+            .await
+            .unwrap()
+    );
+    let ticket = f.core().create_ticket("Linked during the edit").unwrap();
+    let link = LinkRef {
+        kind: LinkKind::Ticket,
+        id: ticket.id,
+    };
+    let second_ticket = f.core().create_ticket("A second linked record").unwrap();
+    let another_link = LinkRef {
+        kind: LinkKind::Ticket,
+        id: second_ticket.id,
+    };
+    let command_id = uuid::Uuid::new_v4().to_string();
+    let request = || {
+        Some(QueueEditSave {
+            command_id: command_id.clone(),
+            message_ids: vec![original.id.clone()],
+        })
+    };
+    let held = original.id.clone();
+    let pending = f
+        .chats
+        .check_queue_edits(&id, vec![command_id.clone()], vec![held.clone()])
+        .unwrap();
+    assert!(pending.saved.is_empty());
+    assert!(pending.removed.is_empty());
+
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[link.clone(), another_link.clone()],
+            Vec::new(),
+            request(),
+        )
+        .await
+        .unwrap();
+    let queue = f.core().chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].text, "Edited");
+    f.core()
+        .set_chat_link(&id, ChatLink::from(link.clone()), false)
+        .unwrap();
+    f.core()
+        .set_chat_link(&id, ChatLink::from(another_link.clone()), false)
+        .unwrap();
+
+    let status = f
+        .chats
+        .check_queue_edits(&id, vec![command_id.clone()], vec![held.clone()])
+        .unwrap();
+    assert_eq!(status.saved.as_slice(), std::slice::from_ref(&command_id));
+    assert_eq!(status.removed, [held]);
+
+    let reordered = f
+        .chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[another_link.clone(), link.clone()],
+            Vec::new(),
+            request(),
+        )
+        .await
+        .unwrap_err();
+    assert!(reordered.message.contains("different"));
+    assert!(f.core().chat(&id).unwrap().links.is_empty());
+    assert_eq!(f.core().chat_queue(&id).unwrap(), queue);
+
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[link.clone(), another_link.clone(), link.clone()],
+            Vec::new(),
+            request(),
+        )
+        .await
+        .unwrap();
+    assert!(f.core().chat(&id).unwrap().links.is_empty());
+    assert_eq!(f.core().chat_queue(&id).unwrap(), queue);
+
+    f.chats.remove_queued(&id, &queue[0].id).await.unwrap();
+    let changed = f
+        .chats
+        .send_linking(&id, "Edited", SendMode::Queue, &[], Vec::new(), request())
+        .await
+        .unwrap_err();
+    assert!(changed.message.contains("different"));
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[link, another_link],
+            Vec::new(),
+            request(),
+        )
+        .await
+        .unwrap();
+    assert!(f.core().chat(&id).unwrap().links.is_empty());
+    assert!(f.core().chat_queue(&id).unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_queue_edit_receipt_binds_empty_links_without_guessing_legacy_links() {
+    for legacy in [false, true] {
+        let f = Fixture::new().await;
+        let id = f.chat().await;
+        f.chats
+            .send(&id, "Original", SendMode::Queue)
+            .await
+            .unwrap();
+        let original = f.core().chat_queue(&id).unwrap().remove(0);
+        let transfer = uuid::Uuid::new_v4().to_string();
+        assert!(
+            f.chats
+                .confirm_queue_edit(&id, &original.id, &transfer)
+                .await
+                .unwrap()
+        );
+
+        let command_id = uuid::Uuid::new_v4().to_string();
+        let request = || {
+            Some(QueueEditSave {
+                command_id: command_id.clone(),
+                message_ids: vec![original.id.clone()],
+            })
+        };
+        if legacy {
+            let save_id = queue_edit_save_id(&command_id).unwrap();
+            f.core()
+                .save_chat_input_replacing(
+                    Some(&save_id),
+                    &id,
+                    "Edited",
+                    &[],
+                    std::slice::from_ref(&original.id),
+                )
+                .unwrap();
+            let db = rusqlite::Connection::open(f.dir.path().join("workspace.sqlite3")).unwrap();
+            db.execute(
+                "UPDATE request_outcomes
+                 SET request = json_remove(request, '$.links', '$.links_ordered', '$.input_source')
+                 WHERE id = ?1",
+                [save_id],
+            )
+            .unwrap();
+        } else {
+            f.chats
+                .send_linking(&id, "Edited", SendMode::Queue, &[], Vec::new(), request())
+                .await
+                .unwrap();
+        }
+        let queue = f.core().chat_queue(&id).unwrap();
+        assert_eq!(queue[0].text, "Edited");
+
+        let link = LinkRef {
+            kind: LinkKind::Ticket,
+            id: f
+                .core()
+                .create_ticket("Added only to the retry")
+                .unwrap()
+                .id,
+        };
+        let retry = f
+            .chats
+            .send_linking(
+                &id,
+                "Edited",
+                SendMode::Queue,
+                &[link],
+                Vec::new(),
+                request(),
+            )
+            .await;
+        assert!(retry.unwrap_err().message.contains("different"));
+        f.chats
+            .send_linking(&id, "Edited", SendMode::Queue, &[], Vec::new(), request())
+            .await
+            .unwrap();
+        assert!(f.core().chat(&id).unwrap().links.is_empty());
+        assert_eq!(f.core().chat_queue(&id).unwrap(), queue);
+        let status = f
+            .chats
+            .check_queue_edits(&id, vec![command_id.clone()], vec![original.id])
+            .unwrap();
+        assert_eq!(status.saved.as_slice(), std::slice::from_ref(&command_id));
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_text_message_does_not_link_records() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let link = LinkRef {
+        kind: LinkKind::Ticket,
+        id: f.core().create_ticket("Refused context").unwrap().id,
+    };
+    f.core().set_chat_trashed(&id, true).unwrap();
+
+    let refused = f
+        .chats
+        .send_linking(&id, "Refused", SendMode::Queue, &[link], Vec::new(), None)
+        .await
+        .unwrap_err();
+    assert!(refused.message.contains("trash"), "{refused:?}");
+    let core = f.core();
+    assert!(core.chat(&id).unwrap().links.is_empty());
+    assert!(core.chat_queue(&id).unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn refused_attachments_leave_ordinary_message_links_and_queue_unchanged() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let ticket = |title| LinkRef {
+        kind: LinkKind::Ticket,
+        id: f.core().create_ticket(title).unwrap().id,
+    };
+    let accepted = ticket("Accepted context");
+    let refused = ticket("Refused context");
+    let files = || {
+        vec![AttachmentInput {
+            name: "notes.txt".into(),
+            data_url: "data:text/plain;base64,bm90ZXM=".into(),
+        }]
+    };
+    f.chats
+        .send_linking(
+            &id,
+            "Accepted",
+            SendMode::Queue,
+            std::slice::from_ref(&accepted),
+            files(),
+            None,
+        )
+        .await
+        .unwrap();
+    f.fake
+        .set_attachment_refusal(ticketd_chat_host::Refusal::Unsupported);
+    assert!(
+        f.chats
+            .send_linking(&id, "Refused", SendMode::Queue, &[refused], files(), None)
+            .await
+            .is_err()
+    );
+
+    let core = f.core();
+    assert_eq!(core.chat(&id).unwrap().links, [ChatLink::from(accepted)]);
+    let queue = core.chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].text, "Accepted");
+    assert_eq!(
+        core.chat_message_attachment_contents(&id, &queue[0].id)
+            .unwrap()[0]
+            .bytes(),
+        b"notes"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_upload_limit_refusal_leaves_the_edit_links_and_original_untouched() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let files = || {
+        vec![AttachmentInput {
+            name: "notes.txt".to_owned(),
+            data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+        }]
+    };
+    f.chats
+        .send_linking(&id, "Original", SendMode::Queue, &[], files(), None)
+        .await
+        .unwrap();
+    let original = f.core().chat_queue(&id).unwrap().remove(0);
+    let transfer = uuid::Uuid::new_v4().to_string();
+    assert!(
+        f.chats
+            .confirm_queue_edit(&id, &original.id, &transfer)
+            .await
+            .unwrap()
+    );
+    let command_id = uuid::Uuid::new_v4().to_string();
+    let request = || {
+        Some(QueueEditSave {
+            command_id: command_id.clone(),
+            message_ids: vec![original.id.clone()],
+        })
+    };
+    let ticket = |title| LinkRef {
+        kind: LinkKind::Ticket,
+        id: f.core().create_ticket(title).unwrap().id,
+    };
+    let rejected = ticket("Link from refused edit");
+    let accepted = ticket("Link from accepted edit");
+    f.core().set_attachment_upload_limit(1).unwrap();
+
+    let refusal = f
+        .chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[rejected],
+            files(),
+            request(),
+        )
+        .await
+        .unwrap_err();
+    assert!(refusal.message.contains("limit"), "{refusal:?}");
+    assert!(f.core().chat(&id).unwrap().links.is_empty());
+    let queue = f.core().chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, original.id);
+    assert!(queue[0].editing);
+    assert_eq!(
+        f.core()
+            .chat_message_attachment_contents(&id, &original.id)
+            .unwrap()[0]
+            .bytes(),
+        b"notes"
+    );
+    let pending = f
+        .chats
+        .check_queue_edits(&id, vec![command_id.clone()], Vec::new())
+        .unwrap();
+    assert!(pending.saved.is_empty());
+
+    f.core().set_attachment_upload_limit(100).unwrap();
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            std::slice::from_ref(&accepted),
+            files(),
+            request(),
+        )
+        .await
+        .unwrap();
+    f.core().set_attachment_upload_limit(1).unwrap();
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            std::slice::from_ref(&accepted),
+            files(),
+            request(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        f.core().chat(&id).unwrap().links,
+        [ChatLink::from(accepted)]
+    );
+    let edited = f.core().chat_queue(&id).unwrap();
+    assert_eq!(edited.len(), 1);
+    assert_eq!(edited[0].text, "Edited");
+    assert_ne!(edited[0].id, original.id);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_fresh_session_excludes_attachment_only_messages_from_picked_history() {
+    let f = Fixture::new().await;
+    let mut input = f.input("");
+    input.attachments = vec![AttachmentInput {
+        name: "original.txt".to_owned(),
+        data_url: "data:text/plain;base64,c25hcHNob3Q=".to_owned(),
+    }];
+    let created = f.chats.create(input).await.unwrap();
+    assert_eq!(created.send_error, None);
+    let id = created.chat_id;
+    settle().await;
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-1"),
+    })
+    .await;
+    let original = messages(&f.core(), &id).unwrap().remove(0);
+    assert!(original.text.is_empty());
+    assert_eq!(original.attachments[0].name, "original.txt");
+    f.fake.lose_process().await;
+    settle().await;
+
+    f.chats
+        .resume(
+            &id,
+            HistorySelection::Picked {
+                ids: vec![original.id],
+            },
+        )
+        .await
+        .unwrap();
+    f.emit(EventKind::SessionIdentified {
+        native_session: NativeSessionId::new("native-2"),
+    })
+    .await;
+    let (opened, _) = f.open(&id).await;
+    assert!(opened.snapshot.items.iter().any(|item| matches!(
+        item,
+        Item::Session {
+            history: "picked",
+            count: 0,
+            ..
+        }
+    )));
+    f.chats.send(&id, "continue", SendMode::Auto).await.unwrap();
+    settle().await;
+    assert_eq!(f.submitted().last().map(String::as_str), Some("continue"));
+}
+
+#[tokio::test(start_paused = true)]
 async fn native_only_permission_restart_offers_fresh_recovery_and_refuses_history_selection() {
     let f = Fixture::with_adapter(FakeAdapter::new(
         &ticketd_core::harnesses::ANTIGRAVITY,
@@ -1320,12 +1774,7 @@ async fn restoring_the_workspace_stops_chats_reconciles_and_dispatches_nothing()
     let (_, seen) = f.open(&id).await;
     assert_eq!(f.chats.working(), 1);
 
-    let unconfirmed = f.chats.begin_restore().await;
-    assert!(unconfirmed.is_empty());
-    assert_eq!(f.chats.working(), 0, "no harness runs across a restore");
-    assert!(matches!(f.fake.written().last(), Some(Written::Close(_))));
-    assert!(f.chats.send(&id, "during", SendMode::Auto).await.is_err());
-    // What a backup can hold: a turn in progress, a submission in flight, queued input.
+    let backup = f.dir.path().join("valid.ticketd-backup");
     let mut core = f.core();
     core.set_chat_queue_paused(&id, false).unwrap();
     let flying = core.save_chat_input(None, &id, "in flight").unwrap();
@@ -1333,9 +1782,21 @@ async fn restoring_the_workspace_stops_chats_reconciles_and_dispatches_nothing()
         .unwrap();
     core.save_chat_input(None, &id, "queued in the backup")
         .unwrap();
+    assert!(core.backup(&backup).unwrap());
     drop(core);
-
-    f.chats.finish_restore().unwrap();
+    let live = f.dir.path().join("workspace.sqlite3");
+    let restored = f
+        .chats
+        .restore(backup, move |backup| {
+            ticketd_core::WorkspaceSession::for_file(live)
+                .and_then(|session| session.exclusive(|path| Workspace::restore(path, backup)))
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .unwrap();
+    assert_eq!(restored.warning, None);
+    assert_eq!(f.chats.working(), 0);
+    assert!(matches!(f.fake.written().last(), Some(Written::Close(_))));
     tokio::time::sleep(Duration::from_secs(3_600)).await;
 
     assert_eq!(f.submitted(), ["first"], "nothing restored was dispatched");
@@ -1350,6 +1811,55 @@ async fn restoring_the_workspace_stops_chats_reconciles_and_dispatches_nothing()
     );
     assert_eq!(opened.snapshot.chat.queue.len(), 1);
     assert_eq!(f.fake.opens().len(), 1, "opening the view started nothing");
+}
+
+#[tokio::test(start_paused = true)]
+async fn overlapping_restore_refuses_to_replace_or_reopen_admission() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let host = f.chats.automation_host().unwrap();
+    let backup = f.dir.path().join("valid.ticketd-backup");
+    assert!(f.core().backup(&backup).unwrap());
+    let (started, replacing) = oneshot::channel();
+    let (finish, finishing) = oneshot::channel();
+    let first = tokio::spawn({
+        let chats = f.chats.clone();
+        let backup = backup.clone();
+        async move {
+            chats
+                .restore(backup, move |_| {
+                    started.send(()).unwrap();
+                    finishing.blocking_recv().unwrap();
+                    Err("replacement failed".to_owned())
+                })
+                .await
+        }
+    });
+    replacing.await.unwrap();
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+
+    let refused = f
+        .chats
+        .restore(backup, |_| {
+            panic!("overlapping restore entered replacement")
+        })
+        .await
+        .unwrap_err();
+    assert!(refused.contains("already in progress"), "{refused}");
+    assert!(matches!(
+        f.chats.automation_host(),
+        Err(HostError::Restoring)
+    ));
+    assert!(matches!(host.serving(), Err(HostError::Restoring)));
+    assert!(f.chats.send(&id, "during", SendMode::Auto).await.is_err());
+
+    finish.send(()).unwrap();
+    drop(f.chats.restore_owner.lock().await);
+    assert!(f.chats.automation_host().is_ok());
+    assert!(host.serving().is_ok());
+    f.chats.send(&id, "after", SendMode::Queue).await.unwrap();
+    assert_eq!(f.core().chat_queue(&id).unwrap()[0].text, "after");
 }
 
 #[tokio::test(start_paused = true)]
@@ -1525,6 +2035,24 @@ async fn a_failed_first_send_returns_the_chat_and_a_retry_makes_no_second_one() 
         id: "no-such-ticket".to_owned(),
     }];
     assert!(f.chats.create(linked).await.is_err());
+
+    let mut workspace = f.core();
+    let project = workspace
+        .create_project("Archived Project", &f.dir.path().to_string_lossy())
+        .unwrap();
+    workspace.set_project_archived(&project.id, true).unwrap();
+    drop(workspace);
+    let mut archived = f.input("first");
+    archived.folder = None;
+    archived.links = vec![LinkRef {
+        kind: LinkKind::Project,
+        id: project.id,
+    }];
+    assert_eq!(
+        f.chats.create(archived).await.unwrap_err().code,
+        "project_archived"
+    );
+
     let managed = format!("{}.chats", f.core().workspace_info().unwrap().path);
     assert!(
         !Path::new(&managed).exists(),
@@ -1566,6 +2094,433 @@ async fn repeating_a_new_chat_request_sends_its_first_message_once() {
         ..f.input("first")
     };
     assert!(f.chats.create(not_a_uuid).await.is_err());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_title_is_cut_at_a_word_and_earlier_title_receipts_still_resume() {
+    let f = Fixture::new().await;
+    let line =
+        "Explain how the retry queue decides which Chats to send after a restart, in detail please";
+    let mut input = f.input(line);
+    let file = AttachmentInput {
+        name: "notes.txt".to_owned(),
+        data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+    };
+    let snapshot =
+        ChatAttachmentContent::from_data_url(&file.name, &file.data_url, MAX_BACKUP_FILE_BYTES)
+            .unwrap();
+    input.attachments.push(file);
+    let earlier = f
+        .core()
+        .create_chat_for_first_message(
+            &format!("{}:chat", input.command_id),
+            NewChat {
+                title: Some(line.chars().take(80).collect()),
+                harness: input.harness_id.clone(),
+                execution_folder: input.folder.clone().unwrap(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+            ChatStartPicks::default(),
+            line,
+            &[snapshot],
+        )
+        .unwrap();
+    let mut changed_text = input.clone();
+    changed_text.message.push_str("\nAnother request");
+    let mut changed_file = input.clone();
+    changed_file.attachments[0].data_url = "data:text/plain;base64,b3RoZXI=".to_owned();
+    for changed in [changed_text, changed_file] {
+        let conflict = f.chats.create(changed).await.unwrap_err();
+        assert!(conflict.message.contains("different"), "{conflict:?}");
+    }
+    let resumed = f.chats.create(input.clone()).await.unwrap();
+    assert_eq!(resumed.chat_id, earlier.id);
+    assert_eq!(resumed.send_error, None);
+    assert_eq!(f.chats.create(input).await.unwrap(), resumed);
+    assert_eq!(messages(&f.core(), &earlier.id).unwrap().len(), 1);
+
+    let fresh = f.chats.create(f.input(line)).await.unwrap();
+    assert_eq!(
+        f.core().chat(&fresh.chat_id).unwrap().title.as_deref(),
+        Some("Explain how the retry queue decides which Chats to send after a restart, in…")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn restoring_while_new_chat_awaits_options_refuses_the_stale_save() {
+    let f = Fixture::new().await;
+    f.fake.set_options(codex_options());
+    let (probing, finish_probe) = f.fake.hold_next_options();
+    let mut input = f.input("From the earlier Workspace");
+    input.folder = None;
+    input.model = Some("gpt-b".to_owned());
+    input.attachments = vec![AttachmentInput {
+        name: "notes.txt".to_owned(),
+        data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+    }];
+    let folder = managed_chat_folders(&f.core())
+        .unwrap()
+        .join(&input.command_id);
+    let backup = f.dir.path().join("valid.ticketd-backup");
+    assert!(f.core().backup(&backup).unwrap());
+
+    let creating = tokio::spawn({
+        let chats = f.chats.clone();
+        let input = input.clone();
+        async move { chats.create(input).await }
+    });
+    probing.await.unwrap();
+    let live = f.dir.path().join("workspace.sqlite3");
+    f.chats
+        .restore(backup, move |backup| {
+            ticketd_core::WorkspaceSession::for_file(live)
+                .and_then(|session| session.exclusive(|path| Workspace::restore(path, backup)))
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .unwrap();
+    finish_probe.send(()).unwrap();
+    let refused = creating.await.unwrap().unwrap_err();
+    assert_eq!(refused.code, "stale");
+    assert!(
+        f.core()
+            .list_chats(ChatListFilter::Active)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!folder.exists());
+    assert!(f.fake.opens().is_empty());
+
+    let retried = f.chats.create(input).await.unwrap();
+    assert_eq!(retried.send_error, None);
+    assert!(folder.is_dir());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_managed_folder_creation_still_binds_the_first_message() {
+    let f = Fixture::new().await;
+    let mut input = f.input("Same title\nOriginal message");
+    input.folder = None;
+    input.attachments = vec![AttachmentInput {
+        name: "notes.txt".to_owned(),
+        data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+    }];
+    let managed = managed_chat_folders(&f.core()).unwrap();
+    let path = managed.join(&input.command_id);
+    std::fs::create_dir_all(managed).unwrap();
+    std::fs::write(&path, b"blocks the directory").unwrap();
+
+    let first = f.chats.create(input.clone()).await.unwrap();
+    assert!(first.send_error.unwrap().contains("could not create"));
+    assert!(messages(&f.core(), &first.chat_id).unwrap().is_empty());
+    std::fs::remove_file(&path).unwrap();
+
+    let mut changed_bytes = input.clone();
+    changed_bytes.attachments[0].data_url = "data:text/plain;base64,b3RoZXI=".to_owned();
+    let changed_text = NewChatInput {
+        message: "Same title\nDifferent message".to_owned(),
+        ..input.clone()
+    };
+    for changed in [changed_bytes, changed_text] {
+        let conflict = f.chats.create(changed).await.unwrap_err();
+        assert!(conflict.message.contains("different"), "{conflict:?}");
+        assert!(!path.exists());
+    }
+
+    // An equivalent data URL carries the same normalized media type and bytes.
+    input.attachments[0].data_url = "data:text/plain;charset=utf-8;base64,bm90ZXM=".to_owned();
+    assert_eq!(
+        f.chats.create(input).await.unwrap(),
+        Created {
+            chat_id: first.chat_id.clone(),
+            send_error: None,
+        }
+    );
+    settle().await;
+    assert!(path.is_dir());
+    let workspace = f.core();
+    let saved = messages(&workspace, &first.chat_id).unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].text, "Same title\nOriginal message");
+    let files = workspace
+        .chat_message_attachment_contents(&first.chat_id, &saved[0].id)
+        .unwrap();
+    assert_eq!(files[0].bytes(), b"notes");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_chat_retry_still_succeeds_after_its_first_input_is_replaced() {
+    let f = Fixture::new().await;
+    f.fake.fail_next_open(Problem {
+        kind: ProblemKind::QuotaExhausted,
+        message: "Test harness unavailable".to_owned(),
+        detail: None,
+        resets_at: None,
+    });
+    let mut input = f.input("Original");
+    input.attachments = vec![AttachmentInput {
+        name: "notes.txt".to_owned(),
+        data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+    }];
+    let first = f.chats.create(input.clone()).await.unwrap();
+    assert_eq!(first.send_error, None);
+    settle().await;
+
+    let id = &first.chat_id;
+    let original = f.core().chat_queue(id).unwrap().remove(0);
+    let transfer = uuid::Uuid::new_v4().to_string();
+    assert!(
+        f.chats
+            .confirm_queue_edit(id, &original.id, &transfer)
+            .await
+            .unwrap()
+    );
+    f.chats
+        .send_linking(
+            id,
+            "Edited",
+            SendMode::Queue,
+            &[],
+            Vec::new(),
+            Some(QueueEditSave {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                message_ids: vec![original.id.clone()],
+            }),
+        )
+        .await
+        .unwrap();
+    let edited = f.core().chat_queue(id).unwrap().remove(0);
+    assert_ne!(edited.id, original.id);
+    assert_eq!(edited.text, "Edited");
+    let opens = f.fake.opens().len();
+
+    assert_eq!(f.chats.create(input).await.unwrap(), first);
+    settle().await;
+    assert_eq!(f.fake.opens().len(), opens);
+    assert!(f.submitted().is_empty());
+    assert_eq!(
+        f.core().list_chats(ChatListFilter::Active).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        f.core().chat_queue(id).unwrap().as_slice(),
+        std::slice::from_ref(&edited)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_attachment_allows_whitespace_within_the_message_byte_limit() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let files = || {
+        vec![AttachmentInput {
+            name: "notes.txt".to_owned(),
+            data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+        }]
+    };
+    let whitespace = " \t\n";
+    let blank = f
+        .chats
+        .send_linking(&id, whitespace, SendMode::Queue, &[], Vec::new(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(blank.message, "The message must not be empty");
+    let oversized = " ".repeat(MAX_TEXT_BYTES + 1);
+    let too_long = f
+        .chats
+        .send_linking(&id, &oversized, SendMode::Queue, &[], files(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(too_long.message, "The message is too long");
+
+    f.chats
+        .send_linking(&id, whitespace, SendMode::Queue, &[], files(), None)
+        .await
+        .unwrap();
+    let queue = f.core().chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].text, whitespace);
+    let attachments = f
+        .core()
+        .chat_message_attachment_contents(&id, &queue[0].id)
+        .unwrap();
+    assert_eq!(attachments[0].bytes(), b"notes");
+}
+
+#[tokio::test(start_paused = true)]
+async fn capture_uses_the_workspace_filename_media_and_size_rules() {
+    let f = Fixture::new().await;
+    let input = |name: &str, data_url: &str| AttachmentInput {
+        name: name.into(),
+        data_url: data_url.into(),
+    };
+    let png = "data:application/octet-stream;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
+    assert_eq!(
+        f.chats
+            .capture_attachment(input("transfer.png", png))
+            .unwrap(),
+        "image/png"
+    );
+    let mismatched = f
+        .chats
+        .capture_attachment(input("screen.png", "data:image/png;base64,bm90ZQ=="))
+        .unwrap_err();
+    assert!(mismatched.message.contains("file bytes"));
+    assert!(
+        f.chats
+            .capture_attachment(input("bad\0name.png", png))
+            .unwrap_err()
+            .message
+            .contains("invalid file name")
+    );
+    f.core().set_attachment_upload_limit(4).unwrap();
+    assert!(
+        f.chats
+            .capture_attachment(input("transfer.png", png))
+            .unwrap_err()
+            .message
+            .contains("limit")
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
+    use ticketd_chat_host::{AppliesFrom, PermissionKind, Setting};
+
+    let f = Fixture::new().await;
+    let mut options = codex_options();
+    options.permission = Some(Setting {
+        current: Some("ask".into()),
+        options: vec![
+            ticketd_chat_host::SettingOption {
+                permission: Some(PermissionKind::Ask),
+                ..offered("ask", true)
+            },
+            ticketd_chat_host::SettingOption {
+                permission: Some(PermissionKind::FullAccess),
+                ..offered("full", false)
+            },
+        ],
+        unchangeable: None,
+        applies_from: AppliesFrom::NextRequest,
+        answered_by: None,
+    });
+    f.fake.set_options(options);
+    let input: NewChatInput = serde_json::from_value(json!({
+        "command_id": uuid::Uuid::new_v4().to_string(),
+        "harness_id": "codex",
+        "folder": f.dir.path(),
+        "links": [],
+        "message": "",
+        "model": "gpt-b",
+        "permission": "ask",
+        "attachments": [{ "name": "sample.txt", "dataUrl": "data:text/plain;base64,ZXhhY3QgYnl0ZXM=" }],
+    }))
+    .unwrap();
+    let first = f.chats.create(input.clone()).await.unwrap();
+    assert_eq!(first.send_error, None);
+    settle().await;
+    assert_eq!(f.fake.opens()[0].settings.model.as_deref(), Some("gpt-b"));
+    assert_eq!(
+        f.fake.opens()[0].settings.permission.as_deref(),
+        Some("ask")
+    );
+    f.core().set_attachment_upload_limit(4).unwrap();
+    let again = f.chats.create(input.clone()).await.unwrap();
+    assert_eq!(again, first);
+    settle().await;
+    let mut changed = input.clone();
+    changed.attachments[0].data_url = "data:text/plain;base64,ZGlmZmVyZW50".into();
+    let conflict = f.chats.create(changed).await.unwrap_err();
+    assert!(conflict.message.contains("different"), "{conflict:?}");
+    for changed in [
+        NewChatInput {
+            model: Some("gpt-a".into()),
+            ..input.clone()
+        },
+        NewChatInput {
+            effort: Some("high".into()),
+            ..input.clone()
+        },
+        NewChatInput {
+            permission: Some("full".into()),
+            ..input.clone()
+        },
+        NewChatInput {
+            permission: Some("invalid".into()),
+            ..input.clone()
+        },
+    ] {
+        let conflict = f.chats.create(changed).await.unwrap_err();
+        assert!(conflict.message.contains("different"), "{conflict:?}");
+    }
+    let fresh = NewChatInput {
+        command_id: uuid::Uuid::new_v4().to_string(),
+        ..input
+    };
+    assert!(f.chats.create(fresh).await.is_err());
+    assert_eq!(
+        f.core().list_chats(ChatListFilter::Active).unwrap().len(),
+        1
+    );
+
+    let saved = messages(&f.core(), &first.chat_id).unwrap();
+    assert_eq!(saved.len(), 1);
+    assert_eq!(saved[0].attachments[0].name, "sample.txt");
+    let exported = f.dir.path().join("exported.txt");
+    f.chats
+        .export_attachment(&first.chat_id, &saved[0].attachments[0].id, &exported)
+        .unwrap();
+    assert_eq!(std::fs::read(exported).unwrap(), b"exact bytes");
+    assert_eq!(f.submitted().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_legacy_first_message_receipt_still_validates_requested_start_settings() {
+    let f = Fixture::new().await;
+    f.fake.set_options(codex_options());
+    let input = f.input("first");
+    let mut workspace = f.core();
+    let chat = workspace
+        .create_chat(
+            Some(&format!("{}:chat", input.command_id)),
+            NewChat {
+                title: Some(input.message.clone()),
+                harness: input.harness_id.clone(),
+                execution_folder: input.folder.clone().unwrap(),
+                folder_managed: false,
+                links: vec![],
+            },
+        )
+        .unwrap();
+    workspace
+        .save_chat_input(
+            Some(&format!("{}:first", input.command_id)),
+            &chat.id,
+            &input.message,
+        )
+        .unwrap();
+    drop(workspace);
+    let invalid = NewChatInput {
+        model: Some("missing".into()),
+        ..input.clone()
+    };
+    let error = f.chats.create(invalid).await.unwrap_err();
+    assert!(error.message.contains("not a model it offers"), "{error:?}");
+    let valid = NewChatInput {
+        model: Some("gpt-b".into()),
+        ..input
+    };
+    assert_eq!(
+        f.chats.create(valid).await.unwrap(),
+        Created {
+            chat_id: chat.id,
+            send_error: None
+        }
+    );
+    settle().await;
+    assert!(f.submitted().is_empty());
 }
 
 #[tokio::test(start_paused = true)]
@@ -2147,6 +3102,31 @@ async fn a_refused_resend_asks_the_person_again_and_says_what_happened() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn restore_does_not_replace_the_workspace_while_a_harness_is_still_opening() {
+    let f = Fixture::new().await;
+    let open = f.fake.hold_next_open();
+    let chat = f.chat().await;
+    let backup = f.dir.path().join("valid.ticketd-backup");
+    assert!(f.core().backup(&backup).unwrap());
+
+    let refused = f
+        .chats
+        .restore(backup, |_| panic!("restore replaced the workspace"))
+        .await
+        .unwrap_err();
+    assert!(refused.contains("still opening or stopping"), "{refused}");
+    assert!(f.fake.opens().is_empty());
+    assert_eq!(f.core().chat_queue(&chat).unwrap()[0].text, "first");
+
+    open.send(()).unwrap();
+    settle().await;
+    assert!(matches!(f.fake.written().as_slice(), [Written::Close(_)]));
+    f.chats.resume_queue(&chat).await.unwrap();
+    settle().await;
+    assert_eq!(f.submitted(), ["first"]);
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_backup_that_cannot_be_restored_stops_no_chat() {
     let f = Fixture::new().await;
     f.chat().await;
@@ -2704,7 +3684,14 @@ async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_i
     assert!(f.chats.linked_to(&link()).unwrap().is_empty());
 
     f.chats
-        .send_linking(&id, "Look at it", SendMode::Queue, &[link()])
+        .send_linking(
+            &id,
+            "Look at it",
+            SendMode::Queue,
+            &[link()],
+            Vec::new(),
+            None,
+        )
         .await
         .unwrap();
     let linked = f.chats.linked_to(&link()).unwrap();
@@ -2722,7 +3709,14 @@ async fn a_ticket_lists_its_chats_and_records_mentioned_in_a_message_link_when_i
     };
     let refused = f
         .chats
-        .send_linking(&other, "And this", SendMode::Queue, &[gone])
+        .send_linking(
+            &other,
+            "And this",
+            SendMode::Queue,
+            &[gone],
+            Vec::new(),
+            None,
+        )
         .await;
     assert!(refused.is_err());
     let (opened, _) = f.open(&other).await;

@@ -3,9 +3,11 @@
 //! moves only when every task is waiting, so `settle` means "until nothing more happens".
 #![allow(clippy::unwrap_used, clippy::panic)] // test setup and assertions
 
+use std::future::poll_fn;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::task::Poll;
 use std::time::Duration;
 
 use ticketd_chat_host::records::{FILES_RECORD_NAME, PLAN_RECORD_NAME, REASONING_RECORD_NAME};
@@ -19,8 +21,8 @@ use ticketd_chat_host::{
     NoticeKind, Problem, ProblemKind, ProviderDetail, QuestionAnswer, ResumeMode,
     RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopReason, StopState,
     Submission, SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL,
-    TEXT_UPDATE_INTERVAL, ToolStatus, TurnEnding, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener,
-    problem_kind,
+    TEXT_UPDATE_INTERVAL, ToolStatus, TurnEnd, TurnEnding, TurnOutcome, Unattended,
+    UnconfirmedCleanup, WorkspaceOpener, problem_kind,
 };
 use ticketd_chat_host::{
     AppliesFrom, ContextUsage, FileChange, FileChangeKind, HarnessSettings, PermissionKind, Plan,
@@ -28,9 +30,11 @@ use ticketd_chat_host::{
     SettingOption, SettingOutcome, StartSettings,
 };
 use ticketd_core::{
-    Chat, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem, ChatMessage,
-    ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState, ChatTurn,
-    ChatTurnState, Error, NewChat, Workspace, WorkspaceSession,
+    AgentHarness, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition, Chat,
+    ChatAttachmentContent, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem,
+    ChatLink, ChatLinkKind, ChatMessage, ChatQueueEdit, ChatRecord, ChatRole, ChatSessionOrigin,
+    ChatSubmissionIntent, ChatToolState, ChatTurn, ChatTurnState, Error, NewChat, RunAction, Step,
+    StepAction, Trigger, Workspace, WorkspaceSession,
 };
 
 struct Fixture {
@@ -40,6 +44,11 @@ struct Fixture {
     fake: FakeAdapter,
     host: ChatHost,
     chat: Chat,
+}
+
+fn saved_file() -> ChatAttachmentContent {
+    ChatAttachmentContent::from_data_url("saved.txt", "data:text/plain;base64,c25hcHNob3Q=", 100)
+        .unwrap()
 }
 
 fn new_chat(workspace: &mut Workspace, harness: &str) -> Chat {
@@ -77,6 +86,58 @@ impl Fixture {
 
     fn core(&self) -> Workspace {
         Workspace::open(&self.path).unwrap()
+    }
+
+    fn automation_chat(&self) -> (String, Unattended) {
+        let mut core = self.core();
+        let tools = AutomationAgentTools {
+            read_files: true,
+            edit_files: false,
+            run_commands: true,
+            any_command: true,
+            allowed_commands: Vec::new(),
+            use_web: false,
+        };
+        let agent = core
+            .create_automation_agent(AutomationAgentSettings {
+                name: "Triage".into(),
+                tools: tools.clone(),
+                harness: AgentHarness::Codex,
+                model: None,
+                instructions: "Triage the ticket.".into(),
+                turn_limit: 2,
+                time_limit_minutes: 5,
+            })
+            .unwrap();
+        let automation = core
+            .create_automation(AutomationDefinition {
+                name: "Triage ticket".into(),
+                trigger: Some(Trigger::ByHand),
+                conditions: Vec::new(),
+                steps: vec![Step {
+                    id: "triage".into(),
+                    action: StepAction::RunAgent {
+                        agent_id: Some(agent.id),
+                        execution_folder: Some(self._dir.path().to_string_lossy().into_owned()),
+                        on_failure: None,
+                    },
+                }],
+            })
+            .unwrap();
+        let run = core.run_automation_now(&automation.id).unwrap();
+        core.start_automation_runs(1).unwrap();
+        let RunAction::RunAgent(step) = core.advance_automation_run(&run.id, None).unwrap() else {
+            panic!("the run should own an agent Chat");
+        };
+        (
+            step.chat_id,
+            Unattended {
+                run_id: run.id,
+                model: None,
+                tools,
+                turn_limit: 2,
+            },
+        )
     }
 
     fn items(&self) -> Vec<ChatItem> {
@@ -127,6 +188,20 @@ impl Fixture {
             .collect()
     }
 
+    async fn wait_for_submissions(&self, count: usize) -> Vec<Submission> {
+        assert!(
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                self.fake.wait_for_submissions(count),
+            )
+            .await
+            .is_ok(),
+            "expected {count} submissions, got {}",
+            self.submits().len()
+        );
+        self.submits()
+    }
+
     async fn send(&self, text: &str) -> ChatMessage {
         let message = self.host.send(&self.chat.id, None, text, SendMode::Auto);
         let message = message.await.unwrap();
@@ -137,6 +212,16 @@ impl Fixture {
     async fn queue(&self, text: &str) -> ChatMessage {
         let message = self.host.send(&self.chat.id, None, text, SendMode::Queue);
         let message = message.await.unwrap();
+        settle().await;
+        message
+    }
+
+    async fn send_file(&self, text: &str, mode: SendMode) -> ChatMessage {
+        let message = self
+            .host
+            .send_with_attachments(&self.chat.id, None, text, mode, vec![saved_file()])
+            .await
+            .unwrap();
         settle().await;
         message
     }
@@ -251,6 +336,50 @@ async fn input_is_recorded_as_possibly_submitted_before_the_write_and_acknowledg
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_host_dispatches_a_saved_screenshot_as_one_message() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let reply = f.fake.hold_next_submit();
+    let image = ticketd_core::ChatAttachmentContent::from_image_data_url(
+        "Screenshot.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+    )
+    .unwrap();
+
+    let saved = f
+        .host
+        .send_with_attachments(&f.chat.id, None, "", SendMode::Auto, vec![image.clone()])
+        .await
+        .unwrap();
+    settle().await;
+
+    let retained = f.message(&saved.id);
+    let submissions = f.submits();
+    let [sent] = submissions.as_slice() else {
+        panic!("expected one submission, got {submissions:?}");
+    };
+    assert_eq!(retained.attempts[0].delivery, ChatDelivery::Possible);
+    assert_eq!(
+        sent.submission,
+        SubmissionId(retained.attempts[0].id.clone())
+    );
+    assert_eq!(sent.text, "");
+    assert_eq!(sent.attachments.as_slice(), std::slice::from_ref(&image));
+    assert_eq!(
+        f.core()
+            .chat_attachment_content(&f.chat.id, &retained.attachments[0].id)
+            .unwrap(),
+        image
+    );
+
+    reply.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+    assert_eq!(
+        f.message(&saved.id).standing(),
+        ticketd_core::ChatInputStanding::Delivered
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn new_chats_picks_open_the_first_session() {
     let f = Fixture::new(FakeAdapter::codex());
     let picks = StartSettings {
@@ -298,7 +427,13 @@ async fn a_crash_between_recording_and_writing_is_uncertain_after_restart_and_no
     let input = core.save_chat_input(None, &f.chat.id, "hello").unwrap();
     core.record_chat_submission(&f.chat.id, &input.id, "a1", ChatSubmissionIntent::NewTurn)
         .unwrap();
-    core.save_chat_input(None, &f.chat.id, "queued before the crash")
+    let queued = core
+        .save_chat_input_with_attachments(
+            None,
+            &f.chat.id,
+            "queued before the crash",
+            &[saved_file()],
+        )
         .unwrap();
     drop(core);
 
@@ -321,7 +456,10 @@ async fn a_crash_between_recording_and_writing_is_uncertain_after_restart_and_no
     after.await.unwrap();
     settle().await;
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
-    let sent: Vec<_> = f.submits().into_iter().map(|sent| sent.text).collect();
+    let submits = f.submits();
+    assert_eq!(submits[0].attachments, [saved_file()]);
+    assert_eq!(f.message(&queued.id).attachments, queued.attachments);
+    let sent: Vec<_> = submits.into_iter().map(|sent| sent.text).collect();
     assert_eq!(sent, ["queued before the crash", "after the restart"]);
     let attempts = f.message(&input.id).attempts;
     assert_eq!(attempts.len(), 1);
@@ -420,7 +558,7 @@ async fn a_steer_refused_after_the_turn_ended_falls_back_to_the_queue_and_runs_n
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;
     let reply = f.fake.hold_next_submit();
-    let steer = f.send("also this").await;
+    let steer = f.send_file("also this", SendMode::Auto).await;
 
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     reply
@@ -432,7 +570,11 @@ async fn a_steer_refused_after_the_turn_ended_falls_back_to_the_queue_and_runs_n
     assert_eq!(attempts[0].delivery, ChatDelivery::Rejected);
     assert_eq!(attempts[1].intent, ChatSubmissionIntent::NewTurn);
     assert_eq!(attempts[1].delivery, ChatDelivery::Acknowledged);
-    assert_eq!(f.submits()[2].kind, SubmissionKind::StartTurn);
+    let submits = f.submits();
+    assert_eq!(submits[1].attachments, [saved_file()]);
+    assert_eq!(submits[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submits[2].text, submits[1].text);
+    assert_eq!(submits[2].attachments, [saved_file()]);
     assert_eq!(f.live().await.problem, None);
 }
 
@@ -449,6 +591,70 @@ async fn without_steering_a_send_during_a_turn_waits_in_the_visible_queue() {
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     assert_eq!(f.submits()[1].kind, SubmissionKind::StartTurn);
     assert_eq!(f.submits()[1].text, "second");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_attachment_message_queues_in_order_when_the_active_turn_cannot_steer() {
+    let f = Fixture::new(FakeAdapter::without_steering());
+    f.send("first").await;
+    f.queue("older").await;
+    let message = f.send_file("Read this", SendMode::Auto).await;
+    assert_eq!(f.queued(), ["older", "Read this"]);
+    assert_eq!(f.submits().len(), 1);
+    assert!(matches!(
+        f.host.send_queued_now(&f.chat.id, &message.id).await,
+        Err(HostError::Working)
+    ));
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.submits()[1].text, "older");
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    let submits = f.submits();
+    assert_eq!(submits[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submits[2].text, "Read this");
+    assert_eq!(submits[2].attachments, [saved_file()]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_image_saved_before_turn_start_waits_when_only_text_can_steer() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.fake.set_steer_image_input(false);
+    let first = f.fake.hold_next_submit();
+    f.send("Start the turn").await;
+    let image = ChatAttachmentContent::from_data_url(
+        "pixel.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/F9sAAAAASUVORK5CYII=",
+        100,
+    ).unwrap();
+    let message = f
+        .host
+        .send_with_attachments(
+            &f.chat.id,
+            None,
+            "Look at this",
+            SendMode::Auto,
+            vec![image.clone()],
+        )
+        .await
+        .unwrap();
+    first.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+
+    assert_eq!(f.submits().len(), 1);
+    assert!(f.message(&message.id).attempts.is_empty());
+    assert_eq!(f.queued(), ["Look at this"]);
+
+    f.send("Text can steer").await;
+    assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submits = f.submits();
+    assert_eq!(submits[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submits[2].attachments, [image]);
+    assert_eq!(f.message(&message.id).attempts.len(), 1);
 }
 
 #[tokio::test(start_paused = true)]
@@ -832,6 +1038,375 @@ async fn detaching_a_view_does_not_stop_the_turn_and_reattaching_starts_nothing(
 }
 
 #[tokio::test(start_paused = true)]
+async fn automation_dispatches_its_prompt_without_draining_older_ordinary_input() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let (chat_id, unattended) = f.automation_chat();
+    let older = f
+        .core()
+        .save_chat_input(None, &chat_id, "Older ordinary input")
+        .unwrap();
+    assert!(!f.core().chat(&chat_id).unwrap().queue_paused);
+
+    let run = tokio::spawn({
+        let host = f.host.clone();
+        let chat_id = chat_id.clone();
+        async move {
+            host.run_unattended(
+                &chat_id,
+                "Run-owned Prompt",
+                unattended,
+                Duration::from_secs(60),
+            )
+            .await
+        }
+    });
+    settle().await;
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.submits()[0].text, "Run-owned Prompt");
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert!(matches!(run.await.unwrap(), Ok(TurnEnd::Finished)));
+    let queue = f.core().chat_queue(&chat_id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, older.id);
+    assert_eq!(f.submits().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_cold_automation_prompt_waits_for_its_harness_lookup_to_recover() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let (chat, unattended) = f.automation_chat();
+    let prompt_reads = Arc::new(AtomicUsize::new(0));
+    let opener: WorkspaceOpener = {
+        let (path, chat, reads) = (f.path.clone(), chat.clone(), prompt_reads.clone());
+        Arc::new(move || {
+            let core = WorkspaceSession::for_file(&path)?.workspace()?;
+            // The cold dispatch reads the Chat, then its Automation harness.
+            if !core.chat_queue(&chat)?.is_empty() && reads.fetch_add(1, Ordering::SeqCst) == 1 {
+                return Err(Error::NoDataDirectory);
+            }
+            Ok(core)
+        })
+    };
+    let host = ChatHost::new(opener, vec![Arc::new(f.fake.clone())]).unwrap();
+    let run = tokio::spawn({
+        let chat = chat.clone();
+        async move {
+            host.run_unattended(&chat, "Run Prompt", unattended, Duration::from_secs(60))
+                .await
+        }
+    });
+    settle().await;
+    assert!(prompt_reads.load(Ordering::SeqCst) >= 2);
+    assert!(f.fake.opens().is_empty());
+    let queued = f.core().chat_queue(&chat).unwrap();
+    assert_eq!(queued.len(), 1);
+    assert!(queued[0].attempts.is_empty());
+
+    assert_eq!(f.wait_for_submissions(1).await[0].text, "Run Prompt");
+    assert_eq!(f.fake.opens().len(), 1);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(run.await.unwrap().unwrap(), TurnEnd::Finished);
+    let items = f.core().chat_snapshot(&chat, 20).unwrap().items;
+    let messages: Vec<_> = items
+        .iter()
+        .filter_map(|item| match item {
+            ChatItem::Message(message) => Some(message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(messages.len(), 1);
+    assert_eq!(messages[0].id, queued[0].id);
+    assert_eq!(messages[0].attempts.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_automation_send_takeover_remains_in_shutdown_reports() {
+    automation_takeover_reports_unconfirmed_cleanup(true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_automation_stop_takeover_is_reported() {
+    automation_takeover_reports_unconfirmed_cleanup(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_automation_open_is_reported_until_late_close_finishes() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let open = f.fake.hold_next_open();
+    let (chat_id, unattended) = f.automation_chat();
+    let run = tokio::spawn({
+        let host = f.host.clone();
+        let chat_id = chat_id.clone();
+        async move {
+            host.run_unattended(
+                &chat_id,
+                "Agent Prompt",
+                unattended,
+                Duration::from_secs(60),
+            )
+            .await
+        }
+    });
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
+    assert_eq!(
+        f.host.live()[&chat_id].opening,
+        Some(ChatSessionOrigin::New)
+    );
+    f.host
+        .send(&chat_id, None, "Person's reply", SendMode::Auto)
+        .await
+        .unwrap();
+    assert!(matches!(run.await.unwrap(), Ok(TurnEnd::TakenOver)));
+    assert!(f.fake.opens().is_empty());
+    assert_eq!(
+        f.host.stop_all(StopReason::Quit).await,
+        [UnconfirmedCleanup {
+            chat_id,
+            reason: "the harness was still starting".to_owned(),
+        }]
+    );
+
+    open.send(()).unwrap();
+    settle().await;
+    assert!(matches!(f.fake.written().as_slice(), [Written::Close(_)]));
+    assert!(f.host.stop_all(StopReason::Quit).await.is_empty());
+}
+
+async fn automation_takeover_reports_unconfirmed_cleanup(send: bool) {
+    let f = Fixture::new(FakeAdapter::codex());
+    let (chat_id, unattended) = f.automation_chat();
+    let run = tokio::spawn({
+        let host = f.host.clone();
+        let chat_id = chat_id.clone();
+        async move {
+            host.run_unattended(
+                &chat_id,
+                "Agent Prompt",
+                unattended,
+                Duration::from_secs(60),
+            )
+            .await
+        }
+    });
+    settle().await;
+    assert_eq!(f.submits().len(), 1);
+    let reason = "the old process did not exit".to_owned();
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: reason.clone(),
+    });
+    if send {
+        let saved = f
+            .host
+            .send(&chat_id, None, "Person's reply", SendMode::Auto)
+            .await
+            .unwrap();
+        assert_eq!(f.core().chat_queue(&chat_id).unwrap()[0].id, saved.id);
+    } else {
+        assert!(matches!(
+            f.host.stop(&chat_id).await,
+            Err(HostError::PermissionRestartCleanupUnconfirmed)
+        ));
+        assert!(matches!(
+            f.host.stop(&chat_id).await,
+            Err(HostError::PermissionRestartCleanupUnconfirmed)
+        ));
+    }
+    assert!(matches!(run.await.unwrap(), Ok(TurnEnd::TakenOver)));
+    assert_eq!(f.fake.opens().len(), 1);
+    // Even when an ordinary supervisor and the detached close both observe
+    // the same unconfirmed exit, they report it only once.
+    assert!(matches!(
+        f.host.resume_queue(&chat_id).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    for _ in 0..2 {
+        assert_eq!(
+            f.host.stop_all(StopReason::Quit).await,
+            [UnconfirmedCleanup {
+                chat_id: chat_id.clone(),
+                reason: reason.clone()
+            }]
+        );
+    }
+    f.fake
+        .set_close_outcome(CloseOutcome::Confirmed { exit_code: Some(0) });
+    f.host.resume(&chat_id, ResumeMode::Native).await.unwrap();
+    assert_eq!(f.fake.opens().len(), 2);
+    assert!(f.host.stop_all(StopReason::Quit).await.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_saved_takeover_reply_dispatches_after_its_queue_read_recovers() {
+    saved_takeover_reply_retries_failed_read(1).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_saved_takeover_reply_dispatches_after_its_chat_read_recovers() {
+    saved_takeover_reply_retries_failed_read(2).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_live_queue_retries_a_transient_read_without_another_event() {
+    live_queue_retries_one_failed_read(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_live_queue_read_retry_obeys_a_new_pause() {
+    live_queue_retries_one_failed_read(true).await;
+}
+
+async fn live_queue_retries_one_failed_read(pause: bool) {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let chat_id = f.chat.id.clone();
+    let waiting = Arc::new(AtomicBool::new(false));
+    let reads_after_end = Arc::new(AtomicUsize::new(0));
+    let reads = reads_after_end.clone();
+    let armed = waiting.clone();
+    f.host = ChatHost::new(
+        Arc::new(move || {
+            let core = WorkspaceSession::for_file(&path)?.workspace()?;
+            if armed.load(Ordering::SeqCst)
+                && core.chat(&chat_id)?.active_turn.is_none()
+                && reads.fetch_add(1, Ordering::SeqCst) == 1
+            {
+                // The first read sees that the live Chat is unpaused. Fail its
+                // next read as pump tries to select a saved queued message.
+                return Err(Error::NoDataDirectory);
+            }
+            Ok(core)
+        }),
+        vec![Arc::new(f.fake.clone())],
+    )
+    .unwrap();
+    f.send("first").await;
+    let queued = f.queue("drain this").await;
+    waiting.store(true, Ordering::SeqCst);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(reads_after_end.load(Ordering::SeqCst), 2);
+    assert!(f.message(&queued.id).attempts.is_empty());
+    if pause {
+        f.core().set_chat_queue_paused(&f.chat.id, true).unwrap();
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    settle().await;
+    assert!(reads_after_end.load(Ordering::SeqCst) > 2);
+    if pause {
+        assert_eq!(f.submits().len(), 1);
+        assert_eq!(f.queued(), ["drain this"]);
+        assert!(f.message(&queued.id).attempts.is_empty());
+    } else {
+        assert_eq!(f.submits().len(), 2);
+        assert_eq!(f.submits()[1].text, "drain this");
+        assert_eq!(f.message(&queued.id).attempts.len(), 1);
+    }
+}
+
+async fn saved_takeover_reply_retries_failed_read(fail_read: usize) {
+    let f = Fixture::new(FakeAdapter::codex());
+    let (chat_id, _) = f.automation_chat();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let fails = Arc::new(AtomicUsize::new(0));
+    let opener: WorkspaceOpener = {
+        let (path, chat_id, reads, fails) = (
+            f.path.clone(),
+            chat_id.clone(),
+            reads.clone(),
+            fails.clone(),
+        );
+        Arc::new(move || {
+            let core = WorkspaceSession::for_file(&path)?.workspace()?;
+            // Admission, takeover queue placement, then dispatch's Chat read.
+            if core.automation_chat_harness(&chat_id)?.is_none()
+                && reads.fetch_add(1, Ordering::SeqCst) == fail_read
+            {
+                fails.fetch_add(1, Ordering::SeqCst);
+                return Err(Error::NoDataDirectory);
+            }
+            Ok(core)
+        })
+    };
+    let host = ChatHost::new(opener, vec![Arc::new(f.fake.clone())]).unwrap();
+
+    let send = || {
+        host.send(
+            &chat_id,
+            Some("takeover-reply"),
+            "Saved reply",
+            SendMode::Auto,
+        )
+    };
+    let receipt = send().await.unwrap();
+    settle().await;
+    assert_eq!(fails.load(Ordering::SeqCst), 1);
+    assert!(f.submits().is_empty());
+    assert_eq!(f.core().chat_queue(&chat_id).unwrap()[0].id, receipt.id);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    settle().await;
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.submits()[0].text, "Saved reply");
+    assert!(f.core().chat_queue(&chat_id).unwrap().is_empty());
+
+    let repeated = send().await.unwrap();
+    settle().await;
+    assert_eq!(repeated.id, receipt.id);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(
+        repeated.attempts.len(),
+        1,
+        "the retained input has exactly one attempt after the read retry"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pending_open_blocks_both_resume_paths_until_late_cleanup_finishes() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let first_open = f.fake.hold_next_open();
+    f.send("Resume this input").await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
+    assert_eq!(f.live().await.opening, Some(ChatSessionOrigin::New));
+    assert!(f.fake.opens().is_empty());
+
+    f.storage_up.store(false, Ordering::SeqCst);
+    assert!(f.host.resume_queue(&f.chat.id).await.is_err());
+    f.storage_up.store(true, Ordering::SeqCst);
+
+    // Both commands reach the same supervisor before it records the hold.
+    let mut explicit = Box::pin(f.host.resume(&f.chat.id, ResumeMode::Native));
+    let mut queue = Box::pin(f.host.resume_queue(&f.chat.id));
+    poll_fn(|context| {
+        assert!(explicit.as_mut().poll(context).is_pending());
+        assert!(queue.as_mut().poll(context).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    assert!(matches!(
+        explicit.await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    queue.await.unwrap();
+    settle().await;
+    assert!(f.fake.opens().is_empty());
+    assert!(f.submits().is_empty());
+
+    let first_close = f.fake.hold_next_close();
+    first_open.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1);
+    assert!(matches!(f.fake.written().as_slice(), [Written::Close(_)]));
+    first_close.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.submits()[0].text, "Resume this input");
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_storage_failure_stops_admission_and_the_runtime_until_storage_returns() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;
@@ -1055,6 +1630,7 @@ async fn a_new_session_gets_the_ticketd_context_once_and_it_is_kept_apart_from_t
     .unwrap();
 
     let first = f.send("first").await;
+    f.wait_for_submissions(1).await;
     f.emit(EventKind::TurnEnded {
         turn: NativeTurnId::new("turn-1"),
         outcome: TurnOutcome::Completed,
@@ -1062,10 +1638,11 @@ async fn a_new_session_gets_the_ticketd_context_once_and_it_is_kept_apart_from_t
     })
     .await;
     f.send("second").await;
+    let submissions = f.wait_for_submissions(2).await;
 
     let context = format!("context for {}", f.chat.id);
-    assert_eq!(f.submits()[0].text, format!("{context}\n\nfirst"));
-    assert_eq!(f.submits()[1].text, "second");
+    assert_eq!(submissions[0].text, format!("{context}\n\nfirst"));
+    assert_eq!(submissions[1].text, "second");
     assert_eq!(f.message(&first.id).text, "first");
     let kept: Vec<_> = f
         .items()
@@ -1330,8 +1907,44 @@ async fn a_context_that_cannot_be_read_is_said_and_the_session_starts_without_it
 
     f.send("first").await;
 
-    assert_eq!(f.submits()[0].text, "first");
+    assert_eq!(f.wait_for_submissions(1).await[0].text, "first");
     assert!(notices(&f)[0].contains("the workspace could not be opened"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_early_harness_rejection_keeps_the_attachment_message_editable() {
+    let f = Fixture::new(FakeAdapter::without_steering());
+    let reply = f.fake.hold_next_submit();
+    let message = f.send_file("Read this", SendMode::Auto).await;
+    let reason = "This model cannot read the attachment.".to_owned();
+    f.emit(EventKind::SubmissionEvidence {
+        submission: f.submits()[0].submission.clone(),
+        evidence: DeliveryEvidence::Rejected {
+            reason: reason.clone(),
+        },
+    })
+    .await;
+    reply.send(SubmitReply::Timeout).unwrap();
+    settle().await;
+
+    let live = f.live().await;
+    assert_eq!(
+        live.problem,
+        Some(ChatProblem::DispatchRefused { detail: reason })
+    );
+    assert!(!live.delivery_unconfirmed);
+    assert_eq!(
+        f.message(&message.id).attempts[0].delivery,
+        ChatDelivery::Rejected
+    );
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(
+        f.host
+            .prepare_queue_edit(&f.chat.id, &message.id)
+            .await
+            .unwrap(),
+        ("Read this".to_owned(), vec![saved_file()])
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -1377,7 +1990,7 @@ async fn a_discarded_message_is_never_sent_even_when_its_rejection_arrives_late(
 async fn a_refused_resend_returns_the_message_to_the_person_and_keeps_the_uncertainty() {
     let f = Fixture::new(FakeAdapter::codex());
     f.fake.script_submit(SubmitReply::LoseProcess);
-    let input = f.send("first").await;
+    let input = f.send_file("first", SendMode::Auto).await;
     f.fake
         .script_submit(SubmitReply::Reject("not now".to_owned()));
 
@@ -1399,8 +2012,14 @@ async fn a_refused_resend_returns_the_message_to_the_person_and_keeps_the_uncert
     // Asking again is a new submission of the same message.
     f.host.resend(&f.chat.id, &input.id).await.unwrap();
     settle().await;
-    assert_eq!(f.submits().len(), 3);
+    let submits = f.submits();
+    assert_eq!(submits.len(), 3);
+    for submit in submits {
+        assert_eq!(submit.text, "first");
+        assert_eq!(submit.attachments, [saved_file()]);
+    }
     assert_eq!(f.message(&input.id).attempts.len(), 3);
+    assert_eq!(f.message(&input.id).attachments, input.attachments);
 }
 
 #[tokio::test(start_paused = true)]
@@ -1439,7 +2058,7 @@ async fn a_host_handle_taken_before_a_restore_can_start_nothing_during_it() {
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     let held = f.host.clone();
 
-    assert_eq!(f.host.begin_restore().await, Vec::new());
+    assert_eq!(f.host.begin_restore().await.unwrap(), Vec::new());
     assert_eq!(f.fake.opens().len(), 1);
     let refused = held.send(&f.chat.id, None, "during", SendMode::Auto).await;
     assert!(matches!(refused, Err(HostError::Restoring)));
@@ -1649,9 +2268,910 @@ async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
     assert_eq!(notices(&f).len(), 4);
 }
 
+#[tokio::test(start_paused = true)]
+async fn an_ordinary_linked_attachment_reaches_a_live_session_with_its_context() {
+    linked_attachment_reaches_the_session_with_context(None).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_auto_linked_attachment_waits_for_a_new_turn_with_its_context() {
+    linked_attachment_reaches_the_session_with_context(Some(SendMode::Auto)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_now_defers_a_linked_attachment_and_leaves_the_paused_queue_alone() {
+    linked_attachment_reaches_the_session_with_context(Some(SendMode::Queue)).await;
+}
+
+fn fixture_with_link_context(
+    fake: FakeAdapter,
+    before_read: impl Fn() -> Result<(), String> + Send + Sync + 'static,
+) -> Fixture {
+    let mut f = Fixture::new(fake);
+    let path = f.path.clone();
+    let context_path = path.clone();
+    f.host = ChatHost::with_context(
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |chat_id| {
+            before_read()?;
+            let chat = Workspace::open(&context_path)
+                .and_then(|core| core.chat(chat_id))
+                .map_err(|error| error.to_string())?;
+            Ok(Some(format!("linked records: {}", chat.links.len())))
+        })),
+    )
+    .unwrap();
+    f
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_linked_image_that_needs_a_new_turn_checks_its_model_before_replacing_held_input() {
+    let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
+    let link = |name| ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket(name).unwrap().id,
+    };
+    let existing = link("Existing link");
+    let added = link("New link");
+    f.core()
+        .add_chat_links(&f.chat.id, std::slice::from_ref(&existing))
+        .unwrap();
+    let mut changed = f.host.changed();
+    f.send("Start the image-capable turn").await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !f
+            .host
+            .live()
+            .get(&f.chat.id)
+            .is_some_and(|live| live.steering.is_some())
+        {
+            changed.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
+    f.fake.set_image_input(false);
+    f.fake.set_steer_image_input(true);
+    let image = ChatAttachmentContent::from_data_url(
+        "pixel.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/F9sAAAAASUVORK5CYII=",
+        100,
+    ).unwrap();
+
+    f.host
+        .send_linking(
+            &f.chat.id,
+            "This image can steer",
+            SendMode::Auto,
+            vec![image.clone()],
+            vec![existing.clone()],
+        )
+        .await
+        .unwrap();
+    let submissions = f.wait_for_submissions(2).await;
+    assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
+
+    let original = f.queue("Keep this held input").await;
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &original.id, "hold")
+            .await
+            .unwrap()
+    );
+    assert!(matches!(
+        f.host.send_with_edit(
+            &f.chat.id, Some("image-edit"), "This image needs a new turn", SendMode::Auto,
+            vec![image], Some(ChatQueueEdit { replaces: vec![original.id.clone()], links: vec![added] }),
+        ).await,
+        Err(HostError::Core(Error::Chat(reason)))
+            if reason.contains(ticketd_chat_host::Refusal::ImageInputUnsupported.reason())
+    ));
+    let chat = f.core().chat(&f.chat.id).unwrap();
+    assert_eq!(chat.links, [existing]);
+    assert!(!chat.queue_paused);
+    assert!(f.message(&original.id).editing);
+    assert_eq!(f.submits().len(), 2);
+}
+
+#[tokio::test(start_paused = true)]
+async fn repeated_link_requests_wait_for_context_while_unrelated_input_steers() {
+    let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
+    f.send("first").await;
+    f.wait_for_submissions(1).await;
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Requested twice").unwrap().id,
+    };
+    let first = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "first linked reply",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link.clone()],
+        )
+        .await
+        .unwrap();
+    let second = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "second linked reply",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    f.send("ordinary steer").await;
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions.len(), 2);
+    assert_eq!(submissions[1].text, "ordinary steer");
+    assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
+    assert!(f.message(&first.id).attempts.is_empty());
+    assert!(f.message(&second.id).attempts.is_empty());
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submissions = f.wait_for_submissions(4).await;
+    assert_eq!(
+        submissions[2].text,
+        "linked records: 1\n\nfirst linked reply"
+    );
+    assert_eq!(submissions[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[3].text, "second linked reply");
+    assert_eq!(
+        submissions[3].kind,
+        SubmissionKind::Steer {
+            expected_turn: NativeTurnId::new("turn-2")
+        }
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_existing_link_saved_before_acknowledgement_waits_if_the_turn_cannot_steer() {
+    let f = fixture_with_link_context(FakeAdapter::without_steering(), || Ok(()));
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Already linked").unwrap().id,
+    };
+    f.core()
+        .add_chat_links(&f.chat.id, std::slice::from_ref(&link))
+        .unwrap();
+    let first = f.fake.hold_next_submit();
+    f.send("first").await;
+    assert_eq!(
+        f.wait_for_submissions(1).await[0].text,
+        "linked records: 1\n\nfirst"
+    );
+    let linked = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Read this too",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    first.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+    assert!(f.message(&linked.id).attempts.is_empty());
+    assert_eq!(f.submits().len(), 1);
+
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions[1].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[1].text, "Read this too");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    assert_eq!(f.message(&linked.id).attempts.len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_live_link_context_read_retries_before_dispatch() {
+    linked_context_recovers_without_an_extra_attempt(LinkedContextSession::Live).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_initial_link_context_read_retries_before_first_dispatch() {
+    linked_context_recovers_without_an_extra_attempt(LinkedContextSession::New).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_takeover_link_context_read_retries_before_first_dispatch() {
+    linked_context_recovers_without_an_extra_attempt(LinkedContextSession::Takeover).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_reopened_queue_waits_for_context_before_sending_a_saved_takeover_reply() {
+    linked_context_recovers_without_an_extra_attempt(LinkedContextSession::TakeoverQueue).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_now_checks_the_context_of_a_saved_queued_takeover_reply() {
+    linked_context_recovers_without_an_extra_attempt(LinkedContextSession::TakeoverSendNow).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn resend_checks_stored_link_context_after_restarting_the_supervisor() {
+    linked_resend_preserves_context(true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn resend_of_a_live_unconfirmed_linked_input_keeps_its_context() {
+    linked_resend_preserves_context(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn stop_cancels_a_resend_waiting_on_link_context() {
+    let hold_read = Arc::new(AtomicBool::new(false));
+    let source = hold_read.clone();
+    let (reading, mut started) = tokio::sync::mpsc::unbounded_channel();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if source.swap(false, Ordering::SeqCst) {
+            let (release, permit) = std::sync::mpsc::channel();
+            let _ = reading.send(release);
+            let _ = permit.recv();
+        }
+        Ok(())
+    });
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Link for resend").unwrap().id,
+    };
+    f.fake.script_submit(SubmitReply::Timeout);
+    let original = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Unconfirmed",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    f.wait_for_submissions(1).await;
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(f.message(&original.id).awaits_decision());
+    let queued = f.queue("Leave paused").await;
+
+    hold_read.store(true, Ordering::SeqCst);
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    let release = tokio::time::timeout(Duration::from_secs(10), started.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    f.host.resend(&f.chat.id, &original.id).await.unwrap();
+    assert_eq!(f.submits().len(), 1);
+    f.host.stop(&f.chat.id).await.unwrap();
+    release.send(()).unwrap();
+
+    f.send("Ordinary after Stop").await;
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(
+        submissions[1].text,
+        "linked records: 1\n\nOrdinary after Stop"
+    );
+    assert_eq!(f.message(&original.id).attempts.len(), 1);
+    assert!(f.message(&original.id).awaits_decision());
+    assert!(f.message(&queued.id).attempts.is_empty());
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+
+    let active = tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            if let Some(active) = f
+                .turns()
+                .into_iter()
+                .find(|turn| turn.state == ChatTurnState::Active)
+            {
+                break active;
+            }
+            settle().await;
+        }
+    })
+    .await
+    .unwrap();
+    let turn = NativeTurnId::new(active.native_turn_id.unwrap());
+    f.emit(turn_ended(turn, TurnOutcome::Completed)).await;
+    f.host.resend(&f.chat.id, &original.id).await.unwrap();
+    let submissions = f.wait_for_submissions(3).await;
+    assert_eq!(submissions[2].text, "Unconfirmed");
+    assert_eq!(submissions[2].attachments, [saved_file()]);
+    assert!(f.message(&queued.id).attempts.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_different_linked_input_carries_snapshot_after_an_unconfirmed_attempt() {
+    new_input_delivers_an_unconfirmed_context_snapshot(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_intervening_ordinary_turn_delivers_context_for_the_later_linked_input() {
+    new_input_delivers_an_unconfirmed_context_snapshot(true).await;
+}
+
+async fn new_input_delivers_an_unconfirmed_context_snapshot(ordinary_in_between: bool) {
+    let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Shared link").unwrap().id,
+    };
+    f.fake.script_submit(SubmitReply::Timeout);
+    let original = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Unconfirmed A",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        f.wait_for_submissions(1).await[0].text,
+        "linked records: 1\n\nUnconfirmed A"
+    );
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(f.message(&original.id).awaits_decision());
+    let queued = f.queue("Leave paused").await;
+    let linked_index = if ordinary_in_between {
+        f.send("Unrelated B").await;
+        assert_eq!(
+            f.wait_for_submissions(2).await[1].text,
+            "linked records: 1\n\nUnrelated B"
+        );
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+        2
+    } else {
+        1
+    };
+
+    let next = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Different linked input",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    let submissions = f.wait_for_submissions(linked_index + 1).await;
+    assert_eq!(
+        submissions[linked_index].text,
+        if ordinary_in_between {
+            "Different linked input"
+        } else {
+            "linked records: 1\n\nDifferent linked input"
+        }
+    );
+    assert_eq!(submissions[linked_index].attachments, [saved_file()]);
+    let original = f.message(&original.id);
+    assert!(original.awaits_decision());
+    assert_eq!(original.attempts.len(), 1);
+    assert_eq!(original.attempts[0].delivery, ChatDelivery::Uncertain);
+    assert_eq!(original.attempts[0].decision, None);
+    assert_eq!(f.message(&next.id).attempts.len(), 1);
+    assert!(f.message(&queued.id).attempts.is_empty());
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+}
+
+#[tokio::test(start_paused = true)]
+async fn resend_with_already_delivered_link_context_refreshes_once() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let source = reads.clone();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        source.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f
+            .core()
+            .create_ticket("Previously delivered link")
+            .unwrap()
+            .id,
+    };
+    f.core()
+        .add_chat_links(&f.chat.id, std::slice::from_ref(&link))
+        .unwrap();
+    f.send("first").await;
+    assert_eq!(
+        f.wait_for_submissions(1).await[0].text,
+        "linked records: 1\n\nfirst"
+    );
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.fake.script_submit(SubmitReply::Timeout);
+    let saved = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Unconfirmed",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    assert_eq!(f.wait_for_submissions(2).await[1].text, "Unconfirmed");
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(f.message(&saved.id).awaits_decision());
+    f.queue("Keep queued").await;
+
+    f.host.resend(&f.chat.id, &saved.id).await.unwrap();
+    let submissions = f.wait_for_submissions(3).await;
+    assert_eq!(submissions[2].text, "Unconfirmed");
+    assert_eq!(submissions[2].attachments, [saved_file()]);
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "one initial read and one resend reread"
+    );
+    assert_eq!(f.queued(), ["Keep queued"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+}
+
+async fn linked_resend_preserves_context(restart: bool) {
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let source = unavailable.clone();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if source.load(Ordering::SeqCst) {
+            Err("context source unavailable".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Linked reply to retry").unwrap().id,
+    };
+    f.fake.script_submit(SubmitReply::Timeout);
+    let saved = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Read this",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    f.wait_for_submissions(1).await;
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(f.message(&saved.id).awaits_decision());
+    let later = f.queue("Keep waiting").await;
+    if restart {
+        assert!(f.host.stop_all(StopReason::Quit).await.is_empty());
+        unavailable.store(true, Ordering::SeqCst);
+    }
+
+    f.host.resend(&f.chat.id, &saved.id).await.unwrap();
+    if restart {
+        wait_for_context_read_failure(&f).await;
+        assert_eq!(f.submits().len(), 1);
+        assert_eq!(f.message(&saved.id).attempts.len(), 1);
+        unavailable.store(false, Ordering::SeqCst);
+    }
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions[1].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[1].text, "linked records: 1\n\nRead this");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    let attempts = f.message(&saved.id).attempts;
+    assert_eq!(attempts.len(), 2);
+    assert_eq!(attempts[0].delivery, ChatDelivery::Uncertain);
+    assert_eq!(attempts[0].decision, Some(ChatDeliveryDecision::Resent));
+    assert_ne!(submissions[0].submission, submissions[1].submission);
+    assert_eq!(f.queued(), ["Keep waiting"]);
+    assert!(f.message(&later.id).attempts.is_empty());
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(f.fake.opens().len(), if restart { 2 } else { 1 });
+}
+
+async fn wait_for_context_read_failure(f: &Fixture) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !notices(f)
+            .iter()
+            .any(|notice| notice.contains("context source unavailable"))
+        {
+            settle().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unrelated_auto_send_starts_while_a_paused_linked_input_cannot_read_context() {
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let source = unavailable.clone();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if source.load(Ordering::SeqCst) {
+            Err("context source unavailable".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    f.send("first").await;
+    f.wait_for_submissions(1).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    unavailable.store(true, Ordering::SeqCst);
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Queued linked record").unwrap().id,
+    };
+    let linked = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Keep queued",
+            SendMode::Queue,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    wait_for_context_read_failure(&f).await;
+
+    f.send("unrelated").await;
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions[1].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[1].text, "unrelated");
+    assert_eq!(f.queued(), ["Keep queued"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert!(f.message(&linked.id).attempts.is_empty());
+
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    unavailable.store(false, Ordering::SeqCst);
+    f.host
+        .send_queued_now(&f.chat.id, &linked.id)
+        .await
+        .unwrap();
+    let submissions = f.wait_for_submissions(3).await;
+    assert_eq!(submissions[2].text, "linked records: 1\n\nKeep queued");
+    assert_eq!(submissions[2].attachments, [saved_file()]);
+    assert_eq!(f.message(&linked.id).attempts.len(), 1);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+}
+
+enum LinkedContextSession {
+    Live,
+    New,
+    Takeover,
+    TakeoverQueue,
+    TakeoverSendNow,
+}
+
+async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContextSession) {
+    let failing = Arc::new(AtomicBool::new(false));
+    let state = failing.clone();
+    let mut f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if state.load(Ordering::SeqCst) {
+            Err("context source unavailable".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    if matches!(
+        session,
+        LinkedContextSession::Takeover
+            | LinkedContextSession::TakeoverQueue
+            | LinkedContextSession::TakeoverSendNow
+    ) {
+        let (chat_id, _) = f.automation_chat();
+        f.chat = f.core().chat(&chat_id).unwrap();
+    }
+    if matches!(session, LinkedContextSession::Live) {
+        f.send("first").await;
+        f.wait_for_submissions(1).await;
+    }
+    failing.store(true, Ordering::SeqCst);
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Linked record").unwrap().id,
+    };
+    let saved = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Read the linked record",
+            match session {
+                LinkedContextSession::TakeoverQueue | LinkedContextSession::TakeoverSendNow => {
+                    SendMode::Queue
+                }
+                _ => SendMode::Auto,
+            },
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    match session {
+        LinkedContextSession::TakeoverQueue | LinkedContextSession::TakeoverSendNow => {
+            assert!(
+                f.fake.opens().is_empty(),
+                "saving the queued reply starts no runtime"
+            );
+            assert!(f.submits().is_empty());
+            assert!(f.message(&saved.id).requires_link_context);
+            if matches!(session, LinkedContextSession::TakeoverQueue) {
+                f.host.resume_queue(&f.chat.id).await.unwrap();
+            } else {
+                f.host.send_queued_now(&f.chat.id, &saved.id).await.unwrap();
+            }
+        }
+        _ => {}
+    }
+    let failed_reads = || {
+        notices(&f)
+            .into_iter()
+            .filter(|notice| notice.contains("context source unavailable"))
+            .count()
+    };
+    wait_for_context_read_failure(&f).await;
+    let before = if matches!(session, LinkedContextSession::Live) {
+        f.send("ordinary steer").await;
+        let submissions = f.wait_for_submissions(2).await;
+        assert_eq!(submissions[1].text, "ordinary steer");
+        assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+        2
+    } else {
+        0
+    };
+    assert_eq!(f.submits().len(), before);
+    assert!(f.message(&saved.id).attempts.is_empty());
+    assert_eq!(failed_reads(), 1);
+    assert_eq!(f.queued(), ["Read the linked record"]);
+
+    failing.store(false, Ordering::SeqCst);
+    let submissions = f.wait_for_submissions(before + 1).await;
+    let sent = &submissions[before];
+    assert_eq!(sent.kind, SubmissionKind::StartTurn);
+    assert_eq!(sent.text, "linked records: 1\n\nRead the linked record");
+    assert_eq!(sent.attachments, [saved_file()]);
+    assert_eq!(f.message(&saved.id).attempts.len(), 1);
+    assert!(f.queued().is_empty());
+    assert_eq!(failed_reads(), 1);
+}
+
+async fn linked_attachment_reaches_the_session_with_context(active_mode: Option<SendMode>) {
+    let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
+    if active_mode.is_some() {
+        f.host.stop(&f.chat.id).await.unwrap();
+        f.queue("stay paused").await;
+    }
+    f.send("first").await;
+    f.wait_for_submissions(1).await;
+    if active_mode.is_none() {
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    }
+
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Attachment context").unwrap().id,
+    };
+    let file =
+        ChatAttachmentContent::from_data_url("notes.txt", "data:text/plain;base64,bm90ZXM=", 100)
+            .unwrap();
+    let attached = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Attached",
+            active_mode.unwrap_or(SendMode::Auto),
+            vec![file.clone()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    settle().await;
+
+    if active_mode == Some(SendMode::Queue) {
+        f.host
+            .send_queued_now(&f.chat.id, &attached.id)
+            .await
+            .unwrap();
+    }
+    let new_turn = if active_mode.is_some() {
+        f.send("ordinary text").await;
+        let submissions = f.wait_for_submissions(2).await;
+        assert_eq!(submissions.len(), 2);
+        assert_eq!(submissions[1].text, "ordinary text");
+        assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
+        assert!(f.message(&attached.id).attempts.is_empty());
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+        assert_eq!(f.queued(), ["stay paused"]);
+        assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+        2
+    } else {
+        1
+    };
+    assert_eq!(f.fake.opens().len(), 1);
+    let submissions = f.wait_for_submissions(new_turn + 1).await;
+    assert_eq!(submissions[new_turn].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[new_turn].text, "linked records: 1\n\nAttached");
+    assert_eq!(submissions[new_turn].attachments, [file]);
+}
+
 /// L4: links changed after the session started reach the agent with the next new turn,
 /// kept as context like the first delivery; a resumed native session is told only
 /// when its context differs from what it was given.
+#[tokio::test]
+async fn a_linked_edit_during_open_leaves_the_unrelated_first_turn_free_to_start() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let context_path = path.clone();
+    let (read, mut context_reads) = tokio::sync::mpsc::unbounded_channel();
+    f.host = ChatHost::with_context(
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |chat_id| {
+            let chat = Workspace::open(&context_path)
+                .and_then(|core| core.chat(chat_id))
+                .map_err(|error| error.to_string())?;
+            let count = chat.links.len();
+            let (release, permit) = std::sync::mpsc::channel();
+            if read.send((count, release)).is_err() || permit.recv().is_err() {
+                return Ok(None);
+            }
+            Ok(Some(format!("linked records: {count}")))
+        })),
+    )
+    .unwrap();
+    f.host.stop(&f.chat.id).await.unwrap();
+    let open = f.fake.hold_next_open();
+    f.send("first").await;
+    let (count, first_read) = tokio::time::timeout(Duration::from_secs(10), context_reads.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(count, 0);
+    let original = f.queue("Original").await;
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &original.id, "hold")
+            .await
+            .unwrap()
+    );
+
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f
+            .core()
+            .create_ticket("Link for the edited input")
+            .unwrap()
+            .id,
+    };
+    let edited = f
+        .host
+        .send_with_edit(
+            &f.chat.id,
+            Some("edit"),
+            "Edited",
+            SendMode::Queue,
+            vec![saved_file()],
+            Some(ChatQueueEdit {
+                replaces: vec![original.id],
+                links: vec![link],
+            }),
+        )
+        .await
+        .unwrap();
+    first_read.send(()).unwrap();
+    open.send(()).unwrap();
+    let (count, linked_read) = tokio::time::timeout(Duration::from_secs(10), context_reads.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(count, 1);
+
+    assert_eq!(f.wait_for_submissions(1).await[0].text, "first");
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(f.queued(), ["Edited"]);
+    assert!(f.message(&edited.id).attempts.is_empty());
+
+    linked_read.send(()).unwrap();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.host
+        .send_queued_now(&f.chat.id, &edited.id)
+        .await
+        .unwrap();
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions[1].text, "linked records: 1\n\nEdited");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+}
+
+#[tokio::test(start_paused = true)]
+async fn overlapping_linked_edits_dispatch_with_the_latest_context() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let context_path = path.clone();
+    let (reading, mut reads) = tokio::sync::mpsc::unbounded_channel();
+    f.host = ChatHost::with_context(
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |chat_id| {
+            let chat = Workspace::open(&context_path)
+                .and_then(|core| core.chat(chat_id))
+                .map_err(|error| error.to_string())?;
+            let count = chat.links.len();
+            if count != 0 {
+                let (resume, permit) = std::sync::mpsc::channel();
+                if reading.send((count, resume)).is_err() || permit.recv().is_err() {
+                    return Ok(None);
+                }
+            }
+            Ok(Some(format!("linked records: {count}")))
+        })),
+    )
+    .unwrap();
+
+    f.send("first").await;
+    f.wait_for_submissions(1).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    let older = f.queue("Original one").await;
+    let newer = f.queue("Original two").await;
+    let mut refreshes = std::collections::VecDeque::new();
+    for (original, text, edit_id) in [
+        (older, "Edited one", "edit-one"),
+        (newer, "Edited two", "edit-two"),
+    ] {
+        assert!(
+            f.host
+                .confirm_queue_edit(&f.chat.id, &original.id, &format!("{edit_id}-hold"))
+                .await
+                .unwrap()
+        );
+        let link = ChatLink {
+            kind: ChatLinkKind::Ticket,
+            id: f.core().create_ticket(text).unwrap().id,
+        };
+        f.host
+            .send_with_edit(
+                &f.chat.id,
+                Some(edit_id),
+                text,
+                SendMode::Queue,
+                Vec::new(),
+                Some(ChatQueueEdit {
+                    replaces: vec![original.id],
+                    links: vec![link],
+                }),
+            )
+            .await
+            .unwrap();
+        refreshes.push_back(reads.recv().await.unwrap());
+    }
+    let (count, older) = refreshes.pop_front().unwrap();
+    assert_eq!(count, 1);
+    let (count, newer) = refreshes.pop_front().unwrap();
+    assert_eq!(count, 2);
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+
+    older.send(()).unwrap();
+    newer.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1);
+    assert_eq!(
+        f.wait_for_submissions(2).await[1].text,
+        "linked records: 2\n\nEdited one"
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_message() {
     let mut f = Fixture::new(FakeAdapter::codex());
@@ -1665,6 +3185,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     )
     .unwrap();
     f.send("first").await;
+    f.wait_for_submissions(1).await;
     f.emit(EventKind::SessionIdentified {
         native_session: NativeSessionId::new("session-1"),
     })
@@ -1674,12 +3195,14 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     *context.lock().unwrap() = "links: T-KQ1".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("second").await;
+    f.wait_for_submissions(2).await;
     f.emit(turn_ended(
         NativeTurnId::new("turn-2"),
         TurnOutcome::Completed,
     ))
     .await;
     f.send("third").await;
+    f.wait_for_submissions(3).await;
     f.emit(turn_ended(
         NativeTurnId::new("turn-3"),
         TurnOutcome::Completed,
@@ -1704,6 +3227,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     // A resumed native session already has what it was given ...
     f.host.stop_all(ticketd_chat_host::StopReason::Quit).await;
     f.send("fourth").await;
+    f.wait_for_submissions(4).await;
     assert_eq!(texts(&f)[3], "fourth");
     f.emit(turn_ended(
         NativeTurnId::new("turn-4"),
@@ -1715,7 +3239,50 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     *context.lock().unwrap() = "links: T-KQ2".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("fifth").await;
+    f.wait_for_submissions(5).await;
     assert_eq!(texts(&f)[4], "links: T-KQ2\n\nfifth");
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_failed_explicit_link_refresh_waits_for_retry_before_the_next_turn() {
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let source = unavailable.clone();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if source.load(Ordering::SeqCst) {
+            Err("context source unavailable".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    f.send("first").await;
+    f.wait_for_submissions(1).await;
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("New external link").unwrap().id,
+    };
+    f.core().add_chat_links(&f.chat.id, &[link]).unwrap();
+
+    unavailable.store(true, Ordering::SeqCst);
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    wait_for_context_read_failure(&f).await;
+    f.send("Steer during backoff").await;
+    let submissions = f.wait_for_submissions(2).await;
+    assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
+    assert_eq!(submissions[1].text, "Steer during backoff");
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    f.send("After explicit link change").await;
+    assert_eq!(
+        f.submits().len(),
+        2,
+        "the new turn waits for the edited links"
+    );
+    unavailable.store(false, Ordering::SeqCst);
+    let submissions = f.wait_for_submissions(3).await;
+    assert_eq!(
+        submissions[2].text,
+        "linked records: 1\n\nAfter explicit link change"
+    );
 }
 
 /// L3: what the agent changed in ticketd during a turn is kept with the turn when it
@@ -2193,7 +3760,7 @@ async fn send_now_steers_one_queued_input_and_leaves_the_rest_queued() {
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;
     f.queue("later").await;
-    let now = f.queue("this one now").await;
+    let now = f.send_file("this one now", SendMode::Queue).await;
 
     f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
     settle().await;
@@ -2205,7 +3772,80 @@ async fn send_now_steers_one_queued_input_and_leaves_the_rest_queued() {
         }
     );
     assert_eq!(f.submits()[1].text, "this one now");
+    assert_eq!(f.submits()[1].attachments, [saved_file()]);
     assert_eq!(f.queued(), ["later"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_now_waits_to_start_an_image_turn_after_a_text_only_steer_turn() {
+    let fake = FakeAdapter::codex();
+    fake.set_steer_image_input(false);
+    send_now_waits_to_start_an_image_turn_when_steering_is_incompatible(fake, true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_now_waits_to_start_an_image_turn_after_a_turn_without_steering() {
+    send_now_waits_to_start_an_image_turn_when_steering_is_incompatible(
+        FakeAdapter::without_steering(),
+        false,
+    )
+    .await;
+}
+
+async fn send_now_waits_to_start_an_image_turn_when_steering_is_incompatible(
+    fake: FakeAdapter,
+    can_steer_text: bool,
+) {
+    let f = Fixture::new(fake);
+    f.host.stop(&f.chat.id).await.unwrap();
+    f.queue("wait in the paused queue").await;
+    let image = ChatAttachmentContent::from_image_data_url(
+        "Screenshot.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+    )
+    .unwrap();
+    let now = f
+        .host
+        .send_with_attachments(
+            &f.chat.id,
+            None,
+            "Look at this",
+            SendMode::Queue,
+            vec![image.clone()],
+        )
+        .await
+        .unwrap();
+    let first = f.fake.hold_next_submit();
+    f.send("Start this turn").await;
+    // The first submission has been written, but the actor has no active turn yet.
+    f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
+    first.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+
+    assert_eq!(f.submits().len(), 1);
+    assert!(f.message(&now.id).attempts.is_empty());
+    assert!(f.live().await.sending.contains(&now.id));
+
+    if can_steer_text {
+        f.send("Text can steer").await;
+        assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+    }
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submits = f.submits();
+    let expected_submissions = if can_steer_text { 3 } else { 2 };
+    assert_eq!(submits.len(), expected_submissions);
+    let image_turn = submits.last().unwrap();
+    assert_eq!(image_turn.kind, SubmissionKind::StartTurn);
+    assert_eq!(image_turn.attachments, [image]);
+    assert_eq!(f.message(&now.id).attempts.len(), 1);
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    assert_eq!(f.submits().len(), expected_submissions);
+    assert_eq!(f.queued(), ["wait in the paused queue"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
 }
 
 /// Send now on a paused queue starts a turn with that input only; the queue stays
@@ -2215,16 +3855,251 @@ async fn send_now_on_a_paused_queue_sends_only_that_input() {
     let f = Fixture::new(FakeAdapter::codex());
     f.host.stop(&f.chat.id).await.unwrap();
     f.queue("older").await;
-    let now = f.queue("this one now").await;
+    let now = f.send_file("this one now", SendMode::Queue).await;
+    assert_eq!(
+        f.host
+            .prepare_queue_edit(&f.chat.id, &now.id)
+            .await
+            .unwrap(),
+        ("this one now".to_owned(), vec![saved_file()])
+    );
 
     f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
     settle().await;
+    assert!(
+        !f.host
+            .confirm_queue_edit(&f.chat.id, &now.id, "late-edit")
+            .await
+            .unwrap()
+    );
 
     let texts = |f: &Fixture| f.submits().into_iter().map(|s| s.text).collect::<Vec<_>>();
     assert_eq!(texts(&f), ["this one now"]);
+    assert_eq!(f.submits()[0].attachments, [saved_file()]);
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     assert_eq!(texts(&f), ["this one now"], "the paused queue stays paused");
     assert_eq!(f.queued(), ["older"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_auto_send_replay_keeps_prepared_and_confirmed_queue_edits_held() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let chat_id = &f.chat.id;
+    let saved = f
+        .host
+        .send(chat_id, Some("original"), "Held input", SendMode::Queue)
+        .await
+        .unwrap();
+    f.host.prepare_queue_edit(chat_id, &saved.id).await.unwrap();
+
+    for confirmed in [false, true] {
+        if confirmed {
+            assert!(
+                f.host
+                    .confirm_queue_edit(chat_id, &saved.id, "edit")
+                    .await
+                    .unwrap()
+            );
+        }
+        let replay = f
+            .host
+            .send(chat_id, Some("original"), "Held input", SendMode::Auto)
+            .await
+            .unwrap();
+        settle().await;
+
+        assert_eq!(replay.id, saved.id);
+        assert_eq!(replay.editing, confirmed);
+        assert_eq!(f.submits().len(), 1);
+        assert!(!f.core().chat(chat_id).unwrap().queue_paused);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_dropped_native_prepare_reply_leaves_the_queue_eligible_for_dispatch() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let saved = f.queue("Queued next").await;
+    let mut prepare = Box::pin(f.host.prepare_queue_edit(&f.chat.id, &saved.id));
+    // Enqueue the command on the active supervisor before dropping its reply.
+    poll_fn(|context| {
+        assert!(prepare.as_mut().poll(context).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    drop(prepare);
+
+    assert!(f.live().await.prepared_queue_edits.is_empty());
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let sent = f.submits();
+    assert_eq!(sent.len(), 2);
+    assert_eq!(sent[1].text, "Queued next");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unadopted_queue_edit_keeps_original_snapshots_through_host_restart() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let queued = f.send_file("Recover this draft", SendMode::Queue).await;
+
+    // The prepared response never reaches a composer that can adopt it.
+    let ignored = f
+        .host
+        .prepare_queue_edit(&f.chat.id, &queued.id)
+        .await
+        .unwrap();
+    drop(ignored);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(
+        f.submits().len(),
+        1,
+        "the prepared edit must not flow into dispatch"
+    );
+    assert_eq!(f.queued(), ["Recover this draft"]);
+    f.host.quit().await;
+
+    let after_restart = start_host(&f.path, &f.storage_up, &f.fake);
+    let snapshot = after_restart
+        .prepare_queue_edit(&f.chat.id, &queued.id)
+        .await
+        .unwrap();
+    assert_eq!(snapshot.0, "Recover this draft");
+    assert_eq!(snapshot.1[0].bytes(), b"snapshot");
+    assert_eq!(f.queued(), ["Recover this draft"]);
+
+    assert!(
+        after_restart
+            .confirm_queue_edit(&f.chat.id, &queued.id, "renderer-adopted")
+            .await
+            .unwrap()
+    );
+    assert!(
+        after_restart
+            .confirm_queue_edit(&f.chat.id, &queued.id, "renderer-adopted")
+            .await
+            .unwrap()
+    );
+    assert_eq!(f.queued(), ["Recover this draft"]);
+    after_restart.quit().await;
+    let reopened = start_host(&f.path, &f.storage_up, &f.fake);
+    assert!(
+        reopened
+            .send_queued_now(&f.chat.id, &queued.id)
+            .await
+            .is_err()
+    );
+    reopened.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(
+        f.submits().len(),
+        1,
+        "neither queue action sent the held original"
+    );
+    assert_eq!(
+        reopened
+            .prepare_queue_edit(&f.chat.id, &queued.id)
+            .await
+            .unwrap(),
+        ("Recover this draft".to_owned(), vec![saved_file()])
+    );
+    let saved = reopened
+        .send_replacing(
+            &f.chat.id,
+            Some("save-edit"),
+            "Edited",
+            SendMode::Queue,
+            vec![saved_file()],
+            vec![queued.id.clone()],
+        )
+        .await
+        .unwrap();
+    let duplicate = reopened
+        .send_replacing(
+            &f.chat.id,
+            Some("save-edit"),
+            "Edited",
+            SendMode::Queue,
+            vec![saved_file()],
+            vec![queued.id.clone()],
+        )
+        .await
+        .unwrap();
+    assert_eq!(duplicate.id, saved.id);
+    assert_eq!(f.queued(), ["Edited"]);
+
+    f.core().withdraw_chat_input(&f.chat.id, &saved.id).unwrap();
+    let retired = reopened
+        .send_replacing(
+            &f.chat.id,
+            Some("save-edit"),
+            "Edited",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![queued.id],
+        )
+        .await
+        .unwrap();
+    settle().await;
+    assert_eq!(retired.id, saved.id);
+    assert!(retired.message.is_none());
+    assert!(f.queued().is_empty());
+    assert_eq!(f.submits().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unadopted_queue_edit_reports_its_hold_and_resume_sends_the_original() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let queued = f.send_file("Unadopted edit", SendMode::Queue).await;
+    f.queue("Next").await;
+
+    // The request reached the host, but its reply never reached a composer.
+    drop(
+        f.host
+            .prepare_queue_edit(&f.chat.id, &queued.id)
+            .await
+            .unwrap(),
+    );
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.submits().len(), 1);
+    assert!(f.live().await.prepared_queue_edits.contains(&queued.id));
+
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert!(f.live().await.prepared_queue_edits.is_empty());
+    let submissions = f.submits();
+    assert_eq!(submissions.len(), 2);
+    assert_eq!(submissions[1].text, "Unadopted edit");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    assert_eq!(f.queued(), ["Next"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn removing_an_abandoned_edit_releases_the_following_queue_entry() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.send("first").await;
+    let abandoned = f.send_file("Abandoned edit", SendMode::Queue).await;
+    f.queue("Next").await;
+    f.host
+        .prepare_queue_edit(&f.chat.id, &abandoned.id)
+        .await
+        .unwrap();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(f.submits().len(), 1);
+
+    f.core()
+        .withdraw_chat_input(&f.chat.id, &abandoned.id)
+        .unwrap();
+    f.host.notify_changed(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(
+        f.submits()
+            .into_iter()
+            .map(|submission| submission.text)
+            .collect::<Vec<_>>(),
+        ["first", "Next"]
+    );
 }
 
 /// Without steering, a turn in progress cannot take it now: it stays in the queue.
@@ -2377,6 +4252,7 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
     }))
     .await;
     assert_eq!(f.live().await.context.unwrap().usage.used, 124_000);
+    let queued = f.send_file("Read this", SendMode::Queue).await;
 
     let full = f
         .host
@@ -2405,7 +4281,65 @@ async fn a_setting_changed_during_a_turn_is_held_until_it_ends() {
     // Nothing reaches the harness while the turn runs.
     assert!(setting_changes(&f).is_empty());
 
+    f.fake.script_submit(SubmitReply::Reject(
+        "the selected settings cannot read the file".into(),
+    ));
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let written = f.fake.written();
+    let Some(
+        [
+            Written::Setting(_),
+            Written::Setting(_),
+            Written::Submit(submitted),
+        ],
+    ) = written.get(1..)
+    else {
+        panic!("both setting changes should precede the queued message: {written:?}");
+    };
+    assert_eq!(submitted.text, "Read this");
+    assert_eq!(submitted.attachments, [saved_file()]);
+    assert_eq!(f.queued(), ["Read this"]);
+    assert!(matches!(
+        f.live().await.problem,
+        Some(ChatProblem::DispatchRefused { .. })
+    ));
+    assert_eq!(
+        f.host
+            .prepare_queue_edit(&f.chat.id, &queued.id)
+            .await
+            .unwrap(),
+        ("Read this".to_owned(), vec![saved_file()])
+    );
+    // An interrupted edit can abandon the response. Its saved entry and
+    // original bytes are still available to the next composer.
+    assert_eq!(f.queued(), ["Read this"]);
+    assert_eq!(
+        f.host
+            .prepare_queue_edit(&f.chat.id, &queued.id)
+            .await
+            .unwrap(),
+        ("Read this".to_owned(), vec![saved_file()])
+    );
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &queued.id, "accepted-edit")
+            .await
+            .unwrap()
+    );
+    assert_eq!(f.queued(), ["Read this"]);
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &queued.id, "accepted-edit")
+            .await
+            .unwrap()
+    );
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &queued.id, "other-edit")
+            .await
+            .unwrap()
+    );
 
     let mut sent: Vec<String> = setting_changes(&f)
         .into_iter()
@@ -2797,7 +4731,7 @@ async fn a_turn_ticketd_stops_records_why_for_each_reason() {
 
     let f = Fixture::new(FakeAdapter::codex());
     f.send("first").await;
-    f.host.begin_restore().await;
+    f.host.begin_restore().await.unwrap();
     assert_eq!(f.first_ending(), stopped(StopReason::Restore));
 
     let f = Fixture::new(FakeAdapter::codex());
@@ -3431,7 +5365,10 @@ async fn a_restore_keeps_only_the_unconfirmed_permission_cleanup() {
         chat_id: f.chat.id.clone(),
         reason,
     };
-    assert_eq!(unconfirmed.as_slice(), std::slice::from_ref(&warning));
+    assert_eq!(
+        unconfirmed.unwrap().as_slice(),
+        std::slice::from_ref(&warning)
+    );
     assert!(f.host.live().is_empty());
 
     // A failed replacement also releases the restore gate.
@@ -3440,7 +5377,7 @@ async fn a_restore_keeps_only_the_unconfirmed_permission_cleanup() {
         f.host.resume(&f.chat.id, ResumeMode::Native).await,
         Err(HostError::PermissionRestartCleanupUnconfirmed)
     ));
-    assert_eq!(f.host.begin_restore().await, [warning]);
+    assert_eq!(f.host.begin_restore().await.unwrap(), [warning]);
     Workspace::restore(&f.path, &backup).unwrap();
     f.host.finish_restore();
 
@@ -3530,6 +5467,112 @@ async fn a_permission_restart_does_not_open_when_chat_turns_off_during_close() {
     assert_eq!(opens[1].settings.permission.as_deref(), Some("ask"));
     assert_eq!(f.submits()[1].text, "send this first");
     assert_eq!(f.queued(), ["queued before turning off"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn chat_off_declines_an_open_that_finishes_while_storage_recovery_is_pending() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let release_open = f.fake.hold_next_open();
+    f.send("first").await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
+    assert!(f.fake.opens().is_empty());
+    f.storage_up.store(false, Ordering::SeqCst);
+
+    let warnings = f.host.turn_off().await;
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].reason.contains("still starting"));
+    assert!(f.fake.written().is_empty());
+
+    release_open.send(()).unwrap();
+    settle().await;
+    let late = f.fake.opens()[0].generation;
+    assert_eq!(f.fake.written(), [Written::Close(late)]);
+    assert!(!f.host.live()[&f.chat.id].running);
+
+    f.storage_up.store(true, Ordering::SeqCst);
+    f.host.turn_on();
+    f.host.resume_queue(&f.chat.id).await.unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.submits()[0].text, "first");
+}
+
+#[tokio::test(start_paused = true)]
+async fn chat_off_keeps_a_delayed_context_completion_for_recovery() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let (path, storage) = (f.path.clone(), f.storage_up.clone());
+    let hold_refresh = Arc::new(AtomicBool::new(false));
+    let source_holds = hold_refresh.clone();
+    let (started, refreshing) = tokio::sync::oneshot::channel();
+    let (release, permit) = std::sync::mpsc::channel();
+    let pending = std::sync::Mutex::new(Some((started, permit)));
+    f.host = ChatHost::with_context(
+        Arc::new(move || {
+            if storage.load(Ordering::SeqCst) {
+                WorkspaceSession::for_file(&path)?.workspace()
+            } else {
+                Err(Error::NoDataDirectory)
+            }
+        }),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |_| {
+            if source_holds.load(Ordering::SeqCst)
+                && let Some((started, permit)) = pending.lock().unwrap().take()
+            {
+                let _ = started.send(());
+                permit.recv().unwrap();
+            }
+            Ok(Some("ticketd context".to_owned()))
+        })),
+    )
+    .unwrap();
+
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    hold_refresh.store(true, Ordering::SeqCst);
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    refreshing.await.unwrap();
+    f.storage_up.store(false, Ordering::SeqCst);
+    assert!(f.host.turn_off().await.is_empty());
+
+    release.send(()).unwrap();
+    settle().await;
+    f.storage_up.store(true, Ordering::SeqCst);
+    f.host.turn_on();
+    f.host.attach(&f.chat.id).await.unwrap();
+    f.send("after enabling").await;
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 2);
+    assert!(f.submits()[1].text.ends_with("after enabling"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn chat_off_keeps_the_pending_dispatch_result_for_recovery() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let pending = f.fake.hold_next_submit();
+    let first = f.send("first").await;
+    let attempt = f.message(&first.id).attempts[0].id.clone();
+    f.storage_up.store(false, Ordering::SeqCst);
+    assert!(f.host.turn_off().await.is_empty());
+
+    pending.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+    f.storage_up.store(true, Ordering::SeqCst);
+    f.host.turn_on();
+    f.host.attach(&f.chat.id).await.unwrap();
+    settle().await;
+    f.send("after enabling").await;
+
+    let original = f.message(&first.id);
+    assert_eq!(original.attempts.len(), 1);
+    assert_eq!(original.attempts[0].id, attempt);
+    assert_eq!(original.attempts[0].delivery, ChatDelivery::Uncertain);
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 2);
+    assert_eq!(f.submits()[1].text, "after enabling");
 }
 
 #[tokio::test(start_paused = true)]

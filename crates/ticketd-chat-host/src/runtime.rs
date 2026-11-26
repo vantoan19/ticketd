@@ -7,9 +7,9 @@ use serde_json::Value;
 
 use crate::json_rpc::{CallOutcome, Connection, Peer, RpcError, WriteFailure};
 use crate::{
-    DeliveryEvidence, DispatchOutcome, EventKind, InteractionResolution, InterruptOutcome,
-    NativeRequestId, NativeTurnId, Refusal, RespondOutcome, RuntimeGeneration, SubmissionId,
-    SubmissionKind, TurnEvidence, TurnOutcome,
+    AutomationPromptAdmission, DeliveryEvidence, DispatchOutcome, EventKind, InteractionResolution,
+    InterruptOutcome, NativeRequestId, NativeTurnId, Refusal, RespondOutcome, RuntimeGeneration,
+    SubmissionId, SubmissionKind, TurnEvidence, TurnOutcome,
 };
 
 // Checked commands for a runtime over JSON-RPC. The codec prepares frames and
@@ -30,11 +30,12 @@ impl<P: Peer> Connection<P> {
         prepare: impl FnOnce(&mut P) -> Result<(Value, P::Call), Refusal>,
         acknowledged_turn: impl FnOnce(&Value) -> Option<NativeTurnId>,
         rejection_reason: impl FnOnce(&RpcError) -> String,
+        admission: Option<AutomationPromptAdmission>,
     ) -> DispatchOutcome {
         if let Err(refusal) = self.check_generation(generation) {
             return DispatchOutcome::NotSent(refusal);
         }
-        match self.call(method, prepare).await {
+        match self.call_with_admission(method, prepare, admission).await {
             CallOutcome::Refused(refusal) => DispatchOutcome::NotSent(refusal),
             CallOutcome::Reply(result) => match acknowledged_turn(&result) {
                 Some(turn) => DispatchOutcome::Acknowledged { turn },

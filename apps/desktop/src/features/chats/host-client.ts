@@ -1,6 +1,6 @@
 import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
 import {
   ChatError,
@@ -26,6 +26,10 @@ import {
 import { loadPreferences, setPreference } from "@/lib/preferences";
 import { projectSchema } from "@/lib/api/client";
 import { typedReference } from "@/features/tickets/ticket-references";
+import {
+  CaptureError,
+  captureChatAttachment,
+} from "@/features/chats/composer-attachments";
 
 /** The fields of `show_ticket`'s reply a linked ticket needs. */
 const exactTicketSchema = z.object({
@@ -68,6 +72,7 @@ export type HostBridge = {
   /** A value to pass as a command argument; the backend sends messages to it. */
   channel(onMessage: (message: unknown) => void): unknown;
   pickFolder(): Promise<string | null>;
+  saveFile(name: string): Promise<string | null>;
   /** The person's Experimental choice, kept on this computer. */
   stored: { get(): boolean; set(enabled: boolean): boolean };
 };
@@ -86,6 +91,8 @@ export function tauriBridge(): HostBridge {
       const picked = await open({ directory: true, multiple: false });
       return typeof picked === "string" ? picked : null;
     },
+    saveFile: (name) =>
+      save({ title: "Save Chat attachment", defaultPath: name }),
     stored: {
       get: () => loadPreferences().chat,
       set: (enabled) => setPreference("chat", enabled),
@@ -95,6 +102,10 @@ export function tauriBridge(): HostBridge {
 
 const failureSchema = z.object({
   code: z.enum(["stale", "gone", "failed", "project_archived"]),
+  message: z.string(),
+});
+const invalidAttachment = z.object({
+  code: z.literal("invalid_attachment"),
   message: z.string(),
 });
 const stoppingSchema = z.object({
@@ -308,10 +319,53 @@ export function createHostChatClient(
         close(feed);
       };
     },
-    send: (id, text, links = []) =>
-      run("chat_send", { chatId: id, text, queue: false, links }),
-    queue: (id, text, links = []) =>
-      run("chat_send", { chatId: id, text, queue: true, links }),
+    send: (id, text, links = [], attachments, queueEdit) =>
+      run("chat_send", {
+        chatId: id,
+        text,
+        queue: false,
+        links,
+        ...(attachments && { attachments }),
+        ...(queueEdit && { queueEdit }),
+      }),
+    async captureAttachment(file) {
+      const limit = z
+        .number()
+        .int()
+        .positive()
+        .parse(await bridge.invoke("attachment_upload_limit"));
+      return captureChatAttachment(file, limit, async (attachment) => {
+        let reply: unknown;
+        try {
+          reply = await bridge.invoke("chat_capture_attachment", {
+            attachment,
+          });
+        } catch (reason) {
+          const failure = invalidAttachment.safeParse(reason);
+          if (failure.success) throw new CaptureError(failure.data.message);
+          throw reason;
+        }
+        return z.string().parse(reply);
+      });
+    },
+    async exportAttachment(id, file) {
+      const destination = await bridge.saveFile(file.name);
+      if (destination)
+        await run("chat_export_attachment", {
+          chatId: id,
+          id: file.id,
+          destination,
+        });
+    },
+    queue: (id, text, links = [], attachments, queueEdit) =>
+      run("chat_send", {
+        chatId: id,
+        text,
+        queue: true,
+        links,
+        ...(attachments && { attachments }),
+        ...(queueEdit && { queueEdit }),
+      }),
     linkedTo: async (link) =>
       z.array(chatSummarySchema).parse(await call("chat_linked_to", { link })),
     folderFiles: async (folder, query) =>
@@ -320,6 +374,35 @@ export function createHostChatClient(
         .parse(await call("chat_files", { path: folder, query })),
     removeQueued: (id, queuedId) =>
       run("chat_remove_queued", { chatId: id, queuedId }),
+    editQueued: async (id, queuedId) =>
+      z
+        .object({
+          text: z.string(),
+          attachments: z.array(
+            z.object({ name: z.string(), dataUrl: z.string() }),
+          ),
+        })
+        .parse(
+          await call("chat_remove_queued", {
+            chatId: id,
+            queuedId,
+            edit: true,
+          }),
+        ),
+    checkQueueEdits: async (id, saves, removals) =>
+      z
+        .object({ saved: z.array(z.string()), removed: z.array(z.string()) })
+        .parse(
+          await call("chat_check_queue_edits", { chatId: id, saves, removals }),
+        ),
+    confirmQueueEdit: async (id, queuedId, transferId) =>
+      z.boolean().parse(
+        await call("chat_confirm_queue_edit", {
+          chatId: id,
+          queuedId,
+          transferId,
+        }),
+      ),
     resumeQueue: (id) => run("chat_resume_queue", { chatId: id }),
     sendQueuedNow: (id, queuedId) =>
       run("chat_send_queued_now", { chatId: id, queuedId }),

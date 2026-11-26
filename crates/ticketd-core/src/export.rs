@@ -116,7 +116,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_messages",
-        "id, chat_id, position, role, text, complete, turn_id, created_at",
+        "id, chat_id, position, role, text, complete, turn_id, created_at, editing, requires_link_context",
     ),
     (
         "chat_submission_attempts",
@@ -192,6 +192,10 @@ const OMITTED_TABLES: &[(&str, &str)] = &[
     (
         "automation_settings",
         "device-local: how many runs execute at once",
+    ),
+    (
+        "chat_attachments",
+        "device-local Chat snapshots retained with their bytes in complete Workspace backups",
     ),
     (
         "chat_changes",

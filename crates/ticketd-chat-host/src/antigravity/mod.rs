@@ -11,13 +11,14 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use ticketd_core::ChatAttachmentContent;
 use ticketd_core::harnesses::ANTIGRAVITY;
 
 use crate::install::{LaunchEnvironment, Os, is_executable, parse_version};
 use crate::stdio::{Serving, spawn_configured, version_output};
 use crate::{
     Capabilities, Capability, Harness, HarnessAdapter, HarnessOptions, Inspection, LoginState,
-    OpenRequest, OpenedRuntime, Problem, ProblemKind, Setting,
+    OpenRequest, OpenedRuntime, Problem, ProblemKind, Refusal, Setting,
 };
 
 pub(crate) use steps::read_steps;
@@ -76,6 +77,11 @@ fn problem(kind: ProblemKind, message: impl Into<String>) -> Problem {
 impl HarnessAdapter for Antigravity {
     fn harness(&self) -> Harness {
         &ANTIGRAVITY
+    }
+
+    fn attachment_refusal(&self, _: &[ChatAttachmentContent]) -> Option<Refusal> {
+        // Only the ACP handshake establishes whether this runtime accepts images.
+        None
     }
 
     async fn inspect(&self) -> Inspection {

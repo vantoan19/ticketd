@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use tokio::sync::mpsc;
+use tokio::sync::{Mutex, OwnedMutexGuard, mpsc};
 
 /// Capacity of a runtime's event channel. The supervisor keeps receiving while
 /// commands are pending. Each adapter handles saturation in its transport.
@@ -204,6 +204,58 @@ pub struct Submission {
     pub generation: RuntimeGeneration,
     pub kind: SubmissionKind,
     pub text: String,
+    pub attachments: Vec<ticketd_core::ChatAttachmentContent>,
+}
+
+/// Holds one Automation run's dispatch fence from the final ownership check
+/// through its Prompt's transport write.
+pub struct AutomationPromptAdmission {
+    pub(crate) fence: Arc<Mutex<()>>,
+    pub(crate) open_workspace: crate::host::WorkspaceOpener,
+    pub(crate) lifecycle: Arc<crate::host::HostLifecycle>,
+    pub(crate) workspace_generation: u64,
+    pub(crate) chat_id: String,
+    pub(crate) run_id: String,
+}
+
+impl AutomationPromptAdmission {
+    pub async fn lock(&self) -> OwnedMutexGuard<()> {
+        self.fence.clone().lock_owned().await
+    }
+
+    /// Rechecks independently ended runs immediately before attempting the write.
+    pub fn check(&self) -> Result<(), Refusal> {
+        if self.lifecycle.serving().is_err() {
+            return Err(Refusal::RuntimeClosed);
+        }
+        let workspace =
+            (self.open_workspace)().map_err(|_| Refusal::AutomationPromptOwnershipUnavailable)?;
+        // The lease pins the file until this check is finished. Admission also
+        // owns the input pipe, which restore must quiesce before swapping files.
+        if !self
+            .lifecycle
+            .serves_workspace_generation(self.workspace_generation)
+        {
+            return Err(Refusal::RuntimeClosed);
+        }
+        match workspace.automation_chat_owned_by_run(&self.chat_id, &self.run_id) {
+            Ok(true) => Ok(()),
+            Ok(false) => Err(Refusal::AutomationPromptNotAllowed),
+            Err(_) => Err(Refusal::AutomationPromptOwnershipUnavailable),
+        }
+    }
+
+    pub(crate) async fn for_write(
+        admission: Option<Self>,
+    ) -> Result<Option<OwnedMutexGuard<()>>, Refusal> {
+        if let Some(admission) = admission {
+            let guard = admission.lock().await;
+            admission.check()?;
+            Ok(Some(guard))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -281,8 +333,18 @@ pub enum Refusal {
     UnknownRequest,
     /// The effective capabilities do not include this operation.
     Unsupported,
+    /// The active harness or model explicitly excludes image input.
+    ImageInputUnsupported,
+    /// An image exceeds this harness's input size limit.
+    ImageInputTooLarge,
+    /// The host could not prepare a readable handoff copy from a saved snapshot.
+    AttachmentUnavailable,
     /// The runtime was closed, replaced or lost before the write.
     RuntimeClosed,
+    /// The Automation has lost ownership at the write boundary.
+    AutomationPromptNotAllowed,
+    /// The Host could not read Automation ownership at the write boundary.
+    AutomationPromptOwnershipUnavailable,
 }
 
 impl Refusal {
@@ -294,8 +356,24 @@ impl Refusal {
             Self::StartUnconfirmed => "the harness has not confirmed the previous message",
             Self::UnknownRequest => "the request was no longer open",
             Self::Unsupported => "the harness can't do that here",
+            Self::ImageInputUnsupported => "image input is unavailable for this Chat",
+            Self::ImageInputTooLarge => "an attached image is too large for the harness",
+            Self::AttachmentUnavailable => {
+                "the Chat could not prepare an attachment file for the harness"
+            }
             Self::RuntimeClosed => "the harness session had closed",
+            Self::AutomationPromptNotAllowed => "the Automation no longer had confirmed ownership",
+            Self::AutomationPromptOwnershipUnavailable => {
+                "ticketd could not check whether the Automation still owned this Chat"
+            }
         }
+    }
+
+    pub(crate) fn attachment_error(&self) -> ticketd_core::Error {
+        ticketd_core::Error::Chat(format!(
+            "Chat attachments could not be sent: {}.",
+            self.reason()
+        ))
     }
 }
 
@@ -942,6 +1020,15 @@ impl ProviderDetail {
 pub trait HarnessAdapter: Send + Sync {
     fn harness(&self) -> Harness;
 
+    /// Static attachment constraints. The live runtime rechecks the current model and
+    /// permissions when it prepares the saved input for delivery.
+    fn attachment_refusal(
+        &self,
+        attachments: &[ticketd_core::ChatAttachmentContent],
+    ) -> Option<Refusal> {
+        (!attachments.is_empty()).then_some(Refusal::Unsupported)
+    }
+
     /// Probes the installation, login and capabilities without starting a session.
     async fn inspect(&self) -> Inspection;
 
@@ -996,9 +1083,33 @@ pub struct OpenedRuntime {
 /// concurrently and must not block the adapter's protocol reader.
 #[async_trait]
 pub trait HarnessRuntime: Send + Sync + std::fmt::Debug {
+    /// Whether the selected model accepts image input, if the harness reported it.
+    fn supports_image_input(&self) -> Option<bool> {
+        None
+    }
+
+    /// A running turn can be served by a different model from the next turn.
+    fn supports_steer_image_input(&self) -> Option<bool> {
+        self.supports_image_input()
+    }
+
     /// Hands input to the harness after rechecking generation and expected turn
     /// immediately before the write.
     async fn submit(&self, submission: Submission) -> DispatchOutcome;
+
+    /// The built-in unattended runtimes hold the admission through the bounded
+    /// write, then release it before waiting for evidence from the harness.
+    async fn submit_with_admission(
+        &self,
+        submission: Submission,
+        admission: Option<AutomationPromptAdmission>,
+    ) -> DispatchOutcome {
+        let _guard = match AutomationPromptAdmission::for_write(admission).await {
+            Ok(guard) => guard,
+            Err(refusal) => return DispatchOutcome::NotSent(refusal),
+        };
+        self.submit(submission).await
+    }
 
     /// Answers a live approval or question. Each request accepts one answer.
     async fn respond(&self, response: InteractionResponse) -> RespondOutcome;

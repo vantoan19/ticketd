@@ -564,6 +564,79 @@ describe("input lifecycle", () => {
     expect(h.events.map((event) => event.event)).not.toContain("accepted");
   });
 
+  it("hands text, a native image and a file snapshot reference to the SDK as one prompt", async () => {
+    const h = harness();
+    const fake = await h.open(1, { permission_mode: "plan" });
+    const path = join(CWD, "attachment-123.txt");
+    await h.send(
+      submit("s1", {
+        text: "Compare the screenshot and these notes",
+        attachments: [
+          { type: "image", media_type: "image/png", data: "iVBORw0KGgo=" },
+          { type: "file", name: "notes.txt", path },
+        ],
+      }),
+    );
+    expect(h.named("command_rejected")).toEqual([]);
+    expect(fake.options.permissionMode).toBe("plan");
+    expect((await fake.readInput()).message).toEqual({
+      role: "user",
+      content: [
+        { type: "text", text: "Compare the screenshot and these notes" },
+        {
+          type: "image",
+          source: {
+            type: "base64",
+            media_type: "image/png",
+            data: "iVBORw0KGgo=",
+          },
+        },
+        {
+          type: "text",
+          text: `Read this Chat attachment snapshot: ${JSON.stringify({ name: "notes.txt", path })}`,
+        },
+      ],
+    });
+    expect(h.named("input_handed_to_sdk")).toMatchObject([
+      { submission_id: "s1" },
+    ]);
+  });
+
+  it("rejects unsupported image content and accepts the corrected file-only prompt", async () => {
+    const h = harness();
+    const fake = await h.open();
+    await h.send(
+      submit("s1", {
+        text: "",
+        attachments: [
+          { type: "image", media_type: "image/svg+xml", data: "PHN2Zz4=" },
+        ],
+      }),
+    );
+    expect(h.named("command_rejected")).toMatchObject([
+      { id: "c2", code: "invalid_command" },
+    ]);
+    expect(h.named("input_handed_to_sdk")).toEqual([]);
+
+    const path = join(CWD, "attachment-123.txt");
+    await h.send(
+      submit("s1", {
+        text: "",
+        attachments: [{ type: "file", name: "notes.txt", path }],
+      }),
+    );
+    expect(h.named("command_rejected")).toHaveLength(1);
+    expect((await fake.readInput()).message).toEqual({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Read this Chat attachment snapshot: ${JSON.stringify({ name: "notes.txt", path })}`,
+        },
+      ],
+    });
+  });
+
   it("keeps one active turn unless the host explicitly sends into it", async () => {
     const h = harness();
     await h.open();

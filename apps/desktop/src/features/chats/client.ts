@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { z } from "zod";
 import { attachmentSchema } from "@/lib/api/attachments";
+import type { ChatAttachmentInput } from "@/features/chats/composer-attachments";
 
 /**
  * What the desktop host tells the Chat screens, and what they may ask of it.
@@ -395,6 +396,12 @@ const changedFileSchema = z.object({
   confirmed: z.boolean(),
 });
 export type ChangedFile = z.infer<typeof changedFileSchema>;
+const chatAttachmentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  media_type: z.string(),
+});
+export type ChatAttachment = z.infer<typeof chatAttachmentSchema>;
 export const transcriptItemSchema = z.discriminatedUnion("kind", [
   z.object({
     ...item,
@@ -413,6 +420,7 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     steer: z.boolean().optional(),
     /** Images sent with the message, kept as Attachments. */
     images: z.array(attachmentSchema).optional(),
+    attachments: z.array(chatAttachmentSchema).optional(),
   }),
   z.object({
     ...item,
@@ -681,6 +689,7 @@ export const chatStateSchema = z.object({
   /** Whether Send can reach the turn in progress; otherwise input is queued. */
   steering: z.object({
     available: z.boolean(),
+    images_refused: z.boolean().optional(),
     /** What steering does to running work, as the harness defines it. */
     effect: z.string().nullish(),
   }),
@@ -691,6 +700,8 @@ export const chatStateSchema = z.object({
     z.object({
       id: z.string(),
       text: z.string(),
+      attachments: z.array(chatAttachmentSchema).optional(),
+      editing: z.boolean().optional(),
       /** Sent to steer, and the harness did not take it: the host's reason. */
       refused_steer: z.string().nullish(),
     }),
@@ -833,6 +844,9 @@ export class ChatError extends Error {
   }
 }
 
+export type QueueEditSave = { commandId: string; messageIds: string[] };
+export type QueueEditStatus = { saved: string[]; removed: string[] };
+
 export interface ChatClient {
   /** The Experimental switch. Off by default. */
   getEnabled(): Promise<boolean>;
@@ -873,6 +887,7 @@ export interface ChatClient {
     folder: string | null;
     links: LinkRef[];
     message: string;
+    attachments?: ChatAttachmentInput[];
     /** New Chat's picks: option ids the harness offered. Unset keeps its own setting. */
     model?: string;
     effort?: string;
@@ -889,13 +904,43 @@ export interface ChatClient {
    * Starts a turn, or steers the one in progress; the host queues it when steering is known not to have been accepted.
    * `links` are the records the message mentions or quotes: linked as it is sent (spec 21.4).
    */
-  send(id: string, text: string, links?: LinkRef[]): Promise<void>;
-  queue(id: string, text: string, links?: LinkRef[]): Promise<void>;
+  send(
+    id: string,
+    text: string,
+    links?: LinkRef[],
+    attachments?: ChatAttachmentInput[],
+    queueEdit?: QueueEditSave,
+  ): Promise<void>;
+  captureAttachment(file: File): Promise<ChatAttachmentInput>;
+  exportAttachment(id: string, file: ChatAttachment): Promise<void>;
+  queue(
+    id: string,
+    text: string,
+    links?: LinkRef[],
+    attachments?: ChatAttachmentInput[],
+    queueEdit?: QueueEditSave,
+  ): Promise<void>;
   /** The Chats outside the trash linked to one record. Refetch on `revision`. */
   linkedTo(link: LinkRef): Promise<ChatSummary[]>;
   /** Files and folders under `folder` matching `query`, for the composer's `@` menu. */
   folderFiles(folder: string, query: string): Promise<FolderFile[]>;
   removeQueued(id: string, queuedId: string): Promise<void>;
+  editQueued(
+    id: string,
+    queuedId: string,
+  ): Promise<{ text: string; attachments: ChatAttachmentInput[] }>;
+  /** Reads save receipts and checks whether explicitly removed originals still exist. */
+  checkQueueEdits(
+    id: string,
+    saves: string[],
+    removals: string[],
+  ): Promise<QueueEditStatus>;
+  /** Holds the original message for editing after the draft displays its snapshot. */
+  confirmQueueEdit(
+    id: string,
+    queuedId: string,
+    transferId: string,
+  ): Promise<boolean>;
   resumeQueue(id: string): Promise<void>;
   /** Sends one queued message now, alone: it steers the turn or starts one; a paused queue stays paused. */
   sendQueuedNow(id: string, queuedId: string): Promise<void>;

@@ -15,9 +15,10 @@ use ticketd_chat_host::{
 };
 use ticketd_core::harnesses::{ResumePolicy, descriptor};
 use ticketd_core::{
-    Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatInteraction, ChatInteractionKind,
-    ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
-    ChatSuggestion, ChatTool, ChatToolState, ChatTurn, ChatTurnState, SuggestedTicket,
+    Chat, ChatAgentChange, ChatAttachment, ChatDelivery, ChatInputStanding, ChatInteraction,
+    ChatInteractionKind, ChatInteractionState, ChatItem, ChatMessage, ChatRole, ChatSessionOrigin,
+    ChatSubmissionIntent, ChatSuggestion, ChatTool, ChatToolState, ChatTurn, ChatTurnState,
+    SuggestedTicket,
 };
 
 use crate::chat_reports::{self, ContextView, FileView, PlanStepView, Report, SettingsView};
@@ -249,6 +250,8 @@ pub enum Item {
         id: String,
         at: String,
         text: String,
+        #[serde(skip_serializing_if = "Vec::is_empty")]
+        attachments: Vec<ChatAttachment>,
         delivery: &'static str,
         /// The turn that took this message, once one did.
         turn_id: Option<String>,
@@ -445,6 +448,7 @@ pub struct Doing {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Steering {
     pub available: bool,
+    pub images_refused: bool,
     pub effect: Option<String>,
 }
 
@@ -452,6 +456,9 @@ pub struct Steering {
 pub struct Queued {
     pub id: String,
     pub text: String,
+    pub editing: bool,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<ChatAttachment>,
     /// It was sent to steer the running turn and the harness did not take it: why, as
     /// the host recorded it. The card says "Couldn't steer; queued".
     pub refused_steer: Option<String>,
@@ -858,9 +865,12 @@ impl Tracker {
             position: 0,
             role: ChatRole::Assistant,
             text: String::new(),
+            attachments: Vec::new(),
             complete: false,
             turn_id: Some(turn_id.to_owned()),
             queued: false,
+            editing: false,
+            requires_link_context: false,
             attempts: Vec::new(),
             created_at: String::new(),
         };
@@ -1459,10 +1469,12 @@ pub fn item(
                 },
             }
         }
+        ChatItem::Message(message) if message.editing && message.queued => return None,
         ChatItem::Message(message) if message.role == ChatRole::User => Item::User {
             id: message.id.clone(),
             at: message.created_at.clone(),
             text: message.text.clone(),
+            attachments: message.attachments.clone(),
             delivery: delivery(message, live)?,
             turn_id: message
                 .attempts
@@ -2052,6 +2064,7 @@ pub fn chat_state(
         catching_up: false,
         steering: Steering {
             available: live.steering.is_some(),
+            images_refused: live.steering_images_refused,
             // Said beside Steer, so the person knows what it does before choosing it.
             effect: live.steering.map(|steering| {
                 if steering.interrupts_tools {
@@ -2067,7 +2080,12 @@ pub fn chat_state(
         ),
         links: around.links.clone(),
         queue: around.queue.clone(),
-        queue_paused: chat.queue_paused,
+        queue_paused: chat.queue_paused
+            || around
+                .queue
+                .iter()
+                .find(|message| !message.editing)
+                .is_some_and(|message| live.prepared_queue_edits.contains(&message.id)),
         context: chat_reports::context(live),
         settings: chat_reports::settings(live),
         unseen: chat.marked_unread
@@ -2179,8 +2197,8 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
 mod tests {
     use super::{
         Chat, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatLive, ChatTool,
-        ChatToolState, ChatTurn, ChatTurnState, Item, Step, Tracker, items, opening, request,
-        steps,
+        ChatToolState, ChatTurn, ChatTurnState, Item, Queued, Step, Surroundings, Tracker,
+        chat_state, items, opening, request, steps,
     };
     use serde_json::json;
     use ticketd_chat_host::{STOPPED_BY_TICKETD, StopReason, TurnEnding};
@@ -2235,6 +2253,28 @@ mod tests {
             muted: false,
             created_at: String::new(),
         }
+    }
+
+    #[test]
+    fn a_prepared_edit_pauses_the_queue_after_held_messages() {
+        let queued = |id: &str, editing| Queued {
+            id: id.to_owned(),
+            text: String::new(),
+            editing,
+            attachments: Vec::new(),
+            refused_steer: None,
+        };
+        let around = Surroundings {
+            queue: vec![queued("held", true), queued("prepared", false)],
+            ..Surroundings::default()
+        };
+        let mut live = ChatLive::idle();
+        let paused = |live: &ChatLive| {
+            chat_state(&chat(None), live, &Tracker::default(), &around).queue_paused
+        };
+        assert!(!paused(&live));
+        live.prepared_queue_edits.insert("prepared".to_owned());
+        assert!(paused(&live));
     }
 
     fn tool(name: &str, input: &str, state: ChatToolState, output: Option<&str>) -> ChatTool {
@@ -3726,9 +3766,12 @@ mod tests {
             position: 3,
             role: ChatRole::User,
             text: "Also post an update".to_owned(),
+            attachments: Vec::new(),
             complete: true,
             turn_id: Some("t1".to_owned()),
             queued: false,
+            editing: false,
+            requires_link_context: false,
             attempts: vec![ChatSubmissionAttempt {
                 id: "a".to_owned(),
                 intent: ChatSubmissionIntent::Steer,
@@ -3829,9 +3872,12 @@ mod tests {
             position: 2,
             role: ChatRole::Assistant,
             text: "Looking".to_owned(),
+            attachments: Vec::new(),
             complete: true,
             turn_id: Some("turn".to_owned()),
             queued: false,
+            editing: false,
+            requires_link_context: false,
             attempts: Vec::new(),
             created_at: "2026-11-25T09:30:00Z".to_owned(),
         };

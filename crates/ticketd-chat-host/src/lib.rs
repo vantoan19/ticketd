@@ -5,6 +5,7 @@
 //! through core workflows.
 
 mod antigravity;
+mod attachment_input;
 pub mod attention;
 mod claude;
 pub mod cli;

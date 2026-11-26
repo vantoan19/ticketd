@@ -1,4 +1,5 @@
 import { renderedLines } from "@/components/ui/rendered-lines";
+import { failureText } from "@/lib/api/describe-failure";
 import {
   Fragment,
   createContext,
@@ -19,6 +20,7 @@ import {
   ChevronDown,
   ChevronRight,
   Clock,
+  Download,
   Eye,
   FilePlus2,
   FileText,
@@ -45,6 +47,7 @@ import { DocumentNavigation } from "@/features/documents/navigation";
 import { StatusIcon } from "@/features/tickets/StatusIcon";
 import {
   useChatClient,
+  type ChatAttachment,
   type ChatState,
   type RecordChange,
   type Step,
@@ -60,6 +63,7 @@ import {
 } from "@/features/chats/TurnReports";
 import {
   binarySize,
+  canPickHistoryMessage,
   duration,
   plainOutput,
   receiptLine,
@@ -114,6 +118,7 @@ export type TranscriptActions = {
   savePlan: (plan: ItemOf<"plan">) => void;
   /** Opens a file the turn changed; rejects with the reason it could not. */
   openFile: (path: string) => Promise<void>;
+  exportAttachment: (file: ChatAttachment) => Promise<void>;
 };
 
 const DELIVERY_CAPTION = {
@@ -199,12 +204,60 @@ function SentText({ text }: { text: string }) {
   );
 }
 
+function SentAttachment({
+  file,
+  exportAttachment,
+}: {
+  file: ChatAttachment;
+  exportAttachment: TranscriptActions["exportAttachment"];
+}) {
+  const [save, setSave] = useState<
+    { status: "saving" } | { status: "failed"; message: string } | null
+  >(null);
+  const errorId = useId();
+  return (
+    <li className="flex max-w-full min-w-0 flex-col items-end">
+      <Button
+        variant="secondary"
+        size="xs"
+        aria-label={`Save ${file.name}`}
+        aria-describedby={save?.status === "failed" ? errorId : undefined}
+        disabled={save?.status === "saving"}
+        onClick={() => {
+          setSave({ status: "saving" });
+          void exportAttachment(file).then(
+            () => setSave(null),
+            (error: unknown) =>
+              setSave({
+                status: "failed",
+                message: failureText(error, `save “${file.name}”`),
+              }),
+          );
+        }}
+      >
+        <Download aria-hidden /> {file.name}
+      </Button>
+      {save?.status === "failed" && (
+        <p id={errorId} role="alert" className="chat-caption wrap-anywhere">
+          {save.message}
+        </p>
+      )}
+    </li>
+  );
+}
+
 /**
  * Your message, exactly as sent, on the right. Past four lines it folds behind
  * Show more. Copy shows beside it on hover or focus; the turn's time is on its
  * work line.
  */
-function UserMessage({ item }: { item: ItemOf<"user"> }) {
+function UserMessage({
+  item,
+  exportAttachment,
+}: {
+  item: ItemOf<"user">;
+  exportAttachment: TranscriptActions["exportAttachment"];
+}) {
   const { opening, waiting, harness } = useContext(UserMessageContext);
   const caption =
     opening && item.delivery === "sending"
@@ -235,18 +288,34 @@ function UserMessage({ item }: { item: ItemOf<"user"> }) {
         {item.images && item.images.length > 0 && (
           <ImageTiles images={item.images} />
         )}
-        <div className="chat-you-box">
-          <div className="chat-you">
-            <div ref={text} data-clamped={more ? undefined : ""}>
-              <span className="sr-only">You: </span>
-              <SentText text={item.text} />
+        {item.text && (
+          <div className="chat-you-box">
+            <div className="chat-you">
+              <div ref={text} data-clamped={more ? undefined : ""}>
+                <span className="sr-only">You: </span>
+                <SentText text={item.text} />
+              </div>
+            </div>
+            <div className="chat-you-actions">
+              {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
+              <CopyButton text={item.text} label="Copy message" />
             </div>
           </div>
-          <div className="chat-you-actions">
-            {/* One copy confirmation everywhere: the shared CopyButton (CH-51). */}
-            <CopyButton text={item.text} label="Copy message" />
-          </div>
-        </div>
+        )}
+        {!!item.attachments?.length && (
+          <ul
+            className="flex max-w-full flex-wrap justify-end gap-1"
+            aria-label="Sent attachments"
+          >
+            {item.attachments.map((file) => (
+              <SentAttachment
+                key={file.id}
+                file={file}
+                exportAttachment={exportAttachment}
+              />
+            ))}
+          </ul>
+        )}
         {long && (
           <Button
             variant="ghost"
@@ -1356,7 +1425,9 @@ const Item = memo(function Item({
         />
       );
     case "user":
-      return <UserMessage item={item} />;
+      return (
+        <UserMessage item={item} exportAttachment={actions.exportAttachment} />
+      );
     case "response":
       // Outside any turn the response is its own final one.
       return (
@@ -1547,7 +1618,8 @@ const excerpt = (text: string) =>
 /**
  * The conversation, in the order things happened, read result-first: each turn's
  * work folds under one row once it ends. In pick mode it becomes the history
- * picker of "Resume in a fresh session": only messages, each with a checkbox.
+ * picker of "Resume in a fresh session": attachments stay visible and only
+ * messages that can be included have a checkbox.
  * `newFrom` is the first item that arrived while the reader was away.
  */
 export function Transcript({
@@ -1628,16 +1700,20 @@ export function Transcript({
           (item) =>
             (item.kind === "user" || item.kind === "response") && (
               <div key={item.id} className="chat-pickrow">
-                <input
-                  type="checkbox"
-                  checked={picked.has(item.id)}
-                  aria-label={
-                    item.kind === "user"
-                      ? `Include your message: ${excerpt(item.text)}`
-                      : `Include the reply: ${excerpt(item.text)}`
-                  }
-                  onChange={(event) => onPick?.(item.id, event.target.checked)}
-                />
+                {canPickHistoryMessage(item) && (
+                  <input
+                    type="checkbox"
+                    checked={picked.has(item.id)}
+                    aria-label={
+                      item.kind === "user"
+                        ? `Include your message: ${excerpt(item.text)}`
+                        : `Include the reply: ${excerpt(item.text)}`
+                    }
+                    onChange={(event) =>
+                      onPick?.(item.id, event.target.checked)
+                    }
+                  />
+                )}
                 <div>
                   <Item
                     item={item}

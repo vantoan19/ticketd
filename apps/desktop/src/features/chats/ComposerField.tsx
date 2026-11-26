@@ -182,6 +182,7 @@ export function ComposerField({
   mentions,
   placeholder,
   autoFocus,
+  readOnly,
   inputRef,
 }: {
   text: string;
@@ -192,14 +193,20 @@ export function ComposerField({
   mentions?: ComposerMentions | undefined;
   placeholder: string;
   autoFocus: boolean;
+  readOnly: boolean;
   inputRef?: Ref<HTMLTextAreaElement> | undefined;
 }) {
   const box = useRef<HTMLTextAreaElement | null>(null);
   const mirror = useRef<HTMLDivElement>(null);
   const listId = useId();
-  const [trigger, setTrigger] = useState<Trigger | null>(null);
+  const [trigger, setTrigger] = useState<(Trigger & { text: string }) | null>(
+    null,
+  );
   /** The trigger Escape closed; it stays closed until another one starts. */
-  const [dismissed, setDismissed] = useState<number | null>(null);
+  const [dismissed, setDismissed] = useState<Pick<
+    Trigger,
+    "start" | "char"
+  > | null>(null);
   const [answer, setAnswer] = useState<Answer | null>(null);
   const [active, setActive] = useState(0);
   const [announce, setAnnounce] = useState("");
@@ -224,8 +231,17 @@ export function ComposerField({
   });
   useLayoutEffect(() => caretAfterPrefill(), []);
 
+  if (trigger && trigger.text !== text) {
+    setTrigger(null);
+    setDismissed(null);
+  }
   const open =
-    trigger && trigger.start !== dismissed && mentions ? trigger : null;
+    !readOnly &&
+    trigger?.text === text &&
+    (trigger.start !== dismissed?.start || trigger.char !== dismissed.char) &&
+    mentions
+      ? trigger
+      : null;
   const openKey = open ? `${open.char}${open.start}:${open.query}` : "";
   const query = open?.query.trim() ?? "";
   const skillSearch = open?.char === "$" ? mentions?.skills : undefined;
@@ -389,6 +405,18 @@ export function ComposerField({
       : null;
   const options = shown?.options ?? [];
 
+  const updateTrigger = (value: string, caret: number) => {
+    const found = triggerAt(value, caret);
+    setTrigger(found && { ...found, text: value });
+    if (
+      dismissed &&
+      (value.charAt(dismissed.start) !== dismissed.char ||
+        (found &&
+          (found.start !== dismissed.start || found.char !== dismissed.char)))
+    )
+      setDismissed(null);
+  };
+
   const changed = (next: string, caret: number) => {
     let nextTokens = reconcile(text, next, tokens, removed.current);
     const pick = inserting.current;
@@ -407,9 +435,7 @@ export function ComposerField({
       ].sort((a, b) => a.start - b.start);
     }
     onChange(next, nextTokens);
-    const found = triggerAt(next, caret);
-    setTrigger(found);
-    if (!found || found.start !== dismissed) setDismissed(null);
+    updateTrigger(next, caret);
   };
 
   const pick = (option: Option) => {
@@ -474,7 +500,8 @@ export function ComposerField({
         // Closes the menu and keeps the text; a second Escape is Stop's.
         event.preventDefault();
         event.stopPropagation();
-        setDismissed(shown.trigger.start);
+        const { start, char } = shown.trigger;
+        setDismissed({ start, char });
         return;
       }
     }
@@ -482,7 +509,7 @@ export function ComposerField({
     const collapsed = caret === textarea.selectionEnd;
     const plain = !event.shiftKey && !event.metaKey && !event.altKey;
     if (collapsed && plain && !event.ctrlKey) {
-      if (event.key === "Backspace" || event.key === "Delete") {
+      if (!readOnly && (event.key === "Backspace" || event.key === "Delete")) {
         const removal = removeToken(
           text,
           tokens,
@@ -641,6 +668,7 @@ export function ComposerField({
           {"​"}
         </div>
         <textarea
+          readOnly={readOnly}
           ref={(node) => {
             box.current = node;
             shareNode(inputRef, node);
@@ -665,7 +693,7 @@ export function ComposerField({
           onSelect={(event) => {
             const target = event.currentTarget;
             if (target.selectionStart !== target.selectionEnd) return;
-            setTrigger(triggerAt(target.value, target.selectionStart));
+            updateTrigger(target.value, target.selectionStart);
           }}
           onScroll={(event) => {
             if (mirror.current)

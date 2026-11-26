@@ -195,11 +195,13 @@ export function RestoreDialog({
   path,
   onClose,
   onRestored,
+  onWorkspaceReplaced,
 }: {
   path: string;
   onClose: () => void;
   /** Reloads open views from the restored workspace. */
   onRestored: () => Promise<void>;
+  onWorkspaceReplaced?: (() => void) | undefined;
 }) {
   const presence = useDialogPresence(onClose);
   const [file, setFile] = useState(path);
@@ -266,10 +268,14 @@ export function RestoreDialog({
       setFailure({ ...failed, sentence: `${failed.sentence} ${UNCHANGED}` });
       return;
     }
+    onWorkspaceReplaced?.();
     let reloadFailure: FailureDescription | null = null;
     try {
-      await recovery.reloadAfterRestore();
-      await onRestored();
+      try {
+        await recovery.reloadAfterRestore();
+      } finally {
+        await onRestored();
+      }
     } catch (reason) {
       reloadFailure = {
         ...describeFailure(reason, "reload open views"),

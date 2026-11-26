@@ -30,46 +30,75 @@ const ticket: LinkedRecord = {
   status: "Todo",
 };
 
-test("Chat about this ticket prefills New Chat and sends nothing until the person does", async () => {
-  const client = createMockChatClient({ enabled: true, records: [ticket] });
-  const create = vi.spyOn(client, "createChat");
-  render(
-    <ChatClientContext value={client}>
-      <ChatProvider>
-        <LinkedChats
-          ticket={{ ...ticket, trashed: false }}
-          folder="/work/api"
-        />
-        <ChatsView />
-      </ChatProvider>
-    </ChatClientContext>,
-  );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Chat about this ticket" }),
-  );
-  const box = await screen.findByRole<HTMLTextAreaElement>("textbox", {
-    name: "Describe a task or ask a question",
-  });
-  expect(box.value).toBe("Work on T-KQ12: Login rate limits");
-  expect(screen.getByRole("button", { name: "Back to T-KQ12" })).toBeTruthy();
-  expect(
-    screen.getByRole("button", { name: "Folder: /work/api" }),
-  ).toBeTruthy();
-  expect(create).not.toHaveBeenCalled();
-
-  await waitFor(() =>
+test.each([false, true])(
+  "Chat about this ticket offers its prompt without changing a file-only draft (file attached: %s)",
+  async (fileOnly) => {
+    const client = createMockChatClient({ enabled: true, records: [ticket] });
+    const create = vi.spyOn(client, "createChat");
+    render(
+      <ChatClientContext value={client}>
+        <ChatProvider>
+          <LinkedChats
+            ticket={{ ...ticket, trashed: false }}
+            folder="/work/api"
+          />
+          <ChatsView />
+        </ChatProvider>
+      </ChatClientContext>,
+    );
+    if (fileOnly) {
+      fireEvent.change(await screen.findByLabelText("Choose files to attach"), {
+        target: {
+          files: [new File(["notes"], "unsent.txt", { type: "text/plain" })],
+        },
+      });
+      await screen.findByRole("button", { name: "Remove unsent.txt" });
+    }
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Chat about this ticket" }),
+    );
+    const textbox = () =>
+      screen.findByRole<HTMLTextAreaElement>("textbox", {
+        name: "Describe a task or ask a question",
+      });
+    if (fileOnly) {
+      expect((await textbox()).value).toBe("");
+      expect(
+        screen.getByRole("button", { name: "Remove unsent.txt" }),
+      ).toBeTruthy();
+      expect(screen.getByText(/Draft kept/)).toBeTruthy();
+      fireEvent.click(
+        screen.getByRole("button", { name: "Use T-KQ12 prompt" }),
+      );
+    }
+    const box = await textbox();
+    expect(box.value).toBe("Work on T-KQ12: Login rate limits");
+    expect(screen.getByRole("button", { name: "Back to T-KQ12" })).toBeTruthy();
     expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: /Send/ }).disabled,
-    ).toBe(false),
-  );
-  fireEvent.keyDown(box, { key: "Enter" });
-  await waitFor(() => expect(create).toHaveBeenCalled());
-  expect(create.mock.calls[0]?.[0]).toMatchObject({
-    folder: "/work/api",
-    links: [{ kind: "ticket", id: "t1" }],
-    message: "Work on T-KQ12: Login rate limits",
-  });
-});
+      screen.getByRole("button", { name: "Folder: /work/api" }),
+    ).toBeTruthy();
+    expect(create).not.toHaveBeenCalled();
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole<HTMLButtonElement>("button", { name: /Send/ })
+          .disabled,
+      ).toBe(false),
+    );
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(create).toHaveBeenCalled());
+    expect(create.mock.calls[0]?.[0]).toMatchObject({
+      folder: "/work/api",
+      links: [{ kind: "ticket", id: "t1" }],
+      message: "Work on T-KQ12: Login rate limits",
+      ...(fileOnly && {
+        attachments: [
+          { name: "unsent.txt", dataUrl: "data:text/plain;base64,bm90ZXM=" },
+        ],
+      }),
+    });
+  },
+);
 
 test("a Codex Chat can find skills after its Project folder is missing", async () => {
   const client = createMockChatClient({

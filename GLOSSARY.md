@@ -14,6 +14,9 @@ _Avoid_: schema version
 **Chat**:
 A standalone conversation in a workspace, linked to a harness session. It can have optional links to multiple projects, tickets, and Documents without belonging to any one of them.
 
+**Chat attachment**:
+A local snapshot of an image or file attached to a draft, queued, or sent message in a Chat. The snapshot belongs to that Chat.
+
 **Harness**:
 The person's own installed agent program, such as Claude Code or Codex, that a Chat runs in. It owns authentication, billing, its settings and its native session; ticketd starts, supervises and answers it but never signs in for it or changes how it bills.
 _Avoid_: Provider, model, agent (for the program itself)
