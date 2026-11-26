@@ -1274,6 +1274,16 @@ impl ChatHost {
         self.sender_for(&gate.chat_id, true)
     }
 
+    /// Checked with the route lock, so a restore cannot finish before this route
+    /// is either installed or refused.
+    fn check_route_workspace(&self, generation: u64) -> Result<(), HostError> {
+        self.serving()?;
+        if self.inner.lifecycle.workspace_generation() != generation {
+            return Err(HostError::Restoring);
+        }
+        Ok(())
+    }
+
     fn sender_for(
         &self,
         chat_id: &str,
@@ -1282,6 +1292,7 @@ impl ChatHost {
         self.serving()?;
         {
             let chats = self.chats();
+            self.serving()?;
             if !after_take_over {
                 self.check_agent_cleanup(chat_id)?;
             }
@@ -1289,12 +1300,13 @@ impl ChatHost {
                 return Ok(commands.clone());
             }
         }
+        let workspace_generation = self.inner.lifecycle.workspace_generation();
         let chat = (self.inner.open_workspace)()?.chat(chat_id)?;
         let adapter = self.inner.adapters.get(chat.harness.as_str()).cloned();
         let mut chats = self.chats();
         // Checked again under the lock `stop_all` uses, so a request racing shutdown
         // cannot add a supervisor after the running ones were stopped.
-        self.serving()?;
+        self.check_route_workspace(workspace_generation)?;
         if !after_take_over {
             self.check_agent_cleanup(chat_id)?;
         }
@@ -1326,6 +1338,7 @@ impl ChatHost {
         chat_id: &str,
     ) -> Result<Option<mpsc::Sender<Command>>, HostError> {
         self.serving()?;
+        let workspace_generation = self.inner.lifecycle.workspace_generation();
         let chat = (self.inner.open_workspace)()?.chat(chat_id)?;
         let adapter = self.inner.adapters.get(chat.harness.as_str()).cloned();
         let descriptor = adapter
@@ -1343,7 +1356,7 @@ impl ChatHost {
             .into());
         }
         let mut chats = self.chats();
-        self.serving()?;
+        self.check_route_workspace(workspace_generation)?;
         let Some(unattended) = self.settings(chat_id) else {
             return Ok(None);
         };
@@ -1564,6 +1577,50 @@ mod tests {
             changed: watch::channel(0).0,
             signals: Mutex::new(HashMap::new()),
         }
+    }
+
+    #[tokio::test]
+    async fn a_route_read_started_in_an_earlier_workspace_is_refused() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let chat = Workspace::open(&path)
+            .unwrap()
+            .create_chat(
+                None,
+                ticketd_core::NewChat {
+                    title: None,
+                    harness: "codex".into(),
+                    execution_folder: dir.path().to_string_lossy().into_owned(),
+                    folder_managed: false,
+                    links: Vec::new(),
+                },
+            )
+            .unwrap();
+        let lifecycle = Arc::new(std::sync::OnceLock::<Arc<HostLifecycle>>::new());
+        let host = ChatHost::new(
+            Arc::new({
+                let lifecycle = lifecycle.clone();
+                move || {
+                    let workspace = WorkspaceSession::for_file(&path)?.workspace()?;
+                    if let Some(lifecycle) = lifecycle.get() {
+                        lifecycle
+                            .workspace_generation
+                            .fetch_add(1, Ordering::SeqCst);
+                    }
+                    Ok(workspace)
+                }
+            }),
+            Vec::new(),
+        )
+        .unwrap();
+        assert!(lifecycle.set(host.inner.lifecycle.clone()).is_ok());
+
+        assert!(matches!(host.sender(&chat.id), Err(HostError::Restoring)));
+        assert!(matches!(
+            host.unattended_sender(&chat.id),
+            Err(HostError::Restoring)
+        ));
+        assert!(host.chats().is_empty());
     }
 
     /// An Automation run's agent waits on its own Chat: what other Chats do wakes the

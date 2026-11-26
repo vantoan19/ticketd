@@ -50,6 +50,7 @@ pub struct FakeAdapter {
     harness: Harness,
     state: Arc<Mutex<State>>,
     submissions: watch::Sender<usize>,
+    open_attempts: watch::Sender<usize>,
     runtime_dropped: watch::Sender<()>,
 }
 
@@ -58,6 +59,7 @@ struct State {
     inspection: Inspection,
     capabilities: Capabilities,
     attachment_refusal: Option<Refusal>,
+    image_input: Option<bool>,
     steer_image_input: Option<bool>,
     open_failures: VecDeque<Problem>,
     open_holds: VecDeque<oneshot::Receiver<()>>,
@@ -123,11 +125,13 @@ impl FakeAdapter {
         Self {
             harness,
             submissions: watch::channel(0).0,
+            open_attempts: watch::channel(0).0,
             runtime_dropped: watch::channel(()).0,
             state: Arc::new(Mutex::new(State {
                 inspection,
                 capabilities,
                 attachment_refusal: None,
+                image_input: None,
                 steer_image_input: None,
                 open_failures: VecDeque::new(),
                 open_holds: VecDeque::new(),
@@ -202,6 +206,10 @@ impl FakeAdapter {
         self.state().attachment_refusal = Some(refusal);
     }
 
+    pub fn set_image_input(&self, supported: bool) {
+        self.state().image_input = Some(supported);
+    }
+
     pub fn set_steer_image_input(&self, supported: bool) {
         self.state().steer_image_input = Some(supported);
     }
@@ -211,6 +219,15 @@ impl FakeAdapter {
         let (sender, receiver) = oneshot::channel();
         self.state().open_holds.push_back(receiver);
         sender
+    }
+
+    /// Waits until the adapter has begun opening, even if the open is held.
+    pub async fn wait_for_open_attempts(&self, count: usize) {
+        let _ = self
+            .open_attempts
+            .subscribe()
+            .wait_for(|seen| *seen >= count)
+            .await;
     }
 
     /// The next `open` fails with this problem.
@@ -466,6 +483,7 @@ impl HarnessAdapter for FakeAdapter {
     /// Opening replaces any live runtime, whose stream then ends.
     async fn open(&self, request: OpenRequest) -> Result<OpenedRuntime, Problem> {
         let hold = self.state().open_holds.pop_front();
+        self.open_attempts.send_modify(|seen| *seen += 1);
         if let Some(hold) = hold {
             let _ = hold.await;
         }
@@ -506,6 +524,10 @@ impl Drop for FakeRuntime {
 
 #[async_trait]
 impl HarnessRuntime for FakeRuntime {
+    fn supports_image_input(&self) -> Option<bool> {
+        self.fake.state().image_input
+    }
+
     fn supports_steer_image_input(&self) -> Option<bool> {
         self.fake.state().steer_image_input
     }
@@ -531,6 +553,7 @@ impl HarnessRuntime for FakeRuntime {
         if let Some(admission) = &admission
             && let Err(refusal) = admission.check()
         {
+            drop(prompt);
             let hold = self.fake.state().prompt_refusal_holds.pop_front();
             if let Some((reached, permit)) = hold {
                 let _ = reached.send(refusal.clone());

@@ -1147,7 +1147,9 @@ async fn an_unconfirmed_automation_open_is_reported_until_late_close_finishes() 
             .await
         }
     });
-    settle().await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
     assert_eq!(
         f.host.live()[&chat_id].opening,
         Some(ChatSessionOrigin::New)
@@ -1364,6 +1366,9 @@ async fn a_pending_open_blocks_both_resume_paths_until_late_cleanup_finishes() {
     let f = Fixture::new(FakeAdapter::codex());
     let first_open = f.fake.hold_next_open();
     f.send("Resume this input").await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
     assert_eq!(f.live().await.opening, Some(ChatSessionOrigin::New));
     assert!(f.fake.opens().is_empty());
 
@@ -2298,6 +2303,63 @@ fn fixture_with_link_context(
     )
     .unwrap();
     f
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_linked_image_that_needs_a_new_turn_checks_its_model_before_replacing_held_input() {
+    let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
+    let link = |name| ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket(name).unwrap().id,
+    };
+    let existing = link("Existing link");
+    let added = link("New link");
+    f.core()
+        .add_chat_links(&f.chat.id, std::slice::from_ref(&existing))
+        .unwrap();
+    f.send("Start the image-capable turn").await;
+    f.wait_for_submissions(1).await;
+    f.fake.set_image_input(false);
+    f.fake.set_steer_image_input(true);
+    let image = ChatAttachmentContent::from_data_url(
+        "pixel.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/F9sAAAAASUVORK5CYII=",
+        100,
+    ).unwrap();
+
+    f.host
+        .send_linking(
+            &f.chat.id,
+            "This image can steer",
+            SendMode::Auto,
+            vec![image.clone()],
+            vec![existing.clone()],
+        )
+        .await
+        .unwrap();
+    let submissions = f.wait_for_submissions(2).await;
+    assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
+
+    let original = f.queue("Keep this held input").await;
+    assert!(
+        f.host
+            .confirm_queue_edit(&f.chat.id, &original.id, "hold")
+            .await
+            .unwrap()
+    );
+    assert!(matches!(
+        f.host.send_with_edit(
+            &f.chat.id, Some("image-edit"), "This image needs a new turn", SendMode::Auto,
+            vec![image], Some(ChatQueueEdit { replaces: vec![original.id.clone()], links: vec![added] }),
+        ).await,
+        Err(HostError::Core(Error::Chat(reason)))
+            if reason.contains(ticketd_chat_host::Refusal::ImageInputUnsupported.reason())
+    ));
+    let chat = f.core().chat(&f.chat.id).unwrap();
+    assert_eq!(chat.links, [existing]);
+    assert!(!chat.queue_paused);
+    assert!(f.message(&original.id).editing);
+    assert_eq!(f.submits().len(), 2);
 }
 
 #[tokio::test(start_paused = true)]
@@ -5400,6 +5462,9 @@ async fn chat_off_declines_an_open_that_finishes_while_storage_recovery_is_pendi
     let f = Fixture::new(FakeAdapter::codex());
     let release_open = f.fake.hold_next_open();
     f.send("first").await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
     assert!(f.fake.opens().is_empty());
     f.storage_up.store(false, Ordering::SeqCst);
 

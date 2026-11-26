@@ -1129,6 +1129,9 @@ async fn taking_over_a_slow_start_holds_the_reply_until_the_late_runtime_closes(
     let f = Fixture::new();
     let open = f.fake.hold_next_open();
     f.agent_working().await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
     let chat = f.chat();
 
     let reply = f
@@ -1775,6 +1778,9 @@ async fn a_run_stopped_while_its_agent_is_opening_closes_the_agent() {
     let open = f.fake.hold_next_open();
     f.tag("Fix login");
     f.tick().await;
+    tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+        .await
+        .unwrap();
     let run = f.runs().remove(0);
     assert_eq!(run.status, AutomationRunStatus::Running);
     let chat = f.chat();
@@ -1818,6 +1824,9 @@ async fn a_run_ended_before_its_agent_took_the_first_message_leaves_nothing_queu
         let run = f.runs().remove(0);
         let chat = f.chat();
         assert_eq!(f.core().chat_queue(&chat).unwrap().len(), 1, "{how}");
+        tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+            .await
+            .unwrap();
 
         let ending = async {
             match how {
@@ -2122,6 +2131,46 @@ async fn an_unreadable_workspace_refuses_prompt_delivery_with_the_storage_diagno
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_held_prompt_refusal_does_not_keep_stop_from_taking_over() {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let f = Fixture::new();
+    let (at_write, check_ownership) = f.fake.hold_next_submit_write();
+    let (refused, finish_refusal) = f.fake.hold_next_prompt_refusal();
+    f.tag("Fix login");
+    f.tick().await;
+    tokio::time::timeout(Duration::from_secs(10), at_write)
+        .await
+        .unwrap()
+        .unwrap();
+    let fail = AtomicBool::new(true);
+    *f.as_the_host_looks.lock().unwrap() = Some(Box::new(move |_| {
+        if fail.swap(false, Ordering::SeqCst) {
+            return Err(Error::NoDataDirectory);
+        }
+        Ok(())
+    }));
+    check_ownership.send(()).unwrap();
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(10), refused)
+            .await
+            .unwrap()
+            .unwrap(),
+        Refusal::AutomationPromptOwnershipUnavailable
+    );
+
+    f.host.stop(&f.chat()).await.unwrap();
+    finish_refusal.send(()).unwrap();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert!(
+        !f.fake
+            .written()
+            .iter()
+            .any(|event| matches!(event, Written::Submit(_)))
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_prompt_waiting_to_check_ownership_cannot_admit_on_a_restored_workspace() {
     prompt_does_not_outlive_its_workspace(false).await;
 }
@@ -2224,6 +2273,9 @@ async fn a_run_taken_over_before_its_session_exists_opens_as_an_ordinary_chat() 
         let open = f.fake.hold_next_open();
         f.tag("Fix login");
         f.tick().await;
+        tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+            .await
+            .unwrap();
         let chat = f.chat();
 
         let taking = async {
@@ -2300,6 +2352,9 @@ async fn a_run_taken_over_while_starting_keeps_its_instructions_set_aside() {
             let open = f.fake.hold_next_open();
             f.tag("Fix login");
             f.tick().await;
+            tokio::time::timeout(Duration::from_secs(10), f.fake.wait_for_open_attempts(1))
+                .await
+                .unwrap();
             let chat = f.chat();
 
             let taking = async {
