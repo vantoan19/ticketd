@@ -174,6 +174,8 @@ export const SHORTCUTS = [
         [["+"], ["-"], ["0"]],
         "Zoom a PDF in, out, or to fit the width",
       ],
+      ["attachments-find", [["Mod", "F"], ["/"]], "Find in a log or text file"],
+      ["attachments-wrap", [["W"]], "Wrap or unwrap the lines of a log"],
       ["attachments-back", [["Esc"]], "Back to Attachments"],
     ] as const
   ).map(([id, keys, label]) => ({

@@ -1005,3 +1005,99 @@ test("closing after stepping returns focus and scroll to what opened the viewer"
   expect(top).toBe(480);
   expect(document.activeElement).toBe(opener);
 });
+
+const runLog: Attachment = {
+  ...file,
+  id: "run-1",
+  display_name: "e2e-run.log",
+  original_filename: "e2e-run.log",
+  size_bytes: 40_000_000,
+};
+const runText = Array.from({ length: 90 }, (_, line) =>
+  line % 30 === 4 ? `line ${line} FAIL checkout` : `line ${line} ok`,
+).join("\n");
+function serveLog() {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_preview")
+      return (args as { id: string }).id === runLog.id
+        ? {
+            attachment: runLog,
+            status: "unsupported",
+            media_type: null,
+            message: null,
+            can_open: true,
+            text_excerpt: { text: "line 0 ok", truncated: true },
+            text: {
+              total_bytes: 240 * 1024 * 1024,
+              shown_bytes: 5 * 1024 * 1024,
+              partial: true,
+            },
+            usage: { total: 0, entries: [], legacy_drafts_pending: false },
+          }
+        : previews[(args as { id: string }).id];
+    if (command === "attachment_text") return new TextEncoder().encode(runText);
+    return null;
+  });
+}
+
+test("a long log shows its scope and keeps Open and Export, and Find leaves browsing and Esc alone", async () => {
+  setPreference("attachmentDetails", false);
+  serveLog();
+  const files = [runLog, shot];
+  const closed = vi.fn();
+  function Browse() {
+    const [shown, setShown] = useState(runLog);
+    return (
+      <AttachmentPreview
+        target={{ id: shown.id, initial: shown }}
+        browse={{ files, onSelect: setShown }}
+        onClose={closed}
+      />
+    );
+  }
+  render(<Browse />);
+  expect(
+    await screen.findByText(
+      "Showing the last 5 MB of 240 MB. Open it in its app for the rest.",
+    ),
+  ).toBeTruthy();
+  // The original stays one action away.
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
+      .disabled,
+  ).toBe(false);
+  expect(screen.getByRole("button", { name: "Export file" })).toBeTruthy();
+  const viewer = screen.getByRole("dialog");
+  const stage = await screen.findByRole("group", {
+    name: "e2e-run.log, Log, 1 of 2",
+  });
+  await waitFor(() => expect(document.activeElement).toBe(stage));
+
+  // ⌘F-style find: J and K are letters in the field, not file steps.
+  fireEvent.keyDown(stage, { key: "/" });
+  const field = await screen.findByRole("textbox", {
+    name: "Find in the text",
+  });
+  fireEvent.change(field, { target: { value: "fail" } });
+  await waitFor(() =>
+    expect(screen.getByRole("status", { name: "" }).textContent).toBe("1 of 3"),
+  );
+  fireEvent.keyDown(field, { key: "j" });
+  expect(header().textContent).toContain("1 of 2");
+  // Esc leaves Find first and keeps the viewer open.
+  fireEvent.keyDown(field, { key: "Escape" });
+  expect(
+    screen.queryByRole("textbox", { name: "Find in the text" }),
+  ).toBeNull();
+  expect(closed).not.toHaveBeenCalled();
+  await waitFor(() => expect(document.activeElement).toBe(stage));
+  // Back on the stage, J walks to the next file, and K returns.
+  fireEvent.keyDown(viewer, { key: "j" });
+  expect(await screen.findByRole("img", { name: "refund.png" })).toBeTruthy();
+  expect(header().textContent).toContain("2 of 2");
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "k" });
+  expect(
+    await screen.findByRole("document", { name: "Text of e2e-run.log" }),
+  ).toBeTruthy();
+});

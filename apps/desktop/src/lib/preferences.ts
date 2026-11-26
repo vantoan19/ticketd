@@ -18,6 +18,8 @@ const preferencesSchema = z.object({
   notifyChats: z.boolean().catch(true),
   /** The viewer's Details panel (I, or "…" > Show details), kept between files. */
   attachmentDetails: z.boolean().catch(false),
+  /** The log stage's Wrap lines, kept between files. On by default. */
+  attachmentWrap: z.boolean().catch(true),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -36,6 +38,7 @@ const DEFAULTS: Preferences = {
   chat: false,
   notifyChats: true,
   attachmentDetails: false,
+  attachmentWrap: true,
 };
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

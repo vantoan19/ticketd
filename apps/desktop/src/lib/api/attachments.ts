@@ -97,6 +97,15 @@ const previewSchema = lazySchema(() =>
     html: z.boolean().optional(),
     /** A stored PDF the viewer renders page by page; its bytes come from `pdf()`. */
     pdf: z.boolean().optional(),
+    /** A plain-text file the viewer reads with `text()`: whole, or only its end when long. */
+    text: z
+      .object({
+        total_bytes: z.number().int().nonnegative(),
+        shown_bytes: z.number().int().nonnegative(),
+        partial: z.boolean(),
+      })
+      .nullable()
+      .optional(),
     usage: z.object({
       total: z.number().int().nonnegative(),
       legacy_drafts_pending: z.boolean(),
@@ -241,6 +250,18 @@ const driveConfigurationSchema = lazySchema(() =>
 );
 export type DriveConfiguration = z.infer<typeof driveConfigurationSchema>;
 
+/** A raw IPC response arrives as bytes or an ArrayBuffer (compared by tag, not by realm). */
+function rawBytes(value: unknown, what: string): Uint8Array {
+  if (
+    value instanceof Uint8Array ||
+    Object.prototype.toString.call(value) === "[object Uint8Array]"
+  )
+    return value as Uint8Array;
+  if (Object.prototype.toString.call(value) === "[object ArrayBuffer]")
+    return new Uint8Array(value as ArrayBuffer);
+  throw new Error(`The ${what} did not arrive as bytes.`);
+}
+
 export const attachments = {
   async removeRemote(id: string, requestId: string) {
     return z
@@ -345,12 +366,15 @@ export const attachments = {
   },
   /** The bytes of a stored PDF, for the viewer to render. One raw binary response. */
   async pdf(workspace: string, id: string): Promise<Uint8Array> {
-    const bytes = await invoke<unknown>("attachment_pdf", { workspace, id });
-    if (bytes instanceof Uint8Array) return bytes;
-    // A raw response arrives as an ArrayBuffer (compared by tag, not by realm).
-    if (Object.prototype.toString.call(bytes) === "[object ArrayBuffer]")
-      return new Uint8Array(bytes as ArrayBuffer);
-    throw new Error("The PDF did not arrive as bytes.");
+    return rawBytes(await invoke("attachment_pdf", { workspace, id }), "PDF");
+  },
+  /** The display text of a plain-text file: all of it, or its end when it is very long. */
+  async text(workspace: string, id: string): Promise<string> {
+    const bytes = rawBytes(
+      await invoke("attachment_text", { workspace, id }),
+      "text",
+    );
+    return new TextDecoder().decode(bytes);
   },
   mediaUrl(workspace: string, id: string) {
     return `${convertFileSrc(workspace, "attachment-media")}/${encodeURIComponent(id)}`;

@@ -365,3 +365,67 @@
     max-width: calc(100% - 24px);
   }
 }
+
+/* A log or text file: numbered lines in the stage, drawn only near the view. The
+   stage scrolls; the canvas grows with the lines so the view bar can stick. */
+.attachment-preview-stage[data-text] .attachment-preview-canvas {
+  display: block;
+  flex: 1 0 auto;
+  padding: 0;
+}
+.attachment-text-scope {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  flex: none;
+  align-items: center;
+  height: 36px;
+  margin: 0;
+  padding-inline: 16px;
+}
+.attachment-text {
+  position: relative;
+  box-sizing: border-box;
+  min-height: 100%;
+  width: max-content;
+  min-width: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-code);
+  line-height: 20px;
+}
+.attachment-text-probe {
+  position: absolute;
+  visibility: hidden;
+  white-space: pre;
+  pointer-events: none;
+}
+.attachment-text-line {
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  min-height: 20px;
+}
+/* The line number is generated, so it is never selected or copied. */
+.attachment-text-line::before {
+  content: attr(data-n);
+  padding-inline: 0 12px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.attachment-text-content {
+  min-width: 0;
+  padding-right: 16px;
+  white-space: pre;
+}
+/* Wrapped lines break at the edge like a terminal and hang 4 characters in. */
+.attachment-text[data-wrap] {
+  width: 100%;
+}
+.attachment-text[data-wrap] .attachment-text-content {
+  padding-left: var(--text-hang);
+  text-indent: calc(-1 * var(--text-hang));
+  white-space: pre-wrap;
+  word-break: break-all;
+}

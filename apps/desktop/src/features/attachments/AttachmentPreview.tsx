@@ -88,6 +88,7 @@ import { ExportMarkdownButton } from "./ExportMarkdown";
 import { FileIcon } from "./AttachmentThumbnail";
 import { HtmlStage } from "./HtmlStage";
 import { PdfStage, type StageKeys } from "./PdfStage";
+import { TextStage } from "./TextStage";
 import { PreviewState } from "./PreviewState";
 import { RenameAttachment } from "./RenameAttachment";
 import { fileType, purged } from "./file-words";
@@ -813,6 +814,7 @@ function PreviewStage({
   let body: ReactNode;
   let reportShown = false;
   let pdfShown = false;
+  let textShown = false;
   if (external && file)
     body = (
       <DriveAccessRecovery
@@ -967,6 +969,20 @@ function PreviewStage({
         onRetry={preview.retry}
       />
     );
+  } else if (info?.text && file) {
+    textShown = true;
+    body = (
+      <TextStage
+        workspace={preview.workspace}
+        file={file}
+        scope={info.text}
+        attempt={preview.attempt}
+        onRetry={preview.retry}
+        scrollerRef={scroller}
+        keysRef={stageKeys}
+        reachable={!stageRef}
+      />
+    );
   } else if (info?.text_excerpt)
     body = (
       <div className="attachment-preview-textual">
@@ -1031,6 +1047,7 @@ function PreviewStage({
       })}
       data-report={reportShown ? "" : undefined}
       data-pdf={pdfShown ? "" : undefined}
+      data-text={textShown ? "" : undefined}
       data-image={
         type.family === "image" &&
         !preview.missing &&

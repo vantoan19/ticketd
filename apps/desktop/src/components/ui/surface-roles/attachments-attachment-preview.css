@@ -58,3 +58,38 @@
 .attachment-uses [data-slot="record-link"] {
   text-align: start;
 }
+.attachment-text-scope {
+  background: var(--surface);
+  box-shadow: inset 0 -1px 0 var(--group-hairline);
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.attachment-text {
+  background: var(--surface);
+  color: var(--foreground);
+}
+.attachment-text:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.attachment-text-line::before {
+  color: var(--disabled-foreground);
+}
+/* Every match is tinted and underlined; the current one is inverted, which keeps
+   its contrast in both themes. */
+.attachment-text-match {
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: inset 0 -1.5px 0 var(--foreground);
+  color: inherit;
+}
+.attachment-text-match[data-current] {
+  background: var(--foreground);
+  box-shadow: none;
+  color: var(--background);
+}
+.attachment-text-count {
+  min-width: 7ch;
+  white-space: nowrap;
+}
