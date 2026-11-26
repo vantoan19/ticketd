@@ -1,7 +1,7 @@
 //! What the Chat screens read: stored Chat records and the host's live state, worded and
 //! shaped for display. Nothing here is a harness wire format, and nothing here decides
 //! what runs; it only describes what the core and the host already know.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
@@ -587,12 +587,25 @@ pub struct Tracker {
     changes: Vec<(String, Vec<ChatAgentChange>)>,
     /// The turn `changes` were made in.
     changes_turn: Option<String>,
-    /// What the agent changed in each turn, by call, to net a turn's records row.
-    turn_changes: HashMap<String, Vec<(String, Vec<ChatAgentChange>)>>,
+    /// What the agent changed in each turn, by call and by the segment of the turn the
+    /// call ran in, to net each segment's records row.
+    turn_changes: HashMap<String, Vec<CallChanges>>,
+    /// How many steers each turn has taken: a steer starts the turn's next segment.
+    steers: HashMap<String, usize>,
+    /// The steering messages already counted; one shown again is not a second steer.
+    steer_messages: HashSet<String>,
     updated_at: Option<String>,
     /// Reasoning, plan and files records of the latest turn: how they read depends on
     /// whether it still runs.
     reports: HashMap<String, ChatTool>,
+}
+
+/// What one ticketd call changed, and the segment of its turn it ran in.
+#[derive(Debug, Clone)]
+struct CallChanges {
+    tool_id: String,
+    segment: usize,
+    changes: Vec<ChatAgentChange>,
 }
 
 /// How user input that was submitted at least once, or that the host holds to send,
@@ -657,6 +670,22 @@ impl Tracker {
                     self.uncertain_text = None;
                 }
                 self.touch(Some(message.created_at.as_str()));
+                // A steer starts the next segment of the turn it joined.
+                if message
+                    .attempts
+                    .last()
+                    .is_some_and(|attempt| attempt.intent == ChatSubmissionIntent::Steer)
+                    && let Some(turn_id) = message
+                        .attempts
+                        .iter()
+                        .rev()
+                        .find_map(|attempt| attempt.turn_id.clone())
+                        .or(message.turn_id.clone())
+                        .or_else(|| self.last_turn.as_ref().map(|turn| turn.id.clone()))
+                    && self.steer_messages.insert(message.id.clone())
+                {
+                    *self.steers.entry(turn_id).or_default() += 1;
+                }
             }
             ChatItem::Message(message) => {
                 self.touch(Some(message.created_at.as_str()));
@@ -711,10 +740,15 @@ impl Tracker {
                         self.changes.clear();
                         self.changes_turn = Some(tool.turn_id.clone());
                     }
+                    let segment = self.steers.get(&tool.turn_id).copied().unwrap_or(0);
                     let calls = self.turn_changes.entry(tool.turn_id.clone()).or_default();
-                    match calls.iter_mut().find(|(id, _)| *id == tool.id) {
-                        Some((_, kept)) => kept.clone_from(&changes),
-                        None => calls.push((tool.id.clone(), changes.clone())),
+                    match calls.iter_mut().find(|call| call.tool_id == tool.id) {
+                        Some(call) => call.changes.clone_from(&changes),
+                        None => calls.push(CallChanges {
+                            tool_id: tool.id.clone(),
+                            segment,
+                            changes: changes.clone(),
+                        }),
                     }
                     match self.changes.iter_mut().find(|(id, _)| *id == tool.id) {
                         Some((_, kept)) => *kept = changes,
@@ -730,27 +764,53 @@ impl Tracker {
         }
     }
 
-    /// What the latest turn did to ticketd's records, the first sentence of its records
-    /// row: each ticket's status moves netted (`attention::net_changes`), in order.
+    /// What the latest turn did to ticketd's records, the first sentence of the records
+    /// row the person sees last: the net (`attention::net_changes`) of the latest
+    /// segment that changed anything, in order.
     pub fn first_change(&self) -> Option<ChatAgentChange> {
+        let calls = self.turn_changes.get(self.changes_turn.as_ref()?)?;
+        let segment_of = |tool_id: &str| {
+            calls
+                .iter()
+                .find(|call| call.tool_id == tool_id)
+                .map_or(0, |call| call.segment)
+        };
+        let latest = self.changes.iter().map(|(id, _)| segment_of(id)).max()?;
         let all: Vec<ChatAgentChange> = self
             .changes
             .iter()
+            .filter(|(id, _)| segment_of(id) == latest)
             .flat_map(|(_, changes)| changes.iter().cloned())
             .collect();
         attention::net_changes(&all).into_iter().next()
     }
 
-    /// What a turn did to ticketd's records up to and including `tool`'s call, netted
-    /// by the Chat host's rule. `tool` counts whether or not it was noted yet.
+    /// What the segment of a turn `tool` ran in did to ticketd's records, netted by the
+    /// Chat host's rule: what that segment's records row says. A steer starts a new
+    /// segment, so the changes before it are not netted in again. `tool` counts
+    /// whether or not it was noted yet.
     fn turn_net(&self, tool: &ChatTool, changes: &[ChatAgentChange]) -> Vec<ChatAgentChange> {
         let calls = self.turn_changes.get(&tool.turn_id);
+        let noted = calls.and_then(|calls| calls.iter().find(|call| call.tool_id == tool.id));
+        let segment = noted.map_or_else(
+            || self.steers.get(&tool.turn_id).copied().unwrap_or(0),
+            |call| call.segment,
+        );
         let mut all: Vec<ChatAgentChange> = calls
             .into_iter()
             .flatten()
-            .flat_map(|(id, kept)| if *id == tool.id { changes } else { kept }.iter().cloned())
+            .filter(|call| call.segment == segment)
+            .flat_map(|call| {
+                if call.tool_id == tool.id {
+                    changes
+                } else {
+                    &call.changes
+                }
+                .iter()
+                .cloned()
+            })
             .collect();
-        if !calls.is_some_and(|calls| calls.iter().any(|(id, _)| *id == tool.id)) {
+        if noted.is_none() {
             all.extend(changes.iter().cloned());
         }
         attention::net_changes(&all)
@@ -3633,6 +3693,100 @@ mod tests {
             panic!("a records item");
         };
         assert!(net.is_empty(), "{net:?}");
+    }
+
+    /// A steer starts a new segment of its turn, and each segment's records row says
+    /// only its own changes; the list row says the first sentence of the last one.
+    #[test]
+    fn a_steer_splits_a_turns_net_changes_into_segments() {
+        use super::{ChatAgentChange, item};
+        use ticketd_core::{
+            ChatDelivery, ChatMessage, ChatRole, ChatSubmissionAttempt, ChatSubmissionIntent,
+        };
+        let call = |id: &str, input: &str| {
+            ChatItem::Tool(ChatTool {
+                id: id.to_owned(),
+                turn_id: "t1".to_owned(),
+                ..tool(
+                    ticketd_chat_host::AGENT_CHANGES_RECORD_NAME,
+                    input,
+                    ChatToolState::Completed,
+                    None,
+                )
+            })
+        };
+        let status = |from: &str, to: &str| {
+            format!(
+                r#"{{"kind":"status","reference":"T-12","title":"Demo","from":"{from}","to":"{to}"}}"#
+            )
+        };
+        let posted = r#"{"kind":"update","reference":"T-12","excerpt":"Done"}"#;
+        let steer = ChatItem::Message(ChatMessage {
+            id: "m".to_owned(),
+            position: 3,
+            role: ChatRole::User,
+            text: "Also post an update".to_owned(),
+            complete: true,
+            turn_id: Some("t1".to_owned()),
+            queued: false,
+            attempts: vec![ChatSubmissionAttempt {
+                id: "a".to_owned(),
+                intent: ChatSubmissionIntent::Steer,
+                delivery: ChatDelivery::Acknowledged,
+                turn_id: Some("t1".to_owned()),
+                detail: None,
+                decision: None,
+                recorded_at: String::new(),
+            }],
+            created_at: String::new(),
+        });
+        let first = call(
+            "a",
+            &format!("[{},{posted}]", status("Todo", "In progress")),
+        );
+        let second = call("b", &format!("[{}]", status("In progress", "In review")));
+        let records = [first.clone(), steer.clone(), second.clone()];
+        let live = ChatLive::idle();
+        // A snapshot reads the whole history, a live view one record at a time: the
+        // same segments either way, and a steer shown again is not a second one.
+        let mut streamed = Tracker::default();
+        for record in &records {
+            streamed.note(record);
+        }
+        streamed.note(&steer);
+        for tracker in [Tracker::from_items(&records), streamed] {
+            let net = |record: &ChatItem| {
+                let Some(Item::Records { net, .. }) =
+                    item(record, &chat(None), &live, None, &tracker)
+                else {
+                    panic!("a records item");
+                };
+                net
+            };
+            let moved = |from: &str, to: &str| ChatAgentChange::Status {
+                reference: "T-12".to_owned(),
+                title: "Demo".to_owned(),
+                from: from.to_owned(),
+                to: to.to_owned(),
+            };
+            assert_eq!(
+                net(&first),
+                [
+                    moved("Todo", "In progress"),
+                    serde_json::from_str::<ChatAgentChange>(posted).unwrap()
+                ]
+            );
+            // Not netted with the first segment's move or its update.
+            assert_eq!(net(&second), [moved("In progress", "In review")]);
+            assert_eq!(
+                tracker
+                    .first_change()
+                    .as_ref()
+                    .map(ticketd_chat_host::attention::change_line)
+                    .as_deref(),
+                Some("Moved T-12 to In review")
+            );
+        }
     }
 
     #[test]

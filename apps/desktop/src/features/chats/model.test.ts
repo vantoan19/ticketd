@@ -1,6 +1,7 @@
 import { expect, test, vi } from "vitest";
 import type {
   ChatSnapshot,
+  RecordChange,
   Step,
   TranscriptItem,
 } from "@/features/chats/client";
@@ -843,6 +844,57 @@ test("a steer starts a new segment that continues the turn", () => {
   expect(segments.map((turn) => turn.label)).toEqual([
     "Worked for 1m 25s",
     "Continued for 48s",
+  ]);
+});
+
+test("each segment's receipt says its own changes, with none said in two", () => {
+  const status = (from: string, to: string) => ({
+    kind: "status" as const,
+    reference: "T-12",
+    title: "Demo",
+    from,
+    to,
+  });
+  const update = { kind: "update" as const, reference: "T-12", excerpt: "Hi" };
+  // The host nets each segment on its own: a steer starts the next one.
+  const records = (
+    id: string,
+    changes: RecordChange[],
+    net: RecordChange[],
+  ): TranscriptItem => ({
+    id,
+    at,
+    kind: "records",
+    turn_id: "t1",
+    changes,
+    net,
+  });
+  const segments = turnsOf(
+    turns(
+      [
+        you("u1", at),
+        timing("completed", "2026-11-10T10:02:13Z"),
+        records(
+          "c1",
+          [status("Todo", "In progress"), update],
+          [status("Todo", "In progress"), update],
+        ),
+        you("u2", "2026-11-10T10:01:25Z", true),
+        records(
+          "c2",
+          [status("In progress", "In review")],
+          [status("In progress", "In review")],
+        ),
+      ],
+      idle,
+    ),
+  );
+  expect(segments.map((turn) => turn.changes)).toEqual([
+    [
+      { ...status("Todo", "In progress"), gone: null },
+      { ...update, gone: null },
+    ],
+    [{ ...status("In progress", "In review"), gone: null }],
   ]);
 });
 
