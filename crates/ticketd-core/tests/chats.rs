@@ -1517,6 +1517,38 @@ fn linked_records_are_read_as_they_are_now_not_as_they_were_when_linked() {
 }
 
 #[test]
+fn withdrawing_held_input_requests_a_fresh_snapshot() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let held = workspace
+        .save_chat_input(None, &chat.id, "Held draft")
+        .unwrap();
+    workspace
+        .confirm_chat_queue_edit(&chat.id, &held.id, "hold")
+        .unwrap();
+    let prior = workspace.chat_snapshot(&chat.id, 50).unwrap();
+    assert!(workspace.chat_queue(&chat.id).unwrap()[0].editing);
+
+    workspace.withdraw_chat_input(&chat.id, &held.id).unwrap();
+
+    assert!(matches!(
+        workspace
+            .chat_changes(&chat.id, prior.sequence, 50)
+            .unwrap(),
+        ChatCatchUp::Resync
+    ));
+    assert!(workspace.chat_queue(&chat.id).unwrap().is_empty());
+    assert!(
+        !workspace
+            .chat_snapshot(&chat.id, 50)
+            .unwrap()
+            .items
+            .iter()
+            .any(|item| matches!(item, ChatItem::Message(message) if message.id == held.id))
+    );
+}
+
+#[test]
 fn queued_input_can_be_withdrawn_until_a_submission_may_have_reached_the_harness() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

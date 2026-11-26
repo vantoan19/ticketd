@@ -1322,20 +1322,6 @@ fn save_input_request(
     request
 }
 
-fn withdraw_queued_input(
-    connection: &Connection,
-    chat_id: &str,
-    message_id: &str,
-) -> Result<bool, Error> {
-    let queued = owned(connection, "chat_messages", chat_id, message_id)?
-        && read_message(connection, message_id)?.is_some_and(|message| message.queued);
-    if !queued {
-        return Ok(false);
-    }
-    delete_queued_input(connection, message_id)?;
-    Ok(true)
-}
-
 fn delete_queued_input(connection: &Connection, message_id: &str) -> Result<(), Error> {
     connection.execute(
         "DELETE FROM chat_submission_attempts WHERE message_id = ?1",
@@ -2629,11 +2615,23 @@ impl Workspace {
     /// Withdraw queued input the person no longer wants sent. Refused once a submission
     /// may have reached the harness: that input is history, not queue.
     pub fn withdraw_chat_input(&mut self, chat_id: &str, message_id: &str) -> Result<Chat, Error> {
-        self.update_chat(chat_id, |connection| {
-            if !withdraw_queued_input(connection, chat_id, message_id)? {
+        self.chat_write(|connection| {
+            read_chat(connection, chat_id)?;
+            let message = if owned(connection, "chat_messages", chat_id, message_id)? {
+                read_message(connection, message_id)?
+            } else {
+                None
+            };
+            let Some(message) = message.filter(|message| message.queued) else {
                 return Err(invalid("this input is not in the queue"));
+            };
+            delete_queued_input(connection, message_id)?;
+            let position = log(connection, chat_id, "chat", chat_id)?;
+            if message.editing {
+                advance_change_floor(connection, chat_id, position)?;
             }
-            Ok(())
+            trim(connection, chat_id)?;
+            read_chat(connection, chat_id)
         })
     }
 
