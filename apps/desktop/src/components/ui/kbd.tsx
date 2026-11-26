@@ -37,12 +37,15 @@ function Kbd({
  */
 function KeyChords({
   keys,
+  spoken,
   sequences,
   sequenceStyle = "words",
   tone = "default",
   className,
 }: {
   keys: readonly (readonly string[])[];
+  /** What is read aloud when it lists more alternatives than `keys` shows. */
+  spoken?: readonly (readonly string[])[];
   sequences?: Shortcut["sequences"];
   sequenceStyle?: "words" | "compact";
   tone?: "default" | "inverted";
@@ -51,7 +54,7 @@ function KeyChords({
   return (
     <span
       role="img"
-      aria-label={spokenKeys(keys, undefined, sequences)}
+      aria-label={spokenKeys(spoken ?? keys, undefined, sequences)}
       className={cn("ui-kbd-group", className)}
     >
       {sequences?.map((sequence, index) => (

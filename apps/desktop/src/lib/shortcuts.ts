@@ -20,9 +20,14 @@ export const SHORTCUT_SCOPES = [
   "Plans",
   "Chat",
   "Dialogs and menus",
-  "First run",
 ] as const;
 export type ShortcutScope = (typeof SHORTCUT_SCOPES)[number];
+/**
+ * The two guide and palette jumps below are Enter on a focused button or
+ * palette row, not shortcuts a person learns: they carry this scope so the
+ * registry still serves their tooltip and chip, and Settings lists none of it.
+ */
+export type UnlistedScope = "Not listed";
 
 export type Shortcut = {
   id: string;
@@ -30,7 +35,12 @@ export type Shortcut = {
   keys: string[][];
   /** Alternatives of ordered chords (G, then I); never simultaneous keys. */
   sequences?: readonly (readonly (readonly string[])[])[];
-  scope: ShortcutScope;
+  scope: ShortcutScope | UnlistedScope;
+  /**
+   * The keys Settings shows when fewer than every alternative reads better
+   * (Zoom in shows ⌘ + only). The spoken label and the handlers keep `keys`.
+   */
+  shown?: string[][];
   label: string;
   /** One sentence where the label alone would surprise. */
   note?: string;
@@ -44,14 +54,14 @@ export function requiresChat(item: Pick<Shortcut, "scope" | "needs">) {
 }
 
 export const SCOPE_CAPTIONS: Record<ShortcutScope, string> = {
-  Everywhere: "These work wherever you are in ticketd.",
+  Everywhere:
+    "Letter keys pause while you type or while a dialog or menu is open.",
   Lists:
     "In ticket lists and boards, the Inbox, Attachments, Documents and the Workspace graph. A list is one stop for Tab.",
-  Ticket: "On the open ticket.",
+  Ticket: "On the open ticket, or the focused one in a list or board.",
   Plans: "On a Plan or the Plans page, as noted.",
   Chat: "In a Chat's message box and its requests.",
   "Dialogs and menus": "In any dialog, menu or sheet.",
-  "First run": "While the guide button or its palette command is focused.",
 };
 
 export const SHORTCUTS = [
@@ -62,23 +72,21 @@ export const SHORTCUTS = [
       ["Mod", "+"],
       ["Mod", "Shift", "+"],
     ],
+    shown: [["Mod", "+"]],
     scope: "Everywhere",
     label: "Zoom in",
-    note: "Enlarge the whole app, including while typing; up to 200%.",
   },
   {
     id: "page-zoom-out",
     keys: [["Mod", "-"]],
     scope: "Everywhere",
     label: "Zoom out",
-    note: "Reduce the whole app, including while typing; down to 50%.",
   },
   {
     id: "page-zoom-reset",
     keys: [["Mod", "0"]],
     scope: "Everywhere",
     label: "Reset zoom",
-    note: "Return the whole app to 100%, including while typing.",
   },
   ...(
     [
@@ -124,7 +132,6 @@ export const SHORTCUTS = [
     sequences: [[["G"], [key]]],
     scope: "Everywhere" as const,
     label,
-    note: "Not while typing or with a dialog or menu open.",
     ...(id === "go-chats" && { needs: "chat" as const }),
   })),
   {
@@ -132,7 +139,6 @@ export const SHORTCUTS = [
     keys: [["C"]],
     scope: "Everywhere",
     label: "New ticket",
-    note: "Opens over the current view; not while typing.",
   },
   {
     id: "capture",
@@ -284,14 +290,12 @@ export const SHORTCUTS = [
     keys: [[key]],
     scope: "Ticket" as const,
     label,
-    note: "On the focused ticket in a list or board, or the open ticket; not while typing.",
   })),
   {
     id: "ticket-copy-reference",
     keys: [["Mod", "Shift", "C"]],
     scope: "Ticket",
     label: "Copy reference",
-    note: "The focused ticket in a list or board, or the open ticket.",
   },
   {
     id: "ticket-edit",
@@ -433,8 +437,7 @@ export const SHORTCUTS = [
     id,
     label,
     keys: [["Enter"]],
-    scope: "First run" as const,
-    note: "While the guide button or its palette command is focused.",
+    scope: "Not listed" as const,
   })),
 ] as const satisfies readonly Shortcut[];
 
