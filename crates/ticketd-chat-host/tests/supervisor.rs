@@ -4282,6 +4282,81 @@ async fn chat_off_declines_an_open_that_finishes_while_storage_recovery_is_pendi
 }
 
 #[tokio::test(start_paused = true)]
+async fn chat_off_keeps_a_delayed_context_completion_for_recovery() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let (path, storage) = (f.path.clone(), f.storage_up.clone());
+    let hold_refresh = Arc::new(AtomicBool::new(false));
+    let source_holds = hold_refresh.clone();
+    let (started, refreshing) = tokio::sync::oneshot::channel();
+    let (release, permit) = std::sync::mpsc::channel();
+    let pending = std::sync::Mutex::new(Some((started, permit)));
+    f.host = ChatHost::with_context(
+        Arc::new(move || {
+            if storage.load(Ordering::SeqCst) {
+                WorkspaceSession::for_file(&path)?.workspace()
+            } else {
+                Err(Error::NoDataDirectory)
+            }
+        }),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |_| {
+            if source_holds.load(Ordering::SeqCst)
+                && let Some((started, permit)) = pending.lock().unwrap().take()
+            {
+                let _ = started.send(());
+                permit.recv().unwrap();
+            }
+            Ok(Some("ticketd context".to_owned()))
+        })),
+    )
+    .unwrap();
+
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    hold_refresh.store(true, Ordering::SeqCst);
+    f.host.links_changed(&f.chat.id).await.unwrap();
+    refreshing.await.unwrap();
+    f.storage_up.store(false, Ordering::SeqCst);
+    assert!(f.host.turn_off().await.is_empty());
+
+    release.send(()).unwrap();
+    settle().await;
+    f.storage_up.store(true, Ordering::SeqCst);
+    f.host.turn_on();
+    f.host.attach(&f.chat.id).await.unwrap();
+    f.send("after enabling").await;
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 2);
+    assert!(f.submits()[1].text.ends_with("after enabling"));
+}
+
+#[tokio::test(start_paused = true)]
+async fn chat_off_keeps_the_pending_dispatch_result_for_recovery() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let pending = f.fake.hold_next_submit();
+    let first = f.send("first").await;
+    let attempt = f.message(&first.id).attempts[0].id.clone();
+    f.storage_up.store(false, Ordering::SeqCst);
+    assert!(f.host.turn_off().await.is_empty());
+
+    pending.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+    f.storage_up.store(true, Ordering::SeqCst);
+    f.host.turn_on();
+    f.host.attach(&f.chat.id).await.unwrap();
+    settle().await;
+    f.send("after enabling").await;
+
+    let original = f.message(&first.id);
+    assert_eq!(original.attempts.len(), 1);
+    assert_eq!(original.attempts[0].id, attempt);
+    assert_eq!(original.attempts[0].delivery, ChatDelivery::Uncertain);
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 2);
+    assert_eq!(f.submits()[1].text, "after enabling");
+}
+
+#[tokio::test(start_paused = true)]
 async fn turning_chat_off_and_on_keeps_waiting_for_the_previous_permission_runtime() {
     let f = Fixture::new(FakeAdapter::new(
         &ticketd_core::harnesses::ANTIGRAVITY,

@@ -18,7 +18,7 @@ use ticketd_core::{
     ChatToolState, ChatTurnReceipt, ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
-use tokio::time::{Instant, sleep_until, timeout, timeout_at};
+use tokio::time::{Instant, sleep_until, timeout};
 use tracing::Instrument;
 use uuid::Uuid;
 
@@ -128,13 +128,6 @@ pub(crate) enum Command {
 
 /// The result of an adapter call that ran in its own task.
 enum Done {
-    Opened {
-        generation: RuntimeGeneration,
-        result: Result<OpenedRuntime, Problem>,
-        accepted: oneshot::Sender<()>,
-        /// The ticketd context read for the new session, or why it could not be.
-        context: Result<Option<String>, String>,
-    },
     OpenCleanupComplete,
     Dispatched {
         outcome: DispatchOutcome,
@@ -160,6 +153,14 @@ enum Done {
         value: String,
         outcome: SettingOutcome,
     },
+}
+
+/// A late open needs an answer even while other completions wait for Chat On.
+struct FinishedOpen {
+    generation: RuntimeGeneration,
+    result: Result<OpenedRuntime, Problem>,
+    accepted: oneshot::Sender<()>,
+    context: Result<Option<String>, String>,
 }
 
 struct SavedReply {
@@ -269,6 +270,8 @@ pub(crate) struct Supervisor {
     commands: mpsc::Receiver<Command>,
     done: mpsc::UnboundedSender<Done>,
     finished: mpsc::UnboundedReceiver<Done>,
+    open_done: mpsc::UnboundedSender<FinishedOpen>,
+    finished_open: mpsc::UnboundedReceiver<FinishedOpen>,
     generations: u64,
     runtime: Option<Runtime>,
     opening: Option<Opening>,
@@ -374,6 +377,7 @@ impl Supervisor {
     ) -> mpsc::Sender<Command> {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
+        let (open_done, finished_open) = mpsc::unbounded_channel();
         // A root span, so a Chat opened from inside a command or a pass is not held open by it.
         let span = tracing::info_span!(
             parent: None,
@@ -395,6 +399,8 @@ impl Supervisor {
             commands,
             done,
             finished,
+            open_done,
+            finished_open,
             generations: 0,
             runtime: None,
             opening: None,
@@ -498,12 +504,15 @@ impl Supervisor {
                         return;
                     }
                 },
-                Some(done) = self.finished.recv() => {
-                    // A retained supervisor still releases workers that finished
-                    // after shutdown. Dropping a late open declines its runtime.
+                Some(opened) = self.finished_open.recv() => {
+                    // Dropping the handoff while Off lets the opening worker close
+                    // the late runtime. Other completions wait for storage recovery.
                     if !self.shutting_down {
-                        self.turn_span().in_scope(|| self.on_done(done));
+                        self.turn_span().in_scope(|| self.on_opened(opened));
                     }
+                }
+                Some(done) = self.finished.recv(), if !self.shutting_down => {
+                    self.turn_span().in_scope(|| self.on_done(done));
                 }
                 event = next_event(&mut self.runtime), if !self.shutting_down => {
                     self.turn_span().in_scope(|| self.on_event(event));
@@ -1685,6 +1694,7 @@ impl Supervisor {
             context_changed: false,
         });
         let (done, chat_id) = (self.done.clone(), chat.id.clone());
+        let open_done = self.open_done.clone();
         let chat_span = self.span.clone();
         let lifecycle = self.lifecycle.clone();
         tokio::spawn(
@@ -1704,7 +1714,7 @@ impl Supervisor {
                 let result = adapter.open(request).await;
                 let (accepted, received) = oneshot::channel();
                 let runtime = result.as_ref().ok().map(|opened| opened.runtime.clone());
-                let _ = done.send(Done::Opened {
+                let _ = open_done.send(FinishedOpen {
                     generation,
                     result,
                     accepted,
@@ -1780,9 +1790,10 @@ impl Supervisor {
         self.record(Vec::new());
         let deadline = Instant::now() + CLOSE_TIMEOUT;
         while self.opening.is_some() {
-            match timeout_at(deadline, self.finished.recv()).await {
-                Ok(Some(done)) => self.on_done(done),
-                _ => break,
+            tokio::select! {
+                Some(opened) = self.finished_open.recv() => self.on_opened(opened),
+                Some(done) = self.finished.recv() => self.on_done(done),
+                () = sleep_until(deadline) => break,
             }
         }
         if let Some(opening) = self.opening.take() {
@@ -2227,12 +2238,6 @@ impl Supervisor {
 
     fn on_done(&mut self, done: Done) {
         match done {
-            Done::Opened {
-                generation,
-                result,
-                accepted,
-                context,
-            } => self.on_opened(generation, result, accepted, context),
             Done::OpenCleanupComplete => {}
             Done::Dispatched { outcome } => self.on_dispatched(outcome),
             Done::Context {
@@ -2349,13 +2354,13 @@ impl Supervisor {
         }
     }
 
-    fn on_opened(
-        &mut self,
-        generation: RuntimeGeneration,
-        result: Result<OpenedRuntime, Problem>,
-        accepted: oneshot::Sender<()>,
-        context: Result<Option<String>, String>,
-    ) {
+    fn on_opened(&mut self, opened: FinishedOpen) {
+        let FinishedOpen {
+            generation,
+            result,
+            accepted,
+            context,
+        } = opened;
         let Some(opening) = self
             .opening
             .take_if(|opening| opening.generation == generation)
@@ -2397,7 +2402,7 @@ impl Supervisor {
                         "ticketd could not prepare this Chat's context, so the session started without it: {error}"
                     )),
                 }
-                if opening.context_changed {
+                if opening.context_changed && !self.closing {
                     self.refresh_context();
                 }
                 self.problem = None;
