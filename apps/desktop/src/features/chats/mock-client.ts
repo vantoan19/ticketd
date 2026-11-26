@@ -27,7 +27,7 @@ import {
   type ProjectRef,
   type TranscriptItem,
 } from "@/features/chats/client";
-import { changeLine } from "@/features/chats/model";
+import { changeLine, netChanges } from "@/features/chats/model";
 import { plainText } from "@/features/documents/graph-text";
 
 /** Words for a condition that holds now and is not a failure; as the host says them. */
@@ -171,7 +171,7 @@ function settled(chat: ChatState): ChatState {
   };
 }
 
-/** The latest turn's first record change, which says the most about it. */
+/** The first sentence of the latest turn's records row: its first net change. */
 function firstChange(items: TranscriptItem[]) {
   const records = items.filter(
     (item): item is Extract<TranscriptItem, { kind: "records" }> =>
@@ -179,9 +179,11 @@ function firstChange(items: TranscriptItem[]) {
   );
   const latest = records.at(-1);
   const turn = latest?.turn_id
-    ? records.find((item) => item.turn_id === latest.turn_id)
-    : latest;
-  return turn?.changes.at(0);
+    ? records.filter((item) => item.turn_id === latest.turn_id)
+    : latest
+      ? [latest]
+      : [];
+  return netChanges(turn.flatMap((item) => item.changes)).at(0);
 }
 
 /**

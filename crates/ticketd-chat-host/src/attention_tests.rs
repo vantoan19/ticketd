@@ -93,6 +93,77 @@ fn a_seen_idle_row_says_its_last_outcome_by_priority() {
     );
 }
 
+fn moved(reference: &str, from: &str, to: &str) -> ChatAgentChange {
+    ChatAgentChange::Status {
+        reference: reference.to_owned(),
+        title: "Demo".to_owned(),
+        from: from.to_owned(),
+        to: to.to_owned(),
+    }
+}
+
+fn posted(reference: &str) -> ChatAgentChange {
+    ChatAgentChange::Update {
+        reference: reference.to_owned(),
+        excerpt: "Done".to_owned(),
+    }
+}
+
+/// The same cases as `netChanges` in `apps/desktop/src/features/chats/model.test.ts`.
+#[test]
+fn a_tickets_status_moves_net_into_one_move() {
+    // Todo -> In progress -> In review, with an update between: the net move leads.
+    assert_eq!(
+        net_changes(&[
+            moved("T-12", "Todo", "In progress"),
+            posted("T-12"),
+            moved("T-12", "In progress", "In review"),
+        ]),
+        [moved("T-12", "Todo", "In review"), posted("T-12")]
+    );
+    // A move that ends where it began is nothing.
+    assert_eq!(
+        net_changes(&[
+            moved("T-12", "Todo", "In progress"),
+            moved("T-12", "In progress", "Todo"),
+            posted("T-12"),
+        ]),
+        [posted("T-12")]
+    );
+    // Each ticket nets by itself and keeps the place of its first move.
+    assert_eq!(
+        net_changes(&[
+            moved("T-12", "Todo", "In progress"),
+            moved("T-13", "Todo", "In progress"),
+            moved("T-12", "In progress", "Done"),
+        ]),
+        [
+            moved("T-12", "Todo", "Done"),
+            moved("T-13", "Todo", "In progress")
+        ]
+    );
+    // Updates are never merged.
+    assert_eq!(
+        net_changes(&[posted("T-12"), posted("T-12")]),
+        [posted("T-12"), posted("T-12")]
+    );
+}
+
+#[test]
+fn an_idle_row_says_the_first_sentence_of_the_records_row() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let chat = chat(5);
+    let net = net_changes(&[
+        moved("T-12", "Todo", "In progress"),
+        posted("T-12"),
+        moved("T-12", "In progress", "In review"),
+    ]);
+    let mut all = facts(&chat, &live, Some(&ended));
+    all.first_change = net.first();
+    assert_eq!(seen_words(all), "Moved T-12 to In review");
+}
+
 #[test]
 fn a_reply_is_cut_at_a_word_and_never_inside_a_link() {
     let live = idle();

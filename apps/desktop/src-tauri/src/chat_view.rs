@@ -574,9 +574,11 @@ pub struct Tracker {
     /// Assistant messages that are not complete; they stop streaming when their turn ends.
     open: HashMap<String, ChatMessage>,
     last_response: Option<String>,
-    first_change: Option<ChatAgentChange>,
-    /// The turn `first_change` was made in.
-    first_change_turn: Option<String>,
+    /// What the agent changed in ticketd in the latest turn that changed anything, by the
+    /// record of each call (a call shown again replaces its own).
+    changes: Vec<(String, Vec<ChatAgentChange>)>,
+    /// The turn `changes` were made in.
+    changes_turn: Option<String>,
     updated_at: Option<String>,
     /// Reasoning, plan and files records of the latest turn: how they read depends on
     /// whether it still runs.
@@ -654,8 +656,8 @@ impl Tracker {
                     self.open.insert(message.id.clone(), message.clone());
                 }
                 // A change from an earlier turn is not what the Chat last did.
-                if message.turn_id != self.first_change_turn {
-                    self.first_change = None;
+                if message.turn_id != self.changes_turn {
+                    self.changes.clear();
                 }
                 self.last_response = Some(message.text.clone());
             }
@@ -692,14 +694,17 @@ impl Tracker {
             }
             ChatItem::Tool(tool) => {
                 self.touch(tool.started_at.as_deref());
-                // A turn is worded by its first change, which says the most: it moved
-                // a ticket, then posted an update, and the row says it moved it.
                 if let Some(changes) = agent_changes(tool)
-                    && let Some(change) = changes.first()
-                    && self.first_change_turn.as_ref() != Some(&tool.turn_id)
+                    && !changes.is_empty()
                 {
-                    self.first_change = Some(change.clone());
-                    self.first_change_turn = Some(tool.turn_id.clone());
+                    if self.changes_turn.as_ref() != Some(&tool.turn_id) {
+                        self.changes.clear();
+                        self.changes_turn = Some(tool.turn_id.clone());
+                    }
+                    match self.changes.iter_mut().find(|(id, _)| *id == tool.id) {
+                        Some((_, kept)) => *kept = changes,
+                        None => self.changes.push((tool.id.clone(), changes)),
+                    }
                 }
                 // Only the latest turn's calls can still be asked about.
                 self.turn_tools
@@ -708,6 +713,17 @@ impl Tracker {
             }
             ChatItem::Session(_) | ChatItem::Notice(_) => {}
         }
+    }
+
+    /// What the latest turn did to ticketd's records, the first sentence of its records
+    /// row: each ticket's status moves netted (`attention::net_changes`), in order.
+    pub fn first_change(&self) -> Option<ChatAgentChange> {
+        let all: Vec<ChatAgentChange> = self
+            .changes
+            .iter()
+            .flat_map(|(_, changes)| changes.iter().cloned())
+            .collect();
+        attention::net_changes(&all).into_iter().next()
     }
 
     /// How many files the latest turn changed, from the host's record of them.
@@ -1794,9 +1810,16 @@ pub fn cut_at_word(text: &str, limit: usize) -> String {
     let head: String = chars[..room].iter().collect();
     // The next character starts a word: the head already ends at one.
     if chars[room].is_whitespace() {
-        return format!("{}…", head.trim_end());
+        return ellipsis(&head);
     }
-    format!("{}…", before_last_word(&head))
+    ellipsis(before_last_word(&head))
+}
+
+/// `text` cut short: without the dash, colon, comma or semicolon its last word was
+/// followed by, then "…".
+fn ellipsis(text: &str) -> String {
+    let text = text.trim_end_matches(|c: char| c.is_whitespace() || "-–—:,;".contains(c));
+    format!("{text}…")
 }
 
 /// `text` without its last, possibly partial, word; all of it when it has only one.
@@ -1824,6 +1847,16 @@ pub(crate) fn title_may_be_cut(chat: &Chat) -> bool {
 /// The first line of a Chat's first message, which its title is made from.
 pub(crate) fn first_line_of(message: &str) -> Option<String> {
     message.trim().lines().next().map(str::to_owned)
+}
+
+/// Whether `line` is a ticket's title followed by the prompt: the title, then ": " or
+/// " - " (or that cut short), as "Work on <reference>: <title><separator><prompt>".
+fn names_title(line: &str, title: &str) -> bool {
+    !title.is_empty()
+        && line.strip_prefix(title).is_some_and(|after| {
+            let after = after.trim_end_matches('…');
+            after.starts_with(": ") || after.starts_with(" - ") || matches!(after, ":" | " -" | " ")
+        })
 }
 
 /// The title the Chat view shows (U-chat titles). A title that starts with
@@ -1860,19 +1893,20 @@ pub(crate) fn display_title(chat: &Chat, around: &Surroundings) -> String {
         Some((rest, ticket_title)) => (rest, Some(ticket_title)),
         None => (chat_title, None),
     };
-    // A line a cut ended, and its ticket's title that goes on from it.
+    // A line a cut ended, and its ticket's title that goes on from it; or a line that
+    // starts with the ticket's title and goes on with the prompt ("<title>: <prompt>").
     let ended = rest.trim_end_matches('…');
-    if (cut || ended.len() < rest.len())
-        && let Some(full) = ticket_title.filter(|full| full.starts_with(ended))
-    {
+    if let Some(full) = ticket_title.filter(|full| {
+        ((cut || ended.len() < rest.len()) && full.starts_with(ended)) || names_title(rest, full)
+    }) {
         return cut_at_word(full, TITLE_LIMIT);
     }
     if cut {
         let whole = rest.trim_end();
         if at_word_end && whole.chars().count() < TITLE_LIMIT {
-            return format!("{whole}…");
+            return ellipsis(whole);
         }
-        return format!("{}…", before_last_word(rest));
+        return ellipsis(before_last_word(rest));
     }
     rest.to_owned()
 }
@@ -1972,6 +2006,7 @@ fn opening(activity: &str, origin: Option<ChatSessionOrigin>) -> Option<&'static
 }
 
 pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroundings) -> Summary {
+    let first_change = tracker.first_change();
     let activity = activity(live, tracker);
     let problem = problem(chat, live, tracker, around);
     let harness = harness_name(&chat.harness);
@@ -1988,7 +2023,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
             .and_then(|problem| problem.message.as_deref()),
         activity,
         opening: opening(activity, live.opening).is_some(),
-        first_change: tracker.first_change.as_ref(),
+        first_change: first_change.as_ref(),
         files_changed: tracker.files_changed(),
         last_response: tracker.last_response.as_deref(),
     });
@@ -2031,7 +2066,7 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
         problem_past: problem.as_ref().is_some_and(|problem| problem.past),
         problem: problem.map(|problem| problem.kind),
         interruption,
-        first_change: tracker.first_change.clone(),
+        first_change,
         preview: tracker
             .last_response
             .as_ref()
@@ -3291,6 +3326,79 @@ mod tests {
     }
 
     #[test]
+    fn a_title_that_starts_with_the_linked_tickets_title_is_that_title() {
+        // "Work on <ref>: <ticket title><sep><prompt>", with either separator.
+        let linked = [ticket("T-12", "Improve the export dialog")];
+        for line in [
+            "Work on T-12: Improve the export dialog: also add a progress bar",
+            "Work on T-12: Improve the export dialog - also add a progress bar",
+        ] {
+            assert_eq!(
+                shown(line, &linked, Some(line)),
+                "Improve the export dialog"
+            );
+        }
+        // The prompt cut it inside the separator.
+        assert_eq!(
+            shown("Work on T-12: Improve the export dialog:", &linked, None),
+            "Improve the export dialog"
+        );
+        // Not the ticket's title, or no separator after it: the rest of the line.
+        assert_eq!(
+            shown("Work on T-12: Improve the export dialogs", &linked, None),
+            "Improve the export dialogs"
+        );
+        assert_eq!(
+            shown(
+                "Work on T-12: Make it faster: also add a progress bar",
+                &linked,
+                None
+            ),
+            "Make it faster: also add a progress bar"
+        );
+        // A ticket title longer than the limit is cut at a word, as for a cut line.
+        let long =
+            "Design the attachment review experience for every kind of record a Chat can link to";
+        let linked = [ticket("T-12", long)];
+        let line = format!("Work on T-12: {long}: and then the settings page");
+        let title = shown(&line, &linked, Some(&line));
+        assert!(
+            title.ends_with('…') && title.chars().count() <= 80,
+            "{title}"
+        );
+        assert!(long.starts_with(title.trim_end_matches('…')), "{title}");
+    }
+
+    #[test]
+    fn a_cut_title_never_ends_in_punctuation_before_the_ellipsis() {
+        // Not linked: a legacy title cut mid-word, whose last whole word is a dash.
+        let line = format!("{}- andromeda and more", "word ".repeat(15));
+        let stored: String = line.chars().take(80).collect();
+        let title = shown(&stored, &[], Some(&line));
+        assert!(title.ends_with('…'), "{title}");
+        assert!(
+            !title
+                .trim_end_matches('…')
+                .ends_with([' ', '-', '–', '—', ':', ',', ';']),
+            "{title}"
+        );
+        // A new title cut at a word keeps no colon or dash either.
+        let long = format!(
+            "{}: {}",
+            "Explain the retry queue and its limits",
+            "x".repeat(60)
+        );
+        assert_eq!(
+            super::cut_at_word(&long, 42),
+            "Explain the retry queue and its limits…"
+        );
+        assert_eq!(
+            super::cut_at_word("Explain the retry queue and its limits - and more", 41),
+            "Explain the retry queue and its limits…"
+        );
+    }
+
+    #[test]
     fn a_title_cut_mid_word_at_eighty_characters_is_cut_again_at_a_word() {
         let line = "Work on T-12: Design the attachment review UI for this user flow and the settings page";
         let stored: String = line.chars().take(80).collect();
@@ -3360,7 +3468,7 @@ mod tests {
         let later = r#"{"kind":"update","reference":"T-13","excerpt":"Next"}"#;
         let wording = |tracker: &Tracker| {
             tracker
-                .first_change
+                .first_change()
                 .as_ref()
                 .map(ticketd_chat_host::attention::change_line)
         };
@@ -3377,6 +3485,33 @@ mod tests {
         assert_eq!(
             wording(&two_calls).as_deref(),
             Some("Moved T-12 to In review")
+        );
+        // Todo -> In progress -> In review, with an update between: the row says the net
+        // move, and a call shown again is not counted twice.
+        let progress = r#"{"kind":"status","reference":"T-12","title":"Demo","from":"Todo","to":"In progress"}"#;
+        let review = r#"{"kind":"status","reference":"T-12","title":"Demo","from":"In progress","to":"In review"}"#;
+        let mut netted = Tracker::from_items(&[
+            changes("a", "t1", &format!("[{progress}]")),
+            changes("b", "t1", &format!("[{posted}]")),
+            changes("c", "t1", &format!("[{review}]")),
+            changes("c", "t1", &format!("[{review}]")),
+        ]);
+        assert_eq!(wording(&netted).as_deref(), Some("Moved T-12 to In review"));
+        // A move that ends where it began leaves the update to lead.
+        netted.note(&changes(
+            "d",
+            "t1",
+            &format!(
+                "[{}]",
+                review.replace(
+                    r#""from":"In progress","to":"In review""#,
+                    r#""from":"In review","to":"Todo""#,
+                )
+            ),
+        ));
+        assert_eq!(
+            wording(&netted).as_deref(),
+            Some("Posted an update on T-12")
         );
         // The next turn is worded by its own first change.
         let next = Tracker::from_items(&[

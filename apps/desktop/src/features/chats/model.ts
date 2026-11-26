@@ -122,13 +122,24 @@ export function ticketdParts(
   const parts: StepWords["parts"] = [];
   const reference = (call: TicketdCall | undefined) =>
     call?.words.find((word) => word.code && !word.record)?.text;
-  calls.forEach((call, index) => {
-    const before = calls[index - 1];
+  // A call made again word for word is one clause, "(3 times)", not said again.
+  const said: { call: TicketdCall; times: number }[] = [];
+  for (const call of calls) {
+    const again = said.find(
+      (each) =>
+        each.call.verb === call.verb &&
+        JSON.stringify(each.call.words) === JSON.stringify(call.words),
+    );
+    if (again) again.times += 1;
+    else said.push({ call, times: 1 });
+  }
+  said.forEach(({ call, times }, index) => {
+    const before = said[index - 1]?.call;
     const repeats = before?.verb === call.verb;
     if (index > 0) {
       if (repeats)
         parts.push({
-          text: calls[index + 1]?.verb === call.verb ? "," : "and",
+          text: said[index + 1]?.call.verb === call.verb ? "," : "and",
         });
       else parts.push({ text: "," }, { text: "then" });
     }
@@ -151,6 +162,7 @@ export function ticketdParts(
                 : { text: word.text },
       );
     }
+    if (times > 1) parts.push({ text: `(${times} times)` });
   });
   return parts;
 }
@@ -218,6 +230,44 @@ export function targetLines(target: StepTarget): string {
   return from === to ? `line ${from}` : `lines ${from}–${to}`;
 }
 
+/** Characters of a ticketd sentence a row holds before it reads the harness's description. */
+const TICKETD_SENTENCE_LIMIT = 64;
+
+/**
+ * A command's first line, as the one muted line of its row. When the command goes on, a
+ * line that ends inside a quote or a bracket ("python3 -c \"") is cut back to before it,
+ * and a line ending in a continuation loses its backslash: it never ends open.
+ */
+export function commandLine(command: string): string {
+  const [first = command, ...more] = command.split("\n");
+  if (more.length === 0) return first;
+  const closing = new Map([
+    ["(", ")"],
+    ["[", "]"],
+    ["{", "}"],
+  ]);
+  // Where the quote or bracket still open began.
+  const open: { at: number; char: string }[] = [];
+  let quote: { at: number; char: string } | undefined;
+  for (let at = 0; at < first.length; at += 1) {
+    const char = first.charAt(at);
+    const top = open.at(-1);
+    if (quote) {
+      // A backslash escapes the next character inside double quotes.
+      if (char === "\\" && quote.char === '"') at += 1;
+      else if (char === quote.char) quote = undefined;
+    } else if (char === "'" || char === '"' || char === "`")
+      quote = { at, char };
+    else if (closing.has(char)) open.push({ at, char });
+    else if (top && closing.get(top.char) === char) open.pop();
+  }
+  const dangling = quote ?? open[0];
+  // "$(" opens a substitution: the dollar goes with it.
+  const from = dangling && first.charAt(dangling.at - 1) === "$" ? 1 : 0;
+  const kept = dangling ? first.slice(0, dangling.at - from) : first;
+  return kept.replace(/[\s\\]+$/, "") || first;
+}
+
 /**
  * Every word of a step row: `[icon] Verb target · suffix`. Only a step that succeeded
  * is in the past tense; any other outcome keeps the plain verb and says its word.
@@ -253,6 +303,14 @@ export function stepWords(
       state === "running" ? 0 : state === "done" ? 1 : 2,
       name,
     );
+    // A sentence too long for a row, and the harness's own shorter account of it.
+    const sentence = partsText(parts);
+    if (
+      step.description &&
+      sentence.length > TICKETD_SENTENCE_LIMIT &&
+      step.description.length < sentence.length
+    )
+      parts = [{ text: step.description }];
   } else if (step.variant === "plan") {
     // Claude Code keeps its plan in its own profile; the path says nothing more.
     parts = [
@@ -281,10 +339,7 @@ export function stepWords(
   } else if (step.kind === "run") {
     // `target` is the command as shown (ticketd without its path); `command` is what ran.
     const command = step.target || step.command || "";
-    parts = [
-      { text: verb },
-      { ...code(command.split("\n")[0] ?? command), command: true },
-    ];
+    parts = [{ text: verb }, { ...code(commandLine(command)), command: true }];
   } else if (omitted) {
     const files =
       omitted.count === null
@@ -1008,6 +1063,34 @@ export function unseenFrom(items: TranscriptItem[]) {
 export const goneWords = (gone: Gone | null | undefined) =>
   gone === "trashed" ? " (in Trash)" : gone === "deleted" ? " (deleted)" : "";
 
+/**
+ * What a turn's changes read as: each ticket's status moves netted into one (the first
+ * `from`, the last `to`, dropped when they are equal) where the ticket's first move
+ * stood. The records row says these sentences and an idle list row's second line says
+ * the first of them. The host words the list row from the same rule
+ * (`net_changes` in the Chat host's `attention.rs`), and both are tested with the
+ * same cases.
+ */
+export function netChanges(changes: RecordChange[]): RecordChange[] {
+  const net: RecordChange[] = [];
+  for (const change of changes) {
+    const earlier =
+      change.kind === "status"
+        ? net.find(
+            (kept) =>
+              kept.kind === "status" && kept.reference === change.reference,
+          )
+        : undefined;
+    if (earlier?.kind === "status" && change.kind === "status") {
+      earlier.to = change.to;
+      earlier.gone = change.gone;
+    } else net.push({ ...change });
+  }
+  return net.filter(
+    (change) => change.kind !== "status" || change.from !== change.to,
+  );
+}
+
 /** What the agent did to a record, as the list row says it. */
 export function changeLine(change: RecordChange) {
   if (change.kind === "status")
@@ -1402,13 +1485,20 @@ export function turnClock(timestamp: string, now = Date.now()): string {
 
 /**
  * The tooltip of a turn's time: its exact start and end, "Started Nov 24, 2:03 PM ·
- * Ended 2:12 PM" (the day again only when it ended on another one).
+ * Ended 2:12 PM" (the day again only when it ended on another one, and the year
+ * only when it is not this year).
  */
 export function turnSpanText(started: string, ended?: string): string {
   const from = new Date(started);
   if (Number.isNaN(from.getTime())) return "";
+  // Month, day and time; the year only when it is not this year.
+  const thisYear = new Date().getFullYear();
   const full = (date: Date) =>
-    date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+    `${date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "numeric",
+      ...(date.getFullYear() !== thisYear && { year: "numeric" }),
+    })}, ${formatTime(date)}`;
   const to = ended ? new Date(ended) : undefined;
   if (!to || Number.isNaN(to.getTime())) return `Started ${full(from)}`;
   return `Started ${full(from)} · Ended ${
