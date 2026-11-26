@@ -4370,22 +4370,11 @@ kbd,
   border-radius: var(--radius-panel);
   background: var(--recessed);
 }
-.attachment-preview-stage[data-image] {
-  background: repeating-conic-gradient(
-      var(--accent) 0 25%,
-      var(--recessed) 0 50%
-    )
-    0 0 / 20px 20px;
-}
 .attachment-preview-title > :is(h2, [data-slot="dialog-title"]) {
   color: var(--foreground);
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
   font-weight: 500;
-}
-.attachment-preview-image {
-  background: transparent;
-  box-shadow: none;
 }
 
 .ui-notice-hint {

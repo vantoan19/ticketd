@@ -172,7 +172,7 @@ export const SHORTCUTS = [
       [
         "attachments-zoom",
         [["+"], ["-"], ["0"]],
-        "Zoom a PDF in, out, or to fit the width",
+        "Zoom a PDF or picture in, out, or to fit",
       ],
       ["attachments-find", [["Mod", "F"], ["/"]], "Find in a log or text file"],
       ["attachments-wrap", [["W"]], "Wrap or unwrap the lines of a log"],

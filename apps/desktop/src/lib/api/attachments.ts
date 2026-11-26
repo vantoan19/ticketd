@@ -376,6 +376,14 @@ export const attachments = {
     );
     return new TextDecoder().decode(bytes);
   },
+  /** The number of the first line `text` returns: 1, or after the lines a long log dropped. */
+  async textFirstLine(workspace: string, id: string) {
+    return z
+      .number()
+      .int()
+      .min(1)
+      .parse(await invoke("attachment_text_first_line", { workspace, id }));
+  },
   mediaUrl(workspace: string, id: string) {
     return `${convertFileSrc(workspace, "attachment-media")}/${encodeURIComponent(id)}`;
   },

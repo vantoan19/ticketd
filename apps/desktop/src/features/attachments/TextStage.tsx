@@ -52,11 +52,13 @@ import {
 
 type Scope = { total_bytes: number; shown_bytes: number; partial: boolean };
 type Loaded =
-  | { key: string; index: SearchIndex; dropped: number }
+  | { key: string; index: SearchIndex; dropped: number; firstLine: number }
   | { key: string; failure: FailureDescription };
 
 /** The line number column, the right padding, and the line above a partial log. */
 const GUTTER = 64;
+/** The space around a line number, inside the gutter: 8px before it and 12px after. */
+const GUTTER_PADDING = 20;
 const RIGHT_PADDING = 16;
 const SCOPE_LINE = 36;
 /** Room under the last line for the view bar. */
@@ -96,14 +98,19 @@ export function TextStage({
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   useEffect(() => {
     let active = true;
-    attachments.text(workspace, file.id).then(
-      (text) => {
+    // A log's end keeps the file's own numbers: core says how many lines it cut.
+    Promise.all([
+      attachments.text(workspace, file.id),
+      scope.partial ? attachments.textFirstLine(workspace, file.id) : 1,
+    ]).then(
+      ([text, firstLine]) => {
         if (!active) return;
         const { text: shown, dropped } = lastLines(text, MAX_LINES);
         setLoaded({
           key,
           index: searchIndex(shown, parseLines(shown)),
           dropped,
+          firstLine,
         });
       },
       (reason: unknown) => {
@@ -114,7 +121,7 @@ export function TextStage({
     return () => {
       active = false;
     };
-  }, [key, workspace, file.id]);
+  }, [key, workspace, file.id, scope.partial]);
   const current = loaded?.key === key ? loaded : null;
   if (!current)
     return (
@@ -134,6 +141,7 @@ export function TextStage({
       name={file.display_name}
       index={current.index}
       dropped={current.dropped}
+      firstLine={current.firstLine}
       scope={scope}
       scrollerRef={scrollerRef}
       keysRef={keysRef}
@@ -146,6 +154,7 @@ function TextLines({
   name,
   index,
   dropped,
+  firstLine,
   scope,
   scrollerRef,
   keysRef,
@@ -155,6 +164,8 @@ function TextLines({
   index: SearchIndex;
   /** Lines before the first one shown, when the file has too many to draw. */
   dropped: number;
+  /** The file's own number of the first line of the text (after a long log's cut). */
+  firstLine: number;
   scope: Scope;
   scrollerRef: RefObject<HTMLElement | null>;
   keysRef: StageKeys;
@@ -168,6 +179,12 @@ function TextLines({
   const [size, setSize] = useState({ width: 0, height: 0 });
   const [scrollTop, setScrollTop] = useState(0);
   const [charWidth, setCharWidth] = useState(FALLBACK_CHAR_WIDTH);
+  // 64px, wider when the last number (a long log's end can reach millions) needs it.
+  const gutter = Math.max(
+    GUTTER,
+    Math.ceil(String(firstLine + dropped + lines.length).length * charWidth) +
+      GUTTER_PADDING,
+  );
   const note = scopeNote(scope, lines.length, dropped);
   const origin = note ? SCOPE_LINE : 0;
 
@@ -207,7 +224,7 @@ function TextLines({
   // Heights: an estimate for every block, replaced by the real height of those drawn.
   const columns = Math.max(
     20,
-    Math.floor((size.width - GUTTER - RIGHT_PADDING) / charWidth),
+    Math.floor((size.width - gutter - RIGHT_PADDING) / charWidth),
   );
   const layoutKey = `${wrap}/${columns}`;
   const estimates = useMemo(
@@ -472,6 +489,7 @@ function TextLines({
         key={block}
         block={block}
         lines={lines}
+        offset={firstLine + dropped - 1}
         matches={matches}
         current={block === currentBlock ? active : -1}
       />,
@@ -490,7 +508,12 @@ function TextLines({
         aria-label={`Text of ${name}`}
         className="attachment-text"
         data-wrap={wrap ? "" : undefined}
-        style={{ "--text-hang": `${HANG}ch` } as CSSProperties}
+        style={
+          {
+            "--text-hang": `${HANG}ch`,
+            "--text-gutter": `${gutter}px`,
+          } as CSSProperties
+        }
         tabIndex={reachable ? 0 : undefined}
         onCopy={onCopy}
       >
@@ -648,11 +671,14 @@ function ViewBarFind({
 const Block = memo(function Block({
   block,
   lines,
+  offset,
   matches,
   current,
 }: {
   block: number;
   lines: readonly string[];
+  /** The file's line number of the first line, less one. */
+  offset: number;
   matches: readonly Match[];
   /** The index of the current match when it is in this block, else -1. */
   current: number;
@@ -669,7 +695,7 @@ const Block = memo(function Block({
         key={line}
         className="attachment-text-line"
         data-line={line}
-        data-n={line + 1}
+        data-n={offset + line + 1}
       >
         <span className="attachment-text-content">
           {start === next

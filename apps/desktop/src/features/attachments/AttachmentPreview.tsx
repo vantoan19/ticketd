@@ -87,6 +87,7 @@ import { ExportMarkdownButton } from "./ExportMarkdown";
 import { FileIcon } from "./AttachmentThumbnail";
 import { FittedTitle } from "./FittedTitle";
 import { HtmlStage } from "./HtmlStage";
+import { ImageStage } from "./ImageStage";
 import { PdfStage, type StageKeys } from "./PdfStage";
 import { TextStage } from "./TextStage";
 import { PreviewLoading, PreviewState, RetryActions } from "./PreviewState";
@@ -129,31 +130,17 @@ function Media({
   onError: () => void;
 }) {
   const media = useRef<HTMLMediaElement>(null);
-  const image = useRef<HTMLImageElement>(null);
   useEffect(() => {
     const element = media.current;
-    const picture = image.current;
-    // Strict Mode rehearses cleanup/setup; restore sources on each setup too.
-    picture?.setAttribute("src", url);
+    // Strict Mode rehearses cleanup/setup; restore the source on each setup too.
     element?.setAttribute("src", url);
     return () => {
-      picture?.removeAttribute("src");
       if (!element) return;
       element.pause();
       element.removeAttribute("src");
       element.load();
     };
   }, [url]);
-  if (mime.startsWith("image/"))
-    return (
-      <img
-        ref={image}
-        className="attachment-preview-image"
-        src={url}
-        alt={file.display_name}
-        onError={onError}
-      />
-    );
   const props = {
     src: url,
     controls: true,
@@ -845,6 +832,7 @@ function PreviewStage({
   let body: ReactNode;
   let reportShown = false;
   let pdfShown = false;
+  let pictureShown = false;
   let textShown = false;
   if (external && file)
     body = (
@@ -1014,17 +1002,32 @@ function PreviewStage({
         action={<RetryActions onRetry={preview.retry} />}
       />
     );
-  else if (info?.status === "available" && file && info.media_type)
-    body = (
-      <Media
-        key={`${preview.workspace}/${file.id}/${preview.attempt}`}
-        file={file}
-        mime={info.media_type}
-        url={attachments.mediaUrl(preview.workspace, file.id)}
-        onError={preview.mediaFailed}
-      />
-    );
-  else if (info?.status === "unavailable")
+  else if (info?.status === "available" && file && info.media_type) {
+    const mediaKey = `${preview.workspace}/${file.id}/${preview.attempt}`;
+    const mediaUrl = attachments.mediaUrl(preview.workspace, file.id);
+    if (info.media_type.startsWith("image/")) {
+      pictureShown = true;
+      body = (
+        <ImageStage
+          key={mediaKey}
+          file={file}
+          url={mediaUrl}
+          onError={preview.mediaFailed}
+          scrollerRef={scroller}
+          keysRef={stageKeys}
+        />
+      );
+    } else
+      body = (
+        <Media
+          key={mediaKey}
+          file={file}
+          mime={info.media_type}
+          url={mediaUrl}
+          onError={preview.mediaFailed}
+        />
+      );
+  } else if (info?.status === "unavailable")
     body = (
       <PreviewState
         family={type.family}
@@ -1120,7 +1123,7 @@ function PreviewStage({
     <div
       ref={stage}
       className="attachment-preview-stage"
-      // The format showing in the stage (a PDF's zoom keys) hears the keys first.
+      // The format showing in the stage (a PDF's or picture's zoom keys) hears the keys first.
       onKeyDown={(event) => stageKeys.current?.(event)}
       {...(stageRef && {
         tabIndex: -1,
@@ -1131,15 +1134,8 @@ function PreviewStage({
       })}
       data-report={reportShown ? "" : undefined}
       data-pdf={pdfShown ? "" : undefined}
+      data-picture={pictureShown ? "" : undefined}
       data-text={textShown ? "" : undefined}
-      data-image={
-        type.family === "image" &&
-        !preview.missing &&
-        !preview.gone &&
-        !external
-          ? ""
-          : undefined
-      }
     >
       {notice}
       <div

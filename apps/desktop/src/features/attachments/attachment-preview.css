@@ -350,14 +350,42 @@
   background: black;
   opacity: 0.08;
 }
-/* Images sit on a checkerboard, so a white or transparent one stays visible on
-   the light stage; a tiny one is drawn at least 128px (shell AT-09). */
+/* A picture sits on its own checkerboard (see styles.css) over the recessed stage,
+   centered above the view bar. The 20px around it and the 72px under it match PAD and
+   BAR_ROOM in ImageStage.tsx, which sizes it. */
+.attachment-preview-stage[data-picture] .attachment-preview-canvas {
+  display: block;
+  width: max-content;
+  min-width: 100%;
+  padding: 0;
+}
+/* A zoomed picture scrolls sideways; the bar spans what the stage shows and sticks to
+   its left edge, so it stays centered under the view. */
+.attachment-picture-bar {
+  display: contents;
+}
+.attachment-picture-bar .view-bar-dock {
+  width: var(--stage-width, 100%);
+}
+.attachment-picture {
+  display: flex;
+  box-sizing: border-box;
+  width: max-content;
+  min-width: 100%;
+  min-height: 100%;
+  padding: 20px 20px 72px;
+}
 .attachment-preview-image {
-  max-width: 100%;
-  max-height: 100%;
-  min-width: min(128px, 100%);
-  min-height: 128px;
-  object-fit: contain;
+  display: block;
+  flex: none;
+  max-width: none;
+  margin: auto;
+}
+.attachment-preview-image[data-zoom="in"] {
+  cursor: zoom-in;
+}
+.attachment-preview-image[data-zoom="out"] {
+  cursor: zoom-out;
 }
 .attachment-preview-canvas video {
   max-width: 100%;
@@ -492,13 +520,13 @@
 }
 .attachment-text-line {
   display: grid;
-  grid-template-columns: 64px minmax(0, 1fr);
+  grid-template-columns: var(--text-gutter, 64px) minmax(0, 1fr);
   min-height: 20px;
 }
 /* The line number is generated, so it is never selected or copied. */
 .attachment-text-line::before {
   content: attr(data-n);
-  padding-inline: 0 12px;
+  padding-inline: 8px 12px; /* GUTTER_PADDING in TextStage.tsx */
   text-align: right;
   font-variant-numeric: tabular-nums;
   user-select: none;
