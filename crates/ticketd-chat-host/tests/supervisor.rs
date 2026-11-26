@@ -2382,6 +2382,62 @@ async fn resend_of_a_live_unconfirmed_linked_input_keeps_its_context() {
     linked_resend_preserves_context(false).await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn resend_with_already_delivered_link_context_refreshes_once() {
+    let reads = Arc::new(AtomicUsize::new(0));
+    let source = reads.clone();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        source.fetch_add(1, Ordering::SeqCst);
+        Ok(())
+    });
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f
+            .core()
+            .create_ticket("Previously delivered link")
+            .unwrap()
+            .id,
+    };
+    f.core()
+        .add_chat_links(&f.chat.id, std::slice::from_ref(&link))
+        .unwrap();
+    f.send("first").await;
+    assert_eq!(
+        f.wait_for_submissions(1).await[0].text,
+        "linked records: 1\n\nfirst"
+    );
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.fake.script_submit(SubmitReply::Timeout);
+    let saved = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Unconfirmed",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    assert_eq!(f.wait_for_submissions(2).await[1].text, "Unconfirmed");
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(f.message(&saved.id).awaits_decision());
+    f.queue("Keep queued").await;
+
+    f.host.resend(&f.chat.id, &saved.id).await.unwrap();
+    let submissions = f.wait_for_submissions(3).await;
+    assert_eq!(submissions[2].text, "Unconfirmed");
+    assert_eq!(submissions[2].attachments, [saved_file()]);
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    assert_eq!(
+        reads.load(Ordering::SeqCst),
+        2,
+        "one initial read and one resend reread"
+    );
+    assert_eq!(f.queued(), ["Keep queued"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+}
+
 async fn linked_resend_preserves_context(restart: bool) {
     let unavailable = Arc::new(AtomicBool::new(false));
     let source = unavailable.clone();
