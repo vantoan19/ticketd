@@ -616,6 +616,11 @@
 .chat-turnpart[data-quiet] .chat-foldline {
   align-items: center;
 }
+/* Where it sits on a work line, on the fold label's baseline: 1px lower. */
+.chat-turnpart[data-quiet] .chat-turn-time {
+  position: relative;
+  top: 1px;
+}
 .chat-fold > svg {
   flex: none;
 }
