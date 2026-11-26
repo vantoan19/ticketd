@@ -255,8 +255,9 @@ it("shows snippet, tags and date per row, highlights matches and refocuses searc
       target: { value: "plan" },
     },
   );
-  await screen.findByText("1 result");
-  expect(document.querySelector("mark")?.textContent).toBe("plan");
+  await screen.findByText("1 result: 1 in titles");
+  // The title "Plan" matches the query, so the mark keeps the title's own letters.
+  expect(document.querySelector("mark")?.textContent).toBe("Plan");
   fireEvent.click(screen.getByRole("button", { name: "Clear search" }));
   expect(document.activeElement).toBe(
     screen.getByLabelText("Search Documents"),
