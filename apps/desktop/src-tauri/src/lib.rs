@@ -2674,6 +2674,8 @@ pub fn run() -> Result<(), tauri::Error> {
             diagnostics_commands::diagnostics_issue_details,
             diagnostics_commands::diagnostics_save_report,
             sync_commands::sync_connect,
+            sync_commands::use_another_google_account,
+            sync_commands::use_sync_uploads_folder,
             s3_commands::s3_profiles,
             s3_commands::s3_choose_cli,
             s3_commands::s3_identity,

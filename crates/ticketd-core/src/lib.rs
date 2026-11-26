@@ -113,7 +113,7 @@ pub use attachment_previews::{
     AttachmentMedia, AttachmentPreview, PreviewStatus, PreviewUsage, PreviewUse,
     TEXT_EXCERPT_BYTES, TextExcerpt,
 };
-pub use upload_destination::AttachmentUploadDestination;
+pub use upload_destination::{AttachmentUploadDestination, GoogleSignIn};
 pub use versions::{RecordKind, Version, VersionSummary};
 pub mod drive;
 mod embedded_attachments;

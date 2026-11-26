@@ -71,8 +71,8 @@ test("splitMatch cuts text around the first match, keeping its original case", (
 
 test("search finds a row by the title its page shows", () => {
   const first = (query: string) => searchSettings(query, SETTINGS_ENTRIES)[0];
-  expect(first("Largest file")?.section).toBe("files");
-  expect(first("upload limit")?.section).toBe("files");
+  expect(first("New files")?.section).toBe("files");
+  expect(first("Google account")?.section).toBe("files");
   expect(first("Check for changes every")?.section).toBe("workspace-sync");
   expect(first("Third-party notices")?.section).toBe("about");
   expect(first("Dialogs and menus")?.section).toBe("keyboard-shortcuts");
@@ -125,8 +125,8 @@ test("experimental finds the Agents and Automations pages", () => {
 });
 
 test("a description from the page finds its row", () => {
-  const [first] = searchSettings("all file types", SETTINGS_ENTRIES);
-  expect(first).toMatchObject({ title: "Upload limit" });
+  const [first] = searchSettings("already attached", SETTINGS_ENTRIES);
+  expect(first).toMatchObject({ title: "New files" });
 });
 
 test("splitMatch marks a word start, not the middle of a word", () => {

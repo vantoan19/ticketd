@@ -18,7 +18,17 @@ pub use copies::*;
 mod copy_provider;
 pub use copy_provider::GoogleDriveCopies;
 mod remote;
-pub use remote::DriveRemote;
+pub use remote::{DriveRemote, UPLOADS_FOLDER};
+
+/// The Uploads folder inside a Workspace's sync folder on Google Drive, as the storage finds
+/// or makes it. Kept apart from [`crate::sync::remote::RemoteStorage`]: Workspace sync never
+/// sees it.
+pub trait SyncUploadsFolder {
+    fn uploads_folder(
+        &self,
+        workspace_folder: &str,
+    ) -> Result<DriveFolder, crate::sync::remote::RemoteError>;
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

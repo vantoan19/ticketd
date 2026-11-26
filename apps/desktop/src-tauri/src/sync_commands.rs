@@ -1097,8 +1097,62 @@ fn woken<T>(outcome: Outcome<T>) -> Outcome<T> {
 // Everything below that reaches Google runs off the UI thread.
 #[tauri::command(async)]
 pub fn sync_connect(app: tauri::AppHandle) -> Outcome<SyncStatus> {
-    let (connection, account) = sign_in(&app)?;
+    // Files and Workspace sync share one Google sign-in: one already made for Files is used
+    // as it is, with no second consent.
+    let known = open_workspace()?
+        .google_sign_in()?
+        .and_then(|known| Some((known.connection_id, known.account?)));
+    let (connection, account) = match known {
+        Some(known) => known,
+        None => sign_in(&app)?,
+    };
     woken(Ok(open_workspace()?.sync_connect(&connection, &account)?))
+}
+
+/// Signs in with another Google account for Files and Workspace sync together. The interface
+/// has said what changes before it asks; nothing changes until the sign-in has finished.
+#[tauri::command(async)]
+pub fn use_another_google_account(app: tauri::AppHandle) -> Outcome<SyncStatus> {
+    let (connection, account) = sign_in(&app)?;
+    let mut workspace = open_workspace()?;
+    workspace.switch_google_account(&connection, &account)?;
+    woken(Ok(workspace.sync_status()?))
+}
+
+/// New files go to the Uploads folder inside the folder Workspace sync uses on Google Drive,
+/// with the sign-in sync holds.
+#[tauri::command(async)]
+pub fn use_sync_uploads_folder() -> Outcome<ticketd_core::AttachmentUploadDestination> {
+    let mut workspace = open_workspace()?;
+    let connection = workspace
+        .sync_binding()?
+        .filter(|binding| binding.provider == SyncProvider::GoogleDrive)
+        .and_then(|binding| binding.connection_id);
+    let Some(connection) = connection else {
+        return rejected("Workspace sync is not on Google Drive");
+    };
+    let remote = drive(&connection);
+    Ok(workspace.use_sync_uploads_folder(remote.as_ref())?)
+}
+
+/// Once sync has a folder on Google Drive, uploads that were going to Drive go inside it. A
+/// failure is left for the next time: uploads keep going where they were chosen to.
+fn follow_uploads(workspace: &mut Workspace) {
+    let connection = workspace
+        .sync_binding()
+        .ok()
+        .flatten()
+        .filter(|binding| binding.provider == SyncProvider::GoogleDrive)
+        .and_then(|binding| binding.connection_id);
+    let Some(connection) = connection else { return };
+    let remote = drive(&connection);
+    if let Err(error) = workspace.follow_sync_uploads(remote.as_ref()) {
+        tracing::warn!(
+            error_kind = error.kind().code(),
+            %error,
+            "could not move uploads into the sync folder"
+        );
+    }
 }
 
 #[tauri::command(async)]
@@ -1113,10 +1167,9 @@ pub fn sync_setup_options() -> Outcome<SetupOptions> {
 pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
     let remote = signed_in(&workspace)?;
-    woken(Ok(workspace.sync_upload_workspace(
-        remote.as_ref(),
-        "ticketd Workspace",
-    )?))
+    let status = workspace.sync_upload_workspace(remote.as_ref(), "ticketd Workspace")?;
+    follow_uploads(&mut workspace);
+    woken(Ok(status))
 }
 
 /// Back to the folder this Workspace synced with before it was disconnected.
@@ -1125,7 +1178,9 @@ pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
 pub fn sync_reconnect() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
     let remote = signed_in(&workspace)?;
-    woken(Ok(workspace.sync_reconnect(remote.as_ref())?))
+    let status = workspace.sync_reconnect(remote.as_ref())?;
+    follow_uploads(&mut workspace);
+    woken(Ok(status))
 }
 
 /// The status after a download, and where the replaced Workspace was kept.

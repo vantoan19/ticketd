@@ -989,6 +989,16 @@ impl Workspace {
         }))
     }
 
+    /// The Google sign-in Workspace sync holds, with the account it shows: a connection
+    /// id and an email address. `None` while sync is not signed in to Google Drive.
+    pub(crate) fn sync_google_sign_in(&self) -> Result<Option<(String, Option<String>)>, Error> {
+        let state = state(&self.connection)?;
+        Ok(match (state.provider, state.connection) {
+            (SyncProvider::GoogleDrive, Some(connection)) => Some((connection, state.account)),
+            _ => None,
+        })
+    }
+
     /// How many records in review and notices are unread.
     pub fn sync_unread_count(&self) -> Result<usize, Error> {
         Ok(self.connection.query_row(

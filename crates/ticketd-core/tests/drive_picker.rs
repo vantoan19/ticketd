@@ -422,7 +422,7 @@ fn disabled_drive_api_reports_publisher_setup_without_saving_credentials() {
             }
             assert_eq!(
                 request.url,
-                "https://www.googleapis.com/drive/v3/about?fields=user(permissionId)"
+                "https://www.googleapis.com/drive/v3/about?fields=user(permissionId,emailAddress)"
             );
             Ok(DriveResponse {
                 headers: vec![],
