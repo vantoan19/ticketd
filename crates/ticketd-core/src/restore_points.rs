@@ -20,7 +20,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use chrono::{DateTime, FixedOffset, SecondsFormat, Utc};
+use chrono::{DateTime, FixedOffset, Local, SecondsFormat, Utc};
 use fs2::FileExt;
 use rusqlite::{Connection, OpenFlags};
 use serde::{Deserialize, Serialize};
@@ -110,10 +110,15 @@ impl Workspace {
         Ok(PathBuf::from(name))
     }
 
+    /// [`Workspace::save_daily_restore_point_at`] for the person's clock.
+    pub fn save_daily_restore_point(&self) -> Result<Option<RestorePoint>, Error> {
+        self.save_daily_restore_point_at(Local::now().fixed_offset())
+    }
+
     /// Saves today's restore point unless one was already saved today: the first call on each
     /// day does the work. `now` is the person's own time, which decides what a day is. Returns
     /// the new point, or `None` when there was nothing to do (or another process is saving).
-    pub fn save_daily_restore_point(
+    pub fn save_daily_restore_point_at(
         &self,
         now: DateTime<FixedOffset>,
     ) -> Result<Option<RestorePoint>, Error> {
@@ -133,8 +138,13 @@ impl Workspace {
             .map(Some)
     }
 
+    /// [`Workspace::save_manual_restore_point_at`] for the person's clock.
+    pub fn save_manual_restore_point(&self) -> Result<RestorePoint, Error> {
+        self.save_manual_restore_point_at(Local::now().fixed_offset())
+    }
+
     /// Saves a restore point now, for Back up now. It needs no file path and replaces nothing.
-    pub fn save_manual_restore_point(
+    pub fn save_manual_restore_point_at(
         &self,
         now: DateTime<FixedOffset>,
     ) -> Result<RestorePoint, Error> {

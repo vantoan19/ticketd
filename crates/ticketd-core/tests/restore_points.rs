@@ -11,6 +11,7 @@ use rusqlite::Connection;
 use ticketd_core::{BackupCheck, RESTORE_POINTS_KEPT, RestorePointKind, Workspace};
 
 /// A moment in the person's own time, so the tests decide what a day is.
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn at(moment: &str) -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339(moment).unwrap()
 }
@@ -19,10 +20,12 @@ fn day(number: u32) -> DateTime<FixedOffset> {
     at(&format!("2026-11-{number:02}T08:52:00+10:00"))
 }
 
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn open(dir: &Path) -> Workspace {
     Workspace::open(dir.join("workspace.sqlite3")).unwrap()
 }
 
+#[allow(clippy::unwrap_used)] // Setup that fails fails the test.
 fn shared_files(workspace: &Workspace) -> usize {
     fs::read_dir(workspace.restore_points_folder().unwrap().join("files"))
         .map_or(0, |files| files.count())
@@ -35,7 +38,7 @@ fn the_first_open_of_each_day_saves_one_point_and_the_rest_of_that_day_saves_non
     workspace.create_ticket("Plan the launch").unwrap();
 
     let first = workspace
-        .save_daily_restore_point(day(26))
+        .save_daily_restore_point_at(day(26))
         .unwrap()
         .unwrap();
     assert_eq!(first.kind, RestorePointKind::Daily);
@@ -45,14 +48,14 @@ fn the_first_open_of_each_day_saves_one_point_and_the_rest_of_that_day_saves_non
     // Later the same day, and from another process: nothing to do.
     assert!(
         workspace
-            .save_daily_restore_point(at("2026-11-26T23:50:00+10:00"))
+            .save_daily_restore_point_at(at("2026-11-26T23:50:00+10:00"))
             .unwrap()
             .is_none()
     );
     // Midnight in the person's time zone starts a new day, though it is still the same day
     // in UTC.
     let next = workspace
-        .save_daily_restore_point(at("2026-11-27T00:10:00+10:00"))
+        .save_daily_restore_point_at(at("2026-11-27T00:10:00+10:00"))
         .unwrap();
     assert!(next.is_some());
     let listed = workspace.restore_points().unwrap().points;
@@ -65,7 +68,7 @@ fn points_live_beside_the_workspace_file_never_inside_it_or_its_attachment_stora
     let dir = tempfile::tempdir().unwrap();
     let workspace = open(dir.path());
     let point = workspace
-        .save_daily_restore_point(day(26))
+        .save_daily_restore_point_at(day(26))
         .unwrap()
         .unwrap();
     let folder = dir.path().join("workspace.sqlite3.restore-points");
@@ -92,7 +95,7 @@ fn the_last_seven_points_are_kept() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = open(dir.path());
     for number in 10..20 {
-        workspace.save_daily_restore_point(day(number)).unwrap();
+        workspace.save_daily_restore_point_at(day(number)).unwrap();
     }
     let kept = workspace.restore_points().unwrap().points;
     assert_eq!(kept.len(), RESTORE_POINTS_KEPT);
@@ -118,15 +121,15 @@ fn the_last_seven_points_are_kept() {
 fn back_up_now_adds_a_point_without_a_path_and_counts_among_the_seven() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = open(dir.path());
-    workspace.save_daily_restore_point(day(26)).unwrap();
+    workspace.save_daily_restore_point_at(day(26)).unwrap();
     let saved = workspace
-        .save_manual_restore_point(at("2026-11-26T09:30:00+10:00"))
+        .save_manual_restore_point_at(at("2026-11-26T09:30:00+10:00"))
         .unwrap();
     assert_eq!(saved.kind, RestorePointKind::Manual);
     // A manual point is not today's daily one.
     assert!(
         workspace
-            .save_daily_restore_point(at("2026-11-26T10:00:00+10:00"))
+            .save_daily_restore_point_at(at("2026-11-26T10:00:00+10:00"))
             .unwrap()
             .is_none()
     );
@@ -148,7 +151,7 @@ fn safety_copies_are_listed_with_their_labels_and_kept_besides_the_seven() {
     old_workspace::workspace_with_attachment(&path, 47, "trace.txt", b"retained");
     let workspace = Workspace::open(&path).unwrap();
     for number in 10..14 {
-        workspace.save_daily_restore_point(day(number)).unwrap();
+        workspace.save_daily_restore_point_at(day(number)).unwrap();
     }
     let point = workspace
         .restore_points()
@@ -164,7 +167,7 @@ fn safety_copies_are_listed_with_their_labels_and_kept_besides_the_seven() {
     let workspace = Workspace::open(&path).unwrap();
     // More days than the seven it keeps.
     for number in 14..24 {
-        workspace.save_daily_restore_point(day(number)).unwrap();
+        workspace.save_daily_restore_point_at(day(number)).unwrap();
     }
     let list = workspace.restore_points().unwrap();
     let count = |kind| {
@@ -208,7 +211,7 @@ fn a_point_that_fails_its_check_is_kept_and_says_it_cannot_be_restored() {
         .execute_batch(&format!("DROP TRIGGER \"{trigger}\""))
         .unwrap();
     let point = workspace
-        .save_daily_restore_point(day(26))
+        .save_daily_restore_point_at(day(26))
         .unwrap()
         .unwrap();
     assert!(point.problem.is_some(), "{point:?}");
@@ -230,7 +233,7 @@ fn an_attachment_file_that_went_missing_makes_its_points_unrestorable_in_the_lis
     fs::write(&source, b"retained").unwrap();
     let mut workspace = open(dir.path());
     workspace.import_attachment("one", &source, None).unwrap();
-    workspace.save_daily_restore_point(day(26)).unwrap();
+    workspace.save_daily_restore_point_at(day(26)).unwrap();
     assert_eq!(workspace.restore_points().unwrap().points[0].problem, None);
     let folder = workspace.restore_points_folder().unwrap().join("files");
     for file in fs::read_dir(folder).unwrap() {
@@ -249,13 +252,13 @@ fn unchanged_attachment_files_are_shared_and_deleting_old_points_never_breaks_a_
     fs::write(&first, b"the first file").unwrap();
     fs::write(&second, b"the second file").unwrap();
     let kept = workspace.import_attachment("one", &first, None).unwrap();
-    workspace.save_daily_restore_point(day(10)).unwrap();
+    workspace.save_daily_restore_point_at(day(10)).unwrap();
     // Its bytes and the record of its upload.
     assert_eq!(shared_files(&workspace), 2);
     let added = workspace.import_attachment("two", &second, None).unwrap();
     // Seven more days: the first point, the only one without the second file, goes.
     for number in 11..18 {
-        workspace.save_daily_restore_point(day(number)).unwrap();
+        workspace.save_daily_restore_point_at(day(number)).unwrap();
     }
     // Eight points over two attachments cost their four files once, not eight times.
     assert_eq!(shared_files(&workspace), 4);
@@ -289,11 +292,11 @@ fn unchanged_attachment_files_are_shared_and_deleting_old_points_never_breaks_a_
 fn files_no_remaining_point_needs_are_deleted_with_the_points_that_named_them() {
     let dir = tempfile::tempdir().unwrap();
     let workspace = open(dir.path());
-    workspace.save_daily_restore_point(day(10)).unwrap();
+    workspace.save_daily_restore_point_at(day(10)).unwrap();
     let store = workspace.restore_points_folder().unwrap().join("files");
     fs::create_dir_all(&store).unwrap();
     fs::write(store.join("left-over"), b"x").unwrap();
-    workspace.save_daily_restore_point(day(11)).unwrap();
+    workspace.save_daily_restore_point_at(day(11)).unwrap();
     assert_eq!(shared_files(&workspace), 0);
 }
 
@@ -310,7 +313,7 @@ fn a_save_that_was_interrupted_leaves_nothing_in_the_list_and_is_cleared_next_ti
     .unwrap();
     fs::write(folder.join(".tmpHalfWritten"), b"half").unwrap();
     assert!(workspace.restore_points().unwrap().points.is_empty());
-    workspace.save_daily_restore_point(day(26)).unwrap();
+    workspace.save_daily_restore_point_at(day(26)).unwrap();
     let names: Vec<String> = fs::read_dir(&folder)
         .unwrap()
         .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
@@ -325,7 +328,7 @@ fn a_backup_saved_to_a_path_is_still_a_standalone_file_that_restores_anywhere() 
     fs::write(&source, b"retained").unwrap();
     let mut workspace = open(dir.path());
     let attachment = workspace.import_attachment("one", &source, None).unwrap();
-    workspace.save_daily_restore_point(day(26)).unwrap();
+    workspace.save_daily_restore_point_at(day(26)).unwrap();
     let elsewhere = tempfile::tempdir().unwrap();
     let backup = elsewhere.path().join("copy.sqlite3");
     workspace.backup(&backup).unwrap();

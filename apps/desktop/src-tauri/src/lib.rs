@@ -15,6 +15,7 @@ mod cli_status;
 mod diagnostics_commands;
 mod drive_commands;
 mod folder_probe;
+mod restore_points;
 #[cfg(test)]
 mod runtime_trace;
 mod s3_commands;
@@ -2374,6 +2375,7 @@ pub fn run() -> Result<(), tauri::Error> {
             updates::start(app.handle());
             start_periodic_refresh(coordinator, refresh_registry);
             start_reminder_timer(open_workspace);
+            restore_points::start(open_workspace);
             sync_commands::publish_status(app.handle().clone());
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
@@ -2499,6 +2501,8 @@ pub fn run() -> Result<(), tauri::Error> {
             open_document,
             save_document,
             backup_workspace,
+            restore_points::restore_points,
+            restore_points::save_restore_point,
             list_sources,
             source_repository_routes,
             link_source_repository_project,
