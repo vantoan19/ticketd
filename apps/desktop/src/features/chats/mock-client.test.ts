@@ -166,9 +166,21 @@ test("quitting stops working Chats and says why in their history", async () => {
   expect(client.quit).toBe(true);
 });
 
-test("an idle row says the first sentence of its latest turn's records row, with each ticket's moves netted", async () => {
-  const records = (id: string, turn: string, changes: RecordChange[]) =>
-    ({ id, at, kind: "records", turn_id: turn, changes }) as TranscriptItem;
+test("an idle row says the first sentence of its latest turn's records row, with the host's netted moves", async () => {
+  const records = (
+    id: string,
+    turn: string,
+    changes: RecordChange[],
+    net?: RecordChange[],
+  ) =>
+    ({
+      id,
+      at,
+      kind: "records",
+      turn_id: turn,
+      changes,
+      net,
+    }) as TranscriptItem;
   const moved: RecordChange = {
     kind: "status",
     reference: "T-12",
@@ -199,7 +211,13 @@ test("an idle row says the first sentence of its latest turn's records row, with
             { ...moved, from: "Todo", to: "In progress" },
             posted,
           ]),
-          records("r2", "t1", [{ ...moved, from: "In progress" }]),
+          // The host nets the whole turn on its last call.
+          records(
+            "r2",
+            "t1",
+            [{ ...moved, from: "In progress" }],
+            [moved, posted],
+          ),
         ],
       },
       {
@@ -215,7 +233,7 @@ test("an idle row says the first sentence of its latest turn's records row, with
   const line = (id: string) => rows.find((row) => row.id === id)?.status.word;
   expect(line("c1")).toBe("Moved T-12 to In review");
   expect(line("c2")).toBe("Posted an update on T-13");
-  // Todo -> In progress -> In review, with an update between: the net move leads.
+  // Todo -> In progress -> In review: the host's net list on the last call leads.
   expect(line("c3")).toBe("Moved T-12 to In review");
 });
 

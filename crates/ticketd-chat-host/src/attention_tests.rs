@@ -109,7 +109,6 @@ fn posted(reference: &str) -> ChatAgentChange {
     }
 }
 
-/// The same cases as `netChanges` in `apps/desktop/src/features/chats/model.test.ts`.
 #[test]
 fn a_tickets_status_moves_net_into_one_move() {
     // Todo -> In progress -> In review, with an update between: the net move leads.
@@ -527,4 +526,16 @@ fn a_turn_ticketd_stopped_before_endings_existed_reads_stopped_then_its_cause() 
             (Rank::Idle, "Stopped", format!("Stopped · {cause}"))
         );
     }
+}
+
+#[test]
+fn a_reply_with_long_spacing_keeps_whole_words_not_a_fragment() {
+    let live = idle();
+    let ended = turn(5, TurnEnding::Completed);
+    let chat = chat(5);
+    // The spaces collapse to one, so both words fit; no cut may land inside the second.
+    let spaced = format!("A{}{}", " ".repeat(120), "b".repeat(40));
+    let mut row = facts(&chat, &live, Some(&ended));
+    row.last_response = Some(&spaced);
+    assert_eq!(seen_words(row), format!("A {}", "b".repeat(40)));
 }

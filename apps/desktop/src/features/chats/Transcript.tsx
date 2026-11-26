@@ -1081,9 +1081,6 @@ const TurnView = memo(function TurnView({
     if (!next) rowButton.current?.focus();
   };
   const rowLive = live && turn.live;
-  const changes = turn.rows.flatMap((row) =>
-    row.kind === "record" ? [row.change] : [],
-  );
   const row = (each: TurnRow) => (
     <Row
       key={each.key}
@@ -1200,11 +1197,11 @@ const TurnView = memo(function TurnView({
           />
         </div>
       )}
-      {!turn.live && changes.length > 0 && (
+      {!turn.live && turn.changes.length > 0 && (
         <div className="chat-changed" data-anchor="">
           {/* Never folded; "N more" opens the fold, where each is a step row. */}
           <ReceiptRow
-            changes={changes}
+            changes={turn.changes}
             onMore={() => {
               if (!open) toggle();
             }}

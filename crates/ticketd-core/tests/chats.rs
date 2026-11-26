@@ -392,6 +392,34 @@ fn a_chats_first_input_text_is_read_whatever_came_after() {
 }
 
 #[test]
+fn a_chats_first_input_text_is_the_first_saved_even_when_queued_input_is_sent_out_of_order() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let first = workspace
+        .save_chat_input(None, &chat.id, "First message")
+        .unwrap();
+    workspace
+        .save_chat_input(None, &chat.id, "First message, then more")
+        .unwrap();
+    // Sending the first from the queue moves it after the second in the transcript.
+    workspace
+        .record_chat_queue_submission(
+            &chat.id,
+            &first.id,
+            "attempt-1",
+            ChatSubmissionIntent::NewTurn,
+        )
+        .unwrap();
+    assert_eq!(
+        workspace
+            .chat_first_input_text(&chat.id)
+            .unwrap()
+            .as_deref(),
+        Some("First message")
+    );
+}
+
+#[test]
 fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_separate_facts() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

@@ -428,6 +428,14 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     changes: z.array(recordChangeSchema),
     /** For each change, whether its record is now trashed or deleted. */
     gone: z.array(goneSchema.nullable()).nullish(),
+    /**
+     * The turn's changes up to this call, netted by the host (a ticket's status
+     * moves become one move): what the receipt row says. `changes` stay raw, for
+     * the fold's step rows. Absent from older hosts: the row says `changes`.
+     */
+    net: z.array(recordChangeSchema).nullish(),
+    /** For each net change, as `gone` is for `changes`. */
+    net_gone: z.array(goneSchema.nullable()).nullish(),
   }),
   /** When a turn started and ended, and how. It has no row of its own. */
   z.object({
