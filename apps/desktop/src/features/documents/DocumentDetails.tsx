@@ -1,25 +1,16 @@
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { formatDateTime, listTime } from "@/lib/format";
 import type { Document, DocumentSummary } from "./api";
 
 function DocumentDate({ value }: { value: string }) {
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? (
+  const shown = listTime(value);
+  return shown === null ? (
     value
   ) : (
-    <Tooltip
-      content={date.toLocaleString(undefined, {
-        dateStyle: "full",
-        timeStyle: "long",
-      })}
-    >
+    <Tooltip content={formatDateTime(value)}>
       <time dateTime={value} tabIndex={0}>
-        {date.toDateString() === new Date().toDateString()
-          ? `today at ${date.toLocaleTimeString(undefined, { timeStyle: "short" })}`
-          : date.toLocaleString(undefined, {
-              dateStyle: "medium",
-              timeStyle: "short",
-            })}
+        {shown}
       </time>
     </Tooltip>
   );
