@@ -2,6 +2,7 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Ticket } from "@/lib/api/client";
+import type { TicketCommandScope } from "@/lib/ticket-command-actions";
 import { deferred } from "@/lib/workspace-reads/test-support";
 import { bridgeDefault, unknownCommands } from "@/test/bridge-defaults";
 import { useTicketCommands } from "./use-ticket-commands";
@@ -45,14 +46,17 @@ beforeEach(() => {
   );
 });
 
-function mount(initialTicket: Ticket | null) {
+function mount(
+  initialTicket: Ticket | null,
+  scope: TicketCommandScope = "Status",
+) {
   const close = vi.fn();
   const refresh = vi.fn(async () => {});
   const hook = renderHook(
     (props: { open: boolean; initialTicket: Ticket | null }) =>
       useTicketCommands({
         reference: "T-KQ1",
-        scope: "Status",
+        scope,
         query: "",
         projects: [],
         plans: [],
@@ -64,6 +68,41 @@ function mount(initialTicket: Ticket | null) {
   );
   return { hook, close, refresh };
 }
+
+test("a reminder saved after the palette closes leaves a fresh request for its next use", async () => {
+  const saved = deferred<null>();
+  const snooze = vi
+    .fn()
+    .mockReturnValueOnce(saved.promise)
+    .mockResolvedValue(null);
+  bridge.invoke.mockImplementation(async (command: string, args?: object) => {
+    if (command === "show_ticket") return stored;
+    if (command === "reminder") return null;
+    if (command === "set_reminder") return snooze(args);
+    return bridgeDefault(command);
+  });
+
+  const { hook } = mount(stored, "Reminder");
+  await act(async () => {});
+  const value = hook.result.current.options[0]!.value;
+  let first!: Promise<void>;
+  act(() => {
+    first = hook.result.current.apply(value);
+  });
+  hook.rerender({ open: false, initialTicket: stored });
+  await act(async () => {
+    saved.resolve(null);
+    await first;
+  });
+  hook.rerender({ open: true, initialTicket: stored });
+  await act(async () => {});
+  await act(() => hook.result.current.apply(value));
+
+  expect(snooze).toHaveBeenCalledTimes(2);
+  expect(snooze.mock.calls[0]?.[0].requestId).not.toBe(
+    snooze.mock.calls[1]?.[0].requestId,
+  );
+});
 
 test("Mark as duplicate keeps its Ticket after the palette closes, though nothing else holds it", async () => {
   // The palette's cached copy answers, but its own read has not.

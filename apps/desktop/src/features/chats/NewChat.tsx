@@ -41,6 +41,7 @@ import {
 } from "@/features/chats/ChatFolderChoices";
 import { ProjectIcon } from "@/features/projects/ProjectIcon";
 import { Composer } from "@/features/chats/Composer";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import type { Token } from "@/features/chats/composer-mentions";
 import { useCodexCommands } from "@/features/chats/composer-settings";
 import type { ComposerMentions } from "@/features/chats/ComposerField";
@@ -70,6 +71,7 @@ import {
   startPick,
   type Pick,
 } from "@/features/chats/harness-pick";
+import type { Project } from "@/lib/api/client";
 import { notificationClient } from "@/lib/api/notifications";
 import { withoutVerbatim } from "@/lib/paths";
 import { loadPreferences } from "@/lib/preferences";
@@ -96,7 +98,9 @@ export function NewChat({
   crumb,
   resting = false,
   focusRequest = 0,
+  projects,
 }: {
+  projects?: readonly Project[] | undefined;
   /**
    * Shown because no Chat is open (U1): nothing to close, and it waits for
    * the person instead of taking focus.
@@ -235,6 +239,7 @@ export function NewChat({
       current = false;
     };
   }, [client, probe]);
+  const workspaceChange = useWorkspaceChange();
   // The folder's Project, for its icon on the folder button.
   const [projectOf, setProjectOf] = useState<{
     folder: string;
@@ -250,7 +255,7 @@ export function NewChat({
     return () => {
       current = false;
     };
-  }, [client, folder]);
+  }, [client, folder, workspaceChange]);
   const project = projectOf?.folder === folder ? projectOf.project : null;
   // A Project's folder that is not on this computer gives way to a ticketd folder.
   useEffect(() => {
@@ -336,10 +341,25 @@ export function NewChat({
     codex,
     Boolean(offered?.permission?.changeable),
   );
+  const currentLinks = useMemo(
+    () =>
+      links.map((record) => {
+        if (record.kind !== "project") return record;
+        const project = projects?.find(({ id }) => id === record.id);
+        return project
+          ? {
+              ...record,
+              title: project.name,
+              archived: Boolean(project.archived),
+            }
+          : record;
+      }),
+    [links, projects],
+  );
   const mentions = useMemo<ComposerMentions>(
     () => ({
       records: (query) => client.searchRecords(query),
-      linked: links,
+      linked: currentLinks,
       ...(folder && {
         folder: {
           name: folderName ?? folder,
@@ -352,7 +372,15 @@ export function NewChat({
         : undefined,
       harness: harness?.name ?? "Harness",
     }),
-    [client, links, folder, folderName, harness?.name, commands, canListSkills],
+    [
+      client,
+      currentLinks,
+      folder,
+      folderName,
+      harness?.name,
+      commands,
+      canListSkills,
+    ],
   );
   const create = async (pending: PendingCreate, keepDraft = false) => {
     const { request, options, pick, quotes } = pending;
@@ -620,18 +648,23 @@ export function NewChat({
                   />
                 </DropdownMenuContent>
               </DropdownMenu>
-              {links.map((record) => (
+              {currentLinks.map((record) => (
                 <RecordChip
                   key={`${record.kind}:${record.id}`}
                   record={record}
                   onRemove={() =>
-                    setLinks(links.filter((item) => item !== record))
+                    setLinks((linked) =>
+                      linked.filter(
+                        (item) =>
+                          item.kind !== record.kind || item.id !== record.id,
+                      ),
+                    )
                   }
                 />
               ))}
               <LinkPicker
                 withLabel
-                linked={links}
+                linked={currentLinks}
                 onPick={(record) => {
                   setLinks([...links, record]);
                   // A linked Project's folder is where its work happens: chosen

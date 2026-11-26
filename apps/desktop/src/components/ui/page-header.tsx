@@ -59,6 +59,7 @@ export function PageHeader({
   count,
   lede,
   actions,
+  wrapActions = false,
   toolbar,
 }: {
   title: string;
@@ -66,11 +67,15 @@ export function PageHeader({
   count?: ReactNode;
   lede?: ReactNode;
   actions?: ReactNode;
+  wrapActions?: boolean;
   toolbar?: ReactNode;
 }) {
   return (
     <header data-slot="page-header" data-arrive="header">
-      <div className="ui-page-header">
+      <div
+        className="ui-page-header"
+        data-wrap-actions={wrapActions || undefined}
+      >
         <div className="ui-page-header-text">
           <div className="ui-page-header-title">
             {/* The narrow window's navigation button, before the title. */}

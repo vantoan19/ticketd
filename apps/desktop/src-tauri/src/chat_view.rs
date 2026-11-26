@@ -88,6 +88,7 @@ pub enum LinkedRecord {
     Project {
         id: String,
         title: String,
+        archived: bool,
     },
 }
 

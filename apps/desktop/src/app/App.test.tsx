@@ -3582,6 +3582,154 @@ test("focused Ticket status key opens a scoped palette and Undo restores the sta
   await vi.waitFor(() => expect(current.status).toBe("Todo"));
 });
 
+test("the palette keeps the ticket's archived Project selected", async () => {
+  const current = bulkTicket(1, {
+    reference: "T-FV1",
+    title: "Palette archive target",
+    project_id: "saved",
+  });
+  const projects = [
+    { id: "saved", name: "Saved Project", archived: true, path: "", paths: [] },
+    {
+      id: "other",
+      name: "Hidden Project",
+      archived: true,
+      path: "",
+      paths: [],
+    },
+    { id: "active", name: "Open Project", path: "", paths: [] },
+  ];
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "find_tickets") return [current];
+    if (command === "show_ticket") return current;
+    if (command === "list_projects") return projects;
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  const row = await screen.findByRole("button", {
+    name: /Palette archive target/,
+  });
+  row.focus();
+  fireEvent.keyDown(row, { key: "p" });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  const list = within(screen.getByRole("listbox"));
+  expect(
+    list
+      .getAllByRole("option")
+      .map((option) => option.getAttribute("aria-label")),
+  ).toEqual(["Open Project", "Saved Project", "No project"]);
+  expect(
+    list.getByRole("option", { name: "Saved Project", selected: true }),
+  ).toBeTruthy();
+  expect(list.getByText("Archived")).toBeTruthy();
+  fireEvent.keyDown(input, { key: "Enter" });
+  await vi.waitFor(() =>
+    expect(
+      screen.queryByRole("combobox", {
+        name: "Search tickets and destinations",
+      }),
+    ).toBeNull(),
+  );
+  expect(
+    bridge.invoke.mock.calls.some(([command]) => command === "change_ticket"),
+  ).toBe(false);
+});
+
+test("the Project palette checks the current assignment before treating the selected Project as unchanged", async () => {
+  const listed = bulkTicket(1, {
+    reference: "T-FV1",
+    title: "Project palette target",
+    project_id: "original",
+  });
+  const projects = [
+    { id: "original", name: "Original Project", path: "", paths: [] },
+    { id: "other", name: "Another Project", path: "", paths: [] },
+  ];
+  let current = { ...listed, project_id: "original" };
+  const change = vi.fn().mockReturnValue(listed);
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "find_tickets") return [listed];
+    if (command === "show_ticket") return current;
+    if (command === "list_projects") return projects;
+    if (command === "change_ticket") return change(args);
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  const row = await screen.findByRole("button", {
+    name: /Project palette target/,
+  });
+  row.focus();
+  fireEvent.keyDown(row, { key: "p" });
+  const input = await screen.findByRole("combobox", {
+    name: "Search tickets and destinations",
+  });
+  expect(
+    screen.getByRole("option", { name: "Original Project", selected: true }),
+  ).toBeTruthy();
+  current = { ...listed, project_id: "other" };
+  fireEvent.keyDown(input, { key: "Enter" });
+  await waitFor(() =>
+    expect(change).toHaveBeenCalledWith(
+      expect.objectContaining({ patch: { project_id: "original" } }),
+    ),
+  );
+});
+
+test("an earlier Project assignment check leaves a reopened palette alone", async () => {
+  const ticket = bulkTicket(1, {
+    reference: "T-FV1",
+    title: "Project check target",
+    project_id: "original",
+  });
+  const project = {
+    id: "original",
+    name: "Original Project",
+    path: "",
+    paths: [],
+  };
+  let deferred: Promise<unknown> | null = null;
+  let finish!: (value: typeof ticket) => void;
+  bridge.invoke.mockImplementation((command: string, args?: object) => {
+    if (command === "find_tickets") return [ticket];
+    if (command === "show_ticket") return deferred ?? ticket;
+    if (command === "list_projects") return [project];
+    return bridgeDefault(command, args);
+  });
+  render(<App />);
+  const row = await screen.findByRole("button", {
+    name: /Project check target/,
+  });
+  const open = () => {
+    row.focus();
+    fireEvent.keyDown(row, { key: "p" });
+    return screen.findByRole("combobox", {
+      name: "Search tickets and destinations",
+    });
+  };
+  const input = await open();
+  deferred = new Promise((resolve) => {
+    finish = resolve;
+  });
+  fireEvent.keyDown(input, { key: "Enter" });
+  deferred = null;
+  fireEvent.keyDown(input, { key: "Escape" });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("combobox", {
+        name: "Search tickets and destinations",
+      }),
+    ).toBeNull(),
+  );
+
+  const reopened = await open();
+  await act(async () => finish(ticket));
+  expect(
+    screen.getByRole("combobox", { name: "Search tickets and destinations" }),
+  ).toBe(reopened);
+});
+
 test("a palette status change shows on the list row at once, before the list is read again", async () => {
   vi.useFakeTimers();
   let current = bulkTicket(1, { reference: "T-FV1", title: "Palette target" });
@@ -11917,8 +12065,14 @@ test.each(["tickets", "Documents"])(
   },
 );
 
-test("bulk selection exposes Status, Project, Plan, Tags and More directly", async () => {
-  await renderBulk({ find_tickets: () => [bulkTicket(1)] });
+test("bulk selection exposes actions and offers only active Project destinations", async () => {
+  await renderBulk({
+    find_tickets: () => [bulkTicket(1)],
+    list_projects: () => [
+      { id: "current", name: "Current Project", path: "", paths: [] },
+      { id: "old", name: "Old Project", path: "", paths: [], archived: true },
+    ],
+  });
   fireEvent.click(screen.getByRole("checkbox", { name: "Select T-KQ1" }));
   const bar = screen.getByRole("region", { name: "Bulk edit" });
   for (const name of [
@@ -11935,6 +12089,11 @@ test("bulk selection exposes Status, Project, Plan, Tags and More directly", asy
   expect(
     screen.getByRole("menuitem", { name: "Remove from Plan" }),
   ).toBeTruthy();
+  fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+  openMenu("Project of selected tickets");
+  expect(
+    screen.getAllByRole("menuitem").map((item) => item.textContent),
+  ).toEqual(["Current Project", "No project"]);
 });
 
 test("workspace failure defers the band while editing, recovers through its header notice and retains a vacated slot until navigation", async () => {
@@ -13193,6 +13352,54 @@ async function renderReviewApp(handlers: Record<string, unknown>) {
   await act(async () => {});
 }
 
+test("an archived Project's scope reflects reactivation even if the catalog refresh fails", async () => {
+  let archived = true;
+  const project = { id: "smoke", name: "Smoke project", path: "", paths: [] };
+  const listProjects = vi.fn(() => {
+    if (!archived) throw new Error("Project list unavailable");
+    return [{ ...project, archived }];
+  });
+  await renderReviewApp({
+    list_projects: listProjects,
+    set_project_archived: (args: { id: string; archived: boolean }) => {
+      expect(args.id).toBe(project.id);
+      archived = args.archived;
+      return { project: { ...project, archived }, change: "reactivated" };
+    },
+  });
+  const scopes = within(
+    await screen.findByRole("navigation", { name: "Project scopes" }),
+  );
+  expect(scopes.queryByRole("button", { name: project.name })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Projects" }));
+  fireEvent.click(await screen.findByRole("radio", { name: "Archived" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: `Open tickets of ${project.name}`,
+    }),
+  );
+
+  const list = within(
+    await screen.findByRole("region", { name: project.name }),
+  );
+  expect(list.getByText("Archived")).toBeTruthy();
+  expect(await list.findByText("No tickets in Smoke project")).toBeTruthy();
+  expect(list.queryByRole("button", { name: "New ticket" })).toBeNull();
+  fireEvent.click(list.getByRole("button", { name: "Reactivate" }));
+
+  const restored = await scopes.findByRole("button", { name: project.name });
+  expect(restored.getAttribute("aria-current")).toBe("page");
+  expect(list.queryByText("Archived")).toBeNull();
+  await waitFor(() =>
+    expect(listProjects.mock.results.some(({ type }) => type === "throw")).toBe(
+      true,
+    ),
+  );
+  expect(document.activeElement).toBe(
+    list.getByRole("button", { name: "Filters" }),
+  );
+});
+
 const reviewSource = {
   provider: "github",
   provider_name: "GitHub",
@@ -13363,6 +13570,7 @@ test("a legacy project offers the detected remote in its header and lets you dis
 test("setting up the source from a project pre-fills discovery and resumes backfill review after save", async () => {
   const project = { ...projectForRemote, remote: "github.com/acme/api" };
   let saved = false;
+  let archived = false;
   const configured = {
     ...reviewSourceEntry,
     next_id: "github",
@@ -13393,7 +13601,7 @@ test("setting up the source from a project pre-fills discovery and resumes backf
     issues: [],
   };
   await renderReviewApp({
-    list_projects: [project],
+    list_projects: () => [{ ...project, archived }],
     list_sources: () => [
       { ...configured, saved: saved ? configured.saved : null },
     ],
@@ -13456,6 +13664,19 @@ test("setting up the source from a project pre-fills discovery and resumes backf
   expect(
     bridge.invoke.mock.calls.some(([command]) => command === "connect_source"),
   ).toBe(false);
+
+  archived = true;
+  await screen.findByRole("button", { name: "Reactivate" });
+  await waitFor(() =>
+    expect(
+      screen.queryByRole("dialog", { name: "Connect project to GitHub" }),
+    ).toBeNull(),
+  );
+  archived = false;
+  await sidebar.findByRole("button", { name: "API repo" });
+  expect(
+    screen.queryByRole("dialog", { name: "Connect project to GitHub" }),
+  ).toBeNull();
 });
 
 test("a known ticket keeps its saved wrapped title and body while a fresh detail read is pending", async () => {

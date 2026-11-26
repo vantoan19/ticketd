@@ -345,7 +345,7 @@ fn only_repository(mut config: ConfigValues, repository: String) -> ConfigValues
 }
 
 fn project_remote(connection: &Connection, project_id: &str) -> Result<(String, String), Error> {
-    let project = projects::find(connection, project_id)?;
+    let project = projects::ensure_active(connection, project_id)?;
     let remote = project
         .remote
         .ok_or(Error::ProjectRemoteRequired(project.name))?;

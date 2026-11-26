@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { DialogShell } from "@/components/ui/dialog-shell";
@@ -61,9 +61,27 @@ export function ProjectFormDialog({
   const remoteMismatchId = useId();
   const scope = project?.id ?? "";
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [failure, setFailure] = useState<FailureDescription | null>(null);
-  const [remoteError, setRemoteError] = useState("");
-  const [busy, setBusy] = useState(false);
+  const opening = useMemo(
+    () => ({ open, scope, initialRemote }),
+    [open, scope, initialRemote],
+  );
+  const activeOpening = useRef<typeof opening | null>(null);
+  useLayoutEffect(() => {
+    activeOpening.current = opening;
+    return () => {
+      activeOpening.current = null;
+    };
+  }, [opening]);
+  const [form, setForm] = useState<{
+    opening: typeof opening;
+    busy: boolean;
+    failure: FailureDescription | null;
+    remoteError: string;
+  } | null>(null);
+  const currentForm = form?.opening === opening ? form : null;
+  const busy = currentForm?.busy ?? false;
+  const failure = currentForm?.failure ?? null;
+  const remoteError = currentForm?.remoteError ?? "";
   const draft = drafts[scope];
   const path = project?.path ?? draft?.path ?? "";
   const name = draft?.name ?? project?.name ?? nameFromFolder(path);
@@ -101,20 +119,17 @@ export function ProjectFormDialog({
 
   function edit(change: Draft) {
     setDrafts((old) => ({ ...old, [scope]: { ...old[scope], ...change } }));
-    if (!staleRepository) setFailure(null);
-    setRemoteError("");
-  }
-
-  function close(next: boolean) {
-    setFailure(null);
-    setRemoteError("");
-    onOpenChange(next);
+    setForm({
+      opening,
+      busy,
+      failure: staleRepository ? failure : null,
+      remoteError: "",
+    });
   }
 
   async function save() {
-    setBusy(true);
-    setFailure(null);
-    setRemoteError("");
+    if (activeOpening.current !== opening) return;
+    setForm({ opening, busy: true, failure: null, remoteError: "" });
     let saved: Project;
     const value = remote.trim();
     try {
@@ -136,23 +151,26 @@ export function ProjectFormDialog({
           : await client.createProject(name.trim(), path);
       }
     } catch (reason) {
+      if (activeOpening.current !== opening) return;
       const error = toFailure(reason);
-      if (
+      const remoteFailure =
         error.code === "invalid_project_remote" ||
-        error.code === "project_remote_taken"
-      )
-        setRemoteError(error.message);
-      else
-        setFailure(
-          describeFailure(
-            error,
-            project ? "save the project" : "create the project",
-          ),
-        );
+        error.code === "project_remote_taken";
+      setForm({
+        opening,
+        busy: false,
+        failure: remoteFailure
+          ? null
+          : describeFailure(
+              error,
+              project ? "save the project" : "create the project",
+            ),
+        remoteError: remoteFailure ? error.message : "",
+      });
       return;
-    } finally {
-      setBusy(false);
     }
+    if (activeOpening.current !== opening) return;
+    setForm(null);
     setDrafts((old) => {
       const next = { ...old };
       delete next[scope];
@@ -165,7 +183,7 @@ export function ProjectFormDialog({
   return (
     <DialogShell
       open={open}
-      onOpenChange={close}
+      onOpenChange={onOpenChange}
       {...(onExitComplete && { onExitComplete })}
       {...(resolveReturnFocus && { resolveReturnFocus })}
       title={project ? "Edit project" : "New project"}

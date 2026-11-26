@@ -101,11 +101,13 @@ const repositoryRoutes = [
     repository: "o/r",
     project_remote: "github.example/o/r",
     project: { id: "p1", name: "Desktop" },
+    archived_project_name: null,
   },
   {
     repository: "other/repo",
     project_remote: "github.example/other/repo",
     project: null,
+    archived_project_name: null,
   },
 ];
 
@@ -136,6 +138,27 @@ test("the project column shows saved repository routes while editing discovery",
   expect(within(table).queryByText("draft/new")).toBeNull();
 });
 
+test("an archived repository claim previews No project and cannot be relinked", async () => {
+  vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue([
+    {
+      ...repositoryRoutes[0]!,
+      project: null,
+      archived_project_name: "Desktop",
+    },
+  ]);
+  render(<SourceCard entry={savedRepositories} />);
+
+  const table = await screen.findByRole("table", {
+    name: "Saved repository routes",
+  });
+  const row = within(table).getByRole("row", { name: /o\/r/ });
+  expect(within(row).getByText("No project")).toBeTruthy();
+  expect(within(row).getByText("Desktop is archived")).toBeTruthy();
+  expect(
+    within(row).queryByRole("button", { name: /Link to project/ }),
+  ).toBeNull();
+});
+
 function SourceCardWithProjectReview() {
   const [review, setReview] = useState<{
     projectId: string;
@@ -161,7 +184,7 @@ function SourceCardWithProjectReview() {
   );
 }
 
-test("linking offers unclaimed projects and then reviews only backfill", async () => {
+test("linking offers active unclaimed projects and then reviews only backfill", async () => {
   const linked = {
     id: "p2",
     name: "Backend",
@@ -174,6 +197,7 @@ test("linking offers unclaimed projects and then reviews only backfill", async (
       return [
         { ...linked, remote: null },
         { ...linked, id: "p1", name: "Already claimed" },
+        { ...linked, id: "p3", name: "Archived", remote: null, archived: true },
       ];
     if (command === "link_source_repository_project") {
       vi.mocked(sourcesClient.repositoryRoutes).mockResolvedValue([
@@ -213,6 +237,7 @@ test("linking offers unclaimed projects and then reviews only backfill", async (
   fireEvent.keyDown(picker, { key: "Enter" });
   const backend = await screen.findByRole("option", { name: "Backend" });
   expect(screen.queryByRole("option", { name: "Already claimed" })).toBeNull();
+  expect(screen.queryByRole("option", { name: "Archived" })).toBeNull();
   fireEvent.click(backend);
   fireEvent.click(screen.getByRole("button", { name: "Link project" }));
 

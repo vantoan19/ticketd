@@ -8,7 +8,7 @@
 //!
 //! 1. the write scope resolves the Ticket reference and refuses a ticket in Trash;
 //! 2. the ticket's own rules: a stale editor save, the external owner of its content, an
-//!    archived Plan, entering and leaving Duplicate;
+//!    archived Project or Plan, entering and leaving Duplicate;
 //! 3. history and the inbox entry it makes;
 //! 4. one read back of the changed ticket, however many steps the change had.
 //!
@@ -178,7 +178,7 @@ pub(crate) fn create(
 ) -> Result<Ticket, Error> {
     let title = non_empty_title(title)?;
     if let Some(id) = project_id {
-        projects::find(scope, id)?;
+        projects::ensure_active(scope, id)?;
     }
     if let Some(id) = plan_id {
         plans::ensure_active(scope, id)?;
@@ -255,9 +255,6 @@ pub(crate) fn edit(
         }
     }
     if let Some(ref project_id) = patch.project_id {
-        if let Some(id) = project_id {
-            projects::find(scope, id)?;
-        }
         set_project(
             scope,
             &ticket.id,
@@ -296,7 +293,7 @@ pub(crate) fn edit(
     Ok(())
 }
 
-/// Updates a ticket's project and records the membership change after eligibility is checked.
+/// Validates a new project assignment and records the membership change.
 pub(crate) fn set_project(
     scope: &WriteScope<'_>,
     ticket_id: &str,
@@ -305,6 +302,9 @@ pub(crate) fn set_project(
     agent: Option<&str>,
 ) -> Result<(), Error> {
     if project_id != current {
+        if let Some(id) = project_id {
+            projects::ensure_active(scope, id)?;
+        }
         scope.execute(
             "UPDATE tickets SET project_id = ?1 WHERE id = ?2",
             params![project_id, ticket_id],

@@ -10,6 +10,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { afterEach, expect, test, vi } from "vitest";
 import type { LinkedRecord } from "@/features/chats/client";
+import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 import { Composer } from "@/features/chats/Composer";
 import {
   ComposerAttachments,
@@ -366,6 +367,45 @@ test("Enter never sends while the # menu is open, even with no row to pick (chat
   fireEvent.keyDown(box, { key: "Enter" });
   expect(onSend).not.toHaveBeenCalled();
   expect(box.value).toBe("Look at #zzz");
+});
+
+test("a Project archived during a mention search leaves the choices and keeps the draft", async () => {
+  const project: LinkedRecord = {
+    kind: "project",
+    id: "p1",
+    title: "Storefront",
+  };
+  const onSend = vi.fn();
+  const page = (version: number, archived: boolean) => (
+    <WorkspaceChangeProvider value={version}>
+      <Composer
+        placeholder="Message"
+        controls={() => ({ send: "send", enabled: true })}
+        onSend={onSend}
+        mentions={{
+          records: async () => [{ ...project, kind: "project", archived }],
+          linked: [],
+          harness: "Codex",
+        }}
+      />
+    </WorkspaceChangeProvider>
+  );
+  const { rerender } = render(page(0, false));
+  const box = screen.getByRole<HTMLTextAreaElement>("textbox", {
+    name: "Message",
+  });
+  type(box, "#store");
+  await screen.findByRole("option", { name: "Storefront" });
+  rerender(page(1, true));
+  expect(
+    await screen.findByText(
+      "Storefront is archived. Reactivate it on the Projects page to link it.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByRole("option")).toBeNull();
+  expect(box.value).toBe("#store");
+  fireEvent.keyDown(box, { key: "Enter" });
+  expect(onSend).not.toHaveBeenCalled();
 });
 
 test("# with nothing typed offers the linked records, then the recently updated ones", async () => {

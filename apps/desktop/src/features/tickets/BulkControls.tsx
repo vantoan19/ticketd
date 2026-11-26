@@ -306,20 +306,24 @@ export function BulkControls({
                   </DropdownMenuTrigger>
                 </Tooltip>
                 <DropdownMenuContent align="start" side="top">
-                  {projects.map((project) => (
-                    <DropdownMenuItem
-                      key={project.id}
-                      onSelect={() =>
-                        organize(
-                          { project_id: project.id },
-                          `Moved ${tickets(count)} to ${project.name}`,
-                        )
-                      }
-                    >
-                      {project.name}
-                    </DropdownMenuItem>
-                  ))}
-                  {projects.length > 0 && <DropdownMenuSeparator />}
+                  {projects
+                    .filter((project) => !project.archived)
+                    .map((project) => (
+                      <DropdownMenuItem
+                        key={project.id}
+                        onSelect={() =>
+                          organize(
+                            { project_id: project.id },
+                            `Moved ${tickets(count)} to ${project.name}`,
+                          )
+                        }
+                      >
+                        {project.name}
+                      </DropdownMenuItem>
+                    ))}
+                  {projects.some((project) => !project.archived) && (
+                    <DropdownMenuSeparator />
+                  )}
                   <DropdownMenuItem
                     onSelect={() =>
                       organize(

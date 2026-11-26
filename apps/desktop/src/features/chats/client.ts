@@ -78,9 +78,18 @@ export const linkedRecordSchema = z.discriminatedUnion("kind", [
     status: z.string(),
   }),
   z.object({ kind: z.literal("document"), id: z.string(), title: z.string() }),
-  z.object({ kind: z.literal("project"), id: z.string(), title: z.string() }),
+  z.object({
+    kind: z.literal("project"),
+    id: z.string(),
+    title: z.string(),
+    archived: z.boolean().optional(),
+  }),
 ]);
 export type LinkedRecord = z.infer<typeof linkedRecordSchema>;
+
+export function isArchivedProjectRecord(record: LinkedRecord): boolean {
+  return record.kind === "project" && record.archived === true;
+}
 
 /** A record that is no longer there to open: named, not linked. */
 export const goneSchema = z.enum(["trashed", "deleted"]);
@@ -817,7 +826,7 @@ export interface Stopping {
  */
 export class ChatError extends Error {
   constructor(
-    readonly code: "stale" | "gone" | "failed",
+    readonly code: "stale" | "gone" | "failed" | "project_archived",
     message: string,
   ) {
     super(message);

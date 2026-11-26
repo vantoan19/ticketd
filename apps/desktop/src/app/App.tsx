@@ -200,6 +200,7 @@ function useVisited(value: boolean) {
 const VIEW_NAMES = {
   tickets: "tickets",
   projects: "Projects",
+  "archived-projects": "Projects",
   plans: "Plans",
   "archived-plans": "Archived Plans",
   settings: "Settings",
@@ -286,8 +287,14 @@ function AppContent() {
         projectId: string;
         resumed?: boolean;
         connection?: string;
+        closing?: boolean;
       }
-    | { mode: "edit_remote"; projectId: string; exit?: "close" | "review" }
+    | {
+        mode: "edit_remote";
+        projectId: string;
+        opening: symbol;
+        exit?: "close" | "review" | "archived";
+      }
     | null
   >(null);
   useThemeSync();
@@ -743,6 +750,16 @@ function AppContent() {
   const sourceProject = projects.find(
     (item) => item.id === projectSource?.projectId,
   );
+  if (sourceProject?.archived && projectSource) {
+    if (projectSource.mode === "review" && !projectSource.closing)
+      setProjectSource({ ...projectSource, closing: true });
+    if (
+      projectSource.mode === "edit_remote" &&
+      projectSource.exit !== "archived"
+    )
+      setProjectSource({ ...projectSource, exit: "archived" });
+    if (projectSource.mode === "setup") setProjectSource(null);
+  }
   const sourceRevision = JSON.stringify(
     sourceEntries.map(({ saved }) => [saved?.id, saved?.saved_at]),
   );
@@ -874,7 +891,8 @@ function AppContent() {
     useTicket(paletteOpen ? paletteReference : null).value ?? undefined;
   // Hidden views mount on their first visit, then stay to keep their state.
   const paletteMounted = useVisited(paletteOpen);
-  const projectsMounted = useVisited(view === "projects");
+  const projectsShown = view === "projects" || view === "archived-projects";
+  const projectsMounted = useVisited(projectsShown);
   const documentsMounted = useVisited(view === "documents" || capture);
   const chatsMounted = useVisited(view === "chats");
   return (
@@ -1319,6 +1337,7 @@ function AppContent() {
                                   {projectSource?.mode === "review" && (
                                     <ConnectProjectSource
                                       projectId={projectSource.projectId}
+                                      closing={projectSource.closing ?? false}
                                       {...(sourceProject?.remote && {
                                         projectRemote: sourceProject.remote,
                                       })}
@@ -1337,6 +1356,7 @@ function AppContent() {
                                           setProjectSource({
                                             mode: "edit_remote",
                                             projectId: sourceProject.id,
+                                            opening: Symbol(),
                                           }),
                                       })}
                                     />
@@ -1346,28 +1366,47 @@ function AppContent() {
                                       <ProjectFormDialog
                                         project={sourceProject}
                                         open={!projectSource.exit}
+                                        resolveReturnFocus={() =>
+                                          projectSource.exit === "archived"
+                                            ? contentPanel
+                                            : null
+                                        }
                                         onOpenChange={(open) =>
                                           !open &&
-                                          setProjectSource({
-                                            ...projectSource,
-                                            exit: "close",
-                                          })
+                                          setProjectSource((current) =>
+                                            current === projectSource
+                                              ? { ...current, exit: "close" }
+                                              : current,
+                                          )
                                         }
                                         onSaved={(project) => {
                                           void reportChange();
                                           if (project.remote)
-                                            setProjectSource({
-                                              ...projectSource,
-                                              exit: "review",
-                                            });
-                                        }}
-                                        onExitComplete={() => {
-                                          if (projectSource.exit === "review")
-                                            reviewProjectSource(
-                                              sourceProject.id,
+                                            setProjectSource((current) =>
+                                              current?.mode === "edit_remote" &&
+                                              current.opening ===
+                                                projectSource.opening &&
+                                              current.exit !== "archived"
+                                                ? { ...current, exit: "review" }
+                                                : current,
                                             );
-                                          else setProjectSource(null);
                                         }}
+                                        onExitComplete={() =>
+                                          setProjectSource((current) => {
+                                            if (
+                                              current?.mode !== "edit_remote" ||
+                                              current.opening !==
+                                                projectSource.opening
+                                            )
+                                              return current;
+                                            return current.exit === "review"
+                                              ? {
+                                                  mode: "review",
+                                                  projectId: current.projectId,
+                                                }
+                                              : null;
+                                          })
+                                        }
                                       />
                                     )}
                                   <ViewRegion
@@ -1423,14 +1462,28 @@ function AppContent() {
                                       <div
                                         className="management-host"
                                         hidden={
-                                          view !== "projects" ||
-                                          graphOrigin !== null
+                                          !projectsShown || graphOrigin !== null
                                         }
                                       >
                                         <Projects
                                           projects={projects}
+                                          archived={
+                                            view === "archived-projects"
+                                          }
+                                          onArchivedChange={(archived) =>
+                                            setView(
+                                              archived
+                                                ? "archived-projects"
+                                                : "projects",
+                                            )
+                                          }
                                           loading={loading}
-                                          onChange={refresh}
+                                          onChange={
+                                            workspace.refreshCurrentScope
+                                          }
+                                          onProjectCommitted={
+                                            workspace.patchProject
+                                          }
                                           onConnectSource={reviewProjectSource}
                                           onOpenTickets={(item) => {
                                             navigate({});
@@ -1596,6 +1649,7 @@ function AppContent() {
                                         <ChatsView
                                           key={chatWorkspace}
                                           newChatRequest={newChatRequest}
+                                          projects={projects}
                                         />
                                       </div>
                                     )}
@@ -1642,16 +1696,20 @@ function AppContent() {
                                             workspace={workspace}
                                             bulk={bulk}
                                             projectNotice={
-                                              <ProjectRemoteNote
-                                                project={scopedProject}
-                                                sourceRevision={sourceRevision}
-                                                onConnectSource={
-                                                  reviewProjectSource
-                                                }
-                                                onProjectChange={() =>
-                                                  void reportChange()
-                                                }
-                                              />
+                                              !scopedProject?.archived && (
+                                                <ProjectRemoteNote
+                                                  project={scopedProject}
+                                                  sourceRevision={
+                                                    sourceRevision
+                                                  }
+                                                  onConnectSource={
+                                                    reviewProjectSource
+                                                  }
+                                                  onProjectChange={() =>
+                                                    void reportChange()
+                                                  }
+                                                />
+                                              )
                                             }
                                             hidden={
                                               ((firstRun || firstRunPending) &&

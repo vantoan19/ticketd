@@ -1159,6 +1159,10 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column sync_state.s3_endpoint
 
 ## 100
++ column projects.archive_change
++ column projects.archived
+
+## 101
 + table chat_attachments
 + column chat_attachments.bytes
 + column chat_attachments.id
@@ -1167,5 +1171,5 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column chat_attachments.name
 + column chat_attachments.position
 
-## 101
+## 102
 + column chat_messages.editing
