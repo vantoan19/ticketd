@@ -29,12 +29,12 @@ export type SourceRow = {
 
 const BUILT_IN = new Set(["github", "linear"]);
 
-function withArticle(phrase: string): string {
+export function withArticle(phrase: string): string {
   return `${/^[aeiou]/i.test(phrase) ? "An" : "A"} ${phrase}`;
 }
 
 /** Who the source signs in as, in the person's words, from what the connector declares. */
-function signsInWith(entry: SourceEntry): string {
+export function signsInWith(entry: SourceEntry): string {
   const { provider, schema } = entry.connector;
   if (provider === "github") return "Your gh login";
   const secret = schema.fields.find((field) => field.type === "secret");
@@ -48,7 +48,7 @@ function signsInWith(entry: SourceEntry): string {
   return withArticle(phrase);
 }
 
-function plural(noun: string, count: number): string {
+export function plural(noun: string, count: number): string {
   if (count === 1) return noun;
   return /[^aeiou]y$/.test(noun) ? `${noun.slice(0, -1)}ies` : `${noun}s`;
 }

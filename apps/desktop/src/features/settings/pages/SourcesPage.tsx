@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +8,7 @@ import type { StatusDotTone } from "@/components/ui/status-dot";
 import type { ProjectSourceSetup } from "@/features/projects/ConnectProjectSource";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { sectionMeta } from "@/features/settings/settings-sections";
+import { AddCustomSourceRow } from "@/features/settings/sources/custom-source";
 import { SourceCard } from "@/features/settings/sources/SourceCard";
 import { SourceIcon } from "@/features/settings/sources/SourceIcon";
 import {
@@ -45,7 +47,16 @@ export function SourcesPage({
     onCancel: () => void;
   };
 }) {
-  const { entries, loading } = useSources();
+  const { entries, loading, readCatalog } = useSources();
+  // A source just added opens once the catalog lists it.
+  const [opening, setOpening] = useState<string | null>(null);
+  useEffect(() => {
+    if (!opening) return;
+    const entry = entries.find(({ connector }) => connector.provider === opening);
+    if (!entry) return;
+    setOpening(null);
+    onOpen(entry.saved?.id ?? opening);
+  }, [opening, entries, onOpen]);
   const { sources: health } = useSourceActivity();
   const now = useNow();
   const projectEntry = projectSetup
@@ -121,6 +132,12 @@ export function SourcesPage({
               </tfoot>
             </table>
           </section>
+          <AddCustomSourceRow
+            onAdded={(extension) => {
+              readCatalog?.();
+              setOpening(extension.id);
+            }}
+          />
         </>
       )}
     </SettingsPage>

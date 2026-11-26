@@ -591,3 +591,180 @@ fn an_install_refuses_a_symlink_to_an_executable_outside_the_package() {
     let error = installation.prepare_add(&package).err().unwrap();
     assert!(error.to_string().contains("symlinks"), "{error}");
 }
+
+fn without_path(mut value: serde_json::Value) -> serde_json::Value {
+    value.as_object_mut().unwrap().remove("path");
+    if let Some(extension) = value.get_mut("extension") {
+        extension.as_object_mut().unwrap().remove("path");
+    }
+    value
+}
+
+fn fixture_folder() -> std::path::PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/source-extension")
+}
+
+#[test]
+fn adding_from_the_app_registers_what_adding_from_the_cli_does() {
+    let scratch = tempfile::tempdir().unwrap();
+    let fixture = fixture_folder();
+
+    let cli = ExtensionRegistry::new(scratch.path().join("cli"));
+    let prepared = cli.prepare_add(&fixture).unwrap();
+    let cli_consent = serde_json::to_value(prepared.consent()).unwrap();
+    let cli_added = cli.add(prepared).unwrap();
+
+    let app = ExtensionRegistry::new(scratch.path().join("app"));
+    let pending = PendingExtensions::default();
+    let shown = pending.prepare(&app, &fixture).unwrap();
+    let app_consent = serde_json::to_value(&shown.consent).unwrap();
+    let app_added = pending.approve(&app, &shown.token).unwrap();
+
+    // The person is shown the same facts, and approving them leaves the same registration.
+    assert_eq!(without_path(app_consent), without_path(cli_consent));
+    assert_eq!(
+        without_path(serde_json::to_value(&app_added).unwrap()),
+        without_path(serde_json::to_value(&cli_added).unwrap())
+    );
+    let listed = |registry: &ExtensionRegistry| {
+        registry
+            .list()
+            .unwrap()
+            .iter()
+            .map(|extension| without_path(serde_json::to_value(extension).unwrap()))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(listed(&app), listed(&cli));
+    let digest = |path: &Path| super::registry::folder_digest(path).unwrap();
+    assert_eq!(digest(&app_added.path), digest(&cli_added.path));
+    assert_eq!(app_added.origin, Some(fixture.canonicalize().unwrap()));
+    assert_eq!(app_added.command, "node driver.mjs");
+    assert!(!app_added.development);
+    // Approving takes the held copy: the same token cannot add it twice.
+    assert!(matches!(
+        pending.approve(&app, &shown.token),
+        Err(AddError::Expired)
+    ));
+}
+
+#[test]
+fn a_changed_source_stays_stopped_until_it_is_added_again_in_the_app_or_the_cli() {
+    let scratch = tempfile::tempdir().unwrap();
+    let fixture = fixture_folder();
+    let config = configuration("valid");
+    let pending = PendingExtensions::default();
+    let by_app = |registry: &ExtensionRegistry| {
+        let shown = pending.prepare(registry, &fixture).unwrap();
+        pending.approve(registry, &shown.token).unwrap()
+    };
+    let by_cli = |registry: &ExtensionRegistry| {
+        registry
+            .add(registry.prepare_add(&fixture).unwrap())
+            .unwrap()
+    };
+    let adders: [(&str, &dyn Fn(&ExtensionRegistry) -> RegisteredExtension); 2] =
+        [("app", &by_app), ("cli", &by_cli)];
+    for (name, add) in adders {
+        let registry = ExtensionRegistry::new(scratch.path().join(name));
+        let installed = add(&registry);
+        let states = registry.states().unwrap();
+        assert_eq!(states.len(), 1);
+        assert!(!states[0].stopped, "{name}: untouched");
+
+        std::fs::write(installed.path.join("extra-file"), "changed").unwrap();
+        assert!(registry.states().unwrap()[0].stopped, "{name}: changed");
+        let engine = registry
+            .engine()
+            .unwrap()
+            .for_connection("scripted", "scripted", &config);
+        let error = engine.check_connection("scripted", &config).unwrap_err();
+        assert!(error.to_string().contains("add it again"), "{name}: {error}");
+
+        add(&registry);
+        assert!(!registry.states().unwrap()[0].stopped, "{name}: added again");
+        let engine = registry
+            .engine()
+            .unwrap()
+            .for_connection("scripted", "scripted", &config);
+        assert!(engine.check_connection("scripted", &config).is_ok(), "{name}");
+    }
+}
+
+#[test]
+fn a_folder_that_cannot_be_added_says_why_before_anything_is_shown() {
+    let scratch = tempfile::tempdir().unwrap();
+    let registry = ExtensionRegistry::new(scratch.path().join("extensions"));
+    let pending = PendingExtensions::default();
+    let manifest = |name: &str, text: &str| {
+        let folder = scratch.path().join(name);
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("ticketd-source.json"), text).unwrap();
+        folder
+    };
+    let refusal = |path: &Path| match pending.prepare(&registry, path) {
+        Err(AddError::Refused(refusal)) => refusal,
+        other => panic!("expected a refusal, got {:?}", other.err()),
+    };
+
+    let empty = scratch.path().join("empty");
+    std::fs::create_dir(&empty).unwrap();
+    assert_eq!(refusal(&empty), FolderRefusal::NoManifest);
+    assert_eq!(
+        refusal(&empty).to_string(),
+        "This folder has no ticketd-source.json"
+    );
+    assert_eq!(
+        refusal(&scratch.path().join("missing")),
+        FolderRefusal::NotAFolder
+    );
+    let file = scratch.path().join("file.txt");
+    std::fs::write(&file, "x").unwrap();
+    assert_eq!(refusal(&file), FolderRefusal::NotAFolder);
+
+    let newer = manifest(
+        "newer",
+        r#"{ "id": "jira", "version": "1.0.0", "executable": "node", "minimumTicketd": "9.0.0" }"#,
+    );
+    assert_eq!(refusal(&newer), FolderRefusal::NeedsNewerTicketd);
+    assert_eq!(refusal(&newer).to_string(), "It needs a newer ticketd");
+
+    let broken = manifest("broken", "{ not json");
+    assert!(matches!(refusal(&broken), FolderRefusal::Invalid { .. }));
+    let bad_id = manifest(
+        "bad-id",
+        r#"{ "id": "Not Valid", "version": "1.0.0", "executable": "node" }"#,
+    );
+    assert!(matches!(refusal(&bad_id), FolderRefusal::Invalid { .. }));
+    let built_in = manifest(
+        "built-in",
+        r#"{ "id": "github", "version": "1.0.0", "executable": "node" }"#,
+    );
+    let FolderRefusal::Invalid { message } = refusal(&built_in) else {
+        panic!("a built-in ID is refused");
+    };
+    assert!(message.contains("built-in"), "{message}");
+
+    // Nothing was held for approval and nothing was registered.
+    assert!(matches!(
+        pending.approve(&registry, "anything"),
+        Err(AddError::Expired)
+    ));
+    assert!(registry.list().unwrap().is_empty());
+}
+
+#[test]
+fn a_development_link_is_never_stopped_and_has_no_origin() {
+    let scratch = tempfile::tempdir().unwrap();
+    let registry = ExtensionRegistry::new(scratch.path().join("extensions"));
+    let package = scratch.path().join("package");
+    std::fs::create_dir(&package).unwrap();
+    for name in ["driver.mjs", "ticketd-source.json"] {
+        std::fs::copy(fixture_folder().join(name), package.join(name)).unwrap();
+    }
+    registry.link(&package).unwrap();
+    std::fs::write(package.join("extra-file"), "edited while developing").unwrap();
+    let states = registry.states().unwrap();
+    assert!(states[0].extension.development);
+    assert!(!states[0].stopped);
+    assert_eq!(states[0].extension.origin, None);
+}

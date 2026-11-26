@@ -159,7 +159,10 @@ export function SettingsView({
             selected === `source-${entry.saved?.id ?? entry.connector.provider}`
           }
           onBack={() => onSelect?.("ticket-sources")}
-          {...(onSourcesChanged && { onChanged: () => onSourcesChanged() })}
+          {...(onSourcesChanged && {
+            onChanged: (added?: SourceEntry) => onSourcesChanged(added),
+          })}
+          onOpen={(id) => onSelect?.(`source-${id}`)}
           {...(onProjectLinked && { onProjectLinked })}
         />
       ))}
