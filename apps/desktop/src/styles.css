@@ -4177,9 +4177,11 @@ kbd,
   line-height: var(--text-ui-line);
 }
 .document-bar .document-return,
-.document-bar .document-plan-crumb,
-.document-crumb-sep {
+.document-bar .document-plan-crumb {
   color: var(--muted-foreground);
+}
+.document-crumb-sep {
+  color: var(--disabled-foreground);
 }
 .document-title,
 .ui-input-title {
@@ -4224,6 +4226,14 @@ kbd,
 .document-workspace .document-body :is(.markdown-document, .rich-document) {
   font-size: var(--text-reading);
   line-height: var(--text-reading-line);
+}
+/* Blocks are 12px apart in rich editing as in reading: the editor's own 12px above and below
+   each block would add up to 24px wherever a reading rule gives a block less. */
+.document-workspace .document-body .rich-document > * {
+  margin-block: 0;
+}
+.document-workspace .document-body .rich-document > * + * {
+  margin-top: 12px;
 }
 /* The heading ladder: 22/30, 17/26, then the body size in bold, with room
    above each and a short step below. Reading and rich editing share it. */
@@ -4313,7 +4323,7 @@ kbd,
   margin-inline: auto;
 }
 .document-workspace .document-body .markdown-editor {
-  margin: 0;
+  margin-block: 0;
   background: transparent;
   box-shadow: none;
 }
@@ -4337,7 +4347,9 @@ kbd,
 .document-end .connected-label {
   line-height: var(--text-ui-line);
 }
-.document-linked-role,
+.document-linked-role {
+  color: var(--muted-foreground);
+}
 .document-end p {
   color: var(--muted-foreground);
   font-size: var(--text-caption);

@@ -34,7 +34,7 @@
 .document-end ul {
   list-style: none;
 }
-.document-end li > button {
+.document-end :is(.document-linked-items, .document-mentions) > li > button {
   white-space: normal;
   text-align: left;
 }

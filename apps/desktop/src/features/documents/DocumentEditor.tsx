@@ -26,6 +26,8 @@ import {
   Pin,
   SquarePen,
   Tag,
+  Trash2,
+  Undo2,
   X,
 } from "lucide-react";
 import {
@@ -1058,17 +1060,38 @@ function RecoveredDocumentEditor({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [initial, active]);
-  const titleInput = (
+  const titleValue = title || (head ? heading : "");
+  const changeTitle = (value: string) => {
+    draft.current = { ...draft.current, title: value };
+    setTitle(value);
+  };
+  const titleInput = capture ? (
     <Input
       id="document-title"
       aria-label="Title"
-      variant={capture ? "capture-title" : "title"}
-      placeholder={capture ? "Document title" : "Title"}
+      variant="capture-title"
+      placeholder="Document title"
       readOnly={locked || restoringCapture}
-      value={title || (head ? heading : "")}
-      onChange={(event) => {
-        draft.current = { ...draft.current, title: event.target.value };
-        setTitle(event.target.value);
+      value={titleValue}
+      onChange={(event) => changeTitle(event.target.value)}
+    />
+  ) : (
+    // The title wraps as it does in reading, so it is a field that grows with its text; Enter
+    // leaves it for the next field, as it would end a one-line input.
+    <Textarea
+      id="document-title"
+      aria-label="Title"
+      rows={1}
+      placeholder="Title"
+      readOnly={locked || restoringCapture}
+      value={titleValue}
+      onChange={(event) =>
+        changeTitle(event.target.value.replace(/[\r\n]+/g, " "))
+      }
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+        event.preventDefault();
+        refocusEditor();
       }}
     />
   );
@@ -1540,9 +1563,12 @@ function RecoveredDocumentEditor({
               </Button>
             </span>
           )}
-          <span aria-hidden="true" className="document-crumb-sep">
-            /
-          </span>
+          {/* A slash separates two crumbs: with nothing before it (full width, no Plan) it is not drawn. */}
+          {(crumbPlan || !expanded) && (
+            <span aria-hidden="true" className="document-crumb-sep">
+              /
+            </span>
+          )}
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
             {reading && !expanded && (
@@ -1700,6 +1726,11 @@ function RecoveredDocumentEditor({
                         {...(!trashed && { variant: "destructive" as const })}
                         onSelect={toggleTrash}
                       >
+                        {trashed ? (
+                          <Undo2 aria-hidden="true" />
+                        ) : (
+                          <Trash2 aria-hidden="true" />
+                        )}
                         {trashed ? "Restore" : "Move to Trash"}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
@@ -1809,7 +1840,9 @@ function RecoveredDocumentEditor({
         {initial &&
           (writing ? (
             // The title edits in place at the heading's size, without a box.
-            <div className="document-title">{titleInput}</div>
+            <div className="document-title" data-value={titleValue}>
+              {titleInput}
+            </div>
           ) : (
             <h1 className="document-title">{heading}</h1>
           ))}
@@ -2021,7 +2054,9 @@ function RecoveredDocumentEditor({
                       {links.some((group) => group.length === 100) && (
                         <p>Showing the first 100 items in each direction.</p>
                       )}
-                      <ul>{mentions.map((item) => connectionRow(item))}</ul>
+                      <ul className="document-mentions">
+                        {mentions.map((item) => connectionRow(item))}
+                      </ul>
                       {passages.length > 0 && (
                         <ul className="document-passages">
                           {passages.map((passage) => (
