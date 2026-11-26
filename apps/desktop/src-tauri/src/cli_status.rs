@@ -44,6 +44,8 @@ pub enum Outcome {
     Installed,
     /// The person declined the administrator password; nothing changed.
     /// `directory` is the folder that needs no password.
+    // Only the macOS administrator prompt can be declined.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     Declined,
 }
 
