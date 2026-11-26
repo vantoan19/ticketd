@@ -1,5 +1,6 @@
 //! Device-local development links and the process connector.
 
+mod add;
 mod host;
 mod logs;
 mod process;
@@ -25,8 +26,11 @@ use host::{Definition, Host};
 use registry::Launch;
 use wire::{Call, ConnectionParams, IssueParams};
 
+pub use add::{AddError, FolderRefusal, PendingConsent, PendingExtensions, check_extension_folder};
 pub(super) use process::password_output;
-pub use registry::{ExtensionConsent, ExtensionRegistry, PreparedExtension, RegisteredExtension};
+pub use registry::{
+    ExtensionConsent, ExtensionRegistry, ExtensionState, PreparedExtension, RegisteredExtension,
+};
 
 /// The published JSON Schema generated from the types that encode and decode
 /// messages on the process boundary.

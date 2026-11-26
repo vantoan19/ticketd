@@ -296,8 +296,11 @@ export function SourceCard({
   onBack,
   onProjectLinked,
   manage,
+  tag,
 }: {
   entry: SourceEntry;
+  /** A tag beside the name that says what kind of source this is (Custom). */
+  tag?: ReactNode;
   /** What a saved connection offers about itself, after Sync: rename and remove. */
   manage?: ReactNode;
   /** Returns to the Ticket sources list (Back and Escape). Adding uses its own `onCancel`. */
@@ -784,7 +787,11 @@ export function SourceCard({
       icon={CircleDot}
       iconContent={<SourceIcon svg={presentation?.icon_svg} />}
       titleAccessory={
-        entry.development && <Badge variant="experimental">Development</Badge>
+        entry.development ? (
+          <Badge variant="experimental">Development</Badge>
+        ) : (
+          tag
+        )
       }
       lede={`Bring matching ${connector.name} issues into this workspace. Their ${syncedFields} sync inward; ${connector.name} stays the place to edit them.`}
       endSlot={

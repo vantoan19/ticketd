@@ -672,6 +672,74 @@ pub(super) fn forget_folder(connection: &Connection) -> Result<(), Error> {
     forget_synced(connection)
 }
 
+/// See [`super::remember_replaced_folder`].
+pub(super) fn remember_replaced_folder(
+    restored: &Connection,
+    replaced: &Connection,
+) -> Result<(), Error> {
+    // A replaced Workspace of an older format has nothing to remember.
+    let Ok(was) = state(replaced) else {
+        return Ok(());
+    };
+    // The folder belongs to one Workspace: a backup of another one is not offered it.
+    let same_workspace = match (
+        crate::embedded_attachments::workspace_id(replaced),
+        crate::embedded_attachments::workspace_id(restored),
+    ) {
+        (Ok(replaced), Ok(restored)) => replaced == restored,
+        _ => false,
+    };
+    if !same_workspace {
+        return Ok(());
+    }
+    let syncing = was.folder.is_some();
+    let Some(folder) = was.folder.clone().or_else(|| was.last_folder.clone()) else {
+        return Ok(());
+    };
+    let (account, provider, bucket, prefix) = if syncing {
+        (
+            was.account.clone(),
+            was.provider,
+            was.s3_bucket.clone(),
+            was.s3_prefix.clone(),
+        )
+    } else {
+        (
+            was.last_account.clone(),
+            was.last_provider,
+            was.last_bucket.clone(),
+            was.last_prefix.clone(),
+        )
+    };
+    // The backup may be of a format before these columns.
+    migrate_last_folder(restored)?;
+    migrate_provider(restored)?;
+    migrate_endpoint(restored)?;
+    // The sign-in and the settings belong to this computer, not to the Workspace's content.
+    restored.execute(
+        "UPDATE sync_state SET last_folder = ?1, last_account = ?2, last_provider = ?3, last_bucket = ?4, last_prefix = ?5, connection = ?6, account = ?7, provider = ?8, s3_bucket = ?9, s3_prefix = ?10, aws_profile = ?11, aws_cli_path = ?12, s3_endpoint = ?13, device_name = ?14, poll_interval_secs = ?15, attachment_download = ?16",
+        params![
+            folder,
+            account,
+            label(provider)?,
+            bucket,
+            prefix,
+            was.connection,
+            was.account,
+            label(was.provider)?,
+            was.s3_bucket,
+            was.s3_prefix,
+            was.aws_profile,
+            was.aws_cli_path,
+            was.s3_endpoint,
+            was.device_name,
+            was.poll_interval_secs,
+            label(was.attachment_download)?,
+        ],
+    )?;
+    Ok(())
+}
+
 /// The folder a disconnected Workspace can go back to: the one it last synced
 /// with, while the storage connected is the one that folder is in and still
 /// lists it. For Google Drive that is the same account; for S3 the same bucket

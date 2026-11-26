@@ -1506,6 +1506,25 @@ impl From<ticketd_core::Error> for SourceFailure {
     }
 }
 
+impl From<ticketd_core::source::AddError> for SourceFailure {
+    fn from(error: ticketd_core::source::AddError) -> Self {
+        use ticketd_core::source::AddError;
+        match error {
+            AddError::Refused(refusal) => Self {
+                code: refusal.code(),
+                message: refusal.to_string(),
+                fields: Vec::new(),
+            },
+            AddError::Expired => Self {
+                code: "expired",
+                message: error.to_string(),
+                fields: Vec::new(),
+            },
+            AddError::Source(source) => source.into(),
+        }
+    }
+}
+
 impl From<ticketd_core::source::SourceError> for SourceFailure {
     fn from(error: ticketd_core::source::SourceError) -> Self {
         ticketd_core::Error::from(error).into()
@@ -1522,6 +1541,9 @@ struct SourceEntry {
     saved: Option<ticketd_core::source::SavedSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_id: Option<String>,
+    /// The program behind a source a person added: what it runs and where from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extension: Option<ticketd_core::source::ExtensionState>,
 }
 
 type SourceRegistry = std::sync::Arc<ExtensionRegistry>;
@@ -1548,11 +1570,18 @@ fn list_sources(
     let workspace = open_workspace()?;
     let engine = sources.engine()?;
     let saved = workspace.saved_sources()?;
+    let extensions = sources.states()?;
     let mut entries = Vec::new();
     for connector in engine.descriptions() {
         let provider = &connector.descriptor.provider;
         let next_id = workspace.next_source_connection_id(provider)?;
         let development = sources.is_development(provider);
+        // A source whose files changed stays listed, stopped, until it is added again.
+        let extension = extensions
+            .iter()
+            .find(|state| &state.extension.id == provider && !state.bundled)
+            .cloned();
+        let unavailable = extension.as_ref().is_some_and(|state| state.stopped);
         let first = entries.len();
         entries.extend(
             saved
@@ -1560,19 +1589,21 @@ fn list_sources(
                 .filter(|source| &source.provider == provider)
                 .map(|source| SourceEntry {
                     development,
-                    unavailable: false,
+                    unavailable,
                     connector: connector.clone(),
                     saved: Some(source.clone()),
                     next_id: Some(next_id.clone()),
+                    extension: extension.clone(),
                 }),
         );
         if entries.len() == first {
             entries.push(SourceEntry {
                 development,
-                unavailable: false,
+                unavailable,
                 connector,
                 saved: None,
                 next_id: Some(next_id),
+                extension,
             });
         }
     }
@@ -1584,10 +1615,54 @@ fn list_sources(
                 connector: workspace.unavailable_source_description(&source.provider)?,
                 saved: Some(source),
                 next_id: None,
+                extension: None,
             });
         }
     }
     Ok(entries)
+}
+
+/// A folder to add as a source, copied and read but not run: what the person
+/// is asked to approve. A folder that cannot be added fails here with the reason.
+#[tauri::command(async)]
+fn source_extension_prepare(
+    path: String,
+    sources: tauri::State<'_, SourceRegistry>,
+    pending: tauri::State<'_, std::sync::Arc<ticketd_core::source::PendingExtensions>>,
+) -> Result<ticketd_core::source::PendingConsent, SourceFailure> {
+    pending
+        .prepare(&sources, std::path::Path::new(&path))
+        .map_err(SourceFailure::from)
+}
+
+/// Approves what `source_extension_prepare` showed, as `ticketd source extension add` does.
+#[tauri::command(async)]
+fn source_extension_add(
+    token: String,
+    sources: tauri::State<'_, SourceRegistry>,
+    pending: tauri::State<'_, std::sync::Arc<ticketd_core::source::PendingExtensions>>,
+) -> Result<ticketd_core::source::RegisteredExtension, SourceFailure> {
+    pending
+        .approve(&sources, &token)
+        .map_err(SourceFailure::from)
+}
+
+/// Drops a prepared folder the person did not approve.
+#[tauri::command(async)]
+fn source_extension_cancel(
+    token: String,
+    pending: tauri::State<'_, std::sync::Arc<ticketd_core::source::PendingExtensions>>,
+) {
+    pending.cancel(&token);
+}
+
+/// Removes the program of a source a person added. Its connections stay saved, stopped.
+#[tauri::command(async)]
+fn source_extension_remove(
+    id: String,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<(), SourceFailure> {
+    sources.remove(&id).map_err(SourceFailure::from)
 }
 #[tauri::command(async)]
 fn source_repository_routes(
@@ -2264,6 +2339,9 @@ pub fn run() -> Result<(), tauri::Error> {
             },
         )
         .manage(drive_commands::DrivePickerOperations::default())
+        .manage(std::sync::Arc::new(
+            ticketd_core::source::PendingExtensions::default(),
+        ))
         .manage(Refresher(
             std::sync::Arc::clone(&coordinator),
             ActiveRefreshes::default(),
@@ -2492,6 +2570,10 @@ pub fn run() -> Result<(), tauri::Error> {
             restore_points::restore_points,
             restore_points::save_restore_point,
             list_sources,
+            source_extension_prepare,
+            source_extension_add,
+            source_extension_cancel,
+            source_extension_remove,
             source_repository_routes,
             link_source_repository_project,
             create_source_repository_project,

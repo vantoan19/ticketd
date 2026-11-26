@@ -1036,7 +1036,13 @@ function AppContent() {
                         <WindowBar />
                         <StatusLineRegion
                           host={{ current: contentPanel }}
-                          notice={updateNotice}
+                          notice={
+                            // About already shows the update, and the notice
+                            // would cover its Help list.
+                            view === "settings" && settingsSection === "about"
+                              ? undefined
+                              : updateNotice
+                          }
                         >
                           <PageZoomStatus zoom={pageZoom} />
                           <NewPlanDialog
