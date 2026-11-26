@@ -57,6 +57,7 @@ import { Field, FieldLabel } from "@/components/ui/field";
 import { Badge } from "@/components/ui/badge";
 import { Reference } from "@/components/ui/reference";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { DialogShell } from "@/components/ui/dialog-shell";
 import { Tooltip } from "@/components/ui/tooltip";
 import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
@@ -65,6 +66,7 @@ import { flushSync } from "react-dom";
 import { DocumentOutline } from "./DocumentOutline";
 import { DocumentRail } from "./DocumentRail";
 import { useSectionFolds } from "./section-folds";
+import { useGrowToFit } from "./use-grow-to-fit";
 import { headingElement, useCurrentHeading } from "./use-current-heading";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
@@ -328,6 +330,8 @@ function RecoveredDocumentEditor({
   const workspaceRevision = useWorkspaceChange();
   const [focusRequest, setFocusRequest] = useState(0);
   const refocusEditor = () => setFocusRequest((value) => value + 1);
+  // The summary field grows with its text (wrapping) so the whole summary shows while editing.
+  const summaryField = useRef<HTMLTextAreaElement>(null);
   const [writing, setWriting] = useState(
     initial === null || recovered !== null,
   );
@@ -978,6 +982,7 @@ function RecoveredDocumentEditor({
   const outline = useMemo(() => outlineOf(readSource), [readSource]);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const folds = useSectionFolds(initial?.id ?? null, outline);
+  useGrowToFit(summaryField, summary, writing);
   const { current: currentAnchor, goTo } = useCurrentHeading(
     scroller,
     outline,
@@ -1809,18 +1814,18 @@ function RecoveredDocumentEditor({
             {writing ? (
               // The author's one-line summary edits in the place it is read.
               <div className="document-summary">
-                <Input
+                <Textarea
+                  ref={summaryField}
                   aria-label="Summary"
-                  variant="title"
+                  rows={1}
                   placeholder="Add a one-line summary"
                   readOnly={locked}
                   value={summary}
                   onChange={(event) => {
-                    draft.current = {
-                      ...draft.current,
-                      summary: event.target.value,
-                    };
-                    setSummary(event.target.value);
+                    // One line of text: a pasted line break becomes a space.
+                    const value = event.target.value.replace(/[\r\n]+/g, " ");
+                    draft.current = { ...draft.current, summary: value };
+                    setSummary(value);
                   }}
                   onKeyDown={(event) => {
                     // Enter leaves the field for the text, as it would end a line.

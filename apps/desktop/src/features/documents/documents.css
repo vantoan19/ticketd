@@ -296,14 +296,27 @@
   line-height: 27px;
   overflow-wrap: anywhere;
 }
-.document-summary [data-slot="input"] {
-  height: 27px;
-  padding: 0;
+/* The edit field wraps and grows to show the whole summary. Like the title, its edge takes 8px of
+   inset cancelled by a negative margin, so the text stays where it is read. The edge shows on hover;
+   focus uses the field's own outline. */
+.document-summary [data-slot="textarea"] {
+  display: block;
+  width: calc(100% + 16px);
+  min-height: 27px;
+  margin-inline: -8px;
+  padding: 0 8px;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
   color: inherit;
   font-size: inherit;
   font-weight: 400;
   letter-spacing: normal;
   line-height: inherit;
+  resize: none;
+}
+.document-summary [data-slot="textarea"]:hover:not(:focus-visible, :read-only) {
+  box-shadow: inset var(--shadow-border-base);
 }
 .document-meta-item,
 .document-meta-part {

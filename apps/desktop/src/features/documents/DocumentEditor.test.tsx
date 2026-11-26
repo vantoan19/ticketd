@@ -1187,7 +1187,7 @@ it("shows the restored text at once after a History restore", async () => {
 // The Document's one-line summary: shown under the meta line, edited under the title.
 const summarized = { ...stored, summary: "Ship the reader on Friday." };
 const summaryField = () =>
-  screen.getByRole<HTMLInputElement>("textbox", { name: "Summary" });
+  screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Summary" });
 it("shows the summary under the meta line, and nothing when there is none", () => {
   const { container, unmount } = renderEditor(
     <DocumentEditor initial={summarized} onClose={vi.fn()} />,
@@ -1211,6 +1211,16 @@ it("offers a one-line field for the summary in Edit, even when empty", () => {
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   expect(summaryField().placeholder).toBe("Add a one-line summary");
   expect(summaryField().value).toBe("");
+});
+it("wraps a long summary in a growing field and never takes a line break", () => {
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  // A text area, so the whole summary shows; a pasted line break becomes a space.
+  expect(summaryField().tagName).toBe("TEXTAREA");
+  fireEvent.change(summaryField(), { target: { value: "First line\nSecond" } });
+  expect(summaryField().value).toBe("First line Second");
+  const enter = fireEvent.keyDown(summaryField(), { key: "Enter" });
+  expect(enter).toBe(false);
 });
 it("saves a typed summary with the loaded revision and leaves the title and body alone", async () => {
   vi.useFakeTimers();
