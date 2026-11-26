@@ -4375,6 +4375,8 @@ kbd,
   font-size: var(--text-ui);
   line-height: var(--text-ui-line);
   font-weight: 500;
+  /* A file name at 14px reads at its own width, not the document title's tight tracking. */
+  letter-spacing: normal;
 }
 
 .ui-notice-hint {

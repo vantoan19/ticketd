@@ -118,11 +118,11 @@ test("a log draws its numbered lines, never all of them, and says when it is onl
       }}
     />,
   );
-  expect(
-    await screen.findByText(
-      "Showing the last 5 MB of 240 MB. Open it in its app for the rest.",
-    ),
-  ).toBeTruthy();
+  const note = await screen.findByText(
+    "Showing the last 5 MB of 240 MB. Open it in its app for the rest.",
+  );
+  // The same info glyph as the other notice lines.
+  expect(note.querySelector("svg[aria-hidden='true']")).toBeTruthy();
 });
 
 test("the end of a long log keeps the file's own line numbers", async () => {

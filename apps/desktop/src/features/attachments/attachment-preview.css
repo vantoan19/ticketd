@@ -169,7 +169,8 @@
   border-radius: 0;
 }
 .attachment-preview-stage > [data-slot="alert"] > svg,
-.attachment-report-note > svg {
+.attachment-report-note > svg,
+.attachment-text-scope > svg {
   flex: none;
   width: 14px;
   height: 14px;
@@ -222,8 +223,8 @@
 }
 
 /* One block for every state: a 112 × 72 tile, a title, one sentence and a
-   reserved 32px row, anchored at the same height so a file moving between
-   states never shifts it. */
+   32px row, all from the same top so the tile never moves between states. The
+   row follows the sentence: a second line pushes it down, as on the boards. */
 .attachment-state {
   display: flex;
   flex-direction: column;
@@ -278,7 +279,6 @@
   vertical-align: 1px;
 }
 .attachment-state-sentence {
-  min-height: calc(2 * var(--text-ui-line));
   color: var(--muted-foreground);
 }
 .attachment-state-action {
@@ -288,7 +288,8 @@
   justify-content: center;
   gap: 8px;
   min-height: 32px;
-  margin-top: 8px;
+  /* 16px under the sentence with the block's 4px gap, as on the boards. */
+  margin-top: 12px;
 }
 /* The board's bar is wider than the shared 64px one: it is the state's whole action. */
 .attachment-state-progress [data-slot="progress"] {
@@ -498,6 +499,7 @@
   display: flex;
   flex: none;
   align-items: center;
+  gap: 8px;
   height: 36px;
   margin: 0;
   padding-inline: 16px;
@@ -508,6 +510,8 @@
   min-height: 100%;
   width: max-content;
   min-width: 100%;
+  /* The gutter of a 3-digit file; TextStage sets the measured one inline. */
+  --text-gutter: 64px;
   font-family: var(--font-mono);
   font-size: var(--text-code);
   line-height: 20px;
@@ -520,7 +524,7 @@
 }
 .attachment-text-line {
   display: grid;
-  grid-template-columns: var(--text-gutter, 64px) minmax(0, 1fr);
+  grid-template-columns: var(--text-gutter) minmax(0, 1fr);
   min-height: 20px;
 }
 /* The line number is generated, so it is never selected or copied. */

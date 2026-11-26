@@ -7,9 +7,10 @@ import type { FileFamily } from "./file-words";
 
 /**
  * One state of the viewer's stage: a 112 × 72 tile (the family glyph over the
- * extension), a title, one sentence and a reserved 32px row for the state's
- * fix or progress. Every state uses the same block, anchored at the same
- * height, so nothing shifts when a file moves from one state to the next.
+ * extension), a title, one sentence and a 32px row for the state's fix or
+ * progress. Every state uses the same block from the same top, so the tile
+ * stays put when a file moves from one state to the next; the row follows the
+ * sentence, one line or two.
  */
 export function PreviewState({
   family,
