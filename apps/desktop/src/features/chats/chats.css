@@ -550,14 +550,30 @@
 .chat-step-words[data-line] > * {
   flex: none;
 }
-.chat-step-words[data-line] > code:not(.chat-file-name) {
+/* What follows the verb is one group the row clips: however many names it holds,
+   the row never grows past its width, and the verb and the outcome stay whole.
+   The 2px either side keeps a name's focus ring inside the clip. */
+.chat-step-words[data-line] > .chat-step-names {
+  display: flex;
+  flex: 0 1 auto;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  padding: 0 2px;
+  margin: 0 -2px;
+  overflow-x: clip;
+}
+.chat-step-words[data-line] > .chat-step-names > * {
+  flex: none;
+}
+.chat-step-words[data-line] code:not(.chat-file-name) {
   flex: 0 1 auto;
   min-width: 0;
 }
-.chat-step-words[data-line] > .chat-file-name {
+.chat-step-words[data-line] .chat-file-name {
   flex: 0 1 auto;
 }
-.chat-step-words[data-line] > code:not(.chat-file-name) {
+.chat-step-words[data-line] code:not(.chat-file-name) {
   overflow: hidden;
   text-overflow: ellipsis;
 }

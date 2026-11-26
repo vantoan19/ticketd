@@ -343,7 +343,18 @@ test("a row naming two long files keeps to one line, its outcome outside the cut
     /\.chat-step-words\[data-line\] \{[^}]*white-space: nowrap/,
   );
   expect(css).toMatch(
-    /\.chat-step-words\[data-line\] > \.chat-file-name \{[^}]*flex: 0 1 auto/,
+    /\.chat-step-words\[data-line\] \.chat-file-name \{[^}]*flex: 0 1 auto/,
+  );
+  // The names and the words between them are one group that clips, so two names
+  // at their minimum widths can never push the outcome past the row (measured in
+  // the headless harness; jsdom has no layout).
+  const group = words?.querySelector(":scope > .chat-step-names");
+  expect(group?.querySelectorAll(".chat-file-name")).toHaveLength(2);
+  expect(group?.nextElementSibling?.nextElementSibling).toBe(
+    words?.lastElementChild,
+  );
+  expect(css).toMatch(
+    /\.chat-step-words\[data-line\] > \.chat-step-names \{[^}]*min-width: 0;[^}]*overflow-x: clip/,
   );
   // A name gives way only down to "…" and its extension (--keep characters), so
   // the next word is never overlapped.

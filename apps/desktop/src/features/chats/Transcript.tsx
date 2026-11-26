@@ -511,6 +511,21 @@ function StepDetail({
   );
 }
 
+/**
+ * On a one-line row, what follows the verb (the names and the words between them) is
+ * one group the row can clip, so the verb and the outcome always stay whole.
+ */
+function wrapNames(oneLine: boolean, nodes: ReactNode[]) {
+  const [verb, ...names] = nodes;
+  if (!oneLine || names.length === 0) return nodes;
+  return [
+    verb,
+    <span key="names" className="chat-step-names">
+      {names}
+    </span>,
+  ];
+}
+
 /** One 28px line: `[icon] words`, then a chevron when it opens. */
 function RowLine({
   icon,
@@ -592,14 +607,14 @@ export const StepRow = memo(function StepRow({
   const Icon = call
     ? TICKETD_ICONS[call.verb]
     : STEP_ICONS[step.explored ? "read" : step.kind];
+  // A command, or a file or a pattern the step named: its row keeps to one line, and
+  // the names give way before the verb and the outcome do.
+  const oneLine =
+    words.parts.some((part) => part.command) ||
+    (!step.ticketd?.length && words.parts.some((part) => part.code));
   const line = (
     <RowLine
-      line={
-        words.parts.some((part) => part.command) ||
-        // A file or a pattern the step named: its row keeps to one line, and the
-        // names give way before the verb and the outcome do.
-        (!step.ticketd?.length && words.parts.some((part) => part.code))
-      }
+      line={oneLine}
       icon={
         running ? (
           <LoaderCircle size={12} className="chat-spin" />
@@ -608,43 +623,46 @@ export const StepRow = memo(function StepRow({
         )
       }
     >
-      {words.parts.map((part, index) => {
-        const file = part.code
-          ? files.findIndex((target) => target.text === part.text)
-          : -1;
-        if (index === 0 && !part.code)
+      {wrapNames(
+        oneLine,
+        words.parts.map((part, index) => {
+          const file = part.code
+            ? files.findIndex((target) => target.text === part.text)
+            : -1;
+          if (index === 0 && !part.code)
+            return (
+              <span
+                key={index}
+                ref={verb}
+                className="chat-step-verb"
+                style={
+                  verbWidth && !running
+                    ? { minWidth: eased ? 0 : verbWidth }
+                    : undefined
+                }
+              >
+                {/* A soft light passes over the words of the step that runs. */}
+                {running ? <Shimmer>{part.text}</Shimmer> : part.text}
+              </span>
+            );
           return (
-            <span
-              key={index}
-              ref={verb}
-              className="chat-step-verb"
-              style={
-                verbWidth && !running
-                  ? { minWidth: eased ? 0 : verbWidth }
-                  : undefined
-              }
-            >
-              {/* A soft light passes over the words of the step that runs. */}
-              {running ? <Shimmer>{part.text}</Shimmer> : part.text}
-            </span>
+            <Fragment key={index}>
+              {index > 0 && part.text !== "," && " "}
+              {file >= 0 ? (
+                <FileName path={part.text} onFailed={setFailure} />
+              ) : part.path ? (
+                <PathCode path={part.text} />
+              ) : part.command ? (
+                <code className="chat-step-command">{part.text}</code>
+              ) : part.code ? (
+                <code>{part.text}</code>
+              ) : (
+                part.text
+              )}
+            </Fragment>
           );
-        return (
-          <Fragment key={index}>
-            {index > 0 && part.text !== "," && " "}
-            {file >= 0 ? (
-              <FileName path={part.text} onFailed={setFailure} />
-            ) : part.path ? (
-              <PathCode path={part.text} />
-            ) : part.command ? (
-              <code className="chat-step-command">{part.text}</code>
-            ) : part.code ? (
-              <code>{part.text}</code>
-            ) : (
-              part.text
-            )}
-          </Fragment>
-        );
-      })}
+        }),
+      )}
       {words.suffix ? (
         <>
           <span aria-hidden> · </span>
