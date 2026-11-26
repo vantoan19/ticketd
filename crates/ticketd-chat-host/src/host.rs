@@ -121,6 +121,14 @@ pub(crate) fn is_refusal(error: &Error) -> bool {
     )
 }
 
+pub(crate) fn requests_chat_links(change: Option<&ChatInputChange>) -> bool {
+    match change {
+        Some(ChatInputChange::Link(links)) => !links.is_empty(),
+        Some(ChatInputChange::Edit(edit)) => !edit.links.is_empty(),
+        None => false,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendMode {
     /// Start a turn when idle; steer the active turn when the harness supports
@@ -784,6 +792,7 @@ impl ChatHost {
                     let host = self.clone();
                     let chat_id = chat_id.to_owned();
                     let message_id = receipt.id.clone();
+                    let requires_link_context = requests_chat_links(change.as_ref());
                     // The takeover still completes if the caller loses its reply.
                     tokio::spawn(async move {
                         let (_, unconfirmed) = host.finish_take_over(&chat_id, run).await;
@@ -793,8 +802,11 @@ impl ChatHost {
                         {
                             // The reply starts a normal turn before admitting later sends.
                             let (reply, scheduled) = oneshot::channel();
-                            let sent =
-                                commands.try_send(Command::ScheduleSaved { message_id, reply });
+                            let sent = commands.try_send(Command::ScheduleSaved {
+                                message_id,
+                                requires_link_context,
+                                reply,
+                            });
                             drop(gate);
                             if sent.is_ok() {
                                 let _ = scheduled.await;
@@ -856,6 +868,7 @@ impl ChatHost {
     /// person's Stop and nothing else: when ticketd closes an agent because its run
     /// ended, it uses `end_run_agents`.
     pub async fn stop(&self, chat_id: &str) -> Result<(), HostError> {
+        let mut sibling_cleanup_unconfirmed = false;
         if self
             .workspace()?
             .automation_chat_harness(chat_id)?
@@ -865,17 +878,20 @@ impl ChatHost {
             let run = self.workspace()?.take_over_automation_run(chat_id, false)?;
             if let Some(run) = run {
                 let (closed, unconfirmed) = self.finish_take_over(chat_id, run).await;
-                if unconfirmed {
-                    return Err(HostError::PermissionRestartCleanupUnconfirmed);
-                }
                 if closed {
-                    return Ok(());
+                    return if unconfirmed {
+                        Err(HostError::PermissionRestartCleanupUnconfirmed)
+                    } else {
+                        Ok(())
+                    };
                 }
+                sibling_cleanup_unconfirmed = unconfirmed;
             }
         }
         self.ask(chat_id, Command::Stop).await?;
-        if self.closing_agents().contains_key(chat_id)
-            && self.inner.lifecycle.has_runtime_cleanup(chat_id)
+        if sibling_cleanup_unconfirmed
+            || (self.closing_agents().contains_key(chat_id)
+                && self.inner.lifecycle.has_runtime_cleanup(chat_id))
         {
             return Err(HostError::PermissionRestartCleanupUnconfirmed);
         }

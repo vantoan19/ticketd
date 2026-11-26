@@ -1355,6 +1355,44 @@ async fn taking_a_run_over_stops_the_agent_of_the_step_it_was_on() {
     assert_eq!(run.steps.len(), 2);
 }
 
+#[tokio::test(start_paused = true)]
+async fn stop_pauses_its_chat_when_a_sibling_automation_harness_cannot_close() {
+    let f = Fixture::new();
+    let mut definition = f.automation.definition.clone();
+    let mut second = definition.steps[0].clone();
+    second.id = "second".into();
+    definition.steps.push(second);
+    f.core()
+        .update_automation(&f.automation.id, definition)
+        .unwrap();
+    f.agent_working().await;
+    f.end_turn(TurnOutcome::Completed).await;
+    let run = f.runs().remove(0);
+    let [first, second] = &run.steps[..] else {
+        panic!("the run should be on its second step");
+    };
+    assert_eq!(second.status, AutomationStepStatus::Running);
+    let first = first.chat_id.as_deref().unwrap();
+    let second = second.chat_id.as_deref().unwrap();
+    let queued = f
+        .core()
+        .save_chat_input(None, first, "Leave queued")
+        .unwrap();
+    assert!(!f.core().chat(first).unwrap().queue_paused);
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: "the sibling harness did not exit".to_owned(),
+    });
+
+    assert!(matches!(
+        f.host.stop(first).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    assert!(f.core().chat(first).unwrap().queue_paused);
+    assert_eq!(f.core().chat_queue(first).unwrap()[0].id, queued.id);
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.host.quit().await[0].chat_id, second);
+}
+
 /// The person replies in step 1's Chat just after the runner created step 2's Chat
 /// and before its agent is known to the host: the take-over finds no agent to stop
 /// there, so the runner must not start one afterwards.
