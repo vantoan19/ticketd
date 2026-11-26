@@ -301,6 +301,46 @@ test("copying a selection takes the text of its lines, without line numbers", as
   );
 });
 
+test("Wrap lines keeps the line at the top of the view instead of the same scroll position", async () => {
+  const text = Array.from(
+    { length: 100 },
+    (_, index) => `L${index} ${"x".repeat(30)}`,
+  ).join("\n");
+  serve(text);
+  render(<Stage />);
+  await screen.findByRole("document");
+  const stage = screen.getByTestId("stage");
+  let top = 0;
+  Object.defineProperty(stage, "scrollTop", {
+    get: () => top,
+    set: (value: number) => {
+      top = value;
+    },
+  });
+  // jsdom has no layout: wrapped, every line is two 20px rows, so line n sits at 40n.
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    const line = this.dataset["line"];
+    if (line === undefined) return { top: 0, bottom: 0 } as DOMRect;
+    const at = Number(line) * 40 - top;
+    return { top: at, bottom: at + 40 } as DOMRect;
+  };
+  try {
+    top = 1010; // line 25, 10px of it scrolled out
+    stage.focus();
+    press("w");
+    await waitFor(() =>
+      expect(screen.getByRole("document").hasAttribute("data-wrap")).toBe(
+        false,
+      ),
+    );
+    // Unwrapped, a line is one row: line 25 now starts at 500, with the same 10px above.
+    expect(top).toBe(510);
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = original;
+  }
+});
+
 test("select all and copy take every line of the log, drawn or not, not the page around it", async () => {
   serve();
   render(<Stage />);
