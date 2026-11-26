@@ -1,5 +1,6 @@
 import { expect, test } from "vitest";
 import { scopeIsPath, splitPath } from "@/features/chats/files";
+import { tailLength } from "@/features/chats/FileName";
 
 test("a path splits into its folder and its name", () => {
   expect(splitPath("gen/icons.py")).toEqual({
@@ -38,4 +39,14 @@ test("a long path is cut from its start, and its name is never cut", () => {
 test("a glob is a pattern, not a place", () => {
   expect(scopeIsPath("src/auth")).toBe(true);
   expect(scopeIsPath("src/**/*.ts")).toBe(false);
+});
+
+test("a file name keeps its extension as the tail that never gives way", () => {
+  expect(tailLength("rate-limit-configuration-loader.test.ts")).toBe(3);
+  expect(tailLength("a-very-long-component.test.tsx")).toBe(4);
+  // No extension, or a dotfile: the last six characters.
+  expect(tailLength("Makefile-with-a-long-name")).toBe(6);
+  expect(tailLength(".gitignore")).toBe(6);
+  // A long extension is cut to twelve.
+  expect(tailLength("archive.verylongextension-name")).toBe(12);
 });

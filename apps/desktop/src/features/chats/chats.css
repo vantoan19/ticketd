@@ -550,9 +550,12 @@
 .chat-step-words[data-line] > * {
   flex: none;
 }
-.chat-step-words[data-line] > :is(code, .chat-file-name) {
+.chat-step-words[data-line] > code:not(.chat-file-name) {
   flex: 0 1 auto;
   min-width: 0;
+}
+.chat-step-words[data-line] > .chat-file-name {
+  flex: 0 1 auto;
 }
 .chat-step-words[data-line] > code:not(.chat-file-name) {
   overflow: hidden;
@@ -744,6 +747,12 @@
   padding: 2px;
   margin: -2px;
   vertical-align: bottom;
+}
+/* However little room a step row leaves, a name keeps its "…" and its tail
+   (--keep characters of its own mono font, plus the 2px padding either side),
+   so its extension never spills over the next word. */
+.chat-file-name {
+  min-width: calc(var(--keep, 0) * 1ch + 4px);
 }
 .chat-file-head {
   min-width: 0;
