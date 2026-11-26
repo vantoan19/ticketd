@@ -28,6 +28,7 @@ export type PreparedReport = {
 const REMOVED =
   "script, base, link, meta[http-equiv], iframe, frame, frameset, object, embed";
 const MEDIA = "svg, canvas, video, audio, table, hr, input, button, textarea";
+const SVG_FETCHING = new Set(["image", "use", "feImage"]);
 const NOT_TEXT = new Set(["STYLE", "SCRIPT", "NOSCRIPT", "TEMPLATE", "TITLE"]);
 // A stylesheet that imports another, or draws from anything but an embedded `data:` URL.
 // One lookahead past the quote and spaces, so `url("data:…")` is not read as remote.
@@ -117,6 +118,16 @@ export function prepareReport(source: string): PreparedReport {
       ) {
         outside = true;
       } else if (name === "style" && CSS_REMOTE.test(attribute.value)) {
+        outside = true;
+      } else if (
+        // Older markup draws from the network too: a `background` or `lowsrc` picture, and
+        // an SVG `<image>`, `<use>` or filter image that points at another file.
+        (name === "background" ||
+          name === "lowsrc" ||
+          ((name === "href" || name === "xlink:href") &&
+            SVG_FETCHING.has(element.localName))) &&
+        external(attribute.value)
+      ) {
         outside = true;
       }
     }
