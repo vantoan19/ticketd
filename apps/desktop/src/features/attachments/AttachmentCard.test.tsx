@@ -108,7 +108,8 @@ test("storage replaces the type word only when the file isn't simply here", () =
       onOpen={() => {}}
     />,
   );
-  expect(screen.getByText("Google Drive · External reference")).toBeTruthy();
+  // Without Drive's details the card says only where the file is.
+  expect(screen.getByText("Google Drive")).toBeTruthy();
   expect(screen.getByRole("button").textContent).toContain("HTML ↗");
 });
 
@@ -255,7 +256,8 @@ test("measured, a cut name keeps the end of its second line and its first line s
   const [first, second] = fitted.lines!;
   expect(first).toBe("load-test-results-");
   expect(name.startsWith(first)).toBe(true);
-  expect(second.endsWith("…" + name.slice(-14))).toBe(true);
+  // The cut falls between words: the kept end starts at a word, whole.
+  expect(second.endsWith("…final.html")).toBe(true);
   expect(measure(second)).toBeLessThanOrEqual(152);
   // A name that fits in two lines is not cut at all.
   expect(fitName("refund-after-fix-before-merge.png", measure).cut).toBe(false);

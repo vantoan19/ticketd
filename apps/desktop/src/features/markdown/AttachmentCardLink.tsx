@@ -53,6 +53,7 @@ export function AttachmentCardLink({
           file={file}
           label={label}
           storage={availability.of(file.id)}
+          storageKnown={availability.known}
           onOpen={() => setOpen(true)}
         />
       ) : (

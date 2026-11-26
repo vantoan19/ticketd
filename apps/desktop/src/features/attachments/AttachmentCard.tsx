@@ -2,14 +2,18 @@ import { useState, type ReactNode } from "react";
 import type { Attachment } from "@/lib/api/attachments";
 import type { Availability } from "@/lib/sync-review-api";
 import { formatSize } from "./format-size";
+import { StatusDot } from "@/components/ui/status-dot";
 import { fileType, stateWord } from "./file-words";
 import { FileIcon } from "./AttachmentThumbnail";
 import { FileCard } from "./FileCard";
+import { useMissing } from "./attachment-missing";
+import { useDriveType, type DriveType } from "./drive-type";
 import { useStill } from "./attachment-still";
 import { useNearViewport } from "./use-near-viewport";
 
 /** The tile's word: the extension (`LOG`, `P12`), with `↗` for a Drive reference. */
-function tileLabel(file: Attachment) {
+function tileLabel(file: Attachment, drive: DriveType | null) {
+  if (drive && file.kind === "external_reference") return `${drive.label} ↗`;
   const dot = file.original_filename.lastIndexOf(".");
   const extension =
     dot > 0 ? file.original_filename.slice(dot + 1).toUpperCase() : "";
@@ -22,11 +26,27 @@ function tileLabel(file: Attachment) {
  * storage replaces the type word only when the file isn't simply on this
  * computer: "Not downloaded · 3.4 MB", "Quarantined · 2.1 MB".
  */
-function cardCaption(file: Attachment, storage?: Availability, pages?: number) {
+function cardCaption(
+  file: Attachment,
+  storage: Availability | undefined,
+  pages: number | undefined,
+  missing: boolean,
+  drive: DriveType | null,
+): ReactNode {
   if (file.kind === "external_reference")
     return file.uploaded_copy
       ? "Google Drive · Uploaded copy"
-      : "Google Drive · External reference";
+      : drive
+        ? `Google Drive · ${drive.word}`
+        : "Google Drive";
+  const size = formatSize(file.size_bytes);
+  if (missing && !stateWord(file))
+    return (
+      <>
+        <StatusDot tone="attention" size={6} className="me-1.5 align-middle" />
+        Missing · {size}
+      </>
+    );
   const lead =
     stateWord(file) ??
     (storage?.state === "downloading"
@@ -36,7 +56,7 @@ function cardCaption(file: Attachment, storage?: Availability, pages?: number) {
         : fileType(file.original_filename).word);
   // A PDF's page count is known once its first page has been read.
   const count = pages ? ` · ${pages} ${pages === 1 ? "page" : "pages"}` : "";
-  return `${lead}${count} · ${formatSize(file.size_bytes)}`;
+  return `${lead}${count} · ${size}`;
 }
 
 /**
@@ -48,6 +68,7 @@ export function AttachmentCard({
   file,
   label,
   storage,
+  storageKnown = false,
   onOpen,
   action,
 }: {
@@ -55,12 +76,16 @@ export function AttachmentCard({
   /** An authored label that differs from the file's name: it names the card. */
   label?: string | undefined;
   storage?: Availability | undefined;
+  /** The first read of where the files are has answered, so a missing copy can be told from one still in the storage. */
+  storageKnown?: boolean;
   onOpen: () => void;
   action?: ReactNode;
 }) {
   const [ref, near] = useNearViewport<HTMLDivElement>();
   const here = storage === undefined || storage.state === "downloaded";
   const still = useStill(file, near && here);
+  const missing = useMissing(file, near && here && storageKnown);
+  const drive = useDriveType(file, near);
   const [broken, setBroken] = useState<string | null>(null);
   const named = label && label !== file.display_name ? label : undefined;
   return (
@@ -72,9 +97,15 @@ export function AttachmentCard({
         file,
         storage,
         still?.kind === "pdf" ? still.pages : undefined,
+        missing,
+        drive,
       )}
-      glyph={<FileIcon family={fileType(file.original_filename).family} />}
-      label={tileLabel(file)}
+      glyph={
+        <FileIcon
+          family={drive?.family ?? fileType(file.original_filename).family}
+        />
+      }
+      label={tileLabel(file, drive)}
       still={
         still?.kind === "image" && broken !== still.id ? (
           <img

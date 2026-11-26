@@ -1,9 +1,11 @@
 import { useEffect, useState } from "react";
 import {
+  Archive,
   File,
-  FileArchive,
   FileAudio,
+  FileCode,
   FileImage,
+  FileSpreadsheet,
   FileText,
   FileVideo,
 } from "lucide-react";
@@ -16,12 +18,14 @@ const ICONS: Record<FileFamily, typeof File> = {
   audio: FileAudio,
   video: FileVideo,
   text: FileText,
+  code: FileCode,
+  table: FileSpreadsheet,
   pdf: FileText,
-  archive: FileArchive,
+  archive: Archive,
   file: File,
 };
 
-/** The glyph of a file's family: image, audio, video, text, archive (AT-24). */
+/** The glyph of a file's family: image, audio, video, text, code, table, archive (AT-24). */
 export function FileIcon({
   family,
   className,

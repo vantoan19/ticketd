@@ -108,6 +108,41 @@ img.file-card-still[data-paper] {
   background: white;
   box-shadow: var(--shadow-medium);
 }
+/* A Document's first page: laid out as a 432px page and scaled to the same
+   paper, 62% of the frame's width, so its text reads as a page's texture. */
+.file-card-page {
+  position: absolute;
+  inset: 0 auto auto 19%;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 432px;
+  height: 460px;
+  padding: 32px 28px;
+  overflow: hidden;
+  background: white;
+  box-shadow: var(--shadow-medium);
+  color: black;
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+  transform: scale(calc(0.62 * 176 / 432));
+  transform-origin: top left;
+  pointer-events: none;
+  animation: file-card-fade var(--dur-enter) ease both;
+}
+.file-card-page > strong {
+  margin-bottom: 4px;
+  font-size: var(--text-reading-heading);
+  font-weight: 600;
+  line-height: var(--text-reading-heading-line);
+}
+.file-card-page > span {
+  flex: none;
+  overflow: hidden;
+  opacity: 0.7;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 @keyframes file-card-fade {
   from {
     opacity: 0;
@@ -174,6 +209,12 @@ img.file-card-still[data-paper] {
   margin: 0 12px 12px 0;
   vertical-align: top;
   list-style: none;
+}
+/* A card's 12px gap belongs between cards, not after the last: the last of a
+   run takes it back, so three cards (552px) fit a 552px column even with the
+   whitespace the Markdown leaves between paragraphs. */
+.markdown-document [data-cards]:is(p, li):not(:has(+ [data-cards])) {
+  margin-inline-end: -12px;
 }
 
 /* A link in a sentence: the family glyph at 14px before the words. */

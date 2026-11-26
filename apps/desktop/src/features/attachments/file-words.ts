@@ -2,7 +2,15 @@ import type { Attachment, AttachmentUsage } from "@/lib/api/attachments";
 
 /** What a file is, for its icon: one glyph per family (shell AT-24). */
 export type FileFamily =
-  "image" | "audio" | "video" | "text" | "pdf" | "archive" | "file";
+  | "image"
+  | "audio"
+  | "video"
+  | "text"
+  | "code"
+  | "table"
+  | "pdf"
+  | "archive"
+  | "file";
 
 const TYPES: Record<string, [string, FileFamily]> = {
   png: ["PNG image", "image"],
@@ -25,12 +33,13 @@ const TYPES: Record<string, [string, FileFamily]> = {
   txt: ["Text", "text"],
   md: ["Markdown", "text"],
   log: ["Log", "text"],
-  csv: ["CSV", "text"],
-  json: ["JSON", "text"],
-  yaml: ["YAML", "text"],
-  yml: ["YAML", "text"],
-  xml: ["XML", "text"],
-  html: ["HTML", "text"],
+  csv: ["CSV", "table"],
+  json: ["JSON", "code"],
+  yaml: ["YAML", "code"],
+  yml: ["YAML", "code"],
+  xml: ["XML", "code"],
+  html: ["HTML", "code"],
+  har: ["HAR file", "code"],
   zip: ["ZIP archive", "archive"],
   gz: ["Gzip archive", "archive"],
   tgz: ["Gzip archive", "archive"],
