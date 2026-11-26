@@ -13556,7 +13556,9 @@ test("Settings renders the registered providers' display data as text and an iso
   fireEvent.click(
     await screen.findByRole("button", { name: "Ticket sources" }),
   );
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Beacon Tracker/ }),
+  );
   const heading = await screen.findByRole("heading", {
     name: "Beacon Tracker",
   });
@@ -13598,14 +13600,14 @@ test("a new connection can be configured while the shared source list is refresh
     complete: true,
     issues: [],
   };
-  const readAfterAdd = vi.fn(() => new Promise(() => {}));
-  let added = false;
+  const readAfterSave = vi.fn(() => new Promise(() => {}));
+  let saved = false;
   await renderReviewApp({
-    list_sources: () => (added ? readAfterAdd() : [available]),
+    list_sources: () => (saved ? readAfterSave() : [available]),
     source_check_connection: { account: "demo" },
     source_preview: preview,
-    add_source_connection: () => {
-      added = true;
+    save_source: () => {
+      saved = true;
       return { source, preview };
     },
   });
@@ -13614,30 +13616,18 @@ test("a new connection can be configured while the shared source list is refresh
   fireEvent.click(
     await screen.findByRole("button", { name: "Ticket sources" }),
   );
+  // A source with no connection yet is a row like any other; its page connects it.
   fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Add Beacon Tracker connection",
-    }),
+    await screen.findByRole("button", { name: /^Beacon Tracker/ }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
-    target: { value: source.name },
-  });
   fireEvent.change(screen.getByPlaceholderText("e.g. PLATFORM"), {
     target: { value: source.config.team },
   });
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByText(/No open issues match these rules/);
-  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
-  expect(
-    (
-      (await screen.findByRole("button", {
-        name: "Add Beacon Tracker connection",
-      })) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
-  await screen.findByRole("heading", { name: source.name });
-  await waitFor(() => expect(readAfterAdd).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(readAfterSave).toHaveBeenCalled());
+  expect(await screen.findByText("Saved configuration")).toBeTruthy();
 });
 
 const projectForRemote = {
