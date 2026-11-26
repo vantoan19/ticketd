@@ -1343,8 +1343,25 @@ fn previous_outcome(
     Ok(None)
 }
 
+const AUTOMATION_PROMPT_REQUEST_SUFFIX: &str = ":first";
+
 fn automation_prompt_command_id(chat_id: &str) -> String {
-    format!("{chat_id}:first")
+    format!("{chat_id}{AUTOMATION_PROMPT_REQUEST_SUFFIX}")
+}
+
+fn saved_automation_prompt_id(
+    connection: &Connection,
+    chat_id: &str,
+) -> Result<Option<String>, Error> {
+    Ok(connection
+        .query_row(
+            "SELECT json_extract(outcome, '$') FROM request_outcomes
+             WHERE id = ?1 AND json_extract(request, '$.operation') = 'save_chat_input'
+                 AND json_extract(request, '$.chat_id') = ?2",
+            params![automation_prompt_command_id(chat_id), chat_id],
+            |row| row.get(0),
+        )
+        .optional()?)
 }
 
 #[derive(Clone, Copy, Default)]
@@ -1924,17 +1941,7 @@ pub(crate) fn set_aside_taken_over_prompt(
     connection: &Connection,
     chat_id: &str,
 ) -> Result<(), Error> {
-    let command_id = automation_prompt_command_id(chat_id);
-    let prompt: Option<String> = connection
-        .query_row(
-            "SELECT json_extract(outcome, '$') FROM request_outcomes
-         WHERE id = ?1 AND json_extract(request, '$.operation') = 'save_chat_input'
-             AND json_extract(request, '$.chat_id') = ?2",
-            params![command_id, chat_id],
-            |row| row.get(0),
-        )
-        .optional()?;
-    let Some(id) = prompt else {
+    let Some(id) = saved_automation_prompt_id(connection, chat_id)? else {
         return Ok(());
     };
     let Some(message) = read_message(connection, &id)? else {
@@ -2666,6 +2673,11 @@ impl Workspace {
         .into_message()
     }
 
+    /// Whether the Prompt can still be dispatched for this running owner.
+    pub fn automation_chat_owned_by_run(&self, chat_id: &str, run_id: &str) -> Result<bool, Error> {
+        owns_running_chat(&self.connection, chat_id, run_id)
+    }
+
     fn save_input(
         &mut self,
         command_id: Option<&str>,
@@ -2690,6 +2702,17 @@ impl Workspace {
                 && !owns_running_chat(connection, chat_id, run_id)?
             {
                 return Err(invalid("the run no longer owns this Chat"));
+            }
+            if !matches!(source, InputSource::AutomationPrompt(_))
+                && let Some(command_id) = command_id
+                && let Some(prompt_chat_id) = command_id.strip_suffix(AUTOMATION_PROMPT_REQUEST_SUFFIX)
+                && connection.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM automation_run_steps WHERE chat_id = ?1)",
+                    [prompt_chat_id],
+                    |row| row.get(0),
+                )?
+            {
+                return Err(Error::RequestConflict(command_id.to_owned()));
             }
             if let Some((command_id, request)) = &request
                 && let Some(receipt) = read_input_receipt(connection, command_id, request)?
@@ -3038,10 +3061,13 @@ impl Workspace {
         run_id: Option<&str>,
     ) -> Result<Option<ChatMessage>, Error> {
         self.chat_write(|connection| {
-            if let Some(run_id) = run_id
-                && !owns_running_chat(connection, chat_id, run_id)?
-            {
-                return Ok(None);
+            if let Some(run_id) = run_id {
+                if !owns_running_chat(connection, chat_id, run_id)? {
+                    return Ok(None);
+                }
+                if saved_automation_prompt_id(connection, chat_id)?.as_deref() != Some(message_id) {
+                    return Err(invalid("only the Automation Prompt can be submitted"));
+                }
             }
             if read_chat(connection, chat_id)?.trashed {
                 return Err(Error::ChatTrashed(chat_id.to_owned()));

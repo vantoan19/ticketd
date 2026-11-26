@@ -888,6 +888,18 @@ impl Workspace {
             .optional()?)
     }
 
+    /// The owner used to coordinate dispatch and takeover across all of a run's Chats.
+    pub fn automation_chat_run_id(&self, chat_id: &str) -> Result<Option<String>, Error> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT automation_run_id FROM chats WHERE id = ?1 AND automation_run_id IS NOT NULL",
+                [chat_id],
+                |row| row.get(0),
+            )
+            .optional()?)
+    }
+
     /// The person replied in (`replied`) or stopped a Chat. When a run owns the
     /// Chat, it becomes an ordinary Chat in the Chat list, and a run that was going
     /// or needed attention ends as Taken over: the step it was on ends there and

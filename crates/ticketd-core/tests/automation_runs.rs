@@ -1238,6 +1238,84 @@ fn a_linked_takeover_reply_keeps_its_context_requirement_through_backup_and_rest
 }
 
 #[test]
+fn an_automation_can_record_only_its_saved_prompt() {
+    let (_dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let queued = workspace
+        .save_chat_input(None, &chat, "Ordinary input")
+        .unwrap();
+    let otherwise = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "codex".to_owned(),
+                execution_folder: folder(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    let reserved = format!("{chat}:first");
+    for target in [&chat, &otherwise.id] {
+        assert!(matches!(
+            workspace.save_chat_input(Some(&reserved), target, "Pretend Prompt"),
+            Err(ticketd_core::Error::RequestConflict(id)) if id == reserved
+        ));
+    }
+    let regular = format!("{}:first", otherwise.id);
+    let ordinary = workspace
+        .save_chat_input(Some(&regular), &otherwise.id, "Ordinary use")
+        .unwrap();
+    assert_eq!(
+        workspace
+            .save_chat_input(Some(&regular), &otherwise.id, "Ordinary use")
+            .unwrap()
+            .id,
+        ordinary.id
+    );
+
+    let prompt = workspace
+        .save_automation_chat_prompt(&chat, &run.id, "Run Prompt")
+        .unwrap();
+    assert_eq!(
+        workspace
+            .save_automation_chat_prompt(&chat, &run.id, "Run Prompt")
+            .unwrap()
+            .id,
+        prompt.id
+    );
+    assert!(
+        workspace
+            .record_automation_chat_submission(&chat, &run.id, &queued.id, "attempt")
+            .is_err()
+    );
+    assert!(
+        workspace
+            .chat_queue(&chat)
+            .unwrap()
+            .iter()
+            .any(|message| message.id == queued.id)
+    );
+
+    let submitted = workspace
+        .record_automation_chat_submission(&chat, &run.id, &prompt.id, "attempt")
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        workspace
+            .record_automation_chat_submission(&chat, &run.id, &prompt.id, "attempt")
+            .unwrap()
+            .unwrap(),
+        submitted
+    );
+    assert_eq!(submitted.attempts.len(), 1);
+    let queue = workspace.chat_queue(&chat).unwrap();
+    assert_eq!(queue, [queued]);
+}
+
+#[test]
 fn stopping_the_chat_takes_over_a_running_run_and_no_other() {
     let (_dir, mut workspace) = workspace();
     triage(&mut workspace);
