@@ -39,7 +39,7 @@ const DAY = 86_400_000;
 /** The time of day in the person's own format, such as 08:52 or 8:52 AM. */
 function clock(date: Date) {
   return date.toLocaleTimeString(undefined, {
-    hour: "numeric",
+    hour: "2-digit",
     minute: "2-digit",
   });
 }

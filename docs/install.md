@@ -89,7 +89,7 @@ The restart prompt shows any running Chats and Automation runs that will stop.
 Interrupted Automation runs are marked as needing attention when ticketd reopens.
 If the release raises the Workspace format version, the prompt warns you before
 installing, and quitting doesn't install it: choose **Restart to update** when
-you're ready. ticketd makes a backup before migrating the Workspace. Update any
+you're ready. ticketd saves a safety copy before migrating the Workspace. Update any
 older copies that need to open the migrated Workspace, including other Sync
 devices and standalone CLI installations.
 
@@ -113,8 +113,10 @@ checks run in the desktop app only.
 
 Use desktop and CLI from the same version. Run `ticketd workspace` to inspect the
 path and supported format without changing data. Most other workspace commands
-may create or migrate the database. Back up before upgrading; an older binary
-may refuse a newer workspace, and downgrade compatibility is not guaranteed.
+may create or migrate the database. The desktop saves a restore point every day
+and a safety copy before it migrates the Workspace, so there is one to go back to;
+`ticketd backup PATH` saves a standalone copy anywhere. An older binary may refuse a newer workspace, and
+downgrade compatibility is not guaranteed.
 Close both desktop and CLI processes before replacing binaries or restoring a backup.
 See [Back up and restore your workspace](workspace-tasks.md#back-up-and-restore-your-workspace).
 
@@ -123,7 +125,8 @@ CLI link if you installed it. On Windows, remove the app folder's entry from you
 user PATH if you added it through Settings. On Ubuntu, removing the package also
 removes its CLI. Remove any standalone CLI executable separately. The workspace
 is stored separately in the user's application-data directory and is retained.
-Keep a backup before uninstalling or upgrading.
+Keep a backup before uninstalling: the restore points live beside the workspace and
+stay with it.
 
 ## Agent CLI skill
 

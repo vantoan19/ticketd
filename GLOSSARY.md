@@ -89,6 +89,10 @@ A short, workspace-unique label for a ticket: `T-`, the device code of the Works
 **Device code**:
 Two uppercase letters identifying one Workspace installation in the Ticket references it issues, so desktops sharing a Workspace do not issue the same reference (a hand-copied Workspace file is the exception until sync detects it, see [ADR 0011](docs/adr/0011-markdown-file-sync-through-google-drive.md#identity)). It is random by default. A restored Workspace takes a fresh one, as does a desktop joining a sync folder where its code is held or was given up, and a file copy of a Workspace once sync detects that the original also syncs.
 
+**Restore point**:
+A copy of the Workspace the desktop keeps on this computer to go back to: one saved the first time ticketd opens each day, and one for each Back up now, with the last 7 kept. It sits in a folder beside the Workspace file, is checked after it is written, and shares its attachment files with the other restore points, so it restores only here. A copy saved before a restore or before an update that changes the Workspace format (a safety copy) is listed with the restore points under a label and is kept besides the 7. It differs from a backup file, which `ticketd backup PATH` writes as one standalone file that restores anywhere, and from a Version, which is an earlier state of one ticket or Document.
+_Avoid_: Snapshot, auto-backup
+
 **Version**:
 An earlier state of a ticket or Document (title, body, status, trash), saved locally on the device whenever a local edit or an incoming sync replaces it. Versions are kept 30 days; the record itself is the current version and is always kept. Restoring a version is an ordinary edit.
 

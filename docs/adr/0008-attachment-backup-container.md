@@ -85,3 +85,17 @@ atomically commit directory replacement with a database change.
 Supported older database-only backups remain readable when they require no
 local bytes. A database-only copy with local records is incomplete and refused.
 Workspace schema migrations and container format evolution remain independent.
+
+## Restore points share their files (container version 2)
+
+The desktop's daily restore points ([product.md](../product.md#backup-restore-and-export))
+use the same container with one change, so seven points cost about one copy of the files.
+A restore point's `ticketd_backup_container` has version 2: its `ticketd_backup_files`
+rows keep the path, size and SHA-256 and an empty `data`, and the bytes are in a `files`
+folder beside the point, one file per SHA-256, shared by every point in the folder.
+Inspecting and restoring a point read the files from there and check every size and
+checksum as they do blobs, so a missing or changed file blocks the restore before the
+Workspace changes. Deleting a point deletes only the files no remaining point's record
+names, under the folder's lock. A point is meaningful only beside its `files` folder
+and on this computer; a standalone backup (`ticketd backup PATH`, a safety copy) stays
+version 1 and restores anywhere. Nothing in the Workspace's own format changes.
