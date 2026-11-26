@@ -617,6 +617,88 @@ test("an HTML report renders read-only in an isolated frame, with scripts and ne
   expect(screen.getByText(/Read-only, offline/)).toBeTruthy();
 });
 
+test("clicking into the report hands focus back to the stage so Esc, J and K keep working", async () => {
+  serveReport(() => reportSource);
+  render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  const frame = await screen.findByLabelText("Report: E2E report");
+  const stage = screen.getByRole("group", { name: /^E2E report/ });
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  // A click inside the frame moves focus there, which the window sees as a blur.
+  frame.focus();
+  expect(document.activeElement).toBe(frame);
+  fireEvent.blur(window);
+  await waitFor(() => expect(document.activeElement).toBe(stage));
+  // The frame stays script-less and isolated all the while.
+  expect(frame.getAttribute("sandbox")).toBe("");
+});
+
+test("Tabbing into the report is left alone, and so is the window losing focus", async () => {
+  serveReport(() => reportSource);
+  render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  const frame = await screen.findByLabelText("Report: E2E report");
+  vi.spyOn(document, "hasFocus").mockReturnValue(true);
+  fireEvent.keyDown(frame.parentElement!, { key: "Tab" });
+  frame.focus();
+  fireEvent.blur(window);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(document.activeElement).toBe(frame);
+  // The app losing focus altogether is not a click either.
+  vi.spyOn(document, "hasFocus").mockReturnValue(false);
+  await new Promise((resolve) => setTimeout(resolve, 200));
+  fireEvent.blur(window);
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  expect(document.activeElement).toBe(frame);
+});
+
+test("a .mov is named the same in the stage, the live region and the description", async () => {
+  const clip = {
+    ...file,
+    id: "clip-1",
+    display_name: "clip.mov",
+    original_filename: "clip.mov",
+  };
+  const other = {
+    ...file,
+    id: "clip-2",
+    display_name: "b.mov",
+    original_filename: "b.mov",
+  };
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_preview")
+      return {
+        attachment: (args as { id: string }).id === "clip-1" ? clip : other,
+        status: "available",
+        media_type: "video/mp4",
+        message: null,
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    return null;
+  });
+  render(
+    <AttachmentPreview
+      target={{ id: clip.id, initial: clip }}
+      browse={{ files: [clip, other], onSelect: () => {} }}
+      onClose={() => {}}
+    />,
+  );
+  expect(
+    await screen.findByRole("group", {
+      name: "clip.mov, QuickTime video, 1 of 2",
+    }),
+  ).toBeTruthy();
+  expect(screen.getByText("QuickTime video preview")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  expect(document.querySelector("[aria-live='polite']")?.textContent).toBe(
+    "b.mov, QuickTime video, 2 of 2",
+  );
+});
+
 test("a report that needs scripts or files that are not attached can't show here", async () => {
   serveReport(() => '<div id="app"></div><script>render()</script>');
   render(
@@ -889,6 +971,13 @@ test("browsing a mixed set: each file shows its own state and recovery, J and K 
   // The report is second of four: its position and both buttons are there.
   await screen.findByLabelText("Report: E2E report");
   expect(header().textContent).toContain("2 of 4");
+  // The position comes first, then the two arrows.
+  expect(header().firstElementChild?.textContent).toBe("2 of 4");
+  expect(
+    [...header().querySelectorAll("button")].map((b) =>
+      b.getAttribute("aria-label"),
+    ),
+  ).toEqual(["Previous file", "Next file"]);
   expect(
     screen.getByRole<HTMLButtonElement>("button", { name: "Previous file" })
       .disabled,

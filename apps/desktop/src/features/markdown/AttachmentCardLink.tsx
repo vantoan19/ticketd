@@ -2,10 +2,8 @@ import { useEffect, useState } from "react";
 import { File } from "lucide-react";
 import { AttachmentCard } from "@/features/attachments/AttachmentCard";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
-import {
-  AttachmentPreview,
-  type ReferenceReplacement,
-} from "@/features/attachments/AttachmentPreview";
+import type { ReferenceReplacement } from "@/features/attachments/AttachmentPreview";
+import { PlacePreview } from "@/features/attachments/AttachmentPlace";
 import { FileCard } from "@/features/attachments/FileCard";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import { useAvailability } from "@/features/sync-review/availability";
@@ -67,8 +65,8 @@ export function AttachmentCardLink({
         />
       )}
       {open && (
-        <AttachmentPreview
-          target={{ uri }}
+        <PlacePreview
+          uri={uri}
           onClose={() => setOpen(false)}
           onReplace={onReplace}
         />

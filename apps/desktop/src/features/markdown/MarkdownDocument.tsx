@@ -32,6 +32,8 @@ import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import { AttachmentCardLink } from "./AttachmentCardLink";
 import { cardLinks } from "./attachment-cards";
+import { attachmentOrder, type PlaceMentions } from "./attachment-order";
+import { AttachmentPlace } from "@/features/attachments/attachment-place";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Check } from "lucide-react";
 import { AttachmentImage as InlineAttachmentImage } from "./InlineImage";
@@ -514,6 +516,13 @@ export function MarkdownDocument({
       );
     };
   }
+  // The files this text links or shows, in reading order, noted while it parses.
+  const [mentions] = useState<PlaceMentions>(() => ({ current: [] }));
+  const place = () =>
+    mentions.current.map(({ uri, node }) => ({
+      uri,
+      replace: replacement(node, uri),
+    }));
   // Parsing is the cost (about 70 ms at 50 kB): cache the text and fade marks.
   // What a block needs besides its text reaches it through the providers below.
   const rendered = useMemo(
@@ -524,13 +533,14 @@ export function MarkdownDocument({
             ? [...remarkPlugins, [chunkFade, chunkStarts]]
             : remarkPlugins
         }
+        rehypePlugins={[[attachmentOrder, mentions]]}
         urlTransform={urlTransform}
         components={components}
       >
         {source}
       </ReactMarkdown>
     ),
-    [source, chunkStarts],
+    [source, chunkStarts, mentions],
   );
   return (
     <div className="markdown-document">
@@ -539,7 +549,9 @@ export function MarkdownDocument({
           <MarkdownSource.Provider value={source}>
             <AttachmentReplacement.Provider value={replacement}>
               <AttachmentCards.Provider value={attachmentCards}>
-                {rendered}
+                <AttachmentPlace.Provider value={place}>
+                  {rendered}
+                </AttachmentPlace.Provider>
               </AttachmentCards.Provider>
             </AttachmentReplacement.Provider>
           </MarkdownSource.Provider>

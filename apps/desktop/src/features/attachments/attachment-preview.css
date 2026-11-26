@@ -35,7 +35,7 @@
   align-items: center;
   gap: 2px;
 }
-/* Previous, "2 of 6" and Next, set apart from Open by a hairline. */
+/* "2 of 6", Previous and Next, set apart from Open by a hairline. */
 .attachment-preview-browse {
   display: flex;
   align-items: center;
@@ -46,6 +46,7 @@
 }
 .attachment-preview-position {
   min-width: 4ch;
+  margin-right: 4px;
   color: var(--muted-foreground);
   font-size: 12px;
   font-variant-numeric: tabular-nums;

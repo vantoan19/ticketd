@@ -1,10 +1,8 @@
 import { useEffect, useState } from "react";
 import { ImageIcon } from "lucide-react";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
-import {
-  AttachmentPreview,
-  type ReferenceReplacement,
-} from "@/features/attachments/AttachmentPreview";
+import type { ReferenceReplacement } from "@/features/attachments/AttachmentPreview";
+import { PlacePreview } from "@/features/attachments/AttachmentPlace";
 import { attachments } from "@/lib/api/attachments";
 
 /** Pictures larger than this keep their label; the preview still opens them. */
@@ -81,8 +79,8 @@ export function AttachmentImage({
         <img src={url} alt={alt} onError={() => setFailed(url)} />
       </button>
       {open && (
-        <AttachmentPreview
-          target={{ uri }}
+        <PlacePreview
+          uri={uri}
           onClose={() => setOpen(false)}
           onReplace={onReplace}
         />

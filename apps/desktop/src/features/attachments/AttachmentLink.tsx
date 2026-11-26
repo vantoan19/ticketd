@@ -4,10 +4,8 @@ import { attachments } from "@/lib/api/attachments";
 import { fileType, type FileFamily } from "./file-words";
 import { FileIcon } from "./AttachmentThumbnail";
 import "./file-card.css";
-import {
-  AttachmentPreview,
-  type ReferenceReplacement,
-} from "./AttachmentPreview";
+import type { ReferenceReplacement } from "./AttachmentPreview";
+import { PlacePreview } from "./AttachmentPlace";
 
 /** The glyph of a link's file family, once the reference resolves. */
 function useFamily(uri: string, wanted: boolean) {
@@ -59,8 +57,8 @@ export function AttachmentLink({
         {children}
       </RecordLink>
       {preview && (
-        <AttachmentPreview
-          target={{ uri: preview.uri }}
+        <PlacePreview
+          uri={preview.uri}
           onClose={() => setPreview(null)}
           onReplace={preview.replace}
         />

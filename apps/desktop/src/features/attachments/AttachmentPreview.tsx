@@ -423,7 +423,7 @@ type Position = {
 };
 
 /**
- * "2 of 6" between Previous and Next. At an end the button that would go
+ * "2 of 6", then Previous and Next. At an end the button that would go
  * further stays in place, disabled, and says why; the keys do nothing there.
  */
 function BrowseControls({ position }: { position: Position }) {
@@ -465,10 +465,10 @@ function BrowseControls({ position }: { position: Position }) {
       role="group"
       aria-label="Browse files"
     >
-      {button(-1)}
       <span className="attachment-preview-position">
         {index} of {total}
       </span>
+      {button(-1)}
       {button(1)}
     </span>
   );
