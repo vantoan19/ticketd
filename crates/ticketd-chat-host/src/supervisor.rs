@@ -206,7 +206,7 @@ struct Dispatch {
 enum DirectSend {
     Auto,
     SendNow,
-    /// Send now was accepted, but an image can only start a new turn.
+    /// Send now was accepted before the current turn was known to be incompatible.
     AfterTurn,
 }
 
@@ -2069,9 +2069,13 @@ impl Supervisor {
             return;
         }
         if !idle && self.steering().is_none() {
-            // Only a Send now whose image needs another turn keeps its direct intent.
-            self.direct
-                .retain(|(_, intent)| *intent == DirectSend::AfterTurn);
+            self.direct.retain_mut(|(_, intent)| match intent {
+                DirectSend::Auto => false,
+                DirectSend::SendNow | DirectSend::AfterTurn => {
+                    *intent = DirectSend::AfterTurn;
+                    true
+                }
+            });
         }
         // What the person asked to send again goes alone, as a new turn.
         loop {

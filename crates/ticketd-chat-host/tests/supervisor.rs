@@ -2765,8 +2765,25 @@ async fn send_now_steers_one_queued_input_and_leaves_the_rest_queued() {
 
 #[tokio::test(start_paused = true)]
 async fn send_now_waits_to_start_an_image_turn_after_a_text_only_steer_turn() {
-    let f = Fixture::new(FakeAdapter::codex());
-    f.fake.set_steer_image_input(false);
+    let fake = FakeAdapter::codex();
+    fake.set_steer_image_input(false);
+    send_now_waits_to_start_an_image_turn_when_steering_is_incompatible(fake, true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_now_waits_to_start_an_image_turn_after_a_turn_without_steering() {
+    send_now_waits_to_start_an_image_turn_when_steering_is_incompatible(
+        FakeAdapter::without_steering(),
+        false,
+    )
+    .await;
+}
+
+async fn send_now_waits_to_start_an_image_turn_when_steering_is_incompatible(
+    fake: FakeAdapter,
+    can_steer_text: bool,
+) {
+    let f = Fixture::new(fake);
     f.host.stop(&f.chat.id).await.unwrap();
     f.queue("wait in the paused queue").await;
     let image = ChatAttachmentContent::from_image_data_url(
@@ -2796,19 +2813,24 @@ async fn send_now_waits_to_start_an_image_turn_after_a_text_only_steer_turn() {
     assert!(f.message(&now.id).attempts.is_empty());
     assert!(f.live().await.sending.contains(&now.id));
 
-    f.send("Text can steer").await;
-    assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+    if can_steer_text {
+        f.send("Text can steer").await;
+        assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+    }
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     let submits = f.submits();
-    assert_eq!(submits[2].kind, SubmissionKind::StartTurn);
-    assert_eq!(submits[2].attachments, [image]);
+    let expected_submissions = if can_steer_text { 3 } else { 2 };
+    assert_eq!(submits.len(), expected_submissions);
+    let image_turn = submits.last().unwrap();
+    assert_eq!(image_turn.kind, SubmissionKind::StartTurn);
+    assert_eq!(image_turn.attachments, [image]);
     assert_eq!(f.message(&now.id).attempts.len(), 1);
     f.emit(turn_ended(
         NativeTurnId::new("turn-2"),
         TurnOutcome::Completed,
     ))
     .await;
-    assert_eq!(f.submits().len(), 3);
+    assert_eq!(f.submits().len(), expected_submissions);
     assert_eq!(f.queued(), ["wait in the paused queue"]);
     assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
 }
