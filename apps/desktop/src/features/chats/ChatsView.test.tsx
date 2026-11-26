@@ -43,7 +43,7 @@ afterEach(() => {
 
 const at = "2026-11-10T10:00:00Z";
 const png =
-  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jhQAAAABJRU5ErkJggg==";
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR4nGPY2BLxHwAGBAKNbLAvQQAAAABJRU5ErkJggg==";
 const screenshotBytes = Uint8Array.from(atob(png), (byte) =>
   byte.charCodeAt(0),
 );
@@ -427,6 +427,7 @@ test("editing queued input waits for the draft submission that is still saving",
   await act(async () => {
     fireEvent.click(button("Edit in the message box"));
   });
+  expect(composer()).toHaveProperty("value", "Sending this draft");
   await act(async () => finishSaving());
   expect(composer()).toHaveProperty("value", "Edit this message");
 });

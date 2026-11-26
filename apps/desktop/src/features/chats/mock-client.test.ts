@@ -131,6 +131,139 @@ async function queuedNote(client: ReturnType<typeof createMockChatClient>) {
   return queued;
 }
 
+const seededNote = {
+  id: "queued-1",
+  text: "Read the notes",
+  attachments: [{ id: "notes", name: note.name, media_type: "text/plain" }],
+};
+
+test.each(["Send now", "Resume"])(
+  "a seeded queued attachment keeps its snapshot through Edit and %s",
+  async (action) => {
+    const file = { ...note };
+    const client = createMockChatClient({
+      chats: [
+        {
+          chat: chatState({
+            id: "c1",
+            title: "Limiter",
+            queue: [seededNote],
+            queue_paused: true,
+          }),
+          queuedFiles: { [seededNote.id]: [file] },
+        },
+      ],
+    });
+    file.name = "Changed seed.txt";
+    await expect(client.editQueued("c1", seededNote.id)).resolves.toEqual({
+      text: seededNote.text,
+      attachments: [note],
+    });
+
+    if (action === "Send now") await client.sendQueuedNow("c1", seededNote.id);
+    else await client.resumeQueue("c1");
+    const { chat, items } = await client.openChat("c1");
+    expect(chat.queue).toEqual([]);
+    expect(items).toMatchObject([
+      {
+        kind: "user",
+        text: seededNote.text,
+        attachments: [{ name: note.name }],
+      },
+    ]);
+  },
+);
+
+test("a seeded queued attachment with missing bytes is never consumed", async () => {
+  const client = createMockChatClient({
+    chats: [
+      {
+        chat: chatState({
+          id: "c1",
+          title: "Limiter",
+          queue: [seededNote],
+          queue_paused: true,
+        }),
+      },
+    ],
+  });
+  for (const operation of [
+    () => client.editQueued("c1", seededNote.id),
+    () => client.sendQueuedNow("c1", seededNote.id),
+    () => client.resumeQueue("c1"),
+  ])
+    await expect(operation()).rejects.toThrow(
+      "Missing matching attachment snapshots",
+    );
+  const { chat, items } = await client.openChat("c1");
+  expect(chat).toMatchObject({ queue: [seededNote], queue_paused: true });
+  expect(items).toEqual([]);
+});
+
+test("a rejected queue edit leaves the Chat and its subscribers without partial links", async () => {
+  const ticket = {
+    kind: "ticket" as const,
+    id: "ticket",
+    reference: "T-14",
+    title: "Fix login",
+    status: "Todo",
+  };
+  const client = createMockChatClient({
+    records: [ticket],
+    chats: [{ chat: chatState({ id: "c1", title: "Limiter" }) }],
+  });
+  const queued = await queuedNote(client);
+  await client.confirmQueueEdit("c1", queued.id, "hold-edit");
+  const before = await client.openChat("c1");
+  const changes: ChatChange[] = [];
+  const unlisten = client.subscribe("c1", before.cursor, (change) =>
+    changes.push(change),
+  );
+  const command = { commandId: "save-edit", messageIds: [queued.id] };
+  await expect(
+    client.queue(
+      "c1",
+      "Edited",
+      [ticket, { kind: "document", id: "missing" }],
+      [note],
+      command,
+    ),
+  ).rejects.toThrow("The record was not found.");
+  unlisten();
+  expect(changes).toEqual([]);
+  expect(await client.openChat("c1")).toEqual(before);
+  await expect(
+    client.checkQueueEdits("c1", [command.commandId], []),
+  ).resolves.toEqual({
+    saved: [],
+    removed: [],
+  });
+});
+
+test("a subscriber cannot reentrantly Send now the same queued message", async () => {
+  const client = working();
+  const queued = await queuedNote(client);
+  const { cursor } = await client.openChat("c1");
+  let attempted = false;
+  let nested: Promise<unknown> | undefined;
+  const unlisten = client.subscribe("c1", cursor, (change) => {
+    if (attempted || change.kind !== "item" || change.item.kind !== "user")
+      return;
+    attempted = true;
+    nested = client
+      .sendQueuedNow("c1", queued.id)
+      .catch((error: unknown) => error);
+  });
+  await client.sendQueuedNow("c1", queued.id);
+  unlisten();
+  expect(await nested).toMatchObject({ code: "stale" });
+  const { chat, items } = await client.openChat("c1");
+  expect(chat.queue).toEqual([]);
+  expect(items.filter((item) => item.kind === "user")).toMatchObject([
+    { text: queued.text, attachments: [{ name: note.name }] },
+  ]);
+});
+
 test("concurrent retries save one queued edit and reject changed input for the same command", async () => {
   const client = working();
   const queued = await queuedNote(client);
@@ -246,6 +379,8 @@ test("Send now refused in Trash keeps the queued text and attachment bytes after
     text: "Read the notes",
     attachments: [note],
   });
+  await client.sendQueuedNow("c1", queued.id);
+  expect((await client.openChat("c1")).chat.queue).toEqual([]);
 });
 
 test("trash stops the work and restore never restarts it", async () => {
