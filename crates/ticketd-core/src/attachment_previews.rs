@@ -17,6 +17,11 @@ pub const TEXT_EXCERPT_BYTES: usize = 64 * 1024;
 /// The most of one HTML report the viewer reads whole. It crosses to the WebView as
 /// one string, so this stays well under the media limit.
 pub const HTML_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
+/// The most of one PDF the viewer reads whole. It crosses to the WebView as one binary
+/// IPC response and is parsed in memory there, so this stays well under the media limit.
+pub const PDF_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
+/// A PDF's `%PDF-` marker may follow stray bytes, but only within this many.
+const PDF_MARKER_WINDOW: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -43,6 +48,10 @@ pub struct AttachmentPreview {
     /// A UTF-8 HTML report small enough to read whole with `attachment_html`. The
     /// viewer shows it read-only in an isolated frame; it is never media.
     pub html: bool,
+    /// A stored PDF (by its `%PDF-` header, not its name) small enough to read whole
+    /// with `attachment_pdf`. The viewer renders its pages in the WebView; it is never
+    /// media.
+    pub pdf: bool,
 }
 
 /// The first bytes of a UTF-8 text file, cut on a character boundary.
@@ -159,6 +168,24 @@ impl Workspace {
                 html = text_excerpt.is_some();
             }
         }
+        let mut pdf = false;
+        if status == PreviewStatus::Unsupported
+            && !html
+            && attachment.kind == AttachmentKind::LocalSnapshot
+            && self.is_pdf(&attachment)
+        {
+            if attachment
+                .size_bytes
+                .is_some_and(|size| size > PDF_PREVIEW_BYTES)
+            {
+                status = PreviewStatus::TooLarge;
+                message = Some(
+                    "This PDF is larger than the 32 MiB preview limit. Open it in its app.".into(),
+                );
+            } else {
+                pdf = true;
+            }
+        }
         Ok(AttachmentPreview {
             uploaded_copy: self.drive_uploaded_copy(id)?.is_some(),
             attachment,
@@ -169,7 +196,40 @@ impl Workspace {
             usage: self.preview_usage(id)?,
             text_excerpt,
             html,
+            pdf,
         })
+    }
+
+    /// The bytes of a stored PDF, for the viewer to render page by page. It reads through
+    /// the checked snapshot (never a path), only a file that starts like a PDF, and only up
+    /// to `PDF_PREVIEW_BYTES`.
+    pub fn attachment_pdf(&self, workspace: &str, id: &str) -> Result<Vec<u8>, Error> {
+        let attachment = self.preview_attachment(workspace, id)?;
+        let (_, file) = open_snapshot(&self.connection, &attachment)
+            .map_err(|failure| Error::Attachment(failure.message))?;
+        if file.metadata()?.len() > PDF_PREVIEW_BYTES {
+            return Err(Error::Attachment(
+                "This PDF is larger than the 32 MiB preview limit. Open it in its app.".into(),
+            ));
+        }
+        let mut bytes = Vec::new();
+        file.take(PDF_PREVIEW_BYTES).read_to_end(&mut bytes)?;
+        if !has_pdf_marker(&bytes) {
+            return Err(Error::Attachment("This file is not a PDF.".into()));
+        }
+        Ok(bytes)
+    }
+
+    /// Whether a stored local file starts like a PDF. A file that cannot be read is not.
+    fn is_pdf(&self, attachment: &Attachment) -> bool {
+        let Ok((_, file)) = open_snapshot(&self.connection, attachment) else {
+            return false;
+        };
+        let mut head = Vec::new();
+        file.take(PDF_MARKER_WINDOW as u64 + 5)
+            .read_to_end(&mut head)
+            .is_ok()
+            && has_pdf_marker(&head)
     }
 
     /// The whole text of a stored HTML report, for the viewer to render in an isolated,
@@ -337,6 +397,12 @@ impl Workspace {
             length,
         })
     }
+}
+
+/// `%PDF-` within the first kilobyte, which is where readers look for it.
+fn has_pdf_marker(bytes: &[u8]) -> bool {
+    let window = &bytes[..bytes.len().min(PDF_MARKER_WINDOW + 5)];
+    window.windows(5).any(|w| w == b"%PDF-")
 }
 
 fn is_html_name(name: &str) -> bool {
