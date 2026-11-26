@@ -57,8 +57,8 @@ type Loaded =
 
 /** The line number column, the right padding, and the line above a partial log. */
 const GUTTER = 64;
-/** The space after a line number, inside the gutter. */
-const GUTTER_PADDING = 12;
+/** The space around a line number, inside the gutter: 8px before it and 12px after. */
+const GUTTER_PADDING = 20;
 const RIGHT_PADDING = 16;
 const SCOPE_LINE = 36;
 /** Room under the last line for the view bar. */

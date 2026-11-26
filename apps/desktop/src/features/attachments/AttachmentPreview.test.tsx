@@ -1037,6 +1037,7 @@ function serveLog() {
           }
         : previews[(args as { id: string }).id];
     if (command === "attachment_text") return new TextEncoder().encode(runText);
+    if (command === "attachment_text_first_line") return 1;
     return null;
   });
 }

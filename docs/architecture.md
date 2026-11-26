@@ -739,7 +739,7 @@ up to 20 MiB, otherwise the last 5 MiB, cut on a character boundary and after th
 break when one is within 64 KiB. ANSI escape sequences (colours, cursor moves, titles) are
 removed and a stray control character or invalid byte becomes U+FFFD, so one bad byte never
 hides a log; the same removal lets an ANSI-coloured log preview at all. The 64 KiB
-`text_excerpt` stays for other callers. The viewer draws only the lines near the view, in
+`text_excerpt` stays for other callers. `Workspace::attachment_text_first_line` (a separate command, asked only for a partial file) counts the lines before that tail so the viewer numbers it as the file does. The viewer draws only the lines near the view, in
 blocks of 64 whose heights are estimated from the wrap width and replaced by their measured
 height once drawn, so Find, Wrap and a 20 MB log stay responsive; a file of more than a
 million lines shows its last million, because a scrolling element tops out near 33 million
