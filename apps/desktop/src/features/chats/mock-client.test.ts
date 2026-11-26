@@ -124,6 +124,39 @@ const note = {
   dataUrl: "data:text/plain;base64,bm90ZXM=",
 };
 
+test("a create command replays only the same caption, attachments, and Chat settings", async () => {
+  const client = createMockChatClient();
+  const input = {
+    command_id: "first-message",
+    harness_id: "claude-code",
+    folder: null,
+    links: [],
+    message: "Read the notes",
+    attachments: [{ ...note }],
+  };
+  const original = await client.createChat(input);
+  await expect(
+    client.createChat({ ...input, attachments: [{ ...note }] }),
+  ).resolves.toEqual(original);
+  const changes: Partial<Parameters<typeof client.createChat>[0]>[] = [
+    { message: "Different caption" },
+    { attachments: [{ ...note, name: "other.txt" }] },
+    { attachments: [{ ...note, dataUrl: "data:text/plain;base64,ZXh0cmE=" }] },
+    { attachments: [] },
+    { harness_id: "codex" },
+    { folder: "/elsewhere" },
+    { links: [{ kind: "document", id: "doc" }] },
+    { model: "sonnet" },
+    { effort: "high" },
+    { permission: "plan" },
+  ];
+  for (const change of changes)
+    await expect(client.createChat({ ...input, ...change })).rejects.toThrow(
+      "Request ID was already used for different content",
+    );
+  expect(await client.listChats("active")).toHaveLength(1);
+});
+
 async function queuedNote(client: ReturnType<typeof createMockChatClient>) {
   await client.queue("c1", "Read the notes", [], [{ ...note }]);
   const queued = (await client.openChat("c1")).chat.queue[0];
@@ -200,14 +233,15 @@ test("a seeded queued attachment with missing bytes is never consumed", async ()
   expect(items).toEqual([]);
 });
 
+const ticket = {
+  kind: "ticket" as const,
+  id: "ticket",
+  reference: "T-14",
+  title: "Fix login",
+  status: "Todo",
+};
+
 test("a rejected queue edit leaves the Chat and its subscribers without partial links", async () => {
-  const ticket = {
-    kind: "ticket" as const,
-    id: "ticket",
-    reference: "T-14",
-    title: "Fix login",
-    status: "Todo",
-  };
   const client = createMockChatClient({
     records: [ticket],
     chats: [{ chat: chatState({ id: "c1", title: "Limiter" }) }],
@@ -229,6 +263,16 @@ test("a rejected queue edit leaves the Chat and its subscribers without partial 
       command,
     ),
   ).rejects.toThrow("The record was not found.");
+  // Exercise an attachment failure after the valid link has been resolved.
+  await expect(
+    client.send(
+      "c1",
+      "Edited",
+      [ticket],
+      [{ ...note, dataUrl: null as unknown as string }],
+      command,
+    ),
+  ).rejects.toThrow();
   unlisten();
   expect(changes).toEqual([]);
   expect(await client.openChat("c1")).toEqual(before);
@@ -238,6 +282,79 @@ test("a rejected queue edit leaves the Chat and its subscribers without partial 
     saved: [],
     removed: [],
   });
+});
+
+test("a linked edit commits its input, queue replacement, and receipt before a subscriber trashes the Chat", async () => {
+  const guide = { kind: "document" as const, id: "guide", title: "Guide" };
+  const links = [ticket, guide];
+  const client = createMockChatClient({
+    records: links,
+    chats: [{ chat: chatState({ id: "c1", title: "Limiter" }) }],
+  });
+  const queued = await queuedNote(client);
+  await client.confirmQueueEdit("c1", queued.id, "hold-edit");
+  const { cursor } = await client.openChat("c1");
+  const command = { commandId: "save-edit", messageIds: [queued.id] };
+  const changes: ChatChange[] = [];
+  let observed:
+    | {
+        snapshot: ReturnType<typeof client.openChat>;
+        edits: ReturnType<typeof client.checkQueueEdits>;
+        trash: ReturnType<typeof client.trash>;
+      }
+    | undefined;
+  const unlisten = client.subscribe("c1", cursor, (change) => {
+    if (observed || change.kind !== "chat" || !change.chat.links.length) return;
+    observed = {
+      snapshot: client.openChat("c1"),
+      edits: client.checkQueueEdits("c1", [command.commandId], [queued.id]),
+      trash: client.trash("c1"),
+    };
+  });
+  const unlistenObserver = client.subscribe("c1", cursor, (change) =>
+    changes.push(change),
+  );
+  await client.send("c1", "Edited caption", links, [note], command);
+  await observed?.trash;
+  unlisten();
+  unlistenObserver();
+  expect(await observed?.snapshot).toMatchObject({
+    chat: { activity: "working", links, queue: [] },
+    items: [{ kind: "user", text: "Edited caption" }],
+  });
+  expect(await observed?.edits).toEqual({
+    saved: [command.commandId],
+    removed: [queued.id],
+  });
+  expect(changes.map((change) => change.seq)).toEqual(
+    changes.map((_, index) => cursor + index + 1),
+  );
+  expect(changes.find((change) => change.kind === "chat")).toMatchObject({
+    chat: { activity: "working", links, queue: [] },
+  });
+  expect(await client.openChat("c1")).toMatchObject({
+    chat: { retention: "trashed", links, queue: [] },
+    items: [
+      {
+        kind: "user",
+        text: "Edited caption",
+        attachments: [{ name: note.name }],
+      },
+      { kind: "marker", reason: "stopped" },
+    ],
+  });
+  await expect(
+    client.send(
+      "c1",
+      "Edited caption",
+      [ticket, guide, ticket],
+      [note],
+      command,
+    ),
+  ).resolves.toBeUndefined();
+  await expect(
+    client.send("c1", "Edited caption", [guide, ticket], [note], command),
+  ).rejects.toThrow("Request ID was already used for different content");
 });
 
 test("a subscriber cannot reentrantly Send now the same queued message", async () => {
@@ -262,6 +379,110 @@ test("a subscriber cannot reentrantly Send now the same queued message", async (
   expect(items.filter((item) => item.kind === "user")).toMatchObject([
     { text: queued.text, attachments: [{ name: note.name }] },
   ]);
+});
+
+test("Send now rejects a fresh queue-edit transfer and keeps the result of an earlier transfer", async () => {
+  const client = working();
+  const earlier = await queuedNote(client);
+  await client.confirmQueueEdit("c1", earlier.id, "earlier-transfer");
+  await client.removeQueued("c1", earlier.id);
+  const queued = await queuedNote(client);
+  await client.editQueued("c1", queued.id);
+  const { cursor } = await client.openChat("c1");
+  let confirmation: Promise<boolean[]> | undefined;
+  const unlisten = client.subscribe("c1", cursor, (change) => {
+    if (change.kind !== "item" || change.item.kind !== "user") return;
+    confirmation = Promise.all([
+      client.confirmQueueEdit("c1", queued.id, "pending-transfer"),
+      client.confirmQueueEdit("c1", earlier.id, "earlier-transfer"),
+    ]);
+  });
+  await client.sendQueuedNow("c1", queued.id);
+  unlisten();
+  expect(await confirmation).toEqual([false, true]);
+});
+
+test("Resume preserves the paused queue and its attachment bytes in Trash", async () => {
+  const client = createMockChatClient({
+    chats: [
+      {
+        chat: chatState({
+          id: "c1",
+          title: "Limiter",
+          queue: [seededNote, { id: "second", text: "Second message" }],
+          queue_paused: true,
+        }),
+        queuedFiles: { [seededNote.id]: [note] },
+      },
+    ],
+  });
+  await client.trash("c1");
+  const before = await client.openChat("c1");
+  await expect(client.resumeQueue("c1")).rejects.toThrow(
+    "This Chat is in Trash.",
+  );
+  expect(await client.openChat("c1")).toEqual(before);
+  await client.restore("c1");
+  await expect(client.editQueued("c1", seededNote.id)).resolves.toEqual({
+    text: seededNote.text,
+    attachments: [note],
+  });
+  await client.resumeQueue("c1");
+  expect(await client.openChat("c1")).toMatchObject({
+    chat: { queue_paused: false, queue: [{ id: "second" }] },
+    items: [
+      {
+        kind: "user",
+        text: seededNote.text,
+        attachments: [{ name: note.name }],
+      },
+    ],
+  });
+});
+
+test("Resume starts the first queued turn before a subscriber can send the second message", async () => {
+  const client = createMockChatClient({
+    chats: [
+      {
+        chat: chatState({
+          id: "c1",
+          title: "Limiter",
+          queue: [seededNote, { id: "second", text: "Second message" }],
+          queue_paused: true,
+          steering: { available: false },
+        }),
+        queuedFiles: { [seededNote.id]: [note] },
+      },
+    ],
+  });
+  const { cursor } = await client.openChat("c1");
+  let competing: Promise<unknown> | undefined;
+  const unlisten = client.subscribe("c1", cursor, (change) => {
+    if (competing || change.kind !== "chat" || change.chat.queue.length !== 1)
+      return;
+    competing = client
+      .sendQueuedNow("c1", "second")
+      .catch((error: unknown) => error);
+  });
+  await client.resumeQueue("c1");
+  unlisten();
+  expect(await competing).toMatchObject({
+    message: "the Chat is working; try again when it has finished",
+  });
+  expect(await client.openChat("c1")).toMatchObject({
+    chat: {
+      activity: "working",
+      queue_paused: false,
+      queue: [{ id: "second" }],
+    },
+    items: [
+      {
+        kind: "user",
+        text: seededNote.text,
+        attachments: [{ name: note.name }],
+      },
+    ],
+  });
 });
 
 test("concurrent retries save one queued edit and reject changed input for the same command", async () => {

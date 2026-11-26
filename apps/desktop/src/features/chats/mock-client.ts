@@ -320,6 +320,11 @@ export type MockChat = {
   queuedFiles?: Record<string, ChatAttachmentInput[]>;
 };
 
+type Change =
+  | { kind: "item"; item: TranscriptItem }
+  | { kind: "text"; item_id: string; text: string }
+  | { kind: "chat"; chat: ChatState };
+
 type Stored = {
   chat: ChatState;
   items: TranscriptItem[];
@@ -328,7 +333,7 @@ type Stored = {
   log: ChatChange[];
   listeners: Set<(change: ChatChange) => void>;
   queuedFiles: Map<string, ChatAttachmentInput[]>;
-  sendingQueuedNow: Set<string>;
+  pending?: Change[];
 };
 
 /** The harness side of the mock: what a test or fixture makes "happen". */
@@ -516,7 +521,10 @@ export function createMockChatClient(
   let enabled = seed.enabled ?? false;
   let harnesses = (seed.harnesses ?? READY).map(harnessStatus);
   let created = 0;
-  const requests = new Map<string, string>();
+  const requests = new Map<
+    string,
+    { id: string; key: string; files: ChatAttachmentInput[] }
+  >();
   const dropping = new Map<string, number>();
   const overviewListeners = new Set<(overview: ChatOverview) => void>();
   const openListeners = new Set<(request: OpenRequest) => void>();
@@ -538,7 +546,6 @@ export function createMockChatClient(
           files.map((file) => ({ ...file })),
         ]),
       ),
-      sendingQueuedNow: new Set(),
     });
   seed.chats?.forEach(store);
 
@@ -618,22 +625,75 @@ export function createMockChatClient(
       updated_at: entry.updated_at,
     });
   };
-  const emit = (
-    entry: Stored,
-    change:
-      | { kind: "item"; item: TranscriptItem }
-      | { kind: "text"; item_id: string; text: string }
-      | { kind: "chat"; chat: ChatState },
-  ) => {
-    entry.seq += 1;
-    const parsed = chatChangeSchema.parse({ ...change, seq: entry.seq });
-    entry.log.push(parsed);
-    if (entry.log.length > logLimit) entry.log.shift();
-    const drop = dropping.get(entry.chat.id) ?? 0;
-    if (drop > 0) dropping.set(entry.chat.id, drop - 1);
-    else for (const listener of [...entry.listeners]) listener(parsed);
-    const counts = overview();
-    for (const listener of [...overviewListeners]) listener(counts);
+  const notifications: (() => void)[] = [];
+  const notify = <T>(listener: (value: T) => void, value: T) => {
+    try {
+      listener(value);
+    } catch (error) {
+      // A subscriber failure cannot reject a command that already committed.
+      queueMicrotask(() => {
+        throw error;
+      });
+    }
+  };
+  const publish = (entry: Stored, changes: ChatChange[]) => {
+    if (!changes.length) return;
+    const listeners = [...entry.listeners];
+    const overviewRecipients = [...overviewListeners];
+    const counts = overviewRecipients.length ? overview() : undefined;
+    const visible = changes.filter((change) => {
+      entry.seq = change.seq;
+      entry.log.push(change);
+      if (entry.log.length > logLimit) entry.log.shift();
+      const drop = dropping.get(entry.chat.id) ?? 0;
+      if (!drop) return true;
+      dropping.set(entry.chat.id, drop - 1);
+      return false;
+    });
+    notifications.push(() => {
+      for (const change of visible)
+        for (const listener of listeners)
+          if (entry.listeners.has(listener)) notify(listener, change);
+      if (counts)
+        for (const listener of overviewRecipients)
+          if (overviewListeners.has(listener)) notify(listener, counts);
+    });
+    // A command from a subscriber can commit now, but its events follow this batch.
+    if (notifications.length === 1) {
+      for (const deliver of notifications) deliver();
+      notifications.length = 0;
+    }
+  };
+  const parseChanges = (entry: Stored, changes: Change[]) =>
+    changes.map((change, index) =>
+      chatChangeSchema.parse({ ...change, seq: entry.seq + index + 1 }),
+    );
+  const emit = (entry: Stored, change: Change) => {
+    if (entry.pending) {
+      if (change.kind !== "chat") entry.pending.push(change);
+    } else {
+      publish(entry, parseChanges(entry, [change]));
+    }
+  };
+  const commit = (entry: Stored, apply: () => void, onCommit?: () => void) => {
+    const { chat, items, queuedFiles } = entry;
+    entry.items = [...items];
+    entry.queuedFiles = new Map(queuedFiles);
+    const pending: Change[] = [];
+    entry.pending = pending;
+    let changes: ChatChange[];
+    try {
+      apply();
+      if (entry.chat !== chat) pending.push({ kind: "chat", chat: entry.chat });
+      changes = parseChanges(entry, pending);
+    } catch (error) {
+      Object.assign(entry, { chat, items, queuedFiles });
+      throw error;
+    } finally {
+      delete entry.pending;
+    }
+    onCommit?.();
+    publish(entry, changes);
   };
   const push = (id: string, item: TranscriptItem) => {
     const entry = get(id);
@@ -705,6 +765,17 @@ export function createMockChatClient(
   };
   const mediaTypeOf = ({ dataUrl }: ChatAttachmentInput) =>
     dataUrl.slice(5, dataUrl.indexOf(";"));
+  const copyAttachments = (files?: ChatAttachmentInput[]) =>
+    files?.map(({ name, dataUrl }) => ({ name, dataUrl })) ?? [];
+  const matchesAttachments = (
+    saved: ChatAttachmentInput[],
+    files: ChatAttachmentInput[],
+  ) =>
+    saved.length === files.length &&
+    saved.every(
+      ({ name, dataUrl }, index) =>
+        name === files[index]?.name && dataUrl === files[index]?.dataUrl,
+    );
   const attachmentLabels = (files: ChatAttachmentInput[]) =>
     files.map((file) => ({
       id: nextId("attachment"),
@@ -823,8 +894,10 @@ export function createMockChatClient(
       linked: LinkRef[],
       attachments: ChatAttachmentInput[] | undefined,
       replaces: string[],
+      onCommit?: () => void,
     ) => {
-      const { chat } = get(id);
+      const entry = get(id);
+      const { chat } = entry;
       if (chat.retention === "trashed")
         throw new ChatError("failed", "This Chat is in Trash.");
       if (
@@ -836,9 +909,15 @@ export function createMockChatClient(
           "stale",
           "The original queued message is no longer held for editing.",
         );
-      linkAll(id, linked);
-      action(id, text, attachments);
-      for (const queuedId of replaces) removeQueued(id, queuedId);
+      commit(
+        entry,
+        () => {
+          linkAll(id, linked);
+          action(id, text, attachments);
+          for (const queuedId of replaces) removeQueued(id, queuedId);
+        },
+        onCommit,
+      );
     };
     if (!edit) return apply(links, files, []);
 
@@ -849,20 +928,14 @@ export function createMockChatClient(
     const linked = links.map(({ kind, id }) => ({ kind, id }));
     const linkKeys = [
       ...new Set(linked.map(({ kind, id }) => `${kind}:${id}`)),
-    ].sort();
+    ];
     const key = JSON.stringify([id, text, linkKeys, replaces]);
-    const attachments =
-      files?.map(({ name, dataUrl }) => ({ name, dataUrl })) ?? [];
+    const attachments = copyAttachments(files);
     const previous = savedQueueEdits.get(commandId);
     if (previous) {
       if (
         previous.key !== key ||
-        previous.files.length !== attachments.length ||
-        previous.files.some(
-          (file, index) =>
-            file.name !== attachments[index]?.name ||
-            file.dataUrl !== attachments[index]?.dataUrl,
-        )
+        !matchesAttachments(previous.files, attachments)
       )
         throw new ChatError(
           "failed",
@@ -874,8 +947,9 @@ export function createMockChatClient(
     // Register the exact request before any listeners can retry the save.
     const result = Promise.resolve()
       .then(() => {
-        apply(linked, attachments, replaces);
-        receipt.saved = true;
+        apply(linked, attachments, replaces, () => {
+          receipt.saved = true;
+        });
       })
       .finally(() => {
         if (!receipt.saved) savedQueueEdits.delete(commandId);
@@ -994,6 +1068,25 @@ export function createMockChatClient(
       [...chats.values()].filter((entry) => entry.chat.folder.path === path)
         .length,
     async createChat(input) {
+      const key = JSON.stringify([
+        input.harness_id,
+        input.folder,
+        input.links.map(({ kind, id }) => [kind, id]),
+        input.message,
+        input.model,
+        input.effort,
+        input.permission,
+      ]);
+      const files = copyAttachments(input.attachments);
+      const existing = requests.get(input.command_id);
+      if (existing) {
+        if (existing.key !== key || !matchesAttachments(existing.files, files))
+          throw new ChatError(
+            "failed",
+            `Request ID was already used for different content: ${input.command_id}`,
+          );
+        return { chat_id: existing.id };
+      }
       const harness = harnesses.find((item) => item.id === input.harness_id);
       if (!harness?.usable)
         throw new ChatError("failed", "The harness is not ready.");
@@ -1005,12 +1098,7 @@ export function createMockChatClient(
           "failed",
           "This harness can't take Chat attachments.",
         );
-      // A repeated request finds the Chat the first try created.
-      const existing = requests.get(input.command_id);
-      if (existing) return { chat_id: existing };
       const id = `chat-${(created += 1)}`;
-      requests.set(input.command_id, id);
-      client.created.push(input);
       const path = input.folder ?? `~/ticketd/chats/${id}`;
       store({
         chat: chatState({
@@ -1032,7 +1120,19 @@ export function createMockChatClient(
           ),
         }),
       });
-      startTurn(id, input.message, input.attachments);
+      try {
+        commit(
+          get(id),
+          () => startTurn(id, input.message, files),
+          () => {
+            requests.set(input.command_id, { id, key, files });
+            client.created.push(input);
+          },
+        );
+      } catch (error) {
+        chats.delete(id);
+        throw error;
+      }
       return { chat_id: id };
     },
     async openChat(id) {
@@ -1122,30 +1222,27 @@ export function createMockChatClient(
     async resumeQueue(id) {
       const entry = get(id);
       const { chat } = entry;
-      const first = chat.queue.find((item) => !item.editing);
-      const next =
-        first && !live(chat) && !entry.sendingQueuedNow.has(first.id)
-          ? first
-          : undefined;
+      if (chat.retention === "trashed")
+        throw new ChatError("failed", "This Chat is in Trash.");
+      const next = live(chat)
+        ? undefined
+        : chat.queue.find((item) => !item.editing);
       const files = next && filesForQueued(entry, next);
-      patch(id, {
-        queue_paused: false,
-        queue: next
-          ? chat.queue.filter((item) => item.id !== next.id)
-          : chat.queue,
+      commit(entry, () => {
+        patch(id, { queue_paused: false });
+        if (next) {
+          startTurn(id, next.text, files);
+          removeQueued(id, next.id);
+        }
       });
-      if (next) {
-        startTurn(id, next.text, files);
-        entry.queuedFiles.delete(next.id);
-      }
     },
     async sendQueuedNow(id, queuedId) {
       const entry = get(id);
-      const { chat, sendingQueuedNow } = entry;
+      const { chat } = entry;
       const queued = chat.queue.find(
         (item) => item.id === queuedId && !item.editing,
       );
-      if (!queued || sendingQueuedNow.has(queuedId))
+      if (!queued)
         throw new ChatError("stale", "This message is no longer queued.");
       if (
         live(chat) &&
@@ -1161,16 +1258,14 @@ export function createMockChatClient(
           "the Chat is working; try again when it has finished",
         );
       const files = filesForQueued(entry, queued);
-      sendingQueuedNow.add(queuedId);
-      try {
+      commit(entry, () => {
         send(id, queued.text, files);
         removeQueued(id, queuedId);
-      } finally {
-        sendingQueuedNow.delete(queuedId);
-      }
+      });
     },
     async stop(id) {
-      if (live(get(id).chat)) halt(id, "stopped");
+      const entry = get(id);
+      if (live(entry.chat)) commit(entry, () => halt(id, "stopped"));
     },
     async answer(id, requestId, answer) {
       const request = get(id).items.find((item) => item.id === requestId);
@@ -1238,8 +1333,11 @@ export function createMockChatClient(
     archive: async (id) => patch(id, { retention: "archived" }),
     unarchive: async (id) => patch(id, { retention: "active" }),
     async trash(id) {
-      if (live(get(id).chat)) halt(id, "stopped");
-      patch(id, { retention: "trashed" });
+      const entry = get(id);
+      commit(entry, () => {
+        if (live(entry.chat)) halt(id, "stopped");
+        patch(id, { retention: "trashed" });
+      });
     },
     // Restoring changes where the Chat is listed and nothing else.
     restore: async (id) => patch(id, { retention: "active" }),

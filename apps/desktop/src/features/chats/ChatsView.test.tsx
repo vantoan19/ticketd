@@ -452,15 +452,24 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
     return payload;
   });
   const acknowledge = client.confirmQueueEdit;
+  let confirmation:
+    | {
+        caption: string | undefined;
+        removalDisabled: boolean | undefined;
+        accepted: boolean;
+      }
+    | undefined;
   const confirm = vi
     .spyOn(client, "confirmQueueEdit")
     .mockImplementationOnce(async (...args) => {
-      expect(composer()).toHaveProperty(
-        "value",
-        "Draft caption\n\nQueued caption",
-      );
-      expect(button("Remove notes.txt")).toHaveProperty("disabled", true);
-      await acknowledge(...args);
+      const caption =
+        screen.queryAllByLabelText<HTMLTextAreaElement>("Message Codex")[0]
+          ?.value;
+      const removalDisabled = screen
+        .queryAllByRole("button", { name: "Remove notes.txt" })[0]
+        ?.matches(":disabled");
+      const accepted = await acknowledge(...args);
+      confirmation = { caption, removalDisabled, accepted };
       throw new Error("Acknowledgement lost");
     });
   type("Draft caption");
@@ -474,6 +483,11 @@ test("a queued edit is recovered after navigation and a lost acknowledgement", a
   await screen.findByRole("heading", { name: "Limiter" });
 
   const retry = await screen.findByRole("button", { name: "Retry queue edit" });
+  expect(confirmation).toEqual({
+    caption: "Draft caption\n\nQueued caption",
+    removalDisabled: true,
+    accepted: true,
+  });
   const held = (await client.openChat("c1")).chat.queue;
   expect(held).toEqual([
     expect.objectContaining({ text: "Queued caption", editing: true }),
