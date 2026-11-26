@@ -420,7 +420,7 @@ pub struct ChatMessage {
     /// Kept for draft recovery and excluded from dispatch while the edit is held.
     #[serde(default)]
     pub editing: bool,
-    /// User input requested links and needs their context before dispatch.
+    /// User input needs linked-record context before dispatch.
     #[serde(default)]
     pub requires_link_context: bool,
     pub attempts: Vec<ChatSubmissionAttempt>,
@@ -2700,15 +2700,16 @@ impl Workspace {
             if read_chat(connection, chat_id)?.trashed {
                 return Err(Error::ChatTrashed(chat_id.to_owned()));
             }
+            let mut requires_link_context = !links.is_empty();
             for original in replaces {
                 let message = require_input(connection, chat_id, original)?;
                 if !message.queued || !message.editing {
                     return Err(invalid("the original message is no longer held for editing"));
                 }
+                requires_link_context |= message.requires_link_context;
                 delete_queued_input(connection, original)?;
             }
-            let requires_link_context = !links.is_empty();
-            let links_changed = requires_link_context && add_links(connection, chat_id, links)?;
+            let links_changed = !links.is_empty() && add_links(connection, chat_id, links)?;
             let run = if matches!(source, InputSource::AutomationReply) {
                 crate::automation_runs::take_over_chat(connection, chat_id, true)?
             } else {

@@ -672,6 +672,47 @@ fn public_command_ids_with_the_old_link_prefix_do_not_collide_with_input_receipt
 }
 
 #[test]
+fn a_wording_edit_keeps_the_link_context_requirement_of_held_input() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: workspace.create_ticket("Context").unwrap().id,
+    };
+    let (linked, _) = workspace
+        .save_chat_input_with_change(
+            None,
+            &chat.id,
+            "Linked input",
+            &[],
+            Some(&ChatInputChange::Link(vec![link.clone()])),
+        )
+        .unwrap();
+    let plain = workspace
+        .save_chat_input(None, &chat.id, "Plain input")
+        .unwrap();
+    workspace
+        .confirm_chat_queue_edit(&chat.id, &linked.id, "hold-linked")
+        .unwrap();
+    workspace
+        .confirm_chat_queue_edit(&chat.id, &plain.id, "hold-plain")
+        .unwrap();
+    let edit = ChatQueueEdit {
+        replaces: vec![linked.id, plain.id],
+        links: Vec::new(),
+    };
+
+    let (receipt, links_changed) = workspace
+        .save_chat_input_with_edit(Some("edit"), &chat.id, "New wording", &[], Some(&edit))
+        .unwrap();
+    let replacement = receipt.into_message().unwrap();
+    assert!(replacement.requires_link_context);
+    assert!(!links_changed);
+    assert_eq!(workspace.chat(&chat.id).unwrap().links, [link]);
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap(), [replacement]);
+}
+
+#[test]
 fn archived_projects_reject_new_chat_links_atomically() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();
