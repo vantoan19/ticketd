@@ -94,17 +94,29 @@ impl Fixture {
     }
 
     async fn with_adapter(fake: FakeAdapter) -> Self {
+        Self::with_adapters(fake, None).await
+    }
+
+    async fn with_adapters(fake: FakeAdapter, claude: Option<FakeAdapter>) -> Self {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("workspace.sqlite3");
         // The desktop creates its workspace before its session opens it.
         drop(Workspace::open(&path).unwrap());
-        let chats = Chats::new(
-            Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
-            vec![Arc::new(fake.clone())],
-            vec![(
+        let mut adapters: Vec<Arc<dyn HarnessAdapter>> = vec![Arc::new(fake.clone())];
+        let unavailable = match claude {
+            Some(claude) => {
+                adapters.push(Arc::new(claude));
+                Vec::new()
+            }
+            None => vec![(
                 "claude-code",
                 "Claude Code is unavailable: the bridge is missing.".to_owned(),
             )],
+        };
+        let chats = Chats::new(
+            Arc::new(move || ticketd_core::WorkspaceSession::for_file(&path)?.workspace()),
+            adapters,
+            unavailable,
             None,
         );
         chats.set_enabled(true).await;
@@ -416,11 +428,14 @@ fn closing_keeps_chats_running_only_when_some_are_working_and_quit_asks_before_s
 /// once, beside the working Chats.
 #[tokio::test(start_paused = true)]
 async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_chats() {
-    let f = Fixture::new().await;
+    // Each fake owns one event stream. The Automation and ordinary Chat
+    // need independent runtimes to be working at the same time.
+    let claude = FakeAdapter::claude();
+    let f = Fixture::with_adapters(FakeAdapter::codex(), Some(claude.clone())).await;
     let mut core = f.core();
     let agent = core
         .create_automation_agent(ticketd_core::AutomationAgentSettings {
-            harness: ticketd_core::AgentHarness::Codex,
+            harness: ticketd_core::AgentHarness::ClaudeCode,
             ..Default::default()
         })
         .unwrap();
@@ -469,11 +484,20 @@ async fn what_would_be_stopped_counts_runs_that_are_going_apart_from_working_cha
             .await;
     });
     settle().await;
+    assert!(
+        claude
+            .emit(EventKind::TurnStarted {
+                turn: NativeTurnId::new("agent-turn"),
+            })
+            .await
+    );
+    settle().await;
     assert_eq!(f.chats.working(), 1, "the run's agent is working");
     assert_eq!(f.chats.stopping(), Stopping { chats: 0, runs: 1 });
     assert_eq!(f.chats.overview().unwrap().working, 0, "the old count");
 
     f.chat().await;
+    assert_eq!(f.chats.working(), 2, "both harnesses are working");
     assert_eq!(f.chats.stopping(), Stopping { chats: 1, runs: 1 });
 
     f.chats.set_enabled(false).await;
