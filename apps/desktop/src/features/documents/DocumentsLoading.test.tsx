@@ -195,6 +195,32 @@ it("keeps a failed fold's own error and Retry when the other fold loads", async 
   expect(documents.unlinked).toHaveBeenCalledTimes(1);
 });
 
+it("keeps a Tab stop on a shown item when a fold's refresh fails under the focused row", async () => {
+  preferences({ documentGroups: { finished: true } });
+  vi.mocked(documents.currentWork).mockResolvedValue({
+    ...emptyWork,
+    finished: 1,
+  });
+  vi.mocked(documents.finished).mockResolvedValueOnce([
+    row("f", "Shipped notes"),
+  ]);
+  const { rerender } = renderDocuments();
+  const shipped = await screen.findByRole("button", { name: "Shipped notes" });
+  fireEvent.focus(shipped);
+  vi.mocked(documents.finished).mockRejectedValue(new Error("busy"));
+  rerender(page(1));
+  const fold = screen
+    .getByRole("button", { name: /^Finished work/ })
+    .closest(".documents-group-block") as HTMLElement;
+  await within(fold).findByRole("button", { name: "Retry" });
+  expect(screen.queryByRole("button", { name: "Shipped notes" })).toBeNull();
+  // The row is gone, so the Tab stop falls back to a header that is on screen.
+  const stops = screen
+    .getAllByRole("button")
+    .filter((button) => button.getAttribute("tabindex") === "0");
+  expect(stops).toHaveLength(1);
+});
+
 it("applies Show update details at once while the pointer rests on the list", async () => {
   preferences({ documentsView: "recent" });
   vi.mocked(documents.recent).mockImplementation(async (_offset, support) =>

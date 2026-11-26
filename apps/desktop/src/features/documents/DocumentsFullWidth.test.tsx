@@ -52,7 +52,19 @@ vi.mock("./api", () => ({
   },
 }));
 vi.mock("@/features/markdown/LazyMarkdownEditor", () => ({
-  LazyMarkdownEditor: () => <textarea aria-label="Your thought" />,
+  LazyMarkdownEditor: ({
+    value,
+    onChange,
+  }: {
+    value: string;
+    onChange: (next: string) => void;
+  }) => (
+    <textarea
+      aria-label="Your thought"
+      value={value}
+      onChange={(event) => onChange(event.target.value)}
+    />
+  ),
 }));
 
 const body = [
@@ -488,6 +500,34 @@ it("keeps the rail's room while editing at full width, so the column stays where
   expect(main().hasAttribute("data-rail")).toBe(true);
   expect(main().hasAttribute("data-writing")).toBe(false);
   expect(container.querySelector(".document-rail")).toBeTruthy();
+});
+
+it("decides the rail's room when Edit starts and keeps it until Done, however many headings the edit leaves", async () => {
+  expandedAlready();
+  vi.mocked(documents.recent).mockResolvedValue([row("a")]);
+  const { container } = renderDocuments();
+  await openRow("Doc a");
+  const main = () => container.querySelector(".document-main") as HTMLElement;
+  expect(main().hasAttribute("data-rail")).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: /^Edit/ }));
+  const editor = await screen.findByRole("textbox", { name: "Your thought" });
+  // Fewer than three headings are left: the column must not move.
+  fireEvent.change(editor, {
+    target: { value: "Intro.\n\n## Goals\n\nText." },
+  });
+  expect(main().hasAttribute("data-rail")).toBe(true);
+  // Adding them back does not move it either.
+  fireEvent.change(editor, { target: { value: body } });
+  expect(main().hasAttribute("data-rail")).toBe(true);
+
+  // Done decides again from what is saved: the one heading left shows no rail.
+  fireEvent.change(editor, {
+    target: { value: "Intro.\n\n## Goals\n\nText." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
+  await screen.findByRole("button", { name: /^Edit/ });
+  expect(main().hasAttribute("data-rail")).toBe(false);
 });
 
 it("lets the Plan crumb's name shorten with an ellipsis, so the bar never draws over itself", async () => {
