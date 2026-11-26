@@ -7,8 +7,8 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::time::Duration;
 
 use ticketd_core::{
-    AutomationRun, AutomationRunStatus, ChatAttachmentContent, ChatInputReceipt, ChatMessage,
-    ChatQueueEdit, ChatSnapshot, Error, WorkspaceGuard,
+    AutomationRun, AutomationRunStatus, ChatAttachmentContent, ChatInputChange, ChatInputReceipt,
+    ChatLink, ChatMessage, ChatQueueEdit, ChatSnapshot, Error, WorkspaceGuard,
 };
 use tokio::sync::{mpsc, oneshot, watch};
 
@@ -685,15 +685,56 @@ impl ChatHost {
         attachments: Vec<ChatAttachmentContent>,
         edit: Option<ChatQueueEdit>,
     ) -> Result<ChatInputReceipt, HostError> {
+        self.send_with_change(
+            chat_id,
+            command_id,
+            text,
+            mode,
+            attachments,
+            edit.map(ChatInputChange::Edit),
+        )
+        .await
+    }
+
+    pub async fn send_linking_attachments(
+        &self,
+        chat_id: &str,
+        text: &str,
+        mode: SendMode,
+        attachments: Vec<ChatAttachmentContent>,
+        links: Vec<ChatLink>,
+    ) -> Result<ChatMessage, HostError> {
+        self.send_with_change(
+            chat_id,
+            None,
+            text,
+            mode,
+            attachments,
+            Some(ChatInputChange::Link(links)),
+        )
+        .await?
+        .into_message()
+        .map_err(HostError::from)
+    }
+
+    async fn send_with_change(
+        &self,
+        chat_id: &str,
+        command_id: Option<&str>,
+        text: &str,
+        mode: SendMode,
+        attachments: Vec<ChatAttachmentContent>,
+        change: Option<ChatInputChange>,
+    ) -> Result<ChatInputReceipt, HostError> {
         self.serving()?;
         if self.check_agent_cleanup(chat_id).is_err()
             && let Some(command_id) = command_id
-            && let Some(receipt) = self.workspace()?.replay_chat_input_with_edit(
+            && let Some(receipt) = self.workspace()?.replay_chat_input_with_change(
                 command_id,
                 chat_id,
                 text,
                 &attachments,
-                edit.as_ref(),
+                change.as_ref(),
             )?
         {
             return Ok(receipt);
@@ -709,24 +750,24 @@ impl ChatHost {
                 if let Some(harness) = workspace.automation_chat_harness(chat_id)? {
                     if let Err(refusal) = self.check_attachment_input(&harness, &attachments) {
                         if let Some(command_id) = command_id
-                            && let Some(receipt) = workspace.replay_chat_input_with_edit(
+                            && let Some(receipt) = workspace.replay_chat_input_with_change(
                                 command_id,
                                 chat_id,
                                 text,
                                 &attachments,
-                                edit.as_ref(),
+                                change.as_ref(),
                             )?
                         {
                             return Ok(receipt);
                         }
                         return Err(refusal);
                     }
-                    Some(workspace.save_automation_chat_reply(
+                    Some(workspace.save_automation_chat_reply_with_change(
                         command_id,
                         chat_id,
                         text,
                         &attachments,
-                        edit.as_ref(),
+                        change.as_ref(),
                     )?)
                 } else {
                     None
@@ -766,7 +807,7 @@ impl ChatHost {
             text,
             mode,
             attachments,
-            edit,
+            change,
             reply,
         })
         .await

@@ -13,8 +13,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use ticketd_core::{
-    Chat, ChatAttachmentContent, ChatInputReceipt, ChatInteractionKind, ChatInteractionState,
-    ChatMessage, ChatObservation, ChatQueueEdit, ChatSessionOrigin, ChatSubmissionIntent,
+    Chat, ChatAttachmentContent, ChatInputChange, ChatInputReceipt, ChatInteractionKind,
+    ChatInteractionState, ChatMessage, ChatObservation, ChatSessionOrigin, ChatSubmissionIntent,
     ChatToolState, ChatTurnReceipt, ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
@@ -69,7 +69,7 @@ pub(crate) enum Command {
         text: String,
         mode: SendMode,
         attachments: Vec<ChatAttachmentContent>,
-        edit: Option<ChatQueueEdit>,
+        change: Option<ChatInputChange>,
         reply: Reply<ChatInputReceipt>,
     },
     ScheduleSaved {
@@ -779,7 +779,7 @@ impl Supervisor {
                 text,
                 mode,
                 attachments,
-                edit,
+                change,
                 reply,
             } => {
                 let _ = reply.send(self.send(
@@ -787,7 +787,7 @@ impl Supervisor {
                     &text,
                     mode,
                     &attachments,
-                    edit.as_ref(),
+                    change.as_ref(),
                 ));
             }
             Command::ScheduleSaved { message_id, reply } => {
@@ -1059,15 +1059,15 @@ impl Supervisor {
         text: &str,
         mode: SendMode,
         attachments: &[ChatAttachmentContent],
-        edit: Option<&ChatQueueEdit>,
+        change: Option<&ChatInputChange>,
     ) -> Result<ChatInputReceipt, HostError> {
         let chat = self.chat_id.clone();
         // A lost reply can arrive after queue eligibility changed. Repeating an
         // already saved edit returns its receipt without dispatching it again.
-        if edit.is_some()
+        if change.is_some()
             && let Some(command_id) = command_id
             && let Some(saved) = self.core(|core| {
-                core.replay_chat_input_with_edit(command_id, &chat, text, attachments, edit)
+                core.replay_chat_input_with_change(command_id, &chat, text, attachments, change)
             })?
         {
             return Ok(saved);
@@ -1095,7 +1095,7 @@ impl Supervisor {
                     .then_some(Refusal::ImageInputUnsupported)
             });
             if let Some(refusal) = refusal {
-                if edit.is_none()
+                if change.is_none()
                     && let Some(command_id) = command_id
                     && let Some(saved) = self.core(|core| {
                         core.replay_chat_input_replacing(command_id, &chat, text, attachments, &[])
@@ -1107,7 +1107,7 @@ impl Supervisor {
             }
         }
         let (receipt, linked) = self.write(|core| {
-            core.save_chat_input_with_edit(command_id, &chat, text, attachments, edit)
+            core.save_chat_input_with_change(command_id, &chat, text, attachments, change)
         })?;
         if linked {
             self.refresh_context();

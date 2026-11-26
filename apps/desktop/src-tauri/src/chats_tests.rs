@@ -1267,6 +1267,55 @@ async fn a_new_queue_edit_receipt_binds_empty_links_without_guessing_legacy_link
 }
 
 #[tokio::test(start_paused = true)]
+async fn refused_attachments_leave_ordinary_message_links_and_queue_unchanged() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let ticket = |title| LinkRef {
+        kind: LinkKind::Ticket,
+        id: f.core().create_ticket(title).unwrap().id,
+    };
+    let accepted = ticket("Accepted context");
+    let refused = ticket("Refused context");
+    let files = || {
+        vec![AttachmentInput {
+            name: "notes.txt".into(),
+            data_url: "data:text/plain;base64,bm90ZXM=".into(),
+        }]
+    };
+    f.chats
+        .send_linking(
+            &id,
+            "Accepted",
+            SendMode::Queue,
+            std::slice::from_ref(&accepted),
+            files(),
+            None,
+        )
+        .await
+        .unwrap();
+    f.fake
+        .set_attachment_refusal(ticketd_chat_host::Refusal::Unsupported);
+    assert!(
+        f.chats
+            .send_linking(&id, "Refused", SendMode::Queue, &[refused], files(), None)
+            .await
+            .is_err()
+    );
+
+    let core = f.core();
+    assert_eq!(core.chat(&id).unwrap().links, [ChatLink::from(accepted)]);
+    let queue = core.chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].text, "Accepted");
+    assert_eq!(
+        core.chat_message_attachment_contents(&id, &queue[0].id)
+            .unwrap()[0]
+            .bytes(),
+        b"notes"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_upload_limit_refusal_leaves_the_edit_links_and_original_untouched() {
     let f = Fixture::new().await;
     let id = f.chat().await;
@@ -1679,22 +1728,35 @@ async fn restoring_the_workspace_stops_chats_reconciles_and_dispatches_nothing()
     let (_, seen) = f.open(&id).await;
     assert_eq!(f.chats.working(), 1);
 
-    let unconfirmed = f.chats.begin_restore().await.unwrap();
-    assert!(unconfirmed.is_empty());
-    assert_eq!(f.chats.working(), 0, "no harness runs across a restore");
+    let backup = f.dir.path().join("valid.ticketd-backup");
+    assert!(f.core().backup(&backup).unwrap());
+    let live = f.dir.path().join("workspace.sqlite3");
+    let restored_chat = id.clone();
+    let restored = f
+        .chats
+        .restore(backup, move |backup| {
+            // Simulate a backup with a turn in progress, a submission in flight, and queued input.
+            let mut core = Workspace::open(live).unwrap();
+            core.set_chat_queue_paused(&restored_chat, false).unwrap();
+            let flying = core
+                .save_chat_input(None, &restored_chat, "in flight")
+                .unwrap();
+            core.record_chat_submission(
+                &restored_chat,
+                &flying.id,
+                "a-restored",
+                ChatSubmissionIntent::NewTurn,
+            )
+            .unwrap();
+            core.save_chat_input(None, &restored_chat, "queued in the backup")
+                .unwrap();
+            Ok(backup)
+        })
+        .await
+        .unwrap();
+    assert_eq!(restored.warning, None);
+    assert_eq!(f.chats.working(), 0);
     assert!(matches!(f.fake.written().last(), Some(Written::Close(_))));
-    assert!(f.chats.send(&id, "during", SendMode::Auto).await.is_err());
-    // What a backup can hold: a turn in progress, a submission in flight, queued input.
-    let mut core = f.core();
-    core.set_chat_queue_paused(&id, false).unwrap();
-    let flying = core.save_chat_input(None, &id, "in flight").unwrap();
-    core.record_chat_submission(&id, &flying.id, "a-restored", ChatSubmissionIntent::NewTurn)
-        .unwrap();
-    core.save_chat_input(None, &id, "queued in the backup")
-        .unwrap();
-    drop(core);
-
-    f.chats.finish_restore().unwrap();
     tokio::time::sleep(Duration::from_secs(3_600)).await;
 
     assert_eq!(f.submitted(), ["first"], "nothing restored was dispatched");
@@ -1709,6 +1771,55 @@ async fn restoring_the_workspace_stops_chats_reconciles_and_dispatches_nothing()
     );
     assert_eq!(opened.snapshot.chat.queue.len(), 1);
     assert_eq!(f.fake.opens().len(), 1, "opening the view started nothing");
+}
+
+#[tokio::test(start_paused = true)]
+async fn overlapping_restore_refuses_to_replace_or_reopen_admission() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let host = f.chats.automation_host().unwrap();
+    let backup = f.dir.path().join("valid.ticketd-backup");
+    assert!(f.core().backup(&backup).unwrap());
+    let (started, replacing) = oneshot::channel();
+    let (finish, finishing) = oneshot::channel();
+    let first = tokio::spawn({
+        let chats = f.chats.clone();
+        let backup = backup.clone();
+        async move {
+            chats
+                .restore(backup, move |_| {
+                    started.send(()).unwrap();
+                    finishing.blocking_recv().unwrap();
+                    Err("replacement failed".to_owned())
+                })
+                .await
+        }
+    });
+    replacing.await.unwrap();
+    first.abort();
+    assert!(first.await.unwrap_err().is_cancelled());
+
+    let refused = f
+        .chats
+        .restore(backup, |_| {
+            panic!("overlapping restore entered replacement")
+        })
+        .await
+        .unwrap_err();
+    assert!(refused.contains("already in progress"), "{refused}");
+    assert!(matches!(
+        f.chats.automation_host(),
+        Err(HostError::Restoring)
+    ));
+    assert!(matches!(host.serving(), Err(HostError::Restoring)));
+    assert!(f.chats.send(&id, "during", SendMode::Auto).await.is_err());
+
+    finish.send(()).unwrap();
+    drop(f.chats.restore_owner.lock().await);
+    assert!(f.chats.automation_host().is_ok());
+    assert!(host.serving().is_ok());
+    f.chats.send(&id, "after", SendMode::Queue).await.unwrap();
+    assert_eq!(f.core().chat_queue(&id).unwrap()[0].text, "after");
 }
 
 #[tokio::test(start_paused = true)]

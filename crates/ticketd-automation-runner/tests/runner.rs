@@ -1015,6 +1015,50 @@ async fn an_invalid_reply_leaves_the_run_live_and_a_saved_reply_waits_for_cleanu
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_ordinary_linked_attachment_reply_takes_over_only_when_committed() {
+    let f = Fixture::new();
+    f.agent_working().await;
+    let chat = f.chat();
+    let existing_links = f.core().chat(&chat).unwrap().links;
+    let file =
+        ChatAttachmentContent::from_data_url("notes.txt", "data:text/plain;base64,bm90ZXM=", 100)
+            .unwrap();
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("New context").unwrap().id,
+    };
+    let send = || {
+        f.host.send_linking_attachments(
+            &chat,
+            "Reply",
+            SendMode::Queue,
+            vec![file.clone()],
+            vec![link.clone()],
+        )
+    };
+    f.core().set_attachment_upload_limit(1).unwrap();
+    assert!(matches!(
+        send().await,
+        Err(HostError::Core(Error::UploadLimit { limit: 1 }))
+    ));
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::Running);
+    assert_eq!(f.core().chat(&chat).unwrap().links, existing_links);
+    assert!(f.core().chat_queue(&chat).unwrap().is_empty());
+
+    f.core().set_attachment_upload_limit(100).unwrap();
+    let saved = send().await.unwrap();
+    assert_eq!(f.runs()[0].status, AutomationRunStatus::TakenOver);
+    assert!(f.core().chat(&chat).unwrap().links.contains(&link));
+    assert_eq!(f.core().chat_queue(&chat).unwrap(), [saved.clone()]);
+    assert_eq!(
+        f.core()
+            .chat_message_attachment_contents(&chat, &saved.id)
+            .unwrap(),
+        [file]
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_automation_edit_commits_its_links_and_takeover_only_with_the_saved_reply() {
     let f = Fixture::new();
     f.agent_working().await;

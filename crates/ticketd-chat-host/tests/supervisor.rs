@@ -2026,6 +2026,50 @@ async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
     assert_eq!(notices(&f).len(), 4);
 }
 
+#[tokio::test(start_paused = true)]
+async fn an_ordinary_linked_attachment_reaches_a_live_session_with_its_context() {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let context_path = path.clone();
+    f.host = ChatHost::with_context(
+        Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+        vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
+        Some(Arc::new(move |chat_id| {
+            let chat = Workspace::open(&context_path)
+                .and_then(|core| core.chat(chat_id))
+                .map_err(|error| error.to_string())?;
+            Ok(Some(format!("linked records: {}", chat.links.len())))
+        })),
+    )
+    .unwrap();
+    f.send("first").await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Attachment context").unwrap().id,
+    };
+    let file =
+        ChatAttachmentContent::from_data_url("notes.txt", "data:text/plain;base64,bm90ZXM=", 100)
+            .unwrap();
+    f.host
+        .send_linking_attachments(
+            &f.chat.id,
+            "Attached",
+            SendMode::Auto,
+            vec![file.clone()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    settle().await;
+
+    assert_eq!(f.fake.opens().len(), 1);
+    let submissions = f.submits();
+    assert_eq!(submissions[1].text, "linked records: 1\n\nAttached");
+    assert_eq!(submissions[1].attachments, [file]);
+}
+
 /// L4: links changed after the session started reach the agent with the next new turn,
 /// kept as context like the first delivery; a resumed native session is told only
 /// when its context differs from what it was given.

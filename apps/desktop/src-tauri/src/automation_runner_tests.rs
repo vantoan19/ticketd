@@ -188,9 +188,14 @@ async fn the_runner_is_told_why_there_is_no_chat_host() {
     ));
     let _ = f.chats.set_enabled(true).await;
     assert!(f.chats.automation_host().is_ok());
-    f.chats.begin_restore().await.unwrap();
-    assert!(matches!(
-        f.chats.automation_host(),
-        Err(HostError::Restoring)
-    ));
+    let backup = f.dir.path().join("valid.ticketd-backup");
+    assert!(f.core().backup(&backup).unwrap());
+    let chats = f.chats.clone();
+    f.chats
+        .restore(backup, move |path| {
+            assert!(matches!(chats.automation_host(), Err(HostError::Restoring)));
+            Ok(path)
+        })
+        .await
+        .unwrap();
 }

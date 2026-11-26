@@ -901,6 +901,7 @@ pub struct Chats {
     /// Set while the workspace is being replaced by a backup, so that no host is
     /// started meanwhile. A host that already runs refuses work by itself.
     restoring: AtomicBool,
+    restore_owner: tokio::sync::Mutex<()>,
     host: Mutex<Option<ChatHost>>,
     /// Per Chat, the failed turn after which "Check again" found the harness usable.
     // ponytail: kept for this run of ticketd only; after a restart the last turn's
@@ -934,6 +935,17 @@ fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
+struct RestoreAdmission<'a>(&'a Chats);
+
+impl Drop for RestoreAdmission<'_> {
+    fn drop(&mut self) {
+        if let Some(host) = self.0.started_host() {
+            host.finish_restore();
+        }
+        self.0.restoring.store(false, Ordering::SeqCst);
+    }
+}
+
 impl Chats {
     pub fn new(
         open_workspace: WorkspaceOpener,
@@ -948,6 +960,7 @@ impl Chats {
             context,
             enabled: AtomicBool::new(false),
             restoring: AtomicBool::new(false),
+            restore_owner: tokio::sync::Mutex::new(()),
             host: Mutex::new(None),
             checked: Mutex::new(HashMap::new()),
             feeds: Mutex::new(HashMap::new()),
@@ -994,17 +1007,20 @@ impl Chats {
         if !self.enabled() {
             return Err(failed("Chat is turned off in Settings > Experimental."));
         }
-        if self.restoring.load(Ordering::SeqCst) {
-            return Err(failed(
+        self.started_or_start().map_err(|error| match error {
+            HostError::Restoring => failed(
                 "The workspace is being restored from a backup. Try again when it has finished.",
-            ));
-        }
-        Ok(self.started_or_start()?)
+            ),
+            error => error.into(),
+        })
     }
 
     /// The one host, started if it has not been yet.
     fn started_or_start(&self) -> Result<ChatHost, HostError> {
         let mut host = lock(&self.host);
+        if self.restoring.load(Ordering::SeqCst) {
+            return Err(HostError::Restoring);
+        }
         if let Some(host) = host.as_ref() {
             return Ok(host.clone());
         }
@@ -1023,9 +1039,6 @@ impl Chats {
     pub fn automation_host(&self) -> Result<ChatHost, HostError> {
         if !self.enabled() {
             return Err(HostError::TurnedOff);
-        }
-        if self.restoring.load(Ordering::SeqCst) {
-            return Err(HostError::Restoring);
         }
         self.started_or_start()
     }
@@ -1116,15 +1129,9 @@ impl Chats {
             .is_ok_and(|workspace| workspace.any_automation_on().unwrap_or(false))
     }
 
-    /// Before the workspace is replaced by a backup: stops every running Chat, so no
-    /// harness keeps working against records that are about to change, and refuses new
-    /// work until `finish_restore`. Returns the Chats whose harness could not be
-    /// confirmed stopped.
-    pub async fn begin_restore(&self) -> Result<Vec<UnconfirmedCleanup>, UnconfirmedCleanup> {
-        self.restoring.store(true, Ordering::SeqCst);
+    /// Stops running Chats and refuses requests from existing clones of the host.
+    async fn stop_for_restore(&self) -> Result<Vec<UnconfirmedCleanup>, UnconfirmedCleanup> {
         match self.started_host() {
-            // The host refuses on every clone of it, including one a command took
-            // before this point.
             Some(host) => host.begin_restore().await,
             None => Ok(Vec::new()),
         }
@@ -1133,7 +1140,7 @@ impl Chats {
     /// After the restore, whether or not it replaced anything. The records now in the
     /// workspace have no runtime behind them: they are reconciled as lost contact, and
     /// every queue with input in it is paused, so restored input waits for the person.
-    pub fn finish_restore(&self) -> Outcome<()> {
+    fn reconcile_restored_workspace(&self) -> Outcome<()> {
         let reconciled = self.workspace().and_then(|mut workspace| {
             let restored = TurnEnding::StoppedByTicketd(StopReason::Restore);
             workspace.mark_chat_contact_lost(
@@ -1163,48 +1170,48 @@ impl Chats {
         // Views read a new snapshot: their cursors belong to the replaced records.
         lock(&self.feeds).clear();
         lock(&self.checked).clear();
-        self.end_restore_admission();
         reconciled
-    }
-
-    fn end_restore_admission(&self) {
-        if let Some(host) = self.started_host() {
-            host.finish_restore();
-        }
-        self.restoring.store(false, Ordering::SeqCst);
     }
 
     /// Replaces the workspace with a backup through `replace`, which returns the safety
     /// copy. The backup is checked first, so one that cannot be restored stops nothing;
     /// then running Chats are stopped and nothing restored is run.
     pub async fn restore(
-        &self,
+        self: &Arc<Self>,
         backup: PathBuf,
         replace: impl FnOnce(PathBuf) -> Result<PathBuf, String> + Send + 'static,
     ) -> Result<Restored, String> {
-        let open = self.open_workspace.clone();
-        let checked = backup.clone();
-        let check = tokio::task::spawn_blocking(move || restorable(&open, &checked)).await;
-        // A check that could not run is not a refusal: the restore checks the backup again.
-        if let Ok(Err(refused)) = check {
-            return Err(refused);
-        }
-        let unconfirmed = match self.begin_restore().await {
-            Ok(warnings) => warnings,
-            Err(blocked) => {
-                self.end_restore_admission();
-                return Err(format!(
+        let chats = self.clone();
+        // A cancelled caller cannot abandon a replacement already running on a blocking thread.
+        tokio::spawn(async move {
+            let _owner = chats.restore_owner.try_lock().map_err(|_| {
+                "A workspace restore is already in progress. Try again when it has finished."
+                    .to_owned()
+            })?;
+            let open = chats.open_workspace.clone();
+            let checked = backup.clone();
+            let check = tokio::task::spawn_blocking(move || restorable(&open, &checked)).await;
+            // If the check did not run, replacement still checks the backup.
+            if let Ok(result) = check {
+                result?;
+            }
+            chats.restoring.store(true, Ordering::SeqCst);
+            let _admission = RestoreAdmission(&chats);
+            let unconfirmed = chats.stop_for_restore().await.map_err(|blocked| {
+                format!(
                     "The workspace could not be restored because {}.",
                     blocked.reason,
-                ));
-            }
-        };
-        let restored = tokio::task::spawn_blocking(move || replace(backup))
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|restored| restored);
-        let reconciled = self.finish_restore();
-        restore_outcome(restored, reconciled, unconfirmed.len())
+                )
+            })?;
+            let restored = tokio::task::spawn_blocking(move || replace(backup))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|restored| restored);
+            let reconciled = chats.reconcile_restored_workspace();
+            restore_outcome(restored, reconciled, unconfirmed.len())
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     /// Stops app-owned execution with bounded cleanup. The host accepts nothing afterwards.
@@ -2182,13 +2189,13 @@ impl Chats {
             self.workspace()?.attachment_upload_limit()?
         };
         let attachments = Self::decode_message_attachments(text, files, limit)?;
-        if !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)? {
-            host.links_changed(chat_id).await?;
-        }
         if attachments.is_empty() {
+            if !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)? {
+                host.links_changed(chat_id).await?;
+            }
             return self.send(chat_id, text, mode).await;
         }
-        host.send_with_attachments(chat_id, None, text, mode, attachments)
+        host.send_linking_attachments(chat_id, text, mode, attachments, links)
             .await?;
         Ok(())
     }

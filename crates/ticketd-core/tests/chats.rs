@@ -505,6 +505,10 @@ fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
         .save_chat_input_with_edit(Some("edit"), &chat.id, "Edited", &[], Some(&edit))
         .unwrap();
     assert!(linked);
+    assert!(matches!(
+        workspace.save_chat_input_replacing(Some("edit"), &chat.id, "Edited", &[], &edit.replaces),
+        Err(Error::RequestConflict(_))
+    ));
     workspace
         .set_chat_link(&chat.id, link.clone(), false)
         .unwrap();
@@ -527,7 +531,49 @@ fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
         workspace.replay_chat_input_with_edit("edit", &chat.id, "Edited", &[], Some(&changed)),
         Err(Error::RequestConflict(_))
     ));
+    assert!(matches!(
+        workspace.replay_chat_input_replacing("edit", &chat.id, "Edited", &[], &changed.replaces),
+        Err(Error::RequestConflict(_))
+    ));
+    assert!(matches!(
+        workspace.replay_chat_queue_edit("edit", &chat.id, "Edited", &[], &changed.replaces),
+        Err(Error::RequestConflict(_))
+    ));
     assert!(workspace.chat(&chat.id).unwrap().links.is_empty());
+}
+
+#[test]
+fn a_replacement_only_request_matches_an_empty_link_receipt_after_withdrawal() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let original = workspace
+        .save_chat_input(None, &chat.id, "Original")
+        .unwrap();
+    workspace
+        .confirm_chat_queue_edit(&chat.id, &original.id, "hold")
+        .unwrap();
+    let edit = ChatQueueEdit {
+        replaces: vec![original.id],
+        links: Vec::new(),
+    };
+    let (mut saved, _) = workspace
+        .save_chat_input_with_edit(Some("edit"), &chat.id, "Edited", &[], Some(&edit))
+        .unwrap();
+    workspace.withdraw_chat_input(&chat.id, &saved.id).unwrap();
+    saved.message = None;
+
+    assert_eq!(
+        workspace
+            .replay_chat_input_replacing("edit", &chat.id, "Edited", &[], &edit.replaces)
+            .unwrap(),
+        Some(saved.clone()),
+    );
+    assert_eq!(
+        workspace
+            .save_chat_input_replacing(Some("edit"), &chat.id, "Edited", &[], &edit.replaces)
+            .unwrap(),
+        saved,
+    );
 }
 
 #[test]
