@@ -118,8 +118,8 @@ pub fn change_line(change: &ChatAgentChange) -> String {
     }
 }
 
-/// The first line of Markdown as plain words, for a one-line detail.
-fn plain_start(markdown: &str) -> Option<String> {
+/// The first line of Markdown as plain text, whole.
+fn plain_text(markdown: &str) -> Option<String> {
     let line = markdown
         .lines()
         .map(str::trim)
@@ -148,7 +148,12 @@ fn plain_start(markdown: &str) -> Option<String> {
     text.push_str(rest);
     let text = text.replace(['`'], "").replace("**", "").replace("__", "");
     let text = text.trim();
-    (!text.is_empty()).then(|| text.chars().take(140).collect())
+    (!text.is_empty()).then(|| text.to_owned())
+}
+
+/// The first line of Markdown as plain words, for a one-line detail.
+fn plain_start(markdown: &str) -> Option<String> {
+    plain_text(markdown).map(|text| text.chars().take(140).collect())
 }
 
 /// "1 file changed", "3 files changed".
@@ -163,7 +168,8 @@ const FIRST_WORDS: usize = 60;
 /// The first words of a reply, cut at a word with "…". A link is whole or left out:
 /// a row never shows half of one.
 fn first_words(markdown: &str) -> Option<String> {
-    let text = plain_start(markdown)?;
+    // Whole, so the word limit below is the only cut and never leaves half a word.
+    let text = plain_text(markdown)?;
     let mut kept = String::new();
     let mut cut = false;
     for word in text.split_whitespace() {
