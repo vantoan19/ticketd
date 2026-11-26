@@ -115,7 +115,7 @@ pub struct DocumentPatch {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_title"
+        deserialize_with = "present_field"
     )]
     pub title: Option<Option<String>>,
     pub body: Option<String>,
@@ -123,7 +123,7 @@ pub struct DocumentPatch {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "present_title"
+        deserialize_with = "present_field"
     )]
     pub summary: Option<Option<String>>,
     /// The `updated_at` the caller last saw. When present and stale the change is rejected, so
@@ -144,7 +144,7 @@ pub(crate) fn one_line_summary(summary: &str) -> Option<String> {
     (!line.is_empty()).then_some(line)
 }
 
-fn present_title<'de, D: serde::Deserializer<'de>>(
+fn present_field<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Option<String>>, D::Error> {
     Option::<String>::deserialize(deserializer).map(Some)
