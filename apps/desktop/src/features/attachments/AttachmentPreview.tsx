@@ -991,7 +991,11 @@ function PreviewStage({
           }
         />
       );
-  } else if (failed && file)
+  } else if (info && !preview.availability.known)
+    // Until the storage says where the bytes are, a file read ahead must not
+    // be read, nor taken for one with no preview: it may still be in Drive.
+    body = <PreviewLoading shape={type.family === "pdf" ? "page" : "block"} />;
+  else if (failed && file)
     body = (
       <PreviewState
         family={type.family}
@@ -1276,12 +1280,33 @@ type Origin = {
   scroll: [Element, number][];
 };
 
+/**
+ * macOS WebKit does not focus a button or link that is clicked, so the opener
+ * of a mouse-opened viewer is not the focused element: it is what was last pressed.
+ */
+let pressed: { target: Element; at: number } | null = null;
+if (typeof document !== "undefined")
+  document.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.target instanceof Element)
+        pressed = { target: event.target, at: event.timeStamp };
+    },
+    true,
+  );
+const OPENER_MS = 5000;
+
 /** Reads where the reviewer is, so closing the viewer can put them back. */
 function captureOrigin(): Origin {
-  const focus =
-    document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
+  const active = document.activeElement;
+  let focus =
+    active instanceof HTMLElement && active !== document.body ? active : null;
+  if (!focus && pressed && performance.now() - pressed.at < OPENER_MS) {
+    const opener = pressed.target.closest<HTMLElement>(
+      "button, a[href], [role='button'], [tabindex]",
+    );
+    if (opener?.isConnected) focus = opener;
+  }
   const scroll: [Element, number][] = [];
   for (let node: Element | null = focus; node; node = node.parentElement)
     if (node.scrollTop > 0) scroll.push([node, node.scrollTop]);
@@ -1469,12 +1494,18 @@ export function AttachmentPreview({
         size="viewer"
         showCloseButton={false}
         inert={!presence.dialog.open || undefined}
-        {...(fallbackFocus && {
-          // The opener, unless it is gone (the file was detached meanwhile).
-          resolveReturnFocus: () =>
-            origin.focus?.isConnected ? null : fallbackFocus(),
-        })}
+        // The opener, unless it is gone (the file was detached meanwhile).
+        resolveReturnFocus={() =>
+          origin.focus?.isConnected ? origin.focus : (fallbackFocus?.() ?? null)
+        }
         onEscapeKeyDown={(event) => {
+          // Renaming is a field too: Esc cancels it first. The dialog hears the key
+          // before the form does, so it cancels here and keeps the viewer open.
+          if (renaming) {
+            event.preventDefault();
+            setRenaming(false);
+            return;
+          }
           // In a field of the format (the PDF's page number), Esc leaves the field first.
           const field =
             event.target instanceof HTMLElement &&

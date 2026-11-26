@@ -1276,3 +1276,89 @@ test("the scripts line carries an info glyph, and a damaged PDF sits in the cent
   const title = await screen.findByText("Couldn’t show this PDF");
   expect(title.closest(".attachment-pdf-state")).not.toBeNull();
 });
+
+test("Esc in the Rename field cancels the rename and leaves the viewer open", async () => {
+  servePdf();
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(2).document);
+  const close = vi.fn();
+  render(<AttachmentPreview target={{ id: pdfFile.id }} onClose={close} />);
+  await screen.findByRole("textbox", { name: "Page" });
+  const more = screen.getByRole("button", { name: "More actions" });
+  fireEvent.pointerDown(more, { button: 0, ctrlKey: false });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Rename…" }));
+  const name = await screen.findByRole("textbox", { name: "Display name" });
+  fireEvent.keyDown(name, { key: "j" });
+  fireEvent.keyDown(name, { key: "Escape" });
+  // The field goes, the viewer stays, and focus has somewhere to be.
+  await waitFor(() =>
+    expect(screen.queryByRole("textbox", { name: "Display name" })).toBeNull(),
+  );
+  expect(screen.getByRole("dialog")).toBeTruthy();
+  expect(close).not.toHaveBeenCalled();
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "More actions" }),
+    ),
+  );
+  // A second Esc, now outside the field, closes the viewer.
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+});
+
+test("a report is not read until the storage has said it is on this computer", async () => {
+  let answer: (value: unknown) => void = () => {};
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    // The bytes exist here only as far as the preview knows; the storage has not answered.
+    if (command === "attachment_availability")
+      return new Promise((resolve) => (answer = resolve));
+    if (command === "attachment_preview") return reportPreview;
+    if (command === "attachment_html") return reportSource;
+    return null;
+  });
+  render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith(
+      "attachment_preview",
+      expect.anything(),
+    ),
+  );
+  await act(async () => {});
+  expect(invoke).not.toHaveBeenCalledWith("attachment_html", expect.anything());
+  expect(screen.queryByLabelText("Report: E2E report")).toBeNull();
+  // Once it has, the file reads as it always did.
+  await act(async () => answer([]));
+  expect(await screen.findByLabelText("Report: E2E report")).toBeTruthy();
+});
+
+test("a viewer opened with the mouse returns focus to the card that was pressed, though WebKit never focused it", async () => {
+  serveWalk();
+  function Card() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <button type="button" onClick={() => setOpen(true)}>
+          Open the card
+        </button>
+        {open && (
+          <AttachmentPreview
+            target={{ id: shot.id }}
+            onClose={() => setOpen(false)}
+          />
+        )}
+      </>
+    );
+  }
+  render(<Card />);
+  const card = screen.getByRole("button", { name: "Open the card" });
+  // WebKit: the press and the click leave focus on the body.
+  fireEvent.pointerDown(card);
+  fireEvent.click(card);
+  expect(document.activeElement).not.toBe(card);
+  await screen.findByRole("img", { name: "refund.png" });
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(card);
+});
