@@ -1191,6 +1191,7 @@ function RecoveredActivity({
                           source={item.note.brief}
                           select={select}
                           revision={revision}
+                          attachmentCards
                         />
                       </Clamp>
                     </div>

@@ -30,6 +30,8 @@ import { codeLanguageLabel } from "./code-language";
 import { chunkFade } from "./chunk-fade";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
+import { AttachmentCardLink } from "./AttachmentCardLink";
+import { cardLinks } from "./attachment-cards";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Check } from "lucide-react";
 import { AttachmentImage as InlineAttachmentImage } from "./InlineImage";
@@ -47,6 +49,8 @@ import {
 } from "@/features/tickets/mention-passage";
 
 const MarkdownSource = createContext("");
+/** Saved updates show an attachment link alone on its line as a card. */
+const AttachmentCards = createContext(false);
 const AttachmentReplacement = createContext<
   (node: ExtraProps["node"], uri: string) => ReferenceReplacement | undefined
 >(() => undefined);
@@ -122,9 +126,14 @@ function DocumentLink({
   const openDocument = useContext(DocumentNavigation);
   const openPlan = useContext(PlanNavigation);
   const replacement = useContext(AttachmentReplacement);
+  const glyph = useContext(AttachmentCards);
   if (href?.startsWith("ticketd://attachment/"))
     return (
-      <AttachmentLink uri={href} onReplace={replacement(node, href)}>
+      <AttachmentLink
+        uri={href}
+        onReplace={replacement(node, href)}
+        glyph={glyph}
+      >
         {children}
       </AttachmentLink>
     );
@@ -279,34 +288,51 @@ function mentionBlock(tag: string) {
     ...props
   }: Record<string, unknown> & ExtraProps) {
     const mark = useContext(MentionTarget);
+    const replacement = useContext(AttachmentReplacement);
+    const cards = useContext(AttachmentCards);
     const marked =
       mark !== null && isMentionBlock(node as PositionedNode, mark);
+    const alone =
+      cards && (tag === "p" || tag === "li") ? cardLinks(node) : null;
     return createElement(
       tag,
-      marked
-        ? {
-            ...props,
-            "data-mention-target": "",
-            tabIndex: -1,
-            "aria-describedby": mark.describedBy,
-          }
-        : props,
-      tag === "li" && String(props.className ?? "").includes("task-list-item")
-        ? Children.map(children as React.ReactNode, (child) => {
-            const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
-              ? typeof child.type === "string"
-                ? child.type
-                : child.props.node?.tagName
-              : undefined;
-            // A child list has its own checked state; loose paragraphs already
-            // provide a block to decorate without striking the child list.
-            return name && ["ul", "ol", "p", "input"].includes(name) ? (
-              child
-            ) : (
-              <span className="markdown-task-text">{child}</span>
-            );
-          })
-        : (children as React.ReactNode),
+      {
+        ...(marked
+          ? {
+              ...props,
+              "data-mention-target": "",
+              tabIndex: -1,
+              "aria-describedby": mark.describedBy,
+            }
+          : props),
+        ...(alone && { "data-cards": "" }),
+      },
+      alone
+        ? alone.map((link, index) => (
+            <AttachmentCardLink
+              key={`${index}:${link.uri}`}
+              uri={link.uri}
+              label={link.label}
+              onReplace={replacement(link.node as ExtraProps["node"], link.uri)}
+            />
+          ))
+        : tag === "li" &&
+            String(props.className ?? "").includes("task-list-item")
+          ? Children.map(children as React.ReactNode, (child) => {
+              const name = isValidElement<{ node?: ExtraProps["node"] }>(child)
+                ? typeof child.type === "string"
+                  ? child.type
+                  : child.props.node?.tagName
+                : undefined;
+              // A child list has its own checked state; loose paragraphs already
+              // provide a block to decorate without striking the child list.
+              return name && ["ul", "ol", "p", "input"].includes(name) ? (
+                child
+              ) : (
+                <span className="markdown-task-text">{child}</span>
+              );
+            })
+          : (children as React.ReactNode),
     );
   };
 }
@@ -430,6 +456,7 @@ export function MarkdownDocument({
   mention,
   onChange,
   chunkStarts,
+  attachmentCards = false,
 }: {
   source: string;
   select?: ((reference: string) => void) | undefined;
@@ -440,6 +467,8 @@ export function MarkdownDocument({
     ((source: string, signal: AbortSignal) => void | Promise<void>) | undefined;
   /** Streamed text: source offsets where each newly arrived chunk began; each fades in. */
   chunkStarts?: readonly number[] | undefined;
+  /** Show an attachment link that stands alone on its line as a card. */
+  attachmentCards?: boolean | undefined;
 }) {
   const currentSource = useRef(source);
   const recovery = useDraftRecovery();
@@ -509,7 +538,9 @@ export function MarkdownDocument({
         <MentionTarget.Provider value={mention ?? null}>
           <MarkdownSource.Provider value={source}>
             <AttachmentReplacement.Provider value={replacement}>
-              {rendered}
+              <AttachmentCards.Provider value={attachmentCards}>
+                {rendered}
+              </AttachmentCards.Provider>
             </AttachmentReplacement.Provider>
           </MarkdownSource.Provider>
         </MentionTarget.Provider>

@@ -154,3 +154,8 @@
 .activity-composer > .markdown-editor .cm-content {
   padding-block: 12px;
 }
+
+/* In the timeline a picture stops at 240px tall; a click opens the viewer. */
+.activity-note .markdown-image img {
+  max-height: 240px;
+}
