@@ -86,3 +86,17 @@ test("a longer name gives way in the middle and keeps its end and extension", ()
 test("an unmeasured header (no width yet) is left alone", () => {
   expect(fitTitle("a-very-long-name.log", 0, unit).cut).toBe(false);
 });
+
+test("a cut never splits an emoji or a letter from its accent", () => {
+  const broken =
+    /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]|…́/;
+  const names = [
+    `${"🎉".repeat(30)}-${"🎉".repeat(9)}b`,
+    `${"🎉".repeat(30)}b.png`,
+    `${"é".repeat(40)}.log`,
+  ];
+  for (const name of names) {
+    expect(fitName(name, measure).text).not.toMatch(broken);
+    expect(fitTitle(name, 100, measure).text).not.toMatch(broken);
+  }
+});

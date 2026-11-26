@@ -15,6 +15,29 @@ const MIN_END = 6;
 const LIMIT = 36;
 
 type Measure = (text: string) => number;
+
+// A name is cut between letters as a reader sees them, never inside an emoji
+// (two UTF-16 units) or between a letter and its accent.
+const segmenter =
+  typeof Intl !== "undefined" && "Segmenter" in Intl
+    ? new Intl.Segmenter()
+    : null;
+function pieces(text: string): string[] {
+  return segmenter
+    ? Array.from(segmenter.segment(text), (part) => part.segment)
+    : Array.from(text);
+}
+const dropFirst = (text: string) => pieces(text).slice(1).join("");
+const dropLast = (text: string) => pieces(text).slice(0, -1).join("");
+/** The last whole letters of `text` that fit in `units` UTF-16 units (at least one). */
+function lastUnits(text: string, units: number): string {
+  let out = "";
+  for (const piece of pieces(text).reverse()) {
+    if (out && out.length + piece.length > units) break;
+    out = piece + out;
+  }
+  return out;
+}
 export type FittedName = {
   /** The name to show, cut in the middle when it is too long. */
   text: string;
@@ -71,7 +94,7 @@ function keptEnd(name: string): string {
     if (next.length > KEEP) break;
     end = next;
   }
-  return end.length >= MIN_END ? end : name.slice(-KEEP);
+  return end.length >= MIN_END ? end : lastUnits(name, KEEP);
 }
 
 /** Greedy wrap at `-`, `_`, `.` and spaces, as the card's two lines do. */
@@ -114,9 +137,9 @@ export function fitName(name: string, measure = measurer()): FittedName {
   // The end comes from the second line, never from the first, and gives up
   // letters until it fits: a wide script can make 14 of them wider than a line.
   let end = keptEnd(rest);
-  while (end.length > 1 && measure(`…${end}`) > WIDTH) end = end.slice(1);
+  while (end.length > 1 && measure(`…${end}`) > WIDTH) end = dropFirst(end);
   let head = rest.slice(0, Math.max(0, rest.length - end.length));
-  while (head && measure(`${head}…${end}`) > WIDTH) head = head.slice(0, -1);
+  while (head && measure(`${head}…${end}`) > WIDTH) head = dropLast(head);
   // The cut falls between words when there is a word to fall between, and the
   // ellipsis sits against the words it joins, not against a separator.
   const wholeWords = head.match(/^(.*[-_. ])[^-_. ]*$/)?.[1];
@@ -149,8 +172,8 @@ export function fitTitle(
   measure: Measure,
 ): FittedName {
   if (width <= 0 || measure(name) <= width) return { text: name, cut: false };
-  const tail = name.slice(-KEEP);
-  let head = name.slice(0, Math.max(0, name.length - KEEP));
-  while (head && measure(`${head}…${tail}`) > width) head = head.slice(0, -1);
+  const tail = lastUnits(name, KEEP);
+  let head = name.slice(0, Math.max(0, name.length - tail.length));
+  while (head && measure(`${head}…${tail}`) > width) head = dropLast(head);
   return { text: `${head}…${tail}`, cut: true };
 }
