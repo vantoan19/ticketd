@@ -71,6 +71,7 @@ export function bridgeDefault(
     case "project_source_candidates":
     case "sync_conflicts": // without sync: nothing to review, every file local
     case "sync_notices":
+    case "sync_devices": // without sync: no other computers
     case "attachment_availability":
     case "list_trash":
     case "source_configuration_summary":

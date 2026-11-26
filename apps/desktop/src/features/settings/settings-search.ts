@@ -187,9 +187,10 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "workspace-sync",
   },
   {
-    title: "Name",
-    description: "New tickets here are numbered",
-    keywords: "this desktop device ticket code",
+    title: "Computers",
+    description: "This computer",
+    keywords:
+      "rename name this computer desktop device ticket code last change",
     section: "workspace-sync",
   },
   {
@@ -199,16 +200,15 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "workspace-sync",
   },
   {
-    title: "Attachments",
+    title: "Files from your other computers",
     description: "Download when opened",
     keywords:
-      "download automatically every file works offline saves disk space files",
+      "attachments download automatically every file works offline saves disk space files",
     section: "workspace-sync",
   },
   {
-    title: "Disconnect this desktop",
-    description:
-      "Stops syncing here. Your files stay in Drive and on this computer.",
+    title: "Stop syncing on this computer",
+    description: "Your files stay in Drive and on this computer.",
     keywords:
       "disconnect google drive s3 sign out account remove unlink stop syncing",
     section: "workspace-sync",

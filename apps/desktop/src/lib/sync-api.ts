@@ -171,6 +171,20 @@ const settingsSchema = z.object({
 export type SyncSettings = z.infer<typeof settingsSchema>;
 export type SyncSettingsChange = Omit<SyncSettings, "device_code">;
 
+/** One computer of the device list: this one, or another that joined the same Workspace. */
+const deviceSchema = z.object({
+  id: z.string(),
+  /** How the computer is named; this one's name is the one in force now. */
+  name: z.string(),
+  /** The two-letter code in the references of tickets made there. */
+  code: z.string(),
+  /** RFC 3339 time of its last uploaded change; `null` before it has uploaded one. */
+  last_synced_at: z.string().nullable(),
+  /** The computer the list is read on. */
+  this: z.boolean(),
+});
+export type SyncDevice = z.infer<typeof deviceSchema>;
+
 const exitReportSchema = z.object({
   /** What still had not uploaded when the flush ended; empty when everything did. */
   pending: z.array(pendingItemSchema),
@@ -250,6 +264,14 @@ export const syncApi = {
   /** `sync_settings` */
   async settings(): Promise<SyncSettings> {
     return settingsSchema.parse(await invoke("sync_settings"));
+  },
+
+  /**
+   * `sync_devices`: the computers that share this Workspace, this one first. Read
+   * from this computer's copy of the device registry: no sign-in, no network.
+   */
+  async devices(): Promise<SyncDevice[]> {
+    return z.array(deviceSchema).parse(await invoke("sync_devices"));
   },
 
   /** `set_sync_settings`: rejects a poll interval under `SYNC_MIN_POLL_SECS`. */
