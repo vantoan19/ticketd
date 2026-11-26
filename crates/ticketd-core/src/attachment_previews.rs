@@ -485,24 +485,31 @@ fn is_html_name(name: &str) -> bool {
     })
 }
 
-/// Text when the bytes are UTF-8 without NUL or control characters other than
-/// tab, line breaks and form feed. A cut at the end of a truncated excerpt may
-/// split one character; that partial character is dropped. Terminal escape
-/// sequences (a coloured log) are not control characters here: they are removed.
+/// Text when the bytes read as UTF-8 without NUL or control characters other than
+/// tab, line breaks and form feed. A few invalid bytes (one in a log) are replaced
+/// by U+FFFD so they never hide it; a file with many is binary. A cut at the end of
+/// a truncated excerpt may split one character; that partial character is dropped.
+/// Terminal escape sequences (a coloured log) are not control characters here: they
+/// are removed.
 fn text_of(bytes: &[u8], truncated: bool) -> Option<String> {
-    let text = match std::str::from_utf8(bytes) {
-        Ok(text) => text,
-        Err(error) if truncated && error.error_len().is_none() => {
-            std::str::from_utf8(&bytes[..error.valid_up_to()]).ok()?
-        }
-        Err(_) => return None,
+    let bytes = match std::str::from_utf8(bytes) {
+        Err(error) if truncated && error.error_len().is_none() => &bytes[..error.valid_up_to()],
+        _ => bytes,
     };
-    let text = strip_terminal_escapes(text);
+    let text = String::from_utf8_lossy(bytes);
+    let invalid = text.chars().filter(|c| *c == '\u{fffd}').count();
+    if invalid > 1 + text.len() / INVALID_BYTES_PER_TEXT {
+        return None;
+    }
+    let text = strip_terminal_escapes(&text);
     if text.chars().any(is_stray_control) {
         return None;
     }
     Some(text)
 }
+
+/// A file is text while at most one invalid byte in this many (plus one) is replaced.
+const INVALID_BYTES_PER_TEXT: usize = 100;
 
 fn is_stray_control(c: char) -> bool {
     c.is_control() && !matches!(c, '\t' | '\n' | '\r' | '\u{c}')
@@ -564,6 +571,7 @@ fn text_window_first_line(mut file: File, whole: u64, tail: u64) -> Result<u64, 
     file.seek(SeekFrom::Start(0))?;
     let mut remaining = shown_from;
     let mut breaks = 0u64;
+    let mut after_cr = false;
     let mut buffer = vec![0u8; 1 << 20];
     while remaining > 0 {
         let want = buffer.len().min(remaining as usize);
@@ -571,7 +579,15 @@ fn text_window_first_line(mut file: File, whole: u64, tail: u64) -> Result<u64, 
         if read == 0 {
             break;
         }
-        breaks += buffer[..read].iter().filter(|b| **b == b'\n').count() as u64;
+        // A line ends at \n, \r\n or a lone \r, as the viewer splits it.
+        for byte in &buffer[..read] {
+            breaks += match byte {
+                b'\n' => u64::from(!after_cr),
+                b'\r' => 1,
+                _ => 0,
+            };
+            after_cr = *byte == b'\r';
+        }
         remaining -= read as u64;
     }
     Ok(breaks + 1)
@@ -975,6 +991,34 @@ mod tests {
         );
         assert!(text_of(b"a\0b", false).is_none());
         assert!(text_of(b"a\x01b", false).is_none());
+    }
+
+    #[test]
+    fn one_invalid_byte_does_not_hide_a_log_but_a_binary_file_stays_hidden() {
+        assert_eq!(
+            text_of(b"ok\nbad \xff byte\nend\n", false).unwrap(),
+            "ok\nbad \u{fffd} byte\nend\n"
+        );
+        // A character cut at the end of an excerpt is dropped, not shown as a bad byte.
+        assert_eq!(text_of(b"ok \xc3", true).unwrap(), "ok ");
+        assert!(text_of(&[0x80, 0xff, 0xfe, 0xfd, b'a', 0x90], false).is_none());
+        assert!(text_of(b"a\0b", false).is_none());
+    }
+
+    #[test]
+    fn a_tail_is_numbered_by_the_lines_the_viewer_splits() {
+        let dir = tempfile::tempdir().unwrap();
+        let first_line = |content: &[u8], whole, tail| {
+            let path = dir.path().join("log");
+            fs::write(&path, content).unwrap();
+            text_window_first_line(File::open(path).unwrap(), whole, tail).unwrap()
+        };
+        // Lone CRs end lines: the tail begins on line 5, not 1.
+        assert_eq!(first_line(b"a\rb\rc\rd\rtail", 11, 4), 5);
+        // \r\n is one break, and \n alone still counts.
+        assert_eq!(first_line(b"a\r\nb\r\nc\nd\n", 8, 4), 4);
+        // A whole file starts at line 1.
+        assert_eq!(first_line(b"a\rb\rc\r", 100, 4), 1);
     }
 
     #[test]
