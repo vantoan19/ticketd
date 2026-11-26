@@ -1,5 +1,6 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
 import { useState } from "react";
+import { X } from "lucide-react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
@@ -139,6 +140,7 @@ export function AttachmentDialogs({
                 disabled={busy}
                 onSelect={() => void detach(selected)}
               >
+                <X aria-hidden="true" />
                 Detach from ticket
               </DropdownMenuItem>
             )

@@ -570,24 +570,27 @@ function ViewBarFind({
       <ViewBarGroup label="Find">
         {finding ? (
           <>
-            <Input
-              ref={inputRef}
-              variant="inline"
-              className="h-6 w-44"
-              aria-label="Find in the text"
-              placeholder="Find"
-              autoComplete="off"
-              spellCheck={false}
-              data-view-field=""
-              value={query}
-              onChange={(event) => onQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  onStep(event.shiftKey ? -1 : 1);
-                } else if (event.key === "Escape") onClose();
-              }}
-            />
+            <span className="view-bar-search">
+              <Search aria-hidden="true" />
+              <Input
+                ref={inputRef}
+                variant="inline"
+                className="h-6 w-44"
+                aria-label="Find in the text"
+                placeholder="Find"
+                autoComplete="off"
+                spellCheck={false}
+                data-view-field=""
+                value={query}
+                onChange={(event) => onQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    onStep(event.shiftKey ? -1 : 1);
+                  } else if (event.key === "Escape") onClose();
+                }}
+              />
+            </span>
             <span
               className="view-bar-of attachment-text-count"
               role="status"

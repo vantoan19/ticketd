@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type RefObject } from "react";
+import { Info } from "lucide-react";
 import { FailureState } from "@/components/ui/failure-alert";
 import { attachments, type Attachment } from "@/lib/api/attachments";
 import {
@@ -108,6 +109,7 @@ export function HtmlStage({
     <div className="attachment-report">
       {(report.scripts || report.external) && (
         <p className="attachment-report-note">
+          <Info aria-hidden="true" />
           Scripts and online images are off in this preview.
         </p>
       )}

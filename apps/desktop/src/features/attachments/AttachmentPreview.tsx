@@ -7,21 +7,28 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
+  type ReactElement,
   type ReactNode,
   type RefObject,
 } from "react";
 import {
   ArrowLeft,
-  ArrowUpFromLine,
   ChevronLeft,
   ChevronRight,
   CloudDownload,
+  Download,
   Ellipsis,
+  Info,
   Link,
+  PanelRight,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
   X,
 } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Kbd } from "@/components/ui/kbd";
 import { useDialogPresence } from "@/components/ui/use-dialog-presence";
 import { CopyButton } from "@/components/ui/copy-button";
 import {
@@ -36,11 +43,10 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuSeparator,
-  DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
-import { PaneHeader } from "@/components/ui/list-header";
+import { PaneHeader, ShellSlotProvider } from "@/components/ui/list-header";
 import {
   ariaKeyShortcuts,
   matchesShortcut,
@@ -79,6 +85,7 @@ import { DriveReferenceDetails } from "./DriveReferenceDetails";
 import { DriveAccessRecovery } from "./DriveAccessRecovery";
 import { ExportMarkdownButton } from "./ExportMarkdown";
 import { FileIcon } from "./AttachmentThumbnail";
+import { FittedTitle } from "./FittedTitle";
 import { HtmlStage } from "./HtmlStage";
 import { PdfStage, type StageKeys } from "./PdfStage";
 import { TextStage } from "./TextStage";
@@ -389,7 +396,7 @@ function useCompact(): boolean {
   );
 }
 
-/** Export, a tray-out icon; while the bytes are not here it keeps its place and says why. */
+/** Export, the tray icon (the one Drive references use too); while the bytes are not here it keeps its place and says why. */
 function exportButton(
   file: Attachment,
   busy: boolean,
@@ -404,7 +411,7 @@ function exportButton(
         void preview.action("export the file", () => attachments.export(file))
       }
     >
-      <ArrowUpFromLine />
+      <Download />
     </IconButton>
   );
   return blocked ? (
@@ -507,7 +514,7 @@ function PreviewHeader({
   /** A compact window: Export moves under "…". */
   compact?: boolean;
   /** The heading element: the dialog's title, or the pane's h2. */
-  title: (name: string) => ReactNode;
+  title: (name: ReactNode) => ReactElement;
   onClose: () => void;
   /** The close button: DialogClose in the viewer, a plain button in a pane. */
   close: (button: ReactNode) => ReactNode;
@@ -615,9 +622,10 @@ function PreviewHeader({
             }}
           />
         ) : (
-          <span className="attachment-preview-title">
-            {title(file?.display_name ?? "Attachment")}
-          </span>
+          <FittedTitle
+            name={file?.display_name ?? "Attachment"}
+            heading={title}
+          />
         )
       }
       actions={
@@ -677,10 +685,11 @@ function PreviewHeader({
                 <DropdownMenuContent align="end">
                   {details && (
                     <DropdownMenuItem onSelect={details.toggle}>
+                      <PanelRight aria-hidden="true" />
                       {details.shown ? "Hide details" : "Show details"}
-                      <DropdownMenuShortcut>
+                      <Kbd aria-hidden="true" className="ml-auto">
                         {shortcutLabel("attachments-details")}
-                      </DropdownMenuShortcut>
+                      </Kbd>
                     </DropdownMenuItem>
                   )}
                   {compact && file && !external && (
@@ -692,6 +701,7 @@ function PreviewHeader({
                         )
                       }
                     >
+                      <Download aria-hidden="true" />
                       Export file
                     </DropdownMenuItem>
                   )}
@@ -700,15 +710,18 @@ function PreviewHeader({
                     !preview.gone &&
                     !file.quarantined && (
                       <DropdownMenuItem onSelect={() => void copyLink()}>
+                        <Link aria-hidden="true" />
                         Copy link
                       </DropdownMenuItem>
                     )}
                   <DropdownMenuItem onSelect={() => onRenamingChange(true)}>
+                    <Pencil aria-hidden="true" />
                     Rename…
                   </DropdownMenuItem>
                   {/* While the file is missing the stage offers Replace itself. */}
                   {onReplace && !(preview.missing && !pane) && (
                     <DropdownMenuItem onSelect={onReplace}>
+                      <RefreshCw aria-hidden="true" />
                       Replace…
                     </DropdownMenuItem>
                   )}
@@ -720,6 +733,7 @@ function PreviewHeader({
                         )
                       }
                     >
+                      <CloudDownload aria-hidden="true" />
                       Download
                     </DropdownMenuItem>
                   )}
@@ -736,6 +750,7 @@ function PreviewHeader({
                         })
                       }
                     >
+                      <RotateCcw aria-hidden="true" />
                       Restore
                     </DropdownMenuItem>
                   )}
@@ -807,12 +822,13 @@ function PreviewStage({
         : "see it";
   const notice = file?.quarantined && !preview.gone && (
     <Alert size="compact">
+      <Info aria-hidden="true" />
       <AlertDescription>
         Quarantined. Restore it to use it in new places.
       </AlertDescription>
       <Button
         variant="outline"
-        size="sm"
+        size="compact"
         disabled={busy}
         onClick={() =>
           void preview.action("restore the file", async () => {
@@ -1508,67 +1524,70 @@ export function AttachmentPreview({
           }
         }}
       >
-        <div
-          className="attachment-preview"
-          data-layout="viewer"
-          data-details={detailsShown ? "" : undefined}
-        >
-          <PreviewHeader
-            preview={preview}
-            title={(name) => <DialogTitle>{name}</DialogTitle>}
-            onClose={close}
-            close={(button) => <DialogClose asChild>{button}</DialogClose>}
-            onReplace={replace}
-            onChanged={undefined}
-            menuItems={menuItems}
-            renaming={renaming}
-            onRenamingChange={setRenaming}
-            details={details}
-            compact={compact}
-            position={position}
-            onCommandsChange={setCommands}
-          />
-          <DialogDescription className="sr-only">
-            {file
-              ? `${fileType(file.original_filename).word} preview`
-              : "Preview"}
-          </DialogDescription>
-          <div aria-live="polite" className="sr-only">
-            {announcement}
-          </div>
-          <div className="attachment-preview-body">
-            <div className="attachment-preview-main">
-              {notice && (
-                <div className="attachment-preview-failure">{notice}</div>
-              )}
-              <PreviewFailure preview={preview} />
-              <PreviewStage
-                preview={preview}
-                stageRef={stage}
-                place={position && `${position.index} of ${position.total}`}
-                fading={fading}
-                onReplace={replace}
-                onRestoreBackup={
-                  openSettings
-                    ? () => {
-                        close();
-                        openSettings("backups");
-                      }
-                    : undefined
-                }
-                onChanged={undefined}
-              />
+        {/* The viewer is a dialog in a portal: it takes none of the shell's header controls. */}
+        <ShellSlotProvider nav={null} crumb={null}>
+          <div
+            className="attachment-preview"
+            data-layout="viewer"
+            data-details={detailsShown ? "" : undefined}
+          >
+            <PreviewHeader
+              preview={preview}
+              title={(name) => <DialogTitle>{name}</DialogTitle>}
+              onClose={close}
+              close={(button) => <DialogClose asChild>{button}</DialogClose>}
+              onReplace={replace}
+              onChanged={undefined}
+              menuItems={menuItems}
+              renaming={renaming}
+              onRenamingChange={setRenaming}
+              details={details}
+              compact={compact}
+              position={position}
+              onCommandsChange={setCommands}
+            />
+            <DialogDescription className="sr-only">
+              {file
+                ? `${fileType(file.original_filename).word} preview`
+                : "Preview"}
+            </DialogDescription>
+            <div aria-live="polite" className="sr-only">
+              {announcement}
             </div>
-            {detailsShown && (
-              <aside
-                className="attachment-preview-details"
-                aria-label="Details"
-              >
-                <PreviewFacts preview={preview} onNavigate={close} />
-              </aside>
-            )}
+            <div className="attachment-preview-body">
+              <div className="attachment-preview-main">
+                {notice && (
+                  <div className="attachment-preview-failure">{notice}</div>
+                )}
+                <PreviewFailure preview={preview} />
+                <PreviewStage
+                  preview={preview}
+                  stageRef={stage}
+                  place={position && `${position.index} of ${position.total}`}
+                  fading={fading}
+                  onReplace={replace}
+                  onRestoreBackup={
+                    openSettings
+                      ? () => {
+                          close();
+                          openSettings("backups");
+                        }
+                      : undefined
+                  }
+                  onChanged={undefined}
+                />
+              </div>
+              {detailsShown && (
+                <aside
+                  className="attachment-preview-details"
+                  aria-label="Details"
+                >
+                  <PreviewFacts preview={preview} onNavigate={close} />
+                </aside>
+              )}
+            </div>
           </div>
-        </div>
+        </ShellSlotProvider>
       </DialogContent>
     </Dialog>
   );

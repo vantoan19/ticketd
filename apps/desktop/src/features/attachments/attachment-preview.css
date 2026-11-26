@@ -21,8 +21,12 @@
   min-height: 0;
   height: 100%;
 }
-.attachment-preview-title {
-  flex: 1 1 auto;
+/* The title takes the room the actions leave, so FittedTitle can measure it. */
+.attachment-preview [data-slot="pane-header"] .ui-pane-header-title {
+  flex: 1 1 0;
+}
+.attachment-preview .ui-pane-header-title > .attachment-preview-title {
+  flex: 1 1 0;
   min-width: 0;
 }
 .attachment-preview-title > :is(h2, [data-slot="dialog-title"]) {
@@ -150,9 +154,25 @@
   display: flex;
   flex: none;
   align-items: center;
+  gap: 8px;
   height: 36px;
   margin: 0;
   padding-inline: 16px;
+}
+/* The quarantine line above a file: the same 36px line, with its fix at the end. */
+.attachment-preview-stage > [data-slot="alert"].ui-notice {
+  flex: none;
+  gap: 8px;
+  min-height: 36px;
+  padding-block: 0;
+  padding-inline: 16px;
+  border-radius: 0;
+}
+.attachment-preview-stage > [data-slot="alert"] > svg,
+.attachment-report-note > svg {
+  flex: none;
+  width: 14px;
+  height: 14px;
 }
 .attachment-report-frame {
   flex: 1 1 0;
@@ -167,6 +187,16 @@
 .attachment-preview-stage[data-pdf] .attachment-preview-canvas {
   display: block;
   padding: 0;
+}
+/* The stage's column layout is block, so a state that replaces the pages
+   (damaged, unreadable) centers itself like every other state. */
+.attachment-pdf-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 100%;
+  padding: 20px;
 }
 .attachment-pdf {
   display: flex;

@@ -1,6 +1,6 @@
 import { expect, test } from "vitest";
 import { renderToStaticMarkup } from "react-dom/server";
-import { breakable, fitName } from "./file-name";
+import { breakable, fitName, fitTitle } from "./file-name";
 
 // Seven pixels a letter: 21 letters fit a line of the card.
 const measure = (text: string) => text.length * 7;
@@ -45,4 +45,28 @@ test("unmeasured, a cut name still ends at a whole word", () => {
   );
   expect(fitted.cut).toBe(true);
   expect(fitted.text.endsWith("…(signed).pdf")).toBe(true);
+});
+
+// One unit a character: easy to reason about widths.
+const unit = (text: string) => text.length;
+
+test("a header name that fits is shown whole", () => {
+  expect(fitTitle("refund.png", 40, unit)).toEqual({
+    text: "refund.png",
+    cut: false,
+  });
+});
+
+test("a longer name gives way in the middle and keeps its end and extension", () => {
+  const name = "refund-flow-recording-before-the-fix-and-after-the-fix.mov";
+  const fitted = fitTitle(name, 30, unit);
+  expect(fitted.cut).toBe(true);
+  expect(fitted.text.length).toBeLessThanOrEqual(30);
+  expect(fitted.text.startsWith("refund-flow")).toBe(true);
+  expect(fitted.text.endsWith(name.slice(-14))).toBe(true);
+  expect(fitted.text).toContain("…");
+});
+
+test("an unmeasured header (no width yet) is left alone", () => {
+  expect(fitTitle("a-very-long-name.log", 0, unit).cut).toBe(false);
 });
