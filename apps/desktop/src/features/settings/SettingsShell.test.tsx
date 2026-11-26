@@ -442,11 +442,91 @@ test("typing in the search field shows the results in place of the page and sele
   await act(async () => {});
   fireEvent.change(field(), { target: { value: "backup" } });
   expect(
-    await screen.findByRole("region", { name: "Backups & export" }),
+    await screen.findByRole("heading", { name: /^\d+ settings match “backup”$/ }),
   ).toBeTruthy();
   expect(
     within(screen.getByRole("navigation", { name: "Settings sections" }))
       .getAllByRole("button")
       .filter((button) => button.getAttribute("aria-current") === "page"),
   ).toHaveLength(0);
+});
+
+/** What a page marks as the setting Search brought the person to. */
+const found = () => document.querySelector("[data-found]");
+
+test("Enter opens the first result's page and highlights that setting for three seconds", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  try {
+    render(<Settings initial="about" />);
+    await act(async () => {});
+    fireEvent.change(field(), { target: { value: "theme" } });
+    await screen.findByRole("heading", { name: /settings? match/ });
+    fireEvent.keyDown(field(), { key: "Enter" });
+    await screen.findByRole("heading", { level: 1, name: "Appearance" });
+    await vi.waitFor(() => expect(found()).not.toBeNull());
+    expect(found()?.textContent).toContain("Theme");
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2900);
+    });
+    expect(found()).not.toBeNull();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(200);
+    });
+    expect(found()).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("the arrows choose another result and Enter opens that one", async () => {
+  render(<Settings initial="about" />);
+  await act(async () => {});
+  fireEvent.change(field(), { target: { value: "backup" } });
+  await screen.findByRole("heading", { name: /settings? match/ });
+  const links = screen.getAllByRole("link");
+  fireEvent.keyDown(field(), { key: "ArrowDown" });
+  expect(links[1]?.getAttribute("aria-current")).toBe("true");
+  const title = links[1]?.querySelector(".settings-list-row-title")?.textContent;
+  fireEvent.keyDown(field(), { key: "Enter" });
+  await screen.findByRole("heading", { level: 1, name: "Backups & export" });
+  await vi.waitFor(() => expect(found()).not.toBeNull());
+  expect(found()?.textContent).toContain(title ?? "never");
+});
+
+test("a connection's result opens Ticket sources and shows its row", async () => {
+  vi.mocked(sourcesClient.list).mockResolvedValue([connected]);
+  render(<Settings initial="about" />);
+  await act(async () => {});
+  fireEvent.change(field(), { target: { value: "github" } });
+  // The connection is read from the Workspace, so its row arrives a moment after the first results.
+  await screen.findByRole("link", { name: /^GitHub/ });
+  fireEvent.keyDown(field(), { key: "Enter" });
+  await screen.findByRole("heading", { level: 1, name: "Ticket sources" });
+  await vi.waitFor(() => expect(found()?.tagName).toBe("TR"));
+  expect(found()?.textContent).toContain("GitHub");
+});
+
+test("a setting that was asked for is not shown on a later visit to its page", async () => {
+  render(<Settings initial="about" />);
+  await act(async () => {});
+  fireEvent.change(field(), { target: { value: "theme" } });
+  await screen.findByRole("heading", { name: /settings? match/ });
+  fireEvent.keyDown(field(), { key: "Enter" });
+  await screen.findByRole("heading", { level: 1, name: "Appearance" });
+  await vi.waitFor(() => expect(found()).not.toBeNull());
+  fireEvent.click(navItem("Attention"));
+  await screen.findByRole("heading", { level: 1, name: "Attention" });
+  fireEvent.click(navItem("Appearance"));
+  await screen.findByRole("heading", { level: 1, name: "Appearance" });
+  expect(found()).toBeNull();
+});
+
+test("clearing the search field returns to the page the search came from", async () => {
+  render(<Settings initial="attention" />);
+  await act(async () => {});
+  fireEvent.change(field(), { target: { value: "backup" } });
+  await screen.findByRole("heading", { name: /settings? match/ });
+  fireEvent.keyDown(field(), { key: "Escape" });
+  expect((field() as HTMLInputElement).value).toBe("");
+  await screen.findByRole("heading", { level: 1, name: "Attention" });
 });

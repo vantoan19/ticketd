@@ -11,6 +11,7 @@ import {
   SETTINGS_ENTRIES,
   sourceEntries,
 } from "@/features/settings/settings-search";
+import { findSetting } from "@/features/settings/settings-highlight";
 import { SETTINGS_SECTIONS } from "@/features/settings/settings-sections";
 import { agentSkillsClient } from "@/lib/api/agent-skills";
 import { cliClient } from "@/lib/api/cli";
@@ -200,7 +201,7 @@ test("Agents show harness names only in the agents list, with Chats off and on",
 test("every search entry's title and description are on the page it opens", async () => {
   const drifted: string[] = [];
   for (const section of SETTINGS_SECTIONS) {
-    const { unmount } = render(
+    const { unmount, container } = render(
       <ChatFeatureContext value={CHAT_ON}>
         <TestReads>
           <SyncStatusProvider>
@@ -222,6 +223,14 @@ test("every search entry's title and description are on the page it opens", asyn
     )) {
       if (!page.includes(plain(entry.title)))
         drifted.push(`${section.id}: title "${entry.title}"`);
+      // Search opens the page and shows this element.
+      // (A row that is the page itself, such as Command line, has no element
+      // of its own: Search just opens the page.)
+      if (
+        plain(entry.title) !== plain(section.label) &&
+        !findSetting(container, entry.title)
+      )
+        drifted.push(`${section.id}: title "${entry.title}" is no element`);
       if (!page.includes(plain(entry.description)))
         drifted.push(
           `${section.id}: "${entry.title}" description "${entry.description}"`,
@@ -255,7 +264,9 @@ test("a source page carries the title and description of its search entries", as
     await new Promise((resolve) => setTimeout(resolve, 100));
   });
   const page = plain(document.body.textContent ?? "");
-  for (const entry of sourceEntries("github", "GitHub")) {
+  for (const entry of sourceEntries("github", "GitHub").filter(
+    (candidate) => candidate.section === "source-github",
+  )) {
     expect(page, entry.title).toContain(plain(entry.title));
     expect(page, entry.description).toContain(plain(entry.description));
   }

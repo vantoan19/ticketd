@@ -1,4 +1,9 @@
-import type { SettingsPageId } from "@/features/settings/settings-sections";
+import {
+  SETTINGS_SECTIONS,
+  navSectionOf,
+  type SettingsPageId,
+  type SettingsSectionId,
+} from "@/features/settings/settings-sections";
 
 /** One setting row, as Search finds it. */
 export interface SettingsEntry {
@@ -298,14 +303,25 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
 ];
 
-/** The rows every source page has, for a source the build offers. */
+/**
+ * What a connection adds to Search: its row in the Ticket sources table, then
+ * the rows its own page has. `label` is the name the table shows (a saved
+ * connection may be renamed); `name` is the source's.
+ */
 export function sourceEntries(
   connection: string,
   name: string,
   fields: string[] = [],
+  label: string = name,
 ): SettingsEntry[] {
   const section: SettingsPageId = `source-${connection}`;
   return [
+    {
+      title: label,
+      description: `Issues from ${name}, brought in as tickets.`,
+      keywords: `${name} source sources connection account ${connection}`,
+      section: "ticket-sources",
+    },
     {
       title: "Connection",
       description: `ticketd uses your own ${name} permissions.`,
@@ -340,35 +356,69 @@ function matchesWords(text: string | undefined, terms: readonly string[]) {
   return terms.every((term) => found.some((word) => word.startsWith(term)));
 }
 
+/** Other names a page answers to, besides its title: what it was called before, and what people say. */
+const PAGE_NAMES: Partial<Record<SettingsSectionId, string>> = {
+  files: "attachments",
+  "ticket-sources": "sources",
+};
+
+const SECTIONS_BY_ID = new Map<string, (typeof SETTINGS_SECTIONS)[number]>(
+  SETTINGS_SECTIONS.map((section) => [section.id, section]),
+);
+
+/** Where the page sits in the sidebar; a connection or an agent follows the page it opens under. */
+function sidebarPosition(page: SettingsPageId) {
+  const section = navSectionOf(page);
+  return section === null
+    ? Number.MAX_SAFE_INTEGER
+    : SETTINGS_SECTIONS.findIndex((candidate) => candidate.id === section);
+}
+
+/** The text a page is known by: its title, then the other names it answers to. */
+function pageNameOf(page: SettingsPageId) {
+  const section = SECTIONS_BY_ID.get(page);
+  return section ? `${section.label} ${PAGE_NAMES[section.id] ?? ""}` : "";
+}
+
 /**
- * The entries that match `query`, best first: title matches, then description,
- * then keywords and the page name, then queries whose words are spread over
- * several of those. A query matches by word beginnings, never inside a word,
- * and every word of it must match. Equal ranks keep registry order. An empty
- * query matches nothing.
+ * The entries that match `query`, best first:
+ * 1. the page's own title (a search for "files" lists the Files page's rows
+ *    before any row that only mentions files elsewhere),
+ * 2. the row's title, 3. its description, 4. its keywords,
+ * 5. words spread over those and the page title.
+ * A query matches by word beginnings, never inside a word, and every word of
+ * it must match. Equal ranks keep the sidebar's order of pages, then the
+ * registry's order of rows. An empty query matches nothing.
  */
 export function searchSettings<T extends SettingsEntry>(
   query: string,
   entries: readonly T[],
-  pageName?: (entry: T) => string,
 ): T[] {
   const terms = words(query);
   if (terms.length === 0) return [];
-  const ranked: { entry: T; rank: number; index: number }[] = [];
+  const ranked: { entry: T; rank: number; page: number; index: number }[] = [];
   entries.forEach((entry, index) => {
-    const aside = `${entry.keywords ?? ""} ${pageName?.(entry) ?? ""}`;
-    const rank = matchesWords(entry.title, terms)
+    const pageName = pageNameOf(entry.section);
+    const rank = matchesWords(pageName, terms)
       ? 0
-      : matchesWords(entry.description, terms)
+      : matchesWords(entry.title, terms)
         ? 1
-        : matchesWords(aside, terms)
+        : matchesWords(entry.description, terms)
           ? 2
-          : matchesWords(`${entry.title} ${entry.description} ${aside}`, terms)
+          : matchesWords(entry.keywords, terms)
             ? 3
-            : -1;
-    if (rank >= 0) ranked.push({ entry, rank, index });
+            : matchesWords(
+                  `${entry.title} ${entry.description} ${entry.keywords ?? ""} ${pageName}`,
+                  terms,
+                )
+              ? 4
+              : -1;
+    if (rank >= 0)
+      ranked.push({ entry, rank, page: sidebarPosition(entry.section), index });
   });
-  ranked.sort((a, b) => a.rank - b.rank || a.index - b.index);
+  ranked.sort(
+    (a, b) => a.rank - b.rank || a.page - b.page || a.index - b.index,
+  );
   return ranked.map(({ entry }) => entry);
 }
 
@@ -394,16 +444,14 @@ export function searchSettingsFor<T extends SettingsEntry>(
   query: string,
   entries: readonly T[],
   chatEnabled: boolean,
-  pageName?: (entry: T) => string,
 ): (T | SettingsEntry)[] {
-  if (chatEnabled) return searchSettings(query, entries, pageName);
+  if (chatEnabled) return searchSettings(query, entries);
   const hits: (T | SettingsEntry)[] = searchSettings(
     query,
     entries.filter((entry) => !chatOnly(entry)),
-    pageName,
   );
   if (hits.some((hit) => hit.section === "agents")) return hits;
-  const hidden = searchSettings(query, entries.filter(chatOnly), pageName);
+  const hidden = searchSettings(query, entries.filter(chatOnly));
   return hidden.length > 0 ? [...hits, CHAT_PAGE_ENTRY] : hits;
 }
 

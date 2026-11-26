@@ -8,6 +8,15 @@ export type IndicatorSection = "command-line" | "agent-skills" | "agents";
 /** What `refreshIndicators` can read again: the indicators, and what Set up ticketd ticks from. */
 export type SettingsRead = IndicatorSection | "agent-update";
 
+/** A setting Search opened its page for: the page shows it with a highlight. */
+export interface SettingsTarget {
+  page: SettingsPageId;
+  /** The row's title as its page shows it. */
+  title: string;
+  /** Distinguishes two openings of the same setting. */
+  id: number;
+}
+
 export interface SettingsState {
   /** The Search page's query; the nav's Search entry shows it. */
   query: string;
@@ -16,6 +25,15 @@ export interface SettingsState {
   openPage: (page: SettingsPageId) => void;
   /** True when the section needs setup; absent while unknown or unreadable. */
   needsSetup: Partial<Record<IndicatorSection, boolean>>;
+  /**
+   * Opens a page from a Search result and asks it to highlight the setting
+   * called `title` for a moment.
+   */
+  openSetting?: (page: SettingsPageId, title: string) => void;
+  /** The setting a page is yet to highlight; `SettingsView` takes it. */
+  target?: SettingsTarget | null;
+  /** Called once the target has been shown. */
+  clearTarget?: () => void;
   /**
    * Reads the command line, the agent skills or the Chat harnesses again so
    * the nav dot follows a change. Pages call it after a check or an install;
