@@ -156,7 +156,7 @@ test("a direct preview replaces only its selected ticket association through the
     </TestOpenTicket>,
   );
   fireEvent.click(await screen.findByRole("button", { name: "Trace" }));
-  await screen.findByText("This file is missing from this computer");
+  await screen.findByText("Missing from this computer");
   fireEvent.click(screen.getByRole("button", { name: "Replace file…" }));
   fireEvent.click(screen.getByRole("radio", { name: "Existing files" }));
   fireEvent.click(

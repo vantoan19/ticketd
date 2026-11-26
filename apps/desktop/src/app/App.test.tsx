@@ -8033,7 +8033,7 @@ test.each(["missing", "quarantined", "unavailable"])(
     const pane = await screen.findByRole("region", { name: "notes.txt" });
     const stage = pane.querySelector(".attachment-preview-stage");
     if (state === "missing") {
-      await within(pane).findByText("This file is missing from this computer");
+      await within(pane).findByText("Missing from this computer");
       expect(
         within(pane).getByRole("button", { name: "Open file" }),
       ).toHaveProperty("disabled", true);

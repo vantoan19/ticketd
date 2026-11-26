@@ -59,6 +59,12 @@ function extension(name: string) {
   return dot > 0 ? name.slice(dot + 1).toLowerCase() : "";
 }
 
+/** The tile's word: the extension in capitals ("HTML", "ZIP"), or "FILE" without one. */
+export function extensionLabel(name: string): string {
+  const ext = extension(name);
+  return ext ? ext.toUpperCase() : "FILE";
+}
+
 /**
  * The file's type in human words ("PNG image", "WAV audio", "PDF") and its
  * family, from the detected media type when the core knows it, else from the
