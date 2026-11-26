@@ -1321,13 +1321,16 @@
   overflow: visible;
 }
 .document-workspace .document-body > .markdown-editor .cm-gutters {
-  /* CodeMirror sets the gutter's position inline. */
-  position: absolute !important;
-  top: 0;
-  right: 100%;
-  left: auto !important;
-  padding-right: 10px;
+  /* A zero-width gutter whose columns run out to the left of it (reversed), so it takes no
+     room in the line however many digits the numbers have. */
+  flex: none;
+  flex-direction: row-reverse;
+  width: 0;
+  min-width: 0;
   background: transparent;
+}
+.document-workspace .document-body > .markdown-editor .cm-lineNumbers {
+  margin-right: 10px;
 }
 .document-workspace .document-body > .markdown-editor .cm-line {
   padding-inline: 0;
@@ -1346,11 +1349,24 @@
   .document-body
   > .markdown-editor
   .cm-gutters {
-  position: sticky !important;
-  right: auto;
-  left: 0 !important;
-  padding-right: 0;
+  flex: none;
+  flex-direction: row;
+  width: auto;
+  min-width: auto;
   background: var(--recessed);
+}
+:where([data-width~="max-879"], [data-width~="max-479"])
+  .document-workspace
+  .document-body
+  > .markdown-editor
+  .cm-lineNumbers,
+:where([data-width~="max-999"])
+  .document-workspace
+  .document-main[data-rail]
+  .document-body
+  > .markdown-editor
+  .cm-lineNumbers {
+  margin-right: 0;
 }
 :where([data-width~="max-879"], [data-width~="max-479"])
   .document-workspace
