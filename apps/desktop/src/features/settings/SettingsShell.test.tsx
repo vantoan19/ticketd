@@ -40,11 +40,11 @@ vi.mock("@/lib/api/workspace", () => ({
     info: vi.fn(),
     reveal: vi.fn(),
     openLink: vi.fn(),
-    lastBackup: vi.fn(),
+    restorePoints: vi.fn(),
+    saveRestorePoint: vi.fn(),
     chooseSavePath: vi.fn(),
     chooseBackupFile: vi.fn(),
     inspectBackup: vi.fn(),
-    safetyBackups: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
@@ -62,7 +62,7 @@ vi.mock("@/lib/api/notifications", () => ({
   },
 }));
 vi.mock("@/lib/api/client", () => ({
-  client: { backupWorkspace: vi.fn(), exportWorkspace: vi.fn() },
+  client: { exportWorkspace: vi.fn() },
 }));
 vi.mock("@/lib/api/sources", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/api/sources")>()),
@@ -103,8 +103,10 @@ beforeEach(() => {
     size_bytes: 10,
     format_version: 20,
   });
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(null);
-  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
+  vi.mocked(workspaceClient.restorePoints).mockResolvedValue({
+    points: [],
+    total_bytes: 0,
+  });
 });
 
 afterEach(() => {

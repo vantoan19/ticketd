@@ -18,16 +18,15 @@ vi.mock("@/lib/api/workspace", () => ({
     info: vi.fn(),
     reveal: vi.fn(),
     openLink: vi.fn(),
-    lastBackup: vi.fn(),
+    restorePoints: vi.fn(),
+    saveRestorePoint: vi.fn(),
     chooseSavePath: vi.fn(),
     chooseBackupFile: vi.fn(),
     inspectBackup: vi.fn(),
-    safetyBackups: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/client", () => ({
   client: {
-    backupWorkspace: vi.fn(),
     exportWorkspace: vi.fn(),
     restoreWorkspace: vi.fn(),
   },
@@ -71,9 +70,11 @@ beforeEach(() => {
     size_bytes: 10,
     format_version: 20,
   });
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(null);
+  vi.mocked(workspaceClient.restorePoints).mockResolvedValue({
+    points: [],
+    total_bytes: 0,
+  });
   vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
-  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
   vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValue(BACKUP);
   vi.mocked(workspaceClient.inspectBackup).mockResolvedValue(valid);
 });
@@ -84,7 +85,7 @@ afterEach(() => {
 
 async function openReview(onRestore: () => Promise<void> = async () => {}) {
   render(<SettingsView selected="backups" onRestore={onRestore} />);
-  fireEvent.click(screen.getByRole("button", { name: "Choose backup…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Restore from a file…" }));
   return screen.findByRole("dialog");
 }
 
@@ -151,7 +152,7 @@ test("the consequence comes first, before the comparison (set BK-05)", async () 
 test("cancelling the file picker opens nothing and restores nothing", async () => {
   vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValue(null);
   render(<SettingsView selected="backups" onRestore={async () => {}} />);
-  fireEvent.click(screen.getByRole("button", { name: "Choose backup…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Restore from a file…" }));
   await waitFor(() =>
     expect(workspaceClient.chooseBackupFile).toHaveBeenCalled(),
   );
@@ -269,14 +270,19 @@ test("Replace workspace shows the safety backup, reloads views, and lists it aft
   const reload = vi.fn(async () => {});
   const write = vi.fn(async () => {});
   Object.assign(navigator, { clipboard: { writeText: write } });
-  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([
-    {
-      path: safety,
-      kind: "safety",
-      saved_at: "2026-11-01T10:00:00Z",
-      size_bytes: 100,
-    },
-  ]);
+  vi.mocked(workspaceClient.restorePoints).mockResolvedValue({
+    points: [
+      {
+        path: safety,
+        kind: "safety",
+        saved_at: "2026-11-01T10:00:00Z",
+        size_bytes: 100,
+        summary: null,
+        problem: null,
+      },
+    ],
+    total_bytes: 100,
+  });
   const dialog = await openReview(reload);
   await within(dialog).findByText(/Integrity checked/);
   fireEvent.click(replaceButton(dialog));
@@ -295,13 +301,8 @@ test("Replace workspace shows the safety backup, reloads views, and lists it aft
 
   fireEvent.click(within(dialog).getByRole("button", { name: "Done" }));
   expect(screen.queryByRole("dialog")).toBeNull();
-  const region = await screen.findByRole("region", { name: "Safety backups" });
-  expect(
-    await within(region).findByText(
-      "workspace.sqlite3.safety-3f2c9a1e.sqlite3",
-    ),
-  ).toBeTruthy();
-  expect(within(region).getByText("Before a restore")).toBeTruthy();
+  const region = await screen.findByRole("region", { name: "Restore points" });
+  expect(await within(region).findByText("Before restoring")).toBeTruthy();
 });
 
 test("a restore that happened with something unconfirmed is a success with a warning", async () => {

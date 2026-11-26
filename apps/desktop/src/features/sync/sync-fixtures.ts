@@ -1,3 +1,4 @@
+import type { WorkspaceInfo } from "@/lib/api/workspace";
 import type { SyncSettings, SyncStatus } from "@/lib/sync-api";
 
 /** A connected, fully synced Workspace; tests override what they exercise. */
@@ -48,4 +49,18 @@ export const hostFailure = (message: string) => ({
   code: "failed",
   index: null,
   message,
+});
+
+/** What this computer's Workspace holds, as the app reads it before sync is set up. */
+export const workspaceInfo = (
+  overrides: Partial<WorkspaceInfo> = {},
+): WorkspaceInfo => ({
+  path: "/demo/workspace.sqlite3",
+  tickets: 17,
+  documents: 2,
+  projects: 1,
+  active_plans: 0,
+  size_bytes: 4096,
+  format_version: 104,
+  ...overrides,
 });

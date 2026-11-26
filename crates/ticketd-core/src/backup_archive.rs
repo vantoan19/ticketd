@@ -10,7 +10,13 @@ use sha2::{Digest, Sha256};
 
 use crate::{Error, backup::table_exists};
 
+/// Attachment files are inside the backup, as blobs: a backup saved anywhere restores anywhere.
 const CONTAINER_VERSION: i64 = 1;
+/// Attachment files are in a `files` folder beside the backup, one file per distinct content
+/// and shared by every restore point there. Only restore points use it: see `restore_points`.
+const SHARED_CONTAINER_VERSION: i64 = 2;
+/// Where restore points keep attachment files, named by their SHA-256.
+pub(crate) const SHARED_FILES_FOLDER: &str = "files";
 
 pub(crate) fn attachment_root(database: &Path) -> PathBuf {
     let mut path = database.as_os_str().to_os_string();
@@ -190,6 +196,80 @@ pub(crate) fn pack(connection: &Connection, files: Vec<(String, PathBuf)>) -> Re
     validate(connection)
 }
 
+/// [`pack`] for a restore point: the files go into `store`, one file per distinct content, and
+/// the point records only their names. The caller holds the upload lock. A file already in the
+/// store is not copied again, which is what makes seven points cost about one copy.
+pub(crate) fn pack_external(
+    connection: &Connection,
+    files: Vec<(String, PathBuf)>,
+    store: &Path,
+) -> Result<(), Error> {
+    let has_attachments = table_exists(connection, "attachments")?
+        && connection.query_row("SELECT EXISTS(SELECT 1 FROM attachments)", [], |r| {
+            r.get::<_, bool>(0)
+        })?;
+    if files.is_empty() && !has_attachments {
+        return Ok(());
+    }
+    fs::create_dir_all(store)?;
+    let tx = connection.unchecked_transaction()?;
+    tx.execute_batch(&format!(
+        "CREATE TABLE ticketd_backup_container(version INTEGER NOT NULL, inventory_sha256 TEXT NOT NULL);
+         INSERT INTO ticketd_backup_container VALUES ({SHARED_CONTAINER_VERSION}, '');
+         CREATE TABLE ticketd_backup_files(path TEXT NOT NULL UNIQUE, size_bytes INTEGER NOT NULL, sha256 TEXT NOT NULL, data BLOB NOT NULL);"
+    ))?;
+    for (relative, source) in files {
+        let path = open_retained(&source, &relative)?;
+        let mut input = File::open(&path)?;
+        let size = input.metadata()?.len();
+        let (hashed, hash) = transfer(&mut input, &mut std::io::sink())?;
+        if hashed != size {
+            return Err(Error::Backup(format!(
+                "attachment changed during backup: {relative}"
+            )));
+        }
+        let shared = store.join(&hash);
+        if fs::metadata(&shared).is_ok_and(|kept| kept.len() == size) {
+            // The same bytes are already kept for an earlier point.
+        } else {
+            input.seek(SeekFrom::Start(0))?;
+            let mut staged = tempfile::NamedTempFile::new_in(store)?;
+            let (copied, copied_hash) = transfer(&mut input, &mut staged)?;
+            if copied != size || copied_hash != hash {
+                return Err(Error::Backup(format!(
+                    "attachment changed during backup: {relative}"
+                )));
+            }
+            staged.as_file().sync_all()?;
+            staged
+                .persist(&shared)
+                .map_err(|error| Error::Directory(error.error))?;
+        }
+        tx.execute(
+            "INSERT INTO ticketd_backup_files(path, size_bytes, sha256, data) VALUES (?1, ?2, ?3, x'')",
+            params![relative, size, hash],
+        )?;
+    }
+    let inventory = inventory_digest(&tx)?;
+    tx.execute(
+        "UPDATE ticketd_backup_container SET inventory_sha256=?1",
+        [inventory],
+    )?;
+    tx.commit()?;
+    sync_directory(store)?;
+    validate(connection)
+}
+
+/// The folder a restore point keeps its attachment files in: `files`, beside the point.
+fn shared_files(connection: &Connection) -> Result<PathBuf, Error> {
+    connection
+        .path()
+        .map(Path::new)
+        .and_then(Path::parent)
+        .map(|folder| folder.join(SHARED_FILES_FOLDER))
+        .ok_or_else(|| Error::Backup("a restore point must be a file".into()))
+}
+
 /// A retained file too big for a backup. Name the Attachment and say what to do: the backup
 /// would otherwise fail on every attempt, and nothing else can fix it.
 fn too_large(connection: &Connection, relative: &str, size: u64) -> Error {
@@ -228,7 +308,7 @@ pub(crate) fn container_version(connection: &Connection) -> Result<Option<i64>, 
         connection.query_row("SELECT version FROM ticketd_backup_container", [], |r| {
             r.get(0)
         })?;
-    if version != CONTAINER_VERSION {
+    if version != CONTAINER_VERSION && version != SHARED_CONTAINER_VERSION {
         return Err(Error::Backup(format!(
             "unsupported attachment backup container version {version}; update ticketd"
         )));
@@ -237,7 +317,14 @@ pub(crate) fn container_version(connection: &Connection) -> Result<Option<i64>, 
 }
 
 pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
-    let packaged = container_version(connection)?.is_some();
+    let version = container_version(connection)?;
+    let packaged = version.is_some();
+    // A restore point's bytes are in files, which `visit_files` has just read to the end.
+    let held = if version == Some(SHARED_CONTAINER_VERSION) {
+        ""
+    } else {
+        " AND length(data)=?2"
+    };
     if packaged {
         let expected: String = connection.query_row(
             "SELECT inventory_sha256 FROM ticketd_backup_container",
@@ -288,7 +375,7 @@ pub(crate) fn validate(connection: &Connection) -> Result<(), Error> {
             let size: u64 = row.get(2)?;
             checked_path(&locator)?;
             let present = packaged && connection.query_row(
-                "SELECT EXISTS(SELECT 1 FROM ticketd_backup_files WHERE (path=?1 OR path=?3) AND size_bytes=?2 AND length(data)=?2)",
+                &format!("SELECT EXISTS(SELECT 1 FROM ticketd_backup_files WHERE (path=?1 OR path=?3) AND size_bytes=?2{held})"),
                 params![locator, size, crate::attachment_cleanup::quarantine_locator(&locator)], |r| r.get::<_, bool>(0)
             )?;
             if !present {
@@ -320,6 +407,11 @@ fn inventory_digest(connection: &Connection) -> Result<String, Error> {
 }
 
 fn visit_files(connection: &Connection, destination: Option<&Path>) -> Result<(), Error> {
+    let shared = if container_version(connection)? == Some(SHARED_CONTAINER_VERSION) {
+        Some(shared_files(connection)?)
+    } else {
+        None
+    };
     let mut query = connection.prepare(
         "SELECT rowid, path, size_bytes, sha256 FROM ticketd_backup_files ORDER BY path",
     )?;
@@ -330,18 +422,31 @@ fn visit_files(connection: &Connection, destination: Option<&Path>) -> Result<()
         let size: u64 = row.get(2)?;
         let expected: String = row.get(3)?;
         let relative = checked_path(&path)?;
-        let mut blob = connection.blob_open(MAIN_DB, "ticketd_backup_files", "data", id, true)?;
+        let damaged = || {
+            Error::Backup(format!(
+                "missing or damaged attachment bytes: {path}; choose a complete backup"
+            ))
+        };
+        // A point's file is named by its checksum, so a name that is not one is not read.
+        let mut source: Box<dyn Read> = if let Some(store) = &shared {
+            if expected.len() != 64 || !expected.bytes().all(|b| b.is_ascii_hexdigit()) {
+                return Err(damaged());
+            }
+            Box::new(File::open(store.join(&expected)).map_err(|_| damaged())?)
+        } else {
+            Box::new(connection.blob_open(MAIN_DB, "ticketd_backup_files", "data", id, true)?)
+        };
         let (actual_size, hash) = if let Some(root) = destination {
             let target = root.join(relative);
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent)?;
             }
             let mut output = File::options().write(true).create_new(true).open(&target)?;
-            let result = transfer(&mut blob, &mut output)?;
+            let result = transfer(&mut source, &mut output)?;
             output.sync_all()?;
             result
         } else {
-            transfer(&mut blob, &mut std::io::sink())?
+            transfer(&mut source, &mut std::io::sink())?
         };
         if size != actual_size || hash != expected {
             return Err(Error::Backup(format!(

@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
 import {
   SettingsList,
+  SettingsListFooter,
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
 import { workspaceClient } from "@/lib/api/workspace";
@@ -64,7 +65,7 @@ type SignIn =
  * bucket and the prefix. Every row is on the page from the start, so nothing
  * moves as the earlier ones are answered.
  */
-export function S3Setup() {
+export function S3Setup({ onBack }: { onBack?: () => void } = {}) {
   const [cli, setCli] = useState<Cli>(null);
   const [readFailure, setReadFailure] = useState<FailureDescription | null>(
     null,
@@ -182,17 +183,33 @@ export function S3Setup() {
     await check(started, failure);
   }
 
+  // Where the AWS CLI cannot answer yet, Back is still the way out of this step.
+  const back = onBack && (
+    <div className="sync-footer">
+      <Button variant="ghost" size="sm" onClick={onBack}>
+        Back
+      </Button>
+    </div>
+  );
   if (cli === null) return <SetupSkeleton />;
   if (cli.cli.state !== "ready")
     return (
-      <CliNotice
-        state={cli.cli}
-        onCheckAgain={checkAgain}
-        failure={readFailure}
-      />
+      <>
+        <CliNotice
+          state={cli.cli}
+          onCheckAgain={checkAgain}
+          failure={readFailure}
+        />
+        {back}
+      </>
     );
   if (cli.profiles.length === 0)
-    return <NoProfiles onCheckAgain={checkAgain} failure={readFailure} />;
+    return (
+      <>
+        <NoProfiles onCheckAgain={checkAgain} failure={readFailure} />
+        {back}
+      </>
+    );
 
   const signedIn = signIn.kind === "signed_in";
   const ready = signedIn && bucket.trim() !== "" && !busy;
@@ -285,20 +302,44 @@ export function S3Setup() {
         />
       )}
       <Failure>{failure}</Failure>
-      <div className="sync-footer flex justify-end">
-        <Button
-          size="sm"
-          disabled={!ready}
-          onClick={() =>
-            void run(
-              () =>
-                syncApi.connectS3({ bucket: bucket.trim(), prefix, profile }),
-              "connect S3",
-            )
-          }
-        >
-          Connect S3
-        </Button>
+      <div className="sync-footer">
+        <SettingsList>
+          <SettingsListFooter
+            actions={
+              <>
+                {onBack && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={onBack}
+                  >
+                    Back
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  disabled={!ready}
+                  onClick={() =>
+                    void run(
+                      () =>
+                        syncApi.connectS3({
+                          bucket: bucket.trim(),
+                          prefix,
+                          profile,
+                        }),
+                      "connect S3",
+                    )
+                  }
+                >
+                  Connect S3
+                </Button>
+              </>
+            }
+          >
+            ticketd does not encrypt the files it puts in the bucket.
+          </SettingsListFooter>
+        </SettingsList>
       </div>
     </div>
   );

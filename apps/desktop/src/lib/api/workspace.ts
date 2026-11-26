@@ -34,11 +34,6 @@ const projectIconSchema = lazySchema(() =>
 );
 export type ProjectFavicon = NonNullable<z.infer<typeof projectIconSchema>>;
 
-const lastBackupSchema = lazySchema(() =>
-  z.object({ path: z.string(), completed_at: z.string() }).nullable(),
-);
-export type BackupRecord = NonNullable<z.infer<typeof lastBackupSchema>>;
-
 const workspaceSummarySchema = lazySchema(() =>
   z.object({
     last_change: z.string().nullable(),
@@ -90,17 +85,26 @@ const backupInspectionSchema = lazySchema(() =>
 );
 export type BackupInspection = z.infer<typeof backupInspectionSchema>;
 
-const safetyBackupsSchema = lazySchema(() =>
-  z.array(
-    z.object({
-      path: z.string(),
-      kind: z.enum(["safety", "pre_migration"]),
-      saved_at: z.string(),
-      size_bytes: z.number(),
-    }),
-  ),
+const restorePointSchema = lazySchema(() =>
+  z.object({
+    path: z.string(),
+    kind: z.enum(["daily", "manual", "safety", "pre_migration"]),
+    saved_at: z.string(),
+    size_bytes: z.number(),
+    summary: workspaceSummarySchema.nullable(),
+    problem: z.string().nullable(),
+    update_version: z.string().optional(),
+  }),
 );
-export type SafetyBackup = z.infer<typeof safetyBackupsSchema>[number];
+export type RestorePoint = z.infer<typeof restorePointSchema>;
+
+const restorePointListSchema = lazySchema(() =>
+  z.object({
+    points: z.array(restorePointSchema),
+    total_bytes: z.number(),
+  }),
+);
+export type RestorePointList = z.infer<typeof restorePointListSchema>;
 
 export const workspaceClient = {
   async info() {
@@ -109,10 +113,6 @@ export const workspaceClient = {
   /** Where the workspace file is, read without opening it. */
   async location() {
     return z.string().parse(await invoke("workspace_location"));
-  },
-  /** The most recent successful backup, including ones made with the CLI. */
-  async lastBackup() {
-    return lastBackupSchema.parse(await invoke("last_backup"));
   },
   /** Opens a native save dialog; resolves to null when it is cancelled. */
   async chooseSavePath(options: {
@@ -155,9 +155,16 @@ export const workspaceClient = {
       await invoke("inspect_backup", { path }),
     );
   },
-  /** Safety and pre-migration backups kept beside the workspace, newest first. */
-  async safetyBackups() {
-    return safetyBackupsSchema.parse(await invoke("safety_backups"));
+  /**
+   * The daily restore points and the copies saved before a restore or an update, newest
+   * first, and the disk they use.
+   */
+  async restorePoints() {
+    return restorePointListSchema.parse(await invoke("restore_points"));
+  },
+  /** Back up now: one more restore point, saved at once with no file to choose. */
+  async saveRestorePoint() {
+    return restorePointSchema.parse(await invoke("save_restore_point"));
   },
   /** Shows the workspace file in the platform file manager. */
   async reveal(path: string) {

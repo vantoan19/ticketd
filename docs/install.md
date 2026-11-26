@@ -44,16 +44,18 @@ The bundled CLI updates with the desktop. On macOS and Windows, open
 `ticketd` available on your PATH.
 
 - **On macOS**, approve the administrator prompt to create a link in
-  `/usr/local/bin`. If you decline, ticketd creates the link in `~/.local/bin`.
-  Add that directory to PATH and open a new terminal. If you move the app, use
-  **Install command-line tool** again to repair the link.
+  `/usr/local/bin`. If you decline, nothing changes; choose **Use ~/.local/bin
+  instead** for a link that needs no password, add that directory to PATH and
+  open a new terminal. If you move the app, use **Install command-line tool**
+  again to repair the link.
 - **On Ubuntu**, the `.deb` already installs `ticketd` in `/usr/bin`.
 - **On Windows**, ticketd adds the app's folder to your user PATH. Restart terminals
   and agent harnesses so they inherit the change.
 
-If an older standalone `ticketd` comes first on PATH, **Settings → Command line**
-shows its version and path. Choose **Remove it** and confirm to remove that file
-or link, or choose **Keep it**. Use **Check again** to confirm which copy is found.
+If an older, newer or different standalone `ticketd` comes first on PATH,
+**Settings → Command line** shows its version and path. Choose **Use this app's
+ticketd**: one administrator prompt removes that copy and links this app's
+copy. Use **Check again** (or return to the window) to confirm which copy is found.
 
 On machines without the desktop, download the standalone archive for your
 platform (`ticketd-cli-*-macos-arm64.tar.gz`, `ticketd-cli-*-linux-x86_64.tar.gz`,
@@ -89,7 +91,7 @@ The restart prompt shows any running Chats and Automation runs that will stop.
 Interrupted Automation runs are marked as needing attention when ticketd reopens.
 If the release raises the Workspace format version, the prompt warns you before
 installing, and quitting doesn't install it: choose **Restart to update** when
-you're ready. ticketd makes a backup before migrating the Workspace. Update any
+you're ready. ticketd saves a safety copy before migrating the Workspace. Update any
 older copies that need to open the migrated Workspace, including other Sync
 devices and standalone CLI installations.
 
@@ -113,8 +115,10 @@ checks run in the desktop app only.
 
 Use desktop and CLI from the same version. Run `ticketd workspace` to inspect the
 path and supported format without changing data. Most other workspace commands
-may create or migrate the database. Back up before upgrading; an older binary
-may refuse a newer workspace, and downgrade compatibility is not guaranteed.
+may create or migrate the database. The desktop saves a restore point every day
+and a safety copy before it migrates the Workspace, so there is one to go back to;
+`ticketd backup PATH` saves a standalone copy anywhere. An older binary may refuse a newer workspace, and
+downgrade compatibility is not guaranteed.
 Close both desktop and CLI processes before replacing binaries or restoring a backup.
 See [Back up and restore your workspace](workspace-tasks.md#back-up-and-restore-your-workspace).
 
@@ -123,7 +127,8 @@ CLI link if you installed it. On Windows, remove the app folder's entry from you
 user PATH if you added it through Settings. On Ubuntu, removing the package also
 removes its CLI. Remove any standalone CLI executable separately. The workspace
 is stored separately in the user's application-data directory and is retained.
-Keep a backup before uninstalling or upgrading.
+Keep a backup before uninstalling: the restore points live beside the workspace and
+stay with it.
 
 ## Agent CLI skill
 
@@ -159,7 +164,7 @@ was started from the Finder or Dock.
 ticketd writes a `.ticketd-managed` marker beside each `SKILL.md` it installs,
 holding the hash of what it wrote and its version. Re-running installation updates a
 copy an older or the same ticketd wrote and nobody changed, and leaves an identical
-one, or one a newer ticketd wrote, alone. A copy edited after installation, or one ticketd did not
+one, or one a newer ticketd wrote, alone. The desktop app does this on its own each time it starts, for every agent that already has a copy ticketd wrote and nobody changed (the marker's hash still matches the file); it never installs into an agent that has no copy yet. A copy edited after installation, or one ticketd did not
 write, is reported and left intact. Review it, then choose Replace in Settings or
 pass `--replace`: the existing `SKILL.md` is saved beside the new one as
 `SKILL.md.backup-<seconds>`. Adjacent files and project instructions are preserved.

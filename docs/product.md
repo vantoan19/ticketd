@@ -205,8 +205,8 @@ opens the graph to understand dependency chains.
   and **Help** (Keyboard shortcuts, Diagnostics, About). A search field above the groups
   finds a setting by name. Things you can have several of, such as a connection, are rows
   on their page that open in place with a way back; the sidebar never lists them.
-  Backups & export is one page for where the Workspace file is, the copies to go back
-  to, and the copies to take elsewhere.
+  Backups & export is one page for where the Workspace file is, the restore points to go
+  back to, and the copies to take elsewhere.
 
 The interface follows [DESIGN.md](../DESIGN.md).
 
@@ -554,14 +554,22 @@ below applies to both unless it names one.
   Attachments are ordinary files. Content is stored unencrypted, and the live SQLite
   database is never synchronized. Inbox read state, checkout paths, credentials, source
   settings, window layout, drafts, and upload queues stay local.
-- **Setup.** Settings > Workspace sync starts with the choice of Google Drive or S3.
-  After connecting, the person uploads this Workspace or downloads an existing one
-  (after a safety backup). Independent Workspaces are never merged
-  automatically. A joining desktop takes a fresh device code when needed so references
-  never clash. Disconnecting deletes nothing, and the same account (or, for S3, the
-  same bucket and prefix) can reconnect to its folder. Restoring a backup disconnects
-  the Workspace from its storage. To move from Drive to S3, disconnect Drive and
-  upload the Workspace to a bucket; there is no migration.
+- **Setup.** Settings > Workspace sync takes four steps. First the person says whether
+  this computer starts a Workspace or joins one; Start is the default when this computer
+  holds tickets or Documents, Join when it is empty, and Join says what it would replace.
+  Then Google Drive or S3, and signing in. Then ticketd reads the storage before it writes
+  anything: when the storage already holds a Workspace, Join is preselected even if this
+  computer holds tickets, with what it holds and what it replaces here, and "Start a
+  separate Workspace" is the second option, never preselected, saying that the two can't
+  be merged later. Joining downloads the Workspace after a safety backup of this
+  computer's. A folder this computer synced before is offered first as Reconnect, which
+  merges both sides and replaces nothing. With nothing in the storage, Start goes
+  straight to the first sync. The first sync shows its progress and has no Back.
+  Independent Workspaces are never merged automatically. A joining desktop takes a fresh
+  device code when needed so references never clash. Disconnecting deletes nothing, and
+  the same account (or, for S3, the same bucket and prefix) can reconnect to its folder.
+  Restoring a backup disconnects the Workspace from its storage. To move from Drive to S3,
+  disconnect Drive and upload the Workspace to a bucket; there is no migration.
 - **When it runs.** While the desktop is open: at launch and reconnect, by polling
   the storage (every minute by default), shortly after a save, and on Sync now. Exit
   makes a bounded attempt to upload pending changes. The CLI never contacts the
@@ -654,6 +662,19 @@ Setup, IAM permissions and the lifecycle rule are in
   and leaves History intact; ticketd recommends it and never sets it.
 
 ### Backup, restore, and export
+
+**Restore points.** The first time the desktop opens each day it saves a restore point
+of the Workspace in the background, checks it as a restore would, and keeps the last 7
+(Back up now in Settings adds one at once, with no file to choose; it counts among the
+7). They are kept on this computer, in a folder beside the Workspace file, and are never
+synced, never part of the Workspace and never inside a sync folder. The Workspace's
+retained local files are kept once for all the points that hold them, so seven points
+cost about one copy of the files, and deleting an old point never removes a file a newer
+one needs. The copies saved before a restore or before an update that changes the
+Workspace format are listed with them under a label and are kept besides the 7. A point
+that fails its check is listed as one that can't be restored. Writing a point never
+holds up the window, and Back up now does not wait for it. Restoring one goes through
+the same review as restoring a file, which stays available as Restore from a file….
 
 `ticketd backup PATH` saves a consistent backup including every retained local file.
 `ticketd inspect-backup` verifies integrity and checksums without restoring, and

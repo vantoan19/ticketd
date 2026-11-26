@@ -9,6 +9,7 @@ import {
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { writeClipboard } from "@/lib/clipboard";
+import { workspaceClient } from "@/lib/api/workspace";
 import { revealFailureDetails } from "@/test/failure-details";
 import { s3Api } from "@/lib/s3-api";
 import {
@@ -19,7 +20,12 @@ import {
 import { TestReads } from "@/lib/workspace-reads/testing";
 import { SyncSettings } from "./SyncSettings";
 import { SyncStatusProvider } from "./SyncStatusProvider";
-import { hostFailure, syncSettings, syncStatus } from "./sync-fixtures";
+import {
+  hostFailure,
+  syncSettings,
+  syncStatus,
+  workspaceInfo,
+} from "./sync-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@/lib/clipboard", () => ({ writeClipboard: vi.fn() }));
@@ -43,7 +49,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
   },
 }));
 vi.mock("@/lib/api/workspace", () => ({
-  workspaceClient: { reveal: vi.fn() },
+  workspaceClient: { reveal: vi.fn(), info: vi.fn() },
 }));
 const api = vi.mocked(syncApi);
 const s3 = vi.mocked(s3Api);
@@ -98,6 +104,7 @@ function show() {
 }
 
 beforeEach(() => {
+  vi.mocked(workspaceClient.info).mockResolvedValue(workspaceInfo());
   api.settings.mockResolvedValue(syncSettings());
   api.setupOptions.mockResolvedValue(options);
   s3.folderLinks.mockResolvedValue({
@@ -110,25 +117,38 @@ afterEach(() => {
   vi.resetAllMocks();
 });
 
-test("choosing a Workspace in a bucket uploads this one by default, in the bucket's words", async () => {
+test("choosing a Workspace in a bucket joins the one there by default, in the bucket's words", async () => {
   api.status.mockResolvedValue(choosing());
   api.uploadWorkspace.mockResolvedValue(
     connected({ first_sync: { direction: "upload", done: 3, total: 23 } }),
   );
   show();
-  const upload = await screen.findByRole("radio", {
-    name: /Upload this Workspace/,
+  const join = await screen.findByRole("radio", {
+    name: /Join “ticketd · web-app”/,
   });
-  expect(upload.textContent).toContain("go to a new folder in the bucket");
-  expect(screen.getByText(`Connected as ${ARN}`)).toBeTruthy();
+  expect(join.getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByText("Your bucket already has a Workspace")).toBeTruthy();
+  expect(screen.getByText("Signed in")).toBeTruthy();
+  expect(screen.getByText(`${ARN} · team-ticketd`)).toBeTruthy();
+  expect(screen.queryByText(/Drive/)).toBeNull();
+  // Starting a separate one is the person's choice, and says what it costs in the bucket.
+  const separate = screen.getByRole("radio", {
+    name: /Start a separate Workspace/,
+  });
+  expect(separate.textContent).toContain(
+    "Your bucket then holds two Workspaces",
+  );
+  fireEvent.click(separate);
   expect(
     screen.getByText(
       "ticketd does not encrypt the files it puts in the bucket.",
     ),
   ).toBeTruthy();
-  expect(screen.queryByText(/Drive/)).toBeNull();
-  fireEvent.click(screen.getByRole("button", { name: "Start sync" }));
+  fireEvent.click(screen.getByRole("button", { name: "Start syncing" }));
   expect(await screen.findByText("Uploading 3 of 23 files")).toBeTruthy();
+  expect(
+    screen.getByText("To “ticketd Workspace” in bucket team-ticketd"),
+  ).toBeTruthy();
 });
 
 test("a bucket the check turns down says why, and is checked again once it is fixed", async () => {
@@ -145,11 +165,13 @@ test("a bucket the check turns down says why, and is checked again once it is fi
   );
   // Nothing starts from a bucket that failed its check.
   expect(
-    screen.getByRole("button", { name: "Start sync" }).hasAttribute("disabled"),
+    screen
+      .getByRole("button", { name: "Start syncing" })
+      .hasAttribute("disabled"),
   ).toBe(true);
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(
-    await screen.findByRole("radio", { name: /Upload this Workspace/ }),
+    await screen.findByRole("radio", { name: /Join “ticketd · web-app”/ }),
   ).toBeTruthy();
   expect(api.setupOptions).toHaveBeenCalledTimes(2);
 });
@@ -193,9 +215,9 @@ test("downloading from the bucket asks first, like a restore", async () => {
   });
   show();
   fireEvent.click(
-    await screen.findByRole("radio", { name: /Download “ticketd · web-app”/ }),
+    await screen.findByRole("radio", { name: /Join “ticketd · web-app”/ }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Join…" }));
   const dialog = await screen.findByRole("dialog");
   expect(dialog.textContent).toContain("from the bucket");
   fireEvent.click(
