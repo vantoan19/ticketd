@@ -712,12 +712,25 @@ authorizes a workspace UUID and attachment ID, opens only a complete managed loc
 snapshot, and classifies bounded header evidence against a passive-media allowlist.
 It returns a read handle, never a filesystem path to React. PNG, JPEG, GIF, WebP,
 BMP, WAV, MP3, recognized Ogg, MP4 and WebM containers can be attempted; container
-recognition is not a codec guarantee. SVG, PDF, office files, playlists and
+recognition is not a codec guarantee. SVG, office files, playlists and
 unrecognized content retain metadata and explicit export/open fallback actions.
 A `.html` or `.htm` snapshot that is UTF-8 text of at most 8 MiB reports `html` in
 its preview and is read whole through the same checked snapshot by
 `Workspace::attachment_html` (a Tauri command returning the text over IPC); it is
 never added to the media allowlist, so the `attachment-media` route still refuses it.
+A stored file that starts with `%PDF-` (within its first kilobyte, whatever its name)
+and is at most 32 MiB reports `pdf` in its preview and is read whole through the same
+checked snapshot by `Workspace::attachment_pdf`, a Tauri command that answers with one
+raw binary IPC response. It is also never added to the media allowlist. The viewer parses
+it with the bundled pdf.js (the legacy build, loaded lazily) and draws pages onto
+canvases; the worker is a same-origin asset, so no CDN and no network are involved.
+The app CSP is unchanged: workers and scripts come from `'self'`, canvases need no
+grant, and `connect-src` still allows only IPC, so pdf.js is configured not to fetch
+anything (no WASM decoders, no external font or CMap files; fonts are drawn as glyph
+shapes, system fonts stand in for unembedded ones, and scripting and XFA forms are off).
+The one cost is that images using JPEG 2000 or JBIG2, and unembedded CJK fonts, may
+not draw. A PDF that cannot be parsed shows the fallback and keeps Open and Export.
+A card's first-page still is drawn from the same read for a PDF of at most 8 MiB.
 External references use the same preview entry point with cached provider details,
 current-source wording and explicit Open in Drive. They never enter the local media
 route or offer an original-byte export; unknown provider size remains unknown.
