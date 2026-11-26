@@ -365,10 +365,7 @@ async fn check(app: AppHandle, sequence: u64) {
         let info = UpdateInfo {
             release_url: format!("{RELEASES}/tag/v{}", offer.version),
             version: offer.version.clone(),
-            upgrades_workspace: upgrades_workspace(
-                &offer.raw_json,
-                ticketd_core::FORMAT_VERSION,
-            ),
+            upgrades_workspace: upgrades_workspace(&offer.raw_json, ticketd_core::FORMAT_VERSION),
         };
         tracing::info!(version = %info.version, "update check found newer release");
         if session.ready.as_ref().is_some_and(|ready| {
