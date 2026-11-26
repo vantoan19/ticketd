@@ -20,6 +20,14 @@ pub const HTML_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
 /// The most of one PDF the viewer reads whole. It crosses to the WebView as one binary
 /// IPC response and is parsed in memory there, so this stays well under the media limit.
 pub const PDF_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
+/// A text file up to this size is shown whole in the viewer (it crosses to the WebView as one
+/// binary IPC response); a larger one shows only its last `TEXT_TAIL_BYTES`, because logs are
+/// read from the end.
+pub const TEXT_WHOLE_BYTES: u64 = 20 * 1024 * 1024;
+/// How much of the end of a text file larger than `TEXT_WHOLE_BYTES` the viewer shows.
+pub const TEXT_TAIL_BYTES: u64 = 5 * 1024 * 1024;
+/// A tail may begin mid-line; it starts after the next line break only when one is this close.
+const TEXT_LINE_START_WINDOW: usize = 64 * 1024;
 /// A PDF's `%PDF-` marker may follow stray bytes, but only within this many.
 const PDF_MARKER_WINDOW: usize = 1024;
 
@@ -52,6 +60,36 @@ pub struct AttachmentPreview {
     /// with `attachment_pdf`. The viewer renders its pages in the WebView; it is never
     /// media.
     pub pdf: bool,
+    /// A plain-text file (a log, notes) the viewer reads with `attachment_text`, whole up to
+    /// `TEXT_WHOLE_BYTES` and otherwise its end. Never media or HTML.
+    pub text: Option<TextScope>,
+}
+
+/// How much of a text file the viewer shows, so it can say so when it is only the end.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TextScope {
+    /// The size of the stored file.
+    pub total_bytes: u64,
+    /// What the viewer shows: the whole file, or the nominal tail when `partial`. A tail
+    /// starts at a line start when one is near, so it can be a little shorter.
+    pub shown_bytes: u64,
+    /// The viewer shows only the end of the file.
+    pub partial: bool,
+}
+
+impl TextScope {
+    fn of(total_bytes: u64) -> Self {
+        let partial = total_bytes > TEXT_WHOLE_BYTES;
+        Self {
+            total_bytes,
+            shown_bytes: if partial {
+                TEXT_TAIL_BYTES
+            } else {
+                total_bytes
+            },
+            partial,
+        }
+    }
 }
 
 /// The first bytes of a UTF-8 text file, cut on a character boundary.
@@ -186,6 +224,8 @@ impl Workspace {
                 pdf = true;
             }
         }
+        let text = (status == PreviewStatus::Unsupported && !html && text_excerpt.is_some())
+            .then(|| TextScope::of(attachment.size_bytes.unwrap_or(0)));
         Ok(AttachmentPreview {
             uploaded_copy: self.drive_uploaded_copy(id)?.is_some(),
             attachment,
@@ -197,6 +237,7 @@ impl Workspace {
             text_excerpt,
             html,
             pdf,
+            text,
         })
     }
 
@@ -218,6 +259,20 @@ impl Workspace {
             return Err(Error::Attachment("This file is not a PDF.".into()));
         }
         Ok(bytes)
+    }
+
+    /// The text of a stored plain-text file for the viewer: the whole file up to
+    /// `TEXT_WHOLE_BYTES`, otherwise its last `TEXT_TAIL_BYTES`. It reads through the checked
+    /// snapshot (never a path), only a file that reads as text, and returns the display text:
+    /// terminal escape sequences are removed and a stray control character becomes U+FFFD.
+    pub fn attachment_text(&self, workspace: &str, id: &str) -> Result<String, Error> {
+        let attachment = self.preview_attachment(workspace, id)?;
+        if self.text_excerpt(&attachment).is_none() {
+            return Err(Error::Attachment("This file is not plain text.".into()));
+        }
+        let (_, file) = open_snapshot(&self.connection, &attachment)
+            .map_err(|failure| Error::Attachment(failure.message))?;
+        read_text_window(file, TEXT_WHOLE_BYTES, TEXT_TAIL_BYTES)
     }
 
     /// Whether a stored local file starts like a PDF. A file that cannot be read is not.
@@ -413,7 +468,8 @@ fn is_html_name(name: &str) -> bool {
 
 /// Text when the bytes are UTF-8 without NUL or control characters other than
 /// tab, line breaks and form feed. A cut at the end of a truncated excerpt may
-/// split one character; that partial character is dropped.
+/// split one character; that partial character is dropped. Terminal escape
+/// sequences (a coloured log) are not control characters here: they are removed.
 fn text_of(bytes: &[u8], truncated: bool) -> Option<String> {
     let text = match std::str::from_utf8(bytes) {
         Ok(text) => text,
@@ -422,13 +478,91 @@ fn text_of(bytes: &[u8], truncated: bool) -> Option<String> {
         }
         Err(_) => return None,
     };
-    if text
-        .chars()
-        .any(|c| c.is_control() && !matches!(c, '\t' | '\n' | '\r' | '\u{c}'))
-    {
+    let text = strip_terminal_escapes(text);
+    if text.chars().any(is_stray_control) {
         return None;
     }
-    Some(text.to_owned())
+    Some(text)
+}
+
+fn is_stray_control(c: char) -> bool {
+    c.is_control() && !matches!(c, '\t' | '\n' | '\r' | '\u{c}')
+}
+
+/// Reads a text file for display: all of it up to `whole`, otherwise its last `tail` bytes
+/// (cut on a character boundary, and after the next line break when one is near). Invalid
+/// UTF-8 and stray control characters become U+FFFD, so one bad byte never hides a log.
+fn read_text_window(mut file: File, whole: u64, tail: u64) -> Result<String, Error> {
+    let length = file.metadata()?.len();
+    let start = if length > whole { length - tail } else { 0 };
+    file.seek(SeekFrom::Start(start))?;
+    let mut bytes = Vec::new();
+    file.take(length - start).read_to_end(&mut bytes)?;
+    let mut from = 0;
+    if start > 0 {
+        while bytes.get(from).is_some_and(|b| b & 0xc0 == 0x80) {
+            from += 1;
+        }
+        let near = &bytes[from..bytes.len().min(from + TEXT_LINE_START_WINDOW)];
+        if let Some(line_break) = near.iter().position(|b| *b == b'\n') {
+            from += line_break + 1;
+        }
+    }
+    let text = String::from_utf8_lossy(&bytes[from..]);
+    let text = strip_terminal_escapes(&text);
+    Ok(if text.chars().any(is_stray_control) {
+        text.chars()
+            .map(|c| if is_stray_control(c) { '\u{fffd}' } else { c })
+            .collect()
+    } else {
+        text
+    })
+}
+
+/// Removes ANSI/VT escape sequences (colours, cursor moves, titles) and the bell and
+/// backspace, so a coloured log reads as plain text. An unfinished sequence at the end of
+/// the text is dropped.
+fn strip_terminal_escapes(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut chars = text.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\u{7}' | '\u{8}' => {}
+            '\u{1b}' => match chars.next() {
+                // CSI: parameters and intermediates, then one final byte (@ to ~).
+                Some('[') => {
+                    for c in chars.by_ref() {
+                        if ('\u{40}'..='\u{7e}').contains(&c) {
+                            break;
+                        }
+                    }
+                }
+                // OSC, DCS, SOS, PM and APC strings end at BEL or ST (ESC \).
+                Some(']' | 'P' | 'X' | '^' | '_') => {
+                    while let Some(c) = chars.next() {
+                        if c == '\u{7}' {
+                            break;
+                        }
+                        if c == '\u{1b}' {
+                            if chars.peek() == Some(&'\\') {
+                                chars.next();
+                            }
+                            break;
+                        }
+                    }
+                }
+                // A character-set or similar sequence: intermediates, then a final byte.
+                Some(' '..='/') => {
+                    while chars.next_if(|c| (' '..='/').contains(c)).is_some() {}
+                    chars.next();
+                }
+                // Any other two-character sequence (ESC c, ESC 7).
+                Some(_) | None => {}
+            },
+            c => out.push(c),
+        }
+    }
+    out
 }
 
 // Only passive media containers with header evidence. This is not a codec guarantee.
@@ -761,5 +895,41 @@ mod tests {
             }
         });
         assert!(matches!(result, Err(error) if error.status == PreviewStatus::Unavailable));
+    }
+
+    #[test]
+    fn terminal_escapes_are_removed_and_other_controls_are_not_text() {
+        let coloured =
+            "\u{1b}[1;31merror\u{1b}[0m: \u{1b}]0;title\u{7}disk \u{1b}(Bfull\u{1b}[2K\u{1b}c";
+        assert_eq!(strip_terminal_escapes(coloured), "error: disk full");
+        // A sequence cut off by the end of an excerpt is dropped, not shown.
+        assert_eq!(strip_terminal_escapes("ok\u{1b}[3"), "ok");
+        assert_eq!(
+            text_of(coloured.as_bytes(), false).unwrap(),
+            "error: disk full"
+        );
+        assert!(text_of(b"a\0b", false).is_none());
+        assert!(text_of(b"a\x01b", false).is_none());
+    }
+
+    #[test]
+    fn a_long_file_shows_its_end_from_a_line_start_on_a_character_boundary() {
+        let dir = tempfile::tempdir().unwrap();
+        let read = |content: &[u8], whole, tail| {
+            let path = dir.path().join("log");
+            fs::write(&path, content).unwrap();
+            read_text_window(File::open(path).unwrap(), whole, tail).unwrap()
+        };
+        let log = "first\nsecond\nthird\nfourth\n";
+        assert_eq!(read(log.as_bytes(), 100, 10), log);
+        // 26 bytes over a limit of 20: the last 10 bytes begin mid-line, so the cut moves on.
+        assert_eq!(read(log.as_bytes(), 20, 10), "fourth\n");
+        // A cut inside a multi-byte character skips its trailing bytes.
+        let accents = "é".repeat(20) + "\nend\n";
+        assert_eq!(read(accents.as_bytes(), 20, 7), "end\n");
+        // No line break in reach: only the character boundary is honoured.
+        assert_eq!(read("é".repeat(20).as_bytes(), 20, 7), "ééé");
+        // Invalid bytes never hide the log.
+        assert_eq!(read(b"a\xffb\x01c", 100, 10), "a\u{fffd}b\u{fffd}c");
     }
 }

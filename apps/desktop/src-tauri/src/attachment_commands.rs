@@ -91,6 +91,24 @@ pub async fn attachment_html(workspace: String, id: String) -> Result<String, Br
     .map_err(BridgeFailure::from)?
 }
 
+/// The display text of a stored plain-text file (the whole file, or its end when it is very
+/// long), for the viewer's log stage. It crosses as one raw binary response of UTF-8, not a
+/// JSON string, because it can be 20 MiB.
+#[tauri::command]
+pub async fn attachment_text(
+    workspace: String,
+    id: String,
+) -> Result<tauri::ipc::Response, BridgeFailure> {
+    tauri::async_runtime::spawn_blocking(move || {
+        open_workspace()
+            .and_then(|w| w.attachment_text(&workspace, &id))
+            .map(|text| tauri::ipc::Response::new(text.into_bytes()))
+            .map_err(BridgeFailure::from)
+    })
+    .await
+    .map_err(BridgeFailure::from)?
+}
+
 /// The bytes of a stored PDF, for the viewer to render page by page. They cross as one
 /// raw binary response (not JSON), read through the checked snapshot and capped by core.
 #[tauri::command]

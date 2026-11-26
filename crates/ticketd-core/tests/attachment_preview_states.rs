@@ -1,6 +1,6 @@
 use ticketd_core::{
     AttachmentQuery, HTML_PREVIEW_BYTES, PDF_PREVIEW_BYTES, PreviewStatus, TEXT_EXCERPT_BYTES,
-    Workspace,
+    TEXT_TAIL_BYTES, TEXT_WHOLE_BYTES, Workspace,
 };
 
 const PNG: &[u8] =
@@ -243,4 +243,97 @@ fn a_pdf_over_the_limit_is_too_large_to_preview() {
     assert_eq!(preview.status, PreviewStatus::TooLarge);
     assert!(!preview.pdf);
     assert!(workspace.attachment_pdf(&identity, &file.id).is_err());
+}
+
+#[test]
+fn a_log_reads_whole_with_its_colours_removed_and_never_as_media_or_html() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let coloured = "\u{1b}[31mFAIL\u{1b}[0m  checkout  timeout after 30s\nnext line\n".repeat(3);
+    let log = workspace
+        .import_attachment_bytes("run", "run.log", coloured.as_bytes(), |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &log.id).unwrap();
+    assert_eq!(preview.status, PreviewStatus::Unsupported);
+    assert!(preview.media_type.is_none() && !preview.html && !preview.pdf);
+    let scope = preview.text.unwrap();
+    assert!(!scope.partial);
+    assert_eq!(scope.total_bytes, coloured.len() as u64);
+    assert_eq!(scope.shown_bytes, scope.total_bytes);
+    // The excerpt for other callers is readable now too, without the escapes.
+    let excerpt = preview.text_excerpt.unwrap();
+    assert!(excerpt.text.starts_with("FAIL  checkout"));
+    let text = workspace.attachment_text(&identity, &log.id).unwrap();
+    assert_eq!(
+        text,
+        "FAIL  checkout  timeout after 30s\nnext line\n".repeat(3)
+    );
+    assert!(workspace.attachment_text("other", &log.id).is_err());
+
+    // Binary and HTML files have no text read.
+    for (name, bytes) in [
+        ("blob.bin", b"PK\x03\x04\0\x01".to_vec()),
+        ("report.html", b"<p>hi</p>".to_vec()),
+    ] {
+        let file = workspace
+            .import_attachment_bytes(name, name, &bytes, |_, _| true)
+            .unwrap();
+        assert!(
+            workspace
+                .attachment_preview(&identity, &file.id)
+                .unwrap()
+                .text
+                .is_none()
+        );
+    }
+}
+
+#[test]
+fn a_log_over_the_limit_shows_its_last_five_megabytes_from_a_line_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let line = "2026-11-26 12:00:00 INFO request done in 12ms\n";
+    let mut big = line
+        .repeat(TEXT_WHOLE_BYTES as usize / line.len() + 2)
+        .into_bytes();
+    big.extend_from_slice(b"the last line\n");
+    let file = workspace
+        .import_attachment_bytes("big", "big.log", &big, |_, _| true)
+        .unwrap();
+    let scope = workspace
+        .attachment_preview(&identity, &file.id)
+        .unwrap()
+        .text
+        .unwrap();
+    assert!(scope.partial);
+    assert_eq!(scope.total_bytes, big.len() as u64);
+    assert_eq!(scope.shown_bytes, TEXT_TAIL_BYTES);
+    let text = workspace.attachment_text(&identity, &file.id).unwrap();
+    assert!(text.len() as u64 <= TEXT_TAIL_BYTES);
+    assert!(text.len() as u64 > TEXT_TAIL_BYTES - 200);
+    assert!(text.starts_with("2026-11-26 12:00:00 INFO request done"));
+    assert!(text.ends_with("the last line\n"));
+
+    // Exactly at the limit it is still whole.
+    let at_limit = "x\n".repeat(TEXT_WHOLE_BYTES as usize / 2);
+    let file = workspace
+        .import_attachment_bytes("edge", "edge.txt", at_limit.as_bytes(), |_, _| true)
+        .unwrap();
+    assert!(
+        !workspace
+            .attachment_preview(&identity, &file.id)
+            .unwrap()
+            .text
+            .unwrap()
+            .partial
+    );
+    assert_eq!(
+        workspace
+            .attachment_text(&identity, &file.id)
+            .unwrap()
+            .len(),
+        at_limit.len()
+    );
 }

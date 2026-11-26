@@ -104,7 +104,8 @@ mod upload_destination;
 mod versions;
 pub use attachment_previews::{
     AttachmentMedia, AttachmentPreview, HTML_PREVIEW_BYTES, PDF_PREVIEW_BYTES, PreviewStatus,
-    PreviewUsage, PreviewUse, TEXT_EXCERPT_BYTES, TextExcerpt,
+    PreviewUsage, PreviewUse, TEXT_EXCERPT_BYTES, TEXT_TAIL_BYTES, TEXT_WHOLE_BYTES, TextExcerpt,
+    TextScope,
 };
 pub use upload_destination::AttachmentUploadDestination;
 pub use versions::{RecordKind, Version, VersionSummary};
