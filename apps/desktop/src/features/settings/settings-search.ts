@@ -210,7 +210,8 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Everywhere",
-    description: "These work wherever you are in ticketd.",
+    description:
+      "Letter keys pause while you type or while a dialog or menu is open.",
     keywords:
       "keyboard shortcuts keys hotkeys capture new chat add settings find",
     section: "keyboard-shortcuts",
@@ -225,7 +226,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Ticket",
-    description: "On the open ticket.",
+    description: "On the open ticket, or the focused one in a list or board.",
     keywords:
       "keyboard shortcuts keys hotkeys edit description new ticket create",
     section: "keyboard-shortcuts",
