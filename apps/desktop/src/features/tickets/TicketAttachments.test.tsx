@@ -416,3 +416,50 @@ test("Files shows cards for a mixed set, with a tile for the file that has no st
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(document.activeElement).toBe(log);
 });
+
+test("opening the middle file steps both ways, and Esc returns to the card that opened it", async () => {
+  const user = userEvent.setup();
+  const first = { ...file, id: "a", display_name: "alpha.log" };
+  const middle = { ...file, id: "b", display_name: "beta.log" };
+  const last = { ...file, id: "c", display_name: "gamma.log" };
+  const all = [first, middle, last];
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") return all;
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_preview")
+      return {
+        attachment: all.find((item) => item.id === (args as { id: string }).id),
+        status: "unsupported",
+        media_type: null,
+        message: null,
+        can_open: true,
+        usage: { total: 0, entries: [], legacy_drafts_pending: false },
+      };
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const card = await screen.findByRole("button", { name: "beta.log" });
+  card.focus();
+  await user.click(card);
+  await screen.findByRole("dialog");
+  expect(screen.getByText("2 of 3")).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Next file" }));
+  expect(
+    await screen.findByRole("heading", { name: "gamma.log" }),
+  ).toBeTruthy();
+  expect(screen.getByText("3 of 3")).toBeTruthy();
+  await user.keyboard("k");
+  await user.keyboard("k");
+  expect(
+    await screen.findByRole("heading", { name: "alpha.log" }),
+  ).toBeTruthy();
+  expect(screen.getByText("1 of 3")).toBeTruthy();
+  // The card of the file the viewer was opened from, not the one shown last.
+  await user.keyboard("{Escape}");
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(document.activeElement).toBe(card);
+});

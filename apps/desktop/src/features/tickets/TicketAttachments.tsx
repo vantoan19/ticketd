@@ -106,8 +106,16 @@ export function AttachmentDialogs({
       />
       {selected && (
         <AttachmentPreview
-          key={selected.id}
+          // One viewer for the whole walk: Previous and Next change `selected`,
+          // and what opened it keeps focus and scroll for the way back.
           target={{ id: selected.id, initial: selected }}
+          browse={{
+            files: state.found ?? [],
+            onSelect: (file) => {
+              setError(null);
+              onSelected(file);
+            },
+          }}
           onClose={() => onSelected(null)}
           onReplace={
             ticket.trashed

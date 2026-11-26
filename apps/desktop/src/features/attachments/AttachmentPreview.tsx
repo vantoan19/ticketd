@@ -13,6 +13,8 @@ import {
 import {
   ArrowLeft,
   ArrowUpFromLine,
+  ChevronLeft,
+  ChevronRight,
   CloudDownload,
   Ellipsis,
   Link,
@@ -179,10 +181,9 @@ function Media({
  * Everything the preview knows and does about one file, shared by the viewer
  * dialog and the library's detail pane. Viewing never edits content.
  */
-function usePreview(target: PreviewTarget) {
-  const [file, setFile] = useState<Attachment | null>(
-    "initial" in target ? (target.initial ?? null) : null,
-  );
+function usePreview(target: PreviewTarget, warm?: Map<string, PreviewInfo>) {
+  const initial = "initial" in target ? (target.initial ?? null) : null;
+  const [file, setFile] = useState<Attachment | null>(initial);
   const [info, setInfo] = useState<PreviewInfo | null>(null);
   const [copy, setCopy] = useState<DriveCopyInspection | null>(null);
   const [workspace, setWorkspace] = useState("");
@@ -194,6 +195,20 @@ function usePreview(target: PreviewTarget) {
   const generation = useRef(0);
   const id = "id" in target ? target.id : undefined;
   const uri = "uri" in target ? target.uri : undefined;
+  // The viewer steps through files without remounting: a new target starts from
+  // nothing of the last one's state. A neighbor read ahead shows at once and is
+  // still read again, so the state shown is never older than this open.
+  const identity = `${id ?? ""}|${uri ?? ""}`;
+  const [shown, setShown] = useState(identity);
+  if (shown !== identity) {
+    setShown(identity);
+    setFile(initial);
+    setInfo((id && warm?.get(id)) || null);
+    setCopy(null);
+    setFailed(false);
+    setError(null);
+    setBusy(false);
+  }
   const availability = useAvailability(
     file && file.kind !== "external_reference" ? [file.id] : [],
   );
@@ -398,6 +413,66 @@ function exportButton(
   );
 }
 
+/** Where the viewer stands among the files of the place it was opened from. */
+type Position = {
+  /** 1-based. */
+  index: number;
+  total: number;
+  step: (delta: -1 | 1) => void;
+};
+
+/**
+ * "2 of 6" between Previous and Next. At an end the button that would go
+ * further stays in place, disabled, and says why; the keys do nothing there.
+ */
+function BrowseControls({ position }: { position: Position }) {
+  const { index, total, step } = position;
+  const button = (delta: -1 | 1) => {
+    const previous = delta < 0;
+    const label = previous ? "Previous file" : "Next file";
+    const key = previous ? "attachments-previous" : "attachments-next";
+    const edge = previous ? index <= 1 : index >= total;
+    const control = (
+      <IconButton
+        label={label}
+        shortcut={shortcutLabel(key)}
+        aria-keyshortcuts={ariaKeyShortcuts(key)}
+        disabled={edge}
+        onClick={() => step(delta)}
+      >
+        {previous ? (
+          <ChevronLeft aria-hidden="true" />
+        ) : (
+          <ChevronRight aria-hidden="true" />
+        )}
+      </IconButton>
+    );
+    return edge ? (
+      <Tooltip content={previous ? "First file" : "Last file"}>
+        {/* A disabled button takes no pointer events; its wrapper keeps the reason. */}
+        <span tabIndex={0} className="inline-flex">
+          {control}
+        </span>
+      </Tooltip>
+    ) : (
+      control
+    );
+  };
+  return (
+    <span
+      className="attachment-preview-browse"
+      role="group"
+      aria-label="Browse files"
+    >
+      {button(-1)}
+      <span className="attachment-preview-position">
+        {index} of {total}
+      </span>
+      {button(1)}
+    </span>
+  );
+}
+
 /**
  * The header row: the file's glyph and name, then Open (the one primary),
  * Export, Copy link, "…" and Close. Rename edits the name in place.
@@ -415,9 +490,12 @@ function PreviewHeader({
   pane = false,
   details,
   compact = false,
+  position,
   onCommandsChange,
 }: {
   preview: Preview;
+  /** Set when the viewer steps through several files. */
+  position?: Position | undefined;
   /** The viewer's Details panel: shown or not, and the switch. */
   details?: { shown: boolean; toggle: () => void };
   /** A compact window: Export moves under "…". */
@@ -539,6 +617,7 @@ function PreviewHeader({
       actions={
         !renaming && (
           <span className="attachment-preview-actions">
+            {position && <BrowseControls position={position} />}
             {openButton &&
               (blocked ? (
                 <Tooltip content={blocked}>
@@ -683,10 +762,16 @@ function PreviewStage({
   onRestoreBackup,
   onChanged,
   stageRef,
+  place,
+  fading = false,
 }: {
   preview: Preview;
   /** The viewer's stage takes focus when it opens, so the reading keys work at once. */
   stageRef?: RefObject<HTMLDivElement | null>;
+  /** "2 of 6", when the viewer steps through files. */
+  place?: string | undefined;
+  /** A file reached by Previous or Next fades in; the first one does not. */
+  fading?: boolean;
   onReplace: (() => void) | undefined;
   onRestoreBackup: (() => void) | undefined;
   onChanged: (() => void) | undefined;
@@ -940,7 +1025,9 @@ function PreviewStage({
       {...(stageRef && {
         tabIndex: -1,
         role: "group",
-        "aria-label": `${file?.display_name ?? "File"}, ${type.word}`,
+        "aria-label": [file?.display_name ?? "File", type.word, place]
+          .filter(Boolean)
+          .join(", "),
       })}
       data-report={reportShown ? "" : undefined}
       data-pdf={pdfShown ? "" : undefined}
@@ -954,7 +1041,14 @@ function PreviewStage({
       }
     >
       {notice}
-      <div className="attachment-preview-canvas">{body}</div>
+      <div
+        // Another file is another canvas: it fades in rather than swapping.
+        key={place ? (file?.id ?? "") : undefined}
+        className="attachment-preview-canvas"
+        data-fading={fading ? "" : undefined}
+      >
+        {body}
+      </div>
     </div>
   );
 }
@@ -1105,6 +1199,39 @@ function restoreScroll(scroll: [Element, number][]) {
       element.scrollTop = top;
 }
 
+/** The files of the place the viewer was opened from, and the way to move among them. */
+export type Browse = {
+  /** In the order that place shows them. */
+  files: Attachment[];
+  /** The file that should now be shown; the caller changes the viewer's target. */
+  onSelect: (file: Attachment) => void;
+};
+
+/** Reads the neighbors' previews ahead of a step, so the next file shows at once. */
+function useReadAhead(
+  ids: string[],
+  ready: boolean,
+  warm: Map<string, PreviewInfo>,
+) {
+  const key = ids.join("\n");
+  useEffect(() => {
+    if (!ready || !key) return;
+    let active = true;
+    void attachments
+      .workspaceId()
+      .then(async (workspace) => {
+        for (const id of key.split("\n")) {
+          if (!active || warm.has(id)) continue;
+          warm.set(id, await attachments.preview(workspace, id));
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [key, ready, warm]);
+}
+
 /**
  * The viewer: a file opened from a ticket, a Document or a Chat. The `viewer`
  * dialog size with one header (Open, Export, Copy link, "…", Close), the
@@ -1118,9 +1245,15 @@ export function AttachmentPreview({
   menuItems,
   notice,
   fallbackFocus,
+  browse,
 }: {
   target: PreviewTarget;
   onClose: () => void;
+  /**
+   * Previous and Next walk these files (J and K); with fewer than two, or when
+   * the target is not one of them, there is nothing to walk.
+   */
+  browse?: Browse;
   onReplace?: ReferenceReplacement | undefined;
   /** Actions of the place that opened it, after a separator in "…" (Detach from ticket). */
   menuItems?: ReactNode;
@@ -1129,7 +1262,8 @@ export function AttachmentPreview({
   /** Where focus goes on close when what opened the viewer is gone. */
   fallbackFocus?: () => HTMLElement | null;
 }) {
-  const preview = usePreview(target);
+  const [warm] = useState(() => new Map<string, PreviewInfo>());
+  const preview = usePreview(target, warm);
   const presence = useDialogPresence(onClose);
   const [picking, setPicking] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -1140,7 +1274,40 @@ export function AttachmentPreview({
   const { attachmentDetails: detailsShown } = usePreferences();
   const stage = useRef<HTMLDivElement>(null);
   // What the reviewer was looking at when the viewer opened, to put back on close.
+  // It stays the opener while files are stepped through.
   const [origin] = useState(captureOrigin);
+  const ids = browse?.files.map((entry) => entry.id) ?? [];
+  const at = "id" in target ? ids.indexOf(target.id) : -1;
+  const walking = browse !== undefined && ids.length > 1 && at >= 0;
+  const [fading, setFading] = useState(false);
+  const [announcement, setAnnouncement] = useState("");
+  const step = (delta: -1 | 1) => {
+    const next = browse?.files[at + delta];
+    if (!browse || !walking || !next) return;
+    setFading(true);
+    setRenaming(false);
+    setAnnouncement(
+      `${next.display_name}, ${fileType(next.original_filename).word}, ${at + delta + 1} of ${ids.length}`,
+    );
+    browse.onSelect(next);
+  };
+  useReadAhead(
+    walking ? [ids[at - 1], ids[at + 1]].filter((id) => id !== undefined) : [],
+    preview.info !== null,
+    warm,
+  );
+  const shownId = "id" in target ? target.id : "";
+  // Each file opens at its top, and a button that just became disabled hands focus on.
+  useLayoutEffect(() => {
+    if (!fading) return;
+    if (stage.current) stage.current.scrollTop = 0;
+    const active = document.activeElement;
+    if (
+      active === document.body ||
+      (active instanceof HTMLButtonElement && active.disabled)
+    )
+      stage.current?.focus({ preventScroll: true });
+  }, [shownId, fading]);
   const replacementRequest = useRef<AbortController | null>(null);
   const openSettings = useContext(SettingsNavigation);
   useEffect(() => () => replacementRequest.current?.abort(), []);
@@ -1181,6 +1348,9 @@ export function AttachmentPreview({
         }}
       />
     );
+  const position: Position | undefined = walking
+    ? { index: at + 1, total: ids.length, step }
+    : undefined;
   const details = {
     shown: detailsShown,
     toggle: () => setPreference("attachmentDetails", !detailsShown),
@@ -1240,6 +1410,16 @@ export function AttachmentPreview({
           } else if (matchesShortcut(event, "attachments-more")) {
             event.preventDefault();
             commands?.more?.();
+          } else if (walking && matchesShortcut(event, "attachments-next")) {
+            // At the last file the key does nothing; it never wraps around.
+            event.preventDefault();
+            step(1);
+          } else if (
+            walking &&
+            matchesShortcut(event, "attachments-previous")
+          ) {
+            event.preventDefault();
+            step(-1);
           }
         }}
       >
@@ -1260,6 +1440,7 @@ export function AttachmentPreview({
             onRenamingChange={setRenaming}
             details={details}
             compact={compact}
+            position={position}
             onCommandsChange={setCommands}
           />
           <DialogDescription className="sr-only">
@@ -1267,6 +1448,9 @@ export function AttachmentPreview({
               ? `${fileType(file.original_filename).word} preview`
               : "Preview"}
           </DialogDescription>
+          <div aria-live="polite" className="sr-only">
+            {announcement}
+          </div>
           <div className="attachment-preview-body">
             <div className="attachment-preview-main">
               {notice && (
@@ -1276,6 +1460,8 @@ export function AttachmentPreview({
               <PreviewStage
                 preview={preview}
                 stageRef={stage}
+                place={position && `${position.index} of ${position.total}`}
+                fading={fading}
                 onReplace={replace}
                 onRestoreBackup={
                   openSettings

@@ -35,6 +35,23 @@
   align-items: center;
   gap: 2px;
 }
+/* Previous, "2 of 6" and Next, set apart from Open by a hairline. */
+.attachment-preview-browse {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-right: 6px;
+  padding-right: 8px;
+  border-right: 1px solid var(--group-hairline);
+}
+.attachment-preview-position {
+  min-width: 4ch;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+  white-space: nowrap;
+}
 .attachment-rename {
   position: relative;
   display: flex;
@@ -223,6 +240,20 @@
 }
 .attachment-preview[data-layout="pane"] .attachment-preview-canvas {
   min-height: 0;
+}
+/* The file reached by Previous or Next fades in over the exit duration. */
+.attachment-preview-canvas[data-fading] {
+  animation: attachment-fade-in var(--dur-exit) ease-out;
+}
+@keyframes attachment-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .attachment-preview-canvas[data-fading] {
+    animation: none;
+  }
 }
 .attachment-preview-loading {
   align-self: stretch;

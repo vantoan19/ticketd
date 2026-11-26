@@ -167,6 +167,8 @@ export const SHORTCUTS = [
       ["attachments-open", [["O"]], "Open file"],
       ["attachments-more", [["."]], "More file actions"],
       ["attachments-details", [["I"]], "Show file details"],
+      ["attachments-next", [["J"]], "Next file in the viewer"],
+      ["attachments-previous", [["K"]], "Previous file in the viewer"],
       [
         "attachments-zoom",
         [["+"], ["-"], ["0"]],

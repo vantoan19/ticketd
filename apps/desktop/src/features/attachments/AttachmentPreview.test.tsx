@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentPreview } from "./AttachmentPreview";
+import type { Attachment } from "@/lib/api/attachments";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { setPreference } from "@/lib/preferences";
@@ -811,4 +812,196 @@ test("a PDF that isn't downloaded, missing or too large never reads its bytes", 
     view.unmount();
   }
   expect(openPdf).not.toHaveBeenCalled();
+});
+
+const shot = {
+  ...file,
+  id: "shot-1",
+  display_name: "refund.png",
+  original_filename: "refund.png",
+  size_bytes: 9_000,
+};
+const lost = {
+  ...file,
+  id: "lost-1",
+  display_name: "trace.log",
+  original_filename: "trace.log",
+  size_bytes: 120,
+};
+const walk: Attachment[] = [shot, reportFile, pdfFile, lost];
+const previews: Record<string, unknown> = {
+  [shot.id]: {
+    attachment: shot,
+    status: "available",
+    media_type: "image/png",
+    message: null,
+    can_open: true,
+    usage: { total: 0, entries: [], legacy_drafts_pending: false },
+  },
+  [reportFile.id]: reportPreview,
+  [pdfFile.id]: pdfPreview,
+  [lost.id]: {
+    attachment: lost,
+    status: "unavailable",
+    media_type: null,
+    message: "The stored copy can't be read.",
+    can_open: false,
+    usage: { total: 0, entries: [], legacy_drafts_pending: false },
+  },
+};
+function serveWalk() {
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (command === "attachment_preview")
+      return previews[(args as { id: string }).id];
+    if (command === "attachment_html") return reportSource;
+    if (command === "attachment_pdf") return new Uint8Array([37, 80, 68, 70]);
+    return null;
+  });
+}
+/** The ticket that opened the viewer: it picks the shown file, like Ticket Files. */
+function Walk({ start, onClose }: { start: number; onClose?: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [shown, setShown] = useState(walk[start]!);
+  return (
+    <div data-testid="pane">
+      <button onClick={() => setOpen(true)}>Open file</button>
+      {open && (
+        <AttachmentPreview
+          target={{ id: shown.id, initial: shown }}
+          browse={{ files: walk, onSelect: setShown }}
+          onClose={() => {
+            setOpen(false);
+            onClose?.();
+          }}
+        />
+      )}
+    </div>
+  );
+}
+const header = () => screen.getByRole("group", { name: "Browse files" });
+
+test("browsing a mixed set: each file shows its own state and recovery, J and K step, the ends hold", async () => {
+  serveWalk();
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(3).document);
+  render(<Walk start={1} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+  // The report is second of four: its position and both buttons are there.
+  await screen.findByLabelText("Report: E2E report");
+  expect(header().textContent).toContain("2 of 4");
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Previous file" })
+      .disabled,
+  ).toBe(false);
+  const viewer = screen.getByRole("dialog");
+  // Both neighbors were read ahead, so a step has its state at once.
+  await waitFor(() => {
+    for (const id of [shot.id, pdfFile.id])
+      expect(invoke).toHaveBeenCalledWith("attachment_preview", {
+        workspace: "workspace",
+        id,
+      });
+  });
+  // J: the PDF, with its pages and bar; the report's frame is gone.
+  fireEvent.keyDown(viewer, { key: "j" });
+  expect(await screen.findByRole("img", { name: "Page 3" })).toBeTruthy();
+  expect(screen.queryByLabelText("Report: E2E report")).toBeNull();
+  expect(header().textContent).toContain("3 of 4");
+  expect(screen.getByRole("heading", { name: "Refunds API" })).toBeTruthy();
+  // The unavailable file brings its own recovery and none of the PDF's controls.
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  expect(await screen.findByText("Couldn't read this file")).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Retry" })).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Fit" })).toBeNull();
+  expect(screen.queryByRole("img", { name: "Page 3" })).toBeNull();
+  expect(
+    screen.getByRole<HTMLButtonElement>("button", { name: "Open file" })
+      .disabled,
+  ).toBe(true);
+  // The last file: Next is disabled and says so, and J does nothing.
+  expect(header().textContent).toContain("4 of 4");
+  expect(
+    header().querySelector<HTMLButtonElement>("[aria-label='Next file']")
+      ?.disabled,
+  ).toBe(true);
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "j" });
+  expect(header().textContent).toContain("4 of 4");
+  // Focus did not stay on a button that just stopped working.
+  expect(document.activeElement).toBe(
+    screen.getByRole("group", { name: "trace.log, Log, 4 of 4" }),
+  );
+  // K walks back to the screenshot, a clean slate: no failure left over.
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "k" });
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "k" });
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "k" });
+  await waitFor(() =>
+    expect(screen.getByRole("img", { name: "refund.png" })).toBeTruthy(),
+  );
+  expect(screen.queryByText("Couldn't read this file")).toBeNull();
+  expect(header().textContent).toContain("1 of 4");
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "k" });
+  expect(header().textContent).toContain("1 of 4");
+  // Each step was announced politely.
+  expect(document.querySelector("[aria-live='polite']")?.textContent).toContain(
+    "refund.png, PNG image, 1 of 4",
+  );
+});
+
+test("J and K are typing in the page number field and never switch files", async () => {
+  serveWalk();
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(4).document);
+  render(<Walk start={2} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+  const field = await screen.findByRole("textbox", { name: "Page" });
+  field.focus();
+  fireEvent.keyDown(field, { key: "j" });
+  fireEvent.keyDown(field, { key: "k" });
+  expect(header().textContent).toContain("3 of 4");
+  // Arrows and the zoom keys stay the stage's: they never change the file.
+  const stage = screen.getByRole("group", { name: /^Refunds API, PDF/ });
+  fireEvent.keyDown(stage, { key: "ArrowRight" });
+  fireEvent.keyDown(stage, { key: "ArrowDown" });
+  fireEvent.keyDown(stage, { key: "+" });
+  expect(header().textContent).toContain("3 of 4");
+});
+
+test("a lone file has no position or buttons, and J does nothing", async () => {
+  serveWalk();
+  render(
+    <AttachmentPreview
+      target={{ id: shot.id, initial: shot }}
+      browse={{ files: [shot], onSelect: () => {} }}
+      onClose={() => {}}
+    />,
+  );
+  await screen.findByRole("img", { name: "refund.png" });
+  expect(screen.queryByRole("group", { name: "Browse files" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Next file" })).toBeNull();
+});
+
+test("closing after stepping returns focus and scroll to what opened the viewer", async () => {
+  serveWalk();
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(2).document);
+  render(<Walk start={0} />);
+  const pane = screen.getByTestId("pane");
+  let top = 480;
+  Object.defineProperty(pane, "scrollTop", {
+    get: () => top,
+    set: (value: number) => {
+      top = value;
+    },
+  });
+  const opener = screen.getByRole("button", { name: "Open file" });
+  opener.focus();
+  fireEvent.click(opener);
+  await screen.findByRole("img", { name: "refund.png" });
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  await screen.findByLabelText("Report: E2E report");
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  await screen.findByRole("heading", { name: "Refunds API" });
+  top = 0;
+  fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  expect(top).toBe(480);
+  expect(document.activeElement).toBe(opener);
 });
