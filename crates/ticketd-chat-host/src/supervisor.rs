@@ -3013,7 +3013,7 @@ impl Supervisor {
             .iter()
             .position(|transfer| transfer.attempt_id == attempt_id)
             && let Some(runtime) = &mut self.runtime
-            && let Some(transfer) = self.pending_contexts.drain(..=index).last()
+            && let Some(transfer) = self.pending_contexts.drain(..=index).next_back()
         {
             // The durable record also supplies the next session's baseline, so
             // older transfers cannot replace a newer confirmed one.
