@@ -14,7 +14,14 @@ import {
   type ReactNode,
   type RefObject,
 } from "react";
-import { ChevronDown, ChevronUp, Info, Search, WrapText, X } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  Info,
+  Search,
+  WrapText,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
