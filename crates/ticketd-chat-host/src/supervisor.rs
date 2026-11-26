@@ -1102,6 +1102,21 @@ impl Supervisor {
         }
     }
 
+    fn retry_link_context(&mut self) {
+        if self
+            .direct
+            .iter()
+            .any(|(input, _)| input.requires_link_context)
+            && let Ok(queue) = self.core(|core| core.chat_queue(&self.chat_id))
+        {
+            // A pending input may have been withdrawn while the context was unavailable.
+            self.direct.retain(|(input, _)| {
+                !input.requires_link_context || queue.iter().any(|message| message.id == input.id)
+            });
+        }
+        self.refresh_context(ContextRefreshScope::LinkedInput);
+    }
+
     /// The context this Chat's sessions were last given or are about to be given.
     fn context_given(&self) -> Option<String> {
         if let Some(context) = self.session_context.as_ref().or(self.context_sent.as_ref()) {
@@ -3316,7 +3331,7 @@ impl Supervisor {
     fn on_timer(&mut self) {
         let now = Instant::now();
         if self.context_retry_at().is_some_and(|at| at <= now) {
-            self.refresh_context(ContextRefreshScope::LinkedInput);
+            self.retry_link_context();
         }
         if self.show_text_at.is_some_and(|at| at <= now) {
             self.show_text();

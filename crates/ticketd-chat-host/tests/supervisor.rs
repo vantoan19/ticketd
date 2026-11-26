@@ -189,12 +189,16 @@ impl Fixture {
     }
 
     async fn wait_for_submissions(&self, count: usize) -> Vec<Submission> {
-        tokio::time::timeout(
-            Duration::from_secs(10),
-            self.fake.wait_for_submissions(count),
-        )
-        .await
-        .expect("the expected submissions did not reach the fake harness");
+        assert!(
+            tokio::time::timeout(
+                Duration::from_secs(10),
+                self.fake.wait_for_submissions(count),
+            )
+            .await
+            .is_ok(),
+            "expected {count} submissions, got {}",
+            self.submits().len()
+        );
         self.submits()
     }
 
@@ -1573,6 +1577,7 @@ async fn a_new_session_gets_the_ticketd_context_once_and_it_is_kept_apart_from_t
     .unwrap();
 
     let first = f.send("first").await;
+    f.wait_for_submissions(1).await;
     f.emit(EventKind::TurnEnded {
         turn: NativeTurnId::new("turn-1"),
         outcome: TurnOutcome::Completed,
@@ -1580,10 +1585,11 @@ async fn a_new_session_gets_the_ticketd_context_once_and_it_is_kept_apart_from_t
     })
     .await;
     f.send("second").await;
+    let submissions = f.wait_for_submissions(2).await;
 
     let context = format!("context for {}", f.chat.id);
-    assert_eq!(f.submits()[0].text, format!("{context}\n\nfirst"));
-    assert_eq!(f.submits()[1].text, "second");
+    assert_eq!(submissions[0].text, format!("{context}\n\nfirst"));
+    assert_eq!(submissions[1].text, "second");
     assert_eq!(f.message(&first.id).text, "first");
     let kept: Vec<_> = f
         .items()
@@ -1848,7 +1854,7 @@ async fn a_context_that_cannot_be_read_is_said_and_the_session_starts_without_it
 
     f.send("first").await;
 
-    assert_eq!(f.submits()[0].text, "first");
+    assert_eq!(f.wait_for_submissions(1).await[0].text, "first");
     assert!(notices(&f)[0].contains("the workspace could not be opened"));
 }
 
@@ -2367,6 +2373,65 @@ async fn send_now_checks_the_context_of_a_saved_queued_takeover_reply() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn resend_checks_stored_link_context_after_restarting_the_supervisor() {
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let source = unavailable.clone();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if source.load(Ordering::SeqCst) {
+            Err("context source unavailable".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Linked reply to retry").unwrap().id,
+    };
+    f.fake.script_submit(SubmitReply::Timeout);
+    let saved = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Read this",
+            SendMode::Auto,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    f.wait_for_submissions(1).await;
+    tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
+    assert!(f.message(&saved.id).awaits_decision());
+    assert!(f.host.stop_all(StopReason::Quit).await.is_empty());
+
+    unavailable.store(true, Ordering::SeqCst);
+    f.host.resend(&f.chat.id, &saved.id).await.unwrap();
+    wait_for_context_read_failure(&f).await;
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.message(&saved.id).attempts.len(), 1);
+
+    unavailable.store(false, Ordering::SeqCst);
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions[1].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[1].text, "linked records: 1\n\nRead this");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    assert_eq!(f.message(&saved.id).attempts.len(), 2);
+}
+
+async fn wait_for_context_read_failure(f: &Fixture) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !notices(f)
+            .iter()
+            .any(|notice| notice.contains("context source unavailable"))
+        {
+            settle().await;
+        }
+    })
+    .await
+    .unwrap();
+}
+
+#[tokio::test(start_paused = true)]
 async fn an_unrelated_auto_send_starts_while_a_paused_linked_input_cannot_read_context() {
     let unavailable = Arc::new(AtomicBool::new(false));
     let source = unavailable.clone();
@@ -2397,16 +2462,7 @@ async fn an_unrelated_auto_send_starts_while_a_paused_linked_input_cannot_read_c
         )
         .await
         .unwrap();
-    tokio::time::timeout(Duration::from_secs(10), async {
-        while !notices(&f)
-            .iter()
-            .any(|notice| notice.contains("context source unavailable"))
-        {
-            settle().await;
-        }
-    })
-    .await
-    .unwrap();
+    wait_for_context_read_failure(&f).await;
 
     f.send("unrelated").await;
     let submissions = f.wait_for_submissions(2).await;
@@ -2507,13 +2563,7 @@ async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContext
             .filter(|notice| notice.contains("context source unavailable"))
             .count()
     };
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while failed_reads() == 0 {
-            settle().await;
-        }
-    })
-    .await
-    .unwrap();
+    wait_for_context_read_failure(&f).await;
     let before = if matches!(session, LinkedContextSession::Live) {
         f.send("ordinary steer").await;
         let submissions = f.wait_for_submissions(2).await;
@@ -2690,6 +2740,7 @@ async fn overlapping_linked_edits_dispatch_with_the_latest_context() {
     .unwrap();
 
     f.send("first").await;
+    f.wait_for_submissions(1).await;
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     f.host.stop(&f.chat.id).await.unwrap();
     let older = f.queue("Original one").await;
