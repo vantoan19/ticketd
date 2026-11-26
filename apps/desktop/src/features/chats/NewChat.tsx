@@ -142,9 +142,7 @@ export function NewChat({
   const { quotes, remove: removeQuote } = useQuotes(NEW_CHAT);
   /** null until the first probe answers: seconds, while each harness is asked. */
   const [harnesses, setHarnesses] = useState<HarnessStatus[] | null>(null);
-  const [harnessId, setHarnessId] = useState(
-    () => pendingCreate?.request.harness_id ?? "",
-  );
+  const [harnessId, setHarnessId] = useState("");
   /** null is the managed folder ticketd keeps for the Chat. */
   const [folder, setFolder] = useState<string | null>(() =>
     start ? start.folder : (pendingCreate?.request.folder ?? null),
@@ -275,11 +273,11 @@ export function NewChat({
     };
   }, [client, start?.folder]);
   const found = harnesses ?? [];
-  // The one chosen here, else the last one used while it can still be, else the
-  // first that can be used, in the host's order.
+  // An automatic probe keeps the pending request's harness until a choice is made.
+  const selectedHarness = harnessId || pendingCreate?.request.harness_id;
   const remembered = rememberedHarness();
   const harness =
-    found.find((item) => item.id === harnessId) ??
+    found.find((item) => item.id === selectedHarness) ??
     found.find((item) => item.id === remembered && item.usable) ??
     found.find((item) => item.usable) ??
     found[0];

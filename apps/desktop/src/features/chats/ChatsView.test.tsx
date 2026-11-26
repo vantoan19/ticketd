@@ -906,12 +906,13 @@ test("an edited New Chat uses current harness picks after reopening the draft", 
   );
 });
 
-test.each([false, true])(
-  "ordinary Send after a lost New Chat reply and late options (model picked: %s)",
-  async (chooseModel) => {
+test.each(["unchanged", "model changed", "harness changed"])(
+  "ordinary Send after a lost New Chat reply and a probe (%s)",
+  async (choice) => {
     localStorage.clear();
     const client = await open(one({ id: "c1", title: "Limiter" }));
     client.setHarnesses([{ id: "codex", name: "Codex", status: "ready" }]);
+    const probe = vi.spyOn(client, "harnesses");
     const initialOptions = client.harnessOptions;
     let finishOptions!: () => void;
     const loading = new Promise<void>((resolve) => {
@@ -944,27 +945,40 @@ test.each([false, true])(
     expect(first?.model).toBeUndefined();
     expect(first?.attachments).toHaveLength(1);
 
+    client.setHarnesses([
+      { id: "claude-code", name: "Claude Code", status: "ready" },
+      { id: "codex", name: "Codex", status: "ready" },
+    ]);
+    const previousProbes = probe.mock.calls.length;
+    fireEvent.click(button("New Chat"));
+    await waitFor(() =>
+      expect(probe.mock.calls.length).toBeGreaterThan(previousProbes),
+    );
     await act(async () => finishOptions());
     const modelPicker = await screen.findByRole("button", {
       name: "Codex, model GPT-5.5 Codex, effort Medium",
     });
-    if (chooseModel) {
+    if (choice === "model changed") {
       fireEvent.click(modelPicker);
       fireEvent.click(
         await screen.findByRole("radio", { name: /Broad world knowledge/ }),
       );
+    } else if (choice === "harness changed") {
+      fireEvent.click(modelPicker);
+      fireEvent.click(await screen.findByRole("tab", { name: "Claude Code" }));
     }
     fireEvent.click(button("Send"));
 
     await screen.findByRole("heading", { name: "first.txt" });
     const second = create.mock.calls[1]?.[0];
-    if (chooseModel) {
-      expect(second?.model).toBe("gpt-5.5");
-      expect(second?.command_id).not.toBe(first?.command_id);
-      expect(client.created).toHaveLength(2);
-    } else {
+    if (choice === "unchanged") {
       expect(second).toEqual(first);
       expect(client.created).toHaveLength(1);
+    } else {
+      expect(second?.command_id).not.toBe(first?.command_id);
+      expect(client.created).toHaveLength(2);
+      if (choice === "model changed") expect(second?.model).toBe("gpt-5.5");
+      else expect(second?.harness_id).toBe("claude-code");
     }
   },
 );
