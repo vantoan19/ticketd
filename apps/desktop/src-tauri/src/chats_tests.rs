@@ -1135,6 +1135,9 @@ async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
         )
         .await
         .unwrap();
+    let queue = f.core().chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].text, "Edited");
     f.core()
         .set_chat_link(&id, ChatLink::from(link.clone()), false)
         .unwrap();
@@ -1149,21 +1152,35 @@ async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
     assert_eq!(status.saved.as_slice(), std::slice::from_ref(&command_id));
     assert_eq!(status.removed, [held]);
 
+    let reordered = f
+        .chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[another_link.clone(), link.clone()],
+            Vec::new(),
+            request(),
+        )
+        .await
+        .unwrap_err();
+    assert!(reordered.message.contains("different"));
+    assert!(f.core().chat(&id).unwrap().links.is_empty());
+    assert_eq!(f.core().chat_queue(&id).unwrap(), queue);
+
     f.chats
         .send_linking(
             &id,
             "Edited",
             SendMode::Queue,
-            &[another_link.clone(), link.clone(), link.clone()],
+            &[link.clone(), another_link.clone(), link.clone()],
             Vec::new(),
             request(),
         )
         .await
         .unwrap();
     assert!(f.core().chat(&id).unwrap().links.is_empty());
-    let queue = f.core().chat_queue(&id).unwrap();
-    assert_eq!(queue.len(), 1);
-    assert_eq!(queue[0].text, "Edited");
+    assert_eq!(f.core().chat_queue(&id).unwrap(), queue);
 
     f.chats.remove_queued(&id, &queue[0].id).await.unwrap();
     let changed = f
@@ -1225,7 +1242,9 @@ async fn a_new_queue_edit_receipt_binds_empty_links_without_guessing_legacy_link
                 .unwrap();
             let db = rusqlite::Connection::open(f.dir.path().join("workspace.sqlite3")).unwrap();
             db.execute(
-                "UPDATE request_outcomes SET request = json_remove(request, '$.links') WHERE id = ?1",
+                "UPDATE request_outcomes
+                 SET request = json_remove(request, '$.links', '$.links_ordered', '$.input_source')
+                 WHERE id = ?1",
                 [save_id],
             )
             .unwrap();
