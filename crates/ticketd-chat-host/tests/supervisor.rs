@@ -2429,7 +2429,10 @@ async fn stop_cancels_a_resend_waiting_on_link_context() {
 
     f.send("Ordinary after Stop").await;
     let submissions = f.wait_for_submissions(2).await;
-    assert!(submissions[1].text.ends_with("Ordinary after Stop"));
+    assert_eq!(
+        submissions[1].text,
+        "linked records: 1\n\nOrdinary after Stop"
+    );
     assert_eq!(f.message(&original.id).attempts.len(), 1);
     assert!(f.message(&original.id).awaits_decision());
     assert!(f.message(&queued.id).attempts.is_empty());
@@ -2453,13 +2456,22 @@ async fn stop_cancels_a_resend_waiting_on_link_context() {
     f.emit(turn_ended(turn, TurnOutcome::Completed)).await;
     f.host.resend(&f.chat.id, &original.id).await.unwrap();
     let submissions = f.wait_for_submissions(3).await;
-    assert_eq!(submissions[2].text, "linked records: 1\n\nUnconfirmed");
+    assert_eq!(submissions[2].text, "Unconfirmed");
     assert_eq!(submissions[2].attachments, [saved_file()]);
     assert!(f.message(&queued.id).attempts.is_empty());
 }
 
 #[tokio::test(start_paused = true)]
 async fn a_different_linked_input_carries_snapshot_after_an_unconfirmed_attempt() {
+    new_input_delivers_an_unconfirmed_context_snapshot(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_intervening_ordinary_turn_delivers_context_for_the_later_linked_input() {
+    new_input_delivers_an_unconfirmed_context_snapshot(true).await;
+}
+
+async fn new_input_delivers_an_unconfirmed_context_snapshot(ordinary_in_between: bool) {
     let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
     let link = ChatLink {
         kind: ChatLinkKind::Ticket,
@@ -2484,21 +2496,39 @@ async fn a_different_linked_input_carries_snapshot_after_an_unconfirmed_attempt(
     tokio::time::sleep(DELIVERY_CONFIRMATION_TIMEOUT + Duration::from_secs(1)).await;
     assert!(f.message(&original.id).awaits_decision());
     let queued = f.queue("Leave paused").await;
+    let linked_index = if ordinary_in_between {
+        f.send("Unrelated B").await;
+        assert_eq!(
+            f.wait_for_submissions(2).await[1].text,
+            "linked records: 1\n\nUnrelated B"
+        );
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+        2
+    } else {
+        1
+    };
 
     let next = f
         .host
         .send_linking(
             &f.chat.id,
-            "Different B",
+            "Different linked input",
             SendMode::Auto,
             vec![saved_file()],
             vec![link],
         )
         .await
         .unwrap();
-    let submissions = f.wait_for_submissions(2).await;
-    assert_eq!(submissions[1].text, "linked records: 1\n\nDifferent B");
-    assert_eq!(submissions[1].attachments, [saved_file()]);
+    let submissions = f.wait_for_submissions(linked_index + 1).await;
+    assert_eq!(
+        submissions[linked_index].text,
+        if ordinary_in_between {
+            "Different linked input"
+        } else {
+            "linked records: 1\n\nDifferent linked input"
+        }
+    );
+    assert_eq!(submissions[linked_index].attachments, [saved_file()]);
     let original = f.message(&original.id);
     assert!(original.awaits_decision());
     assert_eq!(original.attempts.len(), 1);

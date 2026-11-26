@@ -2438,14 +2438,10 @@ impl Supervisor {
             None
         };
         let context = if starts_turn && self.refreshing.is_none() {
-            self.session_context.take().or_else(|| {
-                // A written turn can time out without having received its context.
-                if message.requires_link_context {
-                    self.context_sent.clone()
-                } else {
-                    None
-                }
-            })
+            // A written turn can time out without having received its context.
+            self.session_context
+                .take()
+                .or_else(|| self.context_sent.clone())
         } else {
             None
         };
