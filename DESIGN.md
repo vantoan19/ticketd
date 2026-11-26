@@ -1105,7 +1105,7 @@ Interrupted, Not confirmed and Stop not confirmed keep their own words and never
 
 ### Color, motion and narrow panes
 
-Color is only the existing small status dot beside a word. The one live signal is the 12px spinner beside words, at most one per turn and never on replayed history; list rows have none, and the sidebar's Chats item keeps its own. Under reduced motion it is static and jumps are instant (Chat motion, below). In a narrow pane rows wrap with the suffix beside its target, outcome words never truncate, approval buttons stack, and the model trigger drops its effort bars.
+Color is only the existing small status dot beside a word. The one live signal is the 12px spinner beside words, at most one per turn and never on replayed history; list rows have none, and the sidebar's Chats item keeps its own. Under reduced motion it is static and jumps are instant (Chat motion, below). In a narrow pane rows wrap with the suffix beside its target, outcome words never truncate, approval buttons stack, and below 460px the model trigger shows its effort bars in place of the effort word, so it always keeps one effort indicator.
 
 #### Chat motion
 
