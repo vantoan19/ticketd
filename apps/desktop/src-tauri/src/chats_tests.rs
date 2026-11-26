@@ -1756,28 +1756,22 @@ async fn restoring_the_workspace_stops_chats_reconciles_and_dispatches_nothing()
     assert_eq!(f.chats.working(), 1);
 
     let backup = f.dir.path().join("valid.ticketd-backup");
-    assert!(f.core().backup(&backup).unwrap());
+    let mut core = f.core();
+    core.set_chat_queue_paused(&id, false).unwrap();
+    let flying = core.save_chat_input(None, &id, "in flight").unwrap();
+    core.record_chat_submission(&id, &flying.id, "a-restored", ChatSubmissionIntent::NewTurn)
+        .unwrap();
+    core.save_chat_input(None, &id, "queued in the backup")
+        .unwrap();
+    assert!(core.backup(&backup).unwrap());
+    drop(core);
     let live = f.dir.path().join("workspace.sqlite3");
-    let restored_chat = id.clone();
     let restored = f
         .chats
         .restore(backup, move |backup| {
-            // Simulate a backup with a turn in progress, a submission in flight, and queued input.
-            let mut core = Workspace::open(live).unwrap();
-            core.set_chat_queue_paused(&restored_chat, false).unwrap();
-            let flying = core
-                .save_chat_input(None, &restored_chat, "in flight")
-                .unwrap();
-            core.record_chat_submission(
-                &restored_chat,
-                &flying.id,
-                "a-restored",
-                ChatSubmissionIntent::NewTurn,
-            )
-            .unwrap();
-            core.save_chat_input(None, &restored_chat, "queued in the backup")
-                .unwrap();
-            Ok(backup)
+            ticketd_core::WorkspaceSession::for_file(live)
+                .and_then(|session| session.exclusive(|path| Workspace::restore(path, backup)))
+                .map_err(|error| error.to_string())
         })
         .await
         .unwrap();
@@ -2135,6 +2129,56 @@ async fn a_new_title_is_cut_at_a_word_and_earlier_title_receipts_still_resume() 
 }
 
 #[tokio::test(start_paused = true)]
+async fn restoring_while_new_chat_awaits_options_refuses_the_stale_save() {
+    let f = Fixture::new().await;
+    f.fake.set_options(codex_options());
+    let (probing, finish_probe) = f.fake.hold_next_options();
+    let mut input = f.input("From the earlier Workspace");
+    input.folder = None;
+    input.model = Some("gpt-b".to_owned());
+    input.attachments = vec![AttachmentInput {
+        name: "notes.txt".to_owned(),
+        data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+    }];
+    let folder = managed_chat_folders(&f.core())
+        .unwrap()
+        .join(&input.command_id);
+    let backup = f.dir.path().join("valid.ticketd-backup");
+    assert!(f.core().backup(&backup).unwrap());
+
+    let creating = tokio::spawn({
+        let chats = f.chats.clone();
+        let input = input.clone();
+        async move { chats.create(input).await }
+    });
+    probing.await.unwrap();
+    let live = f.dir.path().join("workspace.sqlite3");
+    f.chats
+        .restore(backup, move |backup| {
+            ticketd_core::WorkspaceSession::for_file(live)
+                .and_then(|session| session.exclusive(|path| Workspace::restore(path, backup)))
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .unwrap();
+    finish_probe.send(()).unwrap();
+    let refused = creating.await.unwrap().unwrap_err();
+    assert_eq!(refused.code, "stale");
+    assert!(
+        f.core()
+            .list_chats(ChatListFilter::Active)
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!folder.exists());
+    assert!(f.fake.opens().is_empty());
+
+    let retried = f.chats.create(input).await.unwrap();
+    assert_eq!(retried.send_error, None);
+    assert!(folder.is_dir());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_failed_managed_folder_creation_still_binds_the_first_message() {
     let f = Fixture::new().await;
     let mut input = f.input("Same title\nOriginal message");
@@ -2358,6 +2402,7 @@ async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
     let first = f.chats.create(input.clone()).await.unwrap();
     assert_eq!(first.send_error, None);
     settle().await;
+    assert_eq!(f.fake.opens()[0].settings.model.as_deref(), Some("gpt-b"));
     assert_eq!(
         f.fake.opens()[0].settings.permission.as_deref(),
         Some("ask")

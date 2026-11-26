@@ -1638,6 +1638,89 @@ fn a_resume_records_a_new_native_session_identity_for_the_same_chat() {
 }
 
 #[test]
+fn restore_installs_dispatchable_chat_queues_paused() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, queued) = workspace_with_chat(&dir);
+    let delivered = workspace.create_chat(None, new_chat()).unwrap();
+    start_turn(&mut workspace, &delivered, "Already delivered", "turn-1");
+    let held = workspace.create_chat(None, new_chat()).unwrap();
+    let draft = workspace
+        .save_chat_input(None, &held.id, "Held input")
+        .unwrap();
+    workspace
+        .confirm_chat_queue_edit(&held.id, &draft.id, "hold")
+        .unwrap();
+    let message = workspace
+        .save_chat_input(None, &queued.id, "Queued")
+        .unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    assert!(workspace.backup(&backup).unwrap());
+    assert!(!workspace.chat(&queued.id).unwrap().queue_paused);
+
+    let target = dir.path().join("restored.sqlite3");
+    Workspace::restore(&target, &backup).unwrap();
+    let restored = Workspace::open(&target).unwrap();
+    assert!(restored.chat(&queued.id).unwrap().queue_paused);
+    assert_eq!(restored.chat_queue(&queued.id).unwrap(), [message]);
+    assert!(!restored.chat(&delivered.id).unwrap().queue_paused);
+    assert!(!restored.chat(&held.id).unwrap().queue_paused);
+    assert!(restored.chat_queue(&held.id).unwrap()[0].editing);
+}
+
+#[test]
+fn restore_keeps_the_live_workspace_when_staging_cannot_pause_chat_queues() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    workspace.save_chat_input(None, &chat.id, "Queued").unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    assert!(workspace.backup(&backup).unwrap());
+    let live = workspace
+        .create_ticket("Only in the live Workspace")
+        .unwrap();
+    drop(workspace);
+    rusqlite::Connection::open(&backup)
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER refuse_queue_pause BEFORE UPDATE OF queue_paused ON chats
+             WHEN NEW.queue_paused = 1 BEGIN SELECT RAISE(ABORT, 'queue pause refused'); END;",
+        )
+        .unwrap();
+
+    let refused = Workspace::restore(&path, &backup).unwrap_err();
+    assert!(
+        refused.to_string().contains("queue pause refused"),
+        "{refused}"
+    );
+    let workspace = Workspace::open(&path).unwrap();
+    assert_eq!(workspace.show_ticket(&live.reference).unwrap(), live);
+    assert!(!workspace.chat(&chat.id).unwrap().queue_paused);
+}
+
+#[test]
+fn a_backup_before_held_edits_can_still_pause_its_queued_input_on_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let backup = dir.path().join("backup.sqlite3");
+    old_chat_workspace(&backup, 101, "completed");
+    rusqlite::Connection::open(&backup)
+        .unwrap()
+        .execute(
+            "INSERT INTO chat_messages (id, chat_id, position, role, text, complete)
+             VALUES ('input', 'chat-1', 2, 'user', 'Queued on an older version', 1)",
+            [],
+        )
+        .unwrap();
+    let target = dir.path().join("restored.sqlite3");
+    Workspace::restore(&target, &backup).unwrap();
+    let restored = Workspace::open(&target).unwrap();
+    assert!(restored.chat("chat-1").unwrap().queue_paused);
+    assert_eq!(
+        restored.chat_queue("chat-1").unwrap()[0].text,
+        "Queued on an older version"
+    );
+}
+
+#[test]
 fn chat_state_survives_backup_and_restore_without_resuming_work() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");

@@ -73,6 +73,7 @@ struct State {
     turns_started: u64,
     options: Option<HarnessOptions>,
     options_asked: usize,
+    options_holds: VecDeque<(oneshot::Sender<()>, oneshot::Receiver<()>)>,
     /// Whether the harness answers a new turn with its identity. Claude Code does not:
     /// it takes the input and names the turn only when it starts processing it.
     acknowledges_new_turn: bool,
@@ -139,6 +140,7 @@ impl FakeAdapter {
                 turns_started: 0,
                 options: None,
                 options_asked: 0,
+                options_holds: VecDeque::new(),
                 acknowledges_new_turn: true,
             })),
         }
@@ -266,6 +268,14 @@ impl FakeAdapter {
         self.state().options = Some(options);
     }
 
+    /// The next options probe signals that it started, then waits for release.
+    pub fn hold_next_options(&self) -> (oneshot::Receiver<()>, oneshot::Sender<()>) {
+        let (started, starting) = oneshot::channel();
+        let (release, released) = oneshot::channel();
+        self.state().options_holds.push_back((started, released));
+        (starting, release)
+    }
+
     /// How many times the options were asked for.
     pub fn options_asked(&self) -> usize {
         self.state().options_asked
@@ -373,12 +383,16 @@ impl HarnessAdapter for FakeAdapter {
     }
 
     async fn options(&self) -> Result<HarnessOptions, String> {
-        let mut state = self.state();
-        state.options_asked += 1;
-        state
-            .options
-            .clone()
-            .ok_or_else(|| "the fake lists no options".to_owned())
+        let (options, hold) = {
+            let mut state = self.state();
+            state.options_asked += 1;
+            (state.options.clone(), state.options_holds.pop_front())
+        };
+        if let Some((started, release)) = hold {
+            let _ = started.send(());
+            let _ = release.await;
+        }
+        options.ok_or_else(|| "the fake lists no options".to_owned())
     }
 
     /// The fake records its permission as `{"permission": id}`; it offers `ask` and

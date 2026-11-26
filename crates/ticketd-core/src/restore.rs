@@ -11,7 +11,8 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 use crate::{
-    Error, FORMAT_VERSION, Workspace, backup, backup_archive, backup_review, default_path, session,
+    Error, FORMAT_VERSION, Workspace, backup, backup_archive, backup_review,
+    chats::QUEUED_CHAT_INPUT, default_path, session,
 };
 
 #[derive(Serialize, Deserialize)]
@@ -45,6 +46,32 @@ fn reported_path(path: PathBuf) -> PathBuf {
 
 pub(crate) fn pending(workspace: &Path) -> bool {
     sibling(workspace, ".restore.json").exists()
+}
+
+fn pause_restored_chat_queues(staged: &Connection) -> Result<(), Error> {
+    if !backup::table_exists(staged, "chats")? {
+        return Ok(());
+    }
+    let has_held_edits: bool = staged.query_row(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('chat_messages') WHERE name = 'editing')",
+        [],
+        |row| row.get(0),
+    )?;
+    let unheld = if has_held_edits {
+        "AND m.editing = 0"
+    } else {
+        ""
+    };
+    staged.execute(
+        &format!(
+            "UPDATE chats SET queue_paused = 1 WHERE queue_paused = 0 AND EXISTS (
+                SELECT 1 FROM chat_messages m
+                WHERE m.chat_id = chats.id AND {QUEUED_CHAT_INPUT} {unheld}
+            )"
+        ),
+        [],
+    )?;
+    Ok(())
 }
 
 /// Called under the exclusive workspace lock, before opening any connection.
@@ -240,6 +267,9 @@ impl Workspace {
                     [record.path, record.completed_at],
                 )?;
         }
+        // A failed pause leaves the live Workspace alone, and an installed copy is
+        // safe even if the desktop is interrupted before reconciling its Chats.
+        pause_restored_chat_queues(&restored)?;
         drop(restored);
         staged.as_file().sync_all()?;
         let root = backup_archive::attachment_root(&workspace);

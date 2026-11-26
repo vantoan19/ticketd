@@ -43,6 +43,8 @@ const SUMMARY_ITEMS: usize = 50;
 const HISTORY_ITEMS: usize = 10_000;
 const MAX_TEXT_BYTES: usize = 1024 * 1024;
 const MAX_LAST_MESSAGES: usize = 200;
+const RESTORING_WORKSPACE: &str =
+    "The workspace is being restored from a backup. Try again when it has finished.";
 
 /// A refused request. `stale` means the request, turn or runtime it named is no longer
 /// current; the message is shown to the person as it is.
@@ -902,6 +904,12 @@ struct BuiltRow {
     summary: Summary,
 }
 
+#[derive(Default)]
+struct RestoreState {
+    replacing: bool,
+    generation: u64,
+}
+
 pub struct Chats {
     open_workspace: WorkspaceOpener,
     adapters: Vec<Arc<dyn HarnessAdapter>>,
@@ -911,9 +919,8 @@ pub struct Chats {
     /// The Experimental switch. The interface keeps the person's choice and tells the
     /// backend at startup; until then Chat is off and nothing can run.
     enabled: AtomicBool,
-    /// Set while the workspace is being replaced by a backup, so that no host is
-    /// started meanwhile. A host that already runs refuses work by itself.
-    restoring: AtomicBool,
+    /// Serializes the start of replacement with admission and the New Chat save.
+    restore_state: Mutex<RestoreState>,
     restore_owner: tokio::sync::Mutex<()>,
     host: Mutex<Option<ChatHost>>,
     /// Per Chat, the failed turn after which "Check again" found the harness usable.
@@ -952,10 +959,11 @@ struct RestoreAdmission<'a>(&'a Chats);
 
 impl Drop for RestoreAdmission<'_> {
     fn drop(&mut self) {
+        let mut restore = lock(&self.0.restore_state);
         if let Some(host) = self.0.started_host() {
             host.finish_restore();
         }
-        self.0.restoring.store(false, Ordering::SeqCst);
+        restore.replacing = false;
     }
 }
 
@@ -972,7 +980,7 @@ impl Chats {
             unavailable,
             context,
             enabled: AtomicBool::new(false),
-            restoring: AtomicBool::new(false),
+            restore_state: Mutex::default(),
             restore_owner: tokio::sync::Mutex::new(()),
             host: Mutex::new(None),
             checked: Mutex::new(HashMap::new()),
@@ -1021,19 +1029,18 @@ impl Chats {
             return Err(failed("Chat is turned off in Settings > Experimental."));
         }
         self.started_or_start().map_err(|error| match error {
-            HostError::Restoring => failed(
-                "The workspace is being restored from a backup. Try again when it has finished.",
-            ),
+            HostError::Restoring => failed(RESTORING_WORKSPACE),
             error => error.into(),
         })
     }
 
     /// The one host, started if it has not been yet.
     fn started_or_start(&self) -> Result<ChatHost, HostError> {
-        let mut host = lock(&self.host);
-        if self.restoring.load(Ordering::SeqCst) {
+        let restore = lock(&self.restore_state);
+        if restore.replacing {
             return Err(HostError::Restoring);
         }
+        let mut host = lock(&self.host);
         if let Some(host) = host.as_ref() {
             return Ok(host.clone());
         }
@@ -1059,6 +1066,20 @@ impl Chats {
     /// Starts the host if Chat is on, so its change signal can be watched.
     pub fn start(&self) -> Outcome<()> {
         self.host().map(|_| ())
+    }
+
+    /// Hold through a New Chat's write, so a restore cannot start across the check.
+    fn new_chat_save_fence(&self, generation: u64) -> Outcome<MutexGuard<'_, RestoreState>> {
+        let restore = lock(&self.restore_state);
+        if restore.generation != generation {
+            return Err(stale(
+                "The workspace changed while preparing this Chat. Try again.",
+            ));
+        }
+        if restore.replacing {
+            return Err(failed(RESTORING_WORKSPACE));
+        }
+        Ok(restore)
     }
 
     /// Moves whenever any Chat record was written or live state changed; cheap to read.
@@ -1150,9 +1171,8 @@ impl Chats {
         }
     }
 
-    /// After the restore, whether or not it replaced anything. The records now in the
-    /// workspace have no runtime behind them: they are reconciled as lost contact, and
-    /// every queue with input in it is paused, so restored input waits for the person.
+    /// Reconcile work with no runtime behind it. The installed queues were paused
+    /// in the staged database before replacement.
     fn reconcile_restored_workspace(&self) -> Outcome<()> {
         let reconciled = self.workspace().and_then(|mut workspace| {
             let restored = TurnEnding::StoppedByTicketd(StopReason::Restore);
@@ -1161,28 +1181,12 @@ impl Chats {
                 &restored.detail().unwrap_or_default(),
                 &restored.key(),
             )?;
-            let filters = [
-                ChatListFilter::Active,
-                ChatListFilter::Archived,
-                ChatListFilter::Trashed,
-            ];
-            for filter in filters {
-                for chat in workspace.list_chats(filter)? {
-                    if !chat.queue_paused
-                        && workspace
-                            .chat_queue(&chat.id)?
-                            .iter()
-                            .any(|message| !message.editing)
-                    {
-                        workspace.set_chat_queue_paused(&chat.id, true)?;
-                    }
-                }
-            }
             Ok(())
         });
         // Views read a new snapshot: their cursors belong to the replaced records.
         lock(&self.feeds).clear();
         lock(&self.checked).clear();
+        *lock(&self.built_rows) = BuiltRows::default();
         reconciled
     }
 
@@ -1208,7 +1212,7 @@ impl Chats {
             if let Ok(result) = check {
                 result?;
             }
-            chats.restoring.store(true, Ordering::SeqCst);
+            lock(&chats.restore_state).replacing = true;
             let _admission = RestoreAdmission(&chats);
             let unconfirmed = chats.stop_for_restore().await.map_err(|blocked| {
                 format!(
@@ -1216,6 +1220,7 @@ impl Chats {
                     blocked.reason,
                 )
             })?;
+            lock(&chats.restore_state).generation += 1;
             let restored = tokio::task::spawn_blocking(move || replace(backup))
                 .await
                 .map_err(|error| error.to_string())
@@ -1630,6 +1635,7 @@ impl Chats {
     /// Creates a Chat and sends its first message. Repeating `command_id` finds the Chat
     /// and the message an earlier try saved instead of making them again.
     pub async fn create(&self, input: NewChatInput) -> Outcome<Created> {
+        let generation = lock(&self.restore_state).generation;
         let host = self.host()?;
         let command_id = uuid::Uuid::parse_str(&input.command_id)
             .map_err(|_| failed("the request id must be a UUID"))?
@@ -1724,6 +1730,7 @@ impl Chats {
                         send_error: None,
                     };
                     if exact || picks.is_empty() {
+                        let _fence = self.new_chat_save_fence(generation)?;
                         return Ok(created);
                     }
                     legacy_saved = Some(created);
@@ -1764,17 +1771,20 @@ impl Chats {
                 )));
             }
         }
-        if let Some(created) = legacy_saved {
-            return Ok(created);
-        }
-        // The Chat is stored first: a request the core refuses leaves no folder behind.
-        let chat = self.workspace()?.create_chat_for_first_message(
-            &create,
-            new_chat,
-            requested,
-            &input.message,
-            &attachments,
-        )?;
+        let chat = {
+            let _fence = self.new_chat_save_fence(generation)?;
+            if let Some(created) = legacy_saved {
+                return Ok(created);
+            }
+            // The Chat is stored first: a request the core refuses leaves no folder behind.
+            self.workspace()?.create_chat_for_first_message(
+                &create,
+                new_chat,
+                requested,
+                &input.message,
+                &attachments,
+            )?
+        };
         let created = |send_error| Created {
             chat_id: chat.id.clone(),
             send_error,

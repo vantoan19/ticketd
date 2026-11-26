@@ -944,6 +944,14 @@ fn list_scope(filter: ChatListFilter) -> &'static str {
 const LIST_ORDER: &str =
     "(SELECT MAX(sequence) FROM chat_changes WHERE chat_id = chats.id) DESC, id";
 
+/// Saved input that can be queued, including an original held for editing.
+pub(crate) const QUEUED_CHAT_INPUT: &str = "m.role = 'user'
+    AND NOT EXISTS (
+        SELECT 1 FROM chat_submission_attempts a WHERE a.message_id = m.id
+        AND (a.delivery IN ('possible', 'acknowledged', 'uncertain')
+             OR a.turn_id IS NOT NULL OR a.decision = 'discarded')
+    )";
+
 fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
     let mut chat = connection
         .prepare_cached(&format!("SELECT {CHAT_COLUMNS} FROM chats WHERE id = ?1"))?
@@ -2947,15 +2955,14 @@ impl Workspace {
     /// Queued input in the order it was saved, including originals held for editing.
     pub fn chat_queue(&self, chat_id: &str) -> Result<Vec<ChatMessage>, Error> {
         read_chat(&self.connection, chat_id)?;
-        let mut statement = self.connection.prepare(
-            "SELECT id FROM chat_messages m WHERE chat_id = ?1 AND role = 'user'
-               AND NOT EXISTS (SELECT 1 FROM chat_submission_attempts a WHERE a.message_id = m.id AND a.delivery IN ('possible', 'acknowledged', 'uncertain'))
-             ORDER BY position",
-        )?;
+        let mut statement = self.connection.prepare(&format!(
+            "SELECT id FROM chat_messages m WHERE chat_id = ?1 AND {QUEUED_CHAT_INPUT}
+             ORDER BY position"
+        ))?;
         let ids = statement
             .query_map([chat_id], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
-        // The query narrows; `queued` is the rule, with the person's decisions in view.
+        // A message may have moved since the candidates were read.
         let mut queue = Vec::with_capacity(ids.len());
         for id in ids {
             queue.extend(read_message(&self.connection, &id)?.filter(|message| message.queued));
