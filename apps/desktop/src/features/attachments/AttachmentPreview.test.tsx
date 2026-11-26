@@ -1363,3 +1363,17 @@ test("a viewer opened with the mouse returns focus to the card that was pressed,
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
   expect(document.activeElement).toBe(card);
 });
+
+test("after Next is clicked with the mouse the stage has focus again, so the reading keys work", async () => {
+  serveWalk();
+  render(<Walk start={0} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+  await screen.findByRole("img", { name: "refund.png" });
+  // WebKit does not focus the button it clicks: focus is left on the viewer.
+  screen.getByRole("dialog").focus();
+  fireEvent.click(screen.getByRole("button", { name: "Next file" }));
+  const stage = await screen.findByRole("group", {
+    name: /^E2E report, .*2 of 4$/,
+  });
+  await waitFor(() => expect(document.activeElement).toBe(stage));
+});

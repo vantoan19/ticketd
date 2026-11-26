@@ -1435,13 +1435,16 @@ export function AttachmentPreview({
     warm,
   );
   const shownId = "id" in target ? target.id : "";
-  // Each file opens at its top, and a button that just became disabled hands focus on.
+  // Each file opens at its top, and focus that has nowhere useful to stay goes to the stage.
   useLayoutEffect(() => {
     if (!fading) return;
     if (stage.current) stage.current.scrollTop = 0;
     const active = document.activeElement;
+    // Focus on the viewer itself is what a click on Previous or Next leaves in
+    // WebKit, which does not focus buttons: the reading keys should still work.
     if (
       active === document.body ||
+      active === stage.current?.closest("[role='dialog']") ||
       (active instanceof HTMLButtonElement && active.disabled)
     )
       stage.current?.focus({ preventScroll: true });
