@@ -278,7 +278,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "Check for updates automatically",
     description:
-      "Once a day, ticketd asks GitHub for the newest release. Nothing about you or your workspace is sent.",
+      "Once a day, from GitHub. Nothing about you or your Workspace is sent.",
     keywords: "version upgrade download install restart check",
     section: "about",
   },
@@ -290,8 +290,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Report an issue",
-    description:
-      "Opens the issue tracker in your browser. Include the version above.",
+    description: "Opens GitHub’s bug form with your version filled in.",
     keywords: "about version bug feedback tracker help",
     section: "about",
   },
