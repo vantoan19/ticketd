@@ -254,7 +254,7 @@ test("a failed read is its own state with Retry, never No restore points yet", a
   expect(await within(section).findByText(/^Today, /)).toBeTruthy();
 });
 
-test("Restore… opens today's review for that point's file", async () => {
+test("Restore… opens the review of that point's file", async () => {
   const saved = point(0);
   vi.mocked(workspaceClient.restorePoints).mockResolvedValue(listOf([saved]));
   vi.mocked(workspaceClient.inspectBackup).mockReturnValue(
@@ -263,7 +263,7 @@ test("Restore… opens today's review for that point's file", async () => {
   renderPage();
   fireEvent.click(await screen.findByRole("button", { name: /^Restore…/ }));
   expect(
-    await screen.findByRole("dialog", { name: "Replace this workspace?" }),
+    await screen.findByRole("dialog", { name: "Replace this Workspace?" }),
   ).toBeTruthy();
   expect(workspaceClient.inspectBackup).toHaveBeenCalledWith(saved.path);
   expect(workspaceClient.chooseBackupFile).not.toHaveBeenCalled();

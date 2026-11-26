@@ -55,6 +55,12 @@ export const failureCodes = [
   "invalid_configuration",
   "unknown_provider",
   "incompatible_contract",
+  // A folder that cannot be added as a ticket source, and an approval that is out of date.
+  "not_a_folder",
+  "no_manifest",
+  "needs_newer_ticketd",
+  "invalid_manifest",
+  "expired",
   // Google sign-in: a build without the Drive app configuration, and a
   // sign-in that was closed, cancelled or timed out.
   "drive_unconfigured",

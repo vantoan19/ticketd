@@ -348,3 +348,45 @@ fn a_backup_saved_to_a_path_is_still_a_standalone_file_that_restores_anywhere() 
         .unwrap();
     assert_eq!(fs::read(output).unwrap(), b"retained");
 }
+
+#[test]
+fn a_points_counts_are_read_from_the_point_beside_the_workspaces_own() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = open(dir.path());
+    let login = workspace.create_ticket("Login").unwrap().reference;
+    workspace.create_ticket("Search").unwrap();
+    workspace.create_document(Some("Context"), "Why").unwrap();
+    workspace.add_activity(&login, "Started", None).unwrap();
+    let point = workspace
+        .save_daily_restore_point_at(day(26))
+        .unwrap()
+        .unwrap();
+    let at_the_point = point.summary.clone().unwrap();
+    // The Workspace moves on after the point was saved.
+    workspace.create_ticket("Billing").unwrap();
+    workspace.add_activity(&login, "Done", None).unwrap();
+    workspace.add_activity(&login, "Shipped", None).unwrap();
+
+    let inspection = workspace.inspect_backup(&point.path).unwrap();
+
+    // The counts the restore dialog shows: this Workspace now, and the point.
+    assert_eq!(
+        (
+            inspection.current.tickets,
+            inspection.current.documents,
+            inspection.current.activities
+        ),
+        (3, 1, 3)
+    );
+    let BackupCheck::Valid { summary, .. } = inspection.check else {
+        panic!("a restore point is a valid backup: {:?}", inspection.check);
+    };
+    assert_eq!(
+        (summary.tickets, summary.documents, summary.activities),
+        (2, 1, 1)
+    );
+    assert_eq!(summary, at_the_point);
+    // The last change is the point's own: nothing later than what it held.
+    assert!(summary.last_change.is_some());
+    assert!(summary.last_change <= inspection.current.last_change);
+}
