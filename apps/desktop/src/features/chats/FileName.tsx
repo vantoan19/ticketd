@@ -50,7 +50,9 @@ export function FileName({
   const { open } = useContext(ChatFilesContext);
   const [gone, setGone] = useState(false);
   const { folder, name } = splitPath(path, STEP_PATH);
-  const split = Math.max(0, name.length - tailLength(name));
+  // A name of twelve characters or fewer is never cut; a longer one gives way
+  // down to "…" and its tail.
+  const split = name.length > 12 ? name.length - tailLength(name) : 0;
   const text = (
     <>
       {folder && <span className="chat-path-dir">{folder}</span>}
