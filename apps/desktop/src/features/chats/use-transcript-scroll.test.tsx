@@ -182,6 +182,26 @@ test("the Jump strip closing at the end is not the reader scrolling up", () => {
   expect(state()).toBe("following");
 });
 
+// A resize that moves nothing sends no scroll event, so the scroller's new
+// height must count as seen: a later scroll up is the reader, not a clamp.
+test("a taller scroller, then the reader scrolling up, stays stopped", () => {
+  const { box, column, state } = setup();
+  size(box, 200, 1000);
+  resized(column);
+  wheelUp(box, 757);
+  expect(state()).toBe("stopped");
+  // The Jump strip closes: 240px of scroller, the offset still fits and stays.
+  size(box, 240, 1000);
+  resized(box);
+  expect(box.scrollTop).toBe(757);
+  wheelUp(box, 755);
+  expect(state()).toBe("stopped");
+  // More content then arrives; the reader stays where they are.
+  size(box, 240, 1100);
+  resized(column);
+  expect(box.scrollTop).toBe(755);
+});
+
 test("a small wheel up stops following", () => {
   const { box, column, state } = setup();
   size(box, 200, 1000);

@@ -111,8 +111,8 @@ export function useTranscriptScroll(
   const anchor = useRef<Anchor>(null);
   // The offset after the last scroll, ours or the reader's.
   const lastTop = useRef(0);
-  // The scroller's height at the last scroll: a taller one (the Jump strip
-  // closing at the end) clamps the offset, which is not the reader.
+  // The scroller's height at the last scroll or resize: a taller one (the Jump
+  // strip closing at the end) clamps the offset, which is not the reader.
   const lastHeight = useRef(0);
   const opened = useRef("");
   // When the reader last used the wheel, touch or keys here, or holds the
@@ -225,6 +225,13 @@ export function useTranscriptScroll(
             anchor.current.offset
           : 0;
         if (moved) box.scrollTop += moved;
+        lastTop.current = box.scrollTop;
+      }
+      // The scroller's new height is seen here, whether or not a scroll event
+      // follows: a resize that moves nothing must not make a later scroll up
+      // read as a clamp. Its offset is the new baseline too.
+      if (box.clientHeight !== lastHeight.current) {
+        lastHeight.current = box.clientHeight;
         lastTop.current = box.scrollTop;
       }
       remember(chatId, follows.current, box);
