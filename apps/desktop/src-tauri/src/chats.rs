@@ -1317,10 +1317,15 @@ impl Chats {
         #[cfg(test)]
         self.rows_built.fetch_add(1, Ordering::SeqCst);
         let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
+        let mut tracker = Tracker::from_items(&items);
+        // A long turn's own record can lie outside the window; the row still says it.
+        if let Some(turn) = workspace.chat_latest_turn(&chat.id)? {
+            tracker.note(&ChatItem::Turn(turn));
+        }
         Ok(chat_view::summary(
             chat,
             live,
-            &Tracker::from_items(&items),
+            &tracker,
             &surroundings(
                 workspace,
                 chat,

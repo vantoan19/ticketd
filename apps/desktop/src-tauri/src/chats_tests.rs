@@ -2343,6 +2343,42 @@ async fn what_the_agent_changed_in_ticketd_is_shown_after_its_turn_and_on_the_li
     assert_eq!(gone, Some((vec![Some("trashed")], vec![Some("trashed")])));
 }
 
+/// A turn longer than the list row's history window still counts its changed files:
+/// its turn record is read on its own, not from that window.
+#[tokio::test(start_paused = true)]
+async fn a_long_turn_still_says_how_many_files_it_changed_on_the_list() {
+    use ticketd_chat_host::{FileChange, FileChangeKind};
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    // More records than the list row reads, before the turn's files report.
+    for number in 0..(SUMMARY_ITEMS + 5) {
+        let item = format!("cmd-{number}");
+        f.emit(command_tool(&item, "ls", ToolStatus::Running)).await;
+        f.emit(command_tool(&item, "ls", ToolStatus::Succeeded))
+            .await;
+    }
+    f.emit(EventKind::FilesChanged {
+        turn: turn(),
+        files: vec![FileChange {
+            path: "/work/src/limiter.ts".to_owned(),
+            kind: FileChangeKind::Added,
+            added_lines: Some(48),
+            removed_lines: Some(0),
+            confirmed: true,
+        }],
+    })
+    .await;
+    f.emit(EventKind::TurnEnded {
+        turn: turn(),
+        outcome: TurnOutcome::Completed,
+        submissions: Vec::new(),
+    })
+    .await;
+    let rows = f.chats.list(ChatListFilter::Active).unwrap();
+    let row = rows.iter().find(|row| row.id == id).unwrap();
+    assert_eq!(row.status.detail.as_deref(), Some("1 file changed"));
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_linked_record_in_trash_is_named_as_such() {
     let f = Fixture::new().await;
