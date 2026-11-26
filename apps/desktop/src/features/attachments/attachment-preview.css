@@ -187,6 +187,8 @@
    COLUMN_PADDING and BAR_CLEARANCE in pdf-layout.ts, which lays pages out. */
 .attachment-preview-stage[data-pdf] .attachment-preview-canvas {
   display: block;
+  width: max-content;
+  min-width: 100%;
   padding: 0;
 }
 /* The stage's column layout is block, so a state that replaces the pages
@@ -490,12 +492,19 @@
 .attachment-preview-stage[data-text] .attachment-preview-canvas {
   display: block;
   flex: 1 0 auto;
+  /* As wide as the lines when they do not wrap, so the view bar's dock can stick to the
+     stage's left edge while the lines scroll sideways. */
+  width: max-content;
+  min-width: 100%;
   padding: 0;
 }
 .attachment-text-scope {
   position: sticky;
   top: 0;
+  left: 0;
   z-index: 1;
+  box-sizing: border-box;
+  width: var(--stage-width, 100%);
   display: flex;
   flex: none;
   align-items: center;

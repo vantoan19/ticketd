@@ -227,6 +227,23 @@ test("find counts every match, marks them, steps with Enter and closes with Esc 
   expect(window.getSelection()?.toString()).toBe("status%3Dopen");
 });
 
+test("a capped match count reads in the same grouped numbers on both sides", async () => {
+  serve("x\n".repeat(20_500));
+  render(<Stage />);
+  await screen.findByRole("document");
+  const stage = screen.getByTestId("stage");
+  stage.focus();
+  press("/");
+  const field = await screen.findByRole("textbox", {
+    name: "Find in the text",
+  });
+  fireEvent.change(field, { target: { value: "x" } });
+  const status = screen.getByRole("status");
+  await waitFor(() => expect(status.textContent).toBe("1 of 20,000+"));
+  fireEvent.keyDown(field, { key: "Enter", shiftKey: true });
+  await waitFor(() => expect(status.textContent).toBe("20,000 of 20,000+"));
+});
+
 test("keys type in the Find field instead of acting, and W wraps outside it", async () => {
   serve();
   render(<Stage />);
@@ -282,6 +299,90 @@ test("copying a selection takes the text of its lines, without line numbers", as
   expect(copied.get("text/plain")).toBe(
     `${lines[3]!.slice(9)}\n${lines[4]}\n${lines[5]!.slice(0, 8)}`,
   );
+});
+
+test("Wrap lines keeps the line at the top of the view instead of the same scroll position", async () => {
+  const text = Array.from(
+    { length: 100 },
+    (_, index) => `L${index} ${"x".repeat(30)}`,
+  ).join("\n");
+  serve(text);
+  render(<Stage />);
+  await screen.findByRole("document");
+  const stage = screen.getByTestId("stage");
+  let top = 0;
+  Object.defineProperty(stage, "scrollTop", {
+    get: () => top,
+    set: (value: number) => {
+      top = value;
+    },
+  });
+  // jsdom has no layout: wrapped, every line is two 20px rows, so line n sits at 40n.
+  const original = HTMLElement.prototype.getBoundingClientRect;
+  HTMLElement.prototype.getBoundingClientRect = function () {
+    const line = this.dataset["line"];
+    if (line === undefined) return { top: 0, bottom: 0 } as DOMRect;
+    const at = Number(line) * 40 - top;
+    return { top: at, bottom: at + 40 } as DOMRect;
+  };
+  try {
+    top = 1010; // line 25, 10px of it scrolled out
+    stage.focus();
+    press("w");
+    await waitFor(() =>
+      expect(screen.getByRole("document").hasAttribute("data-wrap")).toBe(
+        false,
+      ),
+    );
+    // Unwrapped, a line is one row: line 25 now starts at 500, with the same 10px above.
+    expect(top).toBe(510);
+  } finally {
+    HTMLElement.prototype.getBoundingClientRect = original;
+  }
+});
+
+test("select all and copy take every line of the log, drawn or not, not the page around it", async () => {
+  serve();
+  render(<Stage />);
+  await screen.findByRole("document");
+  const stage = screen.getByTestId("stage");
+  stage.focus();
+  const key = new KeyboardEvent("keydown", {
+    key: "a",
+    metaKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  stage.dispatchEvent(key);
+  expect(key.defaultPrevented).toBe(true);
+  const list = document.querySelector(".attachment-text")!;
+  const selection = window.getSelection()!;
+  expect(selection.anchorNode).toBe(list);
+  expect(selection.focusNode).toBe(list);
+  expect(drawn().length).toBeLessThan(lines.length);
+  const copied = new Map<string, string>();
+  const event = new Event("copy", { bubbles: true, cancelable: true });
+  Object.assign(event, {
+    clipboardData: {
+      setData: (type: string, value: string) => copied.set(type, value),
+    },
+  });
+  list.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(copied.get("text/plain")).toBe(lines.join("\n"));
+  // In the Find field, ⌘A still selects the field's own text.
+  press("/");
+  const field = await screen.findByRole("textbox", {
+    name: "Find in the text",
+  });
+  const inField = new KeyboardEvent("keydown", {
+    key: "a",
+    metaKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  field.dispatchEvent(inField);
+  expect(inField.defaultPrevented).toBe(false);
 });
 
 test("a copy still starts where the drag began after that line scrolls out of the drawn rows", async () => {

@@ -240,9 +240,15 @@ function TextLines({
   );
   const measured = useRef({ key: "", heights: new Map<number, number>() });
   const [version, remeasured] = useReducer((count: number) => count + 1, 0);
+  // The line at the top of the view, taken from the page as it is now, before a new layout
+  // (Wrap lines, a resize) draws it again: the view returns to that line afterwards.
+  const layoutAnchor = useRef<{ line: number; offset: number } | null>(null);
   const heights = useMemo(() => {
-    if (measured.current.key !== layoutKey)
+    if (measured.current.key !== layoutKey) {
+      if (measured.current.key !== "")
+        layoutAnchor.current = viewAnchor(scrollerRef.current, listRef.current);
       measured.current = { key: layoutKey, heights: new Map() };
+    }
     const result = Float64Array.from(estimates);
     for (const [block, height] of measured.current.heights)
       result[block] = height;
@@ -283,15 +289,20 @@ function TextLines({
     setCursor({ of: matches, index: next });
     showMatch(matches[next]!);
   }
+  /** Where a line starts in the stage's scrolling content, by estimate until it is drawn. */
+  function offsetOfLine(target: number) {
+    const block = Math.floor(target / BLOCK_LINES);
+    let offset = origin + tops[block]!;
+    for (let line = block * BLOCK_LINES; line < target; line++)
+      offset += rowsOf(lines[line]!.length, columns, wrap) * LINE_HEIGHT;
+    return offset;
+  }
   /** Scroll so the match is in view: by estimate now, then exactly once it is drawn. */
   function showMatch(match: Match) {
     reveal.current = match;
     const stage = scrollerRef.current;
     if (!stage) return;
-    const block = Math.floor(match.line / BLOCK_LINES);
-    let offset = origin + tops[block]!;
-    for (let line = block * BLOCK_LINES; line < match.line; line++)
-      offset += rowsOf(lines[line]!.length, columns, wrap) * LINE_HEIGHT;
+    const offset = offsetOfLine(match.line);
     const height = size.height || 600;
     if (
       offset < stage.scrollTop + SCOPE_LINE ||
@@ -360,6 +371,16 @@ function TextLines({
         if (inField && event.key === "/") return;
         event.preventDefault();
         openFind();
+      } else if (
+        !inField &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "a"
+      ) {
+        // Select all means the whole log, not the page behind it; only the drawn rows exist.
+        event.preventDefault();
+        if (listRef.current)
+          window.getSelection()?.selectAllChildren(listRef.current);
       } else if (inField || event.ctrlKey || event.metaKey) return;
       else if (matchesShortcut(event, "attachments-wrap")) {
         event.preventDefault();
@@ -379,6 +400,19 @@ function TextLines({
   const first = blockAt(tops, relative - viewHeight);
   const last = blockAt(tops, relative + 2 * viewHeight);
   const blocks = heights.length;
+
+  // A new layout (Wrap lines, a resize) changes every line's height: the view keeps the line
+  // it was on. A scroll to a match that is under way finds its own place instead.
+  useLayoutEffect(() => {
+    const anchor = layoutAnchor.current;
+    layoutAnchor.current = null;
+    const stage = scrollerRef.current;
+    if (!anchor || !stage || reveal.current) return;
+    stage.scrollTop = Math.max(0, offsetOfLine(anchor.line) - anchor.offset);
+    setScrollTop(stage.scrollTop);
+    // The anchor is taken when the layout changes, so the layout is what runs this.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [layoutKey]);
 
   // After drawing: take the real height of each block, keeping the view still, and
   // finish a scroll to a match.
@@ -467,6 +501,12 @@ function TextLines({
       !selection.focusNode
     )
       return;
+    // Select all: the list itself is both ends, and every line is meant, drawn or not.
+    if (selection.anchorNode === list && selection.focusNode === list) {
+      event.clipboardData.setData("text/plain", lines.join("\n"));
+      event.preventDefault();
+      return;
+    }
     const anchor =
       positionOf(list, lines, selection.anchorNode, selection.anchorOffset) ??
       edges.current.anchor;
@@ -509,7 +549,14 @@ function TextLines({
   return (
     <>
       {note && (
-        <p className="attachment-text-scope">
+        <p
+          className="attachment-text-scope"
+          style={
+            size.width
+              ? ({ "--stage-width": `${size.width}px` } as CSSProperties)
+              : undefined
+          }
+        >
           <Info aria-hidden="true" />
           {note}
         </p>
@@ -541,6 +588,7 @@ function TextLines({
         <div style={{ height: below + BAR_CLEARANCE }} aria-hidden="true" />
       </div>
       <ViewBarFind
+        stageWidth={size.width}
         finding={finding}
         wrap={wrap}
         query={query}
@@ -569,6 +617,7 @@ function scopeNote(scope: Scope, shown: number, dropped: number) {
 }
 
 function ViewBarFind({
+  stageWidth,
   finding,
   wrap,
   query,
@@ -582,6 +631,7 @@ function ViewBarFind({
   onStep,
   onWrap,
 }: {
+  stageWidth: number;
   finding: boolean;
   wrap: boolean;
   query: string;
@@ -599,9 +649,9 @@ function ViewBarFind({
     ? ""
     : count === 0
       ? "No matches"
-      : `${active + 1} of ${count.toLocaleString()}${capped ? "+" : ""}`;
+      : `${(active + 1).toLocaleString()} of ${count.toLocaleString()}${capped ? "+" : ""}`;
   return (
-    <ViewBar label="View">
+    <ViewBar label="View" stageWidth={stageWidth}>
       <ViewBarGroup label="Find">
         {finding ? (
           <>
@@ -746,6 +796,18 @@ function marked(
   }
   if (at < text.length) parts.push(text.slice(at));
   return parts;
+}
+
+/** The first line in view and how far its top is from the stage's, or null when none is drawn. */
+function viewAnchor(stage: HTMLElement | null, list: HTMLElement | null) {
+  if (!stage || !list) return null;
+  const top = stage.getBoundingClientRect().top;
+  for (const row of list.querySelectorAll<HTMLElement>("[data-line]")) {
+    const box = row.getBoundingClientRect();
+    if (box.bottom > top)
+      return { line: Number(row.dataset["line"]), offset: box.top - top };
+  }
+  return null;
 }
 
 /** The line and character a selection edge sits at, or null when it is not in a line. */

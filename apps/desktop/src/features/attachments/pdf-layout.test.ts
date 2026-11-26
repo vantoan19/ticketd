@@ -27,6 +27,12 @@ test("zoom steps move to the next level in either direction and stop at the ends
   expect(stepZoom(0.834, -1)).toBe(0.8);
   expect(stepZoom(4, 1)).toBe(4);
   expect(stepZoom(0.25, -1)).toBe(0.25);
+  // A picture fitted beyond the levels (a tiny one at 800%, a panorama at 8%) never
+  // jumps the wrong way: zoom in stays at 800%, zoom out stays at 8%.
+  expect(stepZoom(8, 1)).toBe(8);
+  expect(stepZoom(0.08, -1)).toBe(0.08);
+  expect(stepZoom(8, -1)).toBe(4);
+  expect(stepZoom(0.08, 1)).toBe(0.25);
 });
 
 test("pages stack 16px apart and the column leaves room for the bar", () => {

@@ -164,6 +164,50 @@ test("the page number follows the scroll, and typing a number jumps to that page
   expect(field.value).toBe("11");
 });
 
+test("resizing the stage while Fit is on keeps the same place and page in view", async () => {
+  serve(12);
+  let resized: (() => void) | undefined;
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      constructor(callback: () => void) {
+        resized = callback;
+      }
+      observe() {}
+      disconnect() {}
+    },
+  );
+  let width = 1000;
+  try {
+    render(<Stage />);
+    await screen.findByRole("img", { name: "Page 1" });
+    const stage = scrollable();
+    Object.defineProperty(stage.stage, "clientWidth", { get: () => width });
+    const field = screen.getByRole<HTMLInputElement>("textbox", {
+      name: "Page",
+    });
+    stage.to(2100);
+    fireEvent.scroll(stage.stage);
+    await waitFor(() => expect(field.value).toBe("3"));
+    // A narrower stage shrinks Fit, so every page is shorter: the view follows page 3.
+    width = 500;
+    await act(async () => resized?.());
+    expect(screen.getByText("76%")).toBeTruthy();
+    expect(stage.top()).toBeGreaterThan(1100);
+    expect(stage.top()).toBeLessThan(1300);
+    expect(field.value).toBe("3");
+    // The bar's dock spans what the stage shows, so it stays centered when zoomed pages
+    // scroll sideways.
+    expect(
+      document
+        .querySelector<HTMLElement>(".view-bar-dock")!
+        .style.getPropertyValue("--stage-width"),
+    ).toBe("500px");
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 test("a render that was cancelled by a zoom never replaces the newer canvas", async () => {
   const pdf = serve(1);
   const canvases: HTMLCanvasElement[] = [];
