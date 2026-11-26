@@ -58,7 +58,7 @@ use crate::{
     SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
 };
 
-const SAVED_REPLY_RETRY: Duration = Duration::from_millis(250);
+const QUEUE_READ_RETRY: Duration = Duration::from_millis(250);
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
 
@@ -164,11 +164,6 @@ struct FinishedOpen {
     context: Result<Option<String>, String>,
 }
 
-struct SavedReply {
-    message_id: String,
-    retry_at: Instant,
-}
-
 struct Runtime {
     generation: RuntimeGeneration,
     /// Unique per process, so record IDs derived from native IDs never collide with
@@ -205,6 +200,20 @@ struct Dispatch {
     early_rejection: Option<String>,
     preamble: Option<String>,
     context: Option<String>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DirectSend {
+    Auto,
+    SendNow,
+    /// Send now was accepted, but an image can only start a new turn.
+    AfterTurn,
+}
+
+enum DispatchProgress {
+    Finished,
+    Skipped,
+    ImageNeedsNewTurn,
 }
 
 struct ActiveTurn {
@@ -286,10 +295,7 @@ pub(crate) struct Supervisor {
     unconfirmed_deadline: Option<Instant>,
     active: Option<ActiveTurn>,
     /// Input the person sent for immediate dispatch, ahead of the queue.
-    direct: VecDeque<String>,
-    /// The inputs in `direct` that the person took out of the queue with Send now.
-    /// They had no row on screen, so their history moves to where they are sent.
-    direct_from_queue: HashSet<String>,
+    direct: VecDeque<(String, DirectSend)>,
     /// Prepared edits keep their saved rows. The automatic queue waits for the
     /// composer, while an explicit Send now or Resume may still release them.
     prepared_queue_edits: HashSet<String>,
@@ -322,8 +328,10 @@ pub(crate) struct Supervisor {
     /// The person resumed the queue or sent into it, so it may open a session. Without
     /// that, queued input waits for a live runtime: viewing a Chat starts nothing.
     queue_started: bool,
-    /// The takeover reply is already saved. Keep its dispatch intent through a read failure.
-    saved_reply: Option<SavedReply>,
+    /// A saved takeover reply which still needs its place in the queue decided.
+    saved_reply: Option<String>,
+    /// Wake to retry reading the queue without saving an input or recording an attempt again.
+    queue_read_retry_at: Option<Instant>,
     /// The runtime is being closed on purpose; its connection ending is not a loss.
     closing: bool,
     /// Something may have been written since views were last brought up to date.
@@ -376,6 +384,29 @@ impl Supervisor {
         unattended: Option<Arc<UnattendedChat>>,
         lifecycle: Arc<HostLifecycle>,
     ) -> mpsc::Sender<Command> {
+        let (supervisor, sender) = Self::new(
+            chat,
+            open_workspace,
+            adapter,
+            context,
+            board,
+            unattended,
+            lifecycle,
+        );
+        let span = supervisor.span.clone();
+        tokio::spawn(supervisor.run().instrument(span));
+        sender
+    }
+
+    fn new(
+        chat: &Chat,
+        open_workspace: WorkspaceOpener,
+        adapter: Option<Arc<dyn HarnessAdapter>>,
+        context: Option<ContextSource>,
+        board: Arc<Board>,
+        unattended: Option<Arc<UnattendedChat>>,
+        lifecycle: Arc<HostLifecycle>,
+    ) -> (Self, mpsc::Sender<Command>) {
         let (sender, commands) = mpsc::channel(64);
         let (done, finished) = mpsc::unbounded_channel();
         let (open_done, finished_open) = mpsc::unbounded_channel();
@@ -389,7 +420,7 @@ impl Supervisor {
                 .map(|unattended| unattended.settings.run_id.as_str()),
         );
         let supervisor = Self {
-            span: span.clone(),
+            span,
             chat_id: chat.id.clone(),
             number: NEXT_SUPERVISOR.fetch_add(1, Ordering::Relaxed),
             open_workspace,
@@ -411,7 +442,6 @@ impl Supervisor {
             unconfirmed_deadline: None,
             active: None,
             direct: VecDeque::new(),
-            direct_from_queue: HashSet::new(),
             prepared_queue_edits: HashSet::new(),
             resend: None,
             preamble: None,
@@ -435,6 +465,7 @@ impl Supervisor {
             shut_down_for: None,
             queue_started: false,
             saved_reply: None,
+            queue_read_retry_at: None,
             closing: false,
             unpublished: true,
             refreshing: None,
@@ -444,8 +475,7 @@ impl Supervisor {
             lifecycle,
             recorded_settings: chat.effective_settings.clone(),
         };
-        tokio::spawn(supervisor.run().instrument(span));
-        sender
+        (supervisor, sender)
     }
 
     async fn run(mut self) {
@@ -455,7 +485,7 @@ impl Supervisor {
                 self.checkpoint_at,
                 self.stop_deadline,
                 self.unconfirmed_deadline,
-                self.saved_reply.as_ref().map(|saved| saved.retry_at),
+                self.queue_read_retry_at,
             ]
             .into_iter()
             .flatten()
@@ -667,8 +697,8 @@ impl Supervisor {
 
     fn clear_direct(&mut self) {
         self.saved_reply = None;
+        self.queue_read_retry_at = None;
         self.direct.clear();
-        self.direct_from_queue.clear();
     }
 
     /// Keeps the person's latest permission change the runtime has not answered (held
@@ -738,7 +768,8 @@ impl Supervisor {
                     let _ = unattended.first_message.set(message.id.clone());
                     // The run cannot drain the ordinary queue, even when older input waits.
                     if self.active.is_none() && self.can_schedule_saved(message) {
-                        self.direct.push_back(message.id.clone());
+                        self.direct
+                            .push_back((message.id.clone(), DirectSend::Auto));
                     }
                 }
                 let _ = reply.send(result);
@@ -760,10 +791,7 @@ impl Supervisor {
                 ));
             }
             Command::ScheduleSaved { message_id, reply } => {
-                self.saved_reply = Some(SavedReply {
-                    message_id,
-                    retry_at: Instant::now(),
-                });
+                self.saved_reply = Some(message_id);
                 let _ = reply.send(Ok(()));
             }
             Command::Stop(reply) => {
@@ -1097,7 +1125,11 @@ impl Supervisor {
             && message.queued
             && !message.editing
             && !self.prepared_queue_edits.contains(&message.id)
-            && !self.direct.contains(&message.id)
+            && !self.is_sending(&message.id)
+    }
+
+    fn is_sending(&self, message_id: &str) -> bool {
+        self.direct.iter().any(|(id, _)| id == message_id)
     }
 
     fn schedule_saved(&mut self, message: &ChatMessage, immediate: bool) {
@@ -1107,7 +1139,8 @@ impl Supervisor {
                 // it, and the queue runs.
                 self.queue_started = true;
             } else {
-                self.direct.push_back(message.id.clone());
+                self.direct
+                    .push_back((message.id.clone(), DirectSend::Auto));
             }
         }
     }
@@ -1117,9 +1150,6 @@ impl Supervisor {
         let Some(saved) = &self.saved_reply else {
             return true;
         };
-        if saved.retry_at > Instant::now() {
-            return false;
-        }
         let chat_id = &self.chat_id;
         match self.core(|core| {
             let chat = core.chat(chat_id)?;
@@ -1128,8 +1158,7 @@ impl Supervisor {
             Ok((trashed, paused, queue)) => {
                 if !trashed
                     && self.active.is_none()
-                    && let Some(message) =
-                        queue.iter().find(|message| message.id == saved.message_id)
+                    && let Some(message) = queue.iter().find(|message| message.id == *saved)
                     && self.can_schedule_saved(message)
                 {
                     if !paused
@@ -1140,7 +1169,8 @@ impl Supervisor {
                     {
                         self.queue_started = true;
                     } else {
-                        self.direct.push_front(message.id.clone());
+                        self.direct
+                            .push_front((message.id.clone(), DirectSend::Auto));
                     }
                 }
                 self.saved_reply = None;
@@ -1151,9 +1181,7 @@ impl Supervisor {
                 true
             }
             Err(_) => {
-                if let Some(saved) = &mut self.saved_reply {
-                    saved.retry_at = Instant::now() + SAVED_REPLY_RETRY;
-                }
+                self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
                 false
             }
         }
@@ -1245,9 +1273,10 @@ impl Supervisor {
         }
         self.confirm_permission_restart_cleanup().await?;
         self.prepared_queue_edits.remove(&message_id);
-        if !self.direct.contains(&message_id) {
-            self.direct_from_queue.insert(message_id.clone());
-            self.direct.push_back(message_id);
+        match self.direct.iter_mut().find(|(id, _)| id == &message_id) {
+            Some((_, intent @ DirectSend::Auto)) => *intent = DirectSend::SendNow,
+            Some(_) => {}
+            None => self.direct.push_back((message_id, DirectSend::SendNow)),
         }
         Ok(())
     }
@@ -1256,7 +1285,7 @@ impl Supervisor {
         &self,
         message_id: &str,
     ) -> Result<(String, Vec<ChatAttachmentContent>), HostError> {
-        if self.direct.iter().any(|id| id == message_id) {
+        if self.is_sending(message_id) {
             return Err(HostError::Working);
         }
         let chat = self.chat_id.clone();
@@ -1279,7 +1308,7 @@ impl Supervisor {
         message_id: &str,
         transfer_id: &str,
     ) -> Result<bool, HostError> {
-        if self.direct.iter().any(|id| id == message_id) {
+        if self.is_sending(message_id) {
             return Ok(false);
         }
         let chat = self.chat_id.clone();
@@ -1548,7 +1577,6 @@ impl Supervisor {
         self.start_settings.permission.get_or_insert(value);
         self.permission_restart_pending = true;
         let direct = std::mem::take(&mut self.direct);
-        let from_queue = std::mem::take(&mut self.direct_from_queue);
         let resend = self.resend.take();
         // End ownership before checking storage. A paused queue can still be
         // sent to directly.
@@ -1561,7 +1589,6 @@ impl Supervisor {
             }
             if unconfirmed.is_none() {
                 self.direct = direct;
-                self.direct_from_queue = from_queue;
                 self.resend = resend;
             }
             return;
@@ -1579,7 +1606,6 @@ impl Supervisor {
             }
         };
         self.direct = direct;
-        self.direct_from_queue = from_queue;
         self.resend = resend;
         let (session, origin, preamble) = native_session(&chat);
         self.open(&chat, session, origin, preamble, None);
@@ -1621,7 +1647,10 @@ impl Supervisor {
         reply: Option<Reply<()>>,
     ) {
         let readiness = self.lifecycle.serving().and_then(|()| {
-            if self.lifecycle.has_pending_open_cleanup(&self.chat_id) {
+            // Late open cleanup retires its handle before releasing the hold.
+            if self.lifecycle.has_pending_open_cleanup(&self.chat_id)
+                || self.lifecycle.has_retired_permission_runtime(&self.chat_id)
+            {
                 return Err(HostError::PermissionRestartCleanupUnconfirmed);
             }
             Ok(())
@@ -1989,8 +2018,14 @@ impl Supervisor {
     /// sent goes first; queued input follows only while a runtime is live and the queue
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
-        if !self.schedule_takeover_reply()
-            || self.shutting_down
+        if self
+            .queue_read_retry_at
+            .is_some_and(|at| at > Instant::now())
+        {
+            return;
+        }
+        self.queue_read_retry_at = None;
+        if self.shutting_down
             || self.lifecycle.serving().is_err()
             || self.lifecycle.has_pending_open_cleanup(&self.chat_id)
             || self.lifecycle.has_retired_permission_runtime(&self.chat_id)
@@ -2000,73 +2035,86 @@ impl Supervisor {
             || self.refreshing.is_some()
             || self.unconfirmed_start.is_some()
             || self.setting_on_its_way()
+            || !self.schedule_takeover_reply()
         {
             return;
         }
         let idle = self.active.is_none();
-        if !idle && self.direct.is_empty() {
+        if !idle
+            && self
+                .direct
+                .iter()
+                .all(|(_, intent)| *intent == DirectSend::AfterTurn)
+        {
             // During a turn only steering input can go out, so the workspace is not
             // read for every event of a streaming turn.
             return;
         }
         let chat_id = self.chat_id.clone();
-        let Ok(chat) = self.core(|core| core.chat(&chat_id)) else {
-            return;
+        let chat = match self.core(|core| core.chat(&chat_id)) {
+            Ok(chat) => chat,
+            Err(error) => {
+                if !is_refusal(&error)
+                    && (!self.direct.is_empty() || self.queue_started || self.resend.is_some())
+                {
+                    self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
+                }
+                return;
+            }
         };
         if chat.trashed {
             self.direct.clear();
-            self.direct_from_queue.clear();
             self.prepared_queue_edits.clear();
             self.resend = None;
             return;
         }
+        if !idle && self.steering().is_none() {
+            // Only a Send now whose image needs another turn keeps its direct intent.
+            self.direct
+                .retain(|(_, intent)| *intent == DirectSend::AfterTurn);
+        }
         // What the person asked to send again goes alone, as a new turn.
         loop {
             let resend = self.resend.clone().filter(|_| idle);
-            let message_id = loop {
-                if let Some(id) = &resend {
-                    break id.clone();
-                }
-                match self.direct.front() {
-                    Some(id) if idle || self.steering().is_some() => break id.clone(),
-                    // Steering is not available: it stays in the visible queue.
-                    Some(_) => {
-                        if let Some(id) = self.direct.pop_front() {
-                            self.direct_from_queue.remove(&id);
-                        }
-                    }
-                    None if idle
-                        && self.unattended.is_none()
-                        && !chat.queue_paused
-                        && (self.runtime.is_some() || self.queue_started) =>
-                    {
-                        match self.core(|core| core.chat_queue(&chat_id)) {
-                            Ok(queue) => {
-                                self.prepared_queue_edits
-                                    .retain(|id| queue.iter().any(|message| &message.id == id));
-                                match queue.into_iter().find(|message| !message.editing) {
-                                    Some(message)
-                                        if self.prepared_queue_edits.contains(&message.id) =>
-                                    {
-                                        return;
-                                    }
-                                    Some(message) => break message.id,
-                                    None => {
-                                        self.queue_started = false;
-                                        return;
-                                    }
-                                }
-                            }
-                            Err(_) => return,
-                        }
-                    }
-                    None => {
-                        if chat.queue_paused {
+            let direct_index = self
+                .direct
+                .iter()
+                .position(|(_, intent)| idle || *intent != DirectSend::AfterTurn);
+            let message_id = if let Some(id) = &resend {
+                id.clone()
+            } else if let Some(index) = direct_index {
+                self.direct[index].0.clone()
+            } else if idle
+                && self.unattended.is_none()
+                && !chat.queue_paused
+                && (self.runtime.is_some() || self.queue_started)
+            {
+                match self.core(|core| core.chat_queue(&chat_id)) {
+                    Ok(queue) => {
+                        self.prepared_queue_edits
+                            .retain(|id| queue.iter().any(|message| &message.id == id));
+                        let Some(message) = queue.into_iter().find(|message| !message.editing)
+                        else {
                             self.queue_started = false;
+                            return;
+                        };
+                        if self.prepared_queue_edits.contains(&message.id) {
+                            return;
+                        }
+                        message.id
+                    }
+                    Err(error) => {
+                        if !is_refusal(&error) && self.queue_started {
+                            self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
                         }
                         return;
                     }
                 }
+            } else {
+                if chat.queue_paused {
+                    self.queue_started = false;
+                }
+                return;
             };
             // A run's supervisor may only send its own Prompt. This also holds
             // if a person's saved reply became visible while this pump was running.
@@ -2077,9 +2125,8 @@ impl Supervisor {
             {
                 if resend.is_some() {
                     self.resend = None;
-                } else {
-                    self.direct.pop_front();
-                    self.direct_from_queue.remove(&message_id);
+                } else if let Some(index) = direct_index {
+                    self.direct.remove(index);
                 }
                 continue;
             }
@@ -2096,17 +2143,25 @@ impl Supervisor {
                 self.open(&chat, session, origin, preamble, None);
                 return;
             }
-            let mut from_queue = false;
-            if resend.is_some() {
+            let direct = if resend.is_some() {
                 self.resend = None;
-            } else if self.direct.front() == Some(&message_id) {
-                self.direct.pop_front();
-                from_queue = self.direct_from_queue.remove(&message_id);
+                None
             } else {
-                from_queue = true;
-            }
-            if !self.defer_image_steer_or_dispatch(&message_id, resend.is_some(), from_queue) {
-                return;
+                direct_index.and_then(|index| self.direct.remove(index).map(|input| (index, input)))
+            };
+            let from_queue = resend.is_none()
+                && direct
+                    .as_ref()
+                    .is_none_or(|(_, (_, intent))| *intent != DirectSend::Auto);
+            match self.defer_image_steer_or_dispatch(&message_id, resend.is_some(), from_queue) {
+                DispatchProgress::Finished => return,
+                DispatchProgress::Skipped => {}
+                DispatchProgress::ImageNeedsNewTurn => {
+                    if let Some((index, (_, DirectSend::SendNow))) = direct {
+                        self.direct
+                            .insert(index, (message_id, DirectSend::AfterTurn));
+                    }
+                }
             }
         }
     }
@@ -2122,9 +2177,9 @@ impl Supervisor {
         message_id: &str,
         resend: bool,
         from_queue: bool,
-    ) -> bool {
+    ) -> DispatchProgress {
         let Some(runtime) = &self.runtime else {
-            return false;
+            return DispatchProgress::Finished;
         };
         let (handle, generation) = (runtime.handle.clone(), runtime.generation);
         let (kind, intent) = match &self.active {
@@ -2140,12 +2195,14 @@ impl Supervisor {
         let attempt = Uuid::new_v4().to_string();
         let chat = self.chat_id.clone();
         let unattended = self.unattended.clone();
+        let mut image_needs_new_turn = false;
         let recorded = self.write(|core| {
             let attachments = core.chat_message_attachment_contents(&chat, message_id)?;
             if !starts_turn
                 && handle.supports_steer_image_input() == Some(false)
                 && attachments.iter().any(ChatAttachmentContent::is_image)
             {
+                image_needs_new_turn = true;
                 return Ok(None);
             }
             if let Some(agent) = unattended {
@@ -2169,7 +2226,8 @@ impl Supervisor {
         });
         let (message, attachments) = match recorded {
             Ok(Some(recorded)) => recorded,
-            Ok(None) => return true,
+            Ok(None) if image_needs_new_turn => return DispatchProgress::ImageNeedsNewTurn,
+            Ok(None) => return DispatchProgress::Skipped,
             Err(error) => {
                 // Storage failure is reported by `write`; a refusal is said here.
                 // The queue is paused so the same refusal is not met again unasked.
@@ -2177,7 +2235,7 @@ impl Supervisor {
                     self.notice(format!("A message was not sent: {error}"));
                     let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                 }
-                return false;
+                return DispatchProgress::Finished;
             }
         };
         if starts_turn {
@@ -2225,14 +2283,14 @@ impl Supervisor {
         });
         if let Some(refusal) = self.attachment_refusal(&submission.attachments) {
             self.on_dispatched(DispatchOutcome::NotSent(refusal));
-            return false;
+            return DispatchProgress::Finished;
         }
         let done = self.done.clone();
         tokio::spawn(async move {
             let outcome = handle.submit(submission).await;
             let _ = done.send(Done::Dispatched { outcome });
         });
-        false
+        DispatchProgress::Finished
     }
 
     // ------------------------------------------------------------------
@@ -2555,7 +2613,9 @@ impl Supervisor {
             self.preamble = dispatch.preamble;
         }
         if dispatch.context.is_some() {
-            self.session_context = dispatch.context;
+            if self.session_context.is_none() {
+                self.session_context = dispatch.context;
+            }
             self.context_sent = None;
         }
         if dispatch.starts_turn {
@@ -2882,7 +2942,6 @@ impl Supervisor {
                             let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
                         }
                         self.direct.clear();
-                        self.direct_from_queue.clear();
                     }
                 }
             }
@@ -3200,7 +3259,7 @@ impl Supervisor {
             steering: self.active.as_ref().and_then(|_| self.steering()),
             steering_images_refused: self.active.is_some() && self.images_refused(true),
             delivery_unconfirmed: self.unconfirmed_start.is_some(),
-            sending: self.direct.iter().cloned().collect(),
+            sending: self.direct.iter().map(|(id, _)| id.clone()).collect(),
             prepared_queue_edits: self.prepared_queue_edits.clone(),
             interactions: self
                 .interactions
@@ -3309,5 +3368,134 @@ fn native_session(chat: &Chat) -> (SessionStart, ChatSessionOrigin, Option<Strin
             None,
         ),
         None => (SessionStart::New, ChatSessionOrigin::New, None),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used)] // test setup and assertions
+
+    use super::*;
+    use crate::testing::FakeAdapter;
+    use ticketd_core::{NewChat, WorkspaceSession};
+
+    fn supervisor(path: PathBuf) -> (Supervisor, Chat) {
+        let fake = FakeAdapter::codex();
+        let chat = Workspace::open(&path)
+            .unwrap()
+            .create_chat(
+                None,
+                NewChat {
+                    title: None,
+                    harness: fake.harness().key.as_str().to_owned(),
+                    execution_folder: "/work/app".to_owned(),
+                    folder_managed: false,
+                    links: Vec::new(),
+                },
+            )
+            .unwrap();
+        let (supervisor, _) = Supervisor::new(
+            &chat,
+            Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+            Some(Arc::new(fake)),
+            None,
+            Arc::new(Board::new()),
+            None,
+            Arc::new(HostLifecycle::default()),
+        );
+        (supervisor, chat)
+    }
+
+    async fn open(supervisor: &mut Supervisor, chat: &Chat) -> RuntimeGeneration {
+        supervisor.open(chat, SessionStart::New, ChatSessionOrigin::New, None, None);
+        let opened = supervisor.finished_open.recv().await.unwrap();
+        let generation = opened.generation;
+        supervisor.on_opened(opened);
+        generation
+    }
+
+    #[tokio::test]
+    async fn stale_context_completion_cannot_release_pending_dispatch() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        supervisor
+            .send(None, "queued reply", SendMode::Auto, &[], None)
+            .unwrap();
+        let latest = Uuid::new_v4();
+        supervisor.refreshing = Some(latest);
+
+        supervisor.on_done(Done::Context {
+            generation,
+            request: Uuid::new_v4(),
+            context: Ok(Some("old links".to_owned())),
+        });
+        supervisor.pump();
+        assert!(supervisor.dispatching.is_none());
+        assert_eq!(supervisor.refreshing, Some(latest));
+
+        supervisor.on_done(Done::Context {
+            generation,
+            request: latest,
+            context: Ok(Some("new links".to_owned())),
+        });
+        supervisor.pump();
+        let dispatch = supervisor.dispatching.as_ref().unwrap();
+        assert_eq!(dispatch.context.as_deref(), Some("new links"));
+    }
+
+    #[tokio::test]
+    async fn rejected_submission_keeps_newer_link_context_for_the_next_turn() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut supervisor, &chat).await;
+        supervisor.session_context = Some("old links".to_owned());
+        supervisor
+            .send(None, "reply", SendMode::Auto, &[], None)
+            .unwrap();
+        supervisor.pump();
+        supervisor.dispatching.as_mut().unwrap().early_rejection =
+            Some("harness rejected the request".to_owned());
+        let latest = Uuid::new_v4();
+        supervisor.refreshing = Some(latest);
+        supervisor.on_done(Done::Context {
+            generation,
+            request: latest,
+            context: Ok(Some("new links".to_owned())),
+        });
+        supervisor.on_done(Done::Dispatched {
+            outcome: DispatchOutcome::Written,
+        });
+
+        supervisor.resume_queue().await.unwrap();
+        supervisor.pump();
+        let dispatch = supervisor.dispatching.as_ref().unwrap();
+        assert_eq!(dispatch.context.as_deref(), Some("new links"));
+    }
+
+    #[tokio::test]
+    async fn replacement_open_refuses_a_retired_late_runtime_after_its_hold_releases() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        open(&mut supervisor, &chat).await;
+        let runtime = supervisor.runtime.take().unwrap();
+        let lifecycle = supervisor.lifecycle.clone();
+        lifecycle.hold_pending_open_cleanup(&chat.id);
+        lifecycle.retire_runtime(&chat.id, runtime.handle, true);
+        lifecycle.release_pending_open_cleanup(&chat.id);
+
+        let (send, mut reply) = oneshot::channel();
+        supervisor.open(
+            &chat,
+            SessionStart::New,
+            ChatSessionOrigin::New,
+            None,
+            Some(send),
+        );
+        assert!(matches!(
+            reply.try_recv(),
+            Ok(Err(HostError::PermissionRestartCleanupUnconfirmed))
+        ));
+        assert!(supervisor.opening.is_none());
     }
 }

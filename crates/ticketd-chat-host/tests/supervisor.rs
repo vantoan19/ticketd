@@ -1059,6 +1059,15 @@ async fn automation_dispatches_its_prompt_without_draining_older_ordinary_input(
 
 #[tokio::test(start_paused = true)]
 async fn a_saved_takeover_reply_dispatches_after_its_queue_read_recovers() {
+    saved_takeover_reply_retries_failed_read(1).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_saved_takeover_reply_dispatches_after_its_chat_read_recovers() {
+    saved_takeover_reply_retries_failed_read(2).await;
+}
+
+async fn saved_takeover_reply_retries_failed_read(fail_read: usize) {
     let f = Fixture::new(FakeAdapter::codex());
     let (chat_id, _) = f.automation_chat();
     let reads = Arc::new(AtomicUsize::new(0));
@@ -1072,10 +1081,9 @@ async fn a_saved_takeover_reply_dispatches_after_its_queue_read_recovers() {
         );
         Arc::new(move || {
             let core = WorkspaceSession::for_file(&path)?.workspace()?;
-            // The first post-takeover read admits the ordinary supervisor. With
-            // no old runtime, its next read is the saved reply's queue lookup.
+            // Admission, takeover queue placement, then dispatch's Chat read.
             if core.automation_chat_harness(&chat_id)?.is_none()
-                && reads.fetch_add(1, Ordering::SeqCst) == 1
+                && reads.fetch_add(1, Ordering::SeqCst) == fail_read
             {
                 fails.fetch_add(1, Ordering::SeqCst);
                 return Err(Error::NoDataDirectory);
@@ -1109,6 +1117,11 @@ async fn a_saved_takeover_reply_dispatches_after_its_queue_read_recovers() {
     settle().await;
     assert_eq!(repeated.id, receipt.id);
     assert_eq!(f.submits().len(), 1);
+    assert_eq!(
+        repeated.attempts.len(),
+        1,
+        "the retained input has exactly one attempt after the read retry"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -2076,7 +2089,7 @@ async fn a_linked_edit_refreshes_context_captured_during_harness_open() {
 }
 
 #[tokio::test(start_paused = true)]
-async fn an_older_link_read_cannot_release_dispatch_before_the_latest_edit_context() {
+async fn overlapping_linked_edits_dispatch_with_the_latest_context() {
     let mut f = Fixture::new(FakeAdapter::codex());
     let path = f.path.clone();
     let context_path = path.clone();
@@ -2091,11 +2104,9 @@ async fn an_older_link_read_cannot_release_dispatch_before_the_latest_edit_conte
             let count = chat.links.len();
             if count != 0 {
                 let (resume, permit) = std::sync::mpsc::channel();
-                let (finished, finished_read) = tokio::sync::oneshot::channel();
-                if reading.send((count, resume, finished_read)).is_err() || permit.recv().is_err() {
+                if reading.send((count, resume)).is_err() || permit.recv().is_err() {
                     return Ok(None);
                 }
-                let _ = finished.send(());
             }
             Ok(Some(format!("linked records: {count}")))
         })),
@@ -2138,24 +2149,14 @@ async fn an_older_link_read_cannot_release_dispatch_before_the_latest_edit_conte
             .unwrap();
         refreshes.push_back(reads.recv().await.unwrap());
     }
-    let (count, older, older_finished) = refreshes.pop_front().unwrap();
+    let (count, older) = refreshes.pop_front().unwrap();
     assert_eq!(count, 1);
-    let (count, newer, newer_finished) = refreshes.pop_front().unwrap();
+    let (count, newer) = refreshes.pop_front().unwrap();
     assert_eq!(count, 2);
     f.host.resume_queue(&f.chat.id).await.unwrap();
 
     older.send(()).unwrap();
-    older_finished.await.unwrap();
-    tokio::time::advance(Duration::from_millis(1)).await;
-    f.host.attach(&f.chat.id).await.unwrap();
-    assert_eq!(
-        f.submits().len(),
-        1,
-        "the newest link read still holds dispatch"
-    );
-
     newer.send(()).unwrap();
-    newer_finished.await.unwrap();
     settle().await;
     assert_eq!(f.fake.opens().len(), 1);
     assert_eq!(f.submits()[1].text, "linked records: 2\n\nEdited one");
@@ -2716,6 +2717,56 @@ async fn send_now_steers_one_queued_input_and_leaves_the_rest_queued() {
     assert_eq!(f.submits()[1].text, "this one now");
     assert_eq!(f.submits()[1].attachments, [saved_file()]);
     assert_eq!(f.queued(), ["later"]);
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_now_waits_to_start_an_image_turn_after_a_text_only_steer_turn() {
+    let f = Fixture::new(FakeAdapter::codex());
+    f.fake.set_steer_image_input(false);
+    f.host.stop(&f.chat.id).await.unwrap();
+    f.queue("wait in the paused queue").await;
+    let image = ChatAttachmentContent::from_image_data_url(
+        "Screenshot.png",
+        "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=",
+    )
+    .unwrap();
+    let now = f
+        .host
+        .send_with_attachments(
+            &f.chat.id,
+            None,
+            "Look at this",
+            SendMode::Queue,
+            vec![image.clone()],
+        )
+        .await
+        .unwrap();
+    let first = f.fake.hold_next_submit();
+    f.send("Start this turn").await;
+    // The first submission has been written, but the actor has no active turn yet.
+    f.host.send_queued_now(&f.chat.id, &now.id).await.unwrap();
+    first.send(SubmitReply::Acknowledge).unwrap();
+    settle().await;
+
+    assert_eq!(f.submits().len(), 1);
+    assert!(f.message(&now.id).attempts.is_empty());
+    assert!(f.live().await.sending.contains(&now.id));
+
+    f.send("Text can steer").await;
+    assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    let submits = f.submits();
+    assert_eq!(submits[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submits[2].attachments, [image]);
+    assert_eq!(f.message(&now.id).attempts.len(), 1);
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    assert_eq!(f.submits().len(), 3);
+    assert_eq!(f.queued(), ["wait in the paused queue"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
 }
 
 /// Send now on a paused queue starts a turn with that input only; the queue stays

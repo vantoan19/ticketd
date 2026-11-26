@@ -307,6 +307,14 @@ pub(crate) struct Board {
 }
 
 impl Board {
+    pub(crate) fn new() -> Self {
+        Self {
+            live: Mutex::new(HashMap::new()),
+            changed: watch::channel(0).0,
+            signals: Mutex::new(HashMap::new()),
+        }
+    }
+
     fn live(&self) -> MutexGuard<'_, HashMap<String, (u64, ChatLive)>> {
         self.live.lock().unwrap_or_else(PoisonError::into_inner)
     }
@@ -554,11 +562,7 @@ impl ChatHost {
             inner: Arc::new(Inner {
                 open_workspace,
                 context,
-                board: Arc::new(Board {
-                    live: Mutex::new(HashMap::new()),
-                    changed: watch::channel(0).0,
-                    signals: Mutex::new(HashMap::new()),
-                }),
+                board: Arc::new(Board::new()),
                 adapters: adapters
                     .into_iter()
                     .map(|adapter| (adapter.harness().key.as_str(), adapter))
