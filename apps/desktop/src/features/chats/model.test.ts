@@ -341,6 +341,28 @@ test("the same ticketd call said again is one clause", () => {
   ).toEqual(["Adding", "evidence to", "T-12", "(2 times)"]);
 });
 
+test("a call made again after another keeps its place in the order", () => {
+  const set = (to: string) => ({
+    verb: "set" as const,
+    words: [{ text: "T-12", code: true }, { text: `to ${to}` }],
+  });
+  const said = (...calls: ReturnType<typeof set>[]) =>
+    stepWords(step({ kind: "run", ticketd: calls, state: "done" })).label;
+  // In progress, Done, In progress is three clauses in that order, not "(2 times)" first.
+  expect(said(set("In progress"), set("Done"), set("In progress"))).not.toMatch(
+    /times/,
+  );
+  expect(
+    ticketdParts([set("In progress"), set("Done"), set("In progress")], 1)
+      .map((p) => p.text)
+      .join(" "),
+  ).toBe("Set T-12 to In progress , T-12 to Done and T-12 to In progress");
+  // Adjacent repeats still count.
+  expect(said(set("Done"), set("Done"), set("In progress"))).toContain(
+    "Done (2 times)",
+  );
+});
+
 test("a ticketd sentence too long for a row reads the harness's description", () => {
   const calls = ["T-12", "T-13", "T-14"].flatMap((reference) => [
     { verb: "read" as const, words: [{ text: reference, code: true }] },

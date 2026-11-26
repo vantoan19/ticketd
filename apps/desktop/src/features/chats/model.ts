@@ -122,14 +122,17 @@ export function ticketdParts(
   const parts: StepWords["parts"] = [];
   const reference = (call: TicketdCall | undefined) =>
     call?.words.find((word) => word.code && !word.record)?.text;
-  // A call made again word for word is one clause, "(3 times)", not said again.
+  // A call made again word for word, right after itself, is one clause, "(3 times)",
+  // not said again; one made again after another call keeps its place in the order.
   const said: { call: TicketdCall; times: number }[] = [];
   for (const call of calls) {
-    const again = said.find(
-      (each) =>
-        each.call.verb === call.verb &&
-        JSON.stringify(each.call.words) === JSON.stringify(call.words),
-    );
+    const last = said[said.length - 1];
+    const again =
+      last &&
+      last.call.verb === call.verb &&
+      JSON.stringify(last.call.words) === JSON.stringify(call.words)
+        ? last
+        : undefined;
     if (again) again.times += 1;
     else said.push({ call, times: 1 });
   }
