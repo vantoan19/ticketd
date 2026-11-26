@@ -28,7 +28,6 @@ test("choices persist and unknown stored values fall back to defaults", () => {
     ticketRows: "simple",
     sidebarCollapsed: false,
     followCreated: true,
-    notifyReminders: false,
     chat: false,
     notifyChats: true,
     documentsView: "current",
@@ -49,6 +48,16 @@ test("choices persist and unknown stored values fall back to defaults", () => {
     theme: "system",
     openTickets: "expanded",
   });
+});
+
+test("the removed reminder switch left in storage is ignored", () => {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ notifyReminders: true, followCreated: false }),
+  );
+  const loaded = loadPreferences();
+  expect(loaded.followCreated).toBe(false);
+  expect(loaded).not.toHaveProperty("notifyReminders");
 });
 
 test("a choice that cannot be stored is reported", () => {
