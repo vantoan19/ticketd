@@ -188,6 +188,16 @@ impl Fixture {
             .collect()
     }
 
+    async fn wait_for_submissions(&self, count: usize) -> Vec<Submission> {
+        tokio::time::timeout(
+            Duration::from_secs(10),
+            self.fake.wait_for_submissions(count),
+        )
+        .await
+        .expect("the expected submissions did not reach the fake harness");
+        self.submits()
+    }
+
     async fn send(&self, text: &str) -> ChatMessage {
         let message = self.host.send(&self.chat.id, None, text, SendMode::Auto);
         let message = message.await.unwrap();
@@ -2240,6 +2250,7 @@ fn fixture_with_link_context(
 async fn repeated_link_requests_wait_for_context_while_unrelated_input_steers() {
     let f = fixture_with_link_context(FakeAdapter::codex(), || Ok(()));
     f.send("first").await;
+    f.wait_for_submissions(1).await;
     let link = ChatLink {
         kind: ChatLinkKind::Ticket,
         id: f.core().create_ticket("Requested twice").unwrap().id,
@@ -2267,28 +2278,23 @@ async fn repeated_link_requests_wait_for_context_while_unrelated_input_steers() 
         .await
         .unwrap();
     f.send("ordinary steer").await;
-    assert_eq!(f.submits().len(), 2);
-    assert_eq!(f.submits()[1].text, "ordinary steer");
-    assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions.len(), 2);
+    assert_eq!(submissions[1].text, "ordinary steer");
+    assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
     assert!(f.message(&first.id).attempts.is_empty());
     assert!(f.message(&second.id).attempts.is_empty());
 
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while f.submits().len() < 4 {
-            settle().await;
-        }
-    })
-    .await
-    .unwrap();
+    let submissions = f.wait_for_submissions(4).await;
     assert_eq!(
-        f.submits()[2].text,
+        submissions[2].text,
         "linked records: 1\n\nfirst linked reply"
     );
-    assert_eq!(f.submits()[2].kind, SubmissionKind::StartTurn);
-    assert_eq!(f.submits()[3].text, "second linked reply");
+    assert_eq!(submissions[2].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[3].text, "second linked reply");
     assert_eq!(
-        f.submits()[3].kind,
+        submissions[3].kind,
         SubmissionKind::Steer {
             expected_turn: NativeTurnId::new("turn-2")
         }
@@ -2307,7 +2313,10 @@ async fn an_existing_link_saved_before_acknowledgement_waits_if_the_turn_cannot_
         .unwrap();
     let first = f.fake.hold_next_submit();
     f.send("first").await;
-    assert_eq!(f.submits()[0].text, "linked records: 1\n\nfirst");
+    assert_eq!(
+        f.wait_for_submissions(1).await[0].text,
+        "linked records: 1\n\nfirst"
+    );
     let linked = f
         .host
         .send_linking(
@@ -2325,7 +2334,7 @@ async fn an_existing_link_saved_before_acknowledgement_waits_if_the_turn_cannot_
     assert_eq!(f.submits().len(), 1);
 
     f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
-    let submissions = f.submits();
+    let submissions = f.wait_for_submissions(2).await;
     assert_eq!(submissions[1].kind, SubmissionKind::StartTurn);
     assert_eq!(submissions[1].text, "Read this too");
     assert_eq!(submissions[1].attachments, [saved_file()]);
@@ -2347,10 +2356,89 @@ async fn a_failed_takeover_link_context_read_retries_before_first_dispatch() {
     linked_context_recovers_without_an_extra_attempt(LinkedContextSession::Takeover).await;
 }
 
+#[tokio::test(start_paused = true)]
+async fn a_reopened_queue_waits_for_context_before_sending_a_saved_takeover_reply() {
+    linked_context_recovers_without_an_extra_attempt(LinkedContextSession::TakeoverQueue).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_now_checks_the_context_of_a_saved_queued_takeover_reply() {
+    linked_context_recovers_without_an_extra_attempt(LinkedContextSession::TakeoverSendNow).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unrelated_auto_send_starts_while_a_paused_linked_input_cannot_read_context() {
+    let unavailable = Arc::new(AtomicBool::new(false));
+    let source = unavailable.clone();
+    let f = fixture_with_link_context(FakeAdapter::codex(), move || {
+        if source.load(Ordering::SeqCst) {
+            Err("context source unavailable".to_owned())
+        } else {
+            Ok(())
+        }
+    });
+    f.send("first").await;
+    f.wait_for_submissions(1).await;
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.host.stop(&f.chat.id).await.unwrap();
+    unavailable.store(true, Ordering::SeqCst);
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: f.core().create_ticket("Queued linked record").unwrap().id,
+    };
+    let linked = f
+        .host
+        .send_linking(
+            &f.chat.id,
+            "Keep queued",
+            SendMode::Queue,
+            vec![saved_file()],
+            vec![link],
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !notices(&f)
+            .iter()
+            .any(|notice| notice.contains("context source unavailable"))
+        {
+            settle().await;
+        }
+    })
+    .await
+    .unwrap();
+
+    f.send("unrelated").await;
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions[1].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[1].text, "unrelated");
+    assert_eq!(f.queued(), ["Keep queued"]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert!(f.message(&linked.id).attempts.is_empty());
+
+    f.emit(turn_ended(
+        NativeTurnId::new("turn-2"),
+        TurnOutcome::Completed,
+    ))
+    .await;
+    unavailable.store(false, Ordering::SeqCst);
+    f.host
+        .send_queued_now(&f.chat.id, &linked.id)
+        .await
+        .unwrap();
+    let submissions = f.wait_for_submissions(3).await;
+    assert_eq!(submissions[2].text, "linked records: 1\n\nKeep queued");
+    assert_eq!(submissions[2].attachments, [saved_file()]);
+    assert_eq!(f.message(&linked.id).attempts.len(), 1);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+}
+
 enum LinkedContextSession {
     Live,
     New,
     Takeover,
+    TakeoverQueue,
+    TakeoverSendNow,
 }
 
 async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContextSession) {
@@ -2363,12 +2451,18 @@ async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContext
             Ok(())
         }
     });
-    if matches!(session, LinkedContextSession::Takeover) {
+    if matches!(
+        session,
+        LinkedContextSession::Takeover
+            | LinkedContextSession::TakeoverQueue
+            | LinkedContextSession::TakeoverSendNow
+    ) {
         let (chat_id, _) = f.automation_chat();
         f.chat = f.core().chat(&chat_id).unwrap();
     }
     if matches!(session, LinkedContextSession::Live) {
         f.send("first").await;
+        f.wait_for_submissions(1).await;
     }
     failing.store(true, Ordering::SeqCst);
     let link = ChatLink {
@@ -2380,12 +2474,33 @@ async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContext
         .send_linking(
             &f.chat.id,
             "Read the linked record",
-            SendMode::Auto,
+            match session {
+                LinkedContextSession::TakeoverQueue | LinkedContextSession::TakeoverSendNow => {
+                    SendMode::Queue
+                }
+                _ => SendMode::Auto,
+            },
             vec![saved_file()],
             vec![link],
         )
         .await
         .unwrap();
+    match session {
+        LinkedContextSession::TakeoverQueue | LinkedContextSession::TakeoverSendNow => {
+            assert!(
+                f.fake.opens().is_empty(),
+                "saving the queued reply starts no runtime"
+            );
+            assert!(f.submits().is_empty());
+            assert!(f.message(&saved.id).requires_link_context);
+            if matches!(session, LinkedContextSession::TakeoverQueue) {
+                f.host.resume_queue(&f.chat.id).await.unwrap();
+            } else {
+                f.host.send_queued_now(&f.chat.id, &saved.id).await.unwrap();
+            }
+        }
+        _ => {}
+    }
     let failed_reads = || {
         notices(&f)
             .into_iter()
@@ -2401,8 +2516,9 @@ async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContext
     .unwrap();
     let before = if matches!(session, LinkedContextSession::Live) {
         f.send("ordinary steer").await;
-        assert_eq!(f.submits()[1].text, "ordinary steer");
-        assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+        let submissions = f.wait_for_submissions(2).await;
+        assert_eq!(submissions[1].text, "ordinary steer");
+        assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
         f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
         2
     } else {
@@ -2414,14 +2530,8 @@ async fn linked_context_recovers_without_an_extra_attempt(session: LinkedContext
     assert_eq!(f.queued(), ["Read the linked record"]);
 
     failing.store(false, Ordering::SeqCst);
-    tokio::time::timeout(Duration::from_secs(5), async {
-        while f.submits().len() == before {
-            settle().await;
-        }
-    })
-    .await
-    .unwrap();
-    let sent = &f.submits()[before];
+    let submissions = f.wait_for_submissions(before + 1).await;
+    let sent = &submissions[before];
     assert_eq!(sent.kind, SubmissionKind::StartTurn);
     assert_eq!(sent.text, "linked records: 1\n\nRead the linked record");
     assert_eq!(sent.attachments, [saved_file()]);
@@ -2437,6 +2547,7 @@ async fn linked_attachment_reaches_the_session_with_context(active_mode: Option<
         f.queue("stay paused").await;
     }
     f.send("first").await;
+    f.wait_for_submissions(1).await;
     if active_mode.is_none() {
         f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
     }
@@ -2469,9 +2580,10 @@ async fn linked_attachment_reaches_the_session_with_context(active_mode: Option<
     }
     let new_turn = if active_mode.is_some() {
         f.send("ordinary text").await;
-        assert_eq!(f.submits().len(), 2);
-        assert_eq!(f.submits()[1].text, "ordinary text");
-        assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+        let submissions = f.wait_for_submissions(2).await;
+        assert_eq!(submissions.len(), 2);
+        assert_eq!(submissions[1].text, "ordinary text");
+        assert!(matches!(submissions[1].kind, SubmissionKind::Steer { .. }));
         assert!(f.message(&attached.id).attempts.is_empty());
         f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
         assert_eq!(f.queued(), ["stay paused"]);
@@ -2481,7 +2593,7 @@ async fn linked_attachment_reaches_the_session_with_context(active_mode: Option<
         1
     };
     assert_eq!(f.fake.opens().len(), 1);
-    let submissions = f.submits();
+    let submissions = f.wait_for_submissions(new_turn + 1).await;
     assert_eq!(submissions[new_turn].kind, SubmissionKind::StartTurn);
     assert_eq!(submissions[new_turn].text, "linked records: 1\n\nAttached");
     assert_eq!(submissions[new_turn].attachments, [file]);
@@ -2546,7 +2658,10 @@ async fn a_linked_edit_refreshes_context_captured_during_harness_open() {
         .unwrap();
     open.send(()).unwrap();
     settle().await;
-    assert_eq!(f.submits()[0].text, "linked records: 1\n\nfirst");
+    assert_eq!(
+        f.wait_for_submissions(1).await[0].text,
+        "linked records: 1\n\nfirst"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -2620,7 +2735,10 @@ async fn overlapping_linked_edits_dispatch_with_the_latest_context() {
     newer.send(()).unwrap();
     settle().await;
     assert_eq!(f.fake.opens().len(), 1);
-    assert_eq!(f.submits()[1].text, "linked records: 2\n\nEdited one");
+    assert_eq!(
+        f.wait_for_submissions(2).await[1].text,
+        "linked records: 2\n\nEdited one"
+    );
 }
 
 #[tokio::test(start_paused = true)]
@@ -2636,6 +2754,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     )
     .unwrap();
     f.send("first").await;
+    f.wait_for_submissions(1).await;
     f.emit(EventKind::SessionIdentified {
         native_session: NativeSessionId::new("session-1"),
     })
@@ -2645,12 +2764,14 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     *context.lock().unwrap() = "links: T-KQ1".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("second").await;
+    f.wait_for_submissions(2).await;
     f.emit(turn_ended(
         NativeTurnId::new("turn-2"),
         TurnOutcome::Completed,
     ))
     .await;
     f.send("third").await;
+    f.wait_for_submissions(3).await;
     f.emit(turn_ended(
         NativeTurnId::new("turn-3"),
         TurnOutcome::Completed,
@@ -2675,6 +2796,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     // A resumed native session already has what it was given ...
     f.host.stop_all(ticketd_chat_host::StopReason::Quit).await;
     f.send("fourth").await;
+    f.wait_for_submissions(4).await;
     assert_eq!(texts(&f)[3], "fourth");
     f.emit(turn_ended(
         NativeTurnId::new("turn-4"),
@@ -2686,6 +2808,7 @@ async fn links_changed_after_the_session_started_reach_the_agent_with_the_next_m
     *context.lock().unwrap() = "links: T-KQ2".to_owned();
     f.host.links_changed(&f.chat.id).await.unwrap();
     f.send("fifth").await;
+    f.wait_for_submissions(5).await;
     assert_eq!(texts(&f)[4], "links: T-KQ2\n\nfifth");
 }
 

@@ -9,7 +9,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use async_trait::async_trait;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 
 use crate::runtime::RuntimeState;
 use crate::{
@@ -49,6 +49,7 @@ pub enum Written {
 pub struct FakeAdapter {
     harness: Harness,
     state: Arc<Mutex<State>>,
+    submissions: watch::Sender<usize>,
 }
 
 #[derive(Debug)]
@@ -117,6 +118,7 @@ impl FakeAdapter {
         };
         Self {
             harness,
+            submissions: watch::channel(0).0,
             state: Arc::new(Mutex::new(State {
                 inspection,
                 capabilities,
@@ -277,6 +279,15 @@ impl FakeAdapter {
     /// Commands that reached the fake harness, in order.
     pub fn written(&self) -> Vec<Written> {
         self.state().written.clone()
+    }
+
+    /// Waits for submitted input to reach the fake harness, even with its reply held.
+    pub async fn wait_for_submissions(&self, count: usize) {
+        let _ = self
+            .submissions
+            .subscribe()
+            .wait_for(|seen| *seen >= count)
+            .await;
     }
 
     /// How many answers were handed to a runtime, including ones it then refused. A
@@ -461,6 +472,7 @@ impl HarnessRuntime for FakeRuntime {
                 return DispatchOutcome::NotSent(refusal);
             }
             state.written.push(Written::Submit(submission.clone()));
+            self.fake.submissions.send_modify(|seen| *seen += 1);
             state.submit_replies.pop_front()
         };
         let reply = match scripted {

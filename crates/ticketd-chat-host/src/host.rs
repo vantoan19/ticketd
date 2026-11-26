@@ -121,14 +121,6 @@ pub(crate) fn is_refusal(error: &Error) -> bool {
     )
 }
 
-pub(crate) fn requests_chat_links(change: Option<&ChatInputChange>) -> bool {
-    match change {
-        Some(ChatInputChange::Link(links)) => !links.is_empty(),
-        Some(ChatInputChange::Edit(edit)) => !edit.links.is_empty(),
-        None => false,
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendMode {
     /// Start a turn when idle; steer the active turn when the harness supports
@@ -792,7 +784,6 @@ impl ChatHost {
                     let host = self.clone();
                     let chat_id = chat_id.to_owned();
                     let message_id = receipt.id.clone();
-                    let requires_link_context = requests_chat_links(change.as_ref());
                     // The takeover still completes if the caller loses its reply.
                     tokio::spawn(async move {
                         let (_, unconfirmed) = host.finish_take_over(&chat_id, run).await;
@@ -802,11 +793,8 @@ impl ChatHost {
                         {
                             // The reply starts a normal turn before admitting later sends.
                             let (reply, scheduled) = oneshot::channel();
-                            let sent = commands.try_send(Command::ScheduleSaved {
-                                message_id,
-                                requires_link_context,
-                                reply,
-                            });
+                            let sent =
+                                commands.try_send(Command::ScheduleSaved { message_id, reply });
                             drop(gate);
                             if sent.is_ok() {
                                 let _ = scheduled.await;

@@ -27,7 +27,7 @@ use crate::host::{
     ContextReport, ContextSource, DELIVERY_CONFIRMATION_TIMEOUT, HostError, HostLifecycle,
     INTERRUPT_TIMEOUT, LiveInteraction, LiveSettingChange, LiveSettings, ResumeMode,
     SNAPSHOT_ITEMS, SendMode, SettingChangeState, StopState, TEXT_CHECKPOINT_INTERVAL,
-    TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal, requests_chat_links,
+    TEXT_UPDATE_INTERVAL, WorkspaceOpener, is_refusal,
 };
 use crate::records::{
     FILES_RECORD_NAME, FilesRecord, PLAN_RECORD_NAME, PlanRecord, REASONING_RECORD_NAME,
@@ -75,7 +75,6 @@ pub(crate) enum Command {
     },
     ScheduleSaved {
         message_id: String,
-        requires_link_context: bool,
         reply: Reply<()>,
     },
     SendUnattended {
@@ -180,6 +179,8 @@ struct Runtime {
     /// Harness notices already kept for this session.
     said: HashSet<String>,
     context: Option<ContextReport>,
+    /// Last ticketd link context delivered in this runtime.
+    link_context: Option<String>,
     /// When the session compacted, kept for a context report that comes later.
     compacted_at: Option<i64>,
     settings: Option<HarnessSettings>,
@@ -212,6 +213,12 @@ enum DirectSend {
     AfterTurn,
 }
 
+#[derive(Clone)]
+struct PendingInput {
+    id: String,
+    requires_link_context: bool,
+}
+
 enum DispatchProgress {
     Finished,
     Skipped,
@@ -219,9 +226,22 @@ enum DispatchProgress {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum ContextRefreshScope {
+    LinkedInput,
+    NextTurn,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
 enum ContextRefresh {
-    Reading { request: Uuid, retrying: bool },
-    RetryAt(Instant),
+    Reading {
+        request: Uuid,
+        retrying: bool,
+        scope: ContextRefreshScope,
+    },
+    RetryAt {
+        at: Instant,
+        armed: bool,
+    },
 }
 
 struct ActiveTurn {
@@ -303,14 +323,12 @@ pub(crate) struct Supervisor {
     unconfirmed_deadline: Option<Instant>,
     active: Option<ActiveTurn>,
     /// Input the person sent for immediate dispatch, ahead of the queue.
-    direct: VecDeque<(String, DirectSend)>,
-    /// Inputs that requested links. A new turn can carry and record pending context.
-    linked_inputs: HashSet<String>,
+    direct: VecDeque<(PendingInput, DirectSend)>,
     /// Prepared edits keep their saved rows. The automatic queue waits for the
     /// composer, while an explicit Send now or Resume may still release them.
     prepared_queue_edits: HashSet<String>,
     /// Input the person asked to send again although its delivery is uncertain.
-    resend: Option<String>,
+    resend: Option<PendingInput>,
     /// Selected history for a fresh session, sent with the next new turn.
     preamble: Option<String>,
     /// The ticketd context of a new session, sent with its first new turn.
@@ -451,7 +469,6 @@ impl Supervisor {
             unconfirmed_deadline: None,
             active: None,
             direct: VecDeque::new(),
-            linked_inputs: HashSet::new(),
             prepared_queue_edits: HashSet::new(),
             resend: None,
             preamble: None,
@@ -779,8 +796,8 @@ impl Supervisor {
                     let _ = unattended.first_message.set(message.id.clone());
                     // The run cannot drain the ordinary queue, even when older input waits.
                     if self.active.is_none() && self.can_schedule_saved(message) {
-                        self.direct
-                            .push_back((message.id.clone(), DirectSend::Auto));
+                        let input = self.pending_input(message);
+                        self.direct.push_back((input, DirectSend::Auto));
                     }
                 }
                 let _ = reply.send(result);
@@ -801,15 +818,7 @@ impl Supervisor {
                     change.as_ref(),
                 ));
             }
-            Command::ScheduleSaved {
-                message_id,
-                requires_link_context,
-                reply,
-            } => {
-                if requires_link_context && self.context.is_some() {
-                    self.linked_inputs.insert(message_id.clone());
-                    self.refresh_context();
-                }
+            Command::ScheduleSaved { message_id, reply } => {
                 self.saved_reply = Some(message_id);
                 let _ = reply.send(Ok(()));
             }
@@ -861,7 +870,7 @@ impl Supervisor {
                 let _ = reply.send(Ok(self.change_setting(setting, value)));
             }
             Command::StartWith(settings) => self.start_settings = settings,
-            Command::LinksChanged => self.refresh_context(),
+            Command::LinksChanged => self.refresh_context(ContextRefreshScope::NextTurn),
             // Views read the Chat again even when no record changed: what they show
             // can depend on the folder too, such as its branch.
             Command::Changed => self.last_live = None,
@@ -1017,7 +1026,7 @@ impl Supervisor {
 
     /// Reads the ticketd context again for the live session. Without one there is nothing
     /// to tell: the next session reads the context when it opens.
-    fn refresh_context(&mut self) {
+    fn refresh_context(&mut self, mut scope: ContextRefreshScope) {
         let Some(source) = self.context.clone() else {
             return;
         };
@@ -1029,15 +1038,28 @@ impl Supervisor {
             return;
         };
         let retrying = match self.refreshing {
-            Some(ContextRefresh::RetryAt(at)) if at > Instant::now() => return,
-            Some(ContextRefresh::RetryAt(_)) => true,
-            Some(ContextRefresh::Reading { retrying, .. }) => retrying,
+            Some(ContextRefresh::RetryAt { at, .. }) if at > Instant::now() => return,
+            Some(ContextRefresh::RetryAt { .. }) => true,
+            Some(ContextRefresh::Reading {
+                retrying,
+                scope: previous,
+                ..
+            }) => {
+                if previous == ContextRefreshScope::NextTurn {
+                    scope = previous;
+                }
+                retrying
+            }
             None => false,
         };
         let (done, chat_id, generation) =
             (self.done.clone(), self.chat_id.clone(), runtime.generation);
         let request = Uuid::new_v4();
-        self.refreshing = Some(ContextRefresh::Reading { request, retrying });
+        self.refreshing = Some(ContextRefresh::Reading {
+            request,
+            retrying,
+            scope,
+        });
         tokio::spawn(async move {
             // It runs the CLI and can take seconds: off the async threads.
             let context = tokio::task::spawn_blocking(move || source(&chat_id))
@@ -1053,7 +1075,7 @@ impl Supervisor {
 
     fn context_retry_at(&self) -> Option<Instant> {
         match self.refreshing {
-            Some(ContextRefresh::RetryAt(at)) if !self.linked_inputs.is_empty() => Some(at),
+            Some(ContextRefresh::RetryAt { at, armed: true }) => Some(at),
             _ => None,
         }
     }
@@ -1064,26 +1086,31 @@ impl Supervisor {
                 "ticketd could not read this Chat's changed links, so the session was not told about them: {error}"
             ));
         }
-        self.refreshing = Some(ContextRefresh::RetryAt(Instant::now() + LINK_CONTEXT_RETRY));
+        self.schedule_context_retry();
     }
 
-    fn retry_link_context(&mut self) {
-        if let Ok(queue) = self.core(|core| core.chat_queue(&self.chat_id)) {
-            let remains_queued = |id: &str| queue.iter().any(|message| message.id == id);
-            self.direct
-                .retain(|(id, _)| !self.linked_inputs.contains(id) || remains_queued(id));
-            self.linked_inputs.retain(|id| remains_queued(id));
-            if self.linked_inputs.is_empty() {
-                return;
-            }
+    fn schedule_context_retry(&mut self) {
+        self.refreshing = Some(ContextRefresh::RetryAt {
+            at: Instant::now() + LINK_CONTEXT_RETRY,
+            armed: false,
+        });
+    }
+
+    fn arm_context_retry(&mut self) {
+        if let Some(ContextRefresh::RetryAt { armed, .. }) = &mut self.refreshing {
+            *armed = true;
         }
-        self.refresh_context();
     }
 
     /// The context this Chat's sessions were last given or are about to be given.
     fn context_given(&self) -> Option<String> {
         if let Some(context) = self.session_context.as_ref().or(self.context_sent.as_ref()) {
             return Some(context.clone());
+        }
+        if let Some(runtime) = &self.runtime
+            && (runtime.link_context.is_some() || runtime.origin != ChatSessionOrigin::NativeResume)
+        {
+            return runtime.link_context.clone();
         }
         let chat = self.chat_id.clone();
         // Unreadable: treated as never given, so the context is sent rather than lost.
@@ -1163,14 +1190,8 @@ impl Supervisor {
         let (receipt, linked) = self.write(|core| {
             core.save_chat_input_with_change(command_id, &chat, text, attachments, change)
         })?;
-        if requests_chat_links(change)
-            && self.context.is_some()
-            && let Some(message) = &receipt.message
-        {
-            self.linked_inputs.insert(message.id.clone());
-        }
         if linked {
-            self.refresh_context();
+            self.refresh_context(ContextRefreshScope::LinkedInput);
         }
         if mode == SendMode::Auto
             && let Some(message) = &receipt.message
@@ -1188,13 +1209,20 @@ impl Supervisor {
             && !self.is_sending(&message.id)
     }
 
-    fn is_sending(&self, message_id: &str) -> bool {
-        self.direct.iter().any(|(id, _)| id == message_id)
+    fn pending_input(&self, message: &ChatMessage) -> PendingInput {
+        PendingInput {
+            id: message.id.clone(),
+            requires_link_context: message.requires_link_context && self.context.is_some(),
+        }
     }
 
-    fn waits_for_new_turn(&self, id: &str, intent: DirectSend) -> bool {
+    fn is_sending(&self, message_id: &str) -> bool {
+        self.direct.iter().any(|(input, _)| input.id == message_id)
+    }
+
+    fn waits_for_new_turn(&self, input: &PendingInput, intent: DirectSend) -> bool {
         intent == DirectSend::AfterTurn
-            || (self.linked_inputs.contains(id)
+            || (input.requires_link_context
                 && (self.refreshing.is_some()
                     || self.session_context.is_some()
                     || self.context_sent.is_some()))
@@ -1207,8 +1235,8 @@ impl Supervisor {
                 // it, and the queue runs.
                 self.queue_started = true;
             } else {
-                self.direct
-                    .push_back((message.id.clone(), DirectSend::Auto));
+                let input = self.pending_input(message);
+                self.direct.push_back((input, DirectSend::Auto));
             }
         }
     }
@@ -1229,6 +1257,10 @@ impl Supervisor {
                     && let Some(message) = queue.iter().find(|message| message.id == *saved)
                     && self.can_schedule_saved(message)
                 {
+                    let input = self.pending_input(message);
+                    if input.requires_link_context {
+                        self.refresh_context(ContextRefreshScope::LinkedInput);
+                    }
                     if !paused
                         && queue
                             .iter()
@@ -1237,8 +1269,7 @@ impl Supervisor {
                     {
                         self.queue_started = true;
                     } else {
-                        self.direct
-                            .push_front((message.id.clone(), DirectSend::Auto));
+                        self.direct.push_front((input, DirectSend::Auto));
                     }
                 }
                 self.saved_reply = None;
@@ -1341,10 +1372,15 @@ impl Supervisor {
         }
         self.confirm_permission_restart_cleanup().await?;
         self.prepared_queue_edits.remove(&message_id);
-        match self.direct.iter_mut().find(|(id, _)| id == &message_id) {
+        let input = self.pending_input(&queued);
+        match self
+            .direct
+            .iter_mut()
+            .find(|(pending, _)| pending.id == message_id)
+        {
             Some((_, intent @ DirectSend::Auto)) => *intent = DirectSend::SendNow,
             Some(_) => {}
-            None => self.direct.push_back((message_id, DirectSend::SendNow)),
+            None => self.direct.push_back((input, DirectSend::SendNow)),
         }
         Ok(())
     }
@@ -1439,11 +1475,16 @@ impl Supervisor {
         if self.core(|core| core.chat(&chat))?.trashed {
             return Err(Error::ChatTrashed(chat).into());
         }
+        let requires_link_context = self.context.is_some()
+            && self.core(|core| core.chat_input_requires_link_context(&chat, &message_id))?;
         self.confirm_permission_restart_cleanup().await?;
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.clear_direct();
         self.problem = None;
-        self.resend = Some(message_id);
+        self.resend = Some(PendingInput {
+            id: message_id,
+            requires_link_context,
+        });
         Ok(())
     }
 
@@ -2084,6 +2125,9 @@ impl Supervisor {
     /// sent goes first; queued input follows only while a runtime is live and the queue
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
+        if let Some(ContextRefresh::RetryAt { armed, .. }) = &mut self.refreshing {
+            *armed = false;
+        }
         if self
             .queue_read_retry_at
             .is_some_and(|at| at > Instant::now())
@@ -2105,8 +2149,13 @@ impl Supervisor {
         }
         let idle = self.active.is_none();
         if idle
-            && (matches!(self.refreshing, Some(ContextRefresh::Reading { .. }))
-                || self.context_retry_at().is_some())
+            && matches!(
+                self.refreshing,
+                Some(ContextRefresh::Reading {
+                    scope: ContextRefreshScope::NextTurn,
+                    ..
+                })
+            )
         {
             return;
         }
@@ -2114,7 +2163,7 @@ impl Supervisor {
             && self
                 .direct
                 .iter()
-                .all(|(id, intent)| self.waits_for_new_turn(id, *intent))
+                .all(|(input, intent)| self.waits_for_new_turn(input, *intent))
         {
             // During a turn only steering input can go out, so the workspace is not
             // read for every event of a streaming turn.
@@ -2137,14 +2186,13 @@ impl Supervisor {
         };
         if chat.trashed {
             self.direct.clear();
-            self.linked_inputs.clear();
             self.prepared_queue_edits.clear();
             self.resend = None;
             return;
         }
         if !idle && self.steering().is_none() {
-            self.direct.retain_mut(|(id, intent)| match intent {
-                DirectSend::Auto => self.linked_inputs.contains(id),
+            self.direct.retain_mut(|(input, intent)| match intent {
+                DirectSend::Auto => input.requires_link_context,
                 DirectSend::SendNow | DirectSend::AfterTurn => {
                     *intent = DirectSend::AfterTurn;
                     true
@@ -2155,12 +2203,23 @@ impl Supervisor {
         // What the person asked to send again goes alone, as a new turn.
         loop {
             let resend = self.resend.clone().filter(|_| idle);
-            let direct_index = self
-                .direct
-                .iter()
-                .position(|(id, intent)| idle || !self.waits_for_new_turn(id, *intent));
-            let message_id = if let Some(id) = &resend {
-                id.clone()
+            if idle
+                && self
+                    .direct
+                    .iter()
+                    .any(|(input, _)| input.requires_link_context)
+            {
+                self.arm_context_retry();
+            }
+            let direct_index = self.direct.iter().position(|(input, intent)| {
+                if idle {
+                    self.refreshing.is_none() || !input.requires_link_context
+                } else {
+                    !self.waits_for_new_turn(input, *intent)
+                }
+            });
+            let input = if let Some(input) = &resend {
+                input.clone()
             } else if let Some(index) = direct_index {
                 self.direct[index].0.clone()
             } else if idle
@@ -2172,8 +2231,6 @@ impl Supervisor {
                     Ok(queue) => {
                         self.prepared_queue_edits
                             .retain(|id| queue.iter().any(|message| &message.id == id));
-                        self.linked_inputs
-                            .retain(|id| queue.iter().any(|message| &message.id == id));
                         let Some(message) = queue.into_iter().find(|message| !message.editing)
                         else {
                             self.queue_started = false;
@@ -2182,7 +2239,7 @@ impl Supervisor {
                         if self.prepared_queue_edits.contains(&message.id) {
                             return;
                         }
-                        message.id
+                        self.pending_input(&message)
                     }
                     Err(error) => {
                         if !is_refusal(&error) {
@@ -2202,7 +2259,7 @@ impl Supervisor {
             if self
                 .unattended
                 .as_ref()
-                .is_some_and(|agent| agent.first_message.get() != Some(&message_id))
+                .is_some_and(|agent| agent.first_message.get() != Some(&input.id))
             {
                 if resend.is_some() {
                     self.resend = None;
@@ -2224,6 +2281,10 @@ impl Supervisor {
                 self.open(&chat, session, origin, preamble, None);
                 return;
             }
+            if self.refreshing.is_some() && input.requires_link_context {
+                self.arm_context_retry();
+                return;
+            }
             let direct = if resend.is_some() {
                 self.resend = None;
                 None
@@ -2234,13 +2295,12 @@ impl Supervisor {
                 && direct
                     .as_ref()
                     .is_none_or(|(_, (_, intent))| *intent != DirectSend::Auto);
-            match self.defer_image_steer_or_dispatch(&message_id, resend.is_some(), from_queue) {
+            match self.defer_image_steer_or_dispatch(&input.id, resend.is_some(), from_queue) {
                 DispatchProgress::Finished => return,
                 DispatchProgress::Skipped => {}
                 DispatchProgress::ImageNeedsNewTurn => {
-                    if let Some((index, (_, DirectSend::SendNow))) = direct {
-                        self.direct
-                            .insert(index, (message_id, DirectSend::AfterTurn));
+                    if let Some((index, (input, DirectSend::SendNow))) = direct {
+                        self.direct.insert(index, (input, DirectSend::AfterTurn));
                     }
                 }
             }
@@ -2319,7 +2379,6 @@ impl Supervisor {
                 return DispatchProgress::Finished;
             }
         };
-        self.linked_inputs.remove(message_id);
         if starts_turn {
             // An earlier Stop was about an earlier submission.
             self.stop_when_turn_known = false;
@@ -2329,7 +2388,7 @@ impl Supervisor {
         } else {
             None
         };
-        let context = if starts_turn {
+        let context = if starts_turn && self.refreshing.is_none() {
             self.session_context.take()
         } else {
             None
@@ -2391,6 +2450,7 @@ impl Supervisor {
                 let Some(ContextRefresh::Reading {
                     request: latest,
                     retrying,
+                    ..
                 }) = self.refreshing
                 else {
                     return;
@@ -2400,15 +2460,9 @@ impl Supervisor {
                     return;
                 }
                 self.refreshing = None;
-                let fresh_runtime_needs_context = self.runtime.as_ref().is_some_and(|runtime| {
-                    runtime.origin != ChatSessionOrigin::NativeResume && runtime.turns.is_empty()
-                });
                 match context {
                     // Told with the next new turn, and only when it is news to the session.
-                    Ok(Some(context))
-                        if fresh_runtime_needs_context
-                            || self.context_given().as_ref() != Some(&context) =>
-                    {
+                    Ok(Some(context)) if self.context_given().as_ref() != Some(&context) => {
                         self.session_context = Some(context);
                     }
                     Ok(_) => {}
@@ -2535,6 +2589,7 @@ impl Supervisor {
                     tools: HashSet::new(),
                     said: HashSet::new(),
                     context: None,
+                    link_context: None,
                     compacted_at: None,
                     settings: None,
                     setting_changes: Vec::new(),
@@ -2550,15 +2605,15 @@ impl Supervisor {
                             && self.context_given().as_ref() == Some(&context) => {}
                     Ok(Some(context)) => self.session_context = Some(context),
                     Ok(None) => {}
-                    Err(error) if !self.linked_inputs.is_empty() => {
-                        self.context_read_failed(error, false);
+                    Err(error) => {
+                        self.notice(format!(
+                            "ticketd could not prepare this Chat's context: {error}"
+                        ));
+                        self.schedule_context_retry();
                     }
-                    Err(error) => self.notice(format!(
-                        "ticketd could not prepare this Chat's context, so the session started without it: {error}"
-                    )),
                 }
                 if opening.context_changed && !self.closing {
-                    self.refresh_context();
+                    self.refresh_context(ContextRefreshScope::NextTurn);
                 }
                 self.problem = None;
                 Ok(())
@@ -2750,6 +2805,7 @@ impl Supervisor {
             native_turn_id: Some(native.0.clone()),
         });
         if let Some(context) = self.context_sent.take() {
+            runtime.link_context = Some(context.clone());
             observations.push(ChatObservation::Tool {
                 tool_id: format!("{turn_id}:ticketd-context"),
                 turn_id: turn_id.clone(),
@@ -3260,7 +3316,7 @@ impl Supervisor {
     fn on_timer(&mut self) {
         let now = Instant::now();
         if self.context_retry_at().is_some_and(|at| at <= now) {
-            self.retry_link_context();
+            self.refresh_context(ContextRefreshScope::LinkedInput);
         }
         if self.show_text_at.is_some_and(|at| at <= now) {
             self.show_text();
@@ -3354,7 +3410,11 @@ impl Supervisor {
             steering: self.active.as_ref().and_then(|_| self.steering()),
             steering_images_refused: self.active.is_some() && self.images_refused(true),
             delivery_unconfirmed: self.unconfirmed_start.is_some(),
-            sending: self.direct.iter().map(|(id, _)| id.clone()).collect(),
+            sending: self
+                .direct
+                .iter()
+                .map(|(input, _)| input.id.clone())
+                .collect(),
             prepared_queue_edits: self.prepared_queue_edits.clone(),
             interactions: self
                 .interactions
@@ -3521,6 +3581,7 @@ mod tests {
         let reading = Some(ContextRefresh::Reading {
             request: latest,
             retrying: false,
+            scope: ContextRefreshScope::NextTurn,
         });
         supervisor.refreshing = reading;
 
@@ -3559,6 +3620,7 @@ mod tests {
         supervisor.refreshing = Some(ContextRefresh::Reading {
             request: latest,
             retrying: false,
+            scope: ContextRefreshScope::NextTurn,
         });
         supervisor.on_done(Done::Context {
             generation,
