@@ -65,23 +65,17 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "backups-export",
   },
   {
-    title: "Upload destination",
-    description:
-      "Applies to new uploads only. Queued uploads and retries keep their original destination.",
+    title: "New files",
+    description: "Files you already attached stay where they are.",
     keywords:
-      "files drive local storage uploads attachments on this computer included in backups google drive account sign in attach picker",
+      "files drive local storage uploads attachments this computer included in backups works offline google drive attach picker folder change folder uploads sync folder",
     section: "files",
   },
   {
-    title: "Upload folder",
-    description: "Writable when selected. Checked again before each upload.",
-    keywords: "drive change folder",
-    section: "files",
-  },
-  {
-    title: "Upload limit",
-    description: "Per file, for future uploads. All file types are accepted.",
-    keywords: "largest file size mib maximum default",
+    title: "Google account",
+    description: "The one Workspace sync uses.",
+    keywords:
+      "files drive sign in signed out another account switch email google",
     section: "files",
   },
   {

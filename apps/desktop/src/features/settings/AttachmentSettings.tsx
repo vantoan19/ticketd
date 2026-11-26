@@ -1,13 +1,9 @@
-import { SettingsLink } from "@/features/settings/layout/SettingsLink";
-import { DriveSetupNotice } from "@/features/attachments/DriveSetupNotice";
 import { useEffect, useRef, useState } from "react";
-import { Cloud, HardDrive } from "lucide-react";
+import { Cloud, ExternalLink, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ChoiceTile, ChoiceTiles } from "@/components/ui/choice-tiles";
 import { FailureAlert } from "@/components/ui/failure-alert";
-import { FieldError } from "@/components/ui/field";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { StatusLabel } from "@/components/ui/status-label";
 import {
   attachments,
   type AttachmentUploadDestination,
@@ -17,173 +13,24 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { syncApi } from "@/lib/sync-api";
+import { useSyncStatus } from "@/features/sync/sync-status";
+import {
+  UseAnotherAccountDialog,
+  type SyncWithAccount,
+} from "@/features/sync/UseAnotherAccountDialog";
 import { SettingsSection } from "./layout/SettingsSection";
 import { SettingsList, SettingsRow } from "./layout/SettingsList";
 import "./pages/attachments.css";
 
-const MIB = 1048576;
-const DEFAULT_LIMIT_BYTES = 100 * MIB;
-/** How long "Saved" stays beside the field after a save. */
-const SAVED_MS = 2000;
-
-/** The Attachments page's content: where new uploads go, and the largest file. */
+/** The Files page's content: where new files go, and the Google account they use. */
 export function AttachmentSettings() {
-  return (
-    <>
-      <UploadDestinationSettings />
-      <UploadLimitSettings />
-    </>
-  );
-}
-
-function UploadLimitSettings() {
-  const [value, setValue] = useState("");
-  const [saved, setSaved] = useState<number | null>(null);
-  const [confirmed, setConfirmed] = useState(false);
-  const [failure, setFailure] = useState<FailureDescription | null>(null);
-  // A value that cannot be a limit: said under the field, nothing is sent.
-  const [invalid, setInvalid] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [reload, setReload] = useState(0);
-  useEffect(() => {
-    let current = true;
-    void attachments
-      .uploadLimit()
-      .then((bytes) => {
-        if (current) {
-          setValue(String(bytes / MIB));
-          setSaved(bytes);
-        }
-      })
-      .catch((reason: unknown) => {
-        if (current)
-          setFailure(describeFailure(reason, "read the upload limit"));
-      });
-    return () => {
-      current = false;
-    };
-  }, [reload]);
-  // "Saved" confirms the change, then goes; it is not a lasting state.
-  useEffect(() => {
-    if (!confirmed) return;
-    const timer = window.setTimeout(() => setConfirmed(false), SAVED_MS);
-    return () => window.clearTimeout(timer);
-  }, [confirmed]);
-  async function save(text: string) {
-    const bytes = Number(text) * MIB;
-    if (!Number.isSafeInteger(bytes) || bytes <= 0) {
-      setConfirmed(false);
-      setFailure(null);
-      setInvalid(true);
-      return;
-    }
-    setInvalid(false);
-    // Back to the saved value: nothing to send, and an earlier failure is moot.
-    if (bytes === saved) {
-      setFailure(null);
-      return;
-    }
-    setSaving(true);
-    setConfirmed(false);
-    setFailure(null);
-    try {
-      await attachments.setUploadLimit(bytes);
-      setSaved(bytes);
-      setConfirmed(true);
-    } catch (reason) {
-      setFailure(describeFailure(reason, "save the upload limit"));
-    } finally {
-      setSaving(false);
-    }
-  }
-  const isDefault = Number(value) * MIB === DEFAULT_LIMIT_BYTES;
-  return (
-    <SettingsSection title="Upload limit">
-      <SettingsList>
-        <SettingsRow
-          variant="top"
-          title={
-            <Label htmlFor="attachment-upload-limit">
-              Largest file<span className="sr-only"> in MiB</span>
-            </Label>
-          }
-          description="Per file, for future uploads. All file types are accepted."
-          descriptionId="attachment-upload-limit-description"
-          trailing={
-            <div className="attachments-limit">
-              <span className="attachments-limit-field">
-                <Input
-                  id="attachment-upload-limit"
-                  className="w-24 text-right"
-                  type="number"
-                  min={1 / MIB}
-                  step="any"
-                  value={value}
-                  disabled={saved === null || saving}
-                  aria-invalid={invalid || undefined}
-                  aria-describedby={
-                    invalid
-                      ? "attachment-upload-limit-description attachment-upload-limit-error"
-                      : "attachment-upload-limit-description"
-                  }
-                  onChange={(event) => {
-                    setValue(event.target.value);
-                    setConfirmed(false);
-                  }}
-                  onBlur={() => void save(value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") event.currentTarget.blur();
-                  }}
-                />
-                <span aria-hidden="true">MiB</span>
-              </span>
-              {saved !== null && !invalid && !isDefault && (
-                <SettingsLink
-                  disabled={saving}
-                  onClick={() => {
-                    setValue("100");
-                    void save("100");
-                  }}
-                >
-                  Use the default, 100 MiB
-                </SettingsLink>
-              )}
-              {saved !== null && !invalid && isDefault && (
-                <span className="attachments-limit-note">Default</span>
-              )}
-              <span role="status" className="attachments-limit-note">
-                {saving ? "Saving upload limit…" : confirmed ? "Saved" : ""}
-              </span>
-            </div>
-          }
-        >
-          {invalid && (
-            <FieldError id="attachment-upload-limit-error">
-              Enter a size above 0 MiB.
-            </FieldError>
-          )}
-          {failure && (
-            <FailureAlert
-              size="compact"
-              failure={failure}
-              onRetry={() => {
-                setFailure(null);
-                if (saved === null) setReload((count) => count + 1);
-                else void save(value);
-              }}
-            />
-          )}
-        </SettingsRow>
-      </SettingsList>
-    </SettingsSection>
-  );
-}
-
-function UploadDestinationSettings() {
+  const { status, apply } = useSyncStatus();
   const [destination, setDestination] =
     useState<AttachmentUploadDestination | null>(null);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [busy, setBusy] = useState(false);
+  const [switching, setSwitching] = useState(false);
   // Unknown (null) until Drive's configuration is read; only a definite "no"
   // disables the Drive tile.
   const [configuration, setConfiguration] = useState<DriveConfiguration | null>(
@@ -229,22 +76,69 @@ function UploadDestinationSettings() {
       current = false;
     };
   }, []);
+
+  // Workspace sync on Google Drive: the Workspace's folder, and the one Google sign-in.
+  const onDrive = status?.provider === "google_drive";
+  const syncFolder =
+    onDrive && status.connection === "connected" ? status.folder : null;
+  const syncFolderId = syncFolder?.id;
+  const signedIn = onDrive && !!status.connection_id;
+  const signedOut = !!syncFolder && status.recovery === "authorization_expired";
+  const sync: SyncWithAccount = syncFolder
+    ? "syncing"
+    : signedIn
+      ? "choosing"
+      : "off";
+  const onDriveDestination =
+    destination?.kind === "google_drive" ? destination : null;
+  const inSyncFolder =
+    !!syncFolderId && onDriveDestination?.sync_folder === syncFolderId;
+  const account = signedIn
+    ? (status.account ?? null)
+    : (onDriveDestination?.account ?? null);
+
+  // A Drive folder chosen before sync was set up gives way to the Uploads folder inside the
+  // sync folder: there is one place in Drive for one Workspace.
+  const followed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!syncFolderId || !onDriveDestination || inSyncFolder) return;
+    if (followed.current === syncFolderId) return;
+    followed.current = syncFolderId;
+    attachments
+      .useSyncUploadsFolder()
+      .then((saved) => {
+        if (active.current) setDestination(saved);
+      })
+      .catch((reason: unknown) => {
+        if (active.current)
+          setFailure(describeFailure(reason, "use the Uploads folder"));
+      });
+  }, [syncFolderId, onDriveDestination, inSyncFolder]);
+
   async function choose(kind: string) {
     setFailure(null);
     setBusy(true);
     try {
-      let selected = null;
-      if (kind === "google_drive") {
+      let saved: AttachmentUploadDestination;
+      if (kind !== "google_drive") {
+        saved = await attachments.setUploadDestination(null);
+      } else if (syncFolder) {
+        // Sync's own sign-in and its folder: nothing to choose, nothing to ask.
+        saved = await attachments.useSyncUploadsFolder();
+      } else {
         const config = await attachments.driveConfiguration();
         if (!active.current) return;
         setConfiguration(config);
         if (!config.configured) return;
         const operation = crypto.randomUUID();
         selection.current = operation;
-        selected = (await attachments.chooseDriveFolder(operation)).destination;
+        const picked = await attachments.chooseDriveFolder(operation);
         if (!active.current) return;
+        saved = await attachments.setUploadDestination(
+          picked.destination,
+          picked.account ?? null,
+        );
       }
-      const saved = await attachments.setUploadDestination(selected);
       if (active.current) setDestination(saved);
     } catch (reason) {
       if (active.current)
@@ -254,72 +148,141 @@ function UploadDestinationSettings() {
       if (active.current) setBusy(false);
     }
   }
+
+  /** One sign-in again for Files and Workspace sync: both resume. */
+  async function signInAgain() {
+    setFailure(null);
+    setBusy(true);
+    try {
+      apply(await syncApi.recover());
+    } catch (reason) {
+      if (active.current) setFailure(describeFailure(reason, "sign in"));
+    } finally {
+      if (active.current) setBusy(false);
+    }
+  }
+
+  async function useAnotherAccount() {
+    setSwitching(false);
+    setFailure(null);
+    setBusy(true);
+    try {
+      apply(await syncApi.useAnotherAccount());
+      // A Drive folder belongs to the account it was chosen with.
+      if (active.current) setDestination(await attachments.uploadDestination());
+    } catch (reason) {
+      if (active.current)
+        setFailure(describeFailure(reason, "use another account"));
+    } finally {
+      if (active.current) setBusy(false);
+    }
+  }
+
   const driveUnavailable =
     configured === false && destination?.kind !== "google_drive";
   return (
     <SettingsSection
-      title="Upload destination"
-      caption="Applies to new uploads only. Queued uploads and retries keep their original destination."
+      title="New files"
+      caption="Files you already attached stay where they are."
     >
       <ChoiceTiles
-        aria-label="Upload destination"
+        aria-label="New files"
         value={destination?.kind ?? ""}
         disabled={!destination || busy}
         onValueChange={(kind) => void choose(kind)}
       >
         <ChoiceTile
           value="local"
-          title="On this computer"
+          title="This computer"
           icon={<HardDrive />}
-          description="Files are stored beside the workspace."
+          description="Kept beside this Workspace."
         >
           {/* Facts in words; status colour never decorates an icon. */}
           <span className="attachments-facts">
-            Available offline · Included in backups
+            Works offline · Included in backups
           </span>
         </ChoiceTile>
         <ChoiceTile
           value="google_drive"
           title="Google Drive"
           icon={<Cloud />}
-          description="Uploads a separate copy to a folder in your Drive."
+          description="Kept in a folder in your Drive."
           disabled={driveUnavailable}
         >
-          {/* The reason in the tile's muted caption, below its own title. */}
-          {driveUnavailable && (
-            <span className="attachments-facts">
-              Connect Google Drive to choose this.
-            </span>
-          )}
+          {/* The reason in the tile's own facts line. */}
+          <span className="attachments-facts">
+            {driveUnavailable
+              ? "Not set up in this build · Not in backups"
+              : onDriveDestination
+                ? "Not in backups"
+                : "Workspace sync’s sign-in · Not in backups"}
+          </span>
         </ChoiceTile>
       </ChoiceTiles>
-      {driveUnavailable && configuration && (
-        <DriveSetupNotice configuration={configuration} />
-      )}
 
-      {destination?.kind === "google_drive" && (
+      {onDriveDestination && (
         <div className="attachments-folder">
           <SettingsList>
             <SettingsRow
-              title="Upload folder"
+              title="Google account"
               description={
-                <>
-                  <span className="attachments-mono">
-                    {destination.folder_name}
-                  </span>{" "}
-                  · Writable when selected. Checked again before each upload.
-                </>
+                signedOut ? (
+                  <StatusLabel tone="attention" size="caption">
+                    Signed out
+                  </StatusLabel>
+                ) : account ? (
+                  signedIn ? (
+                    `${account}, the one Workspace sync uses`
+                  ) : (
+                    account
+                  )
+                ) : (
+                  "The one Workspace sync uses"
+                )
               }
               trailing={
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={busy}
-                  onClick={() => void choose("google_drive")}
-                >
-                  Change folder…
-                </Button>
+                signedOut ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void signInAgain()}
+                  >
+                    Sign in again
+                    <ExternalLink aria-hidden="true" />
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => setSwitching(true)}
+                  >
+                    Use another account…
+                  </Button>
+                )
+              }
+            />
+            <SettingsRow
+              title="Folder"
+              description={
+                inSyncFolder && syncFolder
+                  ? `Uploads, inside your “${syncFolder.name}” sync folder`
+                  : `“${onDriveDestination.folder_name}”`
+              }
+              trailing={
+                inSyncFolder ? undefined : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={busy}
+                    onClick={() => void choose("google_drive")}
+                  >
+                    Change folder…
+                  </Button>
+                )
               }
             />
           </SettingsList>
@@ -340,13 +303,13 @@ function UploadDestinationSettings() {
           />
         </div>
       )}
-      {/* Only about Drive, so only once Drive is in play. */}
-      {(destination?.kind === "google_drive" || configured === true) && (
-        <p className="attachments-note">
-          Drive failures never switch storage automatically. Sharing stays
-          unchanged; removing an attachment keeps its file in Drive.
-        </p>
-      )}
+      <UseAnotherAccountDialog
+        open={switching}
+        onOpenChange={setSwitching}
+        account={account}
+        sync={sync}
+        onConfirm={() => void useAnotherAccount()}
+      />
     </SettingsSection>
   );
 }

@@ -27,6 +27,7 @@ import {
 } from "@/lib/sync-api";
 import { useNow } from "@/lib/use-now";
 import { S3Setup } from "./S3Setup";
+import { UseAnotherAccountDialog } from "./UseAnotherAccountDialog";
 import { SyncFailure as Failure } from "./SyncFailure";
 import { storageName } from "./storage-name";
 import {
@@ -563,30 +564,40 @@ export function Choose({
       >
         {readFailure ?? failure}
       </Failure>
-      <DialogShell
-        open={switching}
-        onOpenChange={setSwitching}
-        title={s3 ? "Use another bucket?" : "Use another Google account?"}
-        description={
-          s3
-            ? "ticketd disconnects from this bucket so you can choose another bucket or profile. Nothing in the bucket or on this computer is deleted."
-            : `ticketd disconnects from ${account} so you can sign in with a different Google account. Nothing in Drive or on this computer is deleted.`
-        }
-        primaryLabel={s3 ? "Use another bucket" : "Use another account"}
-        blockedReason={null}
-        size="sm"
-        onSubmit={() => {
-          setSwitching(false);
-          void run(syncApi.disconnect, `disconnect from ${storage.full}`);
-        }}
-      >
-        <dl className="sync-summary">
-          <dt>On this computer</dt>
-          <dd>This Workspace stays as it is</dd>
-          <dt>{s3 ? "In the bucket" : "In Google Drive"}</dt>
-          <dd>Your files stay, for your other computers</dd>
-        </dl>
-      </DialogShell>
+      {s3 ? (
+        <DialogShell
+          open={switching}
+          onOpenChange={setSwitching}
+          title="Use another bucket?"
+          description="ticketd disconnects from this bucket so you can choose another bucket or profile. Nothing in the bucket or on this computer is deleted."
+          primaryLabel="Use another bucket"
+          blockedReason={null}
+          size="sm"
+          onSubmit={() => {
+            setSwitching(false);
+            void run(syncApi.disconnect, `disconnect from ${storage.full}`);
+          }}
+        >
+          <dl className="sync-summary">
+            <dt>On this computer</dt>
+            <dd>This Workspace stays as it is</dd>
+            <dt>In the bucket</dt>
+            <dd>Your files stay, for your other computers</dd>
+          </dl>
+        </DialogShell>
+      ) : (
+        // One Google sign-in serves Files and sync, so the switch changes both.
+        <UseAnotherAccountDialog
+          open={switching}
+          onOpenChange={setSwitching}
+          account={status.account}
+          sync="choosing"
+          onConfirm={() => {
+            setSwitching(false);
+            void run(syncApi.useAnotherAccount, "use another account");
+          }}
+        />
+      )}
       {options && download && (
         // Replacing local data is destructive, reviewed like a restore: the
         // consequence first, then what changes, the safety net in the note
@@ -627,6 +638,12 @@ export function Choose({
             <dd>{contents(download.counts)}</dd>
             <dt>Replaced here</dt>
             <dd>{contents(options.local)}</dd>
+            {!s3 && (
+              <>
+                <dt>Uploads</dt>
+                <dd>Your Uploads folder is never touched</dd>
+              </>
+            )}
           </dl>
         </DialogShell>
       )}

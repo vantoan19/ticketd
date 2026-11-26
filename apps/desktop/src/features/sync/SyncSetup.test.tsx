@@ -44,6 +44,7 @@ vi.mock("@/lib/sync-api", async (original) => ({
     reconnect: vi.fn(),
     downloadWorkspace: vi.fn(),
     disconnect: vi.fn(),
+    useAnotherAccount: vi.fn(),
     settings: vi.fn(),
     devices: vi.fn(),
   },
@@ -512,9 +513,15 @@ test("Back at step 3 signs out of this account and returns to where it syncs", a
   expect(api.uploadWorkspace).not.toHaveBeenCalled();
 });
 
-test("another Google account is chosen by disconnecting, once confirmed, which deletes nothing", async () => {
+test("another Google account is one switch for Files and sync, said before it starts, which deletes nothing", async () => {
   api.status.mockResolvedValue(choosing());
-  api.disconnect.mockResolvedValue(notConnected());
+  api.useAnotherAccount.mockResolvedValue(
+    syncStatus({
+      connection: "choosing",
+      folder: null,
+      account: "mira@example.com",
+    }),
+  );
   show();
   fireEvent.click(
     await screen.findByRole("button", { name: "Use another account…" }),
@@ -523,15 +530,29 @@ test("another Google account is chosen by disconnecting, once confirmed, which d
     name: "Use another Google account?",
   });
   expect(dialog.textContent).toContain("you@example.com");
-  expect(dialog.textContent).toContain(
-    "Nothing in Drive or on this computer is deleted.",
-  );
-  expect(api.disconnect).not.toHaveBeenCalled();
+  expect(dialog.textContent).toContain("Files and Workspace sync");
+  expect(dialog.textContent).toContain("Workspace sync");
+  expect(dialog.textContent).toContain("New files");
+  expect(dialog.textContent).toContain("Nothing is deleted");
+  expect(api.useAnotherAccount).not.toHaveBeenCalled();
   fireEvent.click(
     within(dialog).getByRole("button", { name: "Use another account" }),
   );
-  expect(await screen.findByRole("button", { name: "Continue" })).toBeTruthy();
-  expect(api.disconnect).toHaveBeenCalledTimes(1);
+  await waitFor(() => expect(api.useAnotherAccount).toHaveBeenCalledTimes(1));
+  // Signing in is the switch: nothing signs out first, and setup stays at step 3.
+  expect(api.disconnect).not.toHaveBeenCalled();
+});
+
+test("the Replace dialog says the Uploads folder is never touched", async () => {
+  api.status.mockResolvedValue(choosing());
+  api.setupOptions.mockResolvedValue(holdsWorkspace);
+  show();
+  await radio(/Join “ticketd”/);
+  press("Join…");
+  const dialog = await screen.findByRole("dialog", {
+    name: "Replace this Workspace?",
+  });
+  expect(dialog.textContent).toContain("Your Uploads folder is never touched");
 });
 
 test("a Drive that cannot be read says so, can be read again, and keeps the way out", async () => {
