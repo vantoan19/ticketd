@@ -301,6 +301,50 @@ test("copying a selection takes the text of its lines, without line numbers", as
   );
 });
 
+test("select all and copy take every line of the log, drawn or not, not the page around it", async () => {
+  serve();
+  render(<Stage />);
+  await screen.findByRole("document");
+  const stage = screen.getByTestId("stage");
+  stage.focus();
+  const key = new KeyboardEvent("keydown", {
+    key: "a",
+    metaKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  stage.dispatchEvent(key);
+  expect(key.defaultPrevented).toBe(true);
+  const list = document.querySelector(".attachment-text")!;
+  const selection = window.getSelection()!;
+  expect(selection.anchorNode).toBe(list);
+  expect(selection.focusNode).toBe(list);
+  expect(drawn().length).toBeLessThan(lines.length);
+  const copied = new Map<string, string>();
+  const event = new Event("copy", { bubbles: true, cancelable: true });
+  Object.assign(event, {
+    clipboardData: {
+      setData: (type: string, value: string) => copied.set(type, value),
+    },
+  });
+  list.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(copied.get("text/plain")).toBe(lines.join("\n"));
+  // In the Find field, ⌘A still selects the field's own text.
+  press("/");
+  const field = await screen.findByRole("textbox", {
+    name: "Find in the text",
+  });
+  const inField = new KeyboardEvent("keydown", {
+    key: "a",
+    metaKey: true,
+    bubbles: true,
+    cancelable: true,
+  });
+  field.dispatchEvent(inField);
+  expect(inField.defaultPrevented).toBe(false);
+});
+
 test("a copy still starts where the drag began after that line scrolls out of the drawn rows", async () => {
   serve();
   render(<Stage />);

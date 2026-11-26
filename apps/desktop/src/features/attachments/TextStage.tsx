@@ -360,6 +360,16 @@ function TextLines({
         if (inField && event.key === "/") return;
         event.preventDefault();
         openFind();
+      } else if (
+        !inField &&
+        (event.metaKey || event.ctrlKey) &&
+        !event.shiftKey &&
+        event.key.toLowerCase() === "a"
+      ) {
+        // Select all means the whole log, not the page behind it; only the drawn rows exist.
+        event.preventDefault();
+        if (listRef.current)
+          window.getSelection()?.selectAllChildren(listRef.current);
       } else if (inField || event.ctrlKey || event.metaKey) return;
       else if (matchesShortcut(event, "attachments-wrap")) {
         event.preventDefault();
@@ -467,6 +477,12 @@ function TextLines({
       !selection.focusNode
     )
       return;
+    // Select all: the list itself is both ends, and every line is meant, drawn or not.
+    if (selection.anchorNode === list && selection.focusNode === list) {
+      event.clipboardData.setData("text/plain", lines.join("\n"));
+      event.preventDefault();
+      return;
+    }
     const anchor =
       positionOf(list, lines, selection.anchorNode, selection.anchorOffset) ??
       edges.current.anchor;
