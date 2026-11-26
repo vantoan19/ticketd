@@ -440,8 +440,10 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   a personal API key that can read them. Filter discovery by assignee, labels, or
   project. ticketd syncs the issue's current state and its comments and
   timeline.
-- Add and name source connections under Settings → Ticket sources. Several accounts can
-  connect to the same provider. Connections stay on this device and are excluded
+- Settings → Ticket sources is one table of every source with its status, what it
+  signs in with and what it brings in; selecting a row opens that source's page, where
+  you connect it, rename it or remove it. Several accounts can connect to the same
+  provider. Connections stay on this device and are excluded
   from Workspace sync, portable backups, and JSON exports.
 - Extension credentials go in the system keychain. When a tracker rejects
   authentication, **Needs sign-in** opens the credential fields for that
