@@ -99,6 +99,10 @@
 .restore-compare td[data-differs="true"] {
   font-weight: 500;
 }
+/* The facts under a restore point's numbers: sync, and what else goes. */
+.restore-facts {
+  margin-top: 16px;
+}
 .restore-file {
   display: flex;
   align-items: center;
