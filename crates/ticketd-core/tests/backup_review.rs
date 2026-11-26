@@ -672,7 +672,7 @@ fn a_current_backup_missing_one_sync_capture_trigger_is_refused() {
 fn a_backup_file_made_on_another_computer_is_checked_and_restored_here() {
     // "Another computer": its own folder, its own Workspace and device code.
     let there = tempfile::tempdir().unwrap();
-    let mut elsewhere = populated(&there.path().join("workspace.sqlite3"));
+    let elsewhere = populated(&there.path().join("workspace.sqlite3"));
     let made_there = there.path().join("ticketd-backup.sqlite3");
     elsewhere.backup(&made_there).unwrap();
     let code_there = elsewhere.device_code().unwrap();
