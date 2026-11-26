@@ -334,7 +334,7 @@ fn create_document_request(
 ) -> WriteRequest {
     WriteRequest::CreateDocument {
         title,
-        summary: summary.and(None),
+        summary,
         body: body.unwrap_or_default(),
     }
 }
