@@ -263,10 +263,31 @@ core workflows for Documents, Activities, Plans, tags, and links
 
 - A **Document** is Markdown with its own ID, an optional title, and no mandatory
   type. Without a title, its heading is the first nonempty line (or, for activity
-  details, the Activity's brief).
+  details, the Activity's brief). A Document may also carry a **summary**: one
+  plain line written by its author (`--summary` on `document create` and `document
+change`; an empty value clears it) or by a person in the reader's Edit mode. The
+  reader shows it under the meta line. ticketd never writes one.
 - Capture opens an editor at once with no required field, autosaves, and creates
-  nothing if left empty. Documents opens on Recently opened with pinned items above;
-  tags, pins, and links are optional.
+  nothing if left empty. Documents opens on **Current work** with pinned items above:
+  the Documents of Active Plans and open tickets, one group per Plan, each Plan's spec
+  first, then "Open tickets", with "Finished work" and "No Plan or ticket" closed below
+  and read when opened. Recent (by recently opened, recently updated, or title) stays one
+  click away; the view and which groups are open are remembered on this computer. Tags,
+  pins, and links are optional.
+- Searching Documents shows where each result matched: **Titles** (the title holds every
+  word) first, then **Inside Documents** with the matching passage under the title. The
+  words are marked with a fill and an underline, each group shows its count, and the
+  search field shows the total.
+- Reading a long Document: an outline of its headings opens from the right edge, and
+  each h2 and h3 can be folded to its first sentence, one at a time or with Fold all
+  in the outline. Folds are kept per Document on this computer, never change the
+  Markdown, and editing shows everything.
+- A Document can be read at full width: the reader's button hides the list, and the
+  choice is remembered on this computer. The header then shows "N of M" with Previous
+  and Next Document buttons that follow the list as it shows (the chosen view and its
+  order), and the outline becomes a rail beside the text with the sections, Fold all,
+  Back to top (once scrolled) and the Document's Linked Plans and tickets, all kept in view; once everything is folded, the rail shows how many sections are folded and Unfold all instead of the list. Narrow windows keep taking
+  turns between the list and the reader.
 - Documents use recoverable trash; permanent deletion is not supported. A Document can
   create a ticket and be linked to several tickets and Plans.
 - CLI: the `document` command group (`create`, `show`, `read`, `change`, `recent`,

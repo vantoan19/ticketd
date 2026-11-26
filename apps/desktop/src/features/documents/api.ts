@@ -14,6 +14,8 @@ const schema = z.object({
   origin_brief: z.string().nullable().optional(),
   origin_ticket: z.string().nullable().optional(),
   kept: z.boolean().optional(),
+  /** The author's one-line summary; absent when there is none. */
+  summary: z.string().nullable().optional(),
 });
 export type Document = z.infer<typeof schema>;
 const linkSchema = z.object({
@@ -70,12 +72,67 @@ const summary = z.object({
   snippet: z.string().transform(plainSnippet).optional(),
   tags: z.array(z.string()).optional(),
   updated_at: z.string().optional(),
+  /** Where the Document belongs, read with the row so a list never asks per row. */
+  plans: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        archived: z.boolean(),
+        spec: z.boolean(),
+      }),
+    )
+    .optional(),
+  tickets: z
+    .array(
+      z.object({
+        reference: z.string(),
+        title: z.string(),
+        status: z.string(),
+        /** The core's rule: Todo, In progress or In review. */
+        open: z.boolean().optional(),
+      }),
+    )
+    .optional(),
+  /** Whether this computer has opened the Document; a row without it counts as opened. */
+  opened: z.boolean().optional(),
 });
 const searchResult = summary;
 export type DocumentSummary = z.infer<typeof summary>;
 export type DocumentSearchResult = z.infer<typeof searchResult>;
+const currentWorkSchema = z.object({
+  /** Active Plans by their newest Document, then the Documents of open tickets with no Plan. */
+  groups: z.array(
+    z.object({
+      plan: z.object({ id: z.string(), name: z.string() }).nullable(),
+      documents: z.array(summary),
+    }),
+  ),
+  /** Linked Documents with no Active Plan and no open ticket; read them with `finished`. */
+  finished: z.number(),
+  /** Documents with no Plan and no ticket; read them with `unlinked`. */
+  unlinked: z.number(),
+  trashed: z.number(),
+});
+export type CurrentWork = z.infer<typeof currentWorkSchema>;
 export const documents = {
   ...linkDocuments,
+  currentWork: async (includeSupport = false) =>
+    currentWorkSchema.parse(
+      await invoke("current_work_documents", { includeSupport }),
+    ),
+  finished: async (offset: number, includeSupport = false) =>
+    z
+      .array(summary)
+      .parse(await invoke("finished_documents", { offset, includeSupport })),
+  unlinked: async (offset: number, includeSupport = false) =>
+    z
+      .array(summary)
+      .parse(await invoke("unlinked_documents", { offset, includeSupport })),
+  byTitle: async (offset: number, includeSupport = false) =>
+    z
+      .array(summary)
+      .parse(await invoke("documents_by_title", { offset, includeSupport })),
   recent: async (offset: number, includeSupport = false) =>
     z
       .array(summary)
@@ -96,6 +153,9 @@ export const documents = {
         includeSupport,
       }),
     ),
+  /** One Document's row: the same Plans, tickets and tags a list row carries. */
+  row: async (id: string) =>
+    summary.parse(await invoke("document_row", { id })),
   keep: async (id: string, requestId: string) =>
     schema.parse(await invoke("keep_document", { id, requestId })),
   pin: async (id: string, pinned: boolean) =>
@@ -129,6 +189,8 @@ export const documents = {
     titleChanged: boolean,
     expectedUpdatedAt: string | null,
     requestId: string,
+    /** The summary to store (empty clears it); leave it out to keep the stored one. */
+    summary?: string,
   ) =>
     schema.parse(
       await invoke("save_document", {
@@ -138,6 +200,7 @@ export const documents = {
         titleChanged,
         expectedUpdatedAt,
         requestId,
+        summary,
       }),
     ),
 };

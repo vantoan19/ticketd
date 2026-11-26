@@ -31,6 +31,13 @@ vi.mock("@/lib/sync-review-api", () => ({
 }));
 const renderEditor = (ui: ReactElement) =>
   render(<TickingChanges>{ui}</TickingChanges>);
+const choose = async (name: string) => {
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Document actions" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(await screen.findByRole("menuitem", { name }));
+};
 vi.mock("./api", () => ({
   documents: {
     save: vi.fn(),
@@ -38,6 +45,8 @@ vi.mock("./api", () => ({
     version: vi.fn(),
     setTrashed: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
+    row: vi.fn(),
+    tag: vi.fn(),
     createTicket: vi.fn(),
     linkMarkdown: vi.fn(),
     recent: vi.fn(),
@@ -67,8 +76,16 @@ const outside = (document: Awaited<ReturnType<typeof documents.show>>) => {
   vi.mocked(documents.show).mockResolvedValue(document);
   vi.mocked(documents.version).mockResolvedValue(["outside", document.trashed]);
 };
+const emptyRow = {
+  id: "d1",
+  heading: "",
+  plans: [],
+  tickets: [],
+  tags: [],
+};
 beforeEach(() => {
   vi.mocked(documents.links).mockResolvedValue([[], []]);
+  vi.mocked(documents.row).mockResolvedValue(emptyRow);
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -262,7 +279,7 @@ it("inserts a link to a Document chosen by title into the draft", async () => {
     />,
   );
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-  fireEvent.click(screen.getByRole("button", { name: "Link a Document" }));
+  await choose("Link a Document…");
   fireEvent.click(await screen.findByRole("option", { name: /Release plan/ }));
   await waitFor(() =>
     expect(
@@ -300,7 +317,10 @@ it("opens a connected ticket after saving a document draft", async () => {
   renderEditor(
     <DocumentEditor initial={document} onClose={vi.fn()} onOpenTicket={open} />,
   );
-  await screen.findByText(/^From\s*“/);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Mentioned in 1 ticket" }),
+  );
+  await screen.findByText(/^From\s+T-KQ4$/);
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Updated" },
@@ -429,12 +449,12 @@ it("saves a draft before opening the context graph without a dialog", async () =
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "Draft" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
+  await choose("Open in graph");
   await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
   expect(vi.mocked(documents.save).mock.calls[0]?.[2]).toBe("Draft");
 });
 
-it("opens the originating ticket from document details", () => {
+it("opens the originating ticket from document details", async () => {
   const doc = {
     id: "d1",
     title: null,
@@ -449,10 +469,11 @@ it("opens the originating ticket from document details", () => {
   renderEditor(
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenTicket={open} />,
   );
+  await choose("Details");
   fireEvent.click(
-    screen.getByRole("button", { name: "T-KQ3 · Update details" }),
+    await screen.findByRole("button", { name: "T-KQ3 · Update details" }),
   );
-  expect(open).toHaveBeenCalledWith("T-KQ3");
+  await waitFor(() => expect(open).toHaveBeenCalledWith("T-KQ3"));
 });
 
 it("reads an untitled Document with its core heading and current save details", async () => {
@@ -513,7 +534,11 @@ it("consumes graph navigation after saving so later edits stay on the Document",
   fireEvent.change(screen.getByLabelText("Your thought"), {
     target: { value: "First" },
   });
-  fireEvent.click(screen.getByRole("button", { name: "Open graph" }));
+  fireEvent.pointerDown(
+    screen.getByRole("button", { name: "Document actions" }),
+    { button: 0, ctrlKey: false },
+  );
+  fireEvent.click(screen.getByRole("menuitem", { name: "Open in graph" }));
   await act(async () => {});
   expect(graph).toHaveBeenCalledTimes(1);
   fireEvent.change(screen.getByLabelText("Your thought"), {
@@ -605,6 +630,9 @@ it("shows readable linked context and opens a Document referenced in its passage
       onOpenDocument={open}
     />,
   );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Mentioned in 1 Document/ }),
+  );
   const link = await screen.findByRole("button", { name: "related context" });
   expect(screen.queryByText(/ticketd:\/\/document/)).toBeNull();
   fireEvent.click(link);
@@ -612,13 +640,11 @@ it("shows readable linked context and opens a Document referenced in its passage
   expect(
     screen.queryByRole("textbox", { name: "New ticket title" }),
   ).toBeNull();
-  fireEvent.click(
-    screen.getByRole("button", { name: "Create ticket from this" }),
-  );
-  expect(screen.getByLabelText("New ticket title")).toBeTruthy();
+  await choose("Create ticket from this");
+  expect(await screen.findByLabelText("New ticket title")).toBeTruthy();
 });
 
-it("lists each connected item once and names Plans that use the Document as spec", async () => {
+it("lists each connected item once, and keeps a Plan with no passage out of the mentions", async () => {
   const document = {
     id: "d1",
     title: "Spec",
@@ -651,86 +677,12 @@ it("lists each connected item once and names Plans that use the Document as spec
     ],
   ]);
   renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Mentioned in 1 ticket" }),
+  );
   await screen.findByRole("button", { name: /T-KQ4/ });
   expect(screen.getAllByRole("button", { name: /T-KQ4/ })).toHaveLength(1);
-  expect(screen.getByRole("button", { name: "Roadmap" })).toBeTruthy();
-  expect(
-    screen.getByText(/^Updated .* · spec of the Plan Roadmap$/),
-  ).toBeTruthy();
-});
-
-it("keeps the Spec of section for a spec Document that also mentions its Plan", async () => {
-  const document = {
-    id: "d1",
-    title: "Spec",
-    body: "See the plan",
-    created_at: "now",
-    updated_at: "now",
-    trashed: false,
-  };
-  const plan = {
-    source_id: "p1",
-    target_id: "d1",
-    source_kind: "plan",
-    target_kind: "document",
-    source_label: "Roadmap",
-    target_label: "",
-    source_trashed: false,
-    target_trashed: false,
-    explicit: false,
-  };
-  vi.mocked(documents.links).mockResolvedValue([
-    [],
-    [
-      { ...plan, passage: "See the plan" },
-      { ...plan, passage: "" },
-    ],
-  ]);
-  renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
-  await screen.findByRole("region", { name: "Spec of" });
-  expect(screen.getByRole("region", { name: "Mentions" })).toBeTruthy();
-  expect(
-    screen.getByText(/^Updated .* · spec of the Plan Roadmap$/),
-  ).toBeTruthy();
-});
-
-it("names a Plan that only has the Document attached as a supporting Document", async () => {
-  const document = {
-    id: "d1",
-    title: "Checkout spec",
-    body: "x",
-    created_at: "now",
-    updated_at: "now",
-    trashed: false,
-  };
-  vi.mocked(documents.links).mockResolvedValue([
-    [],
-    [
-      {
-        source_id: "p1",
-        target_id: "d1",
-        source_kind: "plan",
-        target_kind: "document",
-        source_label: "Checkout revamp",
-        target_label: "",
-        source_trashed: false,
-        target_trashed: false,
-        passage: "",
-        explicit: true,
-      },
-    ],
-  ]);
-  renderEditor(<DocumentEditor initial={document} onClose={vi.fn()} />);
-  expect(
-    await screen.findByRole("button", {
-      name: "Checkout revamp",
-    }),
-  ).toBeTruthy();
-  expect(
-    screen.getByText(
-      /^Updated .* · supporting Document of the Plan Checkout revamp$/,
-    ),
-  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Roadmap" })).toBeNull();
 });
 
 it("Edit shows the heading once: the title field holds it and the editor keeps the saved text", async () => {
@@ -776,6 +728,61 @@ it("shows the title once in Read: a body heading that repeats it is not rendered
     screen.getAllByRole("heading", { name: "Checkout spec", level: 1 }),
   ).toHaveLength(1);
   expect(screen.getByText("See the flow.")).toBeTruthy();
+});
+
+it("shows the title once in Read when the body's opening heading is the start of it", () => {
+  const doc = {
+    ...base,
+    title: "Attachment review UI design",
+    body: "# Attachment review UI\n\nSee the flow.",
+  };
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  expect(screen.getAllByRole("heading", { level: 1 })).toHaveLength(1);
+  expect(
+    screen.getByRole("heading", {
+      level: 1,
+      name: "Attachment review UI design",
+    }),
+  ).toBeTruthy();
+  expect(screen.getByText("See the flow.")).toBeTruthy();
+});
+
+it("keeps the opening heading in the editor, and the saved Markdown whole, when it only starts the title", async () => {
+  const doc = {
+    ...base,
+    title: "Attachment review UI design",
+    body: "# Attachment review UI\n\nSee the flow.",
+  };
+  renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const editor = screen.getByLabelText("Your thought") as HTMLTextAreaElement;
+  expect(editor.value).toBe("# Attachment review UI\n\nSee the flow.");
+});
+
+it("keeps a later body heading that starts the title, and an opening heading longer than it", () => {
+  renderEditor(
+    <DocumentEditor
+      initial={{
+        ...base,
+        title: "Checkout spec",
+        body: "Intro\n\n# Checkout\n\nText",
+      }}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Checkout" })).toBeTruthy();
+  cleanup();
+  renderEditor(
+    <DocumentEditor
+      initial={{
+        ...base,
+        title: "Checkout",
+        body: "# Checkout spec\n\nText",
+      }}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByRole("heading", { name: "Checkout spec" })).toBeTruthy();
 });
 
 it("keeps a body heading that differs from the explicit title", () => {
@@ -1060,17 +1067,27 @@ it("offers one breadcrumb back and no second back button", () => {
   fireEvent.click(screen.getByRole("button", { name: "Back to Plan" }));
   expect(close).toHaveBeenCalledOnce();
 });
-it("keeps Link a Document, Create ticket and Context graph in Read and Edit", () => {
+it("keeps Link a Document, Create ticket and Open in graph in the menu in Read and Edit", async () => {
   renderEditor(
     <DocumentEditor initial={doc} onClose={vi.fn()} onOpenGraph={vi.fn()} />,
   );
-  const names = () =>
-    ["Link a Document", "Create ticket from this", "Open graph"].map(
-      (name) => screen.queryByRole("button", { name }) !== null,
+  const names = async () => {
+    fireEvent.pointerDown(
+      screen.getByRole("button", { name: "Document actions" }),
+      { button: 0, ctrlKey: false },
     );
-  expect(names()).toEqual([true, true, true]);
+    const found = (await screen.findAllByRole("menuitem")).map(
+      (item) => item.textContent,
+    );
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    return ["Link a Document…", "Create ticket from this", "Open in graph"].map(
+      (name) => found.includes(name),
+    );
+  };
+  expect(await names()).toEqual([true, true, true]);
   fireEvent.click(screen.getByRole("button", { name: "Edit" }));
-  expect(names()).toEqual([true, true, true]);
+  expect(await names()).toEqual([true, true, true]);
 });
 it("quotes a passage shared by several connections once", async () => {
   const link = (target: string) => ({
@@ -1089,9 +1106,13 @@ it("quotes a passage shared by several connections once", async () => {
     [],
   ]);
   renderEditor(<DocumentEditor initial={doc} onClose={vi.fn()} />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Mentioned in 2 tickets" }),
+  );
   await screen.findByRole("button", { name: "T-KQ1" });
   expect(screen.getAllByText(/See\s+T-KQ1/)).toHaveLength(2);
-  expect(screen.getAllByText(/^Both from\s*“/)).toHaveLength(1);
+  // One row for the shared passage, naming both sources.
+  expect(screen.getAllByText(/^From\s+T-KQ1, T-KQ3$/)).toHaveLength(1);
 });
 
 it("opens the Document's History from its actions, and says when it Needs review", async () => {
@@ -1161,4 +1182,127 @@ it("shows the restored text at once after a History restore", async () => {
       screen.getByLabelText<HTMLTextAreaElement>("Your thought").value,
     ).toBe("Earlier text"),
   );
+});
+
+// The Document's one-line summary: shown under the meta line, edited under the title.
+const summarized = { ...stored, summary: "Ship the reader on Friday." };
+const summaryField = () =>
+  screen.getByRole<HTMLTextAreaElement>("textbox", { name: "Summary" });
+it("shows the summary under the meta line, and nothing when there is none", () => {
+  const { container, unmount } = renderEditor(
+    <DocumentEditor initial={summarized} onClose={vi.fn()} />,
+  );
+  const line = screen.getByText("Ship the reader on Friday.");
+  const meta = container.querySelector(".document-meta");
+  expect(
+    meta &&
+      meta.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "Summary" })).toBeNull();
+  unmount();
+  const { container: bare } = renderEditor(
+    <DocumentEditor initial={stored} onClose={vi.fn()} />,
+  );
+  expect(bare.querySelector(".document-summary")).toBeNull();
+  expect(screen.queryByRole("textbox", { name: "Summary" })).toBeNull();
+});
+it("offers a one-line field for the summary in Edit, even when empty", () => {
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  expect(summaryField().placeholder).toBe("Add a one-line summary");
+  expect(summaryField().value).toBe("");
+});
+it("wraps a long summary in a growing field and never takes a line break", () => {
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  // A text area, so the whole summary shows; a pasted line break becomes a space.
+  expect(summaryField().tagName).toBe("TEXTAREA");
+  fireEvent.change(summaryField(), { target: { value: "First line\nSecond" } });
+  expect(summaryField().value).toBe("First line Second");
+  const enter = fireEvent.keyDown(summaryField(), { key: "Enter" });
+  expect(enter).toBe(false);
+});
+it("saves a typed summary with the loaded revision and leaves the title and body alone", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockResolvedValue({ ...stored, summary: "New" });
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  expect(summaryField().value).toBe("Ship the reader on Friday.");
+  fireEvent.change(summaryField(), { target: { value: "  New  " } });
+  await tick(400);
+  const call = vi.mocked(documents.save).mock.calls[0];
+  expect(call?.slice(1, 5)).toEqual([null, null, false, "now"]);
+  expect(call?.[6]).toBe("New");
+});
+it("does not send the summary when only the body changed", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockResolvedValue(summarized);
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Typed" },
+  });
+  await tick(400);
+  expect(vi.mocked(documents.save).mock.calls[0]?.[6]).toBeUndefined();
+});
+it("clears the summary with an empty value", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockResolvedValue(stored);
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(summaryField(), { target: { value: "" } });
+  await tick(400);
+  expect(vi.mocked(documents.save).mock.calls[0]?.[6]).toBe("");
+});
+it("Enter leaves the summary field for the editor and saves nothing extra", async () => {
+  vi.useFakeTimers();
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const editor = screen.getByLabelText("Your thought");
+  const before = editor.getAttribute("data-focus-request");
+  fireEvent.keyDown(summaryField(), { key: "Enter" });
+  expect(editor.getAttribute("data-focus-request")).not.toBe(before);
+  await tick(400);
+  expect(documents.save).not.toHaveBeenCalled();
+});
+it("shows the usual notice when the summary was changed elsewhere, and keeps the draft", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockRejectedValueOnce({
+    code: "conflict",
+    message: "document 'd1' was changed elsewhere since it was loaded",
+  });
+  outside({ ...summarized, summary: "Via CLI", updated_at: "later" });
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(summaryField(), { target: { value: "Mine" } });
+  await tick(400);
+  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
+  expect(summaryField().value).toBe("Mine");
+  vi.mocked(documents.save).mockResolvedValue({ ...stored, summary: "Mine" });
+  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
+  await tick(0);
+  const retry = vi.mocked(documents.save).mock.calls[1];
+  expect(retry?.[4]).toBe("later");
+  expect(retry?.[6]).toBe("Mine");
+});
+it("takes in a summary written elsewhere when nothing of the summary is unsaved", async () => {
+  vi.useFakeTimers();
+  outside({ ...stored, summary: "From the agent", updated_at: "later" });
+  const { container } = renderEditor(
+    <DocumentEditor initial={stored} onClose={vi.fn()} />,
+  );
+  await tick(2000);
+  expect(container.querySelector(".document-summary")?.textContent).toBe(
+    "From the agent",
+  );
+  expect(screen.queryByText(/Saved content changed/)).toBeNull();
+});
+it("keeps showing the summary of a Document in Trash", () => {
+  renderEditor(
+    <DocumentEditor
+      initial={{ ...summarized, trashed: true }}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("Ship the reader on Friday.")).toBeTruthy();
 });

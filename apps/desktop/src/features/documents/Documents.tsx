@@ -1,15 +1,30 @@
 import { emptyCopy } from "@/lib/empty-copy";
-import { PaneHeader } from "@/components/ui/list-header";
+import { PaneHeader, ReturnCrumb } from "@/components/ui/list-header";
 import { Count } from "@/components/ui/count";
 import { NavigatorSearch } from "@/components/ui/navigator";
 import { focusNavigatorRow } from "@/lib/navigator";
 import { SegmentedControl } from "@/components/ui/segmented-control";
-import { Switch } from "@/components/ui/switch";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { setPreference, usePreferences } from "@/lib/preferences";
 import { Pager } from "@/components/ui/pager";
 import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
+import { StatusDot } from "@/components/ui/status-dot";
+import { documentRowContext, groupRowContext } from "./row-context";
+import { highlight, matchesTitle } from "./search-match";
 import { Item } from "@/components/ui/item";
-import { compactAgo, formatDateTime } from "@/lib/format";
+import { formatDateTime, listTime } from "@/lib/format";
 import {
   ariaKeyShortcuts,
   matchesShortcut,
@@ -21,22 +36,24 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
 } from "react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { enter } from "@/components/ui/enter";
 import {
   ArrowLeft,
+  ChevronDown,
+  ChevronRight,
   Clock,
   FileText,
+  MoreHorizontal,
   Pin,
   Plus,
   Search,
   SearchX,
-  Tag,
   Trash2,
 } from "lucide-react";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -47,11 +64,12 @@ import {
 } from "@/lib/api/describe-failure";
 import {
   documents,
+  type CurrentWork,
   type Document,
   type DocumentSummary,
   type DocumentSearchResult,
 } from "./api";
-import { DocumentEditor } from "./DocumentEditor";
+import { DocumentEditor, type DocumentReading } from "./DocumentEditor";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./documents.css";
 
@@ -69,25 +87,6 @@ function sameText(a: string, b: string) {
     text.replace(/\s+/g, " ").replace(/…$/, "").trim().toLowerCase();
   return norm(a) === norm(b);
 }
-/** Wrap case-insensitive occurrences of `query` in <mark>. */
-function highlight(text: string, query: string) {
-  const needle = query.trim();
-  if (!needle) return text;
-  const parts: React.ReactNode[] = [];
-  const lower = text.toLowerCase();
-  const target = needle.toLowerCase();
-  let from = 0;
-  for (;;) {
-    const at = lower.indexOf(target, from);
-    if (at < 0 || lower.length !== text.length) break;
-    if (at > from) parts.push(text.slice(from, at));
-    parts.push(<mark key={at}>{text.slice(at, at + target.length)}</mark>);
-    from = at + target.length;
-  }
-  parts.push(text.slice(from));
-  return parts;
-}
-
 export type DocumentCommands = {
   search: () => void;
   pin: (() => void) | null;
@@ -124,9 +123,12 @@ export function Documents({
   listRequest?: number;
 }) {
   const openGraph = useContext(ContextGraphNavigation);
+  // The button a step used, so the Document it opens takes focus on the same one.
+  const steppedWith = useRef<"previous" | "next" | null>(null);
   const [readerCloseRequest, setReaderCloseRequest] = useState(0);
   const page = useRef<HTMLDivElement>(null);
   const navigator = useRef<HTMLDivElement>(null);
+  const listBody = useRef<HTMLDivElement>(null);
   const searchTrigger = useRef<HTMLButtonElement>(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const restoreSearchFocus = useRef(false);
@@ -136,13 +138,14 @@ export function Documents({
       searchTrigger.current?.focus();
     }
   }, [searchOpen]);
-  const [contexts, setContexts] = useState<Record<string, string | null>>({});
   const [focusedRow, setFocusedRow] = useState<string | null>(null);
   const [groupPins, setGroupPins] = useState<DocumentSummary[]>([]);
   const engaged = useRef(false);
   const pendingBrowse = useRef<{
     recent: DocumentSummary[];
     pins: DocumentSummary[];
+    /** Absent when Current work could not be read: the last one stays. */
+    work: CurrentWork | null;
   } | null>(null);
   const releaseBrowse = (
     nextFocus: EventTarget | null = document.activeElement,
@@ -156,6 +159,7 @@ export function Documents({
     if (pending) {
       setRecent(pending.recent);
       setGroupPins(pending.pins);
+      if (pending.work) setWork(pending.work);
       pendingBrowse.current = null;
     }
   };
@@ -163,12 +167,39 @@ export function Documents({
   const [pins, setPins] = useState<DocumentSummary[]>([]);
   const [trash, setTrash] = useState<DocumentSummary[]>([]);
   const [trashOffset, setTrashOffset] = useState(0);
-  const [view, setView] = useState<"recent" | "all" | "trash">("recent");
-  const showTrash = view === "trash";
+  // What Documents opens on, and the order of Recent, are kept on this computer.
+  const {
+    documentsView: view,
+    documentsSort: sort,
+    documentGroups,
+    openDocuments,
+  } = usePreferences();
+  const expanded = openDocuments === "expanded";
+  const [showTrash, setShowTrash] = useState(false);
+  const sorted = view === "recent" && sort !== "opened";
+  const [work, setWork] = useState<CurrentWork | null>(null);
+  const [finished, setFinished] = useState<DocumentSummary[]>([]);
+  const [finishedOffset, setFinishedOffset] = useState(0);
+  const [finishedLoaded, setFinishedLoaded] = useState(false);
+  const [unlinked, setUnlinked] = useState<DocumentSummary[]>([]);
+  const [unlinkedOffset, setUnlinkedOffset] = useState(0);
+  const [unlinkedLoaded, setUnlinkedLoaded] = useState(false);
+  /** Plan groups and Open tickets start open; the two folds of old work start closed. */
+  const groupOpen = (key: string, fallback = true) =>
+    documentGroups[key] ?? fallback;
+  const toggleGroup = (key: string, fallback = true) =>
+    setPreference("documentGroups", {
+      ...documentGroups,
+      [key]: !groupOpen(key, fallback),
+    });
+  const finishedOpen = groupOpen("finished", false);
+  const unlinkedOpen = groupOpen("unlinked", false);
   const [all, setAll] = useState<DocumentSummary[]>([]);
   const [allOffset, setAllOffset] = useState(0);
   const [allLoaded, setAllLoaded] = useState(false);
   const [selected, setSelected] = useState<Document | null>(null);
+  // Documents opened since the list was read: their rows lose the unread dot at once.
+  const [openedHere, setOpenedHere] = useState<ReadonlySet<string>>(new Set());
   // Reader identity and failure outlive unrelated successful navigator reads.
   const [opening, setOpening] = useState<{
     id: string;
@@ -179,11 +210,11 @@ export function Documents({
     const request = ++openGeneration.current;
     setOpening({ id, failure: null });
     setSelected(null);
-    return Promise.all([documents.open(id), documents.tags(id)]).then(
-      ([doc, values]) => {
+    return documents.open(id).then(
+      (doc) => {
+        setOpenedHere((seen) => new Set(seen).add(id));
         if (request !== openGeneration.current) return false;
         setSelected(doc);
-        setTags(values);
         setOpening(null);
         setReaderError(null);
         return true;
@@ -224,9 +255,6 @@ export function Documents({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [active, selected, opening, onDocumentClose]);
-  const [tags, setTags] = useState<string[]>([]);
-  const [newTag, setNewTag] = useState("");
-  const [addingTag, setAddingTag] = useState(false);
   const [browseLoaded, setBrowseLoaded] = useState(false);
   const [searchKey, setSearchKey] = useState("");
   const [trashLoaded, setTrashLoaded] = useState(false);
@@ -276,27 +304,50 @@ export function Documents({
   const restoredOpen = useRef<HTMLButtonElement>(null);
   // Only mention hidden Activity details when including them would actually find something.
   const [hiddenProbe, setHiddenProbe] = useState({ key: "", found: false });
+  const refreshRequest = useRef(0);
+  // The update-details choice the shown lists were read with.
+  const shownSupport = useRef(false);
   const refresh = useCallback(() => {
+    const request = ++refreshRequest.current;
+    // Current work is read on its own: its failure must not hide Recent and Pinned.
+    const workRead = documents.currentWork(includeSupport).then(
+      (value) => ({ value }),
+      (reason: unknown) => ({ reason }),
+    );
     return Promise.all([
       upTo(recentOffset, (at) => documents.recent(at, includeSupport)),
       upTo(pinOffset, (at) => documents.pins(at)),
+      workRead,
     ])
-      .then(([r, p]) => {
+      .then(([r, p, read]) => {
+        // A newer refresh owns the answer, whether this one succeeded or failed.
+        if (request !== refreshRequest.current) return;
+        const w = "value" in read ? read.value : null;
         setPins(p);
+        // Rows hold still while the person is on the list, but only for a background
+        // refresh: an explicit change of Show update details applies at once.
+        const background = shownSupport.current === includeSupport;
         if (
+          background &&
           navigator.current?.querySelector("[data-document-row]") &&
           (engaged.current ||
             navigator.current?.contains(document.activeElement))
         ) {
-          pendingBrowse.current = { recent: r, pins: p };
+          pendingBrowse.current = { recent: r, pins: p, work: w };
         } else {
+          shownSupport.current = includeSupport;
+          pendingBrowse.current = null;
           setRecent(r);
           setGroupPins(p);
+          if (w) setWork(w);
         }
         setBrowseLoaded(true);
-        setListError(null);
+        if ("reason" in read) failLoad(read.reason, "Documents");
+        else setListError(null);
       })
-      .catch((reason: unknown) => failLoad(reason, "Documents"));
+      .catch((reason: unknown) => {
+        if (request === refreshRequest.current) failLoad(reason, "Documents");
+      });
   }, [recentOffset, pinOffset, includeSupport, failLoad]);
   const loadTrash = useCallback(
     (focus?: { index: number; origin: Element | null }) => {
@@ -354,24 +405,100 @@ export function Documents({
     )?.focus();
   }, [trash, active, showTrash]);
   useEffect(() => {
-    if (!active || view !== "all") return;
-    const load = () =>
-      void upTo(allOffset, (at) => documents.all(at, includeSupport))
-        .then((items) => {
-          setAll(items);
-          setAllLoaded(true);
-          setListError(null);
-        })
-        .catch((reason: unknown) => failLoad(reason, "Documents"));
-    load();
+    if (!active || !sorted) return;
+    let current = true;
+    const read = sort === "title" ? documents.byTitle : documents.all;
+    void upTo(allOffset, (at) => read(at, includeSupport))
+      .then((items) => {
+        if (!current) return;
+        setAll(items);
+        setAllLoaded(true);
+        setListError(null);
+      })
+      .catch((reason: unknown) => {
+        if (current) failLoad(reason, "Documents");
+      });
+    return () => {
+      current = false;
+    };
   }, [
     active,
-    view,
+    sorted,
+    sort,
     allOffset,
     includeSupport,
     changeVersion,
     attempt,
     failLoad,
+  ]);
+  // The two folds of old work read their Documents only while open, each with its own
+  // answer, error and Retry: one fold's answer never settles the other's.
+  const [finishedError, setFinishedError] = useState<FailureDescription | null>(
+    null,
+  );
+  const [unlinkedError, setUnlinkedError] = useState<FailureDescription | null>(
+    null,
+  );
+  const [finishedAttempt, setFinishedAttempt] = useState(0);
+  const [unlinkedAttempt, setUnlinkedAttempt] = useState(0);
+  const foldOpen = active && view === "current" && !showTrash;
+  useEffect(() => {
+    if (!foldOpen || !finishedOpen) {
+      setFinishedError(null);
+      return;
+    }
+    let current = true;
+    void upTo(finishedOffset, (at) => documents.finished(at, includeSupport))
+      .then((items) => {
+        if (!current) return;
+        setFinished(items);
+        setFinishedLoaded(true);
+        setFinishedError(null);
+      })
+      .catch((reason: unknown) => {
+        if (current)
+          setFinishedError(describeFailure(reason, "load Finished work"));
+      });
+    return () => {
+      current = false;
+    };
+  }, [
+    foldOpen,
+    finishedOpen,
+    finishedOffset,
+    includeSupport,
+    changeVersion,
+    finishedAttempt,
+  ]);
+  useEffect(() => {
+    if (!foldOpen || !unlinkedOpen) {
+      setUnlinkedError(null);
+      return;
+    }
+    let current = true;
+    void upTo(unlinkedOffset, (at) => documents.unlinked(at, includeSupport))
+      .then((items) => {
+        if (!current) return;
+        setUnlinked(items);
+        setUnlinkedLoaded(true);
+        setUnlinkedError(null);
+      })
+      .catch((reason: unknown) => {
+        if (current)
+          setUnlinkedError(
+            describeFailure(reason, "load Documents with no Plan or ticket"),
+          );
+      });
+    return () => {
+      current = false;
+    };
+  }, [
+    foldOpen,
+    unlinkedOpen,
+    unlinkedOffset,
+    includeSupport,
+    changeVersion,
+    unlinkedAttempt,
   ]);
   useEffect(() => {
     openGeneration.current++;
@@ -482,52 +609,104 @@ export function Documents({
     );
   };
   const searching = Boolean(query.trim() || filter.trim());
+  // Results always start at the top ("Titles"), wherever the list had been scrolled to.
+  useLayoutEffect(() => {
+    if (searching && listBody.current) listBody.current.scrollTop = 0;
+  }, [searching]);
+  // A word search lists the Documents whose title matches, then those that match only inside;
+  // a search by tag alone has nothing to match and stays one plain list.
+  const wordSearch = query.trim() !== "";
+  const titleHits = wordSearch
+    ? results.filter((doc) => matchesTitle(doc.heading, query))
+    : [];
+  const bodyHits = wordSearch
+    ? results.filter((doc) => !matchesTitle(doc.heading, query))
+    : [];
+  const ranked = wordSearch ? [...titleHits, ...bodyHits] : results;
+  // Current work: the Plan groups in order, then Open tickets, with the two folds last.
+  const groups = work?.groups ?? [];
+  const groupKey = (plan: { id: string } | null) => plan?.id ?? "open-tickets";
+  const currentCount = groups.reduce(
+    (sum, group) => sum + group.documents.length,
+    0,
+  );
+  /** Recent's rows without the Documents the Pinned group already lists. */
+  const unpinned = (items: DocumentSummary[]) =>
+    items.filter((doc) => !groupPins.some((pin) => pin.id === doc.id));
+  /** "Recent" over the rows below the Pinned group, so the two groups read apart. */
+  const recentHeading = (items: DocumentSummary[]) =>
+    groupPins.length > 0 && (
+      <h2 className="documents-group">
+        <Clock aria-hidden="true" />
+        Recent
+        <Count>{unpinned(items).length}</Count>
+      </h2>
+    );
+  // A fold's rows are on screen only once loaded, and not while its read has failed.
+  const finishedShown = finishedOpen && finishedLoaded && !finishedError;
+  const unlinkedShown = unlinkedOpen && unlinkedLoaded && !unlinkedError;
+  /** Everything the arrow keys visit, in order: Documents, and the headers that fold them. */
+  const rovingItems: string[] = [];
   const visibleRows = showTrash
     ? trash
     : searching
-      ? results
-      : view === "all"
-        ? all
-        : [
+      ? ranked
+      : view === "current"
+        ? [
             ...groupPins,
-            ...recent.filter(
-              (doc) => !groupPins.some((pin) => pin.id === doc.id),
+            ...groups.flatMap((group) =>
+              groupOpen(groupKey(group.plan)) ? group.documents : [],
             ),
-          ];
-  const visibleIds = visibleRows.map((doc) => doc.id).join(",");
-  useEffect(() => {
-    if (!active || !visibleIds) return;
-    let current = true;
-    void Promise.all(
-      visibleIds.split(",").map(async (id) => {
-        try {
-          const links = await documents.links(id);
-          const plan = links
-            .flat()
-            .find(
-              (link) =>
-                (link.source_kind === "plan" || link.target_kind === "plan") &&
-                !link.passage,
-            );
-          if (!plan) return [id, ""] as const;
-          const label =
-            plan.source_kind === "plan" ? plan.source_label : plan.target_label;
-          return [id, plan.explicit ? label : `Spec of ${label}`] as const;
-        } catch {
-          return [id, null] as const;
-        }
-      }),
-    ).then((entries) => {
-      if (current) setContexts(Object.fromEntries(entries));
-    });
-    return () => {
-      current = false;
-    };
-  }, [active, visibleIds, changeVersion]);
+            ...(finishedShown ? finished : []),
+            ...(unlinkedShown ? unlinked : []),
+          ]
+        : [...groupPins, ...unpinned(sorted ? all : recent)];
+  if (!showTrash && !searching && view === "current") {
+    rovingItems.push(...groupPins.map((doc) => doc.id));
+    for (const group of groups) {
+      const key = groupKey(group.plan);
+      rovingItems.push(`group:${key}`);
+      if (groupOpen(key)) rovingItems.push(...group.documents.map((d) => d.id));
+    }
+    if (work && work.finished > 0) {
+      rovingItems.push("group:finished");
+      if (finishedShown) rovingItems.push(...finished.map((doc) => doc.id));
+    }
+    if (work && work.unlinked > 0) {
+      rovingItems.push("group:unlinked");
+      if (unlinkedShown) rovingItems.push(...unlinked.map((doc) => doc.id));
+    }
+  } else rovingItems.push(...visibleRows.map((doc) => doc.id));
   const tabRow =
-    visibleRows.find((doc) => doc.id === focusedRow)?.id ??
-    visibleRows.find((doc) => doc.id === selected?.id)?.id ??
-    visibleRows[0]?.id;
+    rovingItems.find((item) => item === focusedRow) ??
+    rovingItems.find((item) => item === selected?.id) ??
+    rovingItems[0];
+  // A Document can show twice (pinned, and in its group); only its first row is a tab stop.
+  let tabRowClaimed = false;
+  // The reader's place in the list as it shows now: a step goes to the neighbour in that order.
+  // A Document the list shows twice (pinned, and in its Plan group) counts once, at its first row.
+  const walkable = visibleRows.filter(
+    (doc, index) => visibleRows.findIndex((d) => d.id === doc.id) === index,
+  );
+  const placeAt = selected
+    ? walkable.findIndex((doc) => doc.id === selected.id)
+    : -1;
+  const reading: DocumentReading | null = selected && {
+    expanded,
+    onExpandedChange: (value) =>
+      setPreference("openDocuments", value ? "expanded" : "split"),
+    place: placeAt < 0 ? null : { index: placeAt + 1, total: walkable.length },
+    previous: (placeAt > 0 && walkable[placeAt - 1]?.id) || null,
+    next: (placeAt >= 0 && walkable[placeAt + 1]?.id) || null,
+    focus: steppedWith.current,
+    onFocused: () => {
+      steppedWith.current = null;
+    },
+    onStep: (id, direction) => {
+      steppedWith.current = direction;
+      open(id);
+    },
+  };
   const commandId =
     visibleRows.find((doc) => doc.id === focusedRow)?.id ??
     selected?.id ??
@@ -535,7 +714,7 @@ export function Documents({
   const commandPinned = pins.some((doc) => doc.id === commandId);
   const searchCommand = useCallback(() => {
     setSearchOpen(true);
-    setView((current) => (current === "trash" ? "recent" : current));
+    setShowTrash(false);
     queueMicrotask(() =>
       navigator.current
         ?.querySelector<HTMLInputElement>("input[type=search]")
@@ -575,15 +754,49 @@ export function Documents({
     onCommandsChange?.(active ? commands : null);
     return () => onCommandsChange?.(null);
   }, [active, commands, onCommandsChange]);
-  const list = (items: DocumentSummary[], mark = "", inTrash = false) => (
+  /** Moves focus along the roving order: Documents and group headers together. */
+  const moveFocus = (current: HTMLElement, key: string) =>
+    focusNavigatorRow(
+      [
+        ...(navigator.current?.querySelectorAll<HTMLButtonElement>(
+          "[data-document-row], [data-group-header]",
+        ) ?? []),
+      ],
+      current,
+      key,
+    );
+  /** The dot between the parts of a row's meta line. */
+  const separator = <span aria-hidden="true">·</span>;
+  /** `grouped` rows sit under a header that names their Plan, so they do not repeat it. */
+  const list = (
+    items: DocumentSummary[],
+    mark = "",
+    inTrash = false,
+    grouped = false,
+    passages = false,
+  ) => (
     <ul className="document-list">
       {items.map((doc, index) => {
         const pinned = pins.some((p) => p.id === doc.id);
-        const date = doc.updated_at ? compactAgo(doc.updated_at) : "";
+        const date = doc.updated_at ? listTime(doc.updated_at) : "";
+        const context = grouped
+          ? groupRowContext(doc)
+          : documentRowContext(doc);
+        const tabStop = tabRow === doc.id && !tabRowClaimed;
+        if (tabStop) tabRowClaimed = true;
         const snippet =
-          mark && doc.snippet && !sameText(doc.snippet, doc.heading)
+          passages && doc.snippet && !sameText(doc.snippet, doc.heading)
             ? doc.snippet
             : "";
+        const unread = doc.opened === false && !openedHere.has(doc.id);
+        // A row with a passage hides its meta line; the button describes itself with it instead,
+        // and the unread dot moves in front of the passage.
+        const metaId = snippet ? `document-meta-${doc.id}` : undefined;
+        const dot = unread && (
+          <span role="img" aria-label="Not opened yet">
+            <StatusDot tone="unread" size={6} />
+          </span>
+        );
         return (
           // A row at ticket density (DL-06): the title, then one meta line
           // (origin, tags, date); the snippet only in search results.
@@ -592,14 +805,14 @@ export function Documents({
               data-open={selected?.id === doc.id || undefined}
               data-pinned={pinned || undefined}
             >
-              <FileText aria-hidden="true" className="document-list-kind" />
               <div className="document-list-content">
                 <button
                   type="button"
                   className="document-list-open"
                   aria-current={selected?.id === doc.id || undefined}
+                  aria-describedby={metaId}
                   data-document-row={doc.id}
-                  tabIndex={tabRow === doc.id ? 0 : -1}
+                  tabIndex={tabStop ? 0 : -1}
                   onFocus={() => setFocusedRow(doc.id)}
                   aria-keyshortcuts={
                     ariaKeyShortcuts("documents-move") + " Enter"
@@ -608,12 +821,7 @@ export function Documents({
                     if (matchesShortcut(event, "documents-move")) {
                       event.preventDefault();
                       event.stopPropagation();
-                      const rows = [
-                        ...(navigator.current?.querySelectorAll<HTMLButtonElement>(
-                          "[data-document-row]",
-                        ) ?? []),
-                      ];
-                      focusNavigatorRow(rows, event.currentTarget, event.key);
+                      moveFocus(event.currentTarget, event.key);
                     } else if (
                       matchesShortcut(event, "documents-pin") &&
                       !inTrash
@@ -625,10 +833,12 @@ export function Documents({
                       );
                     } else if (matchesShortcut(event, "documents-time")) {
                       event.preventDefault();
-                      event.currentTarget
-                        .closest("li")
-                        ?.querySelector<HTMLElement>("time")
-                        ?.focus();
+                      // A row with a passage keeps its time out of sight: nothing to focus.
+                      if (!snippet)
+                        event.currentTarget
+                          .closest("li")
+                          ?.querySelector<HTMLElement>("time")
+                          ?.focus();
                     } else if (event.key === "Enter") {
                       event.preventDefault();
                       open(doc.id);
@@ -636,27 +846,49 @@ export function Documents({
                   }}
                   onClick={() => open(doc.id)}
                 >
-                  <span className="truncate">{doc.heading}</span>
+                  <span className="document-list-title">
+                    {highlight(doc.heading, mark)}
+                  </span>
                 </button>
-                <p className="document-list-meta">
-                  {contexts[doc.id] ? (
-                    <span>{contexts[doc.id]}</span>
-                  ) : (
-                    !doc.origin_ticket &&
-                    !doc.tags?.length && (
-                      <span>
-                        {contexts[doc.id] === null
-                          ? "Links unavailable"
-                          : contexts[doc.id] === undefined
-                            ? "Loading links…"
-                            : "Not linked"}
-                      </span>
-                    )
+                <p className="document-list-meta" id={metaId}>
+                  {!snippet && dot}
+                  {date && doc.updated_at && (
+                    <Tooltip content={formatDateTime(doc.updated_at)}>
+                      <time
+                        className="document-list-date"
+                        dateTime={doc.updated_at}
+                        tabIndex={-1}
+                        onKeyDown={(event) => {
+                          if (
+                            event.key === "Escape" ||
+                            event.key === "ArrowLeft"
+                          ) {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            event.currentTarget
+                              .closest("li")
+                              ?.querySelector<HTMLButtonElement>(
+                                "[data-document-row]",
+                              )
+                              ?.focus();
+                          }
+                        }}
+                      >
+                        {date}
+                      </time>
+                    </Tooltip>
                   )}
+                  {date && context && separator}
+                  {context && <span className="truncate">{context}</span>}
                   {doc.origin_ticket && (
-                    <span className="document-origin">
-                      Update details · {doc.origin_ticket}
-                    </span>
+                    <>
+                      {(date || context) && separator}
+                      <span className="document-origin">Update details</span>
+                      {separator}
+                      <span className="document-origin">
+                        {doc.origin_ticket}
+                      </span>
+                    </>
                   )}
                   {doc.tags?.map((tag) => (
                     <Badge key={tag} size="sm" asChild>
@@ -675,32 +907,12 @@ export function Documents({
                   ))}
                 </p>
                 {snippet && (
-                  <p className="document-snippet">{highlight(snippet, mark)}</p>
+                  <p className="document-snippet">
+                    {dot}
+                    {highlight(snippet, mark)}
+                  </p>
                 )}
               </div>
-              {date && doc.updated_at && (
-                <Tooltip content={formatDateTime(doc.updated_at)}>
-                  <time
-                    className="document-list-date"
-                    dateTime={doc.updated_at}
-                    tabIndex={-1}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape" || event.key === "ArrowLeft") {
-                        event.preventDefault();
-                        event.stopPropagation();
-                        event.currentTarget
-                          .closest("li")
-                          ?.querySelector<HTMLButtonElement>(
-                            "[data-document-row]",
-                          )
-                          ?.focus();
-                      }
-                    }}
-                  >
-                    {date}
-                  </time>
-                </Tooltip>
-              )}
               {inTrash ? (
                 <Button
                   variant="outline"
@@ -736,20 +948,267 @@ export function Documents({
       })}
     </ul>
   );
-  const shownCount = showTrash
-    ? trash.length
-    : searching
-      ? results.length
-      : view === "all"
-        ? all.length
-        : recent.length;
+  // The field says how many Documents match once that is known; "50+" while more can follow.
+  const searchTotal =
+    searching &&
+    searchKey === JSON.stringify([query, filter, offset, includeSupport]) &&
+    results.length > 0
+      ? `${results.length}${results.length >= offset + 50 ? "+" : ""}`
+      : undefined;
   const countKnown = showTrash
     ? trashLoaded
     : searching
       ? searchKey === JSON.stringify([query, filter, offset, includeSupport])
-      : view === "all"
-        ? allLoaded
-        : browseLoaded;
+      : view === "current"
+        ? work !== null
+        : sorted
+          ? allLoaded
+          : browseLoaded;
+  const chooseSupport = (checked: boolean) => {
+    setIncludeSupport(checked);
+    setOffset(0);
+    setRecentOffset(0);
+    setAllOffset(0);
+    setFinishedOffset(0);
+    setUnlinkedOffset(0);
+  };
+  const chooseSort = (value: string) => {
+    if (value !== "opened" && value !== "updated" && value !== "title") return;
+    if (value === sort) return;
+    setAll([]);
+    setAllLoaded(false);
+    setAllOffset(0);
+    setPreference("documentsSort", value);
+  };
+  /**
+   * A header that folds a group: a button naming the group, its count, and open or closed.
+   * Custom rather than a Disclosure: its trigger cannot join the list's roving focus (one tab
+   * stop, J/K and arrows move between headers and rows), and the group's rows are not its body.
+   */
+  const groupHeader = (
+    key: string,
+    label: string,
+    count: number,
+    open: boolean,
+    fallback = true,
+  ) => {
+    const item = `group:${key}`;
+    return (
+      <h2 className="documents-group-header">
+        <button
+          type="button"
+          className="documents-group-toggle"
+          aria-expanded={open}
+          data-group-header={key}
+          tabIndex={tabRow === item ? 0 : -1}
+          aria-keyshortcuts={ariaKeyShortcuts("documents-move")}
+          onFocus={() => setFocusedRow(item)}
+          onClick={() => toggleGroup(key, fallback)}
+          onKeyDown={(event) => {
+            if (matchesShortcut(event, "documents-move")) {
+              event.preventDefault();
+              event.stopPropagation();
+              moveFocus(event.currentTarget, event.key);
+            }
+          }}
+        >
+          {open ? (
+            <ChevronDown aria-hidden="true" />
+          ) : (
+            <ChevronRight aria-hidden="true" />
+          )}
+          <span className="documents-group-name">{label}</span>{" "}
+          <Count>{count}</Count>
+        </button>
+      </h2>
+    );
+  };
+  /** One group of word-search results: its name and count, then its rows. */
+  const searchGroup = (
+    label: string,
+    items: DocumentSummary[],
+    titles: boolean,
+  ) =>
+    items.length > 0 && (
+      <section aria-label={label} className="documents-search-group">
+        <h2 className="documents-search-heading">
+          {label} <Count>{items.length}</Count>
+        </h2>
+        {list(items, query, false, false, !titles)}
+      </section>
+    );
+  const pinnedSection = !showTrash && !searching && groupPins.length > 0 && (
+    <section aria-label="Pinned">
+      <h2 className="documents-group">
+        <Pin aria-hidden="true" />
+        Pinned
+        <Count>{groupPins.length}</Count>
+      </h2>
+      {list(groupPins)}
+      {pins.length >= pinOffset + 50 && (
+        <Pager
+          noun="pinned Documents"
+          onMore={() => setPinOffset(pinOffset + 50)}
+        />
+      )}
+    </section>
+  );
+  // Built only when shown: building its rows claims the list's Tab stop.
+  const currentWorkSection = view === "current" && !showTrash && !searching && (
+    <section aria-label="Current work">
+      {work === null ? (
+        <EmptyState
+          size="inline"
+          role="status"
+          description="Loading Documents…"
+        />
+      ) : (
+        currentCount + work.finished + work.unlinked === 0 && (
+          <EmptyState
+            icon={<FileText />}
+            title={emptyCopy("documents-all").title}
+            description={emptyCopy("documents-all").sentence}
+          />
+        )
+      )}
+      {groups.map((group) => {
+        const key = groupKey(group.plan);
+        const open = groupOpen(key);
+        return (
+          <div key={key} className="documents-group-block">
+            {groupHeader(
+              key,
+              group.plan?.name ?? "Open tickets",
+              group.documents.length,
+              open,
+            )}
+            {open && list(group.documents, "", false, true)}
+          </div>
+        );
+      })}
+      {work !== null && (work.finished > 0 || work.unlinked > 0) && (
+        <div className="documents-folds">
+          {work.finished > 0 && (
+            <div className="documents-group-block">
+              {groupHeader(
+                "finished",
+                "Finished work",
+                work.finished,
+                finishedOpen,
+                false,
+              )}
+              {finishedOpen &&
+                (finishedError ? (
+                  <FailureAlert
+                    size="compact"
+                    failure={finishedError}
+                    onRetry={() => setFinishedAttempt((value) => value + 1)}
+                  />
+                ) : finishedLoaded ? (
+                  list(finished)
+                ) : (
+                  <EmptyState
+                    size="inline"
+                    role="status"
+                    description="Loading Documents…"
+                  />
+                ))}
+              {finishedOpen && finished.length >= finishedOffset + 50 && (
+                <Pager
+                  noun="Documents of finished work"
+                  onMore={() => setFinishedOffset(finishedOffset + 50)}
+                />
+              )}
+            </div>
+          )}
+          {work.unlinked > 0 && (
+            <div className="documents-group-block">
+              {groupHeader(
+                "unlinked",
+                "No Plan or ticket",
+                work.unlinked,
+                unlinkedOpen,
+                false,
+              )}
+              {unlinkedOpen &&
+                (unlinkedError ? (
+                  <FailureAlert
+                    size="compact"
+                    failure={unlinkedError}
+                    onRetry={() => setUnlinkedAttempt((value) => value + 1)}
+                  />
+                ) : unlinkedLoaded ? (
+                  list(unlinked)
+                ) : (
+                  <EmptyState
+                    size="inline"
+                    role="status"
+                    description="Loading Documents…"
+                  />
+                ))}
+              {unlinkedOpen && unlinked.length >= unlinkedOffset + 50 && (
+                <Pager
+                  noun="Documents with no Plan or ticket"
+                  onMore={() => setUnlinkedOffset(unlinkedOffset + 50)}
+                />
+              )}
+            </div>
+          )}
+        </div>
+      )}
+    </section>
+  );
+  const optionsMenu = (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton label="More">
+          <MoreHorizontal />
+        </IconButton>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={4}>
+        {view === "recent" && (
+          <>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel>Sort by</DropdownMenuLabel>
+              <DropdownMenuRadioGroup value={sort} onValueChange={chooseSort}>
+                <DropdownMenuRadioItem value="opened">
+                  Recently opened
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="updated">
+                  Recently updated
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="title">
+                  Title
+                </DropdownMenuRadioItem>
+              </DropdownMenuRadioGroup>
+            </DropdownMenuGroup>
+            <DropdownMenuSeparator />
+          </>
+        )}
+        <DropdownMenuCheckboxItem
+          keepOpen={false}
+          checked={includeSupport}
+          onCheckedChange={chooseSupport}
+        >
+          Show update details
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem
+          onSelect={() => {
+            setQuery("");
+            setFilter("");
+            setSearchOpen(false);
+            setRestored(null);
+            setShowTrash(true);
+          }}
+        >
+          <Trash2 aria-hidden="true" />
+          Trash
+          {work && <Count className="ml-auto">{work.trashed}</Count>}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
   return (
     // The page stays mounted while another is shown; its entrance (enter.ts)
     // plays again each time it comes back from `hidden`.
@@ -757,6 +1216,7 @@ export function Documents({
       className="documents-page"
       data-own-entrance=""
       data-reading={selected !== null || opening !== null || undefined}
+      data-expanded={expanded || undefined}
       ref={page}
     >
       <div
@@ -799,14 +1259,26 @@ export function Documents({
       >
         <div className="documents-list-head" {...enter(0)}>
           <PaneHeader
-            title="Documents"
-            count={countKnown ? <Count>{shownCount}</Count> : undefined}
+            title={showTrash ? "Trash" : "Documents"}
+            hideTitle={!showTrash && !searchOpen}
+            leading={
+              showTrash ? (
+                <ReturnCrumb
+                  origin="Documents"
+                  onReturn={() => {
+                    setShowTrash(false);
+                    setRestored(null);
+                  }}
+                />
+              ) : undefined
+            }
             titleEditor={
               searchOpen ? (
                 <NavigatorSearch
                   aria-label="Search Documents"
                   placeholder="Search Documents…"
                   value={query}
+                  count={searchTotal}
                   onValueChange={(value) => {
                     setQuery(value);
                     setOffset(0);
@@ -814,9 +1286,10 @@ export function Documents({
                 />
               ) : undefined
             }
+            // While searching, the field takes the whole header (the board's L2).
             actions={
-              <>
-                {!searchOpen && (
+              searchOpen ? undefined : (
+                <>
                   <IconButton
                     ref={searchTrigger}
                     label="Search Documents"
@@ -824,45 +1297,46 @@ export function Documents({
                     aria-keyshortcuts={ariaKeyShortcuts("documents-search")}
                     onClick={() => {
                       setSearchOpen(true);
-                      if (showTrash) setView("recent");
+                      setShowTrash(false);
                     }}
                   >
                     <Search />
                   </IconButton>
-                )}
-                {onCapture && (
-                  <IconButton
-                    label="New Document"
-                    shortcut={shortcutLabel("capture")}
-                    aria-keyshortcuts={ariaKeyShortcuts("capture")}
-                    onClick={onCapture}
-                  >
-                    <Plus />
-                  </IconButton>
-                )}
-              </>
+                  {onCapture && (
+                    <IconButton
+                      label="New Document"
+                      shortcut={shortcutLabel("capture")}
+                      aria-keyshortcuts={ariaKeyShortcuts("capture")}
+                      onClick={onCapture}
+                    >
+                      <Plus />
+                    </IconButton>
+                  )}
+                  {!showTrash && optionsMenu}
+                </>
+              )
             }
-          />
-        </div>
-        {/* One toolbar in every view: it never collapses or moves (DL-01, DL-02). */}
-        <div className="documents-toolbar" {...enter(1)}>
-          <SegmentedControl
-            aria-label="Documents view"
-            value={searching && !showTrash ? ("" as typeof view) : view}
-            onValueChange={(value) => {
-              setView(value);
-              setRestored(null);
-              if (value === "trash") {
-                setQuery("");
-                setFilter("");
-              }
-            }}
-            options={[
-              { value: "recent", label: "Recent" },
-              { value: "all", label: "All" },
-              { value: "trash", label: "Trash" },
-            ]}
-          />
+          >
+            {!showTrash && !searchOpen && (
+              <SegmentedControl
+                aria-label="Documents view"
+                className="auto-cols-auto"
+                value={view}
+                onValueChange={(value) => {
+                  setPreference("documentsView", value);
+                  setRestored(null);
+                }}
+                options={[
+                  {
+                    value: "current",
+                    label: "Current work",
+                    ...(work ? { count: currentCount } : {}),
+                  },
+                  { value: "recent", label: "Recent" },
+                ]}
+              />
+            )}
+          </PaneHeader>
         </div>
         {filter.trim() && (
           <div className="documents-filters">
@@ -897,7 +1371,7 @@ export function Documents({
             onRetry={listError.retry}
           />
         )}
-        <div {...enter(2)}>
+        <div className="documents-list-body" ref={listBody} {...enter(1)}>
           {listError?.kind === "load" && !countKnown ? (
             <FailureState
               failure={listError.failure}
@@ -921,7 +1395,7 @@ export function Documents({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => setView("all")}
+                        onClick={() => setShowTrash(false)}
                       >
                         Browse Documents
                       </Button>
@@ -950,8 +1424,19 @@ export function Documents({
                   title={`No Documents match ${query.trim() ? `“${query.trim()}”` : `tag “${filter.trim()}”`}`}
                   description={
                     !includeSupport && hiddenMatches
-                      ? "Update details are hidden; turn on Show update details to search them."
+                      ? "Update details are hidden, and some match."
                       : "Try another word, or clear the search."
+                  }
+                  action={
+                    !includeSupport && hiddenMatches ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => chooseSupport(true)}
+                      >
+                        Show update details
+                      </Button>
+                    ) : undefined
                   }
                 />
               ) : (
@@ -960,8 +1445,23 @@ export function Documents({
                     {results.length === 1
                       ? "1 result"
                       : `${results.length} results`}
+                    {wordSearch &&
+                      `: ${[
+                        titleHits.length > 0 && `${titleHits.length} in titles`,
+                        bodyHits.length > 0 &&
+                          `${bodyHits.length} inside Documents`,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}`}
                   </p>
-                  {list(results, query)}
+                  {wordSearch ? (
+                    <>
+                      {searchGroup("Titles", titleHits, true)}
+                      {searchGroup("Inside Documents", bodyHits, false)}
+                    </>
+                  ) : (
+                    list(results)
+                  )}
                 </>
               )}
               {results.length >= offset + 50 && (
@@ -970,24 +1470,12 @@ export function Documents({
             </section>
           ) : (
             <>
-              {view === "recent" && groupPins.length > 0 && (
-                <section aria-label="Pinned">
-                  <h2 className="documents-group">
-                    <Pin aria-hidden="true" />
-                    Pinned
-                    <Count>{groupPins.length}</Count>
-                  </h2>
-                  {list(groupPins)}
-                  {pins.length >= pinOffset + 50 && (
-                    <Pager
-                      noun="pinned Documents"
-                      onMore={() => setPinOffset(pinOffset + 50)}
-                    />
-                  )}
-                </section>
-              )}
-              {view === "all" ? (
+              {pinnedSection}
+              {view === "current" ? (
+                currentWorkSection
+              ) : sorted ? (
                 <section aria-label="All Documents">
+                  {recentHeading(all)}
                   {!allLoaded ? (
                     <EmptyState
                       size="inline"
@@ -1003,7 +1491,7 @@ export function Documents({
                       />
                     )
                   )}
-                  {list(all)}
+                  {list(unpinned(all))}
                   {all.length >= allOffset + 50 && (
                     <Pager
                       noun="Documents"
@@ -1013,20 +1501,7 @@ export function Documents({
                 </section>
               ) : (
                 <section aria-label="Recently opened">
-                  {groupPins.length > 0 && (
-                    <h2 className="documents-group">
-                      <Clock aria-hidden="true" />
-                      Recent
-                      <Count>
-                        {
-                          recent.filter(
-                            (doc) =>
-                              !groupPins.some((pin) => pin.id === doc.id),
-                          ).length
-                        }
-                      </Count>
-                    </h2>
-                  )}
+                  {recentHeading(recent)}
                   {!browseLoaded ? (
                     <EmptyState
                       size="inline"
@@ -1042,11 +1517,7 @@ export function Documents({
                       />
                     )
                   )}
-                  {list(
-                    recent.filter(
-                      (doc) => !groupPins.some((p) => p.id === doc.id),
-                    ),
-                  )}
+                  {list(unpinned(recent))}
                   {recent.length >= recentOffset + 50 && (
                     <Pager
                       noun="recent Documents"
@@ -1058,23 +1529,6 @@ export function Documents({
             </>
           )}
         </div>
-        <label
-          className="documents-include"
-          data-hidden={showTrash || undefined}
-        >
-          <Switch
-            aria-label="Show update details"
-            checked={includeSupport}
-            disabled={showTrash}
-            onCheckedChange={(checked) => {
-              setIncludeSupport(checked);
-              setOffset(0);
-              setRecentOffset(0);
-              setAllOffset(0);
-            }}
-          />
-          Show update details
-        </label>
       </div>
       {opening && (
         <article className="document-workspace" aria-label="Document reader">
@@ -1110,6 +1564,7 @@ export function Documents({
         <DocumentEditor
           key={selected.id}
           initial={selected}
+          {...(reading && { reading })}
           active={active}
           pinned={pins.some((p) => p.id === selected.id)}
           onTogglePin={() => {
@@ -1148,6 +1603,13 @@ export function Documents({
         >
           {({ trashed }) => (
             <>
+              {readerError && (
+                <FailureAlert
+                  size="compact"
+                  failure={readerError.failure}
+                  onRetry={readerError.retry}
+                />
+              )}
               {!trashed && selected.origin_brief && !selected.kept && (
                 <Button
                   onClick={() =>
@@ -1171,79 +1633,6 @@ export function Documents({
                   Kept in Documents.
                 </p>
               )}
-              <section aria-label="Document tags">
-                <h2>Tags</h2>
-                {readerError && (
-                  <FailureAlert
-                    size="compact"
-                    failure={readerError.failure}
-                    onRetry={readerError.retry}
-                  />
-                )}
-                <ul className="document-tags">
-                  {tags.map((tag) => (
-                    <li key={tag}>
-                      {tag}{" "}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        aria-label={`Remove tag ${tag}`}
-                        disabled={trashed}
-                        onClick={() =>
-                          readerAction(`remove the tag ${tag}`, () =>
-                            documents
-                              .tag(selected.id, tag, false)
-                              .then(() =>
-                                setTags(tags.filter((value) => value !== tag)),
-                              ),
-                          )
-                        }
-                      >
-                        ×
-                      </Button>
-                    </li>
-                  ))}
-                </ul>
-                {!addingTag ? (
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    disabled={trashed}
-                    onClick={() => setAddingTag(true)}
-                  >
-                    <Tag data-icon="inline-start" aria-hidden="true" />
-                    Add tags
-                  </Button>
-                ) : (
-                  <form
-                    className="document-tag-form"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      if (!newTag.trim()) return;
-                      const tag = newTag;
-                      readerAction(`add the tag ${tag.trim()}`, () =>
-                        documents
-                          .tag(selected.id, tag, true)
-                          .then(() => documents.tags(selected.id))
-                          .then((values) => {
-                            setTags(values);
-                            setNewTag("");
-                            setAddingTag(false);
-                          }),
-                      );
-                    }}
-                  >
-                    <label htmlFor="new-document-tag">Add tag</label>
-                    <Input
-                      id="new-document-tag"
-                      autoFocus
-                      value={newTag}
-                      onChange={(e) => setNewTag(e.target.value)}
-                    />
-                    <Button type="submit">Add tag</Button>
-                  </form>
-                )}
-              </section>
             </>
           )}
         </DocumentEditor>

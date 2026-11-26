@@ -206,6 +206,7 @@ impl Workspace {
                 let patch = DocumentPatch {
                     title: Some(version.title),
                     body: Some(version.body),
+                    summary: None,
                     expected_updated_at: None,
                 };
                 self.change_document(&version.record_id, patch)?;

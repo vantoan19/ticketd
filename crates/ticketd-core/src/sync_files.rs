@@ -78,9 +78,11 @@ const MAX_HEADER_INDENT: usize = 64;
 
 const FILE_FORMAT_WITH_TYPED_SOURCE: i64 = 3;
 const FILE_FORMAT_WITH_PROJECT_ARCHIVE: i64 = 4;
+/// A Document file that carries a `summary`. Other Document files stay at format 1.
+const FILE_FORMAT_WITH_DOCUMENT_SUMMARY: i64 = 5;
 /// The highest format this version reads. A file that says a higher number
 /// is left alone until this desktop runs a ticketd that reads it.
-const LATEST_FILE_FORMAT: i64 = FILE_FORMAT_WITH_PROJECT_ARCHIVE;
+const LATEST_FILE_FORMAT: i64 = FILE_FORMAT_WITH_DOCUMENT_SUMMARY;
 
 /// The records kept as sections of their ticket's file.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
@@ -265,6 +267,17 @@ const DOCUMENT: &[Field] = &[
     ("kept", Type::Flag, false),
     ("pinned", Type::Flag, false),
 ];
+/// Format 5: the title is followed by the author's one-line summary.
+const DOCUMENT_WITH_SUMMARY: &[Field] = &[
+    ("title", Type::Text, false),
+    ("summary", Type::Text, false),
+    ("created_at", Type::Time, true),
+    ("tags", Type::Tags, false),
+    ("origin_activity", Type::Id, false),
+    ("trashed", Type::Flag, false),
+    ("kept", Type::Flag, false),
+    ("pinned", Type::Flag, false),
+];
 const PLAN: &[Field] = &[
     ("name", Type::Name, true),
     ("archived", Type::Flag, false),
@@ -339,6 +352,9 @@ impl Block {
 fn shape(block: Block, format: i64) -> (impl Iterator<Item = &'static Field> + Clone, bool) {
     let (fields, has_body) = match block {
         Block::Record(SyncKind::Ticket) => (TICKET, true),
+        Block::Record(SyncKind::Document) if format >= FILE_FORMAT_WITH_DOCUMENT_SUMMARY => {
+            (DOCUMENT_WITH_SUMMARY, true)
+        }
         Block::Record(SyncKind::Document) => (DOCUMENT, true),
         Block::Record(SyncKind::Plan) => (PLAN, true),
         Block::Record(SyncKind::Project) => (PROJECT, false),
@@ -685,6 +701,9 @@ fn write_block(out: &mut String, block: Block, id: &str, fields: &Fields, labels
         Block::Record(SyncKind::Project) => FILE_FORMAT_WITH_PROJECT_ARCHIVE,
         Block::Record(SyncKind::Ticket) if fields.contains_key("source_provider") => {
             FILE_FORMAT_WITH_TYPED_SOURCE
+        }
+        Block::Record(SyncKind::Document) if fields.contains_key("summary") => {
+            FILE_FORMAT_WITH_DOCUMENT_SUMMARY
         }
         _ => 1,
     };
@@ -1419,9 +1438,10 @@ fn read_record_before_source_presentation(
             &["name", "archived"],
         )],
         SyncKind::Document => &[(
-            "SELECT title, body, created_at, originating_activity_id, trashed, kept, EXISTS(SELECT 1 FROM document_pins WHERE document_id = d.id) FROM documents d WHERE id = ?1",
+            "SELECT title, summary, body, created_at, originating_activity_id, trashed, kept, EXISTS(SELECT 1 FROM document_pins WHERE document_id = d.id) FROM documents d WHERE id = ?1",
             &[
                 "title",
+                "summary",
                 "body",
                 "created_at",
                 "origin_activity",
@@ -1769,6 +1789,13 @@ impl Apply<'_> {
                 return Err(bad(format!(
                     "ticket {id} has another reference in this Workspace; a reference never changes"
                 )));
+            }
+            (SyncKind::Document, "summary") => {
+                let summary = value.and_then(crate::documents::one_line_summary);
+                c.execute(
+                    &format!("UPDATE documents SET summary = ?2, updated_at = {NOW} WHERE id = ?1"),
+                    params![id, summary],
+                )?;
             }
             (SyncKind::Document, "title" | "body") => {
                 // The time of the last content change is this device's own, and it
@@ -2255,12 +2282,17 @@ automation: name trashed
             "source_state_category source_state_name source_updated_at source_partition source_provider_name source_provider_icon_svg",
         );
         let format_4 = format_3.replace("project: name\n", "project: name archived\n");
-        assert_eq!(LATEST_FILE_FORMAT, 4);
+        let format_5 = format_4.replace(
+            "document: title created_at",
+            "document: title summary created_at",
+        );
+        assert_eq!(LATEST_FILE_FORMAT, 5);
         for (format, expected) in [
             (1, FORMAT_1),
             (2, FORMAT_1),
             (3, format_3.as_str()),
             (4, format_4.as_str()),
+            (5, format_5.as_str()),
         ] {
             let parts = [SyncPartKind::Activity, SyncPartKind::Evidence];
             let blocks = SyncKind::ALL
