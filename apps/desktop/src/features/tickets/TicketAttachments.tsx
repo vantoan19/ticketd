@@ -43,7 +43,15 @@ export function AttachmentDialogs({
         crypto.randomUUID(),
       );
       onSelected(null);
-      changed();
+      const refreshed = changed();
+      // The viewer returns focus to the card that opened it, which is still on
+      // screen until the files are read again. If that was the detached file the
+      // card goes then, and focus with it: land on the heading instead.
+      void refreshed.then(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body)
+          fallbackFocus?.()?.focus({ preventScroll: true });
+      });
       const restoreId = crypto.randomUUID();
       statusLine.show({
         message: `Detached ${file.display_name}`,

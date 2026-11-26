@@ -355,6 +355,52 @@ test("detaching the open file lands focus on the Files heading", async () => {
   );
 });
 
+test("detaching the open file lands focus on the Files heading even when the files are read again slowly", async () => {
+  let attached = [file];
+  let release: () => void = () => {};
+  let slow = false;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (command === "ticket_attachments") {
+      const now = attached;
+      // After the detach the read is slow: the card outlives the viewer.
+      if (slow) await new Promise<void>((resolve) => (release = resolve));
+      return now;
+    }
+    if (command === "set_ticket_attachment") {
+      attached = (args as { present: boolean }).present ? [file] : [];
+      slow = true;
+      return ticket;
+    }
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const row = await screen.findByRole("button", { name: "Trace" });
+  row.focus();
+  fireEvent.click(row);
+  await screen.findByRole("dialog");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  fireEvent.click(
+    await screen.findByRole("menuitem", { name: "Detach from ticket" }),
+  );
+  await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+  // The card is still there, so focus went back to it...
+  await waitFor(() => expect(document.activeElement).toBe(row));
+  // ...and when the card goes, focus does not fall to the body.
+  await act(async () => release());
+  await waitFor(() =>
+    expect(document.activeElement).toBe(
+      screen.getByRole("heading", { name: "Files" }),
+    ),
+  );
+});
+
 test("Files shows cards for a mixed set, with a tile for the file that has no still, and the keyboard opens the viewer", async () => {
   const user = userEvent.setup();
   const shot = {
