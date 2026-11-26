@@ -11,7 +11,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { loadPreferences } from "@/lib/preferences";
 import { workspaceClient } from "@/lib/api/workspace";
-import { notificationClient } from "@/lib/api/notifications";
 import { cliClient } from "@/lib/api/cli";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi
@@ -40,8 +39,11 @@ vi.mock("@/lib/api/agent-skills", () => ({
 }));
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
-    permitted: vi.fn(),
-    requestPermission: vi.fn(),
+    permission: vi.fn(async () => ({
+      state: "allowed",
+      reported: true,
+      settings: true,
+    })),
     notify: vi.fn(),
   },
 }));
@@ -91,13 +93,7 @@ afterEach(() => {
 });
 
 test("choosing Dark or Full width is stored and exposed as selected", () => {
-  render(
-    <SettingsView
-      selected="appearance"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="appearance" onRestore={async () => {}} />);
   const checked = (name: string | RegExp) =>
     screen.getByRole("radio", { name }).getAttribute("aria-checked");
   expect(checked(/^System/)).toBe("true");
@@ -113,44 +109,22 @@ test("choosing Dark or Full width is stored and exposed as selected", () => {
 
 test("a page opens at its top, not where the previous page was scrolled", () => {
   const view = render(
-    <SettingsView
-      selected="appearance"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
+    <SettingsView selected="appearance" onRestore={async () => {}} />,
   );
   const scroller = view.container.querySelector(".settings-page")!;
   scroller.scrollTop = 600;
-  view.rerender(
-    <SettingsView
-      selected="files"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  view.rerender(<SettingsView selected="files" onRestore={async () => {}} />);
   expect(scroller.scrollTop).toBe(0);
 });
 
 test("the removed Google Drive page opens Files, where Drive is chosen for new uploads", () => {
-  render(
-    <SettingsView
-      selected="google-drive"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="google-drive" onRestore={async () => {}} />);
   expect(screen.getByRole("heading", { level: 1, name: "Files" })).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Appearance" })).toBeNull();
 });
 
 test("Workspace sync opens as its own page, apart from Files", () => {
-  render(
-    <SettingsView
-      selected="workspace-sync"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="workspace-sync" onRestore={async () => {}} />);
   expect(
     screen.getByRole("heading", { level: 1, name: "Workspace sync" }),
   ).toBeTruthy();
@@ -158,13 +132,7 @@ test("Workspace sync opens as its own page, apart from Files", () => {
 });
 
 test("Backups & export shows the Workspace file, its counts, size and format version", async () => {
-  render(
-    <SettingsView
-      selected="backups-export"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   await screen.findAllByText("workspace.sqlite3");
   // The full path is in the PathText tooltip, not a native title.
   const folder = document.querySelector<HTMLElement>(
@@ -188,26 +156,14 @@ test("Copy path puts the workspace path on the clipboard", async () => {
     configurable: true,
     value: { writeText },
   });
-  render(
-    <SettingsView
-      selected="backups-export"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(info.path));
   expect(await screen.findByText("Copied")).toBeTruthy();
 });
 
 test("Show in the file manager reveals the workspace file", async () => {
-  render(
-    <SettingsView
-      selected="backups-export"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   fireEvent.click(await screen.findByRole("button", { name: /^Show in / }));
   await waitFor(() =>
     expect(workspaceClient.reveal).toHaveBeenCalledWith(info.path),
@@ -216,26 +172,14 @@ test("Show in the file manager reveals the workspace file", async () => {
 
 test("a workspace that cannot be read shows an error instead of counts", async () => {
   vi.mocked(workspaceClient.info).mockRejectedValue(new Error("locked"));
-  render(
-    <SettingsView
-      selected="backups-export"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   await revealFailureDetails();
   expect(screen.getByRole("alert").textContent).toContain("locked");
   expect(screen.queryByLabelText("Workspace path")).toBeNull();
 });
 
 test("Follow tickets I create is on by default and the choice persists", () => {
-  render(
-    <SettingsView
-      selected="attention"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="attention" onRestore={async () => {}} />);
   const follow = screen.getByRole("switch", {
     name: "Follow tickets I create",
   });
@@ -245,67 +189,8 @@ test("Follow tickets I create is on by default and the choice persists", () => {
   expect(loadPreferences().followCreated).toBe(false);
 });
 
-test("turning on reminder notifications asks for permission and keeps the switch on when granted", async () => {
-  vi.mocked(notificationClient.requestPermission).mockResolvedValue(true);
-  render(
-    <SettingsView
-      selected="attention"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  const notify = screen.getByRole("switch", {
-    name: "Notify me when a reminder is due",
-  });
-  expect(notify.getAttribute("aria-checked")).toBe("false");
-  fireEvent.click(notify);
-  await waitFor(() => expect(loadPreferences().notifyReminders).toBe(true));
-  expect(notify.getAttribute("aria-checked")).toBe("true");
-});
-
-test("denied permission leaves the switch off and explains how to allow notifications", async () => {
-  vi.mocked(notificationClient.requestPermission).mockResolvedValue(false);
-  render(
-    <SettingsView
-      selected="attention"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  const notify = screen.getByRole("switch", {
-    name: "Notify me when a reminder is due",
-  });
-  fireEvent.click(notify);
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "notification settings",
-  );
-  expect(notify.getAttribute("aria-checked")).toBe("false");
-  expect(loadPreferences().notifyReminders).toBe(false);
-});
-
-test("the Attention footer opens the inbox", () => {
-  const openInbox = vi.fn();
-  render(
-    <SettingsView
-      selected="attention"
-      onRestore={async () => {}}
-      onOpenInbox={openInbox}
-    />,
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Open the Attention inbox" }),
-  );
-  expect(openInbox).toHaveBeenCalled();
-});
-
-test("Location, Restore points and Export are one page in that order", async () => {
-  render(
-    <SettingsView
-      selected="backups-export"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+test("Location, Backups and Export are one page in that order", async () => {
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   await screen.findAllByText("workspace.sqlite3");
   expect(
     screen

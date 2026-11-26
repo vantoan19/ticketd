@@ -160,6 +160,8 @@ export function bridgeDefault(
         app_workspace_path: null,
         suggested_directory: "~/.local/bin",
       };
+    case "notification_permission":
+      return { state: "allowed", reported: false, settings: false };
     case "agent_skills":
       return [];
     case "show_plan":

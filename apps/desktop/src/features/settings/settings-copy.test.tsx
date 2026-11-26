@@ -15,7 +15,6 @@ import { SETTINGS_SECTIONS } from "@/features/settings/settings-sections";
 import { agentSkillsClient } from "@/lib/api/agent-skills";
 import { cliClient } from "@/lib/api/cli";
 import { diagnosticsClient } from "@/lib/api/diagnostics";
-import { notificationClient } from "@/lib/api/notifications";
 import { sourcesClient } from "@/lib/api/sources";
 import { workspaceClient } from "@/lib/api/workspace";
 import { syncApi } from "@/lib/sync-api";
@@ -55,8 +54,11 @@ vi.mock("@/lib/api/agent-skills", () => ({
 }));
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
-    permitted: vi.fn(),
-    requestPermission: vi.fn(),
+    permission: vi.fn(async () => ({
+      state: "allowed",
+      reported: true,
+      settings: true,
+    })),
     notify: vi.fn(),
   },
 }));
@@ -98,7 +100,6 @@ vi.mock("@/lib/sync-api", async (original) => ({
 }));
 
 beforeEach(() => {
-  vi.mocked(notificationClient.permitted).mockResolvedValue(true);
   vi.mocked(cliClient.check).mockResolvedValue({
     found: false,
     on_path: false,
@@ -172,7 +173,6 @@ test("Chat settings show harness names only in the catalog", async () => {
               selected="chat"
               onSelect={() => {}}
               onRestore={async () => {}}
-              onOpenInbox={() => {}}
             />
           </SyncStatusProvider>
         </TestReads>
@@ -201,7 +201,6 @@ test("every search entry's title and description are on the page it opens", asyn
               selected={section.id}
               onSelect={() => {}}
               onRestore={async () => {}}
-              onOpenInbox={() => {}}
             />
           </SyncStatusProvider>
         </TestReads>
@@ -240,7 +239,6 @@ test("a source page carries the title and description of its search entries", as
             selected="source-github"
             onSelect={() => {}}
             onRestore={async () => {}}
-            onOpenInbox={() => {}}
           />
         </SyncStatusProvider>
       </TestReads>

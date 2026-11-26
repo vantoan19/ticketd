@@ -47,6 +47,7 @@ commands, see the [contributor guide](../CONTRIBUTING.md#where-to-start).
 | [Chat host](../crates/ticketd-chat-host/) and [Claude bridge](../apps/chat-bridge-claude/) | The host supervises harness sessions. The bridge connects the host to the Claude Agent SDK. See [Native Chat runtime and storage](#native-chat-runtime-and-storage). |
 | [Automation runner](../crates/ticketd-automation-runner/)                                  | Executes Automations triggered by Workspace events. See [Automation runs](#automation-runs).                                                                         |
 | [Diagnostics](../crates/ticketd-diagnostics/)                                              | Configures logging for the CLI and desktop. See [Logging](#logging).                                                                                                 |
+| [macOS notifications](../crates/ticketd-macos-notifications/)                              | Reads and asks for ticketd's macOS notification permission; the one crate that may use `unsafe`, for Apple's callback pointer. Nothing on other platforms.           |
 
 Runtime failures exit with status 1. Argument validation errors exit with status 2. The core classifies a failure as a `FailureKind` (`failure.rs`) so an interface can choose its words and next step, and only the desktop uses it.
 

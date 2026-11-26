@@ -84,13 +84,7 @@ afterEach(() => {
 });
 
 async function openReview(onRestore: () => Promise<void> = async () => {}) {
-  render(
-    <SettingsView
-      selected="backups"
-      onRestore={onRestore}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups" onRestore={onRestore} />);
   fireEvent.click(screen.getByRole("button", { name: "Restore from a file…" }));
   return screen.findByRole("dialog");
 }
@@ -157,13 +151,7 @@ test("the consequence comes first, before the comparison (set BK-05)", async () 
 
 test("cancelling the file picker opens nothing and restores nothing", async () => {
   vi.mocked(workspaceClient.chooseBackupFile).mockResolvedValue(null);
-  render(
-    <SettingsView
-      selected="backups"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups" onRestore={async () => {}} />);
   fireEvent.click(screen.getByRole("button", { name: "Restore from a file…" }));
   await waitFor(() =>
     expect(workspaceClient.chooseBackupFile).toHaveBeenCalled(),

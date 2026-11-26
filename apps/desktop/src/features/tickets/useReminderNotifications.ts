@@ -1,19 +1,18 @@
 import { useEffect, useRef } from "react";
 import { inboxClient } from "@/lib/api/inbox";
 import { notificationClient } from "@/lib/api/notifications";
-import { usePreferences } from "@/lib/preferences";
+import { notificationsAllowed } from "@/lib/notification-permission";
 import { useOnWorkspaceChange } from "@/lib/workspace-change";
 
 /**
  * Shows one system notification per reminder that comes due while ticketd is
- * open and the preference is on. Reminders already in the inbox when this
+ * open and the system allows notifications. Reminders already in the inbox when this
  * starts stay inbox-only. `open` receives the ticket to show when the person
  * clicks the notification. The desktop delivers a reminder to the inbox when it
  * comes due, which moves the change token, so the inbox is read on each
  * workspace change rather than on a timer of its own.
  */
 export function useReminderNotifications(open: (reference: string) => void) {
-  const { notifyReminders } = usePreferences();
   const openRef = useRef(open);
   useEffect(() => {
     openRef.current = open;
@@ -21,7 +20,6 @@ export function useReminderNotifications(open: (reference: string) => void) {
   const changed = useRef(() => {});
   useOnWorkspaceChange(() => changed.current());
   useEffect(() => {
-    if (!notifyReminders) return;
     let active = true;
     let busy = false;
     // A change that came during a read is read once that read ends.
@@ -51,7 +49,7 @@ export function useReminderNotifications(open: (reference: string) => void) {
         const due = entries
           .filter((entry) => entry.kind === "reminder" && entry.id > previous)
           .reverse();
-        if (due.length === 0 || !(await notificationClient.permitted())) return;
+        if (due.length === 0 || !(await notificationsAllowed())) return;
         for (const entry of due)
           notificationClient.notify(
             entry.title,
@@ -90,5 +88,5 @@ export function useReminderNotifications(open: (reference: string) => void) {
       changed.current = () => {};
       stopListening?.();
     };
-  }, [notifyReminders]);
+  }, []);
 }

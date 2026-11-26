@@ -35,23 +35,26 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Follow tickets I create",
-    description: "Tickets you create in ticketd become followed tickets.",
+    description:
+      "Changes to them reach your Inbox. Tickets agents create aren’t followed.",
     keywords: "follow following inbox",
     section: "attention",
   },
   {
-    title: "Notify me when a reminder is due",
+    title: "System notifications",
     description:
-      "Shows a system notification while ticketd is open. Reminders that come due while it is closed appear only in the inbox.",
-    keywords: "notification notifications reminder alert permission",
+      "Due reminders, and Chats that need you, while ticketd is open.",
+    keywords:
+      "notification notifications reminder alert permission allow blocked system settings",
     section: "attention",
   },
   {
-    title: "Attention inbox",
+    title: "Chat notifications",
     description:
-      "Followed tickets and due reminders collect here. Follows and reminders belong to the person on this computer.",
-    keywords: "inbox follows reminders open",
+      "Approvals, questions, failures and finished turns. Mute one Chat from its menu.",
+    keywords: "chat notification notifications alert sound badge dock mute",
     section: "attention",
+    needsChat: true,
   },
   {
     title: "Location",
@@ -153,13 +156,6 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     description: "Each harness runs on this computer with its own sign-in.",
     keywords:
       "harness claude code codex installed detected signed in check again copy command",
-    section: "agents",
-    needsChat: true,
-  },
-  {
-    title: "Notify me about Chats",
-    description: "Approvals, questions, failures and finished turns.",
-    keywords: "chat notification notifications alert sound badge dock mute",
     section: "agents",
     needsChat: true,
   },
@@ -402,8 +398,7 @@ const chatOnly = (entry: SettingsEntry) =>
 /** Stands in for Chat-only rows while Chat is off: the Agents page is where it is turned on. */
 const CHAT_PAGE_ENTRY: SettingsEntry = {
   title: "Agents",
-  description:
-    "Turn on Chat to set up harnesses, notifications and Automations.",
+  description: "Turn on Chat to set up harnesses and Automations.",
   section: "agents",
 };
 
