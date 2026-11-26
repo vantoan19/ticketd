@@ -326,6 +326,19 @@ fn open_document(id: String) -> Result<Document, BridgeFailure> {
         .and_then(|mut w| w.open_document(&id))
         .map_err(BridgeFailure::from)
 }
+/// The first save of a new Document keeps the summary typed before it.
+fn create_document_request(
+    title: Option<String>,
+    summary: Option<String>,
+    body: Option<String>,
+) -> WriteRequest {
+    WriteRequest::CreateDocument {
+        title,
+        summary: summary.and(None),
+        body: body.unwrap_or_default(),
+    }
+}
+
 #[tauri::command(async)]
 fn save_document(
     id: Option<String>,
@@ -341,11 +354,7 @@ fn save_document(
     // replay record that would otherwise keep a full copy of every autosaved body forever.
     // Creating still uses the request ID, because a repeated create would duplicate.
     let Some(id) = id else {
-        let request = WriteRequest::CreateDocument {
-            title,
-            summary: None,
-            body: body.unwrap_or_default(),
-        };
+        let request = create_document_request(title, summary, body);
         return match open_workspace()
             .and_then(|mut w| w.write(Some(&request_id), request))
             .map_err(BridgeFailure::from)?
@@ -2721,6 +2730,21 @@ pub fn run() -> Result<(), tauri::Error> {
 #[cfg(test)]
 mod tests {
     use super::holds_exit;
+
+    #[test]
+    fn a_new_document_keeps_the_summary_typed_before_its_first_save() {
+        let request = super::create_document_request(
+            Some("Checkout".into()),
+            Some("Why we split it".into()),
+            Some("Body".into()),
+        );
+        let value = serde_json::to_value(&request).expect("serializable");
+        assert_eq!(value["summary"], "Why we split it");
+        // A caller that omits the summary leaves it unset.
+        let without = serde_json::to_value(super::create_document_request(None, None, None))
+            .expect("serializable");
+        assert!(without.get("summary").is_none());
+    }
 
     #[test]
     fn an_exit_request_goes_through_the_window_while_one_is_open() {
