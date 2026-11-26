@@ -434,6 +434,10 @@ impl HostLifecycle {
             .unwrap_or_else(PoisonError::into_inner)
     }
 
+    pub(crate) fn has_pending_open_cleanup(&self, chat_id: &str) -> bool {
+        self.pending_open_cleanup().contains(chat_id)
+    }
+
     pub(crate) fn hold_pending_open_cleanup(&self, chat_id: &str) {
         self.pending_open_cleanup().insert(chat_id.to_owned());
     }
@@ -1340,12 +1344,7 @@ impl ChatHost {
         {
             return Err(HostError::Working);
         }
-        if self
-            .inner
-            .lifecycle
-            .pending_open_cleanup()
-            .contains(chat_id)
-        {
+        if self.inner.lifecycle.has_pending_open_cleanup(chat_id) {
             return Err(HostError::PermissionRestartCleanupUnconfirmed);
         }
         Ok(())

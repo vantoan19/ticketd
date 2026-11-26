@@ -6,7 +6,7 @@
 use std::future::poll_fn;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::task::Poll;
 use std::time::Duration;
 
@@ -21,8 +21,8 @@ use ticketd_chat_host::{
     NoticeKind, Problem, ProblemKind, ProviderDetail, QuestionAnswer, ResumeMode,
     RuntimeGeneration, SUBSCRIBER_BACKLOG_ITEMS, SendMode, SessionStart, StopReason, StopState,
     Submission, SubmissionId, SubmissionKind, Subscription, TEXT_CHECKPOINT_INTERVAL,
-    TEXT_UPDATE_INTERVAL, ToolStatus, TurnEnding, TurnOutcome, UnconfirmedCleanup, WorkspaceOpener,
-    problem_kind,
+    TEXT_UPDATE_INTERVAL, ToolStatus, TurnEnd, TurnEnding, TurnOutcome, Unattended,
+    UnconfirmedCleanup, WorkspaceOpener, problem_kind,
 };
 use ticketd_chat_host::{
     AppliesFrom, ContextUsage, FileChange, FileChangeKind, HarnessSettings, PermissionKind, Plan,
@@ -30,9 +30,11 @@ use ticketd_chat_host::{
     SettingOption, SettingOutcome, StartSettings,
 };
 use ticketd_core::{
-    Chat, ChatAttachmentContent, ChatDelivery, ChatDeliveryDecision, ChatInteractionState,
-    ChatItem, ChatMessage, ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent,
-    ChatToolState, ChatTurn, ChatTurnState, Error, NewChat, Workspace, WorkspaceSession,
+    AgentHarness, AutomationAgentSettings, AutomationAgentTools, AutomationDefinition, Chat,
+    ChatAttachmentContent, ChatDelivery, ChatDeliveryDecision, ChatInteractionState, ChatItem,
+    ChatMessage, ChatRecord, ChatRole, ChatSessionOrigin, ChatSubmissionIntent, ChatToolState,
+    ChatTurn, ChatTurnState, Error, NewChat, RunAction, Step, StepAction, Trigger, Workspace,
+    WorkspaceSession,
 };
 
 struct Fixture {
@@ -84,6 +86,58 @@ impl Fixture {
 
     fn core(&self) -> Workspace {
         Workspace::open(&self.path).unwrap()
+    }
+
+    fn automation_chat(&self) -> (String, Unattended) {
+        let mut core = self.core();
+        let tools = AutomationAgentTools {
+            read_files: true,
+            edit_files: false,
+            run_commands: true,
+            any_command: true,
+            allowed_commands: Vec::new(),
+            use_web: false,
+        };
+        let agent = core
+            .create_automation_agent(AutomationAgentSettings {
+                name: "Triage".into(),
+                tools: tools.clone(),
+                harness: AgentHarness::Codex,
+                model: None,
+                instructions: "Triage the ticket.".into(),
+                turn_limit: 2,
+                time_limit_minutes: 5,
+            })
+            .unwrap();
+        let automation = core
+            .create_automation(AutomationDefinition {
+                name: "Triage ticket".into(),
+                trigger: Some(Trigger::ByHand),
+                conditions: Vec::new(),
+                steps: vec![Step {
+                    id: "triage".into(),
+                    action: StepAction::RunAgent {
+                        agent_id: Some(agent.id),
+                        execution_folder: Some(self._dir.path().to_string_lossy().into_owned()),
+                        on_failure: None,
+                    },
+                }],
+            })
+            .unwrap();
+        let run = core.run_automation_now(&automation.id).unwrap();
+        core.start_automation_runs(1).unwrap();
+        let RunAction::RunAgent(step) = core.advance_automation_run(&run.id, None).unwrap() else {
+            panic!("the run should own an agent Chat");
+        };
+        (
+            step.chat_id,
+            Unattended {
+                run_id: run.id,
+                model: None,
+                tools,
+                turn_limit: 2,
+            },
+        )
     }
 
     fn items(&self) -> Vec<ChatItem> {
@@ -967,6 +1021,136 @@ async fn detaching_a_view_does_not_stop_the_turn_and_reattaching_starts_nothing(
     assert_eq!(view.live.activity, Activity::Working);
     assert_eq!(f.fake.opens().len(), 1);
     assert_eq!(f.fake.written().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn automation_dispatches_its_prompt_without_draining_older_ordinary_input() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let (chat_id, unattended) = f.automation_chat();
+    let older = f
+        .core()
+        .save_chat_input(None, &chat_id, "Older ordinary input")
+        .unwrap();
+    assert!(!f.core().chat(&chat_id).unwrap().queue_paused);
+
+    let run = tokio::spawn({
+        let host = f.host.clone();
+        let chat_id = chat_id.clone();
+        async move {
+            host.run_unattended(
+                &chat_id,
+                "Run-owned Prompt",
+                unattended,
+                Duration::from_secs(60),
+            )
+            .await
+        }
+    });
+    settle().await;
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.submits()[0].text, "Run-owned Prompt");
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert!(matches!(run.await.unwrap(), Ok(TurnEnd::Finished)));
+    let queue = f.core().chat_queue(&chat_id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].id, older.id);
+    assert_eq!(f.submits().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_saved_takeover_reply_dispatches_after_its_queue_read_recovers() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let (chat_id, _) = f.automation_chat();
+    let reads = Arc::new(AtomicUsize::new(0));
+    let fails = Arc::new(AtomicUsize::new(0));
+    let opener: WorkspaceOpener = {
+        let (path, chat_id, reads, fails) = (
+            f.path.clone(),
+            chat_id.clone(),
+            reads.clone(),
+            fails.clone(),
+        );
+        Arc::new(move || {
+            let core = WorkspaceSession::for_file(&path)?.workspace()?;
+            // The first post-takeover read admits the ordinary supervisor. With
+            // no old runtime, its next read is the saved reply's queue lookup.
+            if core.automation_chat_harness(&chat_id)?.is_none()
+                && reads.fetch_add(1, Ordering::SeqCst) == 1
+            {
+                fails.fetch_add(1, Ordering::SeqCst);
+                return Err(Error::NoDataDirectory);
+            }
+            Ok(core)
+        })
+    };
+    let host = ChatHost::new(opener, vec![Arc::new(f.fake.clone())]).unwrap();
+
+    let send = || {
+        host.send(
+            &chat_id,
+            Some("takeover-reply"),
+            "Saved reply",
+            SendMode::Auto,
+        )
+    };
+    let receipt = send().await.unwrap();
+    settle().await;
+    assert_eq!(fails.load(Ordering::SeqCst), 1);
+    assert!(f.submits().is_empty());
+    assert_eq!(f.core().chat_queue(&chat_id).unwrap()[0].id, receipt.id);
+
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    settle().await;
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.submits()[0].text, "Saved reply");
+    assert!(f.core().chat_queue(&chat_id).unwrap().is_empty());
+
+    let repeated = send().await.unwrap();
+    settle().await;
+    assert_eq!(repeated.id, receipt.id);
+    assert_eq!(f.submits().len(), 1);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_pending_open_blocks_both_resume_paths_until_late_cleanup_finishes() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let first_open = f.fake.hold_next_open();
+    f.send("Resume this input").await;
+    assert_eq!(f.live().await.opening, Some(ChatSessionOrigin::New));
+    assert!(f.fake.opens().is_empty());
+
+    f.storage_up.store(false, Ordering::SeqCst);
+    assert!(f.host.resume_queue(&f.chat.id).await.is_err());
+    f.storage_up.store(true, Ordering::SeqCst);
+
+    // Both commands reach the same supervisor before it records the hold.
+    let mut explicit = Box::pin(f.host.resume(&f.chat.id, ResumeMode::Native));
+    let mut queue = Box::pin(f.host.resume_queue(&f.chat.id));
+    poll_fn(|context| {
+        assert!(explicit.as_mut().poll(context).is_pending());
+        assert!(queue.as_mut().poll(context).is_pending());
+        Poll::Ready(())
+    })
+    .await;
+    assert!(matches!(
+        explicit.await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    queue.await.unwrap();
+    settle().await;
+    assert!(f.fake.opens().is_empty());
+    assert!(f.submits().is_empty());
+
+    let first_close = f.fake.hold_next_close();
+    first_open.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 1);
+    assert!(matches!(f.fake.written().as_slice(), [Written::Close(_)]));
+    first_close.send(()).unwrap();
+    settle().await;
+    assert_eq!(f.fake.opens().len(), 2);
+    assert_eq!(f.submits().len(), 1);
+    assert_eq!(f.submits()[0].text, "Resume this input");
 }
 
 #[tokio::test(start_paused = true)]

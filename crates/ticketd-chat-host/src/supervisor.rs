@@ -10,6 +10,7 @@ use std::future::{Future, pending};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::Duration;
 
 use ticketd_core::{
     Chat, ChatAttachmentContent, ChatInputReceipt, ChatInteractionKind, ChatInteractionState,
@@ -56,6 +57,8 @@ use crate::{
     Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, Submission,
     SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
 };
+
+const SAVED_REPLY_RETRY: Duration = Duration::from_millis(250);
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
 
@@ -132,6 +135,7 @@ enum Done {
         /// The ticketd context read for the new session, or why it could not be.
         context: Result<Option<String>, String>,
     },
+    OpenCleanupComplete,
     Dispatched {
         outcome: DispatchOutcome,
     },
@@ -156,6 +160,11 @@ enum Done {
         value: String,
         outcome: SettingOutcome,
     },
+}
+
+struct SavedReply {
+    message_id: String,
+    retry_at: Instant,
 }
 
 struct Runtime {
@@ -308,6 +317,8 @@ pub(crate) struct Supervisor {
     /// The person resumed the queue or sent into it, so it may open a session. Without
     /// that, queued input waits for a live runtime: viewing a Chat starts nothing.
     queue_started: bool,
+    /// The takeover reply is already saved. Keep its dispatch intent through a read failure.
+    saved_reply: Option<SavedReply>,
     /// The runtime is being closed on purpose; its connection ending is not a loss.
     closing: bool,
     /// Something may have been written since views were last brought up to date.
@@ -415,6 +426,7 @@ impl Supervisor {
             shutting_down: false,
             shut_down_for: None,
             queue_started: false,
+            saved_reply: None,
             closing: false,
             unpublished: true,
             refreshing: None,
@@ -435,6 +447,7 @@ impl Supervisor {
                 self.checkpoint_at,
                 self.stop_deadline,
                 self.unconfirmed_deadline,
+                self.saved_reply.as_ref().map(|saved| saved.retry_at),
             ]
             .into_iter()
             .flatten()
@@ -633,9 +646,14 @@ impl Supervisor {
     fn hold_queue(&mut self) {
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
+        self.clear_direct();
+        self.resend = None;
+    }
+
+    fn clear_direct(&mut self) {
+        self.saved_reply = None;
         self.direct.clear();
         self.direct_from_queue.clear();
-        self.resend = None;
     }
 
     /// Keeps the person's latest permission change the runtime has not answered (held
@@ -703,7 +721,10 @@ impl Supervisor {
                 });
                 if let Ok(message) = &result {
                     let _ = unattended.first_message.set(message.id.clone());
-                    self.schedule_saved(message, self.active.is_none());
+                    // The run cannot drain the ordinary queue, even when older input waits.
+                    if self.active.is_none() && self.can_schedule_saved(message) {
+                        self.direct.push_back(message.id.clone());
+                    }
                 }
                 let _ = reply.send(result);
             }
@@ -724,18 +745,11 @@ impl Supervisor {
                 ));
             }
             Command::ScheduleSaved { message_id, reply } => {
-                let result = self.core(|core| core.chat_queue(&self.chat_id));
-                let _ = reply.send(
-                    result
-                        .map(|queue| {
-                            if let Some(message) =
-                                queue.into_iter().find(|row| row.id == message_id)
-                            {
-                                self.schedule_saved(&message, self.active.is_none());
-                            }
-                        })
-                        .map_err(HostError::from),
-                );
+                self.saved_reply = Some(SavedReply {
+                    message_id,
+                    retry_at: Instant::now(),
+                });
+                let _ = reply.send(Ok(()));
             }
             Command::Stop(reply) => {
                 let _ = reply.send(self.request_stop());
@@ -1051,20 +1065,69 @@ impl Supervisor {
         Ok(receipt)
     }
 
-    fn schedule_saved(&mut self, message: &ChatMessage, immediate: bool) {
-        if immediate
-            && !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
+    fn can_schedule_saved(&self, message: &ChatMessage) -> bool {
+        !self.lifecycle.has_retired_permission_runtime(&self.chat_id)
             && message.queued
             && !message.editing
             && !self.prepared_queue_edits.contains(&message.id)
             && !self.direct.contains(&message.id)
-        {
+    }
+
+    fn schedule_saved(&mut self, message: &ChatMessage, immediate: bool) {
+        if immediate && self.can_schedule_saved(message) {
             if self.active.is_none() && self.older_input_waits(&message.id) {
                 // Older input waits in a queue that is not paused: this goes after
                 // it, and the queue runs.
                 self.queue_started = true;
             } else {
                 self.direct.push_back(message.id.clone());
+            }
+        }
+    }
+
+    /// Returns false while a saved takeover reply still needs its queue order read.
+    fn schedule_takeover_reply(&mut self) -> bool {
+        let Some(saved) = &self.saved_reply else {
+            return true;
+        };
+        if saved.retry_at > Instant::now() {
+            return false;
+        }
+        let chat_id = &self.chat_id;
+        match self.core(|core| {
+            let chat = core.chat(chat_id)?;
+            Ok((chat.trashed, chat.queue_paused, core.chat_queue(chat_id)?))
+        }) {
+            Ok((trashed, paused, queue)) => {
+                if !trashed
+                    && self.active.is_none()
+                    && let Some(message) =
+                        queue.iter().find(|message| message.id == saved.message_id)
+                    && self.can_schedule_saved(message)
+                {
+                    if !paused
+                        && queue
+                            .iter()
+                            .find(|row| !row.editing)
+                            .is_some_and(|first| first.id != message.id)
+                    {
+                        self.queue_started = true;
+                    } else {
+                        self.direct.push_front(message.id.clone());
+                    }
+                }
+                self.saved_reply = None;
+                true
+            }
+            Err(error) if is_refusal(&error) => {
+                self.saved_reply = None;
+                true
+            }
+            Err(_) => {
+                if let Some(saved) = &mut self.saved_reply {
+                    saved.retry_at = Instant::now() + SAVED_REPLY_RETRY;
+                }
+                false
             }
         }
     }
@@ -1219,8 +1282,7 @@ impl Supervisor {
     fn request_stop(&mut self) -> Result<(), HostError> {
         let chat = self.chat_id.clone();
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
         if self.active.is_some() {
             self.interrupt();
         } else if self.unconfirmed_start.is_some()
@@ -1255,8 +1317,7 @@ impl Supervisor {
         }
         self.confirm_permission_restart_cleanup().await?;
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
         self.problem = None;
         self.resend = Some(message_id);
         Ok(())
@@ -1272,8 +1333,7 @@ impl Supervisor {
         }]);
         let chat = self.chat_id.clone();
         let _ = self.write(|core| core.set_chat_queue_paused(&chat, true));
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
         self.stop = None;
         self.stop_deadline = None;
     }
@@ -1533,7 +1593,13 @@ impl Supervisor {
         preamble: Option<String>,
         reply: Option<Reply<()>>,
     ) {
-        if let Err(error) = self.lifecycle.serving() {
+        let readiness = self.lifecycle.serving().and_then(|()| {
+            if self.lifecycle.has_pending_open_cleanup(&self.chat_id) {
+                return Err(HostError::PermissionRestartCleanupUnconfirmed);
+            }
+            Ok(())
+        });
+        if let Err(error) = readiness {
             if let Some(reply) = reply {
                 let _ = reply.send(Err(error));
             }
@@ -1637,6 +1703,7 @@ impl Supervisor {
                         lifecycle.retire_runtime(&chat_id, runtime, true);
                     }
                     lifecycle.release_pending_open_cleanup(&chat_id);
+                    let _ = done.send(Done::OpenCleanupComplete);
                 }
             }
             .instrument(chat_span),
@@ -1796,8 +1863,7 @@ impl Supervisor {
         self.interactions.clear();
         self.text.clear();
         self.pending_tools.clear();
-        self.direct.clear();
-        self.direct_from_queue.clear();
+        self.clear_direct();
         self.resend = None;
         self.stop = None;
         self.stop_deadline = None;
@@ -1893,8 +1959,10 @@ impl Supervisor {
     /// sent goes first; queued input follows only while a runtime is live and the queue
     /// is not paused, so viewing or restoring a Chat never starts work.
     fn pump(&mut self) {
-        if self.shutting_down
+        if !self.schedule_takeover_reply()
+            || self.shutting_down
             || self.lifecycle.serving().is_err()
+            || self.lifecycle.has_pending_open_cleanup(&self.chat_id)
             || self.lifecycle.has_retired_permission_runtime(&self.chat_id)
             || self.storage_failed.is_some()
             || self.dispatching.is_some()
@@ -2149,6 +2217,7 @@ impl Supervisor {
                 accepted,
                 context,
             } => self.on_opened(generation, result, accepted, context),
+            Done::OpenCleanupComplete => {}
             Done::Dispatched { outcome } => self.on_dispatched(outcome),
             Done::Context {
                 generation,
