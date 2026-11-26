@@ -20,8 +20,69 @@ afterEach(() => {
   cleanup();
   bridge.invoke.mockReset();
 });
-test("keeps the saved project and reports a failed change", async () => {
-  bridge.invoke.mockRejectedValue(new Error("Database busy; retry"));
+test.each([
+  [new Error("Database busy; retry"), "The result couldn't be confirmed", true],
+  [
+    {
+      code: "project_archived",
+      message: "Project is archived. Reactivate it, or choose another project.",
+    },
+    "Couldn't move T-KQ1 to Project. Project is archived. Reactivate it, or choose another project.",
+    false,
+  ],
+])(
+  "keeps the saved project when the change is refused",
+  async (reason, message, retry) => {
+    bridge.invoke.mockRejectedValue(reason);
+    render(
+      <TicketProperties
+        ticket={{
+          id: "1",
+          reference: "T-KQ1",
+          title: "Ticket",
+          body: "",
+          status: "Todo",
+          tags: [],
+          project_id: null,
+          plan_id: null,
+          trashed: false,
+          availability: null,
+          parent: null,
+          children: [],
+          prerequisites: [],
+        }}
+        projects={[{ id: "p", name: "Project", path: "/p", paths: [] }]}
+        plans={[]}
+        onSaved={() => {}}
+        refresh={async () => {}}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /Project: No project/ }),
+    );
+    const search = await screen.findByLabelText("Search projects");
+    fireEvent.change(search, {
+      target: { value: "Project" },
+    });
+    fireEvent.keyDown(search, {
+      key: "Enter",
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("alert").textContent).toContain(message),
+    );
+    expect(Boolean(screen.queryByRole("button", { name: "Retry" }))).toBe(
+      retry,
+    );
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: /Project: No project/ }),
+      ),
+    );
+  },
+);
+
+test("the Project property groups the current archive and explains other archived matches", async () => {
+  bridge.invoke.mockResolvedValue([]);
   render(
     <TicketProperties
       ticket={{
@@ -31,7 +92,7 @@ test("keeps the saved project and reports a failed change", async () => {
         body: "",
         status: "Todo",
         tags: [],
-        project_id: null,
+        project_id: "current",
         plan_id: null,
         trashed: false,
         availability: null,
@@ -39,30 +100,34 @@ test("keeps the saved project and reports a failed change", async () => {
         children: [],
         prerequisites: [],
       }}
-      projects={[{ id: "p", name: "Project", path: "/p", paths: [] }]}
+      projects={[
+        { id: "current", name: "Saved", path: "", paths: [], archived: true },
+        { id: "hidden", name: "Old", path: "", paths: [], archived: true },
+        { id: "active", name: "Open", path: "", paths: [] },
+      ]}
       plans={[]}
       onSaved={() => {}}
       refresh={async () => {}}
     />,
   );
-  fireEvent.click(screen.getByRole("button", { name: /Project: No project/ }));
+  const property = screen.getByRole("button", {
+    name: "Project: Saved (archived)",
+  });
+  fireEvent.click(property);
   const search = await screen.findByLabelText("Search projects");
-  fireEvent.change(search, {
-    target: { value: "Project" },
-  });
-  fireEvent.keyDown(search, {
-    key: "Enter",
-  });
-  await waitFor(() =>
-    expect(screen.getByRole("alert").textContent).toContain(
-      "The result couldn't be confirmed",
-    ),
+  const saved = screen.getByRole("option", { name: "Saved", selected: true });
+  expect(saved.getAttribute("aria-checked")).toBe("true");
+  expect(screen.getByText("Archived")).toBeTruthy();
+  expect(screen.getAllByRole("option").map((item) => item.textContent)).toEqual(
+    ["Open", "Saved", "No project"],
   );
-  await waitFor(() =>
-    expect(document.activeElement).toBe(
-      screen.getByRole("button", { name: /Project: No project/ }),
+  fireEvent.change(search, { target: { value: "Old" } });
+  expect(
+    await screen.findByText(
+      "Old is archived. Reactivate it on the Projects page to link it.",
     ),
-  );
+  ).toBeTruthy();
+  expect(screen.queryByRole("option")).toBeNull();
 });
 
 test("a duplicate links to its canonical ticket beside the status, even in trash", () => {

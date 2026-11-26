@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTicketBoard } from "./useTicketBoard";
 import { useBoardStatus } from "./useBoardStatus";
 import {
@@ -342,6 +349,12 @@ export function useTicketWorkspace(
       takeExplanation,
     ],
   );
+  // A write can finish after navigation, including when its view has unmounted.
+  const currentRefresh = useRef(refresh);
+  useLayoutEffect(() => {
+    currentRefresh.current = refresh;
+  }, [refresh]);
+  const refreshCurrentScope = useCallback(() => currentRefresh.current(), []);
   const readSourceEntries = useCallback(() => {
     const request = ++sourceRead.current;
     const complete = sourcesClient.list().then(
@@ -501,6 +514,14 @@ export function useTicketWorkspace(
     await reported;
     return ticket.reference;
   }
+  // A committed archive changes the catalog even if the next list read fails.
+  const patchProject = useCallback((updated: Project) => {
+    generation.current += 1;
+    lastSnapshot.current = "";
+    setProjects((items) =>
+      items.map((item) => (item.id === updated.id ? updated : item)),
+    );
+  }, []);
   // Shows a Ticket a write returned in the list at once (the Ticket list is not
   // on the reads module yet) and drops a list read sent before the write.
   const patchTicket = useCallback((updated: Ticket) => {
@@ -635,6 +656,7 @@ export function useTicketWorkspace(
     readSourceHealth,
     refreshSources,
     projects,
+    patchProject,
     plans,
     plansKnown,
     plansFailure,
@@ -680,6 +702,7 @@ export function useTicketWorkspace(
     loading,
     revision,
     refresh,
+    refreshCurrentScope,
     create,
     patchTicket,
     scopeName,

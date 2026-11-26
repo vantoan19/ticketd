@@ -1,7 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { client, type Project, type Ticket } from "@/lib/api/client";
 import { inboxClient } from "@/lib/api/inbox";
 import { failureText } from "@/lib/api/describe-failure";
+import {
+  archivedProjectHint,
+  archivedProjectMatch,
+  projectAssignmentChoices,
+} from "@/features/projects/project-assignment";
 import { editingBlockedReason, useWorkspaceState } from "@/lib/workspace-state";
 import { useStatusLine } from "@/components/ui/use-status-line";
 import {
@@ -11,7 +16,12 @@ import {
 import { reminderPresets } from "@/features/tickets/reminder-presets";
 import type { TicketCommandScope } from "@/lib/ticket-command-actions";
 
-type Option = { value: string; label: string; selected?: boolean };
+type Option = {
+  value: string;
+  label: string;
+  selected?: boolean;
+  group?: string;
+};
 export function useTicketCommands({
   reference,
   initialTicket,
@@ -47,7 +57,21 @@ export function useTicketCommands({
   } | null>(null);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState<(() => void) | null>(null);
-  const [pending, setPending] = useState(false);
+  const opening = useMemo(
+    () => ({ open, reference, scope }),
+    [open, reference, scope],
+  );
+  const currentOpening = useRef<typeof opening | null>(null);
+  useLayoutEffect(() => {
+    currentOpening.current = opening;
+    return () => {
+      currentOpening.current = null;
+    };
+  }, [opening]);
+  const [pendingOpening, setPendingOpening] = useState<typeof opening | null>(
+    null,
+  );
+  const pending = pendingOpening === opening;
   const [duplicate, setDuplicate] = useState(false);
   const [leaving, setLeaving] = useState<string | null>(null);
   const blocked =
@@ -144,11 +168,12 @@ export function useTicketCommands({
       }));
     if (scope === "Project")
       options = [
-        ...projects.map((p) => ({
-          value: p.id,
-          label: p.name,
-          selected: p.id === ticket.project_id,
-        })),
+        ...projectAssignmentChoices(projects, ticket.project_id).map(
+          (option) => ({
+            ...option,
+            selected: option.value === ticket.project_id,
+          }),
+        ),
         {
           value: "",
           label: "No project",
@@ -191,6 +216,16 @@ export function useTicketCommands({
     )
   )
     options.push({ value: query.trim(), label: `Create “${query.trim()}”` });
+  if (scope === "Project" && query.trim()) {
+    const needle = query.trim().toLowerCase();
+    options = options.filter((option) =>
+      option.label.toLowerCase().includes(needle),
+    );
+  }
+  const archivedMatch =
+    scope === "Project" && options.length === 0
+      ? archivedProjectMatch(projects, query)
+      : undefined;
   async function apply(
     value: string,
     confirmed = false,
@@ -201,6 +236,7 @@ export function useTicketCommands({
     const subject = read ?? ticket;
     if (
       !subject ||
+      currentOpening.current !== opening ||
       blocked ||
       pending ||
       !scope ||
@@ -208,30 +244,38 @@ export function useTicketCommands({
     )
       return;
     if (
-      scope === "Status" &&
-      subject.status === value &&
-      (value !== "Duplicate" || externalSource(subject))
+      (scope === "Status" &&
+        subject.status === value &&
+        (value !== "Duplicate" || externalSource(subject))) ||
+      (scope === "Project" && value === (subject.project_id ?? ""))
     ) {
       // Only a read made now says it is already set (the ADR's check before a
       // write); a copy from before a change elsewhere would close without writing.
       if (!read) {
-        setPending(true);
+        setPendingOpening(opening);
         let current: Ticket;
         try {
           current = await client.showTicket(subject.reference);
         } catch (reason) {
-          const message = failureText(reason, "check the status");
+          if (currentOpening.current !== opening) return;
+          const message = failureText(
+            reason,
+            `check the ${scope.toLowerCase()}`,
+          );
           setError(message);
           line.show({ message, tone: "error" });
           return;
         } finally {
-          setPending(false);
+          setPendingOpening((pending) =>
+            pending === opening ? null : pending,
+          );
         }
         return apply(value, confirmed, customAt, current);
       }
       close();
       return;
     }
+
     if (scope === "Status" && value === "Duplicate") {
       setFlowTicket(subject);
       close();
@@ -253,19 +297,25 @@ export function useTicketCommands({
     let forward: () => Promise<Ticket | void>;
     let undo: () => Promise<Ticket | void>;
     let message: string;
+    let failureAction = `change ${scope.toLowerCase()}`;
     switch (scope) {
       case "Status":
         forward = () => client.changeTicket(reference, { status: value });
         undo = () => client.changeTicket(reference, { status: subject.status });
         message = `Moved ${reference} to ${value}`;
         break;
-      case "Project":
+      case "Project": {
+        const destination =
+          projects.find((project) => project.id === value)?.name ??
+          "No project";
+        failureAction = `move ${reference} to ${destination}`;
         forward = () =>
           client.changeTicket(reference, { project_id: value || null });
         undo = () =>
           client.changeTicket(reference, { project_id: subject.project_id });
-        message = `Moved ${reference} to ${projects.find((p) => p.id === value)?.name ?? "No project"}`;
+        message = `Moved ${reference} to ${destination}`;
         break;
+      }
       case "Plan":
         forward = () => client.setPlan(reference, value || null);
         undo = () => client.setPlan(reference, subject.plan_id);
@@ -305,8 +355,11 @@ export function useTicketCommands({
           };
         const attempt = reminderAttempt.current;
         const undoRequestId = crypto.randomUUID();
-        forward = () =>
-          inboxClient.snooze(reference, attempt.dueAt, attempt.requestId);
+        forward = async () => {
+          await inboxClient.snooze(reference, attempt.dueAt, attempt.requestId);
+          if (reminderAttempt.current === attempt)
+            reminderAttempt.current = null;
+        };
         undo = () =>
           inboxClient.snooze(reference, attempt.previousDue, undoRequestId);
         message = dueAt
@@ -315,16 +368,21 @@ export function useTicketCommands({
         break;
       }
     }
-    setPending(true);
+    setPendingOpening(opening);
     try {
       const written = await forward();
-      if (scope === "Reminder") reminderAttempt.current = null;
-      setRetry(null);
-      setError("");
-      close();
+      if (currentOpening.current === opening) {
+        setRetry(null);
+        setError("");
+        close();
+      }
       line.show({
         message,
-        ...(scope !== "Status" || subject.status !== "Duplicate"
+        ...((scope !== "Status" || subject.status !== "Duplicate") &&
+        (scope !== "Project" ||
+          !projects.some(
+            (project) => project.id === subject.project_id && project.archived,
+          ))
           ? {
               undo: async () => {
                 await refresh((await undo()) ?? undefined);
@@ -340,20 +398,23 @@ export function useTicketCommands({
         }),
       );
     } catch (reason) {
-      const message = failureText(reason, `change ${scope.toLowerCase()}`);
-      setError(message);
-      if (scope === "Reminder")
-        setRetry(() => () => {
-          void apply(value, confirmed, customAt);
-        });
+      const message = failureText(reason, failureAction);
+      if (currentOpening.current === opening) {
+        setError(message);
+        if (scope === "Reminder")
+          setRetry(() => () => {
+            void apply(value, confirmed, customAt);
+          });
+      }
       line.show({ message, tone: "error" });
     } finally {
-      setPending(false);
+      setPendingOpening((pending) => (pending === opening ? null : pending));
     }
   }
   return {
     ticket,
     options,
+    projectHint: archivedMatch ? archivedProjectHint(archivedMatch) : undefined,
     apply,
     blocked,
     pending: pending || (scope === "Reminder" && reminderLoaded !== reference),

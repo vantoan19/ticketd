@@ -3,7 +3,7 @@
 ## Discover and read
 
 ```sh
-ticketd project list
+ticketd project list --all
 ticketd list --project PROJECT_ID --limit 20
 ticketd search "search text" --project PROJECT_ID --limit 20
 ticketd show T-KQ1
@@ -35,8 +35,10 @@ ticketd remove-tag T-KQ1 research
 ```
 
 Creation requires only a title. Direct `create` can also take `--plan`; without an
-explicit project it checks registered checkout paths, including parent directories.
-Ambiguous matches fail; no match creates an unlinked ticket. JSON creation and
+explicit project it checks active Projects' registered checkout paths, including
+parent directories. Archived Projects keep their registrations and are skipped
+during inference. Ambiguous matches fail, and no active match creates an unlinked
+ticket. JSON creation and
 batches require explicit `project_id` to link a project.
 
 A title is one non-empty line of at most 1000 characters; put detail in the body. A
@@ -92,7 +94,12 @@ project; `unregister` removes a registration. Discover existing projects before
 creating one. `project create` saves a detected Project remote from `upstream` or `origin`,
 with `--remote host/owner/name` to override it or `--no-remote` to skip detection.
 `project edit ID NAME PATH` accepts `--remote host/owner/name` or
-`--clear-remote`. `project show` and `project list` include the `remote` field.
+`--clear-remote`. Project results include `remote` and `archived`.
+
+Use `ticketd project archive ID` to keep existing links and settings while
+setting a project aside. Use `ticketd project reactivate ID` to resume active use
+and change its settings. `ticketd project list --all` includes both states.
+`ticketd project show ID` and `ticketd list --project ID` work in either state.
 Registering a checkout with a different detected remote still succeeds and
 prints a warning to stderr. Paths are native to the OS; WSL interoperability is not validated.
 

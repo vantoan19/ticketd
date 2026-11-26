@@ -46,7 +46,14 @@ import { ariaKeyShortcuts, matchesShortcut } from "@/lib/shortcuts";
 import { Duplicates } from "@/features/tickets/Duplicates";
 import { ConfirmLeaveDuplicate } from "@/features/tickets/ConfirmLeaveDuplicate";
 import { useResultCascade } from "./use-result-cascade";
-import { useContext, useEffect, useRef, useState, type RefObject } from "react";
+import {
+  Fragment,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
 import {
   Inbox,
   ListTodo,
@@ -70,6 +77,7 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
+  CommandSeparator,
   CommandShortcut,
   CommandMatch,
 } from "@/components/ui/command";
@@ -556,37 +564,68 @@ export function CommandPalette({
               </div>
             )}
             <CommandList ref={resultList} hidden={custom}>
-              {scope && (
-                <CommandGroup>
-                  {actions.options.map((option, index) => (
-                    <CommandItem
-                      key={option.value || "none"}
-                      aria-label={option.label}
-                      aria-keyshortcuts={
-                        index < 9 && option.value !== "Duplicate"
-                          ? String(index + 1)
-                          : undefined
-                      }
-                      value={option.value || "none"}
-                      disabled={actions.blocked || actions.pending}
-                      onSelect={() => choose(option.value)}
-                    >
-                      {scope === "Status" ? (
-                        <StatusIcon status={option.value} decorative />
-                      ) : (
-                        <span className="size-4" />
-                      )}
-                      <span className="flex-1">{option.label}</span>
-                      <CommandShortcut>
-                        {option.selected && <Check aria-hidden="true" />}
-                        {index < 9 && option.value !== "Duplicate" && (
-                          <Kbd>{index + 1}</Kbd>
-                        )}
-                      </CommandShortcut>
-                    </CommandItem>
+              {scope &&
+                (scope === "Project"
+                  ? [
+                      {
+                        options: actions.options.filter(
+                          (option) => !option.group && option.value,
+                        ),
+                      },
+                      {
+                        heading: "Archived",
+                        options: actions.options.filter(
+                          (option) => option.group,
+                        ),
+                      },
+                      {
+                        options: actions.options.filter(
+                          (option) => !option.value,
+                        ),
+                      },
+                    ]
+                  : [{ heading: undefined, options: actions.options }]
+                )
+                  .filter(({ options }) => options.length > 0)
+                  .map(({ heading, options }, groupIndex) => (
+                    <Fragment key={groupIndex}>
+                      {groupIndex > 0 && <CommandSeparator />}
+                      <CommandGroup {...(heading && { heading })}>
+                        {options.map((option) => {
+                          const index = actions.options.indexOf(option);
+                          return (
+                            <CommandItem
+                              key={option.value || "none"}
+                              aria-label={option.label}
+                              aria-keyshortcuts={
+                                index < 9 && option.value !== "Duplicate"
+                                  ? String(index + 1)
+                                  : undefined
+                              }
+                              value={option.value || "none"}
+                              disabled={actions.blocked || actions.pending}
+                              onSelect={() => choose(option.value)}
+                            >
+                              {scope === "Status" ? (
+                                <StatusIcon status={option.value} decorative />
+                              ) : (
+                                <span className="size-4" />
+                              )}
+                              <span className="flex-1">{option.label}</span>
+                              <CommandShortcut>
+                                {option.selected && (
+                                  <Check aria-hidden="true" />
+                                )}
+                                {index < 9 && option.value !== "Duplicate" && (
+                                  <Kbd>{index + 1}</Kbd>
+                                )}
+                              </CommandShortcut>
+                            </CommandItem>
+                          );
+                        })}
+                      </CommandGroup>
+                    </Fragment>
                   ))}
-                </CommandGroup>
-              )}
               {!scope && actions.ticket && (
                 <CommandGroup
                   heading={`${actions.ticket.reference} · ${actions.ticket.title}`}
@@ -1168,9 +1207,16 @@ export function CommandPalette({
                 </CommandGroup>
               )}
               <CommandEmpty>
-                {lookupFailures.length > 0
-                  ? "Some results couldn't be loaded."
-                  : actions.error || "No tickets or destinations found."}
+                {actions.projectHint ? (
+                  <span>
+                    No matches
+                    <span className="block text-xs">{actions.projectHint}</span>
+                  </span>
+                ) : lookupFailures.length > 0 ? (
+                  "Some results couldn't be loaded."
+                ) : (
+                  actions.error || "No tickets or destinations found."
+                )}
               </CommandEmpty>
             </CommandList>
             {lookupFailures.map(({ key, failure, retry }) => (

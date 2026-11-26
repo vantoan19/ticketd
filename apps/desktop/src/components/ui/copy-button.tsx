@@ -23,6 +23,7 @@ export function CopyButton({
   className,
   shortcutId,
   size = "icon-sm",
+  disabled,
   onMouseDown,
 }: {
   text: string;
@@ -37,6 +38,7 @@ export function CopyButton({
   /** The registered action, only for a copy that actually owns this key. */
   shortcutId?: ShortcutId;
   size?: ComponentProps<typeof IconButton>["size"];
+  disabled?: boolean;
   onMouseDown?: ComponentProps<typeof IconButton>["onMouseDown"];
 }) {
   const { copied, error, copy } = useCopy();
@@ -47,6 +49,7 @@ export function CopyButton({
       <IconButton
         type="button"
         size={size}
+        disabled={disabled}
         onMouseDown={onMouseDown}
         label={copied ? "Copied" : error ? "Copy unavailable" : label}
         {...(shortcutId && {

@@ -21,9 +21,9 @@ use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatDelivery, ChatInputStanding, ChatItem, ChatLink,
     ChatLinkKind, ChatListFilter, ChatMessage, ChatRecord, ChatRole, ChatSubmissionIntent,
-    ChatTurnState, NewChat, Workspace, WorkspaceGuard,
+    ChatTurnState, NewChat, Project, Workspace, WorkspaceGuard,
 };
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 
 use crate::chat_reports::{self, HarnessOptionsView, SettingChangeView};
 use crate::chat_view::HarnessFound;
@@ -67,6 +67,12 @@ fn stale(message: impl Into<String>) -> ChatFailure {
 
 impl From<ticketd_core::Error> for ChatFailure {
     fn from(error: ticketd_core::Error) -> Self {
+        if matches!(error, ticketd_core::Error::ProjectArchived(_)) {
+            return Self {
+                code: error.kind().code(),
+                message: error.to_string(),
+            };
+        }
         failed(error.to_string())
     }
 }
@@ -549,6 +555,14 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
     }
 }
 
+fn project_title(project: &Project) -> String {
+    if project.archived {
+        format!("{} (archived)", project.name)
+    } else {
+        project.name.clone()
+    }
+}
+
 fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, ticketd_core::Error> {
     let mut links = Vec::new();
     for record in workspace.chat_linked_records(chat_id)? {
@@ -565,10 +579,14 @@ fn links(workspace: &Workspace, chat_id: &str) -> Result<Vec<LinkedRecord>, tick
                 id: record.id,
                 title: record.title,
             },
-            (ChatLinkKind::Project, _) => LinkedRecord::Project {
-                id: record.id,
-                title: record.title,
-            },
+            (ChatLinkKind::Project, _) => {
+                let project = workspace.show_project(&record.id)?;
+                LinkedRecord::Project {
+                    id: record.id,
+                    title: project_title(&project),
+                    archived: project.archived,
+                }
+            }
         });
     }
     Ok(links)
@@ -691,7 +709,7 @@ fn surroundings(
         folder_missing,
         shared_with,
         first_line,
-        project: project(workspace, &chat.execution_folder, &links)?,
+        project: chat_project(chat, &workspace.list_projects()?),
         branch: None,
         links,
         // Input the host holds to send is being sent, not in the person's queue.
@@ -727,26 +745,34 @@ fn surroundings(
 }
 
 /// The Project whose folder (any checkout) holds `folder`, else the first linked one.
-fn project(
-    workspace: &Workspace,
-    folder: &str,
-    links: &[LinkedRecord],
-) -> Result<Option<ProjectRef>, ticketd_core::Error> {
-    Ok(workspace
-        .project_for_folder(Path::new(folder))?
-        .map(|project| ProjectRef {
-            id: project.id,
-            title: project.name,
-        })
+fn chat_project(chat: &Chat, projects: &[Project]) -> Option<ProjectRef> {
+    Project::for_folder(projects, Path::new(&chat.execution_folder))
         .or_else(|| {
-            links.iter().find_map(|link| match link {
-                LinkedRecord::Project { id, title } => Some(ProjectRef {
-                    id: id.clone(),
-                    title: title.clone(),
-                }),
-                LinkedRecord::Ticket { .. } | LinkedRecord::Document { .. } => None,
-            })
-        }))
+            chat.links
+                .iter()
+                .filter(|link| link.kind == ChatLinkKind::Project)
+                .find_map(|link| projects.iter().find(|project| project.id == link.id))
+        })
+        .map(|project| ProjectRef {
+            id: project.id.clone(),
+            title: project_title(project),
+        })
+}
+
+fn refresh_project_surroundings(around: &mut Surroundings, chat: &Chat, projects: &[Project]) {
+    around.project = chat_project(chat, projects);
+    for link in &mut around.links {
+        if let LinkedRecord::Project {
+            id,
+            title,
+            archived,
+        } = link
+            && let Some(project) = projects.iter().find(|project| project.id == *id)
+        {
+            *title = project_title(project);
+            *archived = project.archived;
+        }
+    }
 }
 
 /// Remembers whether a Chat was last shown with its folder missing; returns whether
@@ -818,6 +844,7 @@ struct View {
 struct BuiltRows {
     /// The change sequence they were built at.
     sequence: i64,
+    projects: Arc<Vec<Project>>,
     rows: HashMap<String, BuiltRow>,
 }
 
@@ -860,6 +887,7 @@ pub struct Chats {
     /// The version each harness reported at its last check.
     versions: Mutex<HashMap<&'static str, Option<String>>>,
     built_rows: Mutex<BuiltRows>,
+    projects: watch::Sender<Arc<Vec<Project>>>,
     /// How often this service borrowed the workspace, for tests that bound it.
     #[cfg(test)]
     workspace_uses: AtomicU64,
@@ -897,6 +925,7 @@ impl Chats {
             options: Mutex::new(HashMap::new()),
             versions: Mutex::new(HashMap::new()),
             built_rows: Mutex::default(),
+            projects: watch::channel(Arc::new(Vec::new())).0,
             #[cfg(test)]
             workspace_uses: AtomicU64::new(0),
             #[cfg(test)]
@@ -1141,6 +1170,18 @@ impl Chats {
         }
     }
 
+    /// Refreshes only Project data on a Workspace wake. Open Chat views follow this separately.
+    pub fn refresh_projects(&self) -> Outcome<bool> {
+        let projects = self.workspace()?.list_projects()?;
+        Ok(self.projects.send_if_modified(|previous| {
+            if **previous == projects {
+                return false;
+            }
+            *previous = Arc::new(projects);
+            true
+        }))
+    }
+
     /// Moves when any Chat may have changed; `None` until the host has started.
     pub fn changed(&self) -> Option<tokio::sync::watch::Receiver<u64>> {
         self.started_host().map(|host| host.changed())
@@ -1297,6 +1338,8 @@ impl Chats {
             .map(|host| host.live())
             .unwrap_or_default();
         let mut built = lock(&self.built_rows);
+        let projects = self.projects.borrow().clone();
+        let projects_changed = !Arc::ptr_eq(&built.projects, &projects);
         // Read first: a write after it is caught by the next call.
         let sequence = workspace.chat_change_sequence()?;
         let changed: HashSet<String> = workspace
@@ -1311,11 +1354,14 @@ impl Chats {
             let live = live.get(&chat.id).cloned().unwrap_or_else(ChatLive::idle);
             let checked = self.checked(&chat.id);
             let summary = match built.rows.remove(&chat.id) {
-                Some(row)
+                Some(mut row)
                     if !changed.contains(&chat.id)
                         && row.live == live
                         && row.checked == checked =>
                 {
+                    if projects_changed {
+                        row.summary.project = chat_project(chat, &projects);
+                    }
                     row.summary
                 }
                 _ => self.summary(&workspace, chat, &users, &live)?,
@@ -1334,6 +1380,7 @@ impl Chats {
         let trashed = trashed.iter().map(&mut row).collect::<Outcome<Vec<_>>>()?;
         *built = BuiltRows {
             sequence,
+            projects,
             rows: kept,
         };
         Ok((overview_of(&rows), rows, trashed))
@@ -1633,6 +1680,7 @@ impl Chats {
             "mark the Chat seen",
             self.mark_seen(chat_id).await,
         );
+        let projects = self.projects.subscribe();
         let (attached, subscription) = host.attach(chat_id).await?;
         let workspace = self.workspace()?;
         let tracker = Tracker::from_items(&attached.snapshot.items);
@@ -1682,7 +1730,9 @@ impl Chats {
         );
         let chats = self.clone();
         tokio::spawn(async move {
-            chats.feed(view, subscription, resynced, sink).await;
+            chats
+                .feed(view, subscription, projects, resynced, sink)
+                .await;
             lock(&chats.feeds).remove(&id);
         });
         Ok(Opened {
@@ -1711,6 +1761,7 @@ impl Chats {
         &self,
         mut view: View,
         mut subscription: Subscription,
+        mut projects: watch::Receiver<Arc<Vec<Project>>>,
         mut resynced: oneshot::Receiver<()>,
         sink: Sink,
     ) {
@@ -1720,14 +1771,26 @@ impl Chats {
             change
         };
         loop {
+            enum Update {
+                Chat(Option<ChatUpdate>),
+                Projects,
+            }
             let update = tokio::select! {
-                update = subscription.next() => update,
+                update = subscription.next() => Update::Chat(update),
+                Ok(()) = projects.changed() => Update::Projects,
                 // Closed by the view (nobody is listening) or asked to resync.
-                _ = &mut resynced => None,
+                _ = &mut resynced => Update::Chat(None),
             };
             let mut ended = false;
             let records = match update {
-                Some(ChatUpdate::Changes(changes)) => {
+                Update::Projects => {
+                    let projects = projects.borrow_and_update().clone();
+                    if let Some(around) = &mut view.around {
+                        refresh_project_surroundings(around, &view.chat, &projects);
+                    }
+                    Vec::new()
+                }
+                Update::Chat(Some(ChatUpdate::Changes(changes))) => {
                     let active = view.chat.active_turn.as_ref().map(|turn| turn.id.clone());
                     let mut records = Vec::new();
                     for change in changes {
@@ -1767,11 +1830,11 @@ impl Chats {
                     records.extend(view.tracker.refolded());
                     records
                 }
-                Some(ChatUpdate::Text {
+                Update::Chat(Some(ChatUpdate::Text {
                     message_id,
                     turn_id,
                     delta,
-                }) => {
+                })) => {
                     // The view's text grows past what was last sent for it.
                     view.sent.remove(&message_id);
                     let change = if view.tracker.streaming(&message_id, &turn_id) {
@@ -1792,7 +1855,7 @@ impl Chats {
                     }
                     continue;
                 }
-                Some(ChatUpdate::Live(live)) => {
+                Update::Chat(Some(ChatUpdate::Live(live))) => {
                     let before = std::mem::replace(&mut view.live, *live);
                     // Codex reports its context after every model call, stamped with the
                     // time; nothing the records show depends on it.
@@ -1838,7 +1901,7 @@ impl Chats {
                         records
                     }
                 }
-                Some(ChatUpdate::Resync) | None => break,
+                Update::Chat(Some(ChatUpdate::Resync) | None) => break,
             };
             // A turn that ends while its Chat is in view is seen.
             if ended && self.focused.load(Ordering::SeqCst) {
@@ -1902,9 +1965,8 @@ impl Chats {
     }
 
     /// Sends or queues a message after linking the records it mentions or quotes, so the
-    /// harness is told about them with this message (spec 21.4). A record that cannot be
-    /// linked refuses the message; links made before the refusal stay, as harmless as
-    /// linking them by hand.
+    /// harness is told about them with this message (spec 21.4). An invalid link
+    /// refuses the whole set of links and the message.
     pub async fn send_linking(
         &self,
         chat_id: &str,
@@ -1914,20 +1976,8 @@ impl Chats {
     ) -> Outcome<()> {
         text_argument(text, "The message")?;
         let host = self.host()?;
-        let present = self.workspace()?.chat(chat_id)?.links;
-        let mut added = false;
-        for link in links {
-            let link = ChatLink::from(link.clone());
-            if present
-                .iter()
-                .any(|old| old.kind == link.kind && old.id == link.id)
-            {
-                continue;
-            }
-            self.workspace()?.set_chat_link(chat_id, link, true)?;
-            added = true;
-        }
-        if added {
+        let links: Vec<_> = links.iter().cloned().map(ChatLink::from).collect();
+        if !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)? {
             host.links_changed(chat_id).await?;
         }
         self.send(chat_id, text, mode).await
@@ -2220,16 +2270,27 @@ impl Chats {
         );
         // Projects are few and have no search index: match their names here.
         let needle = query.to_lowercase();
-        let projects = workspace.list_projects()?.into_iter();
-        found.extend(
+        let projects = workspace.list_projects()?;
+        let matching = || {
             projects
+                .iter()
                 .filter(|project| project.name.to_lowercase().contains(&needle))
+        };
+        let record = |project: &ticketd_core::Project| LinkedRecord::Project {
+            id: project.id.clone(),
+            title: project.name.clone(),
+            archived: project.archived,
+        };
+        found.extend(
+            matching()
+                .filter(|project| !project.archived)
                 .take(8)
-                .map(|project| LinkedRecord::Project {
-                    id: project.id,
-                    title: project.name,
-                }),
+                .map(record),
         );
+        // Offer no assignment for an archived match. Its name explains an empty search.
+        if found.is_empty() {
+            found.extend(matching().find(|project| project.archived).map(record));
+        }
         Ok(found)
     }
 

@@ -18,6 +18,8 @@ import type {
 } from "@/features/automations/client";
 import { ChatClientContext } from "@/features/chats/client";
 import { createMockChatClient } from "@/features/chats/mock-client";
+import { WorkspaceChangeProvider } from "@/lib/workspace-change";
+import type { Project } from "@/lib/api/client";
 import { selectAutomationView } from "@/test/automation-navigation";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -74,8 +76,7 @@ let agents: AutomationAgent[] = [];
 let runs: AutomationRun[] = [];
 /** Every run, for the page's list of them. */
 let allRuns: (AutomationRun & { automation_name: string })[] = [];
-let projects: { id: string; name: string; path: string; paths: string[] }[] =
-  [];
+let projects: Project[] = [];
 beforeEach(() => {
   automations = [];
   agents = [TRIAGE];
@@ -770,4 +771,57 @@ test("one Esc closes a step's panel from its Close button, though the button's t
   fireEvent.keyDown(close, { key: "Escape" });
 
   await waitFor(() => expect(screen.queryByRole("complementary")).toBeNull());
+});
+
+test("an open Automation refreshes Project choices and keeps its saved archived condition", async () => {
+  projects = [
+    {
+      id: "existing",
+      name: "Existing",
+      path: "/existing",
+      paths: ["/existing"],
+    },
+    { id: "other", name: "Other", path: "/other", paths: ["/other"] },
+  ];
+  automations = [
+    automation({
+      name: "Triage",
+      trigger: { kind: "status_changed", to: "Done", from: null },
+      conditions: [{ kind: "project", any_of: ["existing"] }],
+    }),
+  ];
+  const page = (version: number) => (
+    <WorkspaceChangeProvider value={version}>
+      <ChatClientContext value={chat}>
+        <AutomationsView />
+      </ChatClientContext>
+    </WorkspaceChangeProvider>
+  );
+  const { rerender } = render(page(0));
+  const rows = await screen.findByRole("list", { name: "Automations" });
+  fireEvent.click((await within(rows).findAllByRole("button"))[0]!);
+  const steps = await screen.findByRole("application", { name: "Steps" });
+  fireEvent.click(
+    within(steps).getByRole("button", {
+      name: "When the status changes: To Done",
+    }),
+  );
+  fireEvent.keyDown(
+    await screen.findByRole("button", { name: "Project is: Existing" }),
+    { key: "Enter" },
+  );
+  expect(
+    await screen.findByRole("menuitemcheckbox", { name: "Other" }),
+  ).toBeTruthy();
+
+  projects = projects.map((item) => ({ ...item, archived: true }));
+  rerender(page(1));
+  const saved = await screen.findByRole("menuitemcheckbox", {
+    name: "Existing (archived)",
+  });
+  expect(saved.getAttribute("aria-checked")).toBe("true");
+  expect(screen.queryByRole("menuitemcheckbox", { name: /^Other/ })).toBeNull();
+  expect(automations[0]?.conditions).toEqual([
+    { kind: "project", any_of: ["existing"] },
+  ]);
 });

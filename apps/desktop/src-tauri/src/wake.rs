@@ -5,8 +5,9 @@
 //! commands that change what a loop follows. Each loop still wakes on its own
 //! deadline, at least every [`IDLE`], for changes nothing reported.
 
-use std::sync::{Condvar, Mutex, PoisonError};
+use std::sync::{Condvar, Mutex, OnceLock, PoisonError};
 use std::time::Duration;
+use tokio::sync::watch;
 
 /// The longest a background loop sleeps with nothing due.
 pub const IDLE: Duration = Duration::from_secs(30);
@@ -15,6 +16,7 @@ pub const IDLE: Duration = Duration::from_secs(30);
 pub struct Signal {
     count: Mutex<u64>,
     changed: Condvar,
+    listeners: OnceLock<watch::Sender<()>>,
 }
 
 impl Signal {
@@ -22,12 +24,22 @@ impl Signal {
         Self {
             count: Mutex::new(0),
             changed: Condvar::new(),
+            listeners: OnceLock::new(),
         }
     }
 
     pub fn notify(&self) {
         *self.count.lock().unwrap_or_else(PoisonError::into_inner) += 1;
         self.changed.notify_all();
+        if let Some(listeners) = self.listeners.get() {
+            listeners.send_replace(());
+        }
+    }
+
+    pub fn subscribe(&self) -> watch::Receiver<()> {
+        self.listeners
+            .get_or_init(|| watch::channel(()).0)
+            .subscribe()
     }
 
     /// Returns once notified after the last notification `seen` counted, or when

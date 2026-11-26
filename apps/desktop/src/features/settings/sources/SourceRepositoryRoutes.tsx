@@ -104,29 +104,38 @@ export function SourceRepositoryRoutes({
                     </th>
                     <td>
                       <div className="flex flex-wrap items-center justify-between gap-2">
-                        <span>
-                          {route.project
-                            ? `→ ${route.project.name}`
-                            : "No project"}
-                        </span>
-                        {!route.project && route.project_remote && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            aria-label={`Link to project for ${route.repository}`}
-                            onClick={(event) => {
-                              opener.current = event.currentTarget;
-                              if (route.project_remote)
-                                setSelection({
-                                  repository: route.repository,
-                                  remote: route.project_remote,
-                                  step: "choose",
-                                });
-                            }}
-                          >
-                            Link to project…
-                          </Button>
-                        )}
+                        <div>
+                          <span>
+                            {route.project
+                              ? `→ ${route.project.name}`
+                              : "No project"}
+                          </span>
+                          {route.archived_project_name && (
+                            <p className="text-xs text-muted-foreground">
+                              {route.archived_project_name} is archived
+                            </p>
+                          )}
+                        </div>
+                        {!route.project &&
+                          !route.archived_project_name &&
+                          route.project_remote && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              aria-label={`Link to project for ${route.repository}`}
+                              onClick={(event) => {
+                                opener.current = event.currentTarget;
+                                if (route.project_remote)
+                                  setSelection({
+                                    repository: route.repository,
+                                    remote: route.project_remote,
+                                    step: "choose",
+                                  });
+                              }}
+                            >
+                              Link to project…
+                            </Button>
+                          )}
                       </div>
                     </td>
                   </tr>

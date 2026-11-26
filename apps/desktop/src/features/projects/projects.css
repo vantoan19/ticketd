@@ -150,9 +150,6 @@
   flex-direction: column;
   gap: 8px;
 }
-.project-skeleton-row {
-  height: 40px;
-}
 
 /* New project and Register checkout: the folder reads as a field. */
 .folder-picker {

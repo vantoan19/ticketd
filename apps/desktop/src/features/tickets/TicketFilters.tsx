@@ -279,6 +279,7 @@ function FiltersMenu(
         <PaneHeaderButton
           icon={<ListFilter />}
           label="Filter"
+          data-ticket-filters-trigger=""
           aria-label={
             filterCount ? `Filters, ${filterCount} active` : "Filters"
           }

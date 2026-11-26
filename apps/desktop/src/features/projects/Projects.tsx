@@ -1,5 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { m } from "motion/react";
+import { Presence } from "@/components/ui/motion";
 import {
+  Archive,
+  ArchiveRestore,
   ChevronRight,
   Copy,
   Folder,
@@ -17,6 +21,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/ui/empty-state";
@@ -25,6 +30,9 @@ import { IconButton } from "@/components/ui/icon-button";
 import { enter } from "@/components/ui/enter";
 import { ManagementPage, PageHeader } from "@/components/ui/page-header";
 import { PathText } from "@/components/ui/path-text";
+import { SegmentedControl } from "@/components/ui/segmented-control";
+import { arrival, departure, rowTokens } from "@/components/ui/row-motion";
+import { useProjectLifecycle } from "./useProjectLifecycle";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useCopy } from "@/components/ui/use-copy";
 import {
@@ -96,11 +104,13 @@ function reportFailure(
 function CheckoutRow({
   path,
   first,
+  disabled,
   onRemove,
 }: {
   path: string;
   first: boolean;
-  onRemove: () => void;
+  disabled: boolean;
+  onRemove?: () => void;
 }) {
   const manager = fileManagerName();
   const statusLine = useStatusLine();
@@ -122,13 +132,28 @@ function CheckoutRow({
       </span>
       {first && <span className="checkout-note">First checkout</span>}
       <span className="checkout-actions">
-        <CopyButton label="Copy path" subject={path} text={path} />
-        <IconButton label={`Show in ${manager}`} onClick={reveal}>
+        <CopyButton
+          label="Copy path"
+          subject={path}
+          text={path}
+          disabled={disabled}
+        />
+        <IconButton
+          label={`Show in ${manager}`}
+          onClick={reveal}
+          disabled={disabled}
+        >
           <FolderOpen />
         </IconButton>
-        <IconButton label="Remove checkout" onClick={onRemove}>
-          <X />
-        </IconButton>
+        {onRemove && (
+          <IconButton
+            label="Remove checkout"
+            onClick={onRemove}
+            disabled={disabled}
+          >
+            <X />
+          </IconButton>
+        )}
       </span>
     </li>
   );
@@ -142,15 +167,21 @@ function CheckoutRow({
  */
 export function Projects({
   projects,
+  archived = false,
+  onArchivedChange,
   loading,
   onChange,
+  onProjectCommitted,
   onOpenTickets,
   onShowUnassigned,
   onConnectSource,
 }: {
   projects: Project[];
+  archived?: boolean;
+  onArchivedChange?: (archived: boolean) => void;
   loading: boolean;
   onChange: () => Promise<void>;
+  onProjectCommitted?: (project: Project) => void;
   /** Shows that project's tickets. */
   onOpenTickets?: (project: Project) => void;
   /** Opens the tickets that belong to no project. */
@@ -159,7 +190,75 @@ export function Projects({
 }) {
   const statusLine = useStatusLine();
   const { copy } = useCopy();
+  const shown = projects.filter(
+    (project) => Boolean(project.archived) === archived,
+  );
+  const rowActions = useRef(new Map<string, HTMLButtonElement>());
+  const focusedRow = useRef<{
+    id: string;
+    owner: HTMLElement;
+    neighbor: string | undefined;
+  } | null>(null);
+  const focusAfterChange = useRef(
+    new Map<
+      string,
+      {
+        archived: boolean;
+        target?: string;
+        owner: Element | null;
+        trigger: Element | null;
+      }
+    >(),
+  );
+  const lastArchive = useRef(0);
+  const lifecycle = useProjectLifecycle(onChange, onProjectCommitted);
+  const tokens = rowTokens();
+  const page = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const visible = page.current && !page.current.closest("[hidden]");
+    const isShown = (id: string) =>
+      projects.some(
+        (project) =>
+          project.id === id && Boolean(project.archived) === archived,
+      );
+    const restoreFocus = (targetId?: string) => {
+      const action =
+        targetId && isShown(targetId)
+          ? rowActions.current.get(targetId)
+          : undefined;
+      const target =
+        action && !action.disabled
+          ? action
+          : page.current?.querySelector<HTMLElement>("#projects-heading");
+      target?.focus();
+    };
+    for (const [id, focus] of focusAfterChange.current) {
+      const project = projects.find((item) => item.id === id);
+      if (!project || Boolean(project.archived) !== focus.archived) continue;
+      focusAfterChange.current.delete(id);
+      const active = document.activeElement;
+      if (
+        visible &&
+        (active === document.body ||
+          active === focus.owner ||
+          active === focus.trigger)
+      )
+        restoreFocus(focus.target);
+    }
+    const focused = focusedRow.current;
+    if (focused && !isShown(focused.id)) {
+      focusedRow.current = null;
+      const active = document.activeElement;
+      if (visible && (active === focused.owner || active === document.body))
+        restoreFocus(focused.neighbor);
+    }
+  }, [archived, projects]);
   const [dialog, setDialog] = useState<OpenDialog | null>(null);
+  const activeDialog = useRef<OpenDialog | null>(null);
+  useLayoutEffect(() => {
+    activeDialog.current = dialog;
+  }, [dialog]);
+  const [closedForArchive, setClosedForArchive] = useState(false);
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const sourceReview = useRef<string | null>(null);
@@ -212,55 +311,58 @@ export function Projects({
     ? (checkoutDrafts[checkoutProject.id] ?? "")
     : "";
 
+  const archivedDialog =
+    (dialog?.kind === "edit" && editing?.archived) || checkoutProject?.archived;
+  if (archivedDialog) {
+    setClosedForArchive(true);
+    closeDialog();
+  }
+
+  function closeDialog(owner = dialog) {
+    setDialog((current) => (current === owner ? null : current));
+  }
+
   function open(next: OpenDialog) {
+    sourceReview.current = null;
+    setClosedForArchive(false);
     setError(null);
+    setPending(false);
     if (next.kind !== "checkout")
       setEditingId(next.kind === "edit" ? next.id : null);
     setDialog(next);
   }
-  /** Runs a dialog's write, refreshes, and reports whether it all succeeded. */
-  async function save(fn: () => Promise<unknown>, action: string) {
-    setPending(true);
-    setError(null);
-    try {
-      await fn();
-      await onChange();
-      return true;
-    } catch (reason) {
-      setError(describeFailure(reason, action));
-      return false;
-    } finally {
-      setPending(false);
-    }
-  }
-  function drop(
-    setter: (
-      fn: (old: Record<string, string>) => Record<string, string>,
-    ) => void,
-    key: string,
-  ) {
-    setter((old) => {
-      const next = { ...old };
-      delete next[key];
-      return next;
-    });
-  }
   function projectSaved(project: Project) {
     void onChange();
-    if (project.remote && project.remote !== editing?.remote)
+    if (
+      activeDialog.current === dialog &&
+      project.remote &&
+      project.remote !== editing?.remote
+    )
       sourceReview.current = project.id;
   }
 
   async function registerCheckout() {
-    if (!checkoutProject) return;
-    const saved = await save(
-      () => client.registerCheckout(checkoutProject.id, checkoutPath),
-      "register the checkout",
-    );
-    if (!saved) return;
-    drop(setCheckoutDrafts, checkoutProject.id);
-    setExpanded((old) => ({ ...old, [checkoutProject.id]: true }));
-    setDialog(null);
+    const owner = dialog;
+    if (owner?.kind !== "checkout" || !checkoutProject) return;
+    setPending(true);
+    setError(null);
+    try {
+      await client.registerCheckout(checkoutProject.id, checkoutPath);
+      await onChange();
+      if (activeDialog.current !== owner) return;
+      setCheckoutDrafts((old) => {
+        const next = { ...old };
+        delete next[checkoutProject.id];
+        return next;
+      });
+      setExpanded((old) => ({ ...old, [checkoutProject.id]: true }));
+      closeDialog(owner);
+    } catch (reason) {
+      if (activeDialog.current === owner)
+        setError(describeFailure(reason, "register the checkout"));
+    } finally {
+      if (activeDialog.current === owner) setPending(false);
+    }
   }
   /** Removing a checkout is reversible (register it again): act, then Undo. */
   async function removeCheckout(project: Project, path: string) {
@@ -288,6 +390,37 @@ export function Projects({
       );
     }
   }
+  function changeArchiveState(project: Project) {
+    if (!archived && !allowRemoval(lastArchive)) return;
+    const index = shown.findIndex(({ id }) => id === project.id);
+    const neighbor = shown[index + 1] ?? shown[index - 1];
+    const owner = document.activeElement;
+    const trigger = rowActions.current.get(project.id) ?? null;
+    void lifecycle.change(project, !archived, {
+      beforeRefresh: () => {
+        focusAfterChange.current.set(project.id, {
+          archived: !archived,
+          ...(neighbor && { target: neighbor.id }),
+          owner,
+          trigger,
+        });
+      },
+      beforeUndoRefresh: () => {
+        const neighborAction = rowActions.current.get(neighbor?.id ?? "");
+        focusAfterChange.current.set(project.id, {
+          archived,
+          target: project.id,
+          owner: document.activeElement,
+          // Dismissing the status line can return focus here before the list commits.
+          trigger:
+            neighborAction && !neighborAction.disabled
+              ? neighborAction
+              : (page.current?.querySelector("#projects-heading") ?? null),
+        });
+      },
+    });
+  }
+
   async function copyId(project: Project) {
     const done = await copy("Project ID", project.id);
     statusLine.show(
@@ -307,21 +440,44 @@ export function Projects({
     </Button>
   );
   const blocked = pending ? "Saving…" : null;
+  const returnFocus = () => {
+    const header =
+      page.current?.querySelector<HTMLElement>("#projects-heading");
+    return closedForArchive ? (header ?? null) : null;
+  };
 
   return (
     // The page stays mounted while another is shown; its entrance (enter.ts)
     // plays again each time it comes back from `hidden`.
     <ManagementPage ownEntrance aria-labelledby="projects-heading">
-      <div {...enter(0)}>
+      <div ref={page} {...enter(0)}>
         <PageHeader
           title="Projects"
           titleId="projects-heading"
           {...(projects.length > 0 && {
-            count: <Count>{projects.length}</Count>,
-            actions: newProject,
-          })}
-          {...(projects.length > 0 && {
-            lede: "A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in.",
+            wrapActions: true,
+            count: <Count>{shown.length}</Count>,
+            actions: (
+              <>
+                {onArchivedChange && (
+                  <SegmentedControl
+                    aria-label="Which projects"
+                    value={archived ? "archived" : "active"}
+                    onValueChange={(value) =>
+                      onArchivedChange(value === "archived")
+                    }
+                    options={[
+                      { value: "active", label: "Active" },
+                      { value: "archived", label: "Archived" },
+                    ]}
+                  />
+                )}
+                {newProject}
+              </>
+            ),
+            lede: archived
+              ? "Archived projects keep their tickets, links and checkouts. Reactivate one to assign new work to it."
+              : "A project is a repository on this computer. Tickets link to it, and the command line picks it from the folder you're in.",
           })}
         />
       </div>
@@ -332,7 +488,7 @@ export function Projects({
           aria-label="Loading projects"
         >
           {[0, 1, 2].map((key) => (
-            <Skeleton key={key} className="project-skeleton-row" />
+            <Skeleton key={key} className="h-10" />
           ))}
         </div>
       ) : projects.length === 0 ? (
@@ -343,125 +499,218 @@ export function Projects({
           action={newProject}
         />
       ) : (
-        <ul className="project-list" aria-label="Projects">
-          {projects.map((item, index) => {
-            const isOpen = expanded[item.id] ?? false;
-            const checkouts = `project-${item.id}-checkouts`;
-            return (
-              <li
-                key={item.id}
-                className="project-row"
-                data-open={isOpen || undefined}
-              >
-                <div {...enter(index + 1)}>
-                  <div className="project-row-main">
-                    <h2 className="project-row-heading">
-                      <button
-                        type="button"
-                        className="project-row-toggle"
-                        aria-expanded={isOpen}
-                        aria-controls={checkouts}
-                        onClick={() =>
-                          setExpanded((old) => ({ ...old, [item.id]: !isOpen }))
-                        }
-                      >
-                        <ChevronRight
-                          aria-hidden="true"
-                          className="project-row-chevron"
-                        />
-                        <ProjectIcon
-                          project={{ id: item.id, title: item.name }}
-                          size={20}
-                        />
-                        <span className="project-row-text">
-                          <span className="project-row-name">{item.name}</span>
-                          <span className="project-row-meta">
-                            {projectMeta(item, counts[item.id])}
-                          </span>
-                        </span>
-                      </button>
-                    </h2>
-                    <span className="project-row-actions">
-                      {onOpenTickets && (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="sm"
-                          aria-label={`Open tickets of ${item.name}`}
-                          onClick={() => onOpenTickets(item)}
-                        >
-                          Open tickets
-                        </Button>
-                      )}
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <IconButton label={`Actions for ${item.name}`}>
-                            <MoreHorizontal />
-                          </IconButton>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem
-                            onSelect={() => open({ kind: "edit", id: item.id })}
-                          >
-                            <Pencil /> Edit project…
-                          </DropdownMenuItem>
-                          <DropdownMenuItem onSelect={() => void copyId(item)}>
-                            <Copy /> Copy project ID
-                          </DropdownMenuItem>
-                          <DropdownMenuItem
-                            onSelect={() =>
-                              open({ kind: "checkout", id: item.id })
+        <>
+          <ul className="project-list" aria-label="Projects">
+            <Presence key={String(archived)} initial={false}>
+              {shown.map((item, index) => {
+                const changing = lifecycle.pending.has(item.id);
+                const keepAction = (button: HTMLButtonElement | null) => {
+                  if (button) rowActions.current.set(item.id, button);
+                  else rowActions.current.delete(item.id);
+                };
+                const isOpen = expanded[item.id] ?? false;
+                const checkouts = `project-${item.id}-checkouts`;
+                return (
+                  <m.li
+                    key={item.id}
+                    className="project-row"
+                    data-open={isOpen || undefined}
+                    onFocusCapture={(event) => {
+                      focusedRow.current = {
+                        id: item.id,
+                        owner: event.target,
+                        neighbor: (shown[index + 1] ?? shown[index - 1])?.id,
+                      };
+                    }}
+                    onBlurCapture={(event) => {
+                      if (
+                        event.relatedTarget &&
+                        !event.currentTarget.contains(event.relatedTarget)
+                      )
+                        focusedRow.current = null;
+                    }}
+
+                    {...arrival(0, { space: true }, tokens)}
+                    {...departure({ space: true }, tokens)}
+                  >
+                    <div {...enter(index + 1)}>
+                      <div className="project-row-main">
+                        <h2 className="project-row-heading">
+                          <button
+                            type="button"
+                            className="project-row-toggle"
+                            aria-expanded={isOpen}
+                            disabled={changing}
+                            aria-controls={checkouts}
+                            onClick={() =>
+                              setExpanded((old) => ({
+                                ...old,
+                                [item.id]: !isOpen,
+                              }))
                             }
                           >
-                            <Plus /> Register checkout…
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </span>
-                  </div>
-                  <div
-                    id={checkouts}
-                    className="project-checkouts"
-                    hidden={!isOpen}
-                  >
-                    {item.paths.length === 0 ? (
-                      <p className="project-checkouts-empty">
-                        No checkouts. Register one so the command line finds{" "}
-                        {item.name} from its folder.{" "}
-                        <Button
-                          type="button"
-                          variant="link"
-                          size="inline"
-                          onClick={() =>
-                            open({ kind: "checkout", id: item.id })
-                          }
-                        >
-                          Register checkout…
-                        </Button>
-                      </p>
-                    ) : (
-                      <ul
-                        className="checkout-list"
-                        aria-label={`Checkouts of ${item.name}`}
+                            <ChevronRight
+                              aria-hidden="true"
+                              className="project-row-chevron"
+                            />
+                            <ProjectIcon
+                              project={{ id: item.id, title: item.name }}
+                              size={20}
+                            />
+                            <span className="project-row-text">
+                              <span
+                                className={
+                                  archived
+                                    ? "project-row-name text-muted-foreground"
+                                    : "project-row-name"
+                                }
+                              >
+                                {item.name}
+                              </span>
+                              <span className="project-row-meta">
+                                {changing && !archived
+                                  ? "Archiving…"
+                                  : projectMeta(item, counts[item.id])}
+                              </span>
+                            </span>
+                          </button>
+                        </h2>
+                        <span className="project-row-actions">
+                          {onOpenTickets && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              aria-label={`Open tickets of ${item.name}`}
+                              disabled={changing}
+                              onClick={() => onOpenTickets(item)}
+                            >
+                              Open tickets
+                            </Button>
+                          )}
+                          {archived ? (
+                            <Button
+                              ref={keepAction}
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="min-w-32"
+                              disabled={changing}
+                              aria-label={`Reactivate ${item.name}`}
+                              onClick={() => changeArchiveState(item)}
+                            >
+                              <ArchiveRestore aria-hidden />
+                              {changing ? "Reactivating…" : "Reactivate"}
+                            </Button>
+                          ) : (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <IconButton
+                                  ref={keepAction}
+                                  disabled={changing}
+                                  label={`Actions for ${item.name}`}
+                                >
+                                  <MoreHorizontal />
+                                </IconButton>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end">
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    open({ kind: "edit", id: item.id })
+                                  }
+                                >
+                                  <Pencil /> Edit project…
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() => void copyId(item)}
+                                >
+                                  <Copy /> Copy project ID
+                                </DropdownMenuItem>
+                                <DropdownMenuItem
+                                  onSelect={() =>
+                                    open({ kind: "checkout", id: item.id })
+                                  }
+                                >
+                                  <Plus /> Register checkout…
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onSelect={() => changeArchiveState(item)}
+                                >
+                                  <Archive /> Archive project
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+                        </span>
+                      </div>
+                      <div
+                        id={checkouts}
+                        className="project-checkouts"
+                        hidden={!isOpen}
                       >
-                        {item.paths.map((path) => (
-                          <CheckoutRow
-                            key={path}
-                            path={path}
-                            first={path === item.path}
-                            onRemove={() => void removeCheckout(item, path)}
-                          />
-                        ))}
-                      </ul>
-                    )}
-                  </div>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                        {item.paths.length === 0 && archived ? (
+                          <p className="project-checkouts-empty">
+                            No checkouts.
+                          </p>
+                        ) : item.paths.length === 0 ? (
+                          <p className="project-checkouts-empty">
+                            No checkouts. Register one so the command line finds{" "}
+                            {item.name} from its folder.{" "}
+                            <Button
+                              type="button"
+                              variant="link"
+                              size="inline"
+                              disabled={changing}
+                              onClick={() =>
+                                open({ kind: "checkout", id: item.id })
+                              }
+                            >
+                              Register checkout…
+                            </Button>
+                          </p>
+                        ) : (
+                          <ul
+                            className="checkout-list"
+                            aria-label={`Checkouts of ${item.name}`}
+                          >
+                            {item.paths.map((path) => (
+                              <CheckoutRow
+                                key={path}
+                                path={path}
+                                first={path === item.path}
+                                disabled={changing}
+                                {...(!archived && {
+                                  onRemove: () =>
+                                    void removeCheckout(item, path),
+                                })}
+                              />
+                            ))}
+                          </ul>
+                        )}
+                      </div>
+                    </div>
+                  </m.li>
+                );
+              })}
+            </Presence>
+          </ul>
+          {shown.length === 0 && (
+            <EmptyState
+              icon={<Folder aria-hidden />}
+              title={
+                emptyCopy(archived ? "projects-archived" : "projects-active")
+                  .title
+              }
+              description={
+                emptyCopy(archived ? "projects-archived" : "projects-active")
+                  .sentence
+              }
+            />
+          )}
+        </>
       )}
-      {unassigned > 0 && onShowUnassigned && (
+      {!archived && unassigned > 0 && onShowUnassigned && (
         <p className="projects-unassigned">
           {plural(unassigned, "ticket")} {unassigned === 1 ? "has" : "have"} no
           project.{" "}
@@ -480,17 +729,24 @@ export function Projects({
           dialog?.kind === "project" || (dialog?.kind === "edit" && !!editing)
         }
         {...(editing && { project: editing })}
-        onOpenChange={(next) => !next && setDialog(null)}
+        resolveReturnFocus={returnFocus}
+        onOpenChange={(next) => !next && closeDialog()}
         onSaved={projectSaved}
         onExitComplete={() => {
           const projectId = sourceReview.current;
           sourceReview.current = null;
-          if (projectId) onConnectSource?.(projectId);
+          if (
+            projectId &&
+            !closedForArchive &&
+            !projects.find(({ id }) => id === projectId)?.archived
+          )
+            onConnectSource?.(projectId);
         }}
       />
       <DialogShell
         open={!!checkoutProject}
-        onOpenChange={(next) => !next && setDialog(null)}
+        resolveReturnFocus={returnFocus}
+        onOpenChange={(next) => !next && closeDialog()}
         title="Register checkout"
         description={`Choose another folder where ${checkoutProject?.name ?? "this project"} is checked out.`}
         primaryLabel="Register checkout"

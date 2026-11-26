@@ -779,8 +779,7 @@ pub(crate) fn migrate_source_state_conflicts(connection: &Connection) -> Result<
         .collect::<Result<_, _>>()?;
     for id in affected {
         let kind = SyncKind::Ticket;
-        let local =
-            crate::sync_files::read_record_before_source_presentation(connection, kind, &id)?;
+        let local = crate::sync_files::read_ticket_before_source_presentation(connection, &id)?;
         translate_legacy_state_conflicts(connection, &id, local.as_ref())?;
         let Some(mut local) = local else {
             continue;

@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Reference } from "@/components/ui/reference";
 import { TicketNavigation } from "@/features/tickets/navigation";
+import type { Project } from "@/lib/api/client";
 import type { TicketStart } from "@/features/chats/ticket-chat";
 import { FailureAlert, FailureState } from "@/components/ui/failure-alert";
 import type { ChatFailureNotice } from "@/features/chats/failure";
@@ -288,7 +289,9 @@ function TicketCrumb({ reference }: { reference: string }) {
  */
 export function ChatsView({
   newChatRequest = 0,
+  projects,
 }: {
+  projects?: readonly Project[];
   /** Rises when New Chat is chosen elsewhere, such as the sidebar's compose menu. */
   newChatRequest?: number;
 }) {
@@ -547,6 +550,7 @@ export function ChatsView({
       // instance, so asking for it keeps what was typed and nothing moves.
       <NewChat
         key={open?.n ?? 0}
+        projects={projects}
         {...paneProps}
         resting={!open}
         focusRequest={newFocus}

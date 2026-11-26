@@ -19,7 +19,11 @@ pub struct SourceRepositoryRoute {
     pub repository: String,
     /// The connector's canonical Project remote, when it can identify the repository.
     pub project_remote: Option<String>,
+    /// The active Project that would receive a newly discovered ticket.
     pub project: Option<SourceRepositoryProject>,
+    /// An archived Project still reserves the remote while import routing is paused.
+    #[serde(default)]
+    pub archived_project_name: Option<String>,
 }
 
 impl Workspace {
@@ -47,18 +51,26 @@ impl Workspace {
                     } else {
                         None
                     };
-                    let project = match &project_remote {
+                    let claim = match &project_remote {
                         Some(remote) => projects::find_by_remote(connection, remote)?,
                         None => None,
-                    }
-                    .map(|project| SourceRepositoryProject {
-                        id: project.id,
-                        name: project.name,
-                    });
+                    };
+                    let (project, archived_project_name) = match claim {
+                        Some(project) if project.archived => (None, Some(project.name)),
+                        Some(project) => (
+                            Some(SourceRepositoryProject {
+                                id: project.id,
+                                name: project.name,
+                            }),
+                            None,
+                        ),
+                        None => (None, None),
+                    };
                     Ok(SourceRepositoryRoute {
                         repository,
                         project_remote,
                         project,
+                        archived_project_name,
                     })
                 })
                 .collect()
