@@ -22,6 +22,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot } from "@/components/ui/status-dot";
 import { documentRowContext, groupRowContext } from "./row-context";
+import { highlight, matchesTitle } from "./search-match";
 import { Item } from "@/components/ui/item";
 import { formatDateTime, listTime } from "@/lib/format";
 import {
@@ -85,25 +86,6 @@ function sameText(a: string, b: string) {
     text.replace(/\s+/g, " ").replace(/…$/, "").trim().toLowerCase();
   return norm(a) === norm(b);
 }
-/** Wrap case-insensitive occurrences of `query` in <mark>. */
-function highlight(text: string, query: string) {
-  const needle = query.trim();
-  if (!needle) return text;
-  const parts: React.ReactNode[] = [];
-  const lower = text.toLowerCase();
-  const target = needle.toLowerCase();
-  let from = 0;
-  for (;;) {
-    const at = lower.indexOf(target, from);
-    if (at < 0 || lower.length !== text.length) break;
-    if (at > from) parts.push(text.slice(from, at));
-    parts.push(<mark key={at}>{text.slice(at, at + target.length)}</mark>);
-    from = at + target.length;
-  }
-  parts.push(text.slice(from));
-  return parts;
-}
-
 export type DocumentCommands = {
   search: () => void;
   pin: (() => void) | null;
@@ -561,6 +543,16 @@ export function Documents({
     );
   };
   const searching = Boolean(query.trim() || filter.trim());
+  // A word search lists the Documents whose title matches, then those that match only inside;
+  // a search by tag alone has nothing to match and stays one plain list.
+  const wordSearch = query.trim() !== "";
+  const titleHits = wordSearch
+    ? results.filter((doc) => matchesTitle(doc.heading, query))
+    : [];
+  const bodyHits = wordSearch
+    ? results.filter((doc) => !matchesTitle(doc.heading, query))
+    : [];
+  const ranked = wordSearch ? [...titleHits, ...bodyHits] : results;
   // Current work: the Plan groups in order, then Open tickets, with the two folds last.
   const groups = work?.groups ?? [];
   const groupKey = (plan: { id: string } | null) => plan?.id ?? "open-tickets";
@@ -573,7 +565,7 @@ export function Documents({
   const visibleRows = showTrash
     ? trash
     : searching
-      ? results
+      ? ranked
       : view === "current"
         ? [
             ...groupPins,
@@ -701,6 +693,7 @@ export function Documents({
     mark = "",
     inTrash = false,
     grouped = false,
+    passages = false,
   ) => (
     <ul className="document-list">
       {items.map((doc, index) => {
@@ -712,7 +705,7 @@ export function Documents({
         const tabStop = tabRow === doc.id && !tabRowClaimed;
         if (tabStop) tabRowClaimed = true;
         const snippet =
-          mark && doc.snippet && !sameText(doc.snippet, doc.heading)
+          passages && doc.snippet && !sameText(doc.snippet, doc.heading)
             ? doc.snippet
             : "";
         return (
@@ -761,7 +754,9 @@ export function Documents({
                   }}
                   onClick={() => open(doc.id)}
                 >
-                  <span className="document-list-title">{doc.heading}</span>
+                  <span className="document-list-title">
+                    {highlight(doc.heading, mark)}
+                  </span>
                 </button>
                 <p className="document-list-meta">
                   {doc.opened === false && !openedHere.has(doc.id) && (
@@ -857,6 +852,13 @@ export function Documents({
       })}
     </ul>
   );
+  // The field says how many Documents match once that is known; "50+" while more can follow.
+  const searchTotal =
+    searching &&
+    searchKey === JSON.stringify([query, filter, offset, includeSupport]) &&
+    results.length > 0
+      ? `${results.length}${results.length >= offset + 50 ? "+" : ""}`
+      : undefined;
   const countKnown = showTrash
     ? trashLoaded
     : searching
@@ -912,6 +914,20 @@ export function Documents({
       </h2>
     );
   };
+  /** One group of word-search results: its name and count, then its rows. */
+  const searchGroup = (
+    label: string,
+    items: DocumentSummary[],
+    titles: boolean,
+  ) =>
+    items.length > 0 && (
+      <section aria-label={label} className="documents-search-group">
+        <h2 className="documents-search-heading">
+          {label} <Count>{items.length}</Count>
+        </h2>
+        {list(items, query, false, false, !titles)}
+      </section>
+    );
   const pinnedSection = !showTrash &&
     !searching &&
     groupPins.length > 0 &&
@@ -1150,6 +1166,7 @@ export function Documents({
                   aria-label="Search Documents"
                   placeholder="Search Documents…"
                   value={query}
+                  count={searchTotal}
                   onValueChange={(value) => {
                     setQuery(value);
                     setOffset(0);
@@ -1304,8 +1321,23 @@ export function Documents({
                     {results.length === 1
                       ? "1 result"
                       : `${results.length} results`}
+                    {wordSearch &&
+                      `: ${[
+                        titleHits.length > 0 && `${titleHits.length} in titles`,
+                        bodyHits.length > 0 &&
+                          `${bodyHits.length} inside Documents`,
+                      ]
+                        .filter(Boolean)
+                        .join(", ")}`}
                   </p>
-                  {list(results, query)}
+                  {wordSearch ? (
+                    <>
+                      {searchGroup("Titles", titleHits, true)}
+                      {searchGroup("Inside Documents", bodyHits, false)}
+                    </>
+                  ) : (
+                    list(results)
+                  )}
                 </>
               )}
               {results.length >= offset + 50 && (

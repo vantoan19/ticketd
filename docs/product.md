@@ -268,6 +268,10 @@ change`; an empty value clears it). ticketd never writes one.
   and read when opened. Recent (by recently opened, recently updated, or title) stays one
   click away; the view and which groups are open are remembered on this computer. Tags,
   pins, and links are optional.
+- Searching Documents shows where each result matched: **Titles** (the title holds every
+  word) first, then **Inside Documents** with the matching passage under the title. The
+  words are marked with a fill and an underline, each group shows its count, and the
+  search field shows the total.
 - Reading a long Document: an outline of its headings opens from the right edge, and
   each h2 and h3 can be folded to its first sentence, one at a time or with Fold all
   in the outline. Folds are kept per Document on this computer, never change the

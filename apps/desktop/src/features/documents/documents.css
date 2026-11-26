@@ -153,8 +153,44 @@
     pointer-events: auto;
   }
 }
+/* The passage a word search matched in, under the title (the board's .lrow-s): 13/18 muted,
+   two lines before it is cut. A row with a passage drops its meta line. */
 .document-list .document-snippet {
+  display: -webkit-box;
+  margin: 2px 0 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+  font-size: 13px;
+  line-height: 18px;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+.document-list-content:has(.document-snippet) .document-list-meta {
   display: none;
+}
+/* The words a search matched: the accent fill and a 1.5px foreground underline (the board's
+   .hit), so a match never relies on colour alone. */
+.document-list mark {
+  padding: 0 1px;
+  border-radius: 2px;
+  background: var(--accent);
+  box-shadow: inset 0 -1.5px 0 var(--foreground);
+  color: inherit;
+}
+/* The two groups of a word search: a 12/16 medium muted name, then its count. */
+.documents-list-view h2.documents-search-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  padding: 14px 18px 6px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 16px;
+}
+.documents-search-group + .documents-search-group .documents-search-heading {
+  padding-top: 10px;
 }
 .documents-filters,
 .documents-restored {

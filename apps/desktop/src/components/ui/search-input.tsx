@@ -2,6 +2,7 @@ import * as React from "react";
 import { Search, X } from "lucide-react";
 import { cn } from "cn";
 import { IconButton } from "@/components/ui/icon-button";
+import { Count } from "@/components/ui/count";
 import { Input } from "@/components/ui/input";
 import "./patterns.css";
 
@@ -11,13 +12,14 @@ import "./patterns.css";
  * `size="sm"` is 32px for toolbars and popovers, `default` 40px for dialogs;
  * `fill` takes the free width up to 360px (a pane header). The placeholder is
  * "Search {things}…". Escape clears a value, then leaves the field to the
- * caller (`onKeyDown`).
+ * caller (`onKeyDown`). A `count` of matches sits before the clear button.
  */
 function SearchInput({
   value,
   onValueChange,
   size = "sm",
   fill = false,
+  count,
   className,
   onKeyDown,
   ...props
@@ -26,6 +28,8 @@ function SearchInput({
   onValueChange: (value: string) => void;
   size?: "sm" | "default";
   fill?: boolean;
+  /** How many things match, shown inside the field before the clear button. */
+  count?: number | string;
 }) {
   const input = React.useRef<HTMLInputElement>(null);
   return (
@@ -54,6 +58,9 @@ function SearchInput({
         }}
         {...props}
       />
+      {value && count !== undefined && (
+        <Count data-slot="search-count">{count}</Count>
+      )}
       {value && (
         <IconButton
           type="button"
