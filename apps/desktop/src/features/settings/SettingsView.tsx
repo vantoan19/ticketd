@@ -22,6 +22,7 @@ import { FilesPage } from "@/features/settings/pages/FilesPage";
 import { WorkspaceSyncPage } from "@/features/settings/pages/WorkspaceSyncPage";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
 import { SearchPage } from "@/features/settings/pages/SearchPage";
+import { SetupPage } from "@/features/settings/pages/SetupPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
 import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { useFadeThrough } from "@/features/settings/fade-through";
@@ -111,6 +112,7 @@ export function SettingsView({
       // Fading out, the page is out of reach: nothing in it takes focus or a click.
       inert={leaving || undefined}
     >
+      {selected === "setup" && <SetupPage />}
       {selected === "appearance" && <AppearancePage />}
       {selected === "attention" && <AttentionPage />}
       {selected === "files" && <FilesPage key={restores} />}

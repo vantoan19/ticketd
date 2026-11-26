@@ -27,14 +27,18 @@ export function Steps({
   children,
   variant = "default",
   enterFrom,
+  label,
 }: {
   variant?: "default" | "settings";
   className?: string;
   enterFrom?: number;
+  /** Names the list for assistive technology, such as "Setup steps". */
+  label?: string;
   children: ReactNode;
 }) {
   return (
     <ol
+      aria-label={label}
       {...(enterFrom !== undefined && enter(enterFrom))}
       data-slot="steps"
       data-variant={variant}
@@ -70,12 +74,15 @@ export function Step({
   action,
   state,
   settled = true,
+  children,
 }: {
   title: ReactNode;
   description?: ReactNode;
   action?: ReactNode;
   state?: "done" | "current";
   settled?: boolean;
+  /** Content under the description, at the width of the step: a block to copy. */
+  children?: ReactNode;
 }) {
   const { number, enter: entering } = useContext(StepPlace);
   // A step that completes while it is on screen draws its check; one that was
@@ -128,9 +135,17 @@ export function Step({
           {action}
         </span>
         {description && (
-          <span className="text-xs leading-4 text-muted-foreground">
+          <span
+            data-slot="step-description"
+            className="text-xs leading-4 text-muted-foreground"
+          >
             {description}
           </span>
+        )}
+        {children && (
+          <div data-slot="step-extra" className="mt-3">
+            {children}
+          </div>
         )}
       </span>
     </li>

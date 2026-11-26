@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { ArrowLeft, type LucideIcon } from "lucide-react";
+import { ArrowLeft, ListChecks, type LucideIcon } from "lucide-react";
 import { SearchInput } from "@/components/ui/search-input";
 import { Glide } from "@/components/ui/motion";
 import {
@@ -24,6 +24,7 @@ import {
   type SettingsSectionId,
 } from "@/features/settings/settings-sections";
 import { useSettingsState } from "@/features/settings/use-settings-state";
+import { SetupRing } from "@/features/setup/SetupRing";
 import { useUpdates } from "@/features/updates/update-state";
 import "@/features/settings/settings.css";
 
@@ -49,8 +50,10 @@ function useSettingsNavItems() {
   const chat = useChatFeature();
   const update = useUpdates()?.snapshot;
   // Automations are part of Chats: their switch shows and hides both.
+  // Set up ticketd has a row of its own above the groups (see SettingsNav).
   const items: NavItem[] = SETTINGS_SECTIONS.filter(
-    (section) => section.id !== "automations" || chat.enabled,
+    (section) =>
+      section.id !== "setup" && (section.id !== "automations" || chat.enabled),
   );
   const indicator = (id: SettingsSectionId): NavIndicator | null => {
     if (id === "about" && update?.status === "ready" && update.dismissed)
@@ -91,6 +94,8 @@ export function SettingsNav({
     setQuery,
     navOpen = false,
     setNavOpen = () => {},
+    setup,
+    setupRow,
   } = useSettingsState();
   const selected = navSectionOf(resolveSettingsPage(chosen));
   const mobile = useIsMobile();
@@ -133,6 +138,31 @@ export function SettingsNav({
             }}
           />
         </div>
+        {setup && setupRow && (
+          <div role="group" aria-label="Setup">
+            <ul>
+              <li>
+                <button
+                  type="button"
+                  className="settings-nav-row settings-setup-row"
+                  data-responsive-navigation="settings-section:setup"
+                  aria-current={selected === "setup" ? "page" : undefined}
+                  onClick={() => open("setup")}
+                >
+                  {selected === "setup" && <Glide id="settings-nav" />}
+                  <ListChecks size={16} aria-hidden="true" />
+                  <span className="settings-nav-label">
+                    Set up ticketd
+                  </span>{" "}
+                  <span className="settings-setup-count">
+                    <SetupRing done={setup.done} total={setup.steps.length} />
+                    {`${setup.done} of ${setup.steps.length}`}
+                  </span>
+                </button>
+              </li>
+            </ul>
+          </div>
+        )}
         {SETTINGS_GROUPS.map((group) => {
           const sections = items.filter((item) => item.group === group);
           if (sections.length === 0) return null;

@@ -1012,6 +1012,13 @@ fn latest_update(reference: String) -> Result<Option<LatestUpdate>, BridgeFailur
 }
 
 #[tauri::command(async)]
+fn first_agent_update() -> Result<Option<ticketd_core::AgentUpdate>, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.first_agent_update())
+        .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
 fn activity_feed(
     reference: String,
     limit: u32,
@@ -2573,6 +2580,7 @@ pub fn run() -> Result<(), tauri::Error> {
             source_conversation,
             latest_update,
             activity_feed,
+            first_agent_update,
             get_activity,
             add_activity,
             add_activity_with_details,

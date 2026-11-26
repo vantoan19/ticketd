@@ -22,6 +22,14 @@ export interface SettingsEntry {
  */
 export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
+    title: "Set up ticketd",
+    description:
+      "Finish the few things that make ticketd useful with your agents.",
+    keywords:
+      "set up setup checklist onboarding getting started first run steps agents hide",
+    section: "setup",
+  },
+  {
     title: "Theme",
     description: "System follows your operating system",
     keywords: "dark mode light colour color appearance system",

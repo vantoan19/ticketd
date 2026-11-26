@@ -205,6 +205,14 @@ opens the graph to understand dependency chains.
   and **Help** (Keyboard shortcuts, Diagnostics, About). A search field above the groups
   finds a setting by name. Things you can have several of, such as a connection, are rows
   on their page that open in place with a way back; the sidebar never lists them.
+  **Set up ticketd** sits above the groups until it is finished or hidden, with a progress
+  ring, and Settings opens on it meanwhile. Its five steps tick from real state on this
+  computer, never by hand: agents can use ticketd (the `ticketd` command is on PATH and
+  every agent found has the skill, installed together with one administrator prompt),
+  an agent has written its first update, and, optionally, a ticket source is connected,
+  Workspace sync is on and notifications are allowed. Hiding the checklist, or finishing
+  it, removes the row; searching "set up" still finds the page. Nothing is sent anywhere
+  to know a step is done.
   Backups & export is one page for where the Workspace file is, the restore points to go
   back to, and the copies to take elsewhere.
 

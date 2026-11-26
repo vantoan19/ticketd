@@ -31,10 +31,16 @@ export function CommandBlock({
   command,
   copyLabel,
   className,
+  plain = false,
 }: {
   command: string;
   copyLabel: string;
   className?: string;
+  /**
+   * For text to paste into an agent rather than run in a terminal: no `$`, and
+   * no words colored as placeholders.
+   */
+  plain?: boolean;
 }) {
   const { copied, error, copy } = useCopy();
   return (
@@ -46,25 +52,29 @@ export function CommandBlock({
       )}
     >
       <code className="min-w-0 flex-1 overflow-x-auto font-mono text-(length:--text-code) leading-5 whitespace-nowrap">
-        <span
-          aria-hidden="true"
-          className="text-(--disabled-foreground) select-none"
-        >
-          {"$ "}
-        </span>
-        {parts(command).map((part, index) =>
-          part.placeholder ? (
-            <span
-              key={index}
-              data-placeholder
-              className="text-(--syntax-keyword)"
-            >
-              {part.text}
-            </span>
-          ) : (
-            part.text
-          ),
+        {!plain && (
+          <span
+            aria-hidden="true"
+            className="text-(--disabled-foreground) select-none"
+          >
+            {"$ "}
+          </span>
         )}
+        {plain
+          ? command
+          : parts(command).map((part, index) =>
+              part.placeholder ? (
+                <span
+                  key={index}
+                  data-placeholder
+                  className="text-(--syntax-keyword)"
+                >
+                  {part.text}
+                </span>
+              ) : (
+                part.text
+              ),
+            )}
       </code>
       <span
         role="status"
