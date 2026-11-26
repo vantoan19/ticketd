@@ -767,6 +767,7 @@ impl HarnessRuntime for CodexRuntime {
                     if let Some(unattended) = session.turn_overrides.clone() {
                         merge(&mut params, unattended);
                     }
+                    session.reports.turn_start_written();
                     session.runtime.start_written(&id);
                     (params, Call::StartTurn(id))
                 }

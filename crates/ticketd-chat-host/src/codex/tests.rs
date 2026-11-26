@@ -2297,6 +2297,30 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
             turn: turn("turn_1")
         }
     );
+    assert_eq!(
+        runtime
+            .change_setting(change(crate::SettingKey::Model, "gpt-a"))
+            .await,
+        crate::SettingOutcome::Applied
+    );
+    assert_eq!(runtime.supports_image_input(), Some(true));
+    assert_eq!(runtime.supports_steer_image_input(), Some(false));
+    assert_eq!(
+        runtime
+            .submit(Submission {
+                attachments: vec![image.clone()],
+                ..steer("unsupported-steer", "turn_1", "Look at this")
+            })
+            .await,
+        DispatchOutcome::NotSent(Refusal::ImageInputUnsupported)
+    );
+    peer.assert_nothing_written().await;
+    assert_eq!(
+        runtime
+            .change_setting(change(crate::SettingKey::Model, "gpt-b"))
+            .await,
+        crate::SettingOutcome::Applied
+    );
     let rerouted = json!({"method": "model/rerouted", "params": {
         "threadId": "thr_1", "turnId": "turn_1", "fromModel": "gpt-b", "toModel": "gpt-a"
     }});
@@ -2323,6 +2347,37 @@ async fn settings_come_from_codex_lists_and_a_chosen_model_goes_out_with_the_nex
             turn: turn("turn_1")
         }
     );
+}
+
+#[test]
+fn image_steering_uses_the_active_turn_model_and_observes_model_updates() {
+    let mut session = Session::default();
+    session
+        .reports
+        .thread_opened(&json!({"model": "text-only"}));
+    session.reports.models_listed(Ok(&json!({"data": [
+        {"id": "text-only", "inputModalities": ["text"]},
+        {"id": "vision", "inputModalities": ["text", "image"]}
+    ]})));
+    session
+        .reports
+        .override_setting(crate::SettingKey::Model, "vision");
+    session.reports.turn_start_written();
+    session.notification("turn/started", &json!({"turn": {"id": "turn_1"}}));
+    session
+        .reports
+        .override_setting(crate::SettingKey::Model, "text-only");
+
+    assert_eq!(session.reports.supports_image_input(false), Some(false));
+    assert_eq!(session.reports.supports_image_input(true), Some(true));
+
+    session.notification(
+        "thread/settings/updated",
+        &json!({
+            "threadSettings": {"model": "text-only"}
+        }),
+    );
+    assert_eq!(session.reports.supports_image_input(true), Some(false));
 }
 
 #[test]

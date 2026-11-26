@@ -179,8 +179,8 @@ impl Session {
                 None => vec![unknown("turn/steer reply without a turn", result)],
             },
             (Call::StartTurn(submission) | Call::Steer(submission), Err(error)) => {
-                if matches!(call, Call::StartTurn(_)) {
-                    self.runtime.resolve_start(submission);
+                if matches!(call, Call::StartTurn(_)) && self.runtime.resolve_start(submission) {
+                    self.reports.turn_start_rejected();
                 }
                 late.then(|| EventKind::SubmissionEvidence {
                     submission: submission.clone(),

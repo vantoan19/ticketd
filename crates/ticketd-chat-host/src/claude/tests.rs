@@ -170,6 +170,61 @@ async fn a_file_only_message_keeps_the_snapshot_readable_until_claude_closes() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_rejected_submission_releases_only_its_handoff_copy() {
+    let (mut peer, runtime, mut events) = open().await;
+    let file = ticketd_core::ChatAttachmentContent::from_data_url(
+        "notes.txt",
+        "data:text/plain;base64,bm90ZXM=",
+        100,
+    )
+    .unwrap();
+    let submission = || Submission {
+        attachments: vec![file.clone()],
+        ..start_turn("sub-1", "")
+    };
+    let handoff =
+        |command: &Value| PathBuf::from(command["attachments"][0]["path"].as_str().unwrap());
+    let (accepted, accepted_copy) = tokio::join!(runtime.submit(submission()), async {
+        let path = handoff(&peer.written().await);
+        let event = json!({"v": 1, "event": "input_handed_to_sdk", "generation": 7,
+            "submission_id": "sub-1"});
+        peer.send(&format!("{event}\n")).await;
+        path
+    });
+    assert_eq!(accepted, DispatchOutcome::Written);
+
+    let refusal = |command: &Value| {
+        json!({"v": 1, "event": "command_rejected", "id": command["id"],
+            "code": "duplicate_submission", "message": "submission is unresolved"})
+    };
+    let (rejected, rejected_copy) = tokio::join!(runtime.submit(submission()), async {
+        let command = peer.written().await;
+        let path = handoff(&command);
+        assert_eq!(std::fs::read(&path).unwrap(), b"notes");
+        peer.send(&format!("{}\n", refusal(&command))).await;
+        path
+    });
+    assert!(matches!(rejected, DispatchOutcome::Rejected { .. }));
+    assert!(!rejected_copy.exists());
+    assert_eq!(std::fs::read(&accepted_copy).unwrap(), b"notes");
+
+    let (unconfirmed, command) = tokio::join!(runtime.submit(submission()), peer.written());
+    assert_eq!(unconfirmed, DispatchOutcome::Written);
+    let unconfirmed_copy = handoff(&command);
+    assert_eq!(std::fs::read(&unconfirmed_copy).unwrap(), b"notes");
+    peer.send(&format!("{}\n", refusal(&command))).await;
+    assert!(matches!(
+        events.recv().await.unwrap().kind,
+        EventKind::SubmissionEvidence {
+            evidence: DeliveryEvidence::Rejected { .. },
+            ..
+        }
+    ));
+    assert!(!unconfirmed_copy.exists());
+    assert_eq!(std::fs::read(&accepted_copy).unwrap(), b"notes");
+}
+
+#[tokio::test(start_paused = true)]
 async fn claude_checks_image_size_before_queuing_or_sending_a_chat_attachment() {
     let adapter = ClaudeAdapter::new("ticketd-chat-bridge-claude");
     let png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+ip1sAAAAASUVORK5CYII=";
