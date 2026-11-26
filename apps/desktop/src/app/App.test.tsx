@@ -1655,9 +1655,9 @@ test("a Drive download that replaces the Workspace drops the old selection and a
   );
   for (let i = 0; i < 3; i += 1) await turn();
   fireEvent.click(
-    screen.getByRole("radio", { name: /Download “ticketd · other”/ }),
+    screen.getByRole("radio", { name: /Join “ticketd · other”/ }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Join…" }));
   await turn();
   fireEvent.click(
     within(
