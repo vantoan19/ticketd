@@ -61,15 +61,19 @@ function extension(name: string) {
 
 /**
  * The file's type in human words ("PNG image", "WAV audio", "PDF") and its
- * family, from the detected media type when the core knows it, else from the
- * original name. Never a MIME type (shell AT-09).
+ * family. The family comes from the detected media type when the core knows it,
+ * else from the original name; the word comes from the name first, so a `.mov`
+ * reads "QuickTime video" wherever it appears, whatever its container says.
+ * Never a MIME type (shell AT-09).
  */
 export function fileType(
   name: string,
   mediaType?: string | null,
 ): { word: string; family: FileFamily } {
-  const known = (mediaType && MEDIA[mediaType]) || TYPES[extension(name)];
-  if (known) return { word: known[0], family: known[1] };
+  const byName = TYPES[extension(name)];
+  const byMedia = mediaType ? MEDIA[mediaType] : undefined;
+  const known = byMedia ?? byName;
+  if (known) return { word: (byName ?? known)[0], family: known[1] };
   const ext = extension(name);
   return {
     word: ext && ext.length <= 5 ? `${ext.toUpperCase()} file` : "File",
