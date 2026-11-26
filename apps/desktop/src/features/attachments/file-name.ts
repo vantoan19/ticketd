@@ -69,9 +69,13 @@ export function fitName(name: string, measure = measurer()): FittedName {
   const first = firstLine(name, measure);
   const rest = name.slice(first.length);
   if (measure(rest) <= WIDTH) return { text: name, cut: false };
-  let head = rest.slice(0, Math.max(0, rest.length - KEEP));
-  while (head && measure(`${head}…${tail}`) > WIDTH) head = head.slice(0, -1);
-  const second = `${head}…${tail}`;
+  // The end comes from the second line, never from the first, and gives up
+  // letters until it fits: a wide script can make 14 of them wider than a line.
+  let end = rest.slice(-KEEP);
+  while (end.length > 1 && measure(`…${end}`) > WIDTH) end = end.slice(1);
+  let head = rest.slice(0, rest.length - end.length);
+  while (head && measure(`${head}…${end}`) > WIDTH) head = head.slice(0, -1);
+  const second = `${head}…${end}`;
   return { text: first + second, cut: true, lines: [first, second] };
 }
 
