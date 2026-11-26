@@ -88,6 +88,7 @@ const BOARD = [
     name: "Antigravity",
     status: "not_installed",
     help_url: "https://antigravity.google/docs/ide/extensions/acp/",
+    minimum_version: "1.5.2",
     sign_in_command: "agy",
   },
 ] as const;
@@ -221,7 +222,7 @@ test("turning Chats on checks each agent's sign-in and shows the word, the fix a
   );
   expect(row("Antigravity").textContent).toContain("Not installed");
   expect(row("Antigravity").textContent).toContain(
-    "Install Antigravity to use it here.",
+    "Install version 1.5.2 or newer to use it here.",
   );
   // The one fix is labelled, and only where there is one.
   expect(
@@ -237,6 +238,20 @@ test("turning Chats on checks each agent's sign-in and shows the word, the fix a
     ),
   ).toBeTruthy();
   expect(screen.getByRole("button", { name: "Open Claude Code" })).toBeTruthy();
+});
+
+test("an agent with no known minimum version says only what to install", async () => {
+  render(
+    <Settings
+      client={spied(true, [
+        { id: "claude-code", name: "Claude Code", status: "not_installed" },
+      ])}
+    />,
+  );
+  await screen.findByRole("list", { name: "Agents" });
+  expect(
+    await screen.findByText("Install Claude Code to use it here."),
+  ).toBeTruthy();
 });
 
 test("a missing sign-in has one fix: copying its command", async () => {
@@ -422,7 +437,9 @@ test("an agent that is not installed offers where to get it, in its opened view"
   await screen.findByRole("heading", { level: 1, name: "Antigravity" });
   expect(screen.queryByRole("heading", { name: "Sign-in" })).toBeNull();
   const get = await screen.findByRole("button", { name: /Get Antigravity/ });
-  expect(screen.getByText("Install Antigravity to use it here.")).toBeTruthy();
+  expect(
+    screen.getByText("Install version 1.5.2 or newer to use it here."),
+  ).toBeTruthy();
   fireEvent.click(get);
   expect(workspaceClient.openLink).toHaveBeenCalledWith(
     "https://antigravity.google/docs/ide/extensions/acp/",

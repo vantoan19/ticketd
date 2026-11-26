@@ -222,6 +222,8 @@ export const harnessStatusSchema = z.object({
   command: z.string().nullish(),
   /** How the harness signs in or switches accounts ("claude /login"), whatever its state. */
   sign_in_command: z.string().nullish(),
+  /** The oldest version Chats run on ("1.5.2"), when ticketd knows one. */
+  minimum_version: z.string().nullish(),
   help_url: z.string().nullish(),
   /** The executable that was found, to show as a path. */
   path: z.string().nullish(),

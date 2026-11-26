@@ -20,6 +20,8 @@ pub struct Registration {
     pub find: fn() -> Option<PathBuf>,
     /// Set while the program is asked its version, so the question has no side effects.
     pub version_environment: &'static [(&'static str, &'static str)],
+    /// The oldest version Chats can run on, when the program has one ticketd knows.
+    pub minimum_version: Option<(u64, u64, u64)>,
 }
 
 /// A program found on this computer, and the version it reported.
@@ -59,6 +61,7 @@ pub static REGISTRATIONS: &[Registration] = &[
         read_steps: read_claude_steps,
         find: crate::claude::find,
         version_environment: &[],
+        minimum_version: None,
     },
     Registration {
         descriptor: &CODEX,
@@ -66,6 +69,7 @@ pub static REGISTRATIONS: &[Registration] = &[
         read_steps: read_codex_steps,
         find: crate::codex::find,
         version_environment: &[],
+        minimum_version: Some(crate::codex::MINIMUM_VERSION),
     },
     Registration {
         descriptor: &ANTIGRAVITY,
@@ -73,6 +77,7 @@ pub static REGISTRATIONS: &[Registration] = &[
         read_steps: crate::antigravity::read_steps,
         find: crate::antigravity::executable,
         version_environment: &[("AGY_CLI_DISABLE_AUTO_UPDATE", "1")],
+        minimum_version: Some(crate::antigravity::MINIMUM_VERSION),
     },
 ];
 
@@ -110,6 +115,13 @@ mod tests {
             let entry = registration(descriptor.key.as_str()).expect("registered harness");
             assert!(std::ptr::eq(*descriptor, entry.descriptor));
         }
+    }
+
+    #[test]
+    fn programs_with_a_known_minimum_version_say_it() {
+        let minimum = |key: &str| registration(key).and_then(|entry| entry.minimum_version);
+        assert_eq!(minimum("antigravity"), Some((1, 5, 2)));
+        assert!(minimum("codex").is_some());
     }
 
     #[cfg(unix)]

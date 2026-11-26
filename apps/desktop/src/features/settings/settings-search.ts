@@ -146,7 +146,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
     title: "On this computer",
     description:
-      "Claude Code, Codex and Antigravity: which are installed, and whether each is signed in.",
+      "To let them use ticketd in their own terminal, see Agent skills.",
     keywords:
       "agents harness claude code codex antigravity installed detected version signed in check again copy command",
     section: "agents",

@@ -23,7 +23,7 @@ use crate::{
 
 pub(crate) use steps::read_steps;
 
-const MINIMUM_VERSION: (u64, u64, u64) = (1, 5, 2);
+pub(crate) const MINIMUM_VERSION: (u64, u64, u64) = (1, 5, 2);
 const REQUIREMENT: &str = "Antigravity CLI 1.5.2 or newer";
 
 pub(crate) fn make_adapter(_: &crate::HostResources) -> Result<Arc<dyn HarnessAdapter>, Problem> {

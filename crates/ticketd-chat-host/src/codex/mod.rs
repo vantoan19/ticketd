@@ -66,6 +66,9 @@ impl CodexAdapter {
     }
 }
 
+/// The oldest Codex Chats can run on.
+pub(crate) const MINIMUM_VERSION: (u64, u64, u64) = discovery::MINIMUM_VERSION;
+
 /// Where Codex is installed, found the way Chats find it.
 pub(crate) fn find() -> Option<PathBuf> {
     discovery::locate(Os::current(), &LaunchEnvironment::current(), |path| {

@@ -160,7 +160,7 @@ const CHAT_ON = {
   requestChat: () => {},
 };
 
-test("Chat settings show harness names only in the catalog", async () => {
+test("Agents show harness names only in the agents list, with Chats off and on", async () => {
   const client = createMockChatClient({
     harnesses: [{ id: "antigravity", name: "Antigravity", status: "ready" }],
   });
@@ -181,12 +181,16 @@ test("Chat settings show harness names only in the catalog", async () => {
   );
   const harnessNames = /Claude Code|Codex|Antigravity/i;
   const { rerender } = render(page(false));
-  expect(screen.queryByText(harnessNames)).toBeNull();
+  const found = await screen.findByRole("list", { name: "Agents" });
+  expect(screen.getAllByText(harnessNames)).toEqual([
+    within(found).getByText("Antigravity"),
+  ]);
 
   rerender(page(true));
-  const catalog = await screen.findByRole("list", { name: "Harnesses" });
+  await screen.findByText("Ready");
+  const checked = screen.getByRole("list", { name: "Agents" });
   expect(screen.getAllByText(harnessNames)).toEqual([
-    within(catalog).getByText("Antigravity"),
+    within(checked).getByText("Antigravity"),
   ]);
 });
 

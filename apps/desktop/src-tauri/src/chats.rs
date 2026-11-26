@@ -351,6 +351,8 @@ pub struct HarnessStatus {
     /// How the harness signs in or switches accounts ("claude /login"), whatever its
     /// state; `command` is the same text only while there is a sign-in to do.
     pub sign_in_command: &'static str,
+    /// The oldest version Chats can run on ("1.5.2"), when ticketd knows one.
+    pub minimum_version: Option<String>,
     pub help_url: Option<String>,
     /// The executable that was found.
     pub path: Option<String>,
@@ -460,6 +462,12 @@ fn version_number(output: &str) -> &str {
         .unwrap_or(output)
 }
 
+/// "1.5.2": the oldest version of the harness's program that Chats run on.
+fn minimum_version(id: &str) -> Option<String> {
+    let (major, minor, patch) = ticketd_chat_host::registration(id)?.minimum_version?;
+    Some(format!("{major}.{minor}.{patch}"))
+}
+
 fn harness_status(descriptor: Harness, inspection: Inspection) -> HarnessStatus {
     let id = descriptor.key.as_str();
     let name = descriptor.name;
@@ -554,6 +562,7 @@ fn harness_status(descriptor: Harness, inspection: Inspection) -> HarnessStatus 
         message: found.message,
         command: found.command,
         sign_in_command: descriptor.sign_in_command,
+        minimum_version: minimum_version(id),
         help_url: found.help_url,
         path: found.path,
         version: match &inspection {
@@ -1554,6 +1563,7 @@ impl Chats {
                         message: Some(reason),
                         command: None,
                         sign_in_command: descriptor.sign_in_command,
+                        minimum_version: minimum_version(id),
                         help_url: None,
                         path: None,
                         version: None,

@@ -690,7 +690,11 @@ file bytes.
 Native Chat is experimental and off by default (Settings > Agents). A Chat hosts the
 person's own installed Claude Code, Codex or Antigravity harness with its own sign-in. ticketd
 detects the installation and guides the person to the harness's login; it does not
-collect OAuth tokens, proxy model requests, or change billing.
+collect OAuth tokens, proxy model requests, or change billing. Settings > Agents lists
+the agents found on this computer even while Chats are off (it asks each program only
+its version, never its sign-in); with Chats on it shows each one's readiness and the
+one fix a missing sign-in needs, and opening one shows its sign-in, its program and
+what New Chat last started it with.
 
 - **Identity.** A Chat is a standalone Workspace conversation that can start without a
   project or ticket and link to several projects, tickets, and Documents without being
@@ -787,4 +791,6 @@ and a flow of steps that can branch.
   model, instructions, allowed tools, and turn and time limits, run in its own Chat.
 - **Runs.** A run records its event, steps, outcome, and each agent step's Chat. Runs
   are local to the device that ran them, and an Automation is switched on or off per
-  device.
+  device. Runs go two at once; there is no setting for it. Scheduled Automations run
+  only while ticketd is running, so Settings > Automations offers "Start ticketd when
+  you sign in" and says how many scheduled Automations depend on it.

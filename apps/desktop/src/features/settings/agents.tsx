@@ -31,6 +31,12 @@ export const isInstalled = (agent: HarnessStatus) =>
 export const plainMessage = (agent: HarnessStatus) =>
   agent.message?.replaceAll("`", "");
 
+/** What to install, as far as ticketd knows the version Chats need. */
+const installText = (agent: HarnessStatus) =>
+  agent.minimum_version
+    ? `Install version ${agent.minimum_version} or newer to use it here.`
+    : `Install ${agent.name} to use it here.`;
+
 export function agentLine(agent: HarnessStatus): AgentLine {
   const version = agent.version ? ` · version ${agent.version}` : "";
   switch (agent.status) {
@@ -52,13 +58,15 @@ export function agentLine(agent: HarnessStatus): AgentLine {
       return {
         label: agent.word?.word ?? "Not installed",
         tone: "neutral",
-        description: `Install ${agent.name} to use it here.`,
+        description: installText(agent),
       };
     case "incompatible":
       return {
         label: agent.word?.word ?? "Can't be used",
         tone: "attention",
-        description: `Update ${agent.name} to use it here.`,
+        description: agent.minimum_version
+          ? `Update to version ${agent.minimum_version} or newer to use it here.`
+          : `Update ${agent.name} to use it here.`,
       };
     case "unavailable":
       return {

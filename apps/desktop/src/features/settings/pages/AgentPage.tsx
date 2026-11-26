@@ -312,7 +312,7 @@ function startLine(options: HarnessOptions) {
   const pick = startPick(options, rememberedPick(options.harness_id));
   const model = modelOf(options, pick);
   const parts = [
-    model?.label,
+    model?.runs_as ?? model?.label,
     model?.efforts.find((effort) => effort.id === pick.effort)?.label,
     options.permission?.options.find((item) => item.id === pick.permission)
       ?.label,
