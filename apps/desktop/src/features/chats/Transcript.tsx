@@ -671,6 +671,7 @@ export const StepRow = memo(function StepRow({
       type="button"
       className="chat-steps"
       data-anchor=""
+      data-running={running ? "" : undefined}
       aria-expanded={open}
       aria-controls={open ? id : undefined}
       aria-label={words.label}
@@ -691,6 +692,7 @@ export const StepRow = memo(function StepRow({
     <div
       className="chat-steps"
       data-anchor=""
+      data-running={running ? "" : undefined}
       // A row carrying a decision takes focus, so its tooltip shows from the keyboard.
       tabIndex={decision ? 0 : undefined}
       aria-describedby={decision ? described : undefined}
@@ -1115,7 +1117,12 @@ const TurnView = memo(function TurnView({
     // follows, where its reply actions show.
     <div className="chat-turn-unit" data-seen={turn.ids.at(-1)}>
       {work && (
-        <div ref={part} className="chat-turnpart" data-anchor="">
+        <div
+          ref={part}
+          className="chat-turnpart"
+          data-fold={showRow ? "" : undefined}
+          data-anchor=""
+        >
           {showRow && (
             <div className="chat-foldline">
               {/* A plain row, not a Button: the turn's whole fold line is the target. */}
@@ -1381,7 +1388,12 @@ function WorkingLine({
   const worked = since ? workedFor(items, since, now) : NaN;
   return (
     <div className="chat-working">
-      {spinner && <LoaderCircle size={12} className="chat-spin" aria-hidden />}
+      {spinner && (
+        // In the step rows' 16px icon box, so the words start where theirs do.
+        <span className="chat-row-icon" aria-hidden="true">
+          <LoaderCircle size={12} className="chat-spin" />
+        </span>
+      )}
       <Words shimmer={spinner}>
         {since ? (
           Number.isNaN(worked) || worked < 1000 ? (
