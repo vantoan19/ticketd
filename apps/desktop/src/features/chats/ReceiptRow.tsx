@@ -62,15 +62,18 @@ function Sentence({ change }: { change: RecordChange }) {
 
 /**
  * What the agent changed in ticketd during a turn, as one 28px row under the
- * response (after the files row): the first change's icon, then verb-first
+ * response (after the files row): the first sentence's icon, then verb-first
  * sentences joined by ` · `, at most two, then `N more`, which opens the
- * turn's fold, where every change is a step row. Never folded itself, and
+ * turn's fold, where every change is a step row. The changes are the host's net
+ * list (a ticket's status moves netted into one), so "Moved T-12 to In review"
+ * leads, not the step it passed through. Never folded itself, and
  * shown also when the turn failed or was stopped.
  */
 export function ReceiptRow({
   changes,
   onMore,
 }: {
+  /** What the host netted for the turn; not netted again here. */
   changes: RecordChange[];
   /** Opens the turn's fold. */
   onMore: () => void;

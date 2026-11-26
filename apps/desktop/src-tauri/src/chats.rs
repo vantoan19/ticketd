@@ -522,35 +522,40 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
         id,
         at,
         changes,
+        net,
         turn_id,
         ..
     } = item
     else {
         return item;
     };
-    let gone = changes
-        .iter()
-        .map(|change| {
-            let trashed = match change {
-                ChatAgentChange::Status { reference, .. }
-                | ChatAgentChange::Update { reference, .. } => workspace
-                    .show_ticket(reference)
-                    .map(|ticket| ticket.trashed),
-            };
-            match trashed {
-                Ok(true) => Some("trashed"),
-                Ok(false) => None,
-                Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
-                // Not readable now: shown as it was, linked.
-                Err(_) => None,
-            }
-        })
-        .collect();
+    let gone_of = |changes: &[ChatAgentChange]| {
+        changes
+            .iter()
+            .map(|change| {
+                let trashed = match change {
+                    ChatAgentChange::Status { reference, .. }
+                    | ChatAgentChange::Update { reference, .. } => workspace
+                        .show_ticket(reference)
+                        .map(|ticket| ticket.trashed),
+                };
+                match trashed {
+                    Ok(true) => Some("trashed"),
+                    Ok(false) => None,
+                    Err(ticketd_core::Error::NotFound(_)) => Some("deleted"),
+                    // Not readable now: shown as it was, linked.
+                    Err(_) => None,
+                }
+            })
+            .collect()
+    };
     Item::Records {
         id,
         at,
+        gone: gone_of(&changes),
+        net_gone: gone_of(&net),
         changes,
-        gone,
+        net,
         turn_id,
     }
 }
@@ -690,6 +695,13 @@ fn surroundings(
         })
         .collect();
     let links = links(workspace, &chat.id)?;
+    let first_line = if chat_view::title_may_be_cut(chat) {
+        workspace
+            .chat_first_input_text(&chat.id)?
+            .and_then(|text| chat_view::first_line_of(&text))
+    } else {
+        None
+    };
     let trashed_links = workspace
         .chat_linked_records(&chat.id)?
         .into_iter()
@@ -701,6 +713,7 @@ fn surroundings(
         checked_turn,
         folder_missing,
         shared_with,
+        first_line,
         project: chat_project(chat, &workspace.list_projects()?),
         branch: None,
         links,
@@ -1304,10 +1317,15 @@ impl Chats {
         #[cfg(test)]
         self.rows_built.fetch_add(1, Ordering::SeqCst);
         let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
+        let mut tracker = Tracker::from_items(&items);
+        // A long turn's own record can lie outside the window; the row still says it.
+        if let Some(turn) = workspace.chat_latest_turn(&chat.id)? {
+            tracker.note(&ChatItem::Turn(turn));
+        }
         Ok(chat_view::summary(
             chat,
             live,
-            &Tracker::from_items(&items),
+            &tracker,
             &surroundings(
                 workspace,
                 chat,
@@ -1582,12 +1600,12 @@ impl Chats {
             Some(path) => (folder_argument(path)?, false),
             None => (managed.to_string_lossy().into_owned(), true),
         };
-        let first_line = input.message.trim().lines().next().unwrap_or_default();
+        let first_line = chat_view::first_line_of(&input.message).unwrap_or_default();
         // The Chat is stored first: a request the core refuses leaves no folder behind.
         let chat = workspace.create_chat(
             Some(&format!("{command_id}:chat")),
             NewChat {
-                title: Some(first_line.chars().take(80).collect()),
+                title: Some(chat_view::cut_at_word(&first_line, chat_view::TITLE_LIMIT)),
                 harness: input.harness_id,
                 execution_folder,
                 folder_managed,
@@ -2147,6 +2165,8 @@ impl Chats {
             return Err(failed("The folder is still missing.".to_owned()));
         }
         let items = workspace.chat_snapshot(chat_id, SUMMARY_ITEMS)?.items;
+        // The row reads the last turn on its own too, so this must see what the row sees.
+        let latest_turn = workspace.chat_latest_turn(chat_id)?;
         drop(workspace);
         let descriptor = self
             .catalog()
@@ -2163,7 +2183,11 @@ impl Chats {
         ) {
             host.resume(chat_id, ResumeMode::Native).await?;
         }
-        if let Some(turn) = Tracker::from_items(&items).failed_turn() {
+        let mut tracker = Tracker::from_items(&items);
+        if let Some(turn) = latest_turn {
+            tracker.note(&ChatItem::Turn(turn));
+        }
+        if let Some(turn) = tracker.failed_turn() {
             // A sign-in the probe cannot see is not shown to be in order by it.
             let signed_out = matches!(
                 TurnEnding::of(turn),

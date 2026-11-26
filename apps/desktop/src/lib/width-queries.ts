@@ -33,7 +33,7 @@ export const WIDTH_PANES = [
 
 /** The `max-width` breakpoints the stylesheets use, in px (inclusive). */
 const MAX = [
-  400, 419, 420, 459, 460, 479, 599, 600, 619, 640, 760, 799, 879, 999,
+  400, 419, 420, 459, 460, 479, 509, 599, 600, 619, 640, 760, 799, 879, 999,
 ];
 /** The `min-width` breakpoints the stylesheets use, in px (inclusive). */
 const MIN = [760];

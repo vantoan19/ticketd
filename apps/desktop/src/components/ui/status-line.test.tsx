@@ -9,7 +9,11 @@ import {
 import { useEffect } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { StatusLineRegion, StatusLineSpot } from "./status-line";
-import { useStatusLine, type StatusLineMessage } from "./use-status-line";
+import {
+  useStatusLine,
+  useStatusLineAbove,
+  type StatusLineMessage,
+} from "./use-status-line";
 
 beforeEach(() => vi.useFakeTimers());
 afterEach(() => {
@@ -168,4 +172,26 @@ test("an outcome in a sibling pane under one spot replaces the notice, which ret
   });
   act(() => vi.advanceTimersByTime(500));
   expect(lines()).toEqual([expect.stringContaining("0.2.0 is ready")]);
+});
+
+test("a line over an element sits 8px above its top edge, centred on it", () => {
+  const tray = document.createElement("div");
+  document.body.append(tray);
+  tray.getBoundingClientRect = () =>
+    ({ top: 700, left: 100, width: 600, height: 120 }) as DOMRect;
+  function Over() {
+    useStatusLineAbove(tray);
+    return null;
+  }
+  render(
+    <StatusLineRegion>
+      <Poster targetRef={postRef} />
+      <Over />
+    </StatusLineRegion>,
+  );
+  act(() => post({ message: "Couldn't open the link" }));
+  const slot = document.querySelector<HTMLElement>(".ui-status-line-slot");
+  expect(slot?.style.left).toBe("400px");
+  expect(slot?.style.bottom).toBe(`${window.innerHeight - 700 + 8}px`);
+  tray.remove();
 });

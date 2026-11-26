@@ -28,6 +28,7 @@ import { useStatusLine } from "@/components/ui/use-status-line";
 import { RecordLink } from "@/components/ui/record-link";
 import { SyntaxCode } from "./SyntaxCode";
 import { codeLanguageLabel } from "./code-language";
+import { boldOnly } from "./bold-only";
 import { chunkFade } from "./chunk-fade";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
@@ -75,7 +76,7 @@ function htmlAsText() {
   };
   return (tree: MdNode) => walk(tree);
 }
-const remarkPlugins = [remarkGfm, references, htmlAsText];
+const remarkPlugins = [remarkGfm, references, htmlAsText, boldOnly];
 const urlTransform = (url: string) =>
   url.startsWith("ticketd:") ? url : defaultUrlTransform(url);
 /** The passage to mark, and the element that describes it to assistive technology. */
