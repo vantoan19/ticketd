@@ -318,7 +318,7 @@ test("a command with no description is one muted mono line", async () => {
   );
 });
 
-test("a row naming two long files keeps to one line, its outcome outside the cut", async () => {
+test("a row naming two long files keeps to one line until its names cannot fit", async () => {
   await show([
     {
       chat: chatState({ id: "c1", title: "Limiter", activity: "working" }),
@@ -334,28 +334,23 @@ test("a row naming two long files keeps to one line, its outcome outside the cut
     },
   ]);
   const words = document.querySelector(".chat-step-words");
-  // The cascade is read as text (jsdom has none): a line row never wraps, and
-  // its names, not its verb or outcome, are what give way.
+  // The cascade is read as text (jsdom has none): a line row names its files as
+  // direct children, the dot and the outcome stay together, and nothing clips.
   expect(words?.hasAttribute("data-line")).toBe(true);
-  expect(words?.querySelectorAll(".chat-file-name")).toHaveLength(2);
-  expect(words?.lastElementChild?.textContent).toBe("Failed");
+  expect(words?.querySelectorAll(":scope > .chat-file-name")).toHaveLength(2);
+  expect(words?.lastElementChild?.className).toBe("chat-step-suffix");
+  expect(words?.lastElementChild?.textContent).toMatch(/Failed$/);
   expect(css).toMatch(
-    /\.chat-step-words\[data-line\] \{[^}]*white-space: nowrap/,
+    /\.chat-step-words\[data-line\] \{[^}]*flex-wrap: wrap[^}]*white-space: nowrap/,
   );
+  // A name's flex basis is its minimum, so the row wraps only when the shrunken
+  // names cannot fit, and otherwise they grow and truncate on the one line. The
+  // row clips nothing, so a name's button and its focus ring stay visible
+  // (measured in Chromium and WebKit at 340px and 480px; jsdom has no layout).
   expect(css).toMatch(
-    /\.chat-step-words\[data-line\] \.chat-file-name \{[^}]*flex: 0 1 auto/,
+    /\.chat-step-words\[data-line\] \.chat-file-name \{[^}]*flex: 1 1 calc\(var\(--keep, 0\) \* 1ch \+ 4px\);[^}]*max-width: max-content/,
   );
-  // The names and the words between them are one group that clips, so two names
-  // at their minimum widths can never push the outcome past the row (measured in
-  // the headless harness; jsdom has no layout).
-  const group = words?.querySelector(":scope > .chat-step-names");
-  expect(group?.querySelectorAll(".chat-file-name")).toHaveLength(2);
-  expect(group?.nextElementSibling?.nextElementSibling).toBe(
-    words?.lastElementChild,
-  );
-  expect(css).toMatch(
-    /\.chat-step-words\[data-line\] > \.chat-step-names \{[^}]*min-width: 0;[^}]*overflow-x: clip/,
-  );
+  expect(css).not.toContain("chat-step-names");
   // A name gives way only down to "…" and its extension (--keep characters), so
   // the next word is never overlapped.
   expect(css).toMatch(/\.chat-file-name \{[^}]*min-width: calc\(var\(--keep/);
