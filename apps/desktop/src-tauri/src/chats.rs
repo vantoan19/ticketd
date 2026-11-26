@@ -2140,23 +2140,27 @@ impl Chats {
             self.workspace()?.attachment_upload_limit()?
         };
         let attachments = Self::decode_message_attachments(text, files, limit)?;
-        if let Some(command_id) = command_id.as_deref() {
-            let workspace = self.workspace()?;
-            if workspace.chat_queue_edit_saved(chat_id, command_id)?
+        let links: Vec<_> = links.iter().cloned().map(ChatLink::from).collect();
+        let linked = if let Some(command_id) = command_id.as_deref() {
+            let mut workspace = self.workspace()?;
+            let saved = workspace.chat_queue_edit_saved(chat_id, command_id)?
                 && workspace.replay_chat_queue_edit(
                     command_id,
                     chat_id,
                     text,
                     &attachments,
                     &replaces,
-                )?
-            {
+                )?;
+            let linked = workspace.add_chat_queue_edit_links(chat_id, command_id, &links)?;
+            if saved {
                 self.resync(chat_id);
                 return Ok(());
             }
-        }
-        let links: Vec<_> = links.iter().cloned().map(ChatLink::from).collect();
-        if !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)? {
+            linked
+        } else {
+            !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)?
+        };
+        if linked {
             host.links_changed(chat_id).await?;
         }
         let replacing = !replaces.is_empty();

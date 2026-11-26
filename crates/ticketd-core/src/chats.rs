@@ -1158,6 +1158,19 @@ fn add_link(connection: &Connection, chat_id: &str, link: &ChatLink) -> Result<b
     Ok(true)
 }
 
+fn add_links(connection: &Connection, id: &str, links: &[ChatLink]) -> Result<bool, Error> {
+    read_chat(connection, id)?;
+    let mut added = false;
+    for link in links {
+        added |= add_link(connection, id, link)?;
+    }
+    if added {
+        log(connection, id, "chat", id)?;
+        trim(connection, id)?;
+    }
+    Ok(added)
+}
+
 /// Runs `create` once per command ID and returns the ID of the record it created.
 /// A command ID deduplicates this ticketd write only; it promises nothing about the harness.
 /// Creates a Chat in the caller's transaction. Repeating `command_id` with the same
@@ -1244,11 +1257,21 @@ fn once(
         return Ok(id);
     }
     let id = create()?;
+    save_outcome(connection, command_id, &request, &id)?;
+    Ok(id)
+}
+
+fn save_outcome(
+    connection: &Connection,
+    command_id: &str,
+    request: &str,
+    outcome: &str,
+) -> Result<(), Error> {
     connection.execute(
         "INSERT INTO request_outcomes (id, request, outcome) VALUES (?1, ?2, ?3)",
-        params![command_id, request, serde_json::to_string(&id)?],
+        params![command_id, request, serde_json::to_string(outcome)?],
     )?;
-    Ok(id)
+    Ok(())
 }
 
 fn previous_outcome(
@@ -2199,16 +2222,46 @@ impl Workspace {
     /// Adds a message's new links together. Existing links are allowed, including
     /// those to Projects archived since they were linked.
     pub fn add_chat_links(&mut self, id: &str, links: &[ChatLink]) -> Result<bool, Error> {
+        self.chat_write(|connection| add_links(connection, id, links))
+    }
+
+    /// Applies an edited message's links once. The link set is part of its
+    /// request even when empty, and a historical saved edit leaves links alone.
+    pub fn add_chat_queue_edit_links(
+        &mut self,
+        id: &str,
+        command_id: &str,
+        links: &[ChatLink],
+    ) -> Result<bool, Error> {
+        let link_command = format!("chat_queue_edit_links:{command_id}");
+        let mut set = links
+            .iter()
+            .map(|link| Ok((name(link.kind)?, link.id.as_str())))
+            .collect::<Result<Vec<_>, Error>>()?;
+        set.sort_unstable();
+        set.dedup();
+        let request = json!({
+            "operation": "chat_queue_edit_links",
+            "chat_id": id,
+            "links": set,
+        })
+        .to_string();
         self.chat_write(|connection| {
-            read_chat(connection, id)?;
-            let mut added = false;
-            for link in links {
-                added |= add_link(connection, id, link)?;
+            if previous_outcome(connection, &link_command, &request)?.is_some() {
+                return Ok(false);
             }
-            if added {
-                log(connection, id, "chat", id)?;
-                trim(connection, id)?;
+            let saved: bool = connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM request_outcomes WHERE id = ?1)",
+                [command_id],
+                |row| row.get(0),
+            )?;
+            if saved {
+                // Older saves did not persist their links. Keep the receipt
+                // replayable without guessing what links were supplied.
+                return Ok(false);
             }
+            let added = add_links(connection, id, links)?;
+            save_outcome(connection, &link_command, &request, id)?;
             Ok(added)
         })
     }

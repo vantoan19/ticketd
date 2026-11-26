@@ -1104,6 +1104,11 @@ async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
         kind: LinkKind::Ticket,
         id: ticket.id,
     };
+    let second_ticket = f.core().create_ticket("A second linked record").unwrap();
+    let another_link = LinkRef {
+        kind: LinkKind::Ticket,
+        id: second_ticket.id,
+    };
     let command_id = uuid::Uuid::new_v4().to_string();
     let request = || {
         Some(QueueEditSave {
@@ -1124,7 +1129,7 @@ async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
             &id,
             "Edited",
             SendMode::Queue,
-            std::slice::from_ref(&link),
+            &[link.clone(), another_link.clone()],
             Vec::new(),
             request(),
         )
@@ -1132,6 +1137,9 @@ async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
         .unwrap();
     f.core()
         .set_chat_link(&id, ChatLink::from(link.clone()), false)
+        .unwrap();
+    f.core()
+        .set_chat_link(&id, ChatLink::from(another_link.clone()), false)
         .unwrap();
 
     let status = f
@@ -1146,7 +1154,7 @@ async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
             &id,
             "Edited",
             SendMode::Queue,
-            &[link],
+            &[another_link.clone(), link.clone(), link.clone()],
             Vec::new(),
             request(),
         )
@@ -1158,11 +1166,104 @@ async fn a_saved_queue_edit_replays_without_relinking_a_removed_record() {
     assert_eq!(queue[0].text, "Edited");
 
     f.chats.remove_queued(&id, &queue[0].id).await.unwrap();
-    f.chats
+    let changed = f
+        .chats
         .send_linking(&id, "Edited", SendMode::Queue, &[], Vec::new(), request())
         .await
+        .unwrap_err();
+    assert!(changed.message.contains("different"));
+    f.chats
+        .send_linking(
+            &id,
+            "Edited",
+            SendMode::Queue,
+            &[link, another_link],
+            Vec::new(),
+            request(),
+        )
+        .await
         .unwrap();
+    assert!(f.core().chat(&id).unwrap().links.is_empty());
     assert!(f.core().chat_queue(&id).unwrap().is_empty());
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_new_queue_edit_receipt_binds_empty_links_without_guessing_legacy_links() {
+    for legacy in [false, true] {
+        let f = Fixture::new().await;
+        let id = f.chat().await;
+        f.chats
+            .send(&id, "Original", SendMode::Queue)
+            .await
+            .unwrap();
+        let original = f.core().chat_queue(&id).unwrap().remove(0);
+        let transfer = uuid::Uuid::new_v4().to_string();
+        assert!(
+            f.chats
+                .confirm_queue_edit(&id, &original.id, &transfer)
+                .await
+                .unwrap()
+        );
+
+        let command_id = uuid::Uuid::new_v4().to_string();
+        let request = || {
+            Some(QueueEditSave {
+                command_id: command_id.clone(),
+                message_ids: vec![original.id.clone()],
+            })
+        };
+        if legacy {
+            let save_id = queue_edit_save_id(&command_id).unwrap();
+            f.core()
+                .save_chat_input_replacing(
+                    Some(&save_id),
+                    &id,
+                    "Edited",
+                    &[],
+                    std::slice::from_ref(&original.id),
+                )
+                .unwrap();
+        } else {
+            f.chats
+                .send_linking(&id, "Edited", SendMode::Queue, &[], Vec::new(), request())
+                .await
+                .unwrap();
+        }
+        let queue = f.core().chat_queue(&id).unwrap();
+        assert_eq!(queue[0].text, "Edited");
+
+        let link = LinkRef {
+            kind: LinkKind::Ticket,
+            id: f
+                .core()
+                .create_ticket("Added only to the retry")
+                .unwrap()
+                .id,
+        };
+        let retry = f
+            .chats
+            .send_linking(
+                &id,
+                "Edited",
+                SendMode::Queue,
+                &[link],
+                Vec::new(),
+                request(),
+            )
+            .await;
+        if legacy {
+            retry.unwrap();
+        } else {
+            assert!(retry.unwrap_err().message.contains("different"));
+        }
+        assert!(f.core().chat(&id).unwrap().links.is_empty());
+        assert_eq!(f.core().chat_queue(&id).unwrap(), queue);
+        let status = f
+            .chats
+            .check_queue_edits(&id, vec![command_id.clone()], vec![original.id])
+            .unwrap();
+        assert_eq!(status.saved.as_slice(), std::slice::from_ref(&command_id));
+    }
 }
 
 #[tokio::test(start_paused = true)]
