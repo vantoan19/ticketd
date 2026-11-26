@@ -157,7 +157,13 @@ function DocumentSurface({
     </DialogShell>
   );
 }
-type Snapshot = { title: string; body: string; suggestion: string | null };
+type Snapshot = {
+  title: string;
+  body: string;
+  suggestion: string | null;
+  /** The one-line summary as typed; "" is none. */
+  summary: string;
+};
 const plain = (text: string) =>
   text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, "");
 /** A derived heading repeats the body's first line; the reader shows it once, as the heading. */
@@ -199,11 +205,15 @@ function withoutOpeningTitle(body: string, title: string, heading?: string) {
 }
 /** The core stores a whitespace-only title as NULL; the saved baseline must match what it stored. */
 const storedTitle = (title: string) => (title.trim() ? title : "");
+/** The core stores a summary trimmed on one line, and nothing when it is blank. */
+const storedSummary = (summary: string) => summary.replace(/\s+/g, " ").trim();
 type Pending = {
   id: string | null;
   title: string | null;
   body: string | null;
   titleChanged: boolean;
+  /** The summary to store, "" to clear it; null leaves the stored one. */
+  summary: string | null;
   requestId: string;
   snapshot: Snapshot;
   /** The stored revision this save was based on; the core rejects it if that moved on. */
@@ -213,12 +223,15 @@ const snapshotSchema = z.object({
   title: z.string(),
   body: z.string(),
   suggestion: z.string().nullable(),
+  // A draft kept before Documents had summaries has none.
+  summary: z.string().default(""),
 });
 const pendingSchema = z.object({
   id: z.string().nullable(),
   title: z.string().nullable(),
   body: z.string().nullable(),
   titleChanged: z.boolean(),
+  summary: z.string().nullable().default(null),
   requestId: z.string(),
   snapshot: snapshotSchema,
   revision: z.string().nullable(),
@@ -383,6 +396,9 @@ function RecoveredDocumentEditor({
   const [body, setBody] = useState(
     recovered?.draft.body ?? initial?.body ?? "",
   );
+  const [summary, setSummary] = useState(
+    recovered?.draft.summary ?? initial?.summary ?? "",
+  );
   const [status, setStatus] = useState(
     initial ? "Saved on this computer" : "Start writing. We’ll save as you go.",
   );
@@ -430,12 +446,17 @@ function RecoveredDocumentEditor({
     return () => window.clearTimeout(timer);
   }, [discarded]);
   const externalRef = useRef<Snapshot | null>(recovered?.external ?? null);
-  const draft = useRef<Snapshot>({ title, body, suggestion });
+  const draft = useRef<Snapshot>({ title, body, suggestion, summary });
   // The editor holds typing it has not reported yet: an outside change must
   // not replace the body meanwhile.
   const editorPending = useRef(false);
   const saved = useRef<Snapshot>(
-    recovered?.saved ?? { title, body, suggestion: null },
+    recovered?.saved ?? {
+      title,
+      body,
+      suggestion: null,
+      summary: storedSummary(initial?.summary ?? ""),
+    },
   );
   const id = useRef(recovered?.id ?? initial?.id ?? null);
   const pending = useRef<Pending | null>(recovered?.pending ?? null);
@@ -450,6 +471,7 @@ function RecoveredDocumentEditor({
   const recoveryPayload = () => {
     const dirty =
       storedTitle(draft.current.title) !== saved.current.title ||
+      storedSummary(draft.current.summary) !== saved.current.summary ||
       draft.current.body !== saved.current.body ||
       draft.current.suggestion !== saved.current.suggestion;
     const payload =
@@ -493,6 +515,7 @@ function RecoveredDocumentEditor({
       recovery,
       title,
       body,
+      summary,
       suggestion,
       discarded,
       external,
@@ -525,6 +548,7 @@ function RecoveredDocumentEditor({
         externalRevision.current = snapshot.externalRevision;
         setTitle(snapshot.draft.title);
         setBody(snapshot.draft.body);
+        setSummary(snapshot.draft.summary);
         setSuggestion(snapshot.draft.suggestion);
         setExternal(snapshot.external);
         setDiscarded(snapshot.discarded);
@@ -599,10 +623,12 @@ function RecoveredDocumentEditor({
     }
     const snapshot = draft.current;
     const titleChanged = storedTitle(snapshot.title) !== saved.current.title;
+    const summaryChanged =
+      storedSummary(snapshot.summary) !== saved.current.summary;
     const bodyChanged =
       snapshot.body !== saved.current.body ||
       snapshot.suggestion !== saved.current.suggestion;
-    if (!pending.current && !titleChanged && !bodyChanged) {
+    if (!pending.current && !titleChanged && !summaryChanged && !bodyChanged) {
       if (transition.current) void finishTransition();
       else if (closeRequested.current) finish();
       return;
@@ -626,6 +652,7 @@ function RecoveredDocumentEditor({
             : snapshot.body
           : null,
       titleChanged,
+      summary: summaryChanged ? storedSummary(snapshot.summary) : null,
       requestId: crypto.randomUUID(),
       snapshot,
       revision: revision.current,
@@ -650,6 +677,7 @@ function RecoveredDocumentEditor({
         request.titleChanged,
         request.revision,
         request.requestId,
+        request.summary ?? undefined,
       );
       window.clearTimeout(slow);
       id.current = result.id;
@@ -659,6 +687,11 @@ function RecoveredDocumentEditor({
       saved.current = {
         ...request.snapshot,
         title: storedTitle(request.snapshot.title),
+        // A request that left the summary alone keeps what was stored before it.
+        summary:
+          request.summary === null
+            ? saved.current.summary
+            : storedSummary(request.snapshot.summary),
       };
       pending.current = null;
       await persistRecovery();
@@ -669,6 +702,7 @@ function RecoveredDocumentEditor({
       refreshLinks();
       if (
         storedTitle(draft.current.title) !== saved.current.title ||
+        storedSummary(draft.current.summary) !== saved.current.summary ||
         draft.current.body !== saved.current.body ||
         draft.current.suggestion !== saved.current.suggestion
       )
@@ -724,7 +758,7 @@ function RecoveredDocumentEditor({
       void saveRef.current();
     }, 400);
     return () => window.clearTimeout(timer);
-  }, [title, body, suggestion]);
+  }, [title, body, summary, suggestion]);
   /**
    * Fold the stored Document into the editor. Returns true when it was settled (nothing
    * to resolve, or merged without touching the draft) and false when an outside change
@@ -747,6 +781,7 @@ function RecoveredDocumentEditor({
         ? document.body.slice(0, -link.length).replace(/\n\n$/, "")
         : document.body,
       suggestion: hasLink ? currentSuggestion : null,
+      summary: storedSummary(document.summary ?? ""),
     };
     const settle = () => {
       revision.current = document.updated_at;
@@ -757,29 +792,38 @@ function RecoveredDocumentEditor({
     };
     if (
       next.title === saved.current.title &&
+      next.summary === saved.current.summary &&
       next.body === saved.current.body
     ) {
       settle();
       return true;
     }
     const titleDirty = storedTitle(draft.current.title) !== saved.current.title;
+    const summaryDirty =
+      storedSummary(draft.current.summary) !== saved.current.summary;
     const bodyDirty =
       editorPending.current ||
       draft.current.body !== saved.current.body ||
       draft.current.suggestion !== saved.current.suggestion;
     const conflict =
       (titleDirty && next.title !== saved.current.title) ||
+      (summaryDirty && next.summary !== saved.current.summary) ||
       (bodyDirty &&
         (next.body !== saved.current.body ||
           next.suggestion !== saved.current.suggestion));
     if (conflict || pending.current) {
       // Preserve unrelated saved-field changes when the person chooses to
       // save over a conflicting field.
-      if (titleDirty || bodyDirty) {
+      if (titleDirty || summaryDirty || bodyDirty) {
         if (!titleDirty) {
           draft.current = { ...draft.current, title: next.title };
           saved.current = { ...saved.current, title: next.title };
           setTitle(next.title);
+        }
+        if (!summaryDirty) {
+          draft.current = { ...draft.current, summary: next.summary };
+          saved.current = { ...saved.current, summary: next.summary };
+          setSummary(next.summary);
         }
         if (!bodyDirty) {
           draft.current = {
@@ -807,10 +851,12 @@ function RecoveredDocumentEditor({
       title: titleDirty ? draft.current.title : next.title,
       body: bodyDirty ? draft.current.body : next.body,
       suggestion: bodyDirty ? draft.current.suggestion : next.suggestion,
+      summary: summaryDirty ? draft.current.summary : next.summary,
     };
     saved.current = next;
     settle();
     if (!titleDirty) setTitle(next.title);
+    if (!summaryDirty) setSummary(next.summary);
     if (!bodyDirty) {
       setBody(next.body);
       setSuggestion(next.suggestion);
@@ -1363,6 +1409,7 @@ function RecoveredDocumentEditor({
                 setExternal(null);
                 setBlockedLeaving(false);
                 setTitle(external.title);
+                setSummary(external.summary);
                 setBody(external.body);
                 setSuggestion(null);
                 setFailed(false);
@@ -1398,6 +1445,7 @@ function RecoveredDocumentEditor({
             onClick={() => {
               draft.current = discarded;
               setTitle(discarded.title);
+              setSummary(discarded.summary);
               setBody(discarded.body);
               setDiscarded(null);
               refocusEditor();
@@ -1755,6 +1803,36 @@ function RecoveredDocumentEditor({
                 navigate(() => onOpenTicket?.(reference))
               }
             />
+            {writing ? (
+              // The author's one-line summary edits in the place it is read.
+              <div className="document-summary">
+                <Input
+                  aria-label="Summary"
+                  variant="title"
+                  placeholder="Add a one-line summary"
+                  readOnly={locked}
+                  value={summary}
+                  onChange={(event) => {
+                    draft.current = {
+                      ...draft.current,
+                      summary: event.target.value,
+                    };
+                    setSummary(event.target.value);
+                  }}
+                  onKeyDown={(event) => {
+                    // Enter leaves the field for the text, as it would end a line.
+                    if (event.key !== "Enter" || event.nativeEvent.isComposing)
+                      return;
+                    event.preventDefault();
+                    refocusEditor();
+                  }}
+                />
+              </div>
+            ) : (
+              storedSummary(summary) && (
+                <p className="document-summary">{storedSummary(summary)}</p>
+              )
+            )}
             {actionError && (
               <FailureAlert size="compact" failure={actionError} />
             )}

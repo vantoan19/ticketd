@@ -1182,3 +1182,116 @@ it("shows the restored text at once after a History restore", async () => {
     ).toBe("Earlier text"),
   );
 });
+
+// The Document's one-line summary: shown under the meta line, edited under the title.
+const summarized = { ...stored, summary: "Ship the reader on Friday." };
+const summaryField = () =>
+  screen.getByRole<HTMLInputElement>("textbox", { name: "Summary" });
+it("shows the summary under the meta line, and nothing when there is none", () => {
+  const { container, unmount } = renderEditor(
+    <DocumentEditor initial={summarized} onClose={vi.fn()} />,
+  );
+  const line = screen.getByText("Ship the reader on Friday.");
+  const meta = container.querySelector(".document-meta");
+  expect(
+    meta &&
+      meta.compareDocumentPosition(line) & Node.DOCUMENT_POSITION_FOLLOWING,
+  ).toBeTruthy();
+  expect(screen.queryByRole("textbox", { name: "Summary" })).toBeNull();
+  unmount();
+  const { container: bare } = renderEditor(
+    <DocumentEditor initial={stored} onClose={vi.fn()} />,
+  );
+  expect(bare.querySelector(".document-summary")).toBeNull();
+  expect(screen.queryByRole("textbox", { name: "Summary" })).toBeNull();
+});
+it("offers a one-line field for the summary in Edit, even when empty", () => {
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  expect(summaryField().placeholder).toBe("Add a one-line summary");
+  expect(summaryField().value).toBe("");
+});
+it("saves a typed summary with the loaded revision and leaves the title and body alone", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockResolvedValue({ ...stored, summary: "New" });
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  expect(summaryField().value).toBe("Ship the reader on Friday.");
+  fireEvent.change(summaryField(), { target: { value: "  New  " } });
+  await tick(400);
+  const call = vi.mocked(documents.save).mock.calls[0];
+  expect(call?.slice(1, 5)).toEqual([null, null, false, "now"]);
+  expect(call?.[6]).toBe("New");
+});
+it("does not send the summary when only the body changed", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockResolvedValue(summarized);
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(screen.getByLabelText("Your thought"), {
+    target: { value: "Typed" },
+  });
+  await tick(400);
+  expect(vi.mocked(documents.save).mock.calls[0]?.[6]).toBeUndefined();
+});
+it("clears the summary with an empty value", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockResolvedValue(stored);
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(summaryField(), { target: { value: "" } });
+  await tick(400);
+  expect(vi.mocked(documents.save).mock.calls[0]?.[6]).toBe("");
+});
+it("Enter leaves the summary field for the editor and saves nothing extra", async () => {
+  vi.useFakeTimers();
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const editor = screen.getByLabelText("Your thought");
+  const before = editor.getAttribute("data-focus-request");
+  fireEvent.keyDown(summaryField(), { key: "Enter" });
+  expect(editor.getAttribute("data-focus-request")).not.toBe(before);
+  await tick(400);
+  expect(documents.save).not.toHaveBeenCalled();
+});
+it("shows the usual notice when the summary was changed elsewhere, and keeps the draft", async () => {
+  vi.useFakeTimers();
+  vi.mocked(documents.save).mockRejectedValueOnce({
+    code: "conflict",
+    message: "document 'd1' was changed elsewhere since it was loaded",
+  });
+  outside({ ...summarized, summary: "Via CLI", updated_at: "later" });
+  renderEditor(<DocumentEditor initial={summarized} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  fireEvent.change(summaryField(), { target: { value: "Mine" } });
+  await tick(400);
+  expect(screen.getByText(/Saved content changed/)).toBeTruthy();
+  expect(summaryField().value).toBe("Mine");
+  vi.mocked(documents.save).mockResolvedValue({ ...stored, summary: "Mine" });
+  fireEvent.click(screen.getByRole("button", { name: "Save my draft" }));
+  await tick(0);
+  const retry = vi.mocked(documents.save).mock.calls[1];
+  expect(retry?.[4]).toBe("later");
+  expect(retry?.[6]).toBe("Mine");
+});
+it("takes in a summary written elsewhere when nothing of the summary is unsaved", async () => {
+  vi.useFakeTimers();
+  outside({ ...stored, summary: "From the agent", updated_at: "later" });
+  const { container } = renderEditor(
+    <DocumentEditor initial={stored} onClose={vi.fn()} />,
+  );
+  await tick(2000);
+  expect(container.querySelector(".document-summary")?.textContent).toBe(
+    "From the agent",
+  );
+  expect(screen.queryByText(/Saved content changed/)).toBeNull();
+});
+it("keeps showing the summary of a Document in Trash", () => {
+  renderEditor(
+    <DocumentEditor
+      initial={{ ...summarized, trashed: true }}
+      onClose={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("Ship the reader on Friday.")).toBeTruthy();
+});

@@ -333,6 +333,8 @@ fn save_document(
     title_changed: bool,
     expected_updated_at: Option<String>,
     request_id: String,
+    // Absent keeps the stored summary; an empty value clears it.
+    summary: Option<String>,
 ) -> Result<Document, BridgeFailure> {
     // Autosaving an existing Document is last-write-wins and idempotent, so it skips the
     // replay record that would otherwise keep a full copy of every autosaved body forever.
@@ -354,8 +356,8 @@ fn save_document(
     let patch = DocumentPatch {
         title: title_changed.then_some(title),
         body,
+        summary: summary.map(Some),
         expected_updated_at,
-        ..Default::default()
     };
     open_workspace()
         .and_then(|mut w| w.change_document(&id, patch))
