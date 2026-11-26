@@ -1920,8 +1920,8 @@ pub fn summary(chat: &Chat, live: &ChatLive, tracker: &Tracker, around: &Surroun
 mod tests {
     use super::{
         Chat, ChatInteraction, ChatInteractionKind, ChatInteractionState, ChatLive, ChatTool,
-        ChatToolState, ChatTurn, ChatTurnState, Item, Step, Tracker, items, opening, request,
-        steps,
+        ChatToolState, ChatTurn, ChatTurnState, Item, Queued, Step, Surroundings, Tracker,
+        chat_state, items, opening, request, steps,
     };
     use serde_json::json;
     use ticketd_chat_host::{STOPPED_BY_TICKETD, StopReason, TurnEnding};
@@ -1991,7 +1991,7 @@ mod tests {
             queue: vec![queued("held", true), queued("prepared", false)],
             ..Surroundings::default()
         };
-        let mut live = ChatLive::default();
+        let mut live = ChatLive::idle();
         let paused =
             |live| chat_state(&chat(None), live, &Tracker::default(), &around).queue_paused;
         assert!(!paused(&live));
