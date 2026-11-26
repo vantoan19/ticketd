@@ -1380,6 +1380,9 @@ const readFile = (id: string): TranscriptItem =>
   });
 
 test("a finished turn shows its start once, on the work line, with the exact times in its tooltip", async () => {
+  // Only the date is fixed, so the day label does not depend on when the suite runs.
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date(2026, 10, 20, 12));
   await open(
     one({ id: "c1", title: "Limiter" }, [
       youSaid,
