@@ -881,6 +881,30 @@ function Walk({ start, onClose }: { start: number; onClose?: () => void }) {
 }
 const header = () => screen.getByRole("group", { name: "Browse files" });
 
+test("a neighbor whose preview fails to read does not stop the read-ahead of the next one", async () => {
+  serveWalk();
+  const served = vi.mocked(invoke).getMockImplementation()!;
+  vi.mocked(invoke).mockImplementation(async (command, args) => {
+    if (
+      command === "attachment_preview" &&
+      (args as { id: string }).id === shot.id
+    )
+      throw new Error("cannot read");
+    return served(command, args);
+  });
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(3).document);
+  render(<Walk start={1} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open file" }));
+  await screen.findByLabelText("Report: E2E report");
+  // The previous file (read first) fails; the next one is still read ahead.
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("attachment_preview", {
+      workspace: "workspace",
+      id: pdfFile.id,
+    }),
+  );
+});
+
 test("browsing a mixed set: each file shows its own state and recovery, J and K step, the ends hold", async () => {
   serveWalk();
   vi.mocked(openPdf).mockResolvedValue(fakePdf(3).document);

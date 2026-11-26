@@ -1239,7 +1239,12 @@ function useReadAhead(
       .then(async (workspace) => {
         for (const id of key.split("\n")) {
           if (!active || warm.has(id)) continue;
-          warm.set(id, await attachments.preview(workspace, id));
+          // One neighbor that will not read does not stop the others.
+          try {
+            warm.set(id, await attachments.preview(workspace, id));
+          } catch {
+            // A step to it reads it again and shows why.
+          }
         }
       })
       .catch(() => {});
