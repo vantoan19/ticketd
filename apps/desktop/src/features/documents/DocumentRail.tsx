@@ -101,7 +101,6 @@ export function DocumentRail({
                 <IconButton
                   label="Back to top"
                   size="icon-compact"
-                  className="document-rail-top"
                   onClick={() => {
                     if (!scroller) return;
                     scroller.scrollTo({

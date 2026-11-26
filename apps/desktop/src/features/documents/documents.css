@@ -296,23 +296,37 @@
   line-height: 27px;
   overflow-wrap: anywhere;
 }
-/* The edit field wraps and grows to show the whole summary. Like the title, its edge takes 8px of
-   inset cancelled by a negative margin, so the text stays where it is read. The edge shows on hover;
+/* The edit field wraps and grows to show the whole summary: a copy of the text (data-value) sits
+   in the same grid cell, unseen, and sets the height. Like the title, its edge takes 8px of inset
+   cancelled by a negative margin, so the text stays where it is read. The edge shows on hover;
    focus uses the field's own outline. */
+.document-summary:has([data-slot="textarea"]) {
+  display: grid;
+}
+.document-summary:has([data-slot="textarea"])::after,
 .document-summary [data-slot="textarea"] {
-  display: block;
+  grid-area: 1 / 1;
   width: calc(100% + 16px);
   min-height: 27px;
   margin-inline: -8px;
   padding: 0 8px;
-  overflow: hidden;
-  background: transparent;
-  box-shadow: none;
-  color: inherit;
   font-size: inherit;
   font-weight: 400;
   letter-spacing: normal;
   line-height: inherit;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.document-summary:has([data-slot="textarea"])::after {
+  content: attr(data-value) " ";
+  visibility: hidden;
+}
+.document-summary [data-slot="textarea"] {
+  display: block;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
   resize: none;
 }
 .document-summary [data-slot="textarea"]:hover:not(:focus-visible, :read-only) {
@@ -847,8 +861,7 @@
   color: var(--foreground);
   box-shadow: inset 2px 0 0 var(--foreground);
 }
-.document-rail a:focus-visible,
-.document-rail-top:focus-visible {
+.document-rail a:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
@@ -881,11 +894,11 @@
   flex: none;
   margin-top: 2px;
 }
-.document-rail-actions .document-rail-top {
+.document-rail-actions [data-size="icon-compact"] {
   width: 20px;
   padding: 0;
 }
-.document-rail-top svg {
+.document-rail-actions svg {
   width: 14px;
   height: 14px;
 }

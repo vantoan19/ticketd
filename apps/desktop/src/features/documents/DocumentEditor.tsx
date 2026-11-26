@@ -66,7 +66,6 @@ import { flushSync } from "react-dom";
 import { DocumentOutline } from "./DocumentOutline";
 import { DocumentRail } from "./DocumentRail";
 import { useSectionFolds } from "./section-folds";
-import { useGrowToFit } from "./use-grow-to-fit";
 import { headingElement, useCurrentHeading } from "./use-current-heading";
 import { chatSource } from "@/features/chats/quotes";
 import { LazyMarkdownEditor } from "@/features/markdown/LazyMarkdownEditor";
@@ -330,8 +329,6 @@ function RecoveredDocumentEditor({
   const workspaceRevision = useWorkspaceChange();
   const [focusRequest, setFocusRequest] = useState(0);
   const refocusEditor = () => setFocusRequest((value) => value + 1);
-  // The summary field grows with its text (wrapping) so the whole summary shows while editing.
-  const summaryField = useRef<HTMLTextAreaElement>(null);
   const [writing, setWriting] = useState(
     initial === null || recovered !== null,
   );
@@ -982,7 +979,6 @@ function RecoveredDocumentEditor({
   const outline = useMemo(() => outlineOf(readSource), [readSource]);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
   const folds = useSectionFolds(initial?.id ?? null, outline);
-  useGrowToFit(summaryField, summary, writing);
   const { current: currentAnchor, goTo } = useCurrentHeading(
     scroller,
     outline,
@@ -1813,9 +1809,9 @@ function RecoveredDocumentEditor({
             />
             {writing ? (
               // The author's one-line summary edits in the place it is read.
-              <div className="document-summary">
+              // `data-value` mirrors the text so the field is as tall as the whole summary.
+              <div className="document-summary" data-value={summary}>
                 <Textarea
-                  ref={summaryField}
                   aria-label="Summary"
                   rows={1}
                   placeholder="Add a one-line summary"
