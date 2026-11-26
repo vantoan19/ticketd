@@ -11,6 +11,8 @@
 .context-view-wrapper > .cgraph-page {
   flex: 1 1 0;
   min-width: 0;
+  /* Fills the line before it breaks, as the board does (pretty would move words down). */
+  text-wrap: wrap;
   min-height: 0;
 }
 .context-view-wrapper {
@@ -31,10 +33,10 @@
   width: 340px;
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
-  /* WebKit's 10px scrollbar comes and goes with the list's height; its room stays, so a title
-     does not re-wrap when a group opens or closes. */
-  scrollbar-gutter: stable;
+  /* WebKit's 10px scrollbar would come and go with the list's height, narrowing every title
+     and re-wrapping it when a group opens or closes; the track is always there (invisible while
+     there is nothing to scroll). WebKit ignores scrollbar-gutter next to the styled scrollbar. */
+  overflow-y: scroll;
 }
 /* The header sits in a wrapper that takes its step of the page's entrance. */
 .documents-list-view > .documents-list-head {
@@ -124,7 +126,10 @@
 /* A name wraps to a second line before it is cut. */
 .documents-group-name {
   display: -webkit-box;
+  flex: 1 1 0;
   min-width: 0;
+  /* Fills the line before it breaks, as the board does (pretty would move words down). */
+  text-wrap: wrap;
   overflow: hidden;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
@@ -752,6 +757,8 @@
 .markdown-document .folded-summary {
   flex: 1 1 0;
   min-width: 0;
+  /* Fills the line before it breaks, as the board does (pretty would move words down). */
+  text-wrap: wrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--muted-foreground);
