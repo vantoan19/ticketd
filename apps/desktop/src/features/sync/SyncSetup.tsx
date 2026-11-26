@@ -445,7 +445,7 @@ export function Choose({
             {options.reconnect && (
               <ChoiceTile
                 value={RECONNECT}
-                title={<>Reconnect to “{options.reconnect.name}”</>}
+                title={`Reconnect to “${options.reconnect.name}”`}
                 description={`Changes made here and in ${place} are merged, and nothing is replaced`}
               />
             )}
@@ -455,7 +455,7 @@ export function Choose({
                 <ChoiceTile
                   key={workspace.folder_id}
                   value={workspace.folder_id}
-                  title={<>Join “{workspace.folder_name}”</>}
+                  title={`Join “${workspace.folder_name}”`}
                   description={`${plural(workspace.counts.tickets, "ticket")} and ${plural(workspace.counts.documents, "Document")}, ${
                     synced
                       ? `last synced ${workspace.last_synced_by ? `from ${workspace.last_synced_by} ` : ""}${synced}`
