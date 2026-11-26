@@ -2317,8 +2317,20 @@ async fn a_linked_image_that_needs_a_new_turn_checks_its_model_before_replacing_
     f.core()
         .add_chat_links(&f.chat.id, std::slice::from_ref(&existing))
         .unwrap();
+    let mut changed = f.host.changed();
     f.send("Start the image-capable turn").await;
-    f.wait_for_submissions(1).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while !f
+            .host
+            .live()
+            .get(&f.chat.id)
+            .is_some_and(|live| live.steering.is_some())
+        {
+            changed.changed().await.unwrap();
+        }
+    })
+    .await
+    .unwrap();
     f.fake.set_image_input(false);
     f.fake.set_steer_image_input(true);
     let image = ChatAttachmentContent::from_data_url(

@@ -385,7 +385,7 @@ struct Inner {
     /// supervisor starts.
     unattended: Mutex<HashMap<String, Arc<UnattendedChat>>>,
     prompt_fences: Mutex<HashMap<String, Weak<AsyncMutex<()>>>>,
-    taking_over: Mutex<HashMap<String, watch::Receiver<bool>>>,
+    taking_over: Mutex<HashMap<String, Vec<watch::Receiver<bool>>>>,
     closing_agents: Mutex<HashMap<String, watch::Receiver<Option<Closed>>>>,
     lifecycle: Arc<HostLifecycle>,
 }
@@ -393,14 +393,39 @@ struct Inner {
 struct TakeOver {
     host: ChatHost,
     chat_id: String,
+    siblings: Vec<String>,
     finished: watch::Sender<bool>,
+}
+
+impl TakeOver {
+    /// The caller holds the route lock from commit through installing these gates.
+    fn cover_steps(&mut self, run: &AutomationRun) {
+        let mut taking_over = self.host.taking_over();
+        for chat_id in run.steps.iter().filter_map(|step| step.chat_id.as_ref()) {
+            if *chat_id != self.chat_id && !self.siblings.contains(chat_id) {
+                taking_over
+                    .entry(chat_id.clone())
+                    .or_default()
+                    .push(self.finished.subscribe());
+                self.siblings.push(chat_id.clone());
+            }
+        }
+    }
 }
 
 impl Drop for TakeOver {
     fn drop(&mut self) {
         let mut taking_over = self.host.taking_over();
+        let done = self.finished.subscribe();
+        for chat_id in std::iter::once(&self.chat_id).chain(&self.siblings) {
+            if let Some(gates) = taking_over.get_mut(chat_id) {
+                gates.retain(|gate| !gate.same_channel(&done));
+                if gates.is_empty() {
+                    taking_over.remove(chat_id);
+                }
+            }
+        }
         self.finished.send_replace(true);
-        taking_over.remove(&self.chat_id);
     }
 }
 
@@ -771,7 +796,7 @@ impl ChatHost {
         }
         let run_id = self.workspace()?.automation_chat_run_id(chat_id)?;
         if let Some(run_id) = run_id {
-            let gate = self.begin_take_over(chat_id)?;
+            let mut gate = self.begin_take_over(chat_id)?;
             let saved = {
                 let _prompt = self.wait_for_prompt_write(&run_id).await?;
                 self.serving()?;
@@ -792,13 +817,19 @@ impl ChatHost {
                         }
                         return Err(refusal);
                     }
-                    Some(workspace.save_automation_chat_reply_with_change(
+                    let _chats = self.chats();
+                    self.serving()?;
+                    let saved = workspace.save_automation_chat_reply_with_change(
                         command_id,
                         chat_id,
                         text,
                         &attachments,
                         change.as_ref(),
-                    )?)
+                    )?;
+                    if let (_, Some(run)) = &saved {
+                        gate.cover_steps(run);
+                    }
+                    Some(saved)
                 } else {
                     None
                 }
@@ -867,10 +898,11 @@ impl ChatHost {
             return Err(HostError::Working);
         }
         let (finished, done) = watch::channel(false);
-        taking_over.insert(chat_id.to_owned(), done);
+        taking_over.insert(chat_id.to_owned(), vec![done]);
         Ok(TakeOver {
             host: self.clone(),
             chat_id: chat_id.to_owned(),
+            siblings: Vec::new(),
             finished,
         })
     }
@@ -905,11 +937,18 @@ impl ChatHost {
         let mut sibling_cleanup_unconfirmed = false;
         let run_id = self.workspace()?.automation_chat_run_id(chat_id)?;
         if let Some(run_id) = run_id {
-            let gate = self.begin_take_over(chat_id)?;
+            let mut gate = self.begin_take_over(chat_id)?;
             let run = {
                 let _prompt = self.wait_for_prompt_write(&run_id).await?;
                 self.serving()?;
-                self.workspace()?.take_over_automation_run(chat_id, false)?
+                let mut workspace = self.workspace()?;
+                let _chats = self.chats();
+                self.serving()?;
+                let run = workspace.take_over_automation_run(chat_id, false)?;
+                if let Some(run) = &run {
+                    gate.cover_steps(run);
+                }
+                run
             };
             if let Some(run) = run {
                 let host = self.clone();
@@ -1209,7 +1248,7 @@ impl ChatHost {
                 }
             }
         }
-        for (_, mut done) in taking_over {
+        for mut done in taking_over.into_values().flatten() {
             let _ = done.wait_for(|finished| *finished).await;
         }
         if turning_off {
@@ -1499,7 +1538,7 @@ impl ChatHost {
         (started, result.ok().and_then(|closed| closed.clone()))
     }
 
-    fn taking_over(&self) -> MutexGuard<'_, HashMap<String, watch::Receiver<bool>>> {
+    fn taking_over(&self) -> MutexGuard<'_, HashMap<String, Vec<watch::Receiver<bool>>>> {
         self.inner
             .taking_over
             .lock()
@@ -1760,7 +1799,13 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
-    async fn dropping_stop_keeps_closing_sibling_agents_behind_the_takeover_gate() {
+    async fn dropping_a_takeover_keeps_already_closed_siblings_behind_the_gate() {
+        for reply in [false, true] {
+            takeover_keeps_closed_siblings_behind_the_gate(reply).await;
+        }
+    }
+
+    async fn takeover_keeps_closed_siblings_behind_the_gate(reply: bool) {
         let (_dir, host, run_id, first) = running_automation(2);
         register_agent(&host, &run_id, &first);
         let RunAction::RunAgent(next) = host
@@ -1777,10 +1822,18 @@ mod tests {
         host.chats().insert(first.clone(), first_route);
         host.chats().insert(next.chat_id.clone(), second_route);
 
-        let stop = tokio::spawn({
+        let takeover = tokio::spawn({
             let host = host.clone();
-            let chat = first.clone();
-            async move { host.stop(&chat).await }
+            let chat = next.chat_id.clone();
+            async move {
+                if reply {
+                    host.send(&chat, None, "Take over", SendMode::Queue)
+                        .await
+                        .map(drop)
+                } else {
+                    host.stop(&chat).await
+                }
+            }
         });
         let Some(Command::Shutdown(StopReason::TakenOver, first_reply)) =
             tokio::time::timeout(Duration::from_secs(1), first_mailbox.recv())
@@ -1789,8 +1842,8 @@ mod tests {
         else {
             panic!("the first agent was not asked to close");
         };
-        stop.abort();
-        assert!(stop.await.unwrap_err().is_cancelled());
+        takeover.abort();
+        assert!(takeover.await.unwrap_err().is_cancelled());
         first_reply.send(None).unwrap();
 
         let Some(Command::Shutdown(StopReason::TakenOver, second_reply)) =
@@ -1800,15 +1853,45 @@ mod tests {
         else {
             panic!("the sibling agent was not asked to close");
         };
-        assert!(matches!(host.sender(&first), Err(HostError::Working)));
-        let mut gate = host.taking_over().get(&first).unwrap().clone();
+        assert!(matches!(
+            host.resume_queue(&first).await,
+            Err(HostError::Working)
+        ));
+        assert!(matches!(
+            host.sender(&next.chat_id),
+            Err(HostError::Working)
+        ));
+        let mut gate = host.taking_over()[&next.chat_id][0].clone();
         second_reply.send(None).unwrap();
         tokio::time::timeout(Duration::from_secs(1), gate.wait_for(|done| *done))
             .await
             .unwrap()
             .unwrap();
-        assert!(host.sender(&first).is_ok());
+        host.resume_queue(&first).await.unwrap();
         assert!(!host.is_unattended(&next.chat_id));
+    }
+
+    #[tokio::test]
+    async fn releasing_one_takeover_does_not_release_an_overlapping_gate() {
+        let (_dir, host, run_id, first) = running_automation(2);
+        let mut workspace = host.workspace().unwrap();
+        let RunAction::RunAgent(next) = workspace
+            .advance_automation_run(&run_id, Some(StepOutcome::Completed))
+            .unwrap()
+        else {
+            panic!("the run did not start its second agent");
+        };
+        let first_gate = host.begin_take_over(&first).unwrap();
+        let mut second_gate = host.begin_take_over(&next.chat_id).unwrap();
+        {
+            let _chats = host.chats();
+            second_gate.cover_steps(&workspace.automation_run(&run_id).unwrap());
+        }
+
+        drop(first_gate);
+        assert!(matches!(host.sender(&first), Err(HostError::Working)));
+        drop(second_gate);
+        assert!(host.sender(&first).is_ok());
     }
 
     #[tokio::test(start_paused = true)]

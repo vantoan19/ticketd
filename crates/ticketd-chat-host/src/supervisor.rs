@@ -61,6 +61,7 @@ use crate::{
 
 const QUEUE_READ_RETRY: Duration = Duration::from_millis(250);
 const LINK_CONTEXT_RETRY: Duration = Duration::from_secs(1);
+const MAX_PENDING_CONTEXTS: usize = 64;
 
 pub(crate) type Reply<T> = oneshot::Sender<Result<T, HostError>>;
 
@@ -181,7 +182,7 @@ struct Runtime {
     said: HashSet<String>,
     context: Option<ContextReport>,
     /// Last ticketd link context delivered in this runtime.
-    link_context: Option<String>,
+    link_context: Option<Arc<str>>,
     /// When the session compacted, kept for a context report that comes later.
     compacted_at: Option<i64>,
     settings: Option<HarnessSettings>,
@@ -209,7 +210,7 @@ struct Dispatch {
 
 struct ContextTransfer {
     attempt_id: String,
-    text: String,
+    text: Arc<str>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -341,9 +342,9 @@ pub(crate) struct Supervisor {
     /// Selected history for a fresh session, sent with the next new turn.
     preamble: Option<String>,
     /// The ticketd context of a new session, sent with its first new turn.
-    session_context: Option<String>,
+    session_context: Option<Arc<str>>,
     /// Unconfirmed context transfers, in dispatch order.
-    pending_contexts: Vec<ContextTransfer>,
+    pending_contexts: VecDeque<ContextTransfer>,
     text: Vec<TextBuffer>,
     pending_tools: Vec<(String, ChatObservation)>,
     interactions: BTreeMap<String, LiveRequest>,
@@ -490,7 +491,7 @@ impl Supervisor {
             resend: None,
             preamble: None,
             session_context: None,
-            pending_contexts: Vec::new(),
+            pending_contexts: VecDeque::new(),
             text: Vec::new(),
             pending_tools: Vec::new(),
             interactions: BTreeMap::new(),
@@ -1154,11 +1155,11 @@ impl Supervisor {
     }
 
     /// The context this Chat's sessions were last given or are about to be given.
-    fn context_given(&self) -> Option<String> {
+    fn context_given(&self) -> Option<Arc<str>> {
         if let Some(context) = self.session_context.as_ref() {
             return Some(context.clone());
         }
-        if let Some(transfer) = self.pending_contexts.last() {
+        if let Some(transfer) = self.pending_contexts.back() {
             return Some(transfer.text.clone());
         }
         if let Some(runtime) = &self.runtime
@@ -1171,6 +1172,16 @@ impl Supervisor {
         self.core(|core| core.chat_latest_tool_input(&chat, CONTEXT_RECORD_NAME))
             .ok()
             .flatten()
+            .map(Arc::from)
+    }
+
+    fn set_session_context(&mut self, context: String) {
+        let retained = self
+            .pending_contexts
+            .iter()
+            .find(|transfer| *transfer.text == context)
+            .map(|transfer| transfer.text.clone());
+        self.session_context = Some(retained.unwrap_or_else(|| Arc::from(context)));
     }
 
     fn attach(&mut self) -> Result<(ChatView, Subscription), HostError> {
@@ -2519,7 +2530,7 @@ impl Supervisor {
             // A written turn can time out without having received its context.
             self.session_context.take().or_else(|| {
                 self.pending_contexts
-                    .last()
+                    .back()
                     .map(|transfer| transfer.text.clone())
             })
         } else {
@@ -2544,7 +2555,11 @@ impl Supervisor {
             attachments,
         };
         if let Some(text) = context {
-            self.pending_contexts.push(ContextTransfer {
+            // An older attempt can still settle delivery without a context record.
+            if self.pending_contexts.len() == MAX_PENDING_CONTEXTS {
+                self.pending_contexts.pop_front();
+            }
+            self.pending_contexts.push_back(ContextTransfer {
                 attempt_id: attempt.clone(),
                 text,
             });
@@ -2627,8 +2642,10 @@ impl Supervisor {
                 self.refreshing = None;
                 match context {
                     // Told with the next new turn, and only when it is news to the session.
-                    Ok(Some(context)) if self.context_given().as_ref() != Some(&context) => {
-                        self.session_context = Some(context);
+                    Ok(Some(context))
+                        if self.context_given().as_deref() != Some(context.as_str()) =>
+                    {
+                        self.set_session_context(context);
                     }
                     Ok(_) => {}
                     Err(error) => self.context_read_failed(error, retrying, scope),
@@ -2767,8 +2784,8 @@ impl Supervisor {
                     // A resumed native session remembers what it was given.
                     Ok(Some(context))
                         if opening.origin == ChatSessionOrigin::NativeResume
-                            && self.context_given().as_ref() == Some(&context) => {}
-                    Ok(Some(context)) => self.session_context = Some(context),
+                            && self.context_given().as_deref() == Some(context.as_str()) => {}
+                    Ok(Some(context)) => self.set_session_context(context),
                     Ok(None) => {}
                     Err(error) => {
                         self.notice(format!(
@@ -2953,11 +2970,11 @@ impl Supervisor {
             .pending_contexts
             .iter()
             .position(|transfer| transfer.attempt_id == attempt_id)
+            && let Some(transfer) = self.pending_contexts.remove(index)
+            && index == self.pending_contexts.len()
+            && self.session_context.is_none()
         {
-            let transfer = self.pending_contexts.remove(index);
-            if index == self.pending_contexts.len() && self.session_context.is_none() {
-                self.session_context = Some(transfer.text);
-            }
+            self.session_context = Some(transfer.text);
         }
     }
 
@@ -3022,7 +3039,7 @@ impl Supervisor {
                 tool_id: format!("{turn_id}:ticketd-context"),
                 turn_id: turn_id.clone(),
                 name: CONTEXT_RECORD_NAME.to_owned(),
-                input: transfer.text,
+                input: transfer.text.to_string(),
                 state: ChatToolState::Completed,
                 output: None,
             });
@@ -3798,7 +3815,7 @@ mod tests {
         });
         supervisor.pump();
         assert_eq!(
-            supervisor.pending_contexts.last().unwrap().text,
+            supervisor.pending_contexts.back().unwrap().text.as_ref(),
             "new links"
         );
     }
@@ -3808,7 +3825,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (mut supervisor, chat) = supervisor(dir.path().join("workspace.sqlite3"));
         let generation = open(&mut supervisor, &chat).await;
-        supervisor.session_context = Some("old links".to_owned());
+        supervisor.session_context = Some("old links".into());
         supervisor
             .send(None, "reply", SendMode::Auto, &[], None)
             .unwrap();
@@ -3833,7 +3850,7 @@ mod tests {
         supervisor.resume_queue().await.unwrap();
         supervisor.pump();
         assert_eq!(
-            supervisor.pending_contexts.last().unwrap().text,
+            supervisor.pending_contexts.back().unwrap().text.as_ref(),
             "new links"
         );
     }
@@ -3889,13 +3906,104 @@ mod tests {
     }
 
     #[tokio::test(start_paused = true)]
+    async fn timed_out_resends_share_a_bounded_context_and_evicted_evidence_still_settles() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let (mut supervisor, chat) = supervisor(path.clone());
+        let generation = open(&mut supervisor, &chat).await;
+        let original_context: Arc<str> = "original links".into();
+        supervisor.session_context = Some(original_context.clone());
+        let input = supervisor
+            .send(None, "first", SendMode::Auto, &[], None)
+            .unwrap();
+        supervisor.pump();
+        let first_attempt = supervisor.dispatching.as_ref().unwrap().attempt.clone();
+
+        for _ in 0..MAX_PENDING_CONTEXTS {
+            supervisor.on_dispatched(DispatchOutcome::Written);
+            tokio::time::advance(DELIVERY_CONFIRMATION_TIMEOUT).await;
+            supervisor.on_timer();
+            supervisor.request_resend(input.id.clone()).await.unwrap();
+            supervisor.pump();
+            assert!(supervisor.dispatching.is_some());
+        }
+        assert_eq!(supervisor.pending_contexts.len(), MAX_PENDING_CONTEXTS);
+        assert!(supervisor.pending_contexts.iter().all(|transfer| {
+            transfer.attempt_id != first_attempt && Arc::ptr_eq(&transfer.text, &original_context)
+        }));
+
+        supervisor.on_dispatched(DispatchOutcome::Written);
+        tokio::time::advance(DELIVERY_CONFIRMATION_TIMEOUT).await;
+        supervisor.on_timer();
+        supervisor.set_session_context("edited links".to_owned());
+        supervisor
+            .send(None, "second", SendMode::Auto, &[], None)
+            .unwrap();
+        supervisor.pump();
+        let first_turn = NativeTurnId::new("first");
+        supervisor.on_event(Some(RuntimeEvent {
+            generation,
+            kind: EventKind::SubmissionEvidence {
+                submission: SubmissionId(first_attempt.clone()),
+                evidence: DeliveryEvidence::Acknowledged {
+                    turn: first_turn.clone(),
+                },
+            },
+        }));
+
+        let workspace = Workspace::open(&path).unwrap();
+        let items = workspace.chat_snapshot(&chat.id, 100).unwrap().items;
+        let first = items
+            .iter()
+            .find_map(|item| match item {
+                ticketd_core::ChatItem::Message(message) if message.id == input.id => message
+                    .attempts
+                    .iter()
+                    .find(|attempt| attempt.id == first_attempt),
+                _ => None,
+            })
+            .unwrap();
+        assert_eq!(first.delivery, ticketd_core::ChatDelivery::Acknowledged);
+        assert_eq!(
+            workspace
+                .chat_latest_tool_input(&chat.id, CONTEXT_RECORD_NAME)
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            supervisor.pending_contexts.back().unwrap().text.as_ref(),
+            "edited links"
+        );
+
+        supervisor.on_event(Some(RuntimeEvent {
+            generation,
+            kind: EventKind::TurnEnded {
+                turn: first_turn,
+                outcome: TurnOutcome::Completed,
+                submissions: Vec::new(),
+            },
+        }));
+        supervisor.on_dispatched(DispatchOutcome::Acknowledged {
+            turn: NativeTurnId::new("second"),
+        });
+        assert_eq!(
+            workspace
+                .chat_latest_tool_input(&chat.id, CONTEXT_RECORD_NAME)
+                .unwrap()
+                .as_deref(),
+            Some("edited links"),
+        );
+        assert!(supervisor.pending_contexts.is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
     async fn late_evidence_only_records_its_own_context_before_or_after_a_newer_confirmation() {
         for newer_first in [false, true] {
             let dir = tempfile::tempdir().unwrap();
             let path = dir.path().join("workspace.sqlite3");
             let (mut supervisor, chat) = supervisor(path.clone());
             let generation = open(&mut supervisor, &chat).await;
-            supervisor.session_context = Some("original links".to_owned());
+            supervisor.session_context = Some("original links".into());
             let original = supervisor
                 .send(None, "first", SendMode::Auto, &[], None)
                 .unwrap();
@@ -3906,7 +4014,7 @@ mod tests {
             supervisor.on_timer();
             assert!(supervisor.unconfirmed_start.is_none());
 
-            supervisor.session_context = Some("edited links".to_owned());
+            supervisor.session_context = Some("edited links".into());
             supervisor
                 .send(None, "second", SendMode::Auto, &[], None)
                 .unwrap();
@@ -3958,7 +4066,7 @@ mod tests {
             } else {
                 assert_eq!(latest(), "original links");
                 assert_eq!(
-                    supervisor.pending_contexts.last().unwrap().attempt_id,
+                    supervisor.pending_contexts.back().unwrap().attempt_id,
                     later_attempt
                 );
                 supervisor.on_dispatched(DispatchOutcome::Acknowledged { turn: later });
