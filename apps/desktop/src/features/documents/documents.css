@@ -237,6 +237,20 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* The crumbs sit 6px apart (icon, Plan, "/", title) and the Plan's icon on the bar's 12px inset:
+   the Plan button keeps its padding for the hover fill and gives it back in negative margins. */
+.document-bar .document-plan-crumb {
+  margin-inline: -12px -10px;
+}
+.document-bar .document-show-list ~ .document-plan-crumb {
+  margin-left: -4px;
+}
+.document-bar .document-plan-crumb .ui-button {
+  gap: 6px;
+}
+.document-crumb-sep {
+  margin-right: 2px;
+}
 .document-actions {
   display: flex;
   flex: none;
@@ -254,6 +268,10 @@
   min-width: 0;
   overflow-y: auto;
   padding: 44px 40px 96px;
+}
+/* 36px above the title, as on the boards (the gutters and bottom are set above and below). */
+.documents-page .document-workspace > .document-main {
+  padding-top: 36px;
 }
 /* The column is the reading width, centred; the gutters stay 40px (24px and
    16px in narrow panes, where the column is the pane). */
@@ -278,19 +296,53 @@
   padding: 0;
   margin: 0;
 }
+/* The title field wraps as the heading does and grows with its text: a copy of the text
+   (data-value) sits in the same grid cell, unseen, and sets the height. */
+.document-title:has([data-slot="textarea"]) {
+  display: grid;
+}
+.document-title:has([data-slot="textarea"])::after,
+.document-title [data-slot="textarea"] {
+  grid-area: 1 / 1;
+  width: 100%;
+  min-height: 40px;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.document-title:has([data-slot="textarea"])::after {
+  content: attr(data-value) " ";
+  visibility: hidden;
+}
+.document-title [data-slot="textarea"] {
+  display: block;
+  overflow: hidden;
+  background: transparent;
+  box-shadow: none;
+  color: inherit;
+  resize: none;
+}
 /* The line under the title: one line that wraps, its parts joined by dots. */
 .document-meta {
   display: flex;
   flex: none;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
-  margin: -10px 0 8px;
+  gap: 6px 18.62px;
+  margin: -10px 0 0;
   min-width: 0;
+}
+/* Meta line to body without a summary: 28px, as with one the summary's own margin makes 32. */
+.document-meta + .document-body {
+  margin-top: 8px;
 }
 /* The author's one-line summary, under the meta line: read as text, edited in place. */
 .document-summary {
-  margin: 0 0 8px;
+  margin: 0 0 12px;
   color: var(--muted-foreground);
   font-size: var(--text-reading-subsection);
   line-height: 27px;
@@ -339,8 +391,33 @@
   gap: 6px;
   min-width: 0;
 }
+/* The dot hangs in the gap before its part (8px, the 2.62px dot, 8px), so hiding it moves nothing:
+   it is hidden on the part that starts a line, which DocumentMeta marks. */
 .document-meta-item {
-  gap: 8px;
+  position: relative;
+}
+.document-meta-sep {
+  position: absolute;
+  inset-block: 0;
+  left: -10.62px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.62px;
+}
+.document-meta-item[data-line-start] > .document-meta-sep {
+  visibility: hidden;
+}
+/* The words of a part are one run of text, so a space between them is a word space. */
+.document-meta .ui-button {
+  display: inline;
+  gap: 0;
+  font-size: inherit;
+  line-height: inherit;
+}
+.document-meta .ui-reference {
+  font-size: 12px;
+  line-height: inherit;
 }
 .document-meta .document-status {
   flex: none;
@@ -390,11 +467,11 @@
 .document-end {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   margin-top: 28px;
 }
 .document-end section > h2 {
-  margin: 0 0 4px;
+  margin: 0 0 8px;
 }
 .document-end ul {
   padding: 0;
@@ -403,7 +480,9 @@
 .document-end li {
   margin: 0;
 }
-.document-end li > button {
+/* Rows of Linked and of Mentioned in: only these lists, not the links inside a passage. Linked
+   rows are 28px tall, 6px apart (a 34px rhythm); the icons are 14px and the text starts 22px in. */
+.document-end :is(.document-linked-items, .document-mentions) > li > button {
   display: flex;
   align-items: flex-start;
   gap: 8px;
@@ -412,9 +491,40 @@
   margin-left: -8px;
   padding: 4px 8px;
 }
-.document-end li > button svg {
+.document-end
+  :is(.document-linked-items, .document-mentions)
+  > li
+  > button
+  svg {
   flex: none;
-  margin-top: 2px;
+  width: 14px;
+  height: 14px;
+  margin-top: 3px;
+}
+.document-end .document-linked-items > li > button {
+  color: var(--foreground);
+}
+.document-end .document-linked-items > li + li {
+  margin-top: 6px;
+}
+/* A reference's own line box must not stretch the row by a pixel. */
+.document-end .connected-label .ui-reference {
+  line-height: 1;
+}
+.document-end .document-linked-items .ui-reference {
+  color: inherit;
+}
+.document-end .ui-disclosure-trigger {
+  gap: 8px;
+  min-height: 28px;
+  color: var(--muted-foreground);
+}
+.document-end .ui-disclosure-trigger > svg {
+  width: 14px;
+  height: 14px;
+}
+.document-end .ui-disclosure-body {
+  padding-inline-start: 22px;
 }
 .document-end .connected-label {
   display: -webkit-box;
@@ -443,12 +553,38 @@
 .document-passage {
   overflow-wrap: anywhere;
 }
+/* Every passage reads in one style, whatever it quotes: a paragraph, a list or a heading, with
+   links inline in the sentence. */
+.document-passage .markdown-document {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+}
+.document-passage .markdown-document :is(h1, h2, h3, h4, h5, h6) {
+  font-size: inherit;
+  line-height: inherit;
+  font-weight: 500;
+  letter-spacing: normal;
+}
+.document-passage .markdown-document :is(a, .ui-button, .ui-record-link) {
+  display: inline;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
+.document-passage .markdown-document .ui-reference {
+  font-size: inherit;
+  line-height: inherit;
+}
 /* Each mention's passage is a row of its own: the source as a small label, then the quote. */
-.document-passages {
+.document-end .document-passages {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  margin: 12px 0 0;
+  gap: 16px;
+  margin: 20px 0 0;
   padding: 0;
   list-style: none;
 }
@@ -497,6 +633,12 @@
   display: flex;
 }
 :where([data-width~="max-879"]) .document-plan-crumb {
+  display: none;
+}
+/* With neither the list's button nor a crumb before it, a slash would stand alone. */
+:where([data-width~="max-879"])
+  .document-bar[data-expanded]
+  .document-crumb-sep {
   display: none;
 }
 

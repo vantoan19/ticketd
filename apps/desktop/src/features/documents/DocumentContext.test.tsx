@@ -333,3 +333,78 @@ it("opens the graph from the menu", async () => {
   );
   await waitFor(() => expect(graph).toHaveBeenCalledWith("d1"));
 });
+
+const reading = (expanded: boolean) => ({
+  expanded,
+  onExpandedChange: vi.fn(),
+  place: null,
+  previous: null,
+  next: null,
+  focus: null,
+  onFocused: vi.fn(),
+  onStep: vi.fn(),
+});
+
+it("draws the breadcrumb slash only after a crumb: not alone at full width without a Plan", async () => {
+  const bar = () => document.querySelector(".document-bar");
+  renderEditor(
+    <DocumentEditor
+      initial={stored}
+      reading={reading(true)}
+      onClose={vi.fn()}
+    />,
+  );
+  await screen.findByRole("heading", { name: "Checkout spec" });
+  // Full width, no Plan: only the list's button stands before the title.
+  expect(bar()?.querySelector(".document-crumb-sep")).toBeNull();
+  cleanup();
+  // Beside the list, "Documents / title".
+  renderEditor(
+    <DocumentEditor
+      initial={stored}
+      reading={reading(false)}
+      onClose={vi.fn()}
+    />,
+  );
+  await screen.findByRole("heading", { name: "Checkout spec" });
+  expect(bar()?.querySelector(".document-crumb-sep")).not.toBeNull();
+  cleanup();
+  // Full width with a Plan: the Plan is the crumb before it.
+  vi.mocked(documents.row).mockResolvedValue(
+    row({ plans: [plan("Launch", false, true)] }),
+  );
+  renderEditor(
+    <DocumentEditor
+      initial={stored}
+      reading={reading(true)}
+      onClose={vi.fn()}
+    />,
+  );
+  await screen.findByRole("button", { name: "Open Plan Launch" });
+  expect(bar()?.querySelector(".document-crumb-sep")).not.toBeNull();
+});
+
+it("gives Move to Trash its icon, so its label lines up with the other menu items", async () => {
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  openMenu();
+  const trash = await screen.findByRole("menuitem", { name: "Move to Trash" });
+  expect(trash.querySelector("svg")).not.toBeNull();
+  const details = screen.getByRole("menuitem", { name: "Details" });
+  expect(details.querySelector("svg")).not.toBeNull();
+});
+
+it("edits the title in a field that wraps, and Enter leaves it without adding a line", async () => {
+  renderEditor(<DocumentEditor initial={stored} onClose={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: "Edit" }));
+  const title = (await screen.findByRole("textbox", {
+    name: "Title",
+  })) as HTMLTextAreaElement;
+  expect(title.tagName).toBe("TEXTAREA");
+  fireEvent.change(title, { target: { value: "A long title\nin two lines" } });
+  expect(title.value).toBe("A long title in two lines");
+  expect(title.closest(".document-title")?.getAttribute("data-value")).toBe(
+    "A long title in two lines",
+  );
+  const enter = fireEvent.keyDown(title, { key: "Enter" });
+  expect(enter).toBe(false);
+});

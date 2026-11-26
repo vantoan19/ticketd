@@ -1,19 +1,10 @@
 import { Button } from "@/components/ui/button";
-import { Tooltip } from "@/components/ui/tooltip";
-import { formatDateTime, listTime } from "@/lib/format";
+import { formatDateTime } from "@/lib/format";
 import type { Document, DocumentSummary } from "./api";
 
+/** The date and the time, in full: Details is where the list's "Wed" is spelled out. */
 function DocumentDate({ value }: { value: string }) {
-  const shown = listTime(value);
-  return shown === null ? (
-    value
-  ) : (
-    <Tooltip content={formatDateTime(value)}>
-      <time dateTime={value} tabIndex={0}>
-        {shown}
-      </time>
-    </Tooltip>
-  );
+  return <time dateTime={value}>{formatDateTime(value)}</time>;
 }
 
 /**

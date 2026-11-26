@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -11,7 +11,9 @@ import type { DocumentSummary } from "./api";
  * The line under a Document's title: what it belongs to (the Plan it is the spec of, its first
  * ticket), when it changed, how long it takes to read and where it is stored; tags follow as
  * chips. One line that wraps. Each part is a span of its own, so a part can be added before the
- * storage state without touching the others.
+ * storage state without touching the others. A dot belongs to the part after it and hangs in the
+ * gap before it, so the dot of a part that starts a wrapped line is hidden: no line starts or ends
+ * with a dot.
  */
 export function DocumentMeta({
   row,
@@ -35,6 +37,28 @@ export function DocumentMeta({
   onOpenPlan?: (id: string) => void;
   onOpenTicket?: (reference: string) => void;
 }) {
+  const line = useRef<HTMLDivElement>(null);
+  // Mark the parts that start a line, now and whenever the line is laid out again.
+  useLayoutEffect(() => {
+    const element = line.current;
+    if (!element) return;
+    const mark = () => {
+      let top: number | null = null;
+      for (const item of element.querySelectorAll<HTMLElement>(
+        ":scope > .document-meta-item",
+      )) {
+        if (top !== null && item.offsetTop === top)
+          item.removeAttribute("data-line-start");
+        else item.setAttribute("data-line-start", "");
+        top = item.offsetTop;
+      }
+    };
+    mark();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(mark);
+    observer.observe(element);
+    return () => observer.disconnect();
+  });
   const spec = row?.plans?.find((plan) => plan.spec);
   const tickets = row?.tickets ?? [];
   const first = tickets[0];
@@ -73,16 +97,18 @@ export function DocumentMeta({
     parts.push([
       "updated",
       <span className="document-meta-part">
-        Updated{" "}
-        {updated ? (
-          <Tooltip content={formatDateTime(updatedAt)}>
-            <time dateTime={updatedAt} tabIndex={0}>
-              {updated}
-            </time>
-          </Tooltip>
-        ) : (
-          updatedAt
-        )}
+        <span>
+          Updated{" "}
+          {updated ? (
+            <Tooltip content={formatDateTime(updatedAt)}>
+              <time dateTime={updatedAt} tabIndex={0}>
+                {updated}
+              </time>
+            </Tooltip>
+          ) : (
+            updatedAt
+          )}
+        </span>
       </span>,
     ]);
   parts.push([
@@ -95,7 +121,7 @@ export function DocumentMeta({
       <span className="document-meta-part">{storage}</span>,
     ]);
   return (
-    <div className="document-meta">
+    <div className="document-meta" ref={line}>
       {parts.map(([key, part], index) => (
         <span key={key} className="document-meta-item">
           {index > 0 && (
