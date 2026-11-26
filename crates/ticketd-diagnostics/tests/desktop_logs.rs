@@ -149,6 +149,80 @@ fn debug_logging_takes_effect_immediately_and_switches_back() {
     assert_eq!(messages, ["during"]);
 }
 
+/// Whether a debug event emitted in `logs` reaches the folder's files. A macro, so that each
+/// test has its own callsite: a callsite remembers which subscribers wanted it.
+macro_rules! debug_line_written {
+    ($dir:expr, $logs:expr) => {{
+        $logs.with_default(|| tracing::debug!(target: "ticketd_core::sync", "detail"));
+        log_files($dir)
+            .iter()
+            .flat_map(|file| lines(file))
+            .any(|line| line["message"] == "detail")
+    }};
+}
+
+#[test]
+fn a_report_turns_detailed_logging_on_and_survives_a_restart() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = open(dir.path());
+    assert_eq!(logs.log_level().report_started_at, None);
+    logs.start_report();
+    let started = logs.log_level().report_started_at.unwrap();
+    assert!(logs.log_level().debug);
+    drop(logs);
+
+    // The next launch finds the report still open, with the same start, and logs in detail
+    // from its first event.
+    let restarted = open(dir.path());
+    let level = restarted.log_level();
+    assert_eq!(level.report_started_at.as_deref(), Some(started.as_str()));
+    assert!(level.debug);
+    assert!(debug_line_written!(dir.path(), restarted));
+}
+
+#[test]
+fn cancelling_or_saving_a_report_ends_detailed_logging_for_good() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = open(dir.path());
+    logs.start_report();
+    logs.end_report();
+    let level = logs.log_level();
+    assert_eq!((level.debug, level.report_started_at), (false, None));
+    assert!(!debug_line_written!(dir.path(), logs));
+    drop(logs);
+
+    // Nothing is left to find at the next launch.
+    let restarted = open(dir.path());
+    let level = restarted.log_level();
+    assert_eq!((level.debug, level.report_started_at), (false, None));
+}
+
+#[test]
+fn starting_a_report_twice_keeps_the_first_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = open(dir.path());
+    logs.start_report();
+    let first = logs.log_level().report_started_at;
+    logs.start_report();
+    assert_eq!(logs.log_level().report_started_at, first);
+}
+
+#[test]
+fn a_filter_override_leaves_no_report_to_start() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = DesktopLogs::open(
+        dir.path(),
+        Config {
+            filter_override: Some("ticketd=trace".into()),
+            ..Config::default()
+        },
+    );
+    logs.start_report();
+    assert_eq!(logs.log_level().report_started_at, None);
+    drop(logs);
+    assert_eq!(open(dir.path()).log_level().report_started_at, None);
+}
+
 #[test]
 fn a_filter_override_wins_over_the_debug_switch() {
     let dir = tempfile::tempdir().unwrap();

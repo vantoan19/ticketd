@@ -168,6 +168,13 @@ export function bridgeDefault(
       return { state: "allowed", reported: false, settings: false };
     case "agent_skills":
       return [];
+    case "diagnostics_log_level":
+      return {
+        level: "info",
+        debug: false,
+        env_override: null,
+        report_started_at: null,
+      };
     case "show_plan":
       return {
         plan: { id: args?.id ?? "", name: "Plan", archived: false },

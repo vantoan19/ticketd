@@ -264,29 +264,22 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "keyboard-shortcuts",
   },
   {
-    title: "Debug logging",
-    description: "Records more detail until ticketd restarts.",
-    keywords: "diagnostics log level verbose troubleshoot ticketd_log",
+    title: "Detailed logging",
+    description:
+      "Turn it on, repeat what went wrong, then save a report to attach to a GitHub issue.",
+    keywords:
+      "diagnostics debug log level verbose troubleshoot ticketd_log report bug issue support export zip start save",
     section: "diagnostics",
   },
   {
     title: "Log files",
-    description:
-      "One file per day, and the oldest are removed automatically. They stay on this computer.",
+    description: "Kept for 7 days on this computer.",
     keywords: "diagnostics logs folder open finder",
     section: "diagnostics",
   },
   {
-    title: "Export diagnostics",
-    description:
-      "A small .zip of redacted logs and Workspace health to attach to a bug report.",
-    keywords: "diagnostics bug report issue support summary copy zip logs",
-    section: "diagnostics",
-  },
-  {
     title: "Recent errors",
-    description:
-      "The last kinds of warning and error ticketd logged, from the files still kept.",
+    description: "From the last 7 days of logs.",
     keywords: "diagnostics crash failure warning unexpected quit",
     section: "diagnostics",
   },
