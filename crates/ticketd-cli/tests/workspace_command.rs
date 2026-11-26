@@ -737,7 +737,7 @@ fn document_lists_carry_each_rows_plans_tickets_and_unopened_state() {
         );
         assert_eq!(
             row["tickets"],
-            serde_json::json!([{"reference": "T-KQ1", "title": "Ship it", "status": "Todo"}])
+            serde_json::json!([{"reference": "T-KQ1", "title": "Ship it", "status": "Todo", "open": true}])
         );
         assert_eq!(row["opened"], true);
     }
