@@ -45,3 +45,28 @@
   line-height: var(--text-caption-line);
   font-variant-numeric: tabular-nums;
 }
+/* The page field: a recessed fill, no border, like the board's. */
+.view-bar-page .ui-input {
+  background: var(--recessed);
+  box-shadow: none;
+}
+.view-bar-page .ui-input:focus-visible {
+  outline: 1px solid var(--input-focus);
+}
+/* Find: the magnifier sits inside the field. */
+.view-bar-search {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.view-bar-search > svg {
+  position: absolute;
+  inset-inline-start: 8px;
+  width: 14px;
+  height: 14px;
+  color: var(--muted-foreground);
+  pointer-events: none;
+}
+.view-bar-search > .ui-input {
+  padding-inline-start: 28px;
+}

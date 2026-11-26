@@ -87,3 +87,19 @@ export function breakable(text: string): ReactNode {
     ),
   );
 }
+
+/**
+ * A viewer header's name on one line of `width` px: the same rule as a card's,
+ * so a longer name gives way in the middle and keeps its end and extension.
+ */
+export function fitTitle(
+  name: string,
+  width: number,
+  measure: Measure,
+): FittedName {
+  if (width <= 0 || measure(name) <= width) return { text: name, cut: false };
+  const tail = name.slice(-KEEP);
+  let head = name.slice(0, Math.max(0, name.length - KEEP));
+  while (head && measure(`${head}…${tail}`) > width) head = head.slice(0, -1);
+  return { text: `${head}…${tail}`, cut: true };
+}

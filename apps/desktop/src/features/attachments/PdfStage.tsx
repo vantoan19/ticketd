@@ -6,7 +6,7 @@ import {
   type KeyboardEvent,
   type RefObject,
 } from "react";
-import { ChevronDown, ChevronUp, Minus, Plus } from "lucide-react";
+import { ChevronDown, ChevronUp, ZoomIn, ZoomOut } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { FailureState } from "@/components/ui/failure-alert";
 import { IconButton } from "@/components/ui/icon-button";
@@ -107,14 +107,20 @@ export function PdfStage({
       </div>
     );
   if ("failure" in current)
-    return <FailureState failure={current.failure} onRetry={onRetry} />;
+    return (
+      <div className="attachment-pdf-state">
+        <FailureState failure={current.failure} onRetry={onRetry} />
+      </div>
+    );
   if ("unreadable" in current)
     return (
-      <PreviewState
-        family="pdf"
-        title="Couldn't show this PDF"
-        sentence="It may be damaged or password-protected. Open it in its app."
-      />
+      <div className="attachment-pdf-state">
+        <PreviewState
+          family="pdf"
+          title="Couldn't show this PDF"
+          sentence="It may be damaged or password-protected. Open it in its app."
+        />
+      </div>
     );
   return (
     <PdfPages
@@ -272,23 +278,25 @@ function PdfPages({
             >
               <ChevronUp aria-hidden="true" />
             </IconButton>
-            <Input
-              variant="inline"
-              className="h-6 w-10 text-center"
-              inputMode="numeric"
-              aria-label="Page"
-              data-view-field=""
-              value={draft ?? String(page)}
-              onChange={(event) => setDraft(event.target.value)}
-              onFocus={(event) => event.target.select()}
-              onBlur={() => setDraft(null)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  commitDraft();
-                }
-              }}
-            />
+            <span className="view-bar-page">
+              <Input
+                variant="inline"
+                className="h-6 w-10 text-center"
+                inputMode="numeric"
+                aria-label="Page"
+                data-view-field=""
+                value={draft ?? String(page)}
+                onChange={(event) => setDraft(event.target.value)}
+                onFocus={(event) => event.target.select()}
+                onBlur={() => setDraft(null)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commitDraft();
+                  }
+                }}
+              />
+            </span>
             <span className="view-bar-of">of {pages.length}</span>
             <IconButton
               label="Next page"
@@ -305,7 +313,7 @@ function PdfPages({
             shortcut="-"
             onClick={() => changeZoom(stepZoom(scale, -1))}
           >
-            <Minus aria-hidden="true" />
+            <ZoomOut aria-hidden="true" />
           </IconButton>
           <span className="view-bar-value">{Math.round(scale * 100)}%</span>
           <IconButton
@@ -313,7 +321,7 @@ function PdfPages({
             shortcut="+"
             onClick={() => changeZoom(stepZoom(scale, 1))}
           >
-            <Plus aria-hidden="true" />
+            <ZoomIn aria-hidden="true" />
           </IconButton>
           <Button
             variant="ghost"

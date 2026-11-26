@@ -11,6 +11,7 @@ import {
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentPreview } from "./AttachmentPreview";
+import { ShellSlotProvider } from "@/components/ui/list-header";
 import type { Attachment } from "@/lib/api/attachments";
 import { DocumentNavigation } from "@/features/documents/navigation";
 import { TicketNavigation } from "@/features/tickets/navigation";
@@ -1100,4 +1101,64 @@ test("a long log shows its scope and keeps Open and Export, and Find leaves brow
   expect(
     await screen.findByRole("document", { name: "Text of e2e-run.log" }),
   ).toBeTruthy();
+});
+
+test("the viewer's header takes none of the shell's controls", async () => {
+  serveReport(() => reportSource);
+  render(
+    <ShellSlotProvider
+      nav={<button type="button">Open navigation</button>}
+      crumb={<button type="button">Back to the graph</button>}
+    >
+      <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />
+    </ShellSlotProvider>,
+  );
+  await screen.findByLabelText("Report: E2E report");
+  expect(screen.queryByRole("button", { name: "Open navigation" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Back to the graph" }),
+  ).toBeNull();
+});
+
+test("the … menu leads each item with an icon and shows the details key as a chip", async () => {
+  setPreference("attachmentDetails", false);
+  serveReport(() => reportSource);
+  render(
+    <AttachmentPreview
+      target={{ id: reportFile.id }}
+      onClose={() => {}}
+      onReplace={async () => {}}
+    />,
+  );
+  await screen.findByLabelText("Report: E2E report");
+  fireEvent.pointerDown(screen.getByRole("button", { name: "More actions" }), {
+    button: 0,
+    ctrlKey: false,
+  });
+  const items = await screen.findAllByRole("menuitem");
+  expect(items.length).toBeGreaterThan(2);
+  for (const item of items) expect(item.querySelector("svg")).not.toBeNull();
+  expect(
+    screen.getByRole("menuitem", { name: /Show details/ }).querySelector("kbd")
+      ?.textContent,
+  ).toBe("I");
+});
+
+test("the scripts line carries an info glyph, and a damaged PDF sits in the centred block", async () => {
+  serveReport(() => "<script>1</script><p>Hello</p>");
+  const view = render(
+    <AttachmentPreview target={{ id: reportFile.id }} onClose={() => {}} />,
+  );
+  const note = (
+    await screen.findByText(
+      "Scripts and online images are off in this preview.",
+    )
+  ).closest("p");
+  expect(note?.querySelector("svg")).not.toBeNull();
+  view.unmount();
+  servePdf();
+  vi.mocked(openPdf).mockRejectedValue(new PdfUnreadable());
+  render(<AttachmentPreview target={{ id: pdfFile.id }} onClose={() => {}} />);
+  const title = await screen.findByText("Couldn't show this PDF");
+  expect(title.closest(".attachment-pdf-state")).not.toBeNull();
 });

@@ -14,14 +14,18 @@
   outline: 2px solid var(--ring);
   outline-offset: -2px;
 }
-.attachment-report-note {
+.attachment-report-note,
+.attachment-preview-stage > [data-slot="alert"].ui-notice {
+  background: var(--surface);
   box-shadow: inset 0 -1px 0 var(--group-hairline);
   color: var(--muted-foreground);
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
+/* A report that paints no page of its own reads as white paper in both themes
+   (its document asks for a light scheme), like a PDF page. */
 .attachment-report-frame {
-  background: transparent;
+  background: white;
 }
 .attachment-state-tile {
   border-radius: var(--radius-card);
