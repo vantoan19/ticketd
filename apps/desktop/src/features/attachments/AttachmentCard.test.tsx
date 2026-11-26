@@ -263,6 +263,25 @@ test("measured, a cut name keeps the end of its second line and its first line s
   expect(fitName("refund-after-fix-before-merge.png", measure).cut).toBe(false);
 });
 
+test("a wide-script name keeps its end from the second line, and the cut line still fits", () => {
+  // CJK letters are twice as wide: 10 fit a line of the card.
+  const measure = (text: string) =>
+    [...text].reduce((sum, c) => sum + (c.charCodeAt(0) > 255 ? 14 : 7), 0);
+  // 21 distinct letters: the first line takes 10, the other 11 do not fit under it.
+  const name = Array.from({ length: 21 }, (_, i) =>
+    String.fromCharCode(0x4e00 + i),
+  ).join("");
+  const fitted = fitName(name, measure);
+  expect(fitted.cut).toBe(true);
+  const [first, second] = fitted.lines!;
+  const rest = name.slice(first.length);
+  expect(measure(second)).toBeLessThanOrEqual(152);
+  // Nothing of line one is repeated on line two.
+  const [head, end] = second.split("…") as [string, string];
+  expect(rest.startsWith(head) && rest.endsWith(end)).toBe(true);
+  expect(head.length + end.length).toBeLessThan(rest.length);
+});
+
 test("a PDF's still is its first page as paper, and the caption gains the page count", async () => {
   const arrive = viewport();
   const file = stored("pdf", "refunds.pdf", 1.1 * 1048576);
@@ -290,6 +309,42 @@ test("a PDF's still is its first page as paper, and the caption gains the page c
   expect(pdf.renders[0]![0]).toBe(0);
   expect(pdf.renders[0]![1]).toBeCloseTo(240 / 612);
   expect(pdf.destroy).toHaveBeenCalled();
+});
+
+test("a PDF that could not be read is tried again, and nothing is asked before availability is known", async () => {
+  const arrive = viewport();
+  const file = stored("later", "later.pdf");
+  let here = false;
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    if (!here) throw new Error("not downloaded yet");
+    return new Uint8Array([37, 80, 68, 70]);
+  });
+  vi.mocked(openPdf).mockResolvedValue(fakePdf(2).document);
+  vi.spyOn(HTMLCanvasElement.prototype, "toDataURL").mockReturnValue(
+    "data:image/png;base64,AAAA",
+  );
+  // Before the first availability answer the file may not be here: no read at all.
+  const first = render(
+    <AttachmentCard file={file} storageKnown={false} onOpen={() => {}} />,
+  );
+  arrive();
+  await act(async () => {});
+  expect(invoke).not.toHaveBeenCalledWith("attachment_pdf", expect.anything());
+  // Known and present, but the read fails: the tile stays...
+  first.rerender(<AttachmentCard file={file} onOpen={() => {}} />);
+  await waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("attachment_pdf", expect.anything()),
+  );
+  await act(async () => {});
+  expect(first.container.querySelector("img")).toBeNull();
+  first.unmount();
+  // ...and when the file is here, the next card for it draws its page.
+  here = true;
+  render(<AttachmentCard file={file} onOpen={() => {}} />);
+  arrive();
+  const paper = await screen.findByRole("presentation", { hidden: true });
+  expect(paper.hasAttribute("data-paper")).toBe(true);
 });
 
 test("a PDF that can't render, is large or isn't here keeps the tile", async () => {

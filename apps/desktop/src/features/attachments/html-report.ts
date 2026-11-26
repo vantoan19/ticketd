@@ -30,7 +30,8 @@ const REMOVED =
 const MEDIA = "svg, canvas, video, audio, table, hr, input, button, textarea";
 const NOT_TEXT = new Set(["STYLE", "SCRIPT", "NOSCRIPT", "TEMPLATE", "TITLE"]);
 // A stylesheet that imports another, or draws from anything but an embedded `data:` URL.
-const CSS_REMOTE = /@import|url\(\s*["']?\s*(?!data:|#)/i;
+// One lookahead past the quote and spaces, so `url("data:…")` is not read as remote.
+const CSS_REMOTE = /@import|url\(\s*(?!["']?\s*(?:data:|#))/i;
 const LOCAL_URL = /^\s*(?:data:|#|about:blank\s*$)/i;
 
 function external(value: string | null): boolean {

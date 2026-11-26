@@ -3,6 +3,9 @@ use ticketd_core::{
     TEXT_TAIL_BYTES, TEXT_WHOLE_BYTES, Workspace,
 };
 
+/// The size past which a file is too large to preview as media (100 MiB).
+const MEDIA_LIMIT: usize = 100 * 1024 * 1024;
+
 const PNG: &[u8] =
     b"\x89PNG\r\n\x1a\n\0\0\0\x0dIHDR\0\0\0\x01\0\0\0\x01\x08\x06\0\0\0\x1f\x15\xc4\x89";
 
@@ -336,4 +339,54 @@ fn a_log_over_the_limit_shows_its_last_five_megabytes_from_a_line_start() {
             .len(),
         at_limit.len()
     );
+}
+
+#[test]
+fn a_log_over_the_media_limit_still_shows_its_end_as_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    // The upload limit is a setting: a larger one lets a log past the media limit in.
+    workspace
+        .set_attachment_upload_limit(MEDIA_LIMIT as u64 * 2)
+        .unwrap();
+    let line = "2026-11-26 12:00:00 INFO request done in 12ms\n";
+    let mut big = line.repeat(MEDIA_LIMIT / line.len() + 2).into_bytes();
+    big.extend_from_slice(b"the last line\n");
+    let file = workspace
+        .import_attachment_bytes("huge", "huge.log", &big, |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert_eq!(preview.status, PreviewStatus::Unsupported);
+    assert!(preview.message.is_none() && preview.media_type.is_none());
+    let scope = preview.text.unwrap();
+    assert!(scope.partial);
+    assert_eq!(scope.total_bytes, big.len() as u64);
+    let text = workspace.attachment_text(&identity, &file.id).unwrap();
+    assert!(text.ends_with("the last line\n"));
+    // It is still not media: that read stays refused.
+    assert!(workspace.attachment_media(&identity, &file.id).is_err());
+}
+
+#[test]
+fn an_unfinished_escape_sequence_never_swallows_the_lines_after_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    // A title that never ends, a colour code with no final byte, a charset code cut off
+    // by a line break: each loses only itself.
+    let log = "one\n\u{1b}]0;a title nobody closed\ntwo\n\u{1b}[31;1\nthree\n\u{1b}(\nfour\n\u{1b}\nfive\n\u{1b}[32mgreen\u{1b}[0m\n";
+    let file = workspace
+        .import_attachment_bytes("cut", "cut.log", log.as_bytes(), |_, _| true)
+        .unwrap();
+    assert_eq!(
+        workspace.attachment_text(&identity, &file.id).unwrap(),
+        "one\n\ntwo\n\nthree\n\nfour\n\nfive\ngreen\n"
+    );
+    let excerpt = workspace
+        .attachment_preview(&identity, &file.id)
+        .unwrap()
+        .text_excerpt
+        .unwrap();
+    assert!(excerpt.text.contains("five"));
 }

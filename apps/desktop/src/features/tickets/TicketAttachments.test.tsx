@@ -417,6 +417,30 @@ test("Files shows cards for a mixed set, with a tile for the file that has no st
   expect(document.activeElement).toBe(log);
 });
 
+test("eight files and no Documents fold after six cards", async () => {
+  const many = Array.from({ length: 8 }, (_, index) => ({
+    ...file,
+    id: `f${index}`,
+    display_name: `file-${index}.zip`,
+    original_filename: `file-${index}.zip`,
+  }));
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "ticket_attachments") return many;
+    if (command === "attachment_workspace_id") return "workspace-test";
+    if (command === "attachment_availability") return [];
+    return null;
+  });
+  render(
+    <TestOpenTicket ticket={ticket}>
+      <TicketAttachments />
+    </TestOpenTicket>,
+  );
+  const more = await screen.findByRole("button", { name: /Show all 8 files/ });
+  expect(screen.queryByRole("button", { name: "file-6.zip" })).toBeNull();
+  fireEvent.click(more);
+  expect(screen.getByRole("button", { name: "file-7.zip" })).toBeTruthy();
+});
+
 test("opening the middle file steps both ways, and Esc returns to the card that opened it", async () => {
   const user = userEvent.setup();
   const first = { ...file, id: "a", display_name: "alpha.log" };

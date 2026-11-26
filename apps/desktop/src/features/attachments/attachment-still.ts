@@ -42,11 +42,12 @@ export type Still =
 
 // Reports are read whole, one or two at a time, and the last few are kept so
 // folding a list or revisiting a ticket does not read them again. A replaced
-// file has a new id, so an entry is never stale. `null` is "no still".
+// file has a new id, so an entry is never stale. `null` is "no still" for a report;
+// a PDF that failed to draw is not kept, so it is tried again.
 const CONCURRENT = 2;
 const KEPT = 8;
 const kept = new Map<string, string | null>();
-const keptPages = new Map<string, { url: string; pages: number } | null>();
+const keptPages = new Map<string, { url: string; pages: number }>();
 const waiting: Array<() => void> = [];
 let running = 0;
 
@@ -96,7 +97,8 @@ async function pdfStill(
   cancelled: () => boolean,
 ) {
   const key = `${workspace}/${id}`;
-  if (keptPages.has(key)) return keptPages.get(key) ?? null;
+  const had = keptPages.get(key);
+  if (had) return had;
   const still = await schedule(async () => {
     const document = await openPdf(await attachments.pdf(workspace, id));
     try {
@@ -114,7 +116,9 @@ async function pdfStill(
     } finally {
       document.destroy();
     }
-  }, cancelled).catch(() => null);
+  }, cancelled);
+  // A failure is not kept: it may be only that the file was not here yet, and the
+  // card asks again when it is. (`useStill` leaves the tile on a failure.)
   if (still === undefined) return null;
   keptPages.set(key, still);
   if (keptPages.size > KEPT) keptPages.delete(keptPages.keys().next().value!);

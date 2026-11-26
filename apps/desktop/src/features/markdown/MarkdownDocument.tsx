@@ -296,8 +296,9 @@ function mentionBlock(tag: string) {
       mark !== null && isMentionBlock(node as PositionedNode, mark);
     const alone =
       cards && (tag === "p" || tag === "li") ? cardLinks(node) : null;
+    // A card is a block: it cannot sit inside a paragraph, so its row is a div.
     return createElement(
-      tag,
+      alone && tag === "p" ? "div" : tag,
       {
         ...(marked
           ? {

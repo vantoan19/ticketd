@@ -68,7 +68,7 @@ export function AttachmentCard({
   file,
   label,
   storage,
-  storageKnown = false,
+  storageKnown = true,
   onOpen,
   action,
 }: {
@@ -76,15 +76,20 @@ export function AttachmentCard({
   /** An authored label that differs from the file's name: it names the card. */
   label?: string | undefined;
   storage?: Availability | undefined;
-  /** The first read of where the files are has answered, so a missing copy can be told from one still in the storage. */
+  /**
+   * False until the first availability read answers: nothing is asked of the file
+   * before it, no still and no missing check, so a copy that is only still in the
+   * storage is not taken for a lost or undrawable one.
+   */
   storageKnown?: boolean;
   onOpen: () => void;
   action?: ReactNode;
 }) {
   const [ref, near] = useNearViewport<HTMLDivElement>();
-  const here = storage === undefined || storage.state === "downloaded";
+  const here =
+    storageKnown && (storage === undefined || storage.state === "downloaded");
   const still = useStill(file, near && here);
-  const missing = useMissing(file, near && here && storageKnown);
+  const missing = useMissing(file, near && here);
   const drive = useDriveType(file, near);
   const [broken, setBroken] = useState<string | null>(null);
   const named = label && label !== file.display_name ? label : undefined;

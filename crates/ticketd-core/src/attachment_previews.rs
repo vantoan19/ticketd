@@ -181,13 +181,19 @@ impl Workspace {
             Err(error) => (error.status, None, Some(error.message)),
         };
         let can_open = self.attachment_open_target(id).is_ok();
-        let text_excerpt = if status == PreviewStatus::Unsupported
+        // A log over the media limit is still a text file: its end shows, so it gets the
+        // text check too. Anything else that is too large stays too large.
+        let text_excerpt = if matches!(status, PreviewStatus::Unsupported | PreviewStatus::TooLarge)
             && attachment.kind == AttachmentKind::LocalSnapshot
         {
             self.text_excerpt(&attachment)
         } else {
             None
         };
+        if status == PreviewStatus::TooLarge && text_excerpt.is_some() {
+            status = PreviewStatus::Unsupported;
+            message = None;
+        }
         let mut html = false;
         if status == PreviewStatus::Unsupported
             && attachment.kind == AttachmentKind::LocalSnapshot
@@ -519,9 +525,14 @@ fn read_text_window(mut file: File, whole: u64, tail: u64) -> Result<String, Err
     })
 }
 
+/// The longest a string sequence (OSC, DCS and the like) may run without its terminator
+/// before it is taken for stray text rather than a title or a link.
+const ESCAPE_STRING_LIMIT: usize = 4096;
+
 /// Removes ANSI/VT escape sequences (colours, cursor moves, titles) and the bell and
-/// backspace, so a coloured log reads as plain text. An unfinished sequence at the end of
-/// the text is dropped.
+/// backspace, so a coloured log reads as plain text. A sequence that is cut short (it
+/// meets a line break, a byte that cannot belong to it, or runs past
+/// `ESCAPE_STRING_LIMIT`) ends there and the text after it is kept.
 fn strip_terminal_escapes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -529,17 +540,18 @@ fn strip_terminal_escapes(text: &str) -> String {
         match c {
             '\u{7}' | '\u{8}' => {}
             '\u{1b}' => match chars.next() {
-                // CSI: parameters and intermediates, then one final byte (@ to ~).
+                // CSI: parameters (0 to ?) and intermediates (space to /), then one final
+                // byte (@ to ~). Anything else, a line break included, ends it unread.
                 Some('[') => {
-                    for c in chars.by_ref() {
-                        if ('\u{40}'..='\u{7e}').contains(&c) {
-                            break;
-                        }
-                    }
+                    while chars.next_if(|c| (' '..='?').contains(c)).is_some() {}
+                    chars.next_if(|c| ('\u{40}'..='\u{7e}').contains(c));
                 }
-                // OSC, DCS, SOS, PM and APC strings end at BEL or ST (ESC \).
+                // OSC, DCS, SOS, PM and APC strings end at BEL or ST (ESC \), or, when
+                // they never do, at the next line break.
                 Some(']' | 'P' | 'X' | '^' | '_') => {
-                    while let Some(c) = chars.next() {
+                    let mut length = 0;
+                    while let Some(c) = chars.next_if(|c| *c != '\n') {
+                        length += 1;
                         if c == '\u{7}' {
                             break;
                         }
@@ -549,13 +561,18 @@ fn strip_terminal_escapes(text: &str) -> String {
                             }
                             break;
                         }
+                        if length >= ESCAPE_STRING_LIMIT {
+                            break;
+                        }
                     }
                 }
                 // A character-set or similar sequence: intermediates, then a final byte.
                 Some(' '..='/') => {
                     while chars.next_if(|c| (' '..='/').contains(c)).is_some() {}
-                    chars.next();
+                    chars.next_if(|c| ('0'..='~').contains(c));
                 }
+                // An escape at the end of a line keeps its line break.
+                Some('\n') => out.push('\n'),
                 // Any other two-character sequence (ESC c, ESC 7).
                 Some(_) | None => {}
             },

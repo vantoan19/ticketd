@@ -57,7 +57,9 @@ test("a copy still in the sync storage, or an answer not known yet, is never cal
       ? "workspace"
       : preview(file, "missing"),
   );
-  const view = render(<AttachmentCard file={file} onOpen={() => {}} />);
+  const view = render(
+    <AttachmentCard file={file} storageKnown={false} onOpen={() => {}} />,
+  );
   // Where the files are is not known yet: nothing is asked.
   expect(invoke).not.toHaveBeenCalled();
   view.rerender(

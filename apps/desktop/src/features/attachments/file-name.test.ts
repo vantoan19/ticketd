@@ -47,6 +47,22 @@ test("unmeasured, a cut name still ends at a whole word", () => {
   expect(fitted.text.endsWith("…(signed).pdf")).toBe(true);
 });
 
+test("a wide script keeps its end inside the second line, taken from that line", () => {
+  // Every character is 14 wide, so 14 of them overflow a 152px line.
+  const wide = (text: string) => [...text].length * 14;
+  const name = "退款流程修复前后的完整录屏记录文件第一份第二份第三份最终版.mov";
+  const fitted = fitName(name, wide);
+  const [first, second] = fitted.lines!;
+  const end = second!.split("…")[1]!;
+  expect(fitted.cut).toBe(true);
+  expect(wide(second!)).toBeLessThanOrEqual(152);
+  expect(name.startsWith(first!)).toBe(true);
+  expect(name.endsWith(end)).toBe(true);
+  expect(end.endsWith(".mov")).toBe(true);
+  // The end comes from after line one, so nothing is shown twice.
+  expect(name.length - first!.length).toBeGreaterThanOrEqual(end.length);
+});
+
 // One unit a character: easy to reason about widths.
 const unit = (text: string) => text.length;
 
