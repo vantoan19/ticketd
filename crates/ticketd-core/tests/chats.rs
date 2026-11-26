@@ -437,6 +437,53 @@ fn a_chat_links_to_several_records_without_belonging_to_them() {
 }
 
 #[test]
+fn the_first_save_of_a_partial_legacy_edit_applies_its_links_again() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let original = workspace
+        .save_chat_input(None, &chat.id, "Original")
+        .unwrap();
+    workspace
+        .confirm_chat_queue_edit(&chat.id, &original.id, "hold")
+        .unwrap();
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: workspace.create_ticket("Original context").unwrap().id,
+    };
+    workspace
+        .add_chat_links(&chat.id, std::slice::from_ref(&link))
+        .unwrap();
+    let legacy_link_request = serde_json::json!({
+        "operation": "chat_queue_edit_links",
+        "chat_id": chat.id,
+        "links": [["ticket", link.id]],
+    })
+    .to_string();
+    let db = rusqlite::Connection::open(dir.path().join("workspace.sqlite3")).unwrap();
+    db.execute(
+        "INSERT INTO request_outcomes (id, request, outcome) VALUES ('chat_queue_edit_links:edit', ?1, ?2)",
+        [legacy_link_request, serde_json::to_string(&chat.id).unwrap()],
+    ).unwrap();
+    workspace
+        .set_chat_link(&chat.id, link.clone(), false)
+        .unwrap();
+
+    let edit = ChatQueueEdit {
+        replaces: vec![original.id],
+        links: vec![link],
+    };
+    assert!(!workspace.chat_queue_edit_saved(&chat.id, "edit").unwrap());
+    let (saved, linked) = workspace
+        .save_chat_input_with_edit(Some("edit"), &chat.id, "Edited", &[], Some(&edit))
+        .unwrap();
+
+    assert!(linked);
+    assert!(workspace.chat_queue_edit_saved(&chat.id, "edit").unwrap());
+    assert_eq!(workspace.chat(&chat.id).unwrap().links, edit.links);
+    assert_eq!(workspace.chat_queue(&chat.id).unwrap()[0].id, saved.id);
+}
+
+#[test]
 fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

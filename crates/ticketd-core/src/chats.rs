@@ -2620,11 +2620,11 @@ impl Workspace {
                     }
                     delete_queued_input(connection, original)?;
                 }
-                if let Some((links, (command, request))) = &link_receipt
-                    && !links_saved
-                {
+                if let Some((links, (command, request))) = &link_receipt {
                     links_changed = add_links(connection, chat_id, links)?;
-                    save_outcome(connection, command, request, chat_id)?;
+                    if !links_saved {
+                        save_outcome(connection, command, request, chat_id)?;
+                    }
                 }
                 if matches!(source, InputSource::AutomationReply) {
                     run = crate::automation_runs::take_over_chat(connection, chat_id, true)?;
