@@ -2053,7 +2053,7 @@ async fn an_ordinary_linked_attachment_reaches_a_live_session_with_its_context()
         ChatAttachmentContent::from_data_url("notes.txt", "data:text/plain;base64,bm90ZXM=", 100)
             .unwrap();
     f.host
-        .send_linking_attachments(
+        .send_linking(
             &f.chat.id,
             "Attached",
             SendMode::Auto,

@@ -1,6 +1,6 @@
 use ticketd_core::{
     CHAT_CHANGE_TAIL, CHAT_EFFECTIVE_SETTINGS_LIMIT, CHAT_NOTICE_LIMIT, CHAT_RESET_TIME_MAX,
-    CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery, ChatDeliveryDecision,
+    CHAT_TOOL_OUTPUT_LIMIT, Chat, ChatCatchUp, ChatDelivery, ChatDeliveryDecision, ChatInputChange,
     ChatInputStanding, ChatInteractionKind, ChatInteractionState, ChatItem, ChatLink, ChatLinkKind,
     ChatListFilter, ChatMessage, ChatObservation, ChatQueueEdit, ChatRecord, ChatSessionOrigin,
     ChatSubmissionIntent, ChatToolState, ChatTurnState, Error, NewChat, Workspace,
@@ -473,6 +473,15 @@ fn the_first_save_of_a_partial_legacy_edit_applies_its_links_again() {
         links: vec![link],
     };
     assert!(!workspace.chat_queue_edit_saved(&chat.id, "edit").unwrap());
+    assert!(matches!(
+        workspace.replay_chat_input_replacing("edit", &chat.id, "Edited", &[], &edit.replaces),
+        Err(Error::RequestConflict(_))
+    ));
+    assert!(matches!(
+        workspace.save_chat_input_replacing(Some("edit"), &chat.id, "Edited", &[], &edit.replaces),
+        Err(Error::RequestConflict(_))
+    ));
+    assert!(workspace.chat_queue(&chat.id).unwrap()[0].editing);
     let (saved, linked) = workspace
         .save_chat_input_with_edit(Some("edit"), &chat.id, "Edited", &[], Some(&edit))
         .unwrap();
@@ -484,7 +493,7 @@ fn the_first_save_of_a_partial_legacy_edit_applies_its_links_again() {
 }
 
 #[test]
-fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
+fn legacy_queue_edit_links_replay_while_another_connection_holds_the_writer() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);
     let original = workspace
@@ -505,6 +514,21 @@ fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
         .save_chat_input_with_edit(Some("edit"), &chat.id, "Edited", &[], Some(&edit))
         .unwrap();
     assert!(linked);
+    let mut peer = rusqlite::Connection::open(dir.path().join("workspace.sqlite3")).unwrap();
+    peer.execute(
+        "UPDATE request_outcomes SET request = json_remove(request, '$.links') WHERE id = 'edit'",
+        [],
+    )
+    .unwrap();
+    let companion = serde_json::json!({
+        "operation": "chat_queue_edit_links",
+        "chat_id": chat.id,
+        "links": [["ticket", link.id]],
+    });
+    peer.execute(
+        "INSERT INTO request_outcomes (id, request, outcome) VALUES ('chat_queue_edit_links:edit', ?1, ?2)",
+        [companion.to_string(), serde_json::to_string(&chat.id).unwrap()],
+    ).unwrap();
     assert!(matches!(
         workspace.save_chat_input_replacing(Some("edit"), &chat.id, "Edited", &[], &edit.replaces),
         Err(Error::RequestConflict(_))
@@ -513,7 +537,6 @@ fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
         .set_chat_link(&chat.id, link.clone(), false)
         .unwrap();
 
-    let mut peer = rusqlite::Connection::open(dir.path().join("workspace.sqlite3")).unwrap();
     let _writer = peer
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
         .unwrap();
@@ -543,7 +566,7 @@ fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
 }
 
 #[test]
-fn a_replacement_only_request_matches_an_empty_link_receipt_after_withdrawal() {
+fn a_replacement_only_save_binds_empty_links_even_after_withdrawal() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);
     let original = workspace
@@ -552,28 +575,94 @@ fn a_replacement_only_request_matches_an_empty_link_receipt_after_withdrawal() {
     workspace
         .confirm_chat_queue_edit(&chat.id, &original.id, "hold")
         .unwrap();
-    let edit = ChatQueueEdit {
-        replaces: vec![original.id],
-        links: Vec::new(),
-    };
-    let (mut saved, _) = workspace
-        .save_chat_input_with_edit(Some("edit"), &chat.id, "Edited", &[], Some(&edit))
+    let replaces = vec![original.id];
+    let mut saved = workspace
+        .save_chat_input_replacing(Some("edit"), &chat.id, "Edited", &[], &replaces)
         .unwrap();
     workspace.withdraw_chat_input(&chat.id, &saved.id).unwrap();
     saved.message = None;
 
     assert_eq!(
         workspace
-            .replay_chat_input_replacing("edit", &chat.id, "Edited", &[], &edit.replaces)
+            .replay_chat_input_replacing("edit", &chat.id, "Edited", &[], &replaces)
             .unwrap(),
         Some(saved.clone()),
     );
     assert_eq!(
         workspace
-            .save_chat_input_replacing(Some("edit"), &chat.id, "Edited", &[], &edit.replaces)
+            .save_chat_input_replacing(Some("edit"), &chat.id, "Edited", &[], &replaces)
             .unwrap(),
         saved,
     );
+    let changed = ChatQueueEdit {
+        replaces,
+        links: vec![ChatLink {
+            kind: ChatLinkKind::Ticket,
+            id: workspace
+                .create_ticket("Added only to the retry")
+                .unwrap()
+                .id,
+        }],
+    };
+    assert!(matches!(
+        workspace.replay_chat_input_with_edit("edit", &chat.id, "Edited", &[], Some(&changed)),
+        Err(Error::RequestConflict(id)) if id == "edit"
+    ));
+    assert!(matches!(
+        workspace.save_chat_input_with_edit(Some("edit"), &chat.id, "Edited", &[], Some(&changed)),
+        Err(Error::RequestConflict(id)) if id == "edit"
+    ));
+    assert!(workspace.chat(&chat.id).unwrap().links.is_empty());
+    assert!(workspace.chat_queue(&chat.id).unwrap().is_empty());
+}
+
+#[test]
+fn public_command_ids_with_the_old_link_prefix_do_not_collide_with_input_receipts() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let change = ChatInputChange::Link(vec![ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: workspace.create_ticket("Context").unwrap().id,
+    }]);
+    let public = workspace
+        .save_chat_input(
+            Some("chat_queue_edit_links:before"),
+            &chat.id,
+            "Public input",
+        )
+        .unwrap();
+    let (linked, added) = workspace
+        .save_chat_input_with_change(Some("before"), &chat.id, "Linked input", &[], Some(&change))
+        .unwrap();
+    assert!(added);
+    assert_eq!(
+        workspace
+            .replay_chat_input_with_change("before", &chat.id, "Linked input", &[], Some(&change))
+            .unwrap(),
+        Some(linked),
+    );
+    assert_eq!(
+        workspace
+            .replay_chat_input(
+                "chat_queue_edit_links:before",
+                &chat.id,
+                "Public input",
+                &[]
+            )
+            .unwrap(),
+        Some(public),
+    );
+
+    workspace
+        .save_chat_input_with_change(Some("after"), &chat.id, "Linked input", &[], Some(&change))
+        .unwrap();
+    workspace
+        .save_chat_input(
+            Some("chat_queue_edit_links:after"),
+            &chat.id,
+            "Public input",
+        )
+        .unwrap();
 }
 
 #[test]

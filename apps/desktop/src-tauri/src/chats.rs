@@ -2126,10 +2126,8 @@ impl Chats {
             .collect()
     }
 
-    /// Sends or queues a message after linking the records it mentions or quotes, so the
-    /// harness is told about them with this message (spec 21.4). An invalid link
-    /// refuses the whole set of links and the message.
-    /// A queued edit commits its links with the replacement message.
+    /// Saves a message or queued edit with the records it mentions or quotes, so the
+    /// harness is told about the links with this message (spec 21.4).
     pub async fn send_linking(
         &self,
         chat_id: &str,
@@ -2189,13 +2187,10 @@ impl Chats {
             self.workspace()?.attachment_upload_limit()?
         };
         let attachments = Self::decode_message_attachments(text, files, limit)?;
-        if attachments.is_empty() {
-            if !links.is_empty() && self.workspace()?.add_chat_links(chat_id, &links)? {
-                host.links_changed(chat_id).await?;
-            }
+        if attachments.is_empty() && links.is_empty() {
             return self.send(chat_id, text, mode).await;
         }
-        host.send_linking_attachments(chat_id, text, mode, attachments, links)
+        host.send_linking(chat_id, text, mode, attachments, links)
             .await?;
         Ok(())
     }

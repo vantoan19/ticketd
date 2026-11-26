@@ -696,7 +696,8 @@ impl ChatHost {
         .await
     }
 
-    pub async fn send_linking_attachments(
+    /// Saves a person's links with their input before updating the harness context.
+    pub async fn send_linking(
         &self,
         chat_id: &str,
         text: &str,

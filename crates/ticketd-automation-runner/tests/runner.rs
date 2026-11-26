@@ -1028,7 +1028,7 @@ async fn an_ordinary_linked_attachment_reply_takes_over_only_when_committed() {
         id: f.core().create_ticket("New context").unwrap().id,
     };
     let send = || {
-        f.host.send_linking_attachments(
+        f.host.send_linking(
             &chat,
             "Reply",
             SendMode::Queue,

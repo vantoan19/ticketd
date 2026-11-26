@@ -1335,10 +1335,10 @@ fn automation_prompt_command_id(chat_id: &str) -> String {
     format!("{chat_id}:first")
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 struct InputReplacement<'a> {
     replaces: &'a [String],
-    links: Option<&'a [ChatLink]>,
+    links: &'a [ChatLink],
 }
 
 impl<'a> InputReplacement<'a> {
@@ -1349,7 +1349,7 @@ impl<'a> InputReplacement<'a> {
             }
             Some(edit) => Ok(Self {
                 replaces: &edit.replaces,
-                links: Some(&edit.links),
+                links: &edit.links,
             }),
             None => Ok(Self::default()),
         }
@@ -1358,7 +1358,7 @@ impl<'a> InputReplacement<'a> {
     fn for_change(change: Option<&'a ChatInputChange>) -> Result<Self, Error> {
         match change {
             Some(ChatInputChange::Link(links)) => Ok(Self {
-                links: Some(links),
+                links,
                 ..Self::default()
             }),
             Some(ChatInputChange::Edit(edit)) => Self::for_edit(Some(edit)),
@@ -1367,38 +1367,51 @@ impl<'a> InputReplacement<'a> {
     }
 }
 
-fn queue_edit_link_receipt(
+fn validate_legacy_input_links(
+    connection: &Connection,
     command_id: &str,
-    chat_id: &str,
-    links: &[ChatLink],
-) -> Result<(String, String), Error> {
-    let command = format!("chat_queue_edit_links:{command_id}");
-    let mut set = links
-        .iter()
-        .map(|link| Ok((name(link.kind)?, link.id.as_str())))
-        .collect::<Result<Vec<_>, Error>>()?;
-    set.sort_unstable();
-    set.dedup();
-    let request = json!({
-        "operation": "chat_queue_edit_links",
-        "chat_id": chat_id,
-        "links": set,
-    })
-    .to_string();
-    Ok((command, request))
+    request: &Value,
+) -> Result<(), Error> {
+    let key = format!("chat_queue_edit_links:{command_id}");
+    if let Some((previous, _)) = request_outcome(connection, &key)? {
+        let previous: Value = serde_json::from_str(&previous)?;
+        // A public request could use this ID even before the prefix was used for links.
+        if previous["operation"] == "chat_queue_edit_links"
+            && (previous["chat_id"] != request["chat_id"] || previous["links"] != request["links"])
+        {
+            return Err(Error::RequestConflict(command_id.to_owned()));
+        }
+    }
+    Ok(())
 }
 
 fn read_input_receipt(
     connection: &Connection,
     command_id: &str,
-    request: &str,
+    request: &Value,
 ) -> Result<Option<ChatInputReceipt>, Error> {
-    previous_outcome(connection, command_id, request)?
-        .map(|id| {
-            let message = read_message(connection, &id)?;
-            Ok(ChatInputReceipt { id, message })
-        })
-        .transpose()
+    let Some((previous, outcome)) = request_outcome(connection, command_id)? else {
+        // Some older versions could save links before saving the input.
+        validate_legacy_input_links(connection, command_id, request)?;
+        return Ok(None);
+    };
+    let mut previous: Value = serde_json::from_str(&previous)?;
+    let Some(fields) = previous.as_object_mut() else {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    };
+    let legacy = !fields.contains_key("links");
+    if legacy {
+        fields.insert("links".to_owned(), request["links"].clone());
+    }
+    if previous != *request {
+        return Err(Error::RequestConflict(command_id.to_owned()));
+    }
+    if legacy {
+        validate_legacy_input_links(connection, command_id, request)?;
+    }
+    let id: String = serde_json::from_str(&outcome)?;
+    let message = read_message(connection, &id)?;
+    Ok(Some(ChatInputReceipt { id, message }))
 }
 
 enum InputSource<'a> {
@@ -1411,9 +1424,21 @@ fn save_input_request(
     chat_id: &str,
     text: &str,
     files: &[ChatAttachmentContent],
-    replaces: &[String],
-) -> Value {
-    let mut request = json!({"operation": "save_chat_input", "chat_id": chat_id, "text": text});
+    replacement: InputReplacement<'_>,
+) -> Result<Value, Error> {
+    let InputReplacement { links, replaces } = replacement;
+    let mut links = links
+        .iter()
+        .map(|link| Ok((name(link.kind)?, link.id.as_str())))
+        .collect::<Result<Vec<_>, Error>>()?;
+    links.sort_unstable();
+    links.dedup();
+    let mut request = json!({
+        "operation": "save_chat_input",
+        "chat_id": chat_id,
+        "text": text,
+        "links": links,
+    });
     if !files.is_empty() {
         request["attachments"] =
             Value::Array(files.iter().map(ChatAttachmentContent::identity).collect());
@@ -1421,7 +1446,7 @@ fn save_input_request(
     if !replaces.is_empty() {
         request["replaces"] = json!(replaces);
     }
-    request
+    Ok(request)
 }
 
 fn delete_queued_input(connection: &Connection, message_id: &str) -> Result<(), Error> {
@@ -2521,7 +2546,7 @@ impl Workspace {
             files,
             InputReplacement {
                 replaces,
-                links: None,
+                ..InputReplacement::default()
             },
             InputSource::Person,
         )?;
@@ -2642,74 +2667,65 @@ impl Workspace {
         if !replaces.is_empty() && command_id.is_none() {
             return Err(invalid("Editing queued input requires a command ID"));
         }
-        let request = command_id.map_or(Value::Null, |_| {
-            save_input_request(chat_id, text, files, replaces)
-        });
-        let link_receipt = command_id
+        let request = command_id
             .map(|command_id| {
-                queue_edit_link_receipt(command_id, chat_id, links.unwrap_or_default())
+                save_input_request(chat_id, text, files, replacement)
+                    .map(|request| (command_id, request))
             })
             .transpose()?;
         self.chat_write(|connection| {
-            let links_saved = if let Some((command, request)) = &link_receipt {
-                previous_outcome(connection, command, request)?.is_some()
-            } else {
-                false
-            };
-            let mut links_changed = false;
-            let mut run = None;
             if let InputSource::AutomationPrompt(run_id) = source
                 && !owns_running_chat(connection, chat_id, run_id)?
             {
                 return Err(invalid("the run no longer owns this Chat"));
             }
-            let id = once(connection, command_id, request, || {
-                if text.trim().is_empty() && files.is_empty() {
-                    return Err(invalid("Chat input must not be empty"));
+            if let Some((command_id, request)) = &request
+                && let Some(receipt) = read_input_receipt(connection, command_id, request)?
+            {
+                return Ok((receipt, None, false));
+            }
+            if text.trim().is_empty() && files.is_empty() {
+                return Err(invalid("Chat input must not be empty"));
+            }
+            if !files.is_empty() {
+                let limit = crate::attachments::upload_limit(connection)?;
+                for file in files {
+                    file.ensure_fits(limit)?;
                 }
-                if !files.is_empty() {
-                    let limit = crate::attachments::upload_limit(connection)?;
-                    for file in files {
-                        file.ensure_fits(limit)?;
-                    }
+            }
+            if read_chat(connection, chat_id)?.trashed {
+                return Err(Error::ChatTrashed(chat_id.to_owned()));
+            }
+            for original in replaces {
+                let message = require_input(connection, chat_id, original)?;
+                if !message.queued || !message.editing {
+                    return Err(invalid("the original message is no longer held for editing"));
                 }
-                if read_chat(connection, chat_id)?.trashed {
-                    return Err(Error::ChatTrashed(chat_id.to_owned()));
-                }
-                for original in replaces {
-                    let message = require_input(connection, chat_id, original)?;
-                    if !message.queued || !message.editing {
-                        return Err(invalid("the original message is no longer held for editing"));
-                    }
-                    delete_queued_input(connection, original)?;
-                }
-                if let Some(links) = links {
-                    if !links.is_empty() {
-                        links_changed = add_links(connection, chat_id, links)?;
-                    }
-                    if !links_saved && let Some((command, request)) = &link_receipt {
-                        save_outcome(connection, command, request, chat_id)?;
-                    }
-                }
-                if matches!(source, InputSource::AutomationReply) {
-                    run = crate::automation_runs::take_over_chat(connection, chat_id, true)?;
-                }
-                let id = Uuid::new_v4().to_string();
-                let position = log(connection, chat_id, "message", &id)?;
-                connection.execute(
-                    "INSERT INTO chat_messages (id, chat_id, position, role, text, complete) VALUES (?1, ?2, ?3, 'user', ?4, 1)",
-                    params![id, chat_id, position, text],
-                )?;
-                if !files.is_empty() {
-                    attachments::save(connection, &id, files)?;
-                }
-                if !replaces.is_empty() {
-                    // Older cursors may already contain a row just replaced.
-                    advance_change_floor(connection, chat_id, position)?;
-                }
-                trim(connection, chat_id)?;
-                Ok(id)
-            })?;
+                delete_queued_input(connection, original)?;
+            }
+            let links_changed = !links.is_empty() && add_links(connection, chat_id, links)?;
+            let run = if matches!(source, InputSource::AutomationReply) {
+                crate::automation_runs::take_over_chat(connection, chat_id, true)?
+            } else {
+                None
+            };
+            let id = Uuid::new_v4().to_string();
+            let position = log(connection, chat_id, "message", &id)?;
+            connection.execute(
+                "INSERT INTO chat_messages (id, chat_id, position, role, text, complete) VALUES (?1, ?2, ?3, 'user', ?4, 1)",
+                params![id, chat_id, position, text],
+            )?;
+            if !files.is_empty() {
+                attachments::save(connection, &id, files)?;
+            }
+            if !replaces.is_empty() {
+                // Older cursors may already contain a row just replaced.
+                advance_change_floor(connection, chat_id, position)?;
+            }
+            trim(connection, chat_id)?;
+            if let Some((command_id, request)) = request {
+                save_outcome(connection, command_id, &request.to_string(), &id)?;
+            }
             let message = read_message(connection, &id)?;
             Ok((ChatInputReceipt { id, message }, run, links_changed))
         })
@@ -2775,7 +2791,7 @@ impl Workspace {
             files,
             InputReplacement {
                 replaces,
-                links: None,
+                ..InputReplacement::default()
             },
         )
     }
@@ -2824,11 +2840,8 @@ impl Workspace {
         files: &[ChatAttachmentContent],
         replacement: InputReplacement<'_>,
     ) -> Result<Option<ChatInputReceipt>, Error> {
-        let request = save_input_request(chat_id, text, files, replacement.replaces).to_string();
-        let (link_command, links) =
-            queue_edit_link_receipt(command_id, chat_id, replacement.links.unwrap_or_default())?;
+        let request = save_input_request(chat_id, text, files, replacement)?;
         crate::read_scope::run(&self.connection, |connection| {
-            previous_outcome(connection, &link_command, &links)?;
             read_input_receipt(connection, command_id, &request)
         })
     }

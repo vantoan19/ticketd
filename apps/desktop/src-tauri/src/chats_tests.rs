@@ -1223,6 +1223,12 @@ async fn a_new_queue_edit_receipt_binds_empty_links_without_guessing_legacy_link
                     std::slice::from_ref(&original.id),
                 )
                 .unwrap();
+            let db = rusqlite::Connection::open(f.dir.path().join("workspace.sqlite3")).unwrap();
+            db.execute(
+                "UPDATE request_outcomes SET request = json_remove(request, '$.links') WHERE id = ?1",
+                [save_id],
+            )
+            .unwrap();
         } else {
             f.chats
                 .send_linking(&id, "Edited", SendMode::Queue, &[], Vec::new(), request())
@@ -1264,6 +1270,27 @@ async fn a_new_queue_edit_receipt_binds_empty_links_without_guessing_legacy_link
             .unwrap();
         assert_eq!(status.saved.as_slice(), std::slice::from_ref(&command_id));
     }
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_refused_text_message_does_not_link_records() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let link = LinkRef {
+        kind: LinkKind::Ticket,
+        id: f.core().create_ticket("Refused context").unwrap().id,
+    };
+    f.core().set_chat_trashed(&id, true).unwrap();
+
+    let refused = f
+        .chats
+        .send_linking(&id, "Refused", SendMode::Queue, &[link], Vec::new(), None)
+        .await
+        .unwrap_err();
+    assert!(refused.message.contains("trash"), "{refused:?}");
+    let core = f.core();
+    assert!(core.chat(&id).unwrap().links.is_empty());
+    assert!(core.chat_queue(&id).unwrap().is_empty());
 }
 
 #[tokio::test(start_paused = true)]
