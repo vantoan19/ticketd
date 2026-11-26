@@ -11,8 +11,6 @@
 .context-view-wrapper > .cgraph-page {
   flex: 1 1 0;
   min-width: 0;
-  /* Fills the line before it breaks, as the board does (pretty would move words down). */
-  text-wrap: wrap;
   min-height: 0;
 }
 .context-view-wrapper {
@@ -313,13 +311,35 @@
   margin-inline: -12px -10px;
 }
 .document-bar .document-show-list ~ .document-plan-crumb {
-  margin-left: -4px;
+  margin-left: -12px;
 }
 .document-bar .document-plan-crumb .ui-button {
   gap: 6px;
 }
+/* When the bar runs out of room the Plan's name shortens first, to a floor that keeps its icon and
+   a few letters, then the title (the Plan's shrink factor is far larger). The "/" never shrinks, so
+   its 6px on each side hold at every width and nothing is drawn over anything else. */
+.document-bar .document-plan-crumb {
+  flex: 0 1000 auto;
+  min-width: 96px;
+}
+.document-bar .document-plan-crumb .ui-button {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+.document-plan-crumb-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 .document-crumb-sep {
+  flex: none;
   margin-right: 2px;
+}
+/* The "Documents" crumb gives its padding back like the Plan crumb: its arrow sits on the bar's
+   12px inset and the "/" is 6px away. */
+.document-bar .document-return {
+  margin-inline: -12px -10px;
 }
 .document-actions {
   display: flex;
@@ -960,8 +980,6 @@
 .markdown-document .folded-summary {
   flex: 1 1 0;
   min-width: 0;
-  /* Fills the line before it breaks, as the board does (pretty would move words down). */
-  text-wrap: wrap;
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--muted-foreground);
@@ -1066,8 +1084,10 @@
   margin-inline: auto 0;
 }
 .document-rail-track {
-  /* The scroller's padding insets the sticky edge: -16px makes the rail stick 28px below the bar,
-     as on board R2. */
+  /* The scroller's padding (36px) insets the sticky edge: -16px makes the track stick 20px below
+     the bar and the rail's own 8px offset puts the rail 28px below it, as on board R2 (and at 100px
+     at rest, as on board C-wide). The offset sits on the rail because engines differ on whether
+     a sticky box's margin counts. */
   position: sticky;
   top: -16px;
   z-index: 1;
@@ -1079,7 +1099,7 @@
 }
 .document-rail {
   position: absolute;
-  top: 0;
+  top: 8px;
   left: calc(100% + var(--rail-gap));
   display: flex;
   flex-direction: column;
@@ -1249,8 +1269,9 @@
   width: 14px;
   height: 14px;
 }
-/* The rail's Linked list takes the end of the Document's place while the rail is there. */
-.document-main[data-rail] .document-end [aria-label="Linked"] {
+/* The rail's Linked list takes the end of the Document's place while the rail is there (not
+   while editing: the rail is hidden then and only its room stays). */
+.document-main[data-rail]:not([data-writing]) .document-end [aria-label="Linked"] {
   display: none;
 }
 
