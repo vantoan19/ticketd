@@ -313,7 +313,7 @@ it("starts the results at the top, wherever the list had been scrolled", async (
       target={null}
     />,
   );
-  const list = document.querySelector(".documents-list-view") as HTMLElement;
+  const list = document.querySelector(".documents-list-body") as HTMLElement;
   list.scrollTop = 584;
   fireEvent.click(
     await screen.findByRole("button", { name: "Search Documents" }),

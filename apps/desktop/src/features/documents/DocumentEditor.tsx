@@ -1031,7 +1031,9 @@ function RecoveredDocumentEditor({
     // Only at the reader's first render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  const railShown = expanded && !writing && showsOutline(outline);
+  // The rail's room stays while editing (the rail itself is hidden), so the column does not move.
+  const railRoom = expanded && showsOutline(outline);
+  const railShown = railRoom && !writing;
   // The heading line left out of the editor, while the body still starts with it.
   const head =
     writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
@@ -1570,7 +1572,9 @@ function RecoveredDocumentEditor({
                 onClick={() => navigate(() => onOpenPlan?.(crumbPlan.id))}
               >
                 <Layers aria-hidden="true" />
-                {crumbPlan.name}
+                <span className="document-plan-crumb-name">
+                  {crumbPlan.name}
+                </span>
               </Button>
             </span>
           )}
@@ -1798,7 +1802,8 @@ function RecoveredDocumentEditor({
       <div
         className="document-main"
         ref={setScroller}
-        data-rail={(railShown && scroller) || undefined}
+        data-rail={(railRoom && scroller) || undefined}
+        data-writing={writing || undefined}
       >
         {railShown && scroller && (
           <DocumentRail

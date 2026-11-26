@@ -466,3 +466,47 @@ it("hands focus to Previous Document when stepping reaches the end of the list",
     ),
   );
 });
+
+it("keeps the rail's room while editing at full width, so the column stays where it is", async () => {
+  expandedAlready();
+  vi.mocked(documents.recent).mockResolvedValue([row("a")]);
+  const { container } = renderDocuments();
+  await openRow("Doc a");
+  const main = () => container.querySelector(".document-main") as HTMLElement;
+  expect(main().hasAttribute("data-rail")).toBe(true);
+  expect(container.querySelector(".document-rail")).toBeTruthy();
+
+  fireEvent.click(screen.getByRole("button", { name: /^Edit/ }));
+  await screen.findByRole("button", { name: /^Done/ });
+  // The rail is hidden while editing, its room is not: the column keeps its offset.
+  expect(container.querySelector(".document-rail")).toBeNull();
+  expect(main().hasAttribute("data-rail")).toBe(true);
+  expect(main().hasAttribute("data-writing")).toBe(true);
+
+  fireEvent.click(screen.getByRole("button", { name: /^Done/ }));
+  await screen.findByRole("button", { name: /^Edit/ });
+  expect(main().hasAttribute("data-rail")).toBe(true);
+  expect(main().hasAttribute("data-writing")).toBe(false);
+  expect(container.querySelector(".document-rail")).toBeTruthy();
+});
+
+it("lets the Plan crumb's name shorten with an ellipsis, so the bar never draws over itself", async () => {
+  const name = "Improve attachment previews and thumbnails";
+  vi.mocked(documents.recent).mockResolvedValue([row("a")]);
+  vi.mocked(documents.row).mockResolvedValue({
+    id: "a",
+    heading: "Doc a",
+    plans: [{ id: "p1", name, archived: false, spec: false }],
+    tickets: [],
+    tags: [],
+  });
+  const { container } = renderDocuments();
+  await openRow("Doc a");
+  const crumb = await screen.findByRole("button", {
+    name: `Open Plan ${name}`,
+  });
+  // The name is its own element, which the stylesheet gives the ellipsis (reader-layout.test.ts).
+  const text = crumb.querySelector(".document-plan-crumb-name");
+  expect(text?.textContent).toBe(name);
+  expect(container.querySelector(".document-crumb-sep")).toBeTruthy();
+});
