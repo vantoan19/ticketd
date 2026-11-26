@@ -1316,6 +1316,49 @@ fn an_automation_can_record_only_its_saved_prompt() {
 }
 
 #[test]
+fn reserving_an_automation_prompt_does_not_break_an_older_ordinary_replay() {
+    let (dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, active) = on_agent_step(&mut workspace);
+    let ordinary = workspace
+        .create_chat(
+            None,
+            NewChat {
+                title: None,
+                harness: "codex".to_owned(),
+                execution_folder: folder(),
+                folder_managed: false,
+                links: Vec::new(),
+            },
+        )
+        .unwrap();
+    let saved = workspace
+        .save_chat_input(Some("legacy"), &ordinary.id, "Earlier request")
+        .unwrap();
+    let reserved = format!("{active}:first");
+    rusqlite::Connection::open(dir.path().join("runs.sqlite3"))
+        .unwrap()
+        .execute(
+            "UPDATE request_outcomes SET id = ?1 WHERE id = 'legacy'",
+            [&reserved],
+        )
+        .unwrap();
+
+    assert_eq!(
+        workspace
+            .save_chat_input(Some(&reserved), &ordinary.id, "Earlier request")
+            .unwrap()
+            .id,
+        saved.id
+    );
+    assert_eq!(workspace.chat_queue(&ordinary.id).unwrap(), [saved]);
+    assert_eq!(
+        workspace.automation_run(&run.id).unwrap().status,
+        AutomationRunStatus::Running
+    );
+}
+
+#[test]
 fn stopping_the_chat_takes_over_a_running_run_and_no_other() {
     let (_dir, mut workspace) = workspace();
     triage(&mut workspace);

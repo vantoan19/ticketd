@@ -2703,21 +2703,23 @@ impl Workspace {
             {
                 return Err(invalid("the run no longer owns this Chat"));
             }
+            if let Some((command_id, request)) = &request
+                && let Some(receipt) = read_input_receipt(connection, command_id, request)?
+            {
+                return Ok((receipt, None, false));
+            }
             if !matches!(source, InputSource::AutomationPrompt(_))
                 && let Some(command_id) = command_id
                 && let Some(prompt_chat_id) = command_id.strip_suffix(AUTOMATION_PROMPT_REQUEST_SUFFIX)
                 && connection.query_row(
-                    "SELECT EXISTS(SELECT 1 FROM automation_run_steps WHERE chat_id = ?1)",
+                    "SELECT EXISTS(SELECT 1 FROM chats JOIN automation_runs
+                      ON automation_runs.id = chats.automation_run_id
+                      WHERE chats.id = ?1 AND automation_runs.status = 'running')",
                     [prompt_chat_id],
                     |row| row.get(0),
                 )?
             {
                 return Err(Error::RequestConflict(command_id.to_owned()));
-            }
-            if let Some((command_id, request)) = &request
-                && let Some(receipt) = read_input_receipt(connection, command_id, request)?
-            {
-                return Ok((receipt, None, false));
             }
             if text.trim().is_empty() && files.is_empty() {
                 return Err(invalid("Chat input must not be empty"));
