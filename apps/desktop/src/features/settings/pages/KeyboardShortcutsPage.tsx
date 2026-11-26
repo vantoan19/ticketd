@@ -78,7 +78,11 @@ export function KeyboardShortcutsPage() {
                 {...(item.note ? { description: item.note } : {})}
                 trailing={
                   <span className="shortcut-keys">
-                    <KeyChords keys={item.keys} sequences={item.sequences} />
+                    <KeyChords
+                      keys={item.shown ?? item.keys}
+                      spoken={item.keys}
+                      sequences={item.sequences}
+                    />
                   </span>
                 }
               />
