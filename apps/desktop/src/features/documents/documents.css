@@ -749,19 +749,11 @@
   display: flex;
   gap: 2px;
 }
-.document-rail-actions button {
+.document-rail-actions .ui-button {
   height: 20px;
   padding: 0 4px;
-  border: 0;
   border-radius: var(--radius-segment);
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
   font-size: var(--text-caption);
-}
-.document-rail-actions button:hover {
-  background: var(--hover);
-  color: var(--foreground);
 }
 .document-rail ul {
   display: flex;
@@ -793,7 +785,6 @@
   color: var(--foreground);
   box-shadow: inset 2px 0 0 var(--foreground);
 }
-.document-rail-actions button:focus-visible,
 .document-rail a:focus-visible,
 .document-rail-top:focus-visible {
   outline: 2px solid var(--ring);
@@ -826,18 +817,8 @@
   margin-top: 2px;
 }
 .document-rail-top {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   align-self: flex-start;
   padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
-}
-.document-rail-top:hover {
-  color: var(--foreground);
 }
 .document-rail-top svg {
   width: 14px;

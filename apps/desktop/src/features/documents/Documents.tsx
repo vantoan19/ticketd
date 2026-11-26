@@ -876,7 +876,11 @@ export function Documents({
     setAllOffset(0);
     setPreference("documentsSort", value);
   };
-  /** A header that folds a group: a button naming the group, its count, and open or closed. */
+  /**
+   * A header that folds a group: a button naming the group, its count, and open or closed.
+   * Custom rather than a Disclosure: its trigger cannot join the list's roving focus (one tab
+   * stop, J/K and arrows move between headers and rows), and the group's rows are not its body.
+   */
   const groupHeader = (
     key: string,
     label: string,

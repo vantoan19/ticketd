@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { ChevronUp } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import { outlineView, type OutlineHeading } from "@/features/markdown/outline";
+import { readingScrollBehavior } from "./reading-scroll";
 
 /** Whether the reader has scrolled past the first screen of `scroller`. */
 function usePastFirstScreen(scroller: HTMLElement | null) {
@@ -58,14 +60,22 @@ export function DocumentRail({
             <p className="document-rail-title">On this page</p>
             <span className="document-rail-actions">
               {!folds.allFolded && (
-                <button type="button" onClick={folds.foldAll}>
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  onClick={folds.foldAll}
+                >
                   Fold all
-                </button>
+                </Button>
               )}
               {folds.folded > 0 && (
-                <button type="button" onClick={folds.unfoldAll}>
+                <Button
+                  variant="ghost"
+                  size="compact"
+                  onClick={folds.unfoldAll}
+                >
                   Unfold all
-                </button>
+                </Button>
               )}
             </span>
           </div>
@@ -99,25 +109,20 @@ export function DocumentRail({
         </nav>
         {children}
         {past && (
-          <button
-            type="button"
+          <Button
+            variant="ghost"
+            size="compact"
             className="document-rail-top"
             onClick={() => {
               if (!scroller) return;
-              const reduced = window.matchMedia(
-                "(prefers-reduced-motion: reduce)",
-              ).matches;
-              scroller.scrollTo({
-                top: 0,
-                behavior: reduced ? "auto" : "smooth",
-              });
+              scroller.scrollTo({ top: 0, behavior: readingScrollBehavior() });
               // The button leaves once the reader is back at the top: focus stays in the rail.
               nav.current?.querySelector("a")?.focus();
             }}
           >
             <ChevronUp aria-hidden="true" />
             Back to top
-          </button>
+          </Button>
         )}
       </div>
     </div>

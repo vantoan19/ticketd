@@ -45,7 +45,7 @@ vi.mock("./api", () => ({
     version: vi.fn(),
     setTrashed: vi.fn(),
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi.fn(),
+    row: vi.fn(),
     tag: vi.fn(),
     createTicket: vi.fn(),
     linkMarkdown: vi.fn(),

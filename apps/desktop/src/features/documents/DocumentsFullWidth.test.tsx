@@ -32,7 +32,7 @@ vi.mock("@/lib/sync-review-api", () => ({
 vi.mock("./api", () => ({
   documents: {
     links: vi.fn().mockResolvedValue([[], []]),
-    summary: vi.fn(),
+    row: vi.fn(),
     recent: vi.fn(),
     all: vi.fn(),
     byTitle: vi.fn(),

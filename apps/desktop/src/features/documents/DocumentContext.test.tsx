@@ -34,7 +34,7 @@ vi.mock("./api", () => ({
     version: vi.fn(),
     setTrashed: vi.fn(),
     links: vi.fn(),
-    summary: vi.fn(),
+    row: vi.fn(),
     tag: vi.fn(),
     createTicket: vi.fn(),
     recent: vi.fn(),

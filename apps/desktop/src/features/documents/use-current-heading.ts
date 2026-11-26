@@ -3,6 +3,7 @@ import {
   currentHeading,
   type OutlineHeading,
 } from "@/features/markdown/outline";
+import { readingScrollBehavior } from "./reading-scroll";
 
 /** How far below the top of the column the reading line sits, in px. A heading brought to the top (24px) is above it. */
 export const READING_LINE = 48;
@@ -72,12 +73,9 @@ export function useCurrentHeading(
     if (!scroller) return;
     held.current = id;
     setChosen(id);
-    const reduced = window.matchMedia(
-      "(prefers-reduced-motion: reduce)",
-    ).matches;
     headingElement(scroller, id)?.scrollIntoView({
       block: "start",
-      behavior: reduced ? "auto" : "smooth",
+      behavior: readingScrollBehavior(),
     });
   };
   const current = chosen ?? live;
