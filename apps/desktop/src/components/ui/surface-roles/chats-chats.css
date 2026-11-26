@@ -229,6 +229,12 @@ button.chat-steps:hover {
 .chat-steps .ui-reference {
   color: var(--foreground);
 }
+/* The mono inside a row's words (a reference, a command, a file) sits in the
+   row's own 20px line box and never makes a line taller, so every row is
+   exactly 28px. */
+.chat-step-words:not([data-line]) :is(code, .ui-reference) {
+  line-height: 0;
+}
 /* Fades up from a soft blur: each new chunk of streamed text, and a status dot. */
 @keyframes chat-soft-in {
   from {
@@ -833,4 +839,11 @@ button.chat-steps:hover .chat-step-command {
   .chat-row-item:has(.chat-row-more[data-open]) .chat-row-time {
     visibility: visible;
   }
+}
+/* The path in the version line reads as the line does, not as a path in a menu. */
+.chat-pop-found > [data-slot="path-text"] {
+  font-size: inherit;
+  font-weight: inherit;
+  line-height: inherit;
+  color: inherit;
 }

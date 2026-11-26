@@ -122,14 +122,17 @@ export function ticketdParts(
   const parts: StepWords["parts"] = [];
   const reference = (call: TicketdCall | undefined) =>
     call?.words.find((word) => word.code && !word.record)?.text;
-  // A call made again word for word is one clause, "(3 times)", not said again.
+  // A call made again word for word, right after itself, is one clause, "(3 times)",
+  // not said again; one made again after another call keeps its place in the order.
   const said: { call: TicketdCall; times: number }[] = [];
   for (const call of calls) {
-    const again = said.find(
-      (each) =>
-        each.call.verb === call.verb &&
-        JSON.stringify(each.call.words) === JSON.stringify(call.words),
-    );
+    const last = said[said.length - 1];
+    const again =
+      last &&
+      last.call.verb === call.verb &&
+      JSON.stringify(last.call.words) === JSON.stringify(call.words)
+        ? last
+        : undefined;
     if (again) again.times += 1;
     else said.push({ call, times: 1 });
   }
@@ -1443,6 +1446,16 @@ function resetTime(seconds: number | null | undefined): string {
   return `on ${shortDay(at)} at ${formatTime(at)}`;
 }
 
+/**
+ * The previous local calendar day of `now`, as a date string. Not 24 hours back:
+ * a day with a clock change is 23 or 25 hours long.
+ */
+function dayBefore(now: number): string {
+  const day = new Date(now);
+  day.setDate(day.getDate() - 1);
+  return day.toDateString();
+}
+
 /** "now", "2m", "1h", "Yesterday", "Nov 8": the trailing time of a Chat row. */
 export function chatTime(timestamp: string, now = Date.now()): string {
   const then = new Date(timestamp);
@@ -1452,8 +1465,7 @@ export function chatTime(timestamp: string, now = Date.now()): string {
   if (minutes < 60) return `${minutes}m`;
   if (new Date(now).toDateString() === then.toDateString())
     return `${Math.floor(minutes / 60)}h`;
-  if (new Date(now - 86_400_000).toDateString() === then.toDateString())
-    return "Yesterday";
+  if (dayBefore(now) === then.toDateString()) return "Yesterday";
   return shortDay(then);
 }
 
@@ -1466,7 +1478,7 @@ export function turnClock(timestamp: string, now = Date.now()): string {
   if (Number.isNaN(then.getTime())) return "";
   const today = new Date(now).toDateString();
   if (then.toDateString() === today) return formatTime(then);
-  if (new Date(now - 86_400_000).toDateString() === then.toDateString())
+  if (dayBefore(now) === then.toDateString())
     return `Yesterday ${formatTime(then)}`;
   return shortDay(then);
 }

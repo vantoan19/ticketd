@@ -286,6 +286,28 @@ test("the same ticketd call said again is one clause", () => {
   ).toEqual(["Adding", "evidence to", "T-12", "(2 times)"]);
 });
 
+test("a call made again after another keeps its place in the order", () => {
+  const set = (to: string) => ({
+    verb: "set" as const,
+    words: [{ text: "T-12", code: true }, { text: `to ${to}` }],
+  });
+  const said = (...calls: ReturnType<typeof set>[]) =>
+    stepWords(step({ kind: "run", ticketd: calls, state: "done" })).label;
+  // In progress, Done, In progress is three clauses in that order, not "(2 times)" first.
+  expect(said(set("In progress"), set("Done"), set("In progress"))).not.toMatch(
+    /times/,
+  );
+  expect(
+    ticketdParts([set("In progress"), set("Done"), set("In progress")], 1)
+      .map((p) => p.text)
+      .join(" "),
+  ).toBe("Set T-12 to In progress , T-12 to Done and T-12 to In progress");
+  // Adjacent repeats still count.
+  expect(said(set("Done"), set("Done"), set("In progress"))).toContain(
+    "Done (2 times)",
+  );
+});
+
 test("a ticketd sentence too long for a row reads the harness's description", () => {
   const calls = ["T-12", "T-13", "T-14"].flatMap((reference) => [
     { verb: "read" as const, words: [{ text: reference, code: true }] },
@@ -1310,6 +1332,25 @@ test("a turn's time reads as a clock today, Yesterday with a clock, then the day
     }),
   );
   expect(turnClock("not a time", now)).toBe("");
+});
+
+test("Yesterday is the previous calendar day, even across a daylight-saving change", () => {
+  const zone = process.env.TZ;
+  process.env.TZ = "America/New_York";
+  try {
+    // 00:30 on March 9, 2026: the clocks went forward on March 8, so 24 hours
+    // earlier is still March 7.
+    const now = new Date(2026, 2, 9, 0, 30).getTime();
+    const march8 = new Date(2026, 2, 8, 12, 0);
+    const march7 = new Date(2026, 2, 7, 23, 45);
+    expect(turnClock(march8.toISOString(), now)).toMatch(/^Yesterday /);
+    expect(turnClock(march7.toISOString(), now)).not.toMatch(/^Yesterday/);
+    expect(chatTime(march8.toISOString(), now)).toBe("Yesterday");
+    expect(chatTime(march7.toISOString(), now)).not.toBe("Yesterday");
+  } finally {
+    if (zone === undefined) delete process.env.TZ;
+    else process.env.TZ = zone;
+  }
 });
 
 test("a turn's exact start and end are one sentence for its tooltip", () => {

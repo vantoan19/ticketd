@@ -1,11 +1,13 @@
 import { failureText } from "@/lib/api/describe-failure";
-import { useContext, useState } from "react";
+import { useContext, useState, type CSSProperties } from "react";
 import { ChatError } from "@/features/chats/client";
-import { ChatFilesContext, splitPath } from "@/features/chats/files";
+import {
+  ChatFilesContext,
+  splitPath,
+  tailLength,
+} from "@/features/chats/files";
 import { Tooltip } from "@/components/ui/tooltip";
 
-/** How many characters of a name always show, so its extension survives. */
-const TAIL = 12;
 /** A path in a step row is cut shorter than a changed file's, so two fit on a line. */
 const STEP_PATH = 36;
 
@@ -48,7 +50,9 @@ export function FileName({
   const { open } = useContext(ChatFilesContext);
   const [gone, setGone] = useState(false);
   const { folder, name } = splitPath(path, STEP_PATH);
-  const split = Math.max(0, name.length - TAIL);
+  // A name of twelve characters or fewer is never cut; a longer one gives way
+  // down to "…" and its tail.
+  const split = name.length > 12 ? name.length - tailLength(name) : 0;
   const text = (
     <>
       {folder && <span className="chat-path-dir">{folder}</span>}
@@ -56,10 +60,16 @@ export function FileName({
       <span className="chat-file-tail">{name.slice(split)}</span>
     </>
   );
+  // The narrowest it gets: "…" before the tail, or the whole of a short name.
+  const keep = {
+    "--keep": name.length - split + (split > 0 ? 1 : 0),
+  } as CSSProperties;
   if (!open || gone)
     return (
       <Tooltip content={path}>
-        <code className="chat-file-name">{text}</code>
+        <code className="chat-file-name" style={keep}>
+          {text}
+        </code>
       </Tooltip>
     );
   return (
@@ -67,6 +77,7 @@ export function FileName({
       <button
         type="button"
         className="chat-file-name"
+        style={keep}
         aria-label={`Open ${path}`}
         onClick={() =>
           void open(path).then(

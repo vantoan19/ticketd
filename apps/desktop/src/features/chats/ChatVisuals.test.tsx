@@ -343,8 +343,21 @@ test("a row naming two long files keeps to one line, its outcome outside the cut
     /\.chat-step-words\[data-line\] \{[^}]*white-space: nowrap/,
   );
   expect(css).toMatch(
-    /\.chat-step-words\[data-line\] > :is\(code, \.chat-file-name\) \{[^}]*flex: 0 1 auto/,
+    /\.chat-step-words\[data-line\] > \.chat-file-name \{[^}]*flex: 0 1 auto/,
   );
+  // A name gives way only down to "…" and its extension (--keep characters), so
+  // the next word is never overlapped.
+  expect(css).toMatch(/\.chat-file-name \{[^}]*min-width: calc\(var\(--keep/);
+  const names = [
+    ...(words?.querySelectorAll<HTMLElement>(".chat-file-name") ?? []),
+  ];
+  expect(names.map((name) => name.style.getPropertyValue("--keep"))).toEqual([
+    "7", // host.rs is short: kept whole
+    "4", // "…" and ".md"
+  ]);
+  expect(
+    names.map((name) => name.querySelector(".chat-file-tail")?.textContent),
+  ).toEqual(["host.rs", ".md"]);
 });
 
 test("a path in a step row is its folder, muted, then its name", async () => {

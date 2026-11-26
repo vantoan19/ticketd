@@ -938,6 +938,7 @@ function StretchView({
   actions,
   live,
   open: always,
+  revealed,
 }: {
   stretch: Stretch;
   stretchKey: string;
@@ -947,8 +948,17 @@ function StretchView({
   live: boolean;
   /** Its steps show with no row of their own: the turn is its one stretch, or a stop was not confirmed. */
   open: boolean;
+  /** Counts the times the turn's records row asked for its changes to be shown. */
+  revealed: number;
 }) {
   const [toggled, setToggled] = useState(() => toggles.get(stretchKey));
+  // The records row opened this stretch (it is in `toggles` already): follow it.
+  const seen = useRef(revealed);
+  useEffect(() => {
+    if (seen.current === revealed) return;
+    seen.current = revealed;
+    setToggled(toggles.get(stretchKey));
+  }, [revealed, stretchKey]);
   const reading = useReading();
   const part = useRef<HTMLDivElement>(null);
   const rowButton = useRef<HTMLButtonElement>(null);
@@ -1081,6 +1091,7 @@ const TurnView = memo(function TurnView({
     if (!next) rowButton.current?.focus();
   };
   const rowLive = live && turn.live;
+  const [revealed, setRevealed] = useState(0);
   const row = (each: TurnRow) => (
     <Row
       key={each.key}
@@ -1102,6 +1113,7 @@ const TurnView = memo(function TurnView({
         actions={actions}
         live={rowLive}
         open={turn.unconfirmed}
+        revealed={revealed}
       />
     ) : (
       row(block)
@@ -1163,6 +1175,15 @@ const TurnView = memo(function TurnView({
           )}
         </div>
       )}
+      {/* A finished turn with no work shows its time on a quiet line, where its
+          work line would be. */}
+      {!work && !turn.live && turn.started && turnClock(turn.started) && (
+        <div className="chat-turnpart" data-fold="" data-quiet="">
+          <div className="chat-foldline">
+            <TurnTime turn={turn} />
+          </div>
+        </div>
+      )}
       {turn.plan && (
         <div data-anchor="">
           <PlanCard
@@ -1203,6 +1224,14 @@ const TurnView = memo(function TurnView({
           <ReceiptRow
             changes={turn.changes}
             onMore={() => {
+              // Each change is a step row, inside the stretch that holds it: open those too.
+              for (const block of turn.blocks)
+                if (
+                  block.kind === "stretch" &&
+                  block.rows.some((each) => each.kind === "record")
+                )
+                  toggles.set(`${key}:${block.key}`, true);
+              setRevealed((count) => count + 1);
               if (!open) toggle();
             }}
           />

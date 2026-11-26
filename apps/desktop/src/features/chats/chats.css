@@ -550,9 +550,12 @@
 .chat-step-words[data-line] > * {
   flex: none;
 }
-.chat-step-words[data-line] > :is(code, .chat-file-name) {
+.chat-step-words[data-line] > code:not(.chat-file-name) {
   flex: 0 1 auto;
   min-width: 0;
+}
+.chat-step-words[data-line] > .chat-file-name {
+  flex: 0 1 auto;
 }
 .chat-step-words[data-line] > code:not(.chat-file-name) {
   overflow: hidden;
@@ -605,7 +608,18 @@
 }
 .chat-turn-time {
   flex: none;
+  margin-left: auto;
   white-space: nowrap;
+}
+/* A turn with no work has no fold on its line, only the time: centered in the
+   same 28px, as the fold's label is. */
+.chat-turnpart[data-quiet] .chat-foldline {
+  align-items: center;
+}
+/* Where it sits on a work line, on the fold label's baseline: 1px lower. */
+.chat-turnpart[data-quiet] .chat-turn-time {
+  position: relative;
+  top: 1px;
 }
 .chat-fold > svg {
   flex: none;
@@ -738,6 +752,12 @@
   padding: 2px;
   margin: -2px;
   vertical-align: bottom;
+}
+/* However little room a step row leaves, a name keeps its "…" and its tail
+   (--keep characters of its own mono font, plus the 2px padding either side),
+   so its extension never spills over the next word. */
+.chat-file-name {
+  min-width: calc(var(--keep, 0) * 1ch + 4px);
 }
 .chat-file-head {
   min-width: 0;
@@ -1450,10 +1470,6 @@
 .chat-pop-found > [data-slot="path-text"] {
   flex: 0 1 auto;
   min-width: 0;
-  font-size: inherit;
-  font-weight: inherit;
-  line-height: inherit;
-  color: inherit;
 }
 .chat-pop-found > .chat-pop-version {
   flex: none;
