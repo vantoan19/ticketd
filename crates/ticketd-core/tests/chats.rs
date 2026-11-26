@@ -437,6 +437,54 @@ fn a_chat_links_to_several_records_without_belonging_to_them() {
 }
 
 #[test]
+fn saved_queue_edit_links_replay_while_another_connection_holds_the_writer() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    let original = workspace
+        .save_chat_input(None, &chat.id, "Original")
+        .unwrap();
+    workspace
+        .confirm_chat_queue_edit(&chat.id, &original.id, "hold")
+        .unwrap();
+    let link = ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: workspace.create_ticket("Context").unwrap().id,
+    };
+    assert!(
+        workspace
+            .add_chat_queue_edit_links(&chat.id, "edit", std::slice::from_ref(&link))
+            .unwrap()
+    );
+    workspace
+        .save_chat_input_replacing(
+            Some("edit"),
+            &chat.id,
+            "Edited",
+            &[],
+            std::slice::from_ref(&original.id),
+        )
+        .unwrap();
+    workspace
+        .set_chat_link(&chat.id, link.clone(), false)
+        .unwrap();
+
+    let mut peer = rusqlite::Connection::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let _writer = peer
+        .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+        .unwrap();
+    assert!(
+        !workspace
+            .add_chat_queue_edit_links(&chat.id, "edit", std::slice::from_ref(&link))
+            .unwrap()
+    );
+    assert!(matches!(
+        workspace.add_chat_queue_edit_links(&chat.id, "edit", &[]),
+        Err(Error::RequestConflict(_))
+    ));
+    assert!(workspace.chat(&chat.id).unwrap().links.is_empty());
+}
+
+#[test]
 fn archived_projects_reject_new_chat_links_atomically() {
     let dir = tempfile::tempdir().unwrap();
     let mut workspace = Workspace::open(dir.path().join("workspace.db")).unwrap();

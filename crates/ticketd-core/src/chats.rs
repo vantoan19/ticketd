@@ -2246,18 +2246,23 @@ impl Workspace {
             "links": set,
         })
         .to_string();
-        self.chat_write(|connection| {
+        let has_receipt = |connection: &Connection| {
             if previous_outcome(connection, &link_command, &request)?.is_some() {
-                return Ok(false);
+                return Ok(true);
             }
-            let saved: bool = connection.query_row(
+            // Older saves did not persist their links. Keep the receipt
+            // replayable without guessing what links were supplied.
+            Ok(connection.query_row(
                 "SELECT EXISTS(SELECT 1 FROM request_outcomes WHERE id = ?1)",
                 [command_id],
                 |row| row.get(0),
-            )?;
-            if saved {
-                // Older saves did not persist their links. Keep the receipt
-                // replayable without guessing what links were supplied.
+            )?)
+        };
+        if crate::read_scope::run(&self.connection, has_receipt)? {
+            return Ok(false);
+        }
+        self.chat_write(|connection| {
+            if has_receipt(connection)? {
                 return Ok(false);
             }
             let added = add_links(connection, id, links)?;
