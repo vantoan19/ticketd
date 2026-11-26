@@ -149,6 +149,8 @@ export function bridgeDefault(
       };
     case "first_agent_update":
       return null;
+    case "find_ticket_rows":
+      return [];
     case "check_cli":
       return {
         found: false,

@@ -161,6 +161,31 @@ beforeEach(() => {
   );
 });
 
+/** Settings opens on Set up ticketd until it is hidden: tests about other pages hide it. */
+function hideSetupChecklist() {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent", setupHidden: true }),
+  );
+}
+
+test("Settings opens on Set up ticketd while it is unfinished, and on Appearance once it is hidden", async () => {
+  bridge.invoke.mockImplementation(bridgeDefault);
+  const first = render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Hide checklist" }));
+  first.unmount();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Appearance" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Set up ticketd/ })).toBeNull();
+});
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -2205,6 +2230,7 @@ test("the narrow navigation trigger sits in the view's header and gets focus bac
 });
 
 test("Settings reads fresh data on every visit, checks the CLI at startup and again once opened, and moves focus in and out", async () => {
+  hideSetupChecklist();
   vi.useFakeTimers();
   let tickets = 1;
   const calls: string[] = [];
@@ -9791,8 +9817,6 @@ test("Settings Command line settles successful checks and Check again updates th
 test("first run reads completed steps and opens the exact existing Settings sections", async () => {
   bridge.invoke.mockImplementation(
     async (command: string, args?: Record<string, unknown>) => {
-      // Set up ticketd looks for a Ready ticket to name in its prompt.
-      if (command === "find_ticket_rows") return [];
       // The agents step needs the command as well as the skill.
       if (command === "check_cli")
         return {
@@ -13253,6 +13277,7 @@ test.each(["MacIntel", "Win32"])(
 );
 
 test("Settings Escape and palette Reset return to visible section navigation, and the search field gives way to its trigger", async () => {
+  hideSetupChecklist();
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
     if (
       command === "plugin:window|set_background_color" ||

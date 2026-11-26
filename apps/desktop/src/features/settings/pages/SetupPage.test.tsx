@@ -158,7 +158,15 @@ function Settings({
   return (
     <WorkspaceChangeProvider value={revision}>
       <ChatFeatureContext.Provider
-        value={{ enabled: chats, setEnabled: async () => {} }}
+        value={{
+          enabled: chats,
+          setEnabled: async () => {},
+          overview: { needs_you: 0, unread: 0, app_icon: 0, working: 0 },
+          revision: 0,
+          openRequest: null,
+          chatRequest: null,
+          requestChat: () => {},
+        }}
       >
         <SyncStatusContext.Provider
           value={{
