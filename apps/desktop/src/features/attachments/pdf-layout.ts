@@ -18,13 +18,17 @@ export function fitScale(pages: readonly PdfPageSize[], available: number) {
   return Math.min(FIT_MAX, Math.max(available / widest, ZOOM_STEPS[0]));
 }
 
-/** The next zoom step above or below `scale`. */
+/**
+ * The next zoom step above or below `scale`. Past the ends of the steps (a tiny
+ * picture fitted at 800%, a panorama fitted at 8%) the scale stays where it is:
+ * zoom in never zooms out, and zoom out never zooms in.
+ */
 export function stepZoom(scale: number, direction: 1 | -1) {
   const steps = direction > 0 ? ZOOM_STEPS : [...ZOOM_STEPS].reverse();
   const next = steps.find((step) =>
     direction > 0 ? step > scale + 0.005 : step < scale - 0.005,
   );
-  return next ?? steps[steps.length - 1]!;
+  return next ?? scale;
 }
 
 /** Where each page sits in the column, in pixels from the top of its content. */
