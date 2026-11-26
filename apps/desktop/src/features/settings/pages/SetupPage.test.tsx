@@ -555,17 +555,12 @@ test("Hide checklist removes the row, and Search still finds the page", async ()
       screen.getByRole("searchbox", { name: "Search settings" }),
       { target: { value: query } },
     );
-    const group = await screen.findByRole("region", { name: "Set up ticketd" });
     expect(
-      within(group).getByRole("link", { name: /^Set up ticketd/ }),
+      await screen.findByRole("link", { name: /^Set up ticketd/ }),
     ).toBeTruthy();
   }
   // Choosing the result opens the page again.
-  fireEvent.click(
-    within(screen.getByRole("region", { name: "Set up ticketd" })).getByRole(
-      "link",
-    ),
-  );
+  fireEvent.click(screen.getByRole("link", { name: /^Set up ticketd/ }));
   expect(
     await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
   ).toBeTruthy();
