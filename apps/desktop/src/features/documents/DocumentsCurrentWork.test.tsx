@@ -79,6 +79,7 @@ beforeEach(() => {
   vi.mocked(documents.all).mockResolvedValue([]);
   vi.mocked(documents.recent).mockResolvedValue([]);
   vi.mocked(documents.trash).mockResolvedValue([]);
+  vi.mocked(documents.pins).mockResolvedValue([]);
 });
 afterEach(() => {
   cleanup();
@@ -253,6 +254,49 @@ it("holds the sort order, update details and Trash in one menu, and sorts Recent
     expect(documents.byTitle).toHaveBeenLastCalledWith(0, true),
   );
   expect(documents.currentWork).toHaveBeenLastCalledWith(true);
+});
+
+it("keeps the Pinned group on top of Recent in every sort order, listing a pinned Document once", async () => {
+  vi.mocked(documents.pins).mockResolvedValue([row("p", "Pinned note")]);
+  vi.mocked(documents.recent).mockResolvedValue([
+    row("p", "Pinned note"),
+    row("r", "Opened lately"),
+  ]);
+  vi.mocked(documents.all).mockResolvedValue([
+    row("r", "Updated lately"),
+    row("p", "Pinned note"),
+  ]);
+  vi.mocked(documents.byTitle).mockResolvedValue([
+    row("p", "Pinned note"),
+    row("t", "Alphabetical"),
+  ]);
+  renderDocuments();
+  fireEvent.click(await screen.findByRole("radio", { name: "Recent" }));
+  const pinned = () => screen.getByRole("region", { name: "Pinned" });
+  const titles = () =>
+    screen
+      .getAllByRole("button", { name: /Pinned note|lately|Alphabetical/ })
+      .map((button) => button.textContent?.replace(/\s+/g, " ").trim());
+  await screen.findByRole("button", { name: "Opened lately" });
+  await screen.findByRole("region", { name: "Pinned" });
+  expect(within(pinned()).getByRole("button", { name: "Pinned note" }));
+
+  for (const [order, rows] of [
+    ["Recently updated", "Updated lately"],
+    ["Title", "Alphabetical"],
+  ] as const) {
+    fireEvent.pointerDown(screen.getByRole("button", { name: "More" }), {
+      button: 0,
+      ctrlKey: false,
+    });
+    fireEvent.click(await screen.findByRole("menuitemradio", { name: order }));
+    await screen.findByRole("button", { name: rows });
+    expect(within(pinned()).getByRole("button", { name: "Pinned note" }));
+    expect(screen.getAllByRole("button", { name: "Pinned note" })).toHaveLength(
+      1,
+    );
+    expect(titles()[0]).toContain("Pinned note");
+  }
 });
 
 it("opens Trash from the menu and comes back with the Documents crumb", async () => {

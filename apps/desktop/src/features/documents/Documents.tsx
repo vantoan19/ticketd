@@ -560,6 +560,18 @@ export function Documents({
     (sum, group) => sum + group.documents.length,
     0,
   );
+  /** Recent's rows without the Documents the Pinned group already lists. */
+  const unpinned = (items: DocumentSummary[]) =>
+    items.filter((doc) => !groupPins.some((pin) => pin.id === doc.id));
+  /** "Recent" over the rows below the Pinned group, so the two groups read apart. */
+  const recentHeading = (items: DocumentSummary[]) =>
+    groupPins.length > 0 && (
+      <h2 className="documents-group">
+        <Clock aria-hidden="true" />
+        Recent
+        <Count>{unpinned(items).length}</Count>
+      </h2>
+    );
   /** Everything the arrow keys visit, in order: Documents, and the headers that fold them. */
   const rovingItems: string[] = [];
   const visibleRows = showTrash
@@ -575,14 +587,7 @@ export function Documents({
             ...(finishedOpen ? finished : []),
             ...(unlinkedOpen ? unlinked : []),
           ]
-        : sorted
-          ? all
-          : [
-              ...groupPins,
-              ...recent.filter(
-                (doc) => !groupPins.some((pin) => pin.id === doc.id),
-              ),
-            ];
+        : [...groupPins, ...unpinned(sorted ? all : recent)];
   if (!showTrash && !searching && view === "current") {
     rovingItems.push(...groupPins.map((doc) => doc.id));
     for (const group of groups) {
@@ -932,25 +937,22 @@ export function Documents({
         {list(items, query, false, false, !titles)}
       </section>
     );
-  const pinnedSection = !showTrash &&
-    !searching &&
-    groupPins.length > 0 &&
-    (view === "current" || !sorted) && (
-      <section aria-label="Pinned">
-        <h2 className="documents-group">
-          <Pin aria-hidden="true" />
-          Pinned
-          <Count>{groupPins.length}</Count>
-        </h2>
-        {list(groupPins)}
-        {pins.length >= pinOffset + 50 && (
-          <Pager
-            noun="pinned Documents"
-            onMore={() => setPinOffset(pinOffset + 50)}
-          />
-        )}
-      </section>
-    );
+  const pinnedSection = !showTrash && !searching && groupPins.length > 0 && (
+    <section aria-label="Pinned">
+      <h2 className="documents-group">
+        <Pin aria-hidden="true" />
+        Pinned
+        <Count>{groupPins.length}</Count>
+      </h2>
+      {list(groupPins)}
+      {pins.length >= pinOffset + 50 && (
+        <Pager
+          noun="pinned Documents"
+          onMore={() => setPinOffset(pinOffset + 50)}
+        />
+      )}
+    </section>
+  );
   const currentWorkSection = (
     <section aria-label="Current work">
       {work === null ? (
@@ -1355,6 +1357,7 @@ export function Documents({
                 currentWorkSection
               ) : sorted ? (
                 <section aria-label="All Documents">
+                  {recentHeading(all)}
                   {!allLoaded ? (
                     <EmptyState
                       size="inline"
@@ -1370,7 +1373,7 @@ export function Documents({
                       />
                     )
                   )}
-                  {list(all)}
+                  {list(unpinned(all))}
                   {all.length >= allOffset + 50 && (
                     <Pager
                       noun="Documents"
@@ -1380,20 +1383,7 @@ export function Documents({
                 </section>
               ) : (
                 <section aria-label="Recently opened">
-                  {groupPins.length > 0 && (
-                    <h2 className="documents-group">
-                      <Clock aria-hidden="true" />
-                      Recent
-                      <Count>
-                        {
-                          recent.filter(
-                            (doc) =>
-                              !groupPins.some((pin) => pin.id === doc.id),
-                          ).length
-                        }
-                      </Count>
-                    </h2>
-                  )}
+                  {recentHeading(recent)}
                   {!browseLoaded ? (
                     <EmptyState
                       size="inline"
@@ -1409,11 +1399,7 @@ export function Documents({
                       />
                     )
                   )}
-                  {list(
-                    recent.filter(
-                      (doc) => !groupPins.some((p) => p.id === doc.id),
-                    ),
-                  )}
+                  {list(unpinned(recent))}
                   {recent.length >= recentOffset + 50 && (
                     <Pager
                       noun="recent Documents"
