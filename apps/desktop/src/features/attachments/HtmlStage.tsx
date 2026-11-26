@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type RefObject } from "react";
 import { FailureState } from "@/components/ui/failure-alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { attachments, type Attachment } from "@/lib/api/attachments";
@@ -12,6 +12,44 @@ import { PreviewState } from "./PreviewState";
 type Loaded =
   | { key: string; report: PreparedReport }
   | { key: string; failure: FailureDescription };
+
+/**
+ * Key events inside a sandboxed frame never reach the viewer, so Esc, J and K
+ * would go dead the moment the report is clicked. The frame cannot be given a
+ * script to forward them without weakening its isolation. Instead, when a click
+ * moves focus into the frame, focus goes straight back to the stage: wheel,
+ * touch and scrollbar scrolling and mouse selection need no focus and carry on.
+ * A person who Tabs into the frame chose it (arrow and Space scrolling need its
+ * focus), so that arrival is left alone.
+ */
+const TAB_ARRIVAL_MS = 150;
+function useFocusStaysOutside(frame: RefObject<HTMLIFrameElement | null>) {
+  useEffect(() => {
+    let tabbedAt = Number.NEGATIVE_INFINITY;
+    const noteTab = (event: KeyboardEvent) => {
+      if (event.key === "Tab") tabbedAt = event.timeStamp;
+    };
+    const onBlur = (blur: Event) => {
+      // Focus arrives in the frame after the window's blur; look once it settled.
+      setTimeout(() => {
+        const element = frame.current;
+        if (!element || document.activeElement !== element) return;
+        // The window itself losing focus is not a click into the frame.
+        if (!document.hasFocus()) return;
+        if (blur.timeStamp - tabbedAt < TAB_ARRIVAL_MS) return;
+        const holder =
+          element.parentElement?.closest<HTMLElement>("[tabindex]");
+        holder?.focus({ preventScroll: true });
+      }, 0);
+    };
+    document.addEventListener("keydown", noteTab, true);
+    window.addEventListener("blur", onBlur);
+    return () => {
+      document.removeEventListener("keydown", noteTab, true);
+      window.removeEventListener("blur", onBlur);
+    };
+  }, [frame]);
+}
 
 /**
  * A stored HTML report, read-only. It renders in a sandboxed frame with no
@@ -31,6 +69,8 @@ export function HtmlStage({
   onRetry: () => void;
 }) {
   const key = `${workspace}/${file.id}/${attempt}`;
+  const frame = useRef<HTMLIFrameElement>(null);
+  useFocusStaysOutside(frame);
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   useEffect(() => {
     let active = true;
@@ -80,6 +120,7 @@ export function HtmlStage({
         </p>
       )}
       <iframe
+        ref={frame}
         className="attachment-report-frame"
         aria-label={`Report: ${file.display_name}`}
         // Empty sandbox: no scripts, forms, popups, downloads or app origin.
