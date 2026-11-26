@@ -38,6 +38,56 @@ function external(value: string | null): boolean {
   return value !== null && value.trim() !== "" && !LOCAL_URL.test(value);
 }
 
+/**
+ * Serialising and parsing a document again does not always give the same document: text
+ * inside a `<style>` or `<noscript>` can become elements (a mutation XSS payload hides a
+ * `<meta http-equiv=refresh>` this way). The frame parses the markup a second time, so it is
+ * stripped again until it comes out the same, leaving only the policy meta that was added.
+ */
+export function settle(markup: string): string {
+  let current = markup;
+  for (let pass = 0; pass < 4; pass += 1) {
+    const doc = new DOMParser().parseFromString(current, "text/html");
+    let changed = false;
+    for (const element of doc.querySelectorAll(REMOVED)) {
+      if (
+        element.localName === "meta" &&
+        element.getAttribute("content") === REPORT_CSP
+      )
+        continue;
+      element.remove();
+      changed = true;
+    }
+    for (const element of doc.querySelectorAll("*")) {
+      for (const attribute of [...element.attributes]) {
+        if (attribute.name.toLowerCase().startsWith("on")) {
+          element.removeAttribute(attribute.name);
+          changed = true;
+        }
+      }
+      if (
+        (element.localName === "a" || element.localName === "area") &&
+        (element.hasAttribute("href") || element.hasAttribute("target"))
+      ) {
+        element.removeAttribute("href");
+        element.removeAttribute("target");
+        changed = true;
+      }
+      if (element.localName === "form" && element.hasAttribute("action")) {
+        element.removeAttribute("action");
+        changed = true;
+      }
+      if (element.hasAttribute("formaction")) {
+        element.removeAttribute("formaction");
+        changed = true;
+      }
+    }
+    if (!changed) return current;
+    current = `<!doctype html>${doc.documentElement.outerHTML}`;
+  }
+  return current;
+}
+
 export function prepareReport(source: string): PreparedReport {
   const doc = new DOMParser().parseFromString(source, "text/html");
   let scripts = doc.querySelector("script") !== null;
@@ -109,7 +159,7 @@ export function prepareReport(source: string): PreparedReport {
   );
   const visible = text || picture || body.querySelector(MEDIA) !== null;
   return {
-    srcdoc: `<!doctype html>${doc.documentElement.outerHTML}`,
+    srcdoc: settle(`<!doctype html>${doc.documentElement.outerHTML}`),
     scripts,
     external: outside,
     // Empty, or only stylesheets that are not part of the attachment.

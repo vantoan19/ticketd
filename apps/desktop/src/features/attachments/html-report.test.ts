@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { expect, test } from "vitest";
 import report from "@/test/fixtures/attachment-report.html?raw";
-import { prepareReport, REPORT_CSP } from "./html-report";
+import { prepareReport, REPORT_CSP, settle } from "./html-report";
 
 /** What the frame would hold, read back as an inert document. */
 function frame(srcdoc: string) {
@@ -29,6 +29,24 @@ test("a report that asks for a dark scheme still reads as a light page on the wh
   const last = doc.head.lastElementChild;
   expect(last?.localName).toBe("style");
   expect(last?.textContent).toBe(":root{color-scheme:light !important}");
+});
+
+test("markup that turns into a refresh, a frame or a handler when parsed again is stripped again", () => {
+  const csp = `<meta http-equiv="Content-Security-Policy" content="${REPORT_CSP}">`;
+  const settled = settle(
+    `<!doctype html><html><head>${csp}<meta http-equiv="refresh" content="0;url=https://example.com"></head>` +
+      `<body><p onclick="x()">a<a href="https://example.com" target="_blank">l</a></p><iframe src="https://example.com"></iframe></body></html>`,
+  );
+  const doc = frame(settled);
+  expect(doc.querySelectorAll("meta[http-equiv]")).toHaveLength(1);
+  expect(
+    doc.querySelector("meta[http-equiv]")?.getAttribute("http-equiv"),
+  ).toBe("Content-Security-Policy");
+  expect(doc.querySelector("iframe")).toBeNull();
+  expect(doc.querySelector("p")?.hasAttribute("onclick")).toBe(false);
+  expect(doc.querySelector("a")?.hasAttribute("href")).toBe(false);
+  // Markup that is already clean comes back as it was.
+  expect(settle(settled)).toBe(settled);
 });
 
 test("scripts, handlers, links and the network stay off", () => {
