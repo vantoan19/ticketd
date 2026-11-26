@@ -67,7 +67,7 @@ import {
   type DocumentSummary,
   type DocumentSearchResult,
 } from "./api";
-import { DocumentEditor } from "./DocumentEditor";
+import { DocumentEditor, type DocumentReading } from "./DocumentEditor";
 import { useWorkspaceChange } from "@/lib/workspace-change";
 import "./documents.css";
 
@@ -140,6 +140,8 @@ export function Documents({
   listRequest?: number;
 }) {
   const openGraph = useContext(ContextGraphNavigation);
+  // The button a step used, so the Document it opens takes focus on the same one.
+  const steppedWith = useRef<"previous" | "next" | null>(null);
   const [readerCloseRequest, setReaderCloseRequest] = useState(0);
   const page = useRef<HTMLDivElement>(null);
   const navigator = useRef<HTMLDivElement>(null);
@@ -185,7 +187,9 @@ export function Documents({
     documentsView: view,
     documentsSort: sort,
     documentGroups,
+    openDocuments,
   } = usePreferences();
+  const expanded = openDocuments === "expanded";
   const [showTrash, setShowTrash] = useState(false);
   const sorted = view === "recent" && sort !== "opened";
   const [work, setWork] = useState<CurrentWork | null>(null);
@@ -609,6 +613,30 @@ export function Documents({
     rovingItems[0];
   // A Document can show twice (pinned, and in its group); only its first row is a tab stop.
   let tabRowClaimed = false;
+  // The reader's place in the list as it shows now: a step goes to the neighbour in that order.
+  // A Document the list shows twice (pinned, and in its Plan group) counts once, at its first row.
+  const walkable = visibleRows.filter(
+    (doc, index) => visibleRows.findIndex((d) => d.id === doc.id) === index,
+  );
+  const placeAt = selected
+    ? walkable.findIndex((doc) => doc.id === selected.id)
+    : -1;
+  const reading: DocumentReading | null = selected && {
+    expanded,
+    onExpandedChange: (value) =>
+      setPreference("openDocuments", value ? "expanded" : "split"),
+    place: placeAt < 0 ? null : { index: placeAt + 1, total: walkable.length },
+    previous: (placeAt > 0 && walkable[placeAt - 1]?.id) || null,
+    next: (placeAt >= 0 && walkable[placeAt + 1]?.id) || null,
+    focus: steppedWith.current,
+    onFocused: () => {
+      steppedWith.current = null;
+    },
+    onStep: (id, direction) => {
+      steppedWith.current = direction;
+      open(id);
+    },
+  };
   const commandId =
     visibleRows.find((doc) => doc.id === focusedRow)?.id ??
     selected?.id ??
@@ -1060,6 +1088,7 @@ export function Documents({
       className="documents-page"
       data-own-entrance=""
       data-reading={selected !== null || opening !== null || undefined}
+      data-expanded={expanded || undefined}
       ref={page}
     >
       <div
@@ -1395,6 +1424,7 @@ export function Documents({
         <DocumentEditor
           key={selected.id}
           initial={selected}
+          {...(reading && { reading })}
           active={active}
           pinned={pins.some((p) => p.id === selected.id)}
           onTogglePin={() => {

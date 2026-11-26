@@ -11,10 +11,14 @@ import {
   CloudCheck,
   ArrowLeft,
   Check,
+  ChevronDown,
+  ChevronUp,
   Clock,
   FileText,
   Info,
   Layers,
+  Maximize2,
+  PanelLeftOpen,
   CircleDashed,
   Link2,
   MoreHorizontal,
@@ -59,6 +63,7 @@ import { MarkdownDocument } from "@/features/markdown/MarkdownDocument";
 import { outlineOf, showsOutline } from "@/features/markdown/outline";
 import { flushSync } from "react-dom";
 import { DocumentOutline } from "./DocumentOutline";
+import { DocumentRail } from "./DocumentRail";
 import { useSectionFolds } from "./section-folds";
 import { headingElement, useCurrentHeading } from "./use-current-heading";
 import { chatSource } from "@/features/chats/quotes";
@@ -228,8 +233,27 @@ const recoverySchema = z.object({
   external: snapshotSchema.nullable(),
   externalRevision: z.string().nullable(),
 });
+/**
+ * Where the reader sits in the Documents screen: beside the list or at full
+ * width, and, at full width, the Document's place in the list it was opened from.
+ */
+export type DocumentReading = {
+  expanded: boolean;
+  /** Hides the list (full width) or brings it back (beside the list). */
+  onExpandedChange: (expanded: boolean) => void;
+  /** The place in the list as it shows now; null when the Document is not in it. */
+  place: { index: number; total: number } | null;
+  /** The Documents before and after this one in the list, if any. */
+  previous: string | null;
+  next: string | null;
+  /** The button the reader should focus when it opens, because the reader stepped with it. */
+  focus: "previous" | "next" | null;
+  onFocused: () => void;
+  onStep: (id: string, direction: "previous" | "next") => void;
+};
 type DocumentEditorProps = {
   initial: Document | null;
+  reading?: DocumentReading;
   onClose: () => void;
   currentTicket?: string | null;
   onOpenDocument?: (id: string) => void;
@@ -259,6 +283,7 @@ export function DocumentEditor(props: DocumentEditorProps) {
 
 function RecoveredDocumentEditor({
   initial,
+  reading,
   onClose,
   currentTicket,
   onOpenDocument,
@@ -919,6 +944,31 @@ function RecoveredDocumentEditor({
     const moved = here ? here.getBoundingClientRect().top - before : 0;
     if (scroller && moved !== 0) scroller.scrollBy(0, moved);
   };
+  const expanded = reading?.expanded ?? false;
+  const expandButton = useRef<HTMLButtonElement>(null);
+  const showListButton = useRef<HTMLButtonElement>(null);
+  const previousButton = useRef<HTMLButtonElement>(null);
+  const nextButton = useRef<HTMLButtonElement>(null);
+  // The control the pointer or keys just used leaves the bar; focus moves to its counterpart.
+  const toggled = useRef(false);
+  useEffect(() => {
+    if (!toggled.current) return;
+    toggled.current = false;
+    (expanded ? showListButton : expandButton).current?.focus();
+  }, [expanded]);
+  const stepped = reading?.focus ?? null;
+  useEffect(() => {
+    if (!stepped) return;
+    // The reader that stepped is replaced by this one: the same button takes focus again.
+    // At the end of the list the button is off, and its opposite takes the focus.
+    const button = (stepped === "next" ? nextButton : previousButton).current;
+    const other = (stepped === "next" ? previousButton : nextButton).current;
+    (button && !button.disabled ? button : other)?.focus();
+    reading?.onFocused();
+    // Only at the reader's first render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  const railShown = expanded && !writing && showsOutline(outline);
   // The heading line left out of the editor, while the body still starts with it.
   const head =
     writing && hiddenHead && body.startsWith(hiddenHead) ? hiddenHead : "";
@@ -1399,7 +1449,21 @@ function RecoveredDocumentEditor({
       error={capture && saveError}
     >
       {initial && (
-        <header className="document-bar">
+        <header className="document-bar" data-expanded={expanded || undefined}>
+          {reading && expanded && (
+            <span className="document-show-list">
+              <IconButton
+                ref={showListButton}
+                label="Show the Documents list"
+                onClick={() => {
+                  toggled.current = true;
+                  reading.onExpandedChange(false);
+                }}
+              >
+                <PanelLeftOpen />
+              </IconButton>
+            </span>
+          )}
           <span className="document-return">
             <Button
               variant="ghost"
@@ -1429,6 +1493,58 @@ function RecoveredDocumentEditor({
           </span>
           <span className="document-crumb-title">{heading}</span>
           <div className="document-actions">
+            {reading && !expanded && (
+              <span className="document-expand">
+                <IconButton
+                  ref={expandButton}
+                  label="Read full width"
+                  onClick={() => {
+                    toggled.current = true;
+                    reading.onExpandedChange(true);
+                  }}
+                >
+                  <Maximize2 />
+                </IconButton>
+              </span>
+            )}
+            {reading && expanded && (
+              // The slot stays when the Document is not in the list, so the icons never move.
+              <div
+                className="document-position"
+                role="group"
+                aria-label="Position in the list"
+              >
+                <span className="document-position-text">
+                  {reading.place
+                    ? `${reading.place.index} of ${reading.place.total}`
+                    : "–"}
+                </span>
+                <IconButton
+                  ref={previousButton}
+                  label="Previous Document"
+                  disabled={!reading.previous}
+                  onClick={() =>
+                    reading.previous &&
+                    navigate(() =>
+                      reading.onStep(reading.previous!, "previous"),
+                    )
+                  }
+                >
+                  <ChevronUp />
+                </IconButton>
+                <IconButton
+                  ref={nextButton}
+                  label="Next Document"
+                  disabled={!reading.next}
+                  onClick={() =>
+                    reading.next &&
+                    navigate(() => reading.onStep(reading.next!, "next"))
+                  }
+                >
+                  <ChevronDown />
+                </IconButton>
+              </div>
+            )}
             <Button
               ref={editTrigger}
               variant="ghost"
@@ -1563,7 +1679,43 @@ function RecoveredDocumentEditor({
           onRestored={refreshStored}
         />
       )}
-      <div className="document-main" ref={setScroller}>
+      <div
+        className="document-main"
+        ref={setScroller}
+        data-rail={(railShown && scroller) || undefined}
+      >
+        {railShown && scroller && (
+          <DocumentRail
+            headings={outline}
+            current={currentAnchor}
+            scroller={scroller}
+            folds={{
+              folded: folds.folded.size,
+              allFolded: folds.allFolded,
+              foldAll: () => keepPlace(folds.foldAll),
+              unfoldAll: () => keepPlace(folds.unfoldAll),
+            }}
+            onChoose={(heading) => {
+              // A folded section has nothing to scroll to until it is open.
+              flushSync(() => folds.reveal(heading.id));
+              goTo(heading.id);
+            }}
+          >
+            {(linkedPlans.length > 0 || linkedTickets.length > 0) && (
+              <section aria-label="Linked" className="document-rail-linked">
+                <h2>Linked</h2>
+                <LinkedItems
+                  plans={linkedPlans}
+                  tickets={linkedTickets}
+                  onOpenPlan={(id) => navigate(() => onOpenPlan?.(id))}
+                  onOpenTicket={(reference) =>
+                    navigate(() => onOpenTicket?.(reference))
+                  }
+                />
+              </section>
+            )}
+          </DocumentRail>
+        )}
         {initial && <NeedsReviewNotice kind="document" id={initial.id} />}
         {trashed && (
           <div className="document-trash-notice">
@@ -1789,23 +1941,27 @@ function RecoveredDocumentEditor({
           </aside>
         )}
       </div>
-      {initial && !writing && scroller && showsOutline(outline) && (
-        <DocumentOutline
-          headings={outline}
-          current={currentAnchor}
-          folds={{
-            folded: folds.folded.size,
-            allFolded: folds.allFolded,
-            foldAll: () => keepPlace(folds.foldAll),
-            unfoldAll: () => keepPlace(folds.unfoldAll),
-          }}
-          onChoose={(heading) => {
-            // A folded section has nothing to scroll to until it is open.
-            flushSync(() => folds.reveal(heading.id));
-            goTo(heading.id);
-          }}
-        />
-      )}
+      {initial &&
+        !writing &&
+        scroller &&
+        !railShown &&
+        showsOutline(outline) && (
+          <DocumentOutline
+            headings={outline}
+            current={currentAnchor}
+            folds={{
+              folded: folds.folded.size,
+              allFolded: folds.allFolded,
+              foldAll: () => keepPlace(folds.foldAll),
+              unfoldAll: () => keepPlace(folds.unfoldAll),
+            }}
+            onChoose={(heading) => {
+              // A folded section has nothing to scroll to until it is open.
+              flushSync(() => folds.reveal(heading.id));
+              goTo(heading.id);
+            }}
+          />
+        )}
     </DocumentSurface>
   );
 }

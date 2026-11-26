@@ -23,6 +23,7 @@ test("choices persist and unknown stored values fall back to defaults", () => {
   expect(loadPreferences()).toEqual({
     theme: "system",
     openTickets: "split",
+    openDocuments: "split",
     ticketLayout: "list",
     ticketRows: "simple",
     sidebarCollapsed: false,
