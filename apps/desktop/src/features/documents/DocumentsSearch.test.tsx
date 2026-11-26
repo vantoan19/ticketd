@@ -189,7 +189,9 @@ it("reads every word of the query: a title holding all of them is a title match"
 });
 
 it("leaves out the Titles group when no title matches", async () => {
-  vi.mocked(documents.search).mockResolvedValue([results[0], results[2]]);
+  vi.mocked(documents.search).mockResolvedValue(
+    results.filter((doc) => doc.id.startsWith("body")),
+  );
   render(
     <Documents
       active

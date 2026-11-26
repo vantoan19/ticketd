@@ -29,7 +29,7 @@ function SearchInput({
   size?: "sm" | "default";
   fill?: boolean;
   /** How many things match, shown inside the field before the clear button. */
-  count?: number | string;
+  count?: number | string | undefined;
 }) {
   const input = React.useRef<HTMLInputElement>(null);
   return (
