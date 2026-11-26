@@ -1,3 +1,4 @@
+import { updateClient } from "@/features/updates/client";
 import { beaconIcon, beaconSource, githubSource } from "@/test/source-fixtures";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { Ticket } from "@/lib/api/client";
@@ -2296,6 +2297,51 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
       .getByRole("region", { name: "Location" })
       .querySelector(".settings-list-footer-text")?.textContent,
   ).toContain("7 tickets");
+});
+
+test("the update notice stays hidden while About shows the update itself", async () => {
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "list_projects" || command === "list_plans") return [];
+      if (command === "find_tickets") return [];
+      if (
+        command.startsWith("plugin:window|") ||
+        command.startsWith("plugin:webview|")
+      )
+        return null;
+      if (command === "check_cli") throw new Error("not installed");
+      return bridgeDefault(command, args);
+    },
+  );
+  // The updater only exists in the packaged app; this is a fake one.
+  const uninstall = installNativeZoomBridge();
+  const listen = vi.spyOn(updateClient, "listen").mockResolvedValue(() => {});
+  const state = vi.spyOn(updateClient, "state").mockResolvedValue({
+    revision: 1,
+    automatic: true,
+    dismissed: false,
+    install_on_quit: false,
+    status: "ready",
+    update: {
+      version: "0.3.0",
+      release_url: "https://github.com/vantoan19/ticketd/releases/tag/v0.3.0",
+      upgrades_workspace: true,
+    },
+  });
+  render(<App />);
+  const notice = () => screen.queryByRole("button", { name: "Dismiss" });
+  await screen.findAllByText("ticketd 0.3.0 is ready");
+  expect(notice()).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(await screen.findByRole("button", { name: "About" }));
+  await screen.findByRole("heading", { level: 1, name: "ticketd" });
+  expect(screen.getAllByText("ticketd 0.3.0 is ready")).toHaveLength(1);
+  expect(notice()).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+  await waitFor(() => expect(notice()).toBeTruthy());
+  listen.mockRestore();
+  state.mockRestore();
+  uninstall();
 });
 
 test("a selection ends when the filters change, and the bar can be skipped to", async () => {
