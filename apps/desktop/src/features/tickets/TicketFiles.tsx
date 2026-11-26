@@ -21,7 +21,7 @@ import { useOpenTicket } from "./open-ticket";
 import { DocumentPicker } from "./DocumentPicker";
 import { RailRow, RailSection } from "./RailSection";
 import { FileGrid } from "@/features/attachments/FileCard";
-import { AttachmentDialogs, AttachmentRows } from "./TicketAttachments";
+import { AttachmentDialogs, useAttachmentItems } from "./TicketAttachments";
 import { useTicketAttachments } from "./use-ticket-attachments";
 import { DocumentRow } from "./TicketDocuments";
 import { useTicketDocuments } from "./use-ticket-documents";
@@ -55,6 +55,10 @@ export function TicketFiles({
   const loaded = files.found !== null && docs.links !== null;
   const empty = loaded && !files.found?.length && !docs.links?.length;
   const failed = files.loadFailure ?? docs.loadFailure;
+  const fileItems = useAttachmentItems(files.found ?? [], (file) => {
+    files.setError(null);
+    setSelected(file);
+  });
   if (readOnly && empty) return null;
   const menu = (trigger: ReactNode) => (
     <Popover open={choosing} onOpenChange={setChoosing}>
@@ -153,13 +157,7 @@ export function TicketFiles({
                   onOpenUpdate={onOpenUpdate}
                 />
               ))}
-              <AttachmentRows
-                files={files.found ?? []}
-                onOpen={(file) => {
-                  files.setError(null);
-                  setSelected(file);
-                }}
-              />
+              {fileItems}
             </FileGrid>
           )}
           {empty &&

@@ -1,5 +1,5 @@
 import { useStatusLine } from "@/components/ui/use-status-line";
-import { useState } from "react";
+import { useState, type ReactElement } from "react";
 import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
 import { FailureAlert } from "@/components/ui/failure-alert";
 import { describeFailure } from "@/lib/api/describe-failure";
@@ -11,14 +11,14 @@ import { AttachmentCard } from "@/features/attachments/AttachmentCard";
 import { useAvailability } from "@/features/sync-review/availability";
 import type { TicketAttachmentsState } from "./use-ticket-attachments";
 
-/** The attached files as cards; each opens its preview. */
-export function AttachmentRows({
-  files,
-  onOpen,
-}: {
-  files: Attachment[];
-  onOpen: (file: Attachment) => void;
-}) {
+/**
+ * The attached files as card items, one `<li>` each so the grid can count them
+ * and fold after six; each opens its preview.
+ */
+export function useAttachmentItems(
+  files: Attachment[],
+  onOpen: (file: Attachment) => void,
+): ReactElement[] {
   const availability = useAvailability(
     files
       .filter((file) => file.kind !== "external_reference")
