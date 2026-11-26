@@ -1731,6 +1731,28 @@ function RecoveredDocumentEditor({
           onRestored={refreshStored}
         />
       )}
+      {/* The ticks come before the text in the tab order (right after the bar); they are positioned, so they stay where they are drawn. */}
+      {initial &&
+        !writing &&
+        scroller &&
+        !railShown &&
+        showsOutline(outline) && (
+          <DocumentOutline
+            headings={outline}
+            current={currentAnchor}
+            folds={{
+              folded: folds.folded.size + folds.introFolded.size,
+              allFolded: folds.allFolded,
+              foldAll: () => keepPlace(folds.foldAll),
+              unfoldAll: () => keepPlace(folds.unfoldAll),
+            }}
+            onChoose={(heading) => {
+              // A folded section has nothing to scroll to until it is open.
+              flushSync(() => folds.reveal(heading.id));
+              goTo(heading.id);
+            }}
+          />
+        )}
       <div
         className="document-main"
         ref={setScroller}
@@ -2027,27 +2049,6 @@ function RecoveredDocumentEditor({
           </aside>
         )}
       </div>
-      {initial &&
-        !writing &&
-        scroller &&
-        !railShown &&
-        showsOutline(outline) && (
-          <DocumentOutline
-            headings={outline}
-            current={currentAnchor}
-            folds={{
-              folded: folds.folded.size + folds.introFolded.size,
-              allFolded: folds.allFolded,
-              foldAll: () => keepPlace(folds.foldAll),
-              unfoldAll: () => keepPlace(folds.unfoldAll),
-            }}
-            onChoose={(heading) => {
-              // A folded section has nothing to scroll to until it is open.
-              flushSync(() => folds.reveal(heading.id));
-              goTo(heading.id);
-            }}
-          />
-        )}
     </DocumentSurface>
   );
 }

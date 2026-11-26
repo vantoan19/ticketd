@@ -281,7 +281,7 @@ change`; an empty value clears it) or by a person in the reader's Edit mode. The
   choice is remembered on this computer. The header then shows "N of M" with Previous
   and Next Document buttons that follow the list as it shows (the chosen view and its
   order), and the outline becomes a rail beside the text with the sections, Fold all,
-  Back to top (once scrolled) and the Document's Linked Plans and tickets, all kept in view. Narrow windows keep taking
+  Back to top (once scrolled) and the Document's Linked Plans and tickets, all kept in view; once everything is folded, the rail shows how many sections are folded and Unfold all instead of the list. Narrow windows keep taking
   turns between the list and the reader.
 - Documents use recoverable trash; permanent deletion is not supported. A Document can
   create a ticket and be linked to several tickets and Plans.

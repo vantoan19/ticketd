@@ -268,11 +268,15 @@ it("keeps the ticks and popover beside the list, and swaps them for the rail at 
   vi.mocked(documents.recent).mockResolvedValue([row("a")]);
   const { container } = renderDocuments();
   await openRow("Doc a");
-  expect(screen.getByRole("button", { name: "Show outline" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "On this page, 6 headings" }),
+  ).toBeTruthy();
   expect(container.querySelector(".document-rail")).toBeNull();
 
   fireEvent.click(screen.getByRole("button", { name: "Read full width" }));
-  expect(screen.queryByRole("button", { name: "Show outline" })).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "On this page, 6 headings" }),
+  ).toBeNull();
   const rail = container.querySelector(".document-rail") as HTMLElement;
   expect(rail).toBeTruthy();
   // The rail is open without hovering anything: every section, and the current one's subsections.
@@ -331,6 +335,67 @@ it("offers Back to top only once the reader is past the first screen", async () 
   );
   scrollTo(0);
   expect(screen.queryByRole("button", { name: "Back to top" })).toBeNull();
+});
+
+it("brings Back to top home smoothly, and keeps focus from cancelling the scroll", async () => {
+  expandedAlready();
+  vi.mocked(documents.recent).mockResolvedValue([row("a")]);
+  const { container } = renderDocuments();
+  await openRow("Doc a");
+  const scroller = container.querySelector(".document-main") as HTMLElement;
+  vi.spyOn(scroller, "clientHeight", "get").mockReturnValue(800);
+  scroller.scrollTop = 1600;
+  fireEvent.scroll(scroller);
+  const focus = vi.spyOn(HTMLElement.prototype, "focus");
+  const scrollTo = vi.mocked(Element.prototype.scrollTo);
+  scrollTo.mockClear();
+  fireEvent.click(
+    within(outlineNav()).getByRole("button", { name: "Back to top" }),
+  );
+  expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "smooth" });
+  // Focus moves to the rail so it is not lost when the button leaves, but must not scroll: a focus
+  // that scrolls cancels a smooth scroll in the middle of its way.
+  expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+  focus.mockRestore();
+});
+
+it("names no subsection count in the rail, and gives Linked its own plain list", async () => {
+  expandedAlready();
+  vi.mocked(documents.recent).mockResolvedValue([row("a")]);
+  vi.mocked(documents.row).mockResolvedValue({
+    id: "a",
+    heading: "Doc a",
+    plans: [{ id: "p1", name: "A Plan with a long name", archived: false }],
+    tickets: [],
+    tags: [],
+  });
+  const { container } = renderDocuments();
+  await openRow("Doc a");
+  const rail = container.querySelector(".document-rail") as HTMLElement;
+  expect(rail.querySelector(".document-outline-count")).toBeNull();
+  // Only the outline's list is the scrolling, faded one; Linked is a list of its own.
+  expect(rail.querySelectorAll("ul.document-rail-outline")).toHaveLength(1);
+  const linked = rail.querySelector(".document-linked-items") as HTMLElement;
+  expect(linked.closest(".document-rail-outline")).toBeNull();
+});
+
+it("shows how many sections are folded, and Unfold all, in place of the list once everything is folded", async () => {
+  expandedAlready();
+  vi.mocked(documents.recent).mockResolvedValue([row("a")]);
+  const { container } = renderDocuments();
+  await openRow("Doc a");
+  const rail = container.querySelector(".document-rail") as HTMLElement;
+  expect(rail.querySelector(".document-rail-outline")).not.toBeNull();
+  fireEvent.click(
+    within(outlineNav()).getByRole("button", { name: "Fold all" }),
+  );
+  // Goals, Decisions, First, Second, Rejected and Why are foldable.
+  expect(within(rail).getByText("6 sections folded")).toBeTruthy();
+  expect(rail.querySelector(".document-rail-outline")).toBeNull();
+  expect(within(rail).queryByRole("link")).toBeNull();
+  fireEvent.click(within(rail).getByRole("button", { name: "Unfold all" }));
+  expect(within(rail).getByText("On this page")).toBeTruthy();
+  expect(rail.querySelector(".document-rail-outline")).not.toBeNull();
 });
 
 it("lists what the Document is linked to in the rail", async () => {

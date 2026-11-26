@@ -41,8 +41,14 @@ type Node = {
 
 const parser = unified().use(remarkParse).use(remarkGfm);
 
+/** Containers of blocks: their parts are separate lines, so the text of one must not run into the next. */
+const BLOCKS = new Set(["root", "blockquote", "list", "listItem"]);
+
 function plainText(node: Node): string {
-  if (node.children) return node.children.map(plainText).join("");
+  // A hard line break is a space, as a soft one (a newline in the text) already is.
+  if (node.type === "break") return " ";
+  if (node.children)
+    return node.children.map(plainText).join(BLOCKS.has(node.type) ? " " : "");
   if (node.type === "image") return node.alt ?? "";
   return node.value ?? "";
 }

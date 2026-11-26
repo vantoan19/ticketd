@@ -106,3 +106,24 @@ it("takes the first sentence under a heading as its summary", () => {
     "Version 1.2 shipped.",
   ]);
 });
+
+it("keeps the spaces between a first sentence's parts: nested lists, hard breaks and soft ones", () => {
+  const summary = (markdown: string) =>
+    outlineOf(`## Heading\n\n${markdown}`)[0]?.summary;
+  // A list item that holds a list: the label and its first item are two lines.
+  expect(
+    summary("- Active, all projects archived:\n  - EmptyState block"),
+  ).toBe("Active, all projects archived: EmptyState block");
+  // A hard break (two spaces, or a backslash) is a line end too.
+  expect(summary("Ticket property:  \nThe value reads.")).toBe(
+    "Ticket property: The value reads.",
+  );
+  expect(summary("Ticket property:\\\nThe value reads.")).toBe(
+    "Ticket property: The value reads.",
+  );
+  expect(summary("Ticket property:\nThe value reads.")).toBe(
+    "Ticket property: The value reads.",
+  );
+  // A quote of two paragraphs, cut at the first full stop.
+  expect(summary("> One.\n>\n> Two.")).toBe("One.");
+});

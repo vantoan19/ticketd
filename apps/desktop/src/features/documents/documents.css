@@ -469,12 +469,20 @@
   > .documents-list-view {
   display: none;
 }
-:where([data-width~="max-879"]) .document-main {
-  --reading-column: 100%;
-  padding: 44px 24px 96px;
+/* The reader's gutters. The ticks sit 12px from the right edge with a 36px hover area, so 72px on
+   each side keeps that area 24px clear of the text and leaves room for the fold chevron (28px) on
+   the left. The column is at most 600px and centred at every width, one pane or two.
+   The scrollbar always has its room (`scroll`) and the left gutter gives the same room back, so the
+   column stays centred, and a Document too short to scroll does not move it. (`scrollbar-gutter:
+   stable both-edges` would do this, but WebKit leaves the left gutter out of a flex container and
+   ignores `stable` when nothing scrolls.) A pane under 480px has no room for the ticks: it keeps the
+   chevron's 32px. */
+.document-main {
+  overflow-y: scroll;
+  padding-inline: calc(72px + var(--scrollbar-size)) 72px;
 }
 :where([data-width~="max-479"]) .document-main {
-  padding-inline: 16px;
+  padding-inline: calc(32px + var(--scrollbar-size)) 32px;
 }
 :where([data-width~="max-479"]) .document-actions {
   gap: 2px;
@@ -541,11 +549,13 @@
 }
 .document-outline-popover {
   position: absolute;
-  top: 0;
+  /* Board R1 puts the popover's top edge 2px above the ticks' hover area. */
+  top: -2px;
   right: 0;
+  display: flex;
+  flex-direction: column;
   width: var(--outline-popover-width);
   max-height: calc(100vh - 48px - 112px - 32px);
-  overflow-y: auto;
   padding: 6px;
   border-radius: var(--radius-panel);
   background: var(--popover);
@@ -560,9 +570,13 @@
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
 }
-.document-outline-popover ul {
+/* The list scrolls under the heading, with no scrollbar (see the rail's list). */
+.document-outline-list {
+  flex: 0 1 auto;
+  min-height: 0;
   margin: 0;
   padding: 0;
+  overflow-y: auto;
   list-style: none;
 }
 .document-outline-popover a {
@@ -570,7 +584,7 @@
   align-items: center;
   gap: 8px;
   min-height: 32px;
-  padding: 0 8px;
+  padding: 6px 8px;
   border-radius: var(--radius);
   color: var(--muted-foreground);
   text-decoration: none;
@@ -582,7 +596,12 @@
 .document-outline-popover a[data-current] {
   color: var(--foreground);
 }
-.document-outline-popover a[data-section-current] {
+.document-outline-popover a[data-current] {
+  font-weight: 500;
+}
+/* The grey fill follows the pointer or the keyboard, not the reading. */
+.document-outline-popover a:hover,
+.document-outline-popover a:focus-visible {
   background: var(--accent);
 }
 .document-outline-popover a:focus-visible {
@@ -594,15 +613,19 @@
   color: var(--muted-foreground);
   font-size: var(--text-caption);
 }
+/* The title is 30px tall with its text centred 14px down: the actions' 24px buttons share that
+   centre line (2px down), as on board R1. */
 .document-outline-head {
   display: flex;
-  align-items: center;
+  flex: none;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
 }
 .document-outline-actions {
   display: flex;
   gap: 2px;
+  margin-top: 2px;
   padding-right: 2px;
 }
 .document-outline-actions button {
@@ -668,14 +691,52 @@
   outline: 2px solid var(--ring);
   outline-offset: 0;
 }
+/* A folded section is a compact row (board R3): its heading at 17/26 (15/24 for a subsection,
+   indented 22px) and its first sentence at 14px muted, on one line. The row's hover fill reaches
+   the chevron's gutter, and the chevron stays where it is, so folding moves nothing sideways;
+   unfolding gives the reading type back. */
 .document-workspace .document-body .markdown-document > [data-folded] {
+  --fold-indent: 0px;
+  isolation: isolate;
   display: flex;
-  align-items: baseline;
-  gap: 10px;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
   margin-bottom: 0;
+  padding: 0 8px 0 var(--fold-indent);
+  font-size: var(--text-reading-subsection);
+  line-height: var(--text-reading-subsection-line);
+  letter-spacing: var(--text-reading-subsection-tracking);
   white-space: nowrap;
 }
+.document-workspace .document-body .markdown-document > h3[data-folded] {
+  --fold-indent: 22px;
+  font-size: var(--text-doc);
+  line-height: var(--text-doc-line);
+  letter-spacing: normal;
+}
+.document-workspace .document-body .markdown-document > [data-folded]::before {
+  content: "";
+  position: absolute;
+  z-index: -1;
+  inset: 0 0 0 calc(var(--fold-indent) - 32px);
+  border-radius: var(--radius);
+}
+.document-workspace
+  .document-body
+  .markdown-document
+  > [data-folded]:hover::before {
+  background: var(--hover);
+}
+.document-workspace .document-body .markdown-document > [data-folded] .fold {
+  top: 50%;
+  left: calc(var(--fold-indent) - 28px);
+  margin-top: -10px;
+}
 .document-workspace .document-body .markdown-document > [data-after-folded] {
+  margin-top: 0;
+}
+.document-workspace .document-body .markdown-document > h2[data-after-folded] {
   margin-top: 6px;
 }
 .markdown-document [data-folded] .fold-title {
@@ -690,16 +751,17 @@
   overflow: hidden;
   text-overflow: ellipsis;
   color: var(--muted-foreground);
-  font-size: var(--text-reading);
+  font-size: var(--text-ui);
   font-weight: 400;
+  line-height: var(--text-ui-line);
   letter-spacing: normal;
 }
 /* Headings brought to the top keep room above, so the reading line passes them. */
 .document-body [id] {
   scroll-margin-top: var(--outline-scroll-margin);
 }
-/* One pane, no list beside it: the full-width reader has its own outline. */
-:where([data-width~="max-879"]) .document-outline {
+/* A pane this narrow has no room for the ticks. */
+:where([data-width~="max-479"]) .document-outline {
   display: none;
 }
 
@@ -735,46 +797,80 @@
   text-align: end;
   white-space: nowrap;
 }
-/* The rail hangs from a zero-height track that sticks to the top of the reader. The reader keeps
-   the room for it on its right, so the column sits left of centre, and the rail stands 64px from
-   the column wherever the column is. */
-.document-main[data-rail] {
-  --rail-reserve: 264px;
-  --rail-column: min(600px, calc(100% - var(--rail-reserve)));
-  padding-inline: 32px calc(24px + var(--rail-reserve));
+/* The rail hangs from a zero-height track that sticks to the top of the reader, and the block of
+   column, 64px gap and 200px rail is centred in the reader, as on boards C-wide and R2. Everything
+   is measured in the reader's content box, which has gutters of 32px (left) and 24px (right) and
+   never more than the reader's own width: nothing sticks out, so the reader never scrolls
+   sideways. A pane under 880px has no rail (below). */
+.context-view-wrapper:not([data-width~="max-879"]) .document-main[data-rail] {
+  --rail-gap: 64px;
+  --rail-width: 200px;
+  --rail-column: min(
+    var(--reading-column),
+    calc(100% - var(--rail-gap) - var(--rail-width))
+  );
+  --rail-offset: max(
+    0px,
+    calc(
+      (100% - var(--rail-column) - var(--rail-gap) - var(--rail-width)) / 2 -
+        4px
+    )
+  );
+  padding-inline: calc(32px + var(--scrollbar-size)) 24px;
 }
-/* A wide table keeps the reader's width but stops at the column's right edge, short of the
-   rail, and grows to the left instead; one as wide as the column lines up with the text. */
-.document-workspace
+/* The column sits left of centre by the rail's room: the parts of the reader that are the column
+   take its width and offset. */
+.context-view-wrapper:not([data-width~="max-879"])
+  .document-workspace
+  > .document-main[data-rail]
+  > :not(
+    .document-body,
+    .document-trash-notice,
+    .floating-edit-position,
+    .document-rail-track
+  ) {
+  max-width: var(--rail-column);
+  margin-inline: var(--rail-offset) auto;
+}
+/* The body runs from the gutter to the column's right edge: the text keeps the column (flush with
+   that edge), and a wide table keeps the reader's width but stops short of the rail, growing to
+   the left instead; one as wide as the column lines up with the text. */
+.context-view-wrapper:not([data-width~="max-879"])
+  .document-main[data-rail]
+  > .document-body {
+  margin-right: calc(100% - var(--rail-offset) - var(--rail-column));
+}
+.context-view-wrapper:not([data-width~="max-879"])
+  .document-workspace
   .document-main[data-rail]
   .document-body
-  .markdown-table-scroll {
-  margin-left: auto;
-  margin-right: calc((100% - var(--rail-column)) / 2);
-  max-width: calc((100% + var(--rail-column)) / 2);
+  :is(
+    .markdown-document > :not(.markdown-table-scroll),
+    .markdown-table-scroll,
+    .markdown-editor
+  ) {
+  margin-inline: auto 0;
 }
 .document-rail-track {
-  /* The reader's padding insets the sticky edge: 0 keeps the rail level with the title. */
+  /* The scroller's padding insets the sticky edge: -16px makes the rail stick 28px below the bar,
+     as on board R2. */
   position: sticky;
-  top: 0;
+  top: -16px;
   z-index: 1;
   flex: none;
-  width: calc(100% + var(--rail-reserve));
+  width: var(--rail-column);
   height: 0;
   /* The flex gap would otherwise leave 20px above the title. */
-  margin-bottom: -20px;
+  margin: 0 0 -20px var(--rail-offset);
 }
 .document-rail {
   position: absolute;
   top: 0;
-  left: calc(
-    (100% - var(--rail-reserve) - var(--rail-column)) / 2 + var(--rail-column) +
-      64px
-  );
+  left: calc(100% + var(--rail-gap));
   display: flex;
   flex-direction: column;
   gap: 24px;
-  width: 200px;
+  width: var(--rail-width);
   /* The rail stays inside the window: only the outline list scrolls (below), so Linked stays
      in view under it. */
   max-height: calc(100vh - 140px);
@@ -812,7 +908,7 @@
   border-radius: var(--radius-segment);
   font-size: var(--text-caption);
 }
-.document-rail ul {
+.document-rail-outline {
   display: flex;
   flex: 0 1 auto;
   flex-direction: column;
@@ -823,14 +919,23 @@
   list-style: none;
   box-shadow: inset 1px 0 0 var(--group-hairline);
 }
-/* A soft fade at the edge of the list that has more to scroll to. */
-.document-rail ul[data-fade="bottom"] {
+/* A list that scrolls on its own (the rail's, the popover's) shows no scrollbar: its items keep
+   their width, and a soft fade at the edge with more to scroll to says so. */
+.document-rail-outline,
+.document-outline-list {
+  scrollbar-width: none;
+}
+.document-rail-outline::-webkit-scrollbar,
+.document-outline-list::-webkit-scrollbar {
+  display: none;
+}
+:is(.document-rail-outline, .document-outline-list)[data-fade="bottom"] {
   mask-image: linear-gradient(to bottom, black calc(100% - 24px), transparent);
 }
-.document-rail ul[data-fade="top"] {
+:is(.document-rail-outline, .document-outline-list)[data-fade="top"] {
   mask-image: linear-gradient(to top, black calc(100% - 24px), transparent);
 }
-.document-rail ul[data-fade="both"] {
+:is(.document-rail-outline, .document-outline-list)[data-fade="both"] {
   mask-image: linear-gradient(
     to bottom,
     transparent,
@@ -839,10 +944,10 @@
     transparent
   );
 }
-.document-rail li {
+.document-rail-outline li {
   margin: 0;
 }
-.document-rail a {
+.document-rail-outline a {
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -850,20 +955,33 @@
   color: var(--muted-foreground);
   text-decoration: none;
 }
-.document-rail a[data-level="subsection"] {
+.document-rail-outline a[data-level="subsection"] {
   padding-left: 24px;
 }
-.document-rail a:hover,
-.document-rail a[data-section-current] {
+.document-rail-outline a:hover,
+.document-rail-outline a[data-section-current] {
   color: var(--foreground);
 }
-.document-rail a[data-current] {
+.document-rail-outline a[data-current] {
   color: var(--foreground);
   box-shadow: inset 2px 0 0 var(--foreground);
 }
-.document-rail a:focus-visible {
+.document-rail-outline a:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: -2px;
+}
+/* Everything is folded: the count of folded sections and Unfold all stand in for the list. */
+.document-rail-unfold .ui-button {
+  height: 28px;
+  margin-left: -8px;
+  padding: 0 8px;
+  color: var(--foreground);
+  font-size: var(--text-preview);
+  line-height: var(--text-preview-line);
+}
+.document-rail-unfold svg {
+  width: 14px;
+  height: 14px;
 }
 .document-rail-linked {
   flex: none;
@@ -880,6 +998,7 @@
   margin: 0;
   list-style: none;
 }
+/* Linked is a plain list of 13/18 labels that wrap whole, as on board C-wide. */
 .document-rail-linked li > button {
   display: flex;
   align-items: flex-start;
@@ -888,11 +1007,25 @@
   min-height: 24px;
   margin-left: -8px;
   padding: 2px 8px;
+  font-size: var(--text-preview);
+  line-height: var(--text-preview-line);
   text-align: start;
+  white-space: normal;
 }
 .document-rail-linked li > button svg {
   flex: none;
+  width: 14px;
+  height: 14px;
   margin-top: 2px;
+}
+.document-rail-linked .connected-label {
+  min-width: 0;
+  line-height: var(--text-preview-line);
+  overflow-wrap: anywhere;
+}
+.document-rail-linked .document-linked-role {
+  font-size: inherit;
+  line-height: inherit;
 }
 .document-rail-actions [data-size="icon-compact"] {
   width: 20px;
@@ -918,17 +1051,9 @@
 :where([data-width~="max-879"]) .document-bar[data-expanded] .document-return {
   display: flex;
 }
-:where([data-width~="max-879"]) .document-main[data-rail] {
-  --rail-reserve: 0px;
-  --rail-column: 100%;
-  padding: 44px 24px 96px;
-}
 :where([data-width~="max-879"])
   .document-main[data-rail]
   .document-end
   [aria-label="Linked"] {
   display: block;
-}
-:where([data-width~="max-479"]) .document-main[data-rail] {
-  padding-inline: 16px;
 }
