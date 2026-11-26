@@ -8163,8 +8163,12 @@ test("empty Ticket Files adds an existing file and detaches with Undo", async ()
   );
   fireEvent.click(screen.getByRole("button", { name: "Insert selected" }));
   fireEvent.click(await screen.findByRole("button", { name: "review.txt" }));
+  fireEvent.pointerDown(
+    await screen.findByRole("button", { name: "More actions" }),
+    { button: 0, ctrlKey: false },
+  );
   fireEvent.click(
-    await screen.findByRole("button", { name: "Detach from ticket" }),
+    await screen.findByRole("menuitem", { name: "Detach from ticket" }),
   );
   fireEvent.click(await screen.findByRole("button", { name: "Undo" }));
   expect(
