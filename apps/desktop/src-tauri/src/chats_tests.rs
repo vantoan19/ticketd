@@ -1725,6 +1725,105 @@ async fn repeating_a_new_chat_request_sends_its_first_message_once() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_new_chat_retry_still_succeeds_after_its_first_input_is_replaced() {
+    let f = Fixture::new().await;
+    f.fake.fail_next_open(Problem {
+        kind: ProblemKind::QuotaExhausted,
+        message: "Test harness unavailable".to_owned(),
+        detail: None,
+        resets_at: None,
+    });
+    let mut input = f.input("Original");
+    input.attachments = vec![AttachmentInput {
+        name: "notes.txt".to_owned(),
+        data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+    }];
+    let first = f.chats.create(input.clone()).await.unwrap();
+    assert_eq!(first.send_error, None);
+    settle().await;
+
+    let id = &first.chat_id;
+    let original = f.core().chat_queue(id).unwrap().remove(0);
+    let transfer = uuid::Uuid::new_v4().to_string();
+    assert!(
+        f.chats
+            .confirm_queue_edit(id, &original.id, &transfer)
+            .await
+            .unwrap()
+    );
+    f.chats
+        .send_linking(
+            id,
+            "Edited",
+            SendMode::Queue,
+            &[],
+            Vec::new(),
+            Some(QueueEditSave {
+                command_id: uuid::Uuid::new_v4().to_string(),
+                message_ids: vec![original.id.clone()],
+            }),
+        )
+        .await
+        .unwrap();
+    let edited = f.core().chat_queue(id).unwrap().remove(0);
+    assert_ne!(edited.id, original.id);
+    assert_eq!(edited.text, "Edited");
+    let opens = f.fake.opens().len();
+
+    assert_eq!(f.chats.create(input).await.unwrap(), first);
+    settle().await;
+    assert_eq!(f.fake.opens().len(), opens);
+    assert!(f.submitted().is_empty());
+    assert_eq!(
+        f.core().list_chats(ChatListFilter::Active).unwrap().len(),
+        1
+    );
+    assert_eq!(
+        f.core().chat_queue(id).unwrap().as_slice(),
+        std::slice::from_ref(&edited)
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_attachment_allows_whitespace_within_the_message_byte_limit() {
+    let f = Fixture::new().await;
+    let id = f.chat().await;
+    let files = || {
+        vec![AttachmentInput {
+            name: "notes.txt".to_owned(),
+            data_url: "data:text/plain;base64,bm90ZXM=".to_owned(),
+        }]
+    };
+    let whitespace = " \t\n";
+    let blank = f
+        .chats
+        .send_linking(&id, whitespace, SendMode::Queue, &[], Vec::new(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(blank.message, "The message must not be empty");
+    let oversized = " ".repeat(MAX_TEXT_BYTES + 1);
+    let too_long = f
+        .chats
+        .send_linking(&id, &oversized, SendMode::Queue, &[], files(), None)
+        .await
+        .unwrap_err();
+    assert_eq!(too_long.message, "The message is too long");
+
+    f.chats
+        .send_linking(&id, whitespace, SendMode::Queue, &[], files(), None)
+        .await
+        .unwrap();
+    let queue = f.core().chat_queue(&id).unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].text, whitespace);
+    let attachments = f
+        .core()
+        .chat_message_attachment_contents(&id, &queue[0].id)
+        .unwrap();
+    assert_eq!(attachments[0].bytes(), b"notes");
+}
+
+#[tokio::test(start_paused = true)]
 async fn capture_uses_the_workspace_filename_media_and_size_rules() {
     let f = Fixture::new().await;
     let input = |name: &str, data_url: &str| AttachmentInput {

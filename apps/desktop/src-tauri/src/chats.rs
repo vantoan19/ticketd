@@ -402,6 +402,10 @@ fn text_argument(text: &str, what: &str) -> Outcome<()> {
     if text.trim().is_empty() {
         return Err(failed(format!("{what} must not be empty")));
     }
+    text_byte_limit(text, what)
+}
+
+fn text_byte_limit(text: &str, what: &str) -> Outcome<()> {
     if text.len() > MAX_TEXT_BYTES {
         return Err(failed(format!("{what} is too long")));
     }
@@ -1656,7 +1660,13 @@ impl Chats {
                     ChatCreationReplay::Legacy(chat) => (chat, false),
                 };
                 if workspace
-                    .replay_chat_input(&first, &chat.id, &input.message, &attachments)?
+                    .replay_chat_input_replacing(
+                        &first,
+                        &chat.id,
+                        &input.message,
+                        &attachments,
+                        &[],
+                    )?
                     .is_some()
                 {
                     let created = Created {
@@ -2082,12 +2092,11 @@ impl Chats {
         files: Vec<AttachmentInput>,
         limit: u64,
     ) -> Outcome<Vec<ChatAttachmentContent>> {
-        if files.is_empty() || !text.is_empty() {
-            text_argument(text, "The message")?;
-        }
         if files.is_empty() {
+            text_argument(text, "The message")?;
             return Ok(Vec::new());
         }
+        text_byte_limit(text, "The message")?;
         files
             .into_iter()
             .map(|file| {
