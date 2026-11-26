@@ -1775,7 +1775,10 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   // The window opening played it once.
   expect(order.filter((step) => step === "launch")).toHaveLength(1);
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  await turn();
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(0);
+  });
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
