@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
@@ -160,4 +162,16 @@ test("a Drive file of another kind uses its mime type and extension, or says onl
   expect(
     driveType({ name: "Mystery", mime_type: "application/x-thing" }),
   ).toBeNull();
+});
+
+test("a run of cards in a text keeps the document's 12px block gap above and below", () => {
+  // The cards' own margin (a row gap) zeroes the gap `.markdown-document > * + *`
+  // would give them, so the neighbours take it: measured 0px above and 24px below.
+  const css = readFileSync(join(__dirname, "file-card.css"), "utf8");
+  expect(css).toMatch(
+    /\.markdown-document > :has\(\+ \[data-cards\]\) \{\s*margin-bottom: 12px;/,
+  );
+  expect(css).toMatch(
+    /\.markdown-document > \[data-cards\] \+ :not\(\[data-cards\]\) \{\s*margin-top: 0;/,
+  );
 });

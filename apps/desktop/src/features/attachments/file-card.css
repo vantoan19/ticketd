@@ -228,3 +228,13 @@ img.file-card-still[data-paper] {
   vertical-align: -2px;
   color: var(--muted-foreground);
 }
+
+/* The 12px between blocks also holds above and below a run of cards. The cards'
+   own margin (above) is a row gap that must stay, and it zeroes the block gap
+   the text above would add, so the text above and below take the gap instead. */
+.markdown-document > :has(+ [data-cards]) {
+  margin-bottom: 12px;
+}
+.markdown-document > [data-cards] + :not([data-cards]) {
+  margin-top: 0;
+}
