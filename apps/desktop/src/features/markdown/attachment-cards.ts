@@ -41,3 +41,38 @@ export function cardLinks(node: ExtraProps["node"]): CardLink[] | null {
   }
   return links.length ? links : null;
 }
+
+type Tree = {
+  type: string;
+  tagName?: string;
+  value?: string;
+  children?: Tree[];
+};
+const holdsCards = (node: Tree | undefined) =>
+  node?.type === "element" &&
+  (node.tagName === "p" || node.tagName === "li") &&
+  cardLinks(node as unknown as ExtraProps["node"]) !== null;
+
+function dropGaps(node: Tree) {
+  if (!node.children) return;
+  node.children.forEach(dropGaps);
+  const siblings = node.children;
+  node.children = siblings.filter(
+    (child, index) =>
+      !(
+        child.type === "text" &&
+        !child.value?.trim() &&
+        holdsCards(siblings[index - 1]) &&
+        holdsCards(siblings[index + 1])
+      ),
+  );
+}
+
+/**
+ * A rehype plugin: the blank text the parser leaves between two blocks that
+ * both hold cards is dropped, so the cards sit 12px apart (their grid's gap)
+ * instead of 12px plus the width of a space.
+ */
+export function cardGaps() {
+  return (tree: Tree) => dropGaps(tree);
+}

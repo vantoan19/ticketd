@@ -4,6 +4,8 @@ import { createElement, Fragment, type ReactNode } from "react";
 const WIDTH = 152;
 /** The end that always stays visible: a date, a run number, the extension. */
 const KEEP = 14;
+/** A kept end shorter than this is no use as a landmark: fall back to KEEP characters. */
+const MIN_END = 6;
 /** Without a way to measure text, about two lines of a card's name. */
 const LIMIT = 36;
 
@@ -32,10 +34,45 @@ function measurer(): Measure | null {
   return measureText;
 }
 
+/**
+ * The pieces a name can break between: after `-`, `_`, `.` and spaces, except
+ * that the extension stays attached to what precedes it, so a line never ends
+ * with "report." and leaves "log" alone on the next.
+ */
+function tokens(name: string, separators = /(?<=[-_. ])/): string[] {
+  const parts = name.split(separators);
+  const last = parts.at(-1);
+  const before = parts.at(-2);
+  if (
+    last &&
+    !/[-_. ]$/.test(last) &&
+    before?.endsWith(".") &&
+    before.length > 1
+  )
+    parts.splice(-2, 2, before + last);
+  return parts;
+}
+
+/**
+ * The end a cut name always shows: the longest run of whole words (from a
+ * separator on) of at most KEEP characters, so the cut falls between words.
+ * A name whose last word is longer than that keeps its last KEEP characters.
+ */
+function keptEnd(name: string): string {
+  const parts = tokens(name);
+  let end = "";
+  for (let index = parts.length - 1; index > 0; index--) {
+    const next = parts[index]! + end;
+    if (next.length > KEEP) break;
+    end = next;
+  }
+  return end.length >= MIN_END ? end : name.slice(-KEEP);
+}
+
 /** Greedy wrap at `-`, `_`, `.` and spaces, as the card's two lines do. */
 function firstLine(name: string, measure: Measure): string {
   let line = "";
-  for (const token of name.split(/(?<=[-_. ])/)) {
+  for (const token of tokens(name)) {
     if (measure(line + token) <= WIDTH) {
       line += token;
       continue;
@@ -52,16 +89,16 @@ function firstLine(name: string, measure: Measure): string {
 
 /**
  * A card's name for up to two lines. A longer name gives way in the middle of its
- * second line, so its end stays visible; the ellipsis sits right against that end
- * and any spaces at the cut are kept.
+ * second line, so its end stays visible; the cut falls between words and the
+ * ellipsis sits right against the end that is kept.
  */
 export function fitName(name: string, measure = measurer()): FittedName {
-  const tail = name.slice(-KEEP);
+  const tail = keptEnd(name);
   if (!measure) {
     return name.length <= LIMIT
       ? { text: name, cut: false }
       : {
-          text: `${name.slice(0, LIMIT - KEEP - 1)}…${tail}`,
+          text: `${name.slice(0, LIMIT - tail.length - 1).trimEnd()}…${tail}`,
           cut: true,
         };
   }
@@ -69,15 +106,20 @@ export function fitName(name: string, measure = measurer()): FittedName {
   const first = firstLine(name, measure);
   const rest = name.slice(first.length);
   if (measure(rest) <= WIDTH) return { text: name, cut: false };
-  let head = rest.slice(0, Math.max(0, rest.length - KEEP));
+  let head = rest.slice(0, Math.max(0, rest.length - tail.length));
   while (head && measure(`${head}…${tail}`) > WIDTH) head = head.slice(0, -1);
+  // The cut falls between words when there is a word to fall between, and the
+  // ellipsis sits against the words it joins, not against a separator.
+  const wholeWords = head.match(/^(.*[-_. ])[^-_. ]*$/)?.[1];
+  const trimmed = (wholeWords ?? head).replace(/[-_. ]+$/, "");
+  if (trimmed) head = trimmed;
   const second = `${head}…${tail}`;
   return { text: first + second, cut: true, lines: [first, second] };
 }
 
 /** Lets a line break after `-`, `_` and `.` as well as at spaces. */
 export function breakable(text: string): ReactNode {
-  const parts = text.split(/(?<=[-_.])/);
+  const parts = tokens(text, /(?<=[-_.])/);
   return parts.map((part, index) =>
     createElement(
       Fragment,

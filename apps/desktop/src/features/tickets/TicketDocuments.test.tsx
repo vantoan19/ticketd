@@ -365,3 +365,43 @@ test("a failed Remove shows the Document again with the error", async () => {
   expect(await screen.findByRole("alert")).toBeTruthy();
   expect(screen.getByRole("button", { name: "Linked" })).toBeTruthy();
 });
+
+test("a Document's card shows its first page as paper, read once it is near", async () => {
+  vi.mocked(invoke).mockImplementation((command) =>
+    Promise.resolve(
+      command === "document_context_links"
+        ? [[link("d1", "Refund rules for partial captures", true)], []]
+        : command === "show_document"
+          ? {
+              id: "d1",
+              title: null,
+              body: "# Refund rules for partial captures\n\nRefund the captured amount only.\n\n## Checks\n\n- Never refund an authorisation\n",
+              created_at: "2026-11-25T00:00:00Z",
+              updated_at: "2026-11-25T00:00:00Z",
+              trashed: false,
+            }
+          : command === "ticket_attachments"
+            ? []
+            : null,
+    ),
+  );
+  render(files());
+  const card = await screen.findByRole("button", {
+    name: "Refund rules for partial captures",
+  });
+  expect(card.textContent).toContain("Document · Linked");
+  await waitFor(() =>
+    expect(card.querySelector("[data-paper]")?.textContent).toContain(
+      "Refund the captured amount only.",
+    ),
+  );
+  const paper = card.querySelector("[data-paper]")!;
+  // The title is the page's heading once, not again as its first line.
+  expect(paper.querySelector("strong")?.textContent).toBe(
+    "Refund rules for partial captures",
+  );
+  expect(
+    paper.textContent?.match(/Refund rules for partial captures/g),
+  ).toHaveLength(1);
+  expect(paper.textContent).toContain("Never refund an authorisation");
+});

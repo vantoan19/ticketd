@@ -31,7 +31,7 @@ import { chunkFade } from "./chunk-fade";
 import { MermaidDiagram } from "./MermaidDiagram";
 import { AttachmentLink } from "@/features/attachments/AttachmentLink";
 import { AttachmentCardLink } from "./AttachmentCardLink";
-import { cardLinks } from "./attachment-cards";
+import { cardGaps, cardLinks } from "./attachment-cards";
 import { CopyButton } from "@/components/ui/copy-button";
 import { Check } from "lucide-react";
 import { AttachmentImage as InlineAttachmentImage } from "./InlineImage";
@@ -524,13 +524,14 @@ export function MarkdownDocument({
             ? [...remarkPlugins, [chunkFade, chunkStarts]]
             : remarkPlugins
         }
+        rehypePlugins={attachmentCards ? [cardGaps] : []}
         urlTransform={urlTransform}
         components={components}
       >
         {source}
       </ReactMarkdown>
     ),
-    [source, chunkStarts],
+    [source, chunkStarts, attachmentCards],
   );
   return (
     <div className="markdown-document">
