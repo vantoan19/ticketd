@@ -489,7 +489,7 @@ export function AttachmentPicker({
   }
   /** Settings, from inside the dialog: close it first, then open the page. */
   const openSettings = openSettingsPage
-    ? (page: "attachments" | "google-drive") => () => {
+    ? (page: "files") => () => {
         changeOpen(false);
         openSettingsPage(page);
       }
@@ -763,7 +763,7 @@ export function AttachmentPicker({
             {folderConfiguration && (
               <DriveSetupNotice
                 configuration={folderConfiguration}
-                onOpenSettings={openSettings?.("google-drive")}
+                onOpenSettings={openSettings?.("files")}
               />
             )}
             {dropFailure && (
@@ -814,7 +814,7 @@ export function AttachmentPicker({
                           ),
                         )
                     }
-                    onChangeLimit={openSettings?.("attachments")}
+                    onChangeLimit={openSettings?.("files")}
                   />
                 ))}
               </ul>
@@ -828,7 +828,7 @@ export function AttachmentPicker({
               busy={busy}
               onBusyChange={setBusy}
               onFailure={setError}
-              onOpenSettings={openSettings?.("google-drive")}
+              onOpenSettings={openSettings?.("files")}
             />
           )
         ) : (

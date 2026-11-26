@@ -54,99 +54,79 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "attention",
   },
   {
-    title: "Workspace file",
+    title: "Location",
     description:
-      "The desktop app and the ticketd command line read and write this workspace.",
-    keywords: "path folder sqlite database finder show copy location",
-    section: "location",
-  },
-  {
-    title: "One file, two ways in",
-    description:
-      "Changes made by you in the app and by agents through the command line land in the same file.",
-    keywords: "desktop app command line agents reads writes",
-    section: "location",
-  },
-  {
-    title: "Contents",
-    description: "Format version",
-    keywords: "size tickets documents projects plans format version count",
-    section: "location",
+      "The app and the ticketd command both read and write this file.",
+    keywords:
+      "workspace file path folder sqlite database finder show copy format version size tickets documents plans count where",
+    section: "backups-export",
   },
   {
     title: "Upload destination",
     description:
       "Applies to new uploads only. Queued uploads and retries keep their original destination.",
     keywords:
-      "files drive local storage uploads attachments on this computer included in backups",
-    section: "attachments",
+      "files drive local storage uploads attachments on this computer included in backups google drive account sign in attach picker",
+    section: "files",
   },
   {
     title: "Upload folder",
     description: "Writable when selected. Checked again before each upload.",
     keywords: "drive change folder",
-    section: "attachments",
+    section: "files",
   },
   {
     title: "Upload limit",
     description: "Per file, for future uploads. All file types are accepted.",
     keywords: "largest file size mib maximum default",
-    section: "attachments",
+    section: "files",
   },
   {
     title: "Back up now",
     description:
       "Saves a checked copy to a new file you choose. It never replaces an existing file.",
     keywords: "backup copy save last backup",
-    section: "backups",
+    section: "backups-export",
   },
   {
     title: "What a backup contains",
     description: "Tickets, Documents, Plans, Projects, activity and evidence",
     keywords:
       "includes contents local attachment files integrity check google drive not included",
-    section: "backups",
+    section: "backups-export",
   },
   {
     title: "Restore from a backup",
     description:
       "Replaces this workspace after a review. A safety backup of it is saved first.",
     keywords: "restore recover replace workspace choose backup",
-    section: "backups",
+    section: "backups-export",
   },
   {
     title: "Safety backups",
     description:
       "Saved next to the workspace before a restore or a format upgrade, with every retained local attachment file. Restore one to undo.",
     keywords: "undo backup automatic",
-    section: "backups",
+    section: "backups-export",
   },
   {
-    title: "Export as JSON",
+    title: "Workspace as JSON",
     description:
-      "One readable snapshot of the workspace, including Trash. It cannot be imported back.",
-    keywords: "json snapshot download trash",
-    section: "export",
+      "Every ticket, Document and Plan, Trash included, in one file.",
+    keywords: "export json snapshot download trash",
+    section: "backups-export",
   },
   {
     title: "A ticket or Document as Markdown",
-    description:
-      "Portable Markdown with its referenced files and a manifest, written to a new ticketd-export folder.",
+    description: "With its files, from the command line.",
     keywords:
-      "export command line cli terminal export-markdown same export json manifest folder",
-    section: "export",
-  },
-  {
-    title: "Export or back up?",
-    description:
-      "Readable copies of your work for other tools. To keep a copy you can restore, use Backups.",
-    keywords: "difference compare restore",
-    section: "export",
+      "export command line cli terminal export-markdown manifest folder portable",
+    section: "backups-export",
   },
   {
     title: "Status",
     description:
-      "Agents and terminals run ticketd by name to read and write the same workspace as this app.",
+      "Lets your agents and terminals run ticketd on this Workspace.",
     keywords:
       "command-line tool path terminal install cli check again executable",
     section: "command-line",
@@ -160,7 +140,8 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "ticketd skill",
-    description: "Teaches your coding agents to use the ticketd command line.",
+    description:
+      "Teaches the agents on this computer to use ticketd without being told.",
     keywords: "claude code codex agent install update skill",
     section: "agent-skills",
   },
@@ -177,35 +158,34 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
       "Adds Chats and Automations to the sidebar, where you start and follow your agents’ work.",
     keywords:
       "chat claude codex ai experimental sidebar conversations automations",
-    section: "chat",
+    section: "agents",
   },
   {
     title: "Experimental",
     description:
-      "Work in ticketd with the coding tools installed on this computer.",
+      "Run the coding agents on this computer inside ticketd, in Chats.",
     keywords:
       "beta preview not yet qualified against real subscriptions claude codex ai",
-    section: "chat",
+    section: "agents",
   },
   {
     title: "Harnesses",
     description: "Each harness runs on this computer with its own sign-in.",
     keywords:
       "harness claude code codex installed detected signed in check again copy command",
-    section: "chat",
+    section: "agents",
     needsChat: true,
   },
   {
     title: "Notify me about Chats",
     description: "Approvals, questions, failures and finished turns.",
     keywords: "chat notification notifications alert sound badge dock mute",
-    section: "chat",
+    section: "agents",
     needsChat: true,
   },
   {
     title: "Experimental",
-    description:
-      "Run agents and steps on tickets without starting each one by hand. Open Automations from the sidebar to set them up.",
+    description: "Let agents and steps work on your tickets by themselves.",
     keywords: "automation automations beta preview agents steps",
     section: "automations",
   },
@@ -225,8 +205,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Workspace sync",
-    description:
-      "Keep this workspace in sync between your desktops, through a folder in your own Google Drive or an S3 bucket.",
+    description: "Keep this Workspace the same on your other computers.",
     keywords:
       "sync cloud connect account desktops folder storage google drive s3 aws bucket profile prefix sso sign in",
     section: "workspace-sync",
@@ -259,25 +238,11 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "workspace-sync",
   },
   {
-    title: "Google Drive",
-    description:
-      "Attach files from your Google Drive, or keep new uploads there. ticketd only sees the files you choose.",
-    keywords: "drive account sign in google attach files",
-    section: "google-drive",
-  },
-  {
-    title: "Attach from Drive",
-    description:
-      "Choose Google Drive in the attachment picker. You sign in with Google the first time.",
-    keywords: "picker reference link file google",
-    section: "google-drive",
-  },
-  {
-    title: "Sources",
-    description:
-      "Connect accounts on this desktop to discover and refresh tickets.",
-    keywords: "source connection provider account discovery refresh settings",
-    section: "sources",
+    title: "Ticket sources",
+    description: "Bring issues from your other trackers in as tickets.",
+    keywords:
+      "source sources connection connections provider account discovery refresh github linear jira issues import",
+    section: "ticket-sources",
   },
   {
     title: "Everywhere",
@@ -454,18 +419,18 @@ export function searchSettings<T extends SettingsEntry>(
 const chatOnly = (entry: SettingsEntry) =>
   entry.section === "automations" || entry.needsChat === true;
 
-/** Stands in for Chat-only rows while Chat is off: the Chat page is where it is turned on. */
+/** Stands in for Chat-only rows while Chat is off: the Agents page is where it is turned on. */
 const CHAT_PAGE_ENTRY: SettingsEntry = {
-  title: "Chat",
+  title: "Agents",
   description:
     "Turn on Chat to set up harnesses, notifications and Automations.",
-  section: "chat",
+  section: "agents",
 };
 
 /**
  * `searchSettings` for the person's current Chat setting. While Chat is on every
  * entry is searched. While it is off the Chat-only rows stay hidden, but a query
- * that matches only them finds the Chat page entry instead, so the way to them
+ * that matches only them finds the Agents page entry instead, so the way to them
  * is not a dead end.
  */
 export function searchSettingsFor<T extends SettingsEntry>(
@@ -480,7 +445,7 @@ export function searchSettingsFor<T extends SettingsEntry>(
     entries.filter((entry) => !chatOnly(entry)),
     pageName,
   );
-  if (hits.some((hit) => hit.section === "chat")) return hits;
+  if (hits.some((hit) => hit.section === "agents")) return hits;
   const hidden = searchSettings(query, entries.filter(chatOnly), pageName);
   return hidden.length > 0 ? [...hits, CHAT_PAGE_ENTRY] : hits;
 }

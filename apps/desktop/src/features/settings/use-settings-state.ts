@@ -2,13 +2,13 @@ import { createContext, useContext } from "react";
 import type { SettingsPageId } from "@/features/settings/settings-sections";
 
 /** Which nav indicators a page can ask to read again after it changed them. */
-export type IndicatorSection = "command-line" | "agent-skills" | "chat";
+export type IndicatorSection = "command-line" | "agent-skills" | "agents";
 
 export interface SettingsState {
   /** The Search page's query; the nav's Search entry shows it. */
   query: string;
   setQuery: (query: string) => void;
-  /** Opens another Settings page, for links between pages (Export to Backups, Chat to About). */
+  /** Opens another Settings page, for links between pages (Command line to Agent skills, Agents to About). */
   openPage: (page: SettingsPageId) => void;
   /** True when the section needs setup; absent while unknown or unreadable. */
   needsSetup: Partial<Record<IndicatorSection, boolean>>;

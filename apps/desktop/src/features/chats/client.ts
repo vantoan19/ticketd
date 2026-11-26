@@ -1003,7 +1003,7 @@ export interface ChatClient {
   /** The person had the transcript in view through `itemId`; kept with the Chat. */
   readThrough(id: string, itemId: string): Promise<void>;
   setMuted(id: string, muted: boolean): Promise<void>;
-  /** Settings > Chat > Notify me about Chats, as the person last chose it. */
+  /** Settings > Agents > Notify me about Chats, as the person last chose it. */
   setNotify(enabled: boolean): Promise<void>;
   /** The person clicked a Chat's system notification. */
   onOpenRequested(listener: (request: OpenRequest) => void): Unsubscribe;

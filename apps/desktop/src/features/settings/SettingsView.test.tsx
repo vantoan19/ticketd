@@ -125,7 +125,7 @@ test("a page opens at its top, not where the previous page was scrolled", () => 
   scroller.scrollTop = 600;
   view.rerender(
     <SettingsView
-      selected="google-drive"
+      selected="files"
       onRestore={async () => {}}
       onOpenInbox={() => {}}
     />,
@@ -133,7 +133,7 @@ test("a page opens at its top, not where the previous page was scrolled", () => 
   expect(scroller.scrollTop).toBe(0);
 });
 
-test("Google Drive opens as its own page in the shell", () => {
+test("the removed Google Drive page opens Files, where Drive is chosen for new uploads", () => {
   render(
     <SettingsView
       selected="google-drive"
@@ -141,13 +141,11 @@ test("Google Drive opens as its own page in the shell", () => {
       onOpenInbox={() => {}}
     />,
   );
-  expect(
-    screen.getByRole("heading", { level: 1, name: "Google Drive" }),
-  ).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 1, name: "Files" })).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Appearance" })).toBeNull();
 });
 
-test("Workspace sync opens as its own page, apart from Google Drive", () => {
+test("Workspace sync opens as its own page, apart from Files", () => {
   render(
     <SettingsView
       selected="workspace-sync"
@@ -158,15 +156,13 @@ test("Workspace sync opens as its own page, apart from Google Drive", () => {
   expect(
     screen.getByRole("heading", { level: 1, name: "Workspace sync" }),
   ).toBeTruthy();
-  expect(
-    screen.queryByRole("heading", { level: 1, name: "Google Drive" }),
-  ).toBeNull();
+  expect(screen.queryByRole("heading", { level: 1, name: "Files" })).toBeNull();
 });
 
-test("the Location page shows the path, counts, size, and format version", async () => {
+test("Backups & export shows the Workspace file, its counts, size and format version", async () => {
   render(
     <SettingsView
-      selected="location"
+      selected="backups-export"
       onRestore={async () => {}}
       onOpenInbox={() => {}}
     />,
@@ -182,12 +178,10 @@ test("the Location page shows the path, counts, size, and format version", async
     "/Users/me/Library/Application Support/ticketd",
   );
   fireEvent.keyDown(document.body, { key: "Escape" });
-  const text = screen.getByRole("region", { name: "Contents" }).textContent;
-  expect(text).toContain("Tickets42");
-  expect(text).toContain("Projects3");
-  expect(text).toContain("Active Plans2");
-  expect(text).toContain("File size2.5 MB");
-  expect(text).toContain("Format version20");
+  const text = screen
+    .getByRole("region", { name: "Location" })
+    .querySelector(".settings-list-footer-text")?.textContent;
+  expect(text).toBe("42 tickets · 0 Documents · 2 Plans · 2.5 MB · format 20");
 });
 
 test("Copy path puts the workspace path on the clipboard", async () => {
@@ -198,7 +192,7 @@ test("Copy path puts the workspace path on the clipboard", async () => {
   });
   render(
     <SettingsView
-      selected="location"
+      selected="backups-export"
       onRestore={async () => {}}
       onOpenInbox={() => {}}
     />,
@@ -211,7 +205,7 @@ test("Copy path puts the workspace path on the clipboard", async () => {
 test("Show in the file manager reveals the workspace file", async () => {
   render(
     <SettingsView
-      selected="location"
+      selected="backups-export"
       onRestore={async () => {}}
       onOpenInbox={() => {}}
     />,
@@ -226,7 +220,7 @@ test("a workspace that cannot be read shows an error instead of counts", async (
   vi.mocked(workspaceClient.info).mockRejectedValue(new Error("locked"));
   render(
     <SettingsView
-      selected="location"
+      selected="backups-export"
       onRestore={async () => {}}
       onOpenInbox={() => {}}
     />,
@@ -238,7 +232,7 @@ test("a workspace that cannot be read shows an error instead of counts", async (
 
 test("cancelling a save dialog changes nothing and shows no error", async () => {
   const props = { onRestore: async () => {}, onOpenInbox: () => {} };
-  render(<SettingsView selected="backups" {...props} />);
+  render(<SettingsView selected="backups-export" {...props} />);
   await screen.findByText("No backups yet");
   fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
   await waitFor(() =>
@@ -318,16 +312,19 @@ test("the Attention footer opens the inbox", () => {
   expect(openInbox).toHaveBeenCalled();
 });
 
-test("workspace stats use short one-line labels", async () => {
+test("Location, Backups and Export are one page in that order", async () => {
   render(
     <SettingsView
-      selected="location"
+      selected="backups-export"
       onRestore={async () => {}}
       onOpenInbox={() => {}}
     />,
   );
-  await screen.findByText("Documents");
-  const contents = screen.getByRole("region", { name: "Contents" });
-  expect(contents.textContent).toContain("Documents");
-  expect(contents.textContent).not.toContain("including details and Trash");
+  await screen.findAllByText("workspace.sqlite3");
+  expect(
+    screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent)
+      .filter((text) => ["Location", "Backups", "Export"].includes(text ?? "")),
+  ).toEqual(["Location", "Backups", "Export"]);
 });

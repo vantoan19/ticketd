@@ -22,9 +22,6 @@
   background: var(--recessed);
   color: var(--foreground);
 }
-.settings-nav-query {
-  color: var(--muted-foreground);
-}
 .settings-back:focus-visible,
 .settings-nav-row:focus-visible {
   outline: 2px solid var(--ring);

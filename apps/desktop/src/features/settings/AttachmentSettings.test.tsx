@@ -11,7 +11,6 @@ import {
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { AttachmentSettings } from "./AttachmentSettings";
-import { SettingsStateContext, type SettingsState } from "./use-settings-state";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 afterEach(() => {
@@ -180,24 +179,24 @@ test("the local tile lists what local storage gives", async () => {
   expect(local.textContent).toContain("Included in backups");
 });
 
-test("Drive is disabled with a way to set it up when Drive is not configured", async () => {
+test("Drive is disabled and the setup notice says why when Drive is not configured", async () => {
   answer({
     drive_configuration: { configured: false, message: "Set CLIENT_ID" },
   });
-  const openPage = vi.fn();
-  render(
-    <SettingsStateContext value={{ openPage } as unknown as SettingsState}>
-      <AttachmentSettings />
-    </SettingsStateContext>,
-  );
+  render(<AttachmentSettings />);
   const tile = await screen.findByRole("radio", { name: /Google Drive/ });
   await waitFor(() => expect((tile as HTMLButtonElement).disabled).toBe(true));
   expect(tile.textContent).toContain("Connect Google Drive to choose this");
+  // The page the old link led to is gone: the notice is here, with no link away.
   expect(
-    screen.getByRole("button", { name: "Set up Google Drive" }).dataset.slot,
-  ).toBe("settings-link");
-  fireEvent.click(screen.getByRole("button", { name: "Set up Google Drive" }));
-  expect(openPage).toHaveBeenCalledWith("google-drive");
+    await screen.findByText("Google Drive isn't set up on this computer."),
+  ).toBeTruthy();
+  expect(
+    screen.queryByRole("button", { name: /Open Files settings/ }),
+  ).toBeNull();
+  expect(
+    screen.queryByRole("button", { name: "Set up Google Drive" }),
+  ).toBeNull();
 });
 
 test("Drive stays selectable and shows no setup link when it is configured", async () => {

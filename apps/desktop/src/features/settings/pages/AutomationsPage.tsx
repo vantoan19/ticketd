@@ -15,10 +15,7 @@ import {
   SettingsListFooter,
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
-import {
-  AppliesRightAway,
-  SettingsPage,
-} from "@/features/settings/layout/SettingsPage";
+import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import { sectionMeta } from "@/features/settings/settings-sections";
 import "@/features/settings/pages/attachments.css";
@@ -29,8 +26,6 @@ export function AutomationsPage() {
     <SettingsPage
       {...sectionMeta("automations")}
       titleAccessory={<Badge variant="experimental">Experimental</Badge>}
-      lede="Run agents and steps on tickets without starting each one by hand. Open Automations from the sidebar to set them up."
-      endSlot={<AppliesRightAway />}
     >
       <RunsAtOnce />
       <InTheBackground />

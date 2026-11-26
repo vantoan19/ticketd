@@ -19,7 +19,11 @@ A local snapshot of an image or file attached to a draft, queued, or sent messag
 
 **Harness**:
 The person's own installed agent program, such as Claude Code or Codex, that a Chat runs in. It owns authentication, billing, its settings and its native session; ticketd starts, supervises and answers it but never signs in for it or changes how it bills.
-_Avoid_: Provider, model, agent (for the program itself)
+_Avoid_: Provider, model
+
+**Agent**:
+The interface's word for the program a harness runs, such as Claude Code or Codex, as the person meets it on Settings › Agents and in a Chat's picker. "Harness" stays the word in code, the CLI and these definitions for the same program. An Automation agent is a different thing, a saved definition of who runs a step; it and the Editing agent keep their own entries.
+_Avoid_: Bot, assistant
 
 **Turn**:
 One run of the harness from a message the person sent until it ends: completed, failed, stopped by the person, or cut off. A steer joins the running turn instead of starting another. A turn that ended is not evidence that its task succeeded.

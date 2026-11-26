@@ -2,7 +2,7 @@
 
 ## Back up and restore your workspace
 
-1. Open **Settings → Backups** and choose **Back up now…**. Choose a new file.
+1. Open **Settings → Backups & export** and choose **Back up now…**. Choose a new file.
    ticketd saves the workspace and its retained local attachment files, then
    checks the copy. The latest backup appears in **Backups**.
 2. When you need to recover a workspace, choose **Choose backup…** on that page.

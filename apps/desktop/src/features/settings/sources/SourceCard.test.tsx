@@ -797,20 +797,16 @@ test("a hidden source page does not check the account until it is shown", async 
   await screen.findByText("Signed in as octo");
 });
 
-test("the section list offers a source only when its connector is available", async () => {
-  vi.mocked(sourcesClient.list).mockResolvedValue([]);
-  const { unmount } = render(<SettingsNav onBack={() => {}} />);
-  await act(async () => {});
-  expect(screen.queryByRole("button", { name: "GitHub" })).toBeNull();
-  unmount();
-
+test("the section list has no entry for a connection, available or saved", async () => {
   vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
   render(<SettingsNav onBack={() => {}} />);
   const group = await screen.findByRole("group", { name: "Connections" });
-  expect(group.textContent).toContain("Google Drive");
   expect(
-    await within(group).findByRole("button", { name: "GitHub" }),
-  ).toBeTruthy();
+    within(group)
+      .getAllByRole("button")
+      .map((button) => button.textContent),
+  ).toEqual(["Ticket sources"]);
+  expect(screen.queryByRole("button", { name: "GitHub" })).toBeNull();
 });
 
 test("opening a source focuses its page title, named for the source", async () => {
@@ -1282,7 +1278,7 @@ test("optional fields show grey examples and an Optional marker, not saved-looki
   expect(screen.getAllByText("Optional").length).toBeGreaterThan(0);
 });
 
-test("the section list puts Connections after Agents and before Help", async () => {
+test("the section list puts Connections after AI and before Help", async () => {
   vi.mocked(sourcesClient.list).mockResolvedValue([entry]);
   render(<SettingsNav onBack={() => {}} />);
   await screen.findByRole("group", { name: "Connections" });
@@ -1292,7 +1288,7 @@ test("the section list puts Connections after Agents and before Help", async () 
   expect(groups).toEqual([
     "Preferences",
     "Workspace",
-    "Agents",
+    "AI",
     "Connections",
     "Help",
   ]);

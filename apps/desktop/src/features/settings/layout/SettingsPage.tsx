@@ -1,6 +1,6 @@
 import { ShellNoticeSlot } from "@/components/ui/list-header";
-import { useEffect, useRef, type ReactNode } from "react";
-import { Check, ChevronDown, Menu, type LucideIcon } from "lucide-react";
+import { Fragment, useEffect, useRef, type ReactNode } from "react";
+import { ChevronDown, ChevronLeft, Menu, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconTile } from "@/components/ui/icon-tile";
 import { StatusDot } from "@/components/ui/status-dot";
@@ -20,6 +20,7 @@ export function SettingsPage({
   iconContent,
   title = label,
   lede,
+  drillIn,
   endSlot,
   titleAccessory,
   footer,
@@ -37,9 +38,18 @@ export function SettingsPage({
   iconContent?: ReactNode;
   /** The `h1`; the label unless the page names itself differently. */
   title?: ReactNode;
-  /** One sentence under the title, at most 560px wide. */
+  /**
+   * One sentence under the title, at most 560px wide. A string may mark a
+   * command with backticks.
+   */
   lede?: ReactNode;
-  /** The end of the panel bar: `<AppliesRightAway />` or a source's save state. */
+  /**
+   * Set when this page opened in place from `parent`'s list (`SettingsDrillIn`
+   * fills it in): the panel bar gets a back control and the breadcrumb a
+   * third step that returns.
+   */
+  drillIn?: { parent: string; onBack: () => void };
+  /** The end of the panel bar: a source's save state. */
   endSlot?: ReactNode;
   /** Sits beside the title, such as Chat's Experimental badge. */
   titleAccessory?: ReactNode;
@@ -66,6 +76,18 @@ export function SettingsPage({
   return (
     <div className="settings-shell" hidden={hidden}>
       <div className="settings-panel-bar">
+        {drillIn && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="-ml-2"
+            aria-label={`Back to ${drillIn.parent}`}
+            onClick={drillIn.onBack}
+          >
+            <ChevronLeft aria-hidden="true" />
+          </Button>
+        )}
         {mobile ? (
           // The nav is a sheet here: the breadcrumb becomes its trigger.
           <Button
@@ -88,6 +110,17 @@ export function SettingsPage({
           <nav aria-label="Breadcrumb">
             <ol>
               <li>{group}</li>
+              {drillIn && (
+                <li>
+                  <button
+                    type="button"
+                    className="settings-crumb-link"
+                    onClick={drillIn.onBack}
+                  >
+                    {drillIn.parent}
+                  </button>
+                </li>
+              )}
               <li aria-current="page">{label}</li>
             </ol>
           </nav>
@@ -111,7 +144,11 @@ export function SettingsPage({
                 </h1>
                 {titleAccessory}
               </div>
-              {lede && <p className="settings-page-lede">{lede}</p>}
+              {lede && (
+                <p className="settings-page-lede">
+                  {typeof lede === "string" ? <JobLine text={lede} /> : lede}
+                </p>
+              )}
             </div>
           </header>
         ) : null}
@@ -122,12 +159,15 @@ export function SettingsPage({
   );
 }
 
-/** The panel bar's end slot on pages whose controls take effect when changed. */
-export function AppliesRightAway() {
-  return (
-    <span className="settings-applies">
-      <Check size={14} aria-hidden="true" />
-      Changes apply right away
-    </span>
+/** A job line as text, with a backticked command set in the code font. */
+function JobLine({ text }: { text: string }) {
+  return text.split("`").map((part, index) =>
+    index % 2 === 1 ? (
+      <code key={index} className="font-mono">
+        {part}
+      </code>
+    ) : (
+      <Fragment key={index}>{part}</Fragment>
+    ),
   );
 }

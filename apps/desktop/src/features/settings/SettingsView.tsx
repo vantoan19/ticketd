@@ -1,28 +1,27 @@
 import type { ProjectSourceSetup } from "@/features/projects/ConnectProjectSource";
 import { modifierKeyLabel } from "@/lib/platform";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { SettingsPageId } from "@/features/settings/settings-sections";
+import {
+  SEARCH_INPUT_ID,
+  resolveSettingsPage,
+  type LegacySettingsPageId,
+  type SettingsPageId,
+} from "@/features/settings/settings-sections";
 import { useSources } from "@/features/settings/sources/use-sources";
 import type { SourceEntry } from "@/lib/api/sources";
 import { AboutPage } from "@/features/settings/pages/AboutPage";
+import { AgentsPage } from "@/features/settings/pages/AgentsPage";
 import { AgentSkillsPage } from "@/features/settings/pages/AgentSkillsPage";
 import { AppearancePage } from "@/features/settings/pages/AppearancePage";
-import { AttachmentsPage } from "@/features/settings/pages/AttachmentsPage";
 import { AttentionPage } from "@/features/settings/pages/AttentionPage";
 import { AutomationsPage } from "@/features/settings/pages/AutomationsPage";
-import { BackupsPage } from "@/features/settings/pages/BackupsPage";
-import { ChatPage } from "@/features/settings/pages/ChatPage";
+import { BackupsExportPage } from "@/features/settings/pages/BackupsExportPage";
 import { CommandLinePage } from "@/features/settings/pages/CommandLinePage";
 import { DiagnosticsPage } from "@/features/settings/pages/DiagnosticsPage";
-import { ExportPage } from "@/features/settings/pages/ExportPage";
-import { GoogleDrivePage } from "@/features/settings/pages/GoogleDrivePage";
+import { FilesPage } from "@/features/settings/pages/FilesPage";
 import { WorkspaceSyncPage } from "@/features/settings/pages/WorkspaceSyncPage";
 import { KeyboardShortcutsPage } from "@/features/settings/pages/KeyboardShortcutsPage";
-import { LocationPage } from "@/features/settings/pages/LocationPage";
-import {
-  SEARCH_INPUT_ID,
-  SearchPage,
-} from "@/features/settings/pages/SearchPage";
+import { SearchPage } from "@/features/settings/pages/SearchPage";
 import { SourcePage } from "@/features/settings/pages/SourcePage";
 import { SourcesPage } from "@/features/settings/pages/SourcesPage";
 import { useFadeThrough } from "@/features/settings/fade-through";
@@ -55,9 +54,10 @@ export function SettingsView({
   onProjectSourceSaved,
   onProjectSourceCancel,
   onProjectLinked,
-  selected: chosen = "appearance",
+  selected: chosenName = "appearance",
 }: {
-  selected?: SettingsPageId;
+  /** The open page, under its current or an old name (`resolveSettingsPage`). */
+  selected?: SettingsPageId | LegacySettingsPageId;
   /** Opens another page, for links between pages and for ⌘F. */
   onSelect?: (page: SettingsPageId) => void;
   /** Called after anything replaced the Workspace: a restore, or a download from Drive. */
@@ -81,6 +81,7 @@ export function SettingsView({
     await onRestore();
   };
   const { entries: sources } = useSources();
+  const chosen = resolveSettingsPage(chosenName);
   // Choosing another page fades the open one out, then the next arrives.
   const { shown: selected, leaving } = useFadeThrough(chosen);
   // Every page shares one scroll container, so a page would otherwise open at
@@ -95,8 +96,10 @@ export function SettingsView({
       if (!isFindShortcut(event)) return;
       event.preventDefault();
       onSelect?.("search");
-      // Already on Search: the page does not remount, so focus its input here.
-      document.getElementById(SEARCH_INPUT_ID)?.focus();
+      // The field is in the nav, which stays mounted: focus it and select what it holds.
+      const field = document.getElementById(SEARCH_INPUT_ID);
+      field?.focus();
+      if (field instanceof HTMLInputElement) field.select();
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
@@ -112,18 +115,16 @@ export function SettingsView({
     >
       {selected === "appearance" && <AppearancePage />}
       {selected === "attention" && <AttentionPage onOpenInbox={onOpenInbox} />}
-      {selected === "location" && <LocationPage />}
-      {selected === "attachments" && <AttachmentsPage key={restores} />}
-      {selected === "backups" && (
-        <BackupsPage
+      {selected === "files" && <FilesPage key={restores} />}
+      {selected === "backups-export" && (
+        <BackupsExportPage
           onRestore={replaced}
           onWorkspaceReplaced={onWorkspaceReplaced}
         />
       )}
-      {selected === "export" && <ExportPage />}
       {selected === "command-line" && <CommandLinePage />}
       {selected === "agent-skills" && <AgentSkillsPage />}
-      {selected === "chat" && <ChatPage />}
+      {selected === "agents" && <AgentsPage />}
       {selected === "automations" && <AutomationsPage />}
       {selected === "workspace-sync" && (
         <WorkspaceSyncPage
@@ -133,12 +134,11 @@ export function SettingsView({
           }}
         />
       )}
-      {selected === "google-drive" && <GoogleDrivePage />}
       {selected === "keyboard-shortcuts" && <KeyboardShortcutsPage />}
       {selected === "diagnostics" && <DiagnosticsPage />}
       {selected === "about" && <AboutPage />}
       {selected === "search" && <SearchPage />}
-      {selected === "sources" && (
+      {selected === "ticket-sources" && (
         <SourcesPage
           onOpen={(id) => onSelect?.(`source-${id}`)}
           onChanged={onSourcesChanged}
@@ -160,6 +160,7 @@ export function SettingsView({
           active={
             selected === `source-${entry.saved?.id ?? entry.connector.provider}`
           }
+          onBack={() => onSelect?.("ticket-sources")}
           {...(onProjectLinked && { onProjectLinked })}
         />
       ))}

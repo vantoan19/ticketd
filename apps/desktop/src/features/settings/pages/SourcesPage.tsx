@@ -195,10 +195,7 @@ export function SourcesPage({
   }
 
   return (
-    <SettingsPage
-      {...sectionMeta("sources")}
-      lede="Connect accounts on this desktop to discover and refresh tickets."
-    >
+    <SettingsPage {...sectionMeta("ticket-sources")}>
       {loading ? (
         <p role="status">Loading sources…</p>
       ) : (

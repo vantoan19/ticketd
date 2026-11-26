@@ -625,7 +625,7 @@ function FirstSync({
         <SettingsListFooter>
           {upload
             ? "You can keep working. Everything is already saved on this computer."
-            : "A safety backup of the Workspace that was here is in Settings › Backups."}
+            : "A safety backup of the Workspace that was here is in Settings › Backups & export."}
         </SettingsListFooter>
       </SettingsList>
     </div>

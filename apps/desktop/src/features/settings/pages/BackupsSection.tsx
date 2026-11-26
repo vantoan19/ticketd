@@ -16,8 +16,6 @@ import { formatDateTime } from "@/lib/format";
 import { localDate } from "@/features/settings/settings-format";
 import { RestoreDialog } from "@/features/settings/RestoreDialog";
 import { SafetyBackups } from "@/features/settings/SafetyBackups";
-import { sectionMeta } from "@/features/settings/settings-sections";
-import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import {
   SettingsList,
@@ -124,12 +122,16 @@ function LastBackupRow({
   );
 }
 
-type BackupsProps = {
+export type BackupsProps = {
   onRestore: () => Promise<void>;
   onWorkspaceReplaced?: (() => void) | undefined;
 };
 
-function BackupsContent({ onRestore, onWorkspaceReplaced }: BackupsProps) {
+/** Backups & export › Backups: the last backup, Back up now, Restore and the safety copies. */
+export function BackupsSection({
+  onRestore,
+  onWorkspaceReplaced,
+}: BackupsProps) {
   const [last, setLast] = useState<LastBackup>({ status: "loading" });
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [message, setMessage] = useState("");
@@ -219,7 +221,7 @@ function BackupsContent({ onRestore, onWorkspaceReplaced }: BackupsProps) {
   const quiet = message === "Backup saved and checked.";
   return (
     <>
-      <div className="settings-section">
+      <SettingsSection title="Backups">
         <SettingsList aria-label="Backups" role="group">
           <LastBackupRow
             last={last}
@@ -275,7 +277,7 @@ function BackupsContent({ onRestore, onWorkspaceReplaced }: BackupsProps) {
         <p role="status" className="sr-only">
           {quiet ? message : ""}
         </p>
-      </div>
+      </SettingsSection>
 
       <SettingsSection title="What a backup contains">
         <SettingsList>
@@ -322,16 +324,5 @@ function BackupsContent({ onRestore, onWorkspaceReplaced }: BackupsProps) {
         />
       )}
     </>
-  );
-}
-
-export function BackupsPage(props: BackupsProps) {
-  return (
-    <SettingsPage
-      {...sectionMeta("backups")}
-      lede="Save a checked copy of this workspace, and restore one later."
-    >
-      <BackupsContent {...props} />
-    </SettingsPage>
   );
 }

@@ -934,7 +934,7 @@ pub struct Chats {
     missing_folders: Mutex<HashSet<String>>,
     /// The main window has focus: an open Chat is in view only while it does.
     focused: AtomicBool,
-    /// Settings > Chat > Notify me about Chats. The interface keeps the choice.
+    /// Settings > Agents > Notify me about Chats. The interface keeps the choice.
     notify: AtomicBool,
     /// What each harness offered when last asked, with the version it was asked at:
     /// probing starts a harness process, so it is repeated only for a new version.
@@ -1026,7 +1026,7 @@ impl Chats {
     /// Must be called inside the async runtime: the host starts its tasks on it.
     fn host(&self) -> Outcome<ChatHost> {
         if !self.enabled() {
-            return Err(failed("Chat is turned off in Settings > Experimental."));
+            return Err(failed("Chat is turned off in Settings > Agents."));
         }
         self.started_or_start().map_err(|error| match error {
             HostError::Restoring => failed(RESTORING_WORKSPACE),

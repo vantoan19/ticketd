@@ -30,7 +30,6 @@ test("the page has one list for following and reminders, then the Inbox", () => 
   render(<AttentionPage onOpenInbox={() => {}} />);
   for (const name of ["Following and reminders", "Inbox"])
     expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
-  expect(screen.getByText("Changes apply right away")).toBeTruthy();
 });
 
 test("with notifications off there is no preview and no help line", () => {

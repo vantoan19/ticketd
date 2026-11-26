@@ -1,6 +1,6 @@
 /* Sync: layout only. Colours, radii and type sizes are tokens from styles.css. */
 
-/* Settings › Google Drive: the setup stages as one row of steps. Numbered,
+/* Settings › Workspace sync, for Google Drive: the setup stages as one row of steps. Numbered,
    a check once done, the current one in primary; no status colour. */
 .sync-track {
   display: flex;

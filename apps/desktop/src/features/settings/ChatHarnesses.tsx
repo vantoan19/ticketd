@@ -54,7 +54,7 @@ function harnessDetail(harness: HarnessStatus) {
 }
 
 /**
- * Settings › Chat: whether each harness can run here, one row per harness
+ * Settings › Agents: whether each harness can run here, one row per harness
  * with its official mark and status, the command to copy where one helps,
  * and Check again. The nav's Needs setup dot on Chat follows this list.
  */
@@ -81,7 +81,7 @@ export function ChatHarnesses() {
   const checkAgain = () => {
     setLoad({ phase: "loading" });
     void read();
-    refreshIndicators("chat");
+    refreshIndicators("agents");
   };
   return (
     <SettingsSection

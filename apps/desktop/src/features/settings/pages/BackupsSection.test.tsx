@@ -9,7 +9,7 @@ import {
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { BackupsPage } from "@/features/settings/pages/BackupsPage";
+import { BackupsSection } from "@/features/settings/pages/BackupsSection";
 import { workspaceClient } from "@/lib/api/workspace";
 import { client } from "@/lib/api/client";
 
@@ -43,7 +43,7 @@ afterEach(() => {
 });
 
 function renderPage(onRestore: () => Promise<void> = async () => {}) {
-  return render(<BackupsPage onRestore={onRestore} />);
+  return render(<BackupsSection onRestore={onRestore} />);
 }
 const backUpButton = () =>
   screen.getByRole("button", { name: /^Back up now…|^Backing up…/ });

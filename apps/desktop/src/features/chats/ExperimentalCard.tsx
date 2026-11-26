@@ -20,7 +20,7 @@ import { stoppingText } from "@/features/chats/model";
 import { useChatFeature } from "@/features/chats/use-chats";
 
 /**
- * Settings > Chat: the notice and the Show Chat switch. Off by default. Turning it off
+ * Settings > Agents: the notice and the Show Chat switch. Off by default. Turning it off
  * hides Chat and keeps every Chat; Chats that are working and runs that are
  * going are stopped first, and only after the person confirms.
  */

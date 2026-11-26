@@ -1,8 +1,6 @@
-import { SourceIcon } from "./sources/SourceIcon";
 import { useEffect } from "react";
-import { ArrowLeft, Search, type LucideIcon } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
-import { Kbd } from "@/components/ui/kbd";
+import { ArrowLeft, type LucideIcon } from "lucide-react";
+import { SearchInput } from "@/components/ui/search-input";
 import { Glide } from "@/components/ui/motion";
 import {
   Sheet,
@@ -14,25 +12,26 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { useChatFeature } from "@/features/chats/use-chats";
 import { useIsMobile } from "@/hooks/use-mobile";
-import { modifierKeyLabel } from "@/lib/platform";
 import {
+  SEARCH_INPUT_ID,
   SETTINGS_GROUPS,
   SETTINGS_SECTIONS,
-  sourceSection,
+  navSectionOf,
+  resolveSettingsPage,
+  type LegacySettingsPageId,
   type SettingsGroup,
   type SettingsPageId,
+  type SettingsSectionId,
 } from "@/features/settings/settings-sections";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import { useUpdates } from "@/features/updates/update-state";
-import { useSources } from "@/features/settings/sources/use-sources";
 import "@/features/settings/settings.css";
 
 interface NavItem {
-  id: SettingsPageId;
+  id: SettingsSectionId;
   label: string;
   group: SettingsGroup;
   icon: LucideIcon;
-  iconSvg?: string | null | undefined;
 }
 
 interface NavIndicator {
@@ -42,44 +41,25 @@ interface NavIndicator {
 
 /**
  * The nav's items and the dot each carries: "Needs setup" (attention) on
- * Command line, Agent skills and Chat when the page would ask for a step;
- * "Connected" (positive) on a source with a saved configuration. The page
- * says the same words in its StatusLabel.
+ * Command line, Agent skills and Agents when the page would ask for a step. The
+ * page says the same words in its StatusLabel.
  */
 function useSettingsNavItems() {
-  const { entries } = useSources();
   const { needsSetup } = useSettingsState();
   const chat = useChatFeature();
   const update = useUpdates()?.snapshot;
-  const items: NavItem[] = [
-    // Automations are part of Chat: its switch shows and hides both.
-    ...SETTINGS_SECTIONS.filter(
-      (section) => section.id !== "automations" || chat.enabled,
-    ),
-    ...entries.map(({ connector, saved }) =>
-      sourceSection(
-        saved?.id ?? connector.provider,
-        saved?.name ?? connector.name,
-        connector.presentation?.icon_svg,
-      ),
-    ),
-  ];
-  const indicator = (id: SettingsPageId): NavIndicator | null => {
+  // Automations are part of Chats: their switch shows and hides both.
+  const items: NavItem[] = SETTINGS_SECTIONS.filter(
+    (section) => section.id !== "automations" || chat.enabled,
+  );
+  const indicator = (id: SettingsSectionId): NavIndicator | null => {
     if (id === "about" && update?.status === "ready" && update.dismissed)
       return { label: "Update ready", tone: "unread" };
     if (
-      (id === "command-line" || id === "agent-skills" || id === "chat") &&
+      (id === "command-line" || id === "agent-skills" || id === "agents") &&
       needsSetup[id]
     )
       return { label: "Needs setup", tone: "attention" };
-    const source = entries.find(
-      (entry) =>
-        `source-${entry.saved?.id ?? entry.connector.provider}` === id &&
-        entry.saved,
-    );
-    if (source?.unavailable)
-      return { label: "Extension unavailable", tone: "attention" };
-    if (source) return { label: "Connected", tone: "positive" };
     return null;
   };
   return { items, indicator };
@@ -94,25 +74,29 @@ export function SettingsNav({
   onBack,
   resolveReturnFocus,
   origin = "tickets",
-  selected = "appearance",
+  selected: chosen = "appearance",
   onSelect,
 }: {
   onBack: () => void;
   resolveReturnFocus?: () => HTMLElement | null;
-  /** Where Back returns, by name ("tickets", "Attachments"): shell SH-21. */
+  /** Where Back returns, by name ("tickets", "Files"): shell SH-21. */
   origin?: string;
-  selected?: SettingsPageId;
+  /** The open page, under its current or an old name; a connection selects Ticket sources. */
+  selected?: SettingsPageId | LegacySettingsPageId;
   onSelect?: (page: SettingsPageId) => void;
 }) {
   const { items, indicator } = useSettingsNavItems();
-  const { query, navOpen = false, setNavOpen = () => {} } = useSettingsState();
+  const {
+    query,
+    setQuery,
+    navOpen = false,
+    setNavOpen = () => {},
+  } = useSettingsState();
+  const selected = navSectionOf(resolveSettingsPage(chosen));
   const mobile = useIsMobile();
   useEffect(() => {
     if (!mobile && navOpen) setNavOpen(false);
   }, [mobile, navOpen, setNavOpen]);
-  const modifier = modifierKeyLabel();
-  const findHint = modifier === "Ctrl" ? "Ctrl+F" : `${modifier}F`;
-  const shown = query.trim();
   const open = (page: SettingsPageId) => {
     setNavOpen(false);
     onSelect?.(page);
@@ -128,31 +112,27 @@ export function SettingsNav({
           onBack();
         }}
       >
-        <ArrowLeft size={16} aria-hidden="true" /> Back to {origin}
+        <ArrowLeft size={16} aria-hidden="true" /> {`Back to ${origin}`}
       </button>
       <nav aria-label="Settings sections">
-        {/* A nav row like the others: the input is drawn on the Search page only. */}
-        <button
-          type="button"
-          className="settings-nav-row settings-search-entry"
-          data-responsive-navigation="settings-section:search"
-          aria-current={selected === "search" ? "page" : undefined}
-          onClick={() => open("search")}
-        >
-          {selected === "search" && <Glide id="settings-nav" />}
-          <Search size={16} aria-hidden="true" />
-          <span className="settings-nav-label">
-            {shown ? (
-              <>
-                <span className="sr-only">Search settings: </span>
-                <span className="settings-nav-query">“{shown}”</span>
-              </>
-            ) : (
-              "Search settings"
-            )}
-          </span>
-          <Kbd aria-hidden="true">{findHint}</Kbd>
-        </button>
+        {/* A field above the groups: typing shows the results in the page. */}
+        <div className="settings-nav-search">
+          <SearchInput
+            id={SEARCH_INPUT_ID}
+            data-responsive-navigation="settings-search"
+            fill
+            aria-label="Search settings"
+            placeholder="Search settings"
+            value={query}
+            onValueChange={(value) => {
+              setQuery(value);
+              if (value.trim() && selected !== null) onSelect?.("search");
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") setNavOpen(false);
+            }}
+          />
+        </div>
         {SETTINGS_GROUPS.map((group) => {
           const sections = items.filter((item) => item.group === group);
           if (sections.length === 0) return null;
@@ -174,15 +154,8 @@ export function SettingsNav({
                         onClick={() => open(item.id)}
                       >
                         {selected === item.id && <Glide id="settings-nav" />}
-                        {item.iconSvg ? (
-                          <SourceIcon svg={item.iconSvg} size={16} />
-                        ) : (
-                          <item.icon size={16} aria-hidden="true" />
-                        )}
+                        <item.icon size={16} aria-hidden="true" />
                         <span className="settings-nav-label">{item.label}</span>
-                        {item.id === "chat" && (
-                          <Badge variant="experimental">Experimental</Badge>
-                        )}
                         {dot && (
                           <Tooltip content={dot.label} side="right">
                             <span

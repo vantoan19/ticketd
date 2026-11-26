@@ -33,16 +33,20 @@
   content: "/";
   margin-right: 8px;
 }
+/* The parent step of a drill-in breadcrumb is a button that looks like text. */
+.settings-crumb-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
 .settings-panel-bar-end {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-left: auto;
-}
-.settings-applies {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
 /* The scroll container around the open page. Focus-driven scrolls stop

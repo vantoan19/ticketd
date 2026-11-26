@@ -1,10 +1,9 @@
 import { SourceIcon } from "../sources/SourceIcon";
 import { emptyCopy } from "@/lib/empty-copy";
-import { Fragment, useEffect, useId, useMemo, useRef } from "react";
-import { ChevronRight, Search, SearchX, type LucideIcon } from "lucide-react";
+import { Fragment, useId, useMemo } from "react";
+import { ChevronRight, SearchX, type LucideIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { EmptyState } from "@/components/ui/empty-state";
-import { Input } from "@/components/ui/input";
 import {
   SEARCH_PAGE,
   SETTINGS_SECTIONS,
@@ -24,9 +23,6 @@ import { useSettingsState } from "@/features/settings/use-settings-state";
 import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 import { SettingsList } from "@/features/settings/layout/SettingsList";
 import "@/features/settings/pages/search-page.css";
-
-/** The id ⌘F and Ctrl+F focus when Settings is already on this page. */
-export const SEARCH_INPUT_ID = "settings-search-input";
 
 interface PageInfo {
   id: SettingsPageId;
@@ -51,15 +47,15 @@ function Highlighted({ text, query }: { text: string; query: string }) {
   );
 }
 
-/** Search every setting by name, description or related word. */
+/**
+ * Search every setting by name, description or related word. The query is
+ * typed in the field above the nav's groups; this page shows what it finds.
+ */
 export function SearchPage() {
-  const { query, setQuery, openPage } = useSettingsState();
+  const { query, openPage } = useSettingsState();
   const { entries: sources } = useSources();
   const chat = useChatFeature();
-  const input = useRef<HTMLInputElement>(null);
   const statusId = useId();
-  // Search opens to its input, not its title.
-  useEffect(() => input.current?.focus({ preventScroll: true }), []);
 
   const { pages, entries } = useMemo(() => {
     const pages = new Map<SettingsPageId, PageInfo>(
@@ -114,7 +110,7 @@ export function SearchPage() {
   const firstSource = sources[0];
   const shortcuts: { id: SettingsPageId; label: string }[] = [
     { id: "appearance", label: "Appearance" },
-    { id: "backups", label: "Backups" },
+    { id: "backups-export", label: "Backups & export" },
     ...(firstSource
       ? [
           {
@@ -126,23 +122,9 @@ export function SearchPage() {
   ];
 
   return (
-    <SettingsPage {...SEARCH_PAGE} header={false} focusTitle={false}>
+    // The query is typed in the nav's field, which keeps the focus.
+    <SettingsPage {...SEARCH_PAGE} focusTitle={false}>
       <div className="settings-search">
-        <h1 className="settings-search-title">
-          <label htmlFor={SEARCH_INPUT_ID}>Search settings</label>
-        </h1>
-        <div className="settings-search-field">
-          <Search size={16} aria-hidden="true" />
-          <Input
-            ref={input}
-            id={SEARCH_INPUT_ID}
-            type="search"
-            aria-describedby={statusId}
-            placeholder="Try theme, backup or keyboard"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
         {/* With no match the empty state says it; the status stays for screen readers. */}
         <p
           className={

@@ -86,7 +86,7 @@ test("a missing file is flagged in the library and its preview offers a real way
   fireEvent.click(
     within(pane).getByRole("button", { name: "Restore from a backup…" }),
   );
-  expect(openSettings).toHaveBeenCalledWith("backups");
+  expect(openSettings).toHaveBeenCalledWith("backups-export");
 });
 
 test("plain text previews as text, and other formats say so once without Retry", async () => {
@@ -146,6 +146,6 @@ test("an upload over the limit says its size and the limit, and offers Change li
   expect(within(row).queryByRole("button", { name: "Retry" })).toBeNull();
   expect(within(row).getByRole("button", { name: "Remove" })).toBeTruthy();
   fireEvent.click(within(row).getByRole("button", { name: "Change limit" }));
-  expect(openSettings).toHaveBeenCalledWith("attachments");
+  expect(openSettings).toHaveBeenCalledWith("files");
   await waitFor(() => expect(changed).toHaveBeenCalledWith(false));
 });

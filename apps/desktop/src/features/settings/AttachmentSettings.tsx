@@ -1,4 +1,5 @@
 import { SettingsLink } from "@/features/settings/layout/SettingsLink";
+import { DriveSetupNotice } from "@/features/attachments/DriveSetupNotice";
 import { useEffect, useRef, useState } from "react";
 import { Cloud, HardDrive } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -10,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   attachments,
   type AttachmentUploadDestination,
+  type DriveConfiguration,
 } from "@/lib/api/attachments";
 import {
   describeFailure,
@@ -17,7 +19,6 @@ import {
 } from "@/lib/api/describe-failure";
 import { SettingsSection } from "./layout/SettingsSection";
 import { SettingsList, SettingsRow } from "./layout/SettingsList";
-import { useSettingsState } from "./use-settings-state";
 import "./pages/attachments.css";
 
 const MIB = 1048576;
@@ -179,14 +180,16 @@ function UploadLimitSettings() {
 }
 
 function UploadDestinationSettings() {
-  const { openPage } = useSettingsState();
   const [destination, setDestination] =
     useState<AttachmentUploadDestination | null>(null);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const [busy, setBusy] = useState(false);
   // Unknown (null) until Drive's configuration is read; only a definite "no"
   // disables the Drive tile.
-  const [configured, setConfigured] = useState<boolean | null>(null);
+  const [configuration, setConfiguration] = useState<DriveConfiguration | null>(
+    null,
+  );
+  const configured = configuration ? configuration.configured : null;
   const selection = useRef<string | null>(null);
   const active = useRef(true);
   const [reload, setReload] = useState(0);
@@ -219,7 +222,7 @@ function UploadDestinationSettings() {
     void attachments
       .driveConfiguration()
       .then((config) => {
-        if (current) setConfigured(config.configured);
+        if (current) setConfiguration(config);
       })
       .catch(() => {});
     return () => {
@@ -234,7 +237,7 @@ function UploadDestinationSettings() {
       if (kind === "google_drive") {
         const config = await attachments.driveConfiguration();
         if (!active.current) return;
-        setConfigured(config.configured);
+        setConfiguration(config);
         if (!config.configured) return;
         const operation = crypto.randomUUID();
         selection.current = operation;
@@ -290,14 +293,10 @@ function UploadDestinationSettings() {
           )}
         </ChoiceTile>
       </ChoiceTiles>
-      {driveUnavailable && (
-        <p className="attachments-note">
-          <SettingsLink onClick={() => openPage("google-drive")}>
-            Set up Google Drive
-          </SettingsLink>{" "}
-          to store new uploads there.
-        </p>
+      {driveUnavailable && configuration && (
+        <DriveSetupNotice configuration={configuration} />
       )}
+
       {destination?.kind === "google_drive" && (
         <div className="attachments-folder">
           <SettingsList>

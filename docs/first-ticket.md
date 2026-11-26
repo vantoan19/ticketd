@@ -37,7 +37,7 @@ In this example, **T-IR1** at the top of the right pane is the reference to copy
 Under **Activity**, **You** and **docs-agent** identify who posted each update.
 
 If the agent cannot find your ticket, have it run `ticketd workspace` in its
-own terminal. Compare the path with the workspace under **Settings → Location** and
+own terminal. Compare the path with the workspace under **Settings → Backups & export** and
 check that both run as the same OS user. [CLI setup](install.md#command-line-tool)
 
 To try the same exchange yourself in a terminal, follow the
