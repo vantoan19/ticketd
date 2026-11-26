@@ -1,8 +1,9 @@
 use ticketd_core::{
     Automation, AutomationAgentSettings, AutomationDefinition, AutomationRun, AutomationRunScope,
-    AutomationRunStatus, AutomationRunSummary, AutomationStepStatus, ChatLink, ChatLinkKind,
-    ChatListFilter, Check, Condition, NewChat, NotifyTarget, RunAction, RunAnswer, RunEnd,
-    RunningAutomationRuns, Step, StepAction, StepOutcome, Ticket, Trigger, Workspace,
+    AutomationRunStatus, AutomationRunSummary, AutomationStepStatus, ChatInputChange, ChatLink,
+    ChatLinkKind, ChatListFilter, ChatSubmissionIntent, Check, Condition, NewChat, NotifyTarget,
+    RunAction, RunAnswer, RunEnd, RunningAutomationRuns, Step, StepAction, StepOutcome, Ticket,
+    Trigger, Workspace,
 };
 
 const TAG: &str = "ready-for-triage";
@@ -1189,6 +1190,51 @@ fn replying_in_the_chat_of_a_running_run_ends_it_taken_over_with_the_rest_not_ru
     );
     // The ticket is free for a new run of the Automation.
     workspace.run_automation_again(&run.id).unwrap();
+}
+
+#[test]
+fn a_linked_takeover_reply_keeps_its_context_requirement_through_backup_and_restore() {
+    let (dir, mut workspace) = workspace();
+    triage(&mut workspace);
+    let (run, chat) = on_agent_step(&mut workspace);
+    let ticket = workspace.create_ticket("Linked context").unwrap();
+    let change = ChatInputChange::Link(vec![ChatLink {
+        kind: ChatLinkKind::Ticket,
+        id: ticket.id,
+    }]);
+    let (receipt, ended) = workspace
+        .save_automation_chat_reply_with_change(None, &chat, "Take over", &[], Some(&change))
+        .unwrap();
+    let ended = ended.unwrap();
+    assert_eq!(ended.id, run.id);
+    assert_eq!(ended.status, AutomationRunStatus::TakenOver);
+    let saved = receipt.into_message().unwrap();
+    assert!(saved.queued && saved.requires_link_context);
+
+    let backup = dir.path().join("backup.sqlite3");
+    assert!(workspace.backup(&backup).unwrap());
+    let target = dir.path().join("restored.sqlite3");
+    Workspace::restore(&target, &backup).unwrap();
+    let mut restored = Workspace::open(&target).unwrap();
+    assert_eq!(
+        restored.chat_queue(&chat).unwrap().as_slice(),
+        std::slice::from_ref(&saved)
+    );
+
+    restored
+        .record_chat_queue_submission(&chat, &saved.id, "attempt", ChatSubmissionIntent::NewTurn)
+        .unwrap();
+    assert!(restored.chat_queue(&chat).unwrap().is_empty());
+    assert!(
+        restored
+            .chat_input_requires_link_context(&chat, &saved.id)
+            .unwrap()
+    );
+    assert!(
+        restored
+            .chat_input_requires_link_context("other-chat", &saved.id)
+            .is_err()
+    );
 }
 
 #[test]

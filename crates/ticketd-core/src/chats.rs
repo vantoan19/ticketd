@@ -420,6 +420,9 @@ pub struct ChatMessage {
     /// Kept for draft recovery and excluded from dispatch while the edit is held.
     #[serde(default)]
     pub editing: bool,
+    /// User input requested links and needs their context before dispatch.
+    #[serde(default)]
+    pub requires_link_context: bool,
     pub attempts: Vec<ChatSubmissionAttempt>,
     pub created_at: String,
 }
@@ -970,7 +973,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
 fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>, Error> {
     let message = connection
         .query_row(
-            "SELECT id, position, role, text, complete, turn_id, created_at, editing FROM chat_messages WHERE id = ?1",
+            "SELECT id, position, role, text, complete, turn_id, created_at, editing, requires_link_context FROM chat_messages WHERE id = ?1",
             [id],
             |row| {
                 Ok(ChatMessage {
@@ -984,6 +987,7 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
                     created_at: row.get(6)?,
                     queued: false,
                     editing: row.get(7)?,
+                    requires_link_context: row.get(8)?,
                     attempts: Vec::new(),
                 })
             },
@@ -2703,7 +2707,8 @@ impl Workspace {
                 }
                 delete_queued_input(connection, original)?;
             }
-            let links_changed = !links.is_empty() && add_links(connection, chat_id, links)?;
+            let requires_link_context = !links.is_empty();
+            let links_changed = requires_link_context && add_links(connection, chat_id, links)?;
             let run = if matches!(source, InputSource::AutomationReply) {
                 crate::automation_runs::take_over_chat(connection, chat_id, true)?
             } else {
@@ -2712,8 +2717,8 @@ impl Workspace {
             let id = Uuid::new_v4().to_string();
             let position = log(connection, chat_id, "message", &id)?;
             connection.execute(
-                "INSERT INTO chat_messages (id, chat_id, position, role, text, complete) VALUES (?1, ?2, ?3, 'user', ?4, 1)",
-                params![id, chat_id, position, text],
+                "INSERT INTO chat_messages (id, chat_id, position, role, text, complete, requires_link_context) VALUES (?1, ?2, ?3, 'user', ?4, 1, ?5)",
+                params![id, chat_id, position, text, requires_link_context],
             )?;
             if !files.is_empty() {
                 attachments::save(connection, &id, files)?;
@@ -2938,6 +2943,17 @@ impl Workspace {
             queue.extend(read_message(&self.connection, &id)?.filter(|message| message.queued));
         }
         Ok(queue)
+    }
+
+    /// Whether saved input needs linked-record context, including input awaiting resend.
+    pub fn chat_input_requires_link_context(
+        &self,
+        chat_id: &str,
+        message_id: &str,
+    ) -> Result<bool, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            Ok(require_input(connection, chat_id, message_id)?.requires_link_context)
+        })
     }
 
     /// Record, before handing input to the harness, that it may be about to receive it.

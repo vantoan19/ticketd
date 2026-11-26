@@ -116,7 +116,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_messages",
-        "id, chat_id, position, role, text, complete, turn_id, created_at, editing",
+        "id, chat_id, position, role, text, complete, turn_id, created_at, editing, requires_link_context",
     ),
     (
         "chat_submission_attempts",

@@ -489,7 +489,9 @@ fn the_first_save_of_a_partial_legacy_edit_applies_its_links_again() {
     assert!(linked);
     assert!(workspace.chat_queue_edit_saved(&chat.id, "edit").unwrap());
     assert_eq!(workspace.chat(&chat.id).unwrap().links, edit.links);
-    assert_eq!(workspace.chat_queue(&chat.id).unwrap()[0].id, saved.id);
+    let replacement = workspace.chat_queue(&chat.id).unwrap().remove(0);
+    assert_eq!(replacement.id, saved.id);
+    assert!(replacement.requires_link_context);
 }
 
 #[test]
@@ -634,7 +636,9 @@ fn public_command_ids_with_the_old_link_prefix_do_not_collide_with_input_receipt
     let (linked, added) = workspace
         .save_chat_input_with_change(Some("before"), &chat.id, "Linked input", &[], Some(&change))
         .unwrap();
+    assert!(!public.requires_link_context);
     assert!(added);
+    assert!(linked.message.as_ref().unwrap().requires_link_context);
     assert_eq!(
         workspace
             .replay_chat_input_with_change("before", &chat.id, "Linked input", &[], Some(&change))
@@ -653,9 +657,11 @@ fn public_command_ids_with_the_old_link_prefix_do_not_collide_with_input_receipt
         Some(public),
     );
 
-    workspace
+    let (already_linked, added) = workspace
         .save_chat_input_with_change(Some("after"), &chat.id, "Linked input", &[], Some(&change))
         .unwrap();
+    assert!(!added);
+    assert!(already_linked.message.unwrap().requires_link_context);
     workspace
         .save_chat_input(
             Some("chat_queue_edit_links:after"),
@@ -2592,6 +2598,28 @@ fn a_format_82_workspace_gains_the_turn_ending_column_and_keeps_its_turns() {
     let turn = last_turn(&workspace, &chat);
     assert_eq!(turn.state, ChatTurnState::Completed);
     assert_eq!(turn.ending, None);
+}
+
+#[test]
+fn format_102_queued_edits_keep_their_message_without_a_link_context_requirement() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    old_chat_workspace(&path, 102, "completed");
+    let db = rusqlite::Connection::open(&path).unwrap();
+    db.execute(
+        "INSERT INTO chat_messages (id, chat_id, position, role, text, complete, editing)
+         VALUES ('input', 'chat-1', 2, 'user', 'original text', 1, 1)",
+        [],
+    )
+    .unwrap();
+    drop(db);
+
+    let workspace = Workspace::open(&path).unwrap();
+    let queue = workspace.chat_queue("chat-1").unwrap();
+    assert_eq!(queue.len(), 1);
+    assert_eq!(queue[0].text, "original text");
+    assert!(queue[0].editing);
+    assert!(!queue[0].requires_link_context);
 }
 
 #[test]

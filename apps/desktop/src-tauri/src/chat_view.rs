@@ -718,6 +718,7 @@ impl Tracker {
             turn_id: Some(turn_id.to_owned()),
             queued: false,
             editing: false,
+            requires_link_context: false,
             attempts: Vec::new(),
             created_at: String::new(),
         };
