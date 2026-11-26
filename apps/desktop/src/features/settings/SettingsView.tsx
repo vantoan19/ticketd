@@ -47,7 +47,6 @@ function isFindShortcut(event: KeyboardEvent) {
 export function SettingsView({
   onRestore,
   onWorkspaceReplaced,
-  onOpenInbox,
   onSourcesChanged,
   onSelect,
   projectSourceSetup,
@@ -64,7 +63,6 @@ export function SettingsView({
   onRestore: () => Promise<void>;
   /** Called as soon as the replacement succeeds, before refreshing views. */
   onWorkspaceReplaced?: (() => void) | undefined;
-  onOpenInbox: () => void;
   onSourcesChanged?: (added?: SourceEntry) => Promise<void>;
   projectSourceSetup?: ProjectSourceSetup;
   onProjectSourceSaved?: (connection: string) => void;
@@ -114,7 +112,7 @@ export function SettingsView({
       inert={leaving || undefined}
     >
       {selected === "appearance" && <AppearancePage />}
-      {selected === "attention" && <AttentionPage onOpenInbox={onOpenInbox} />}
+      {selected === "attention" && <AttentionPage />}
       {selected === "files" && <FilesPage key={restores} />}
       {selected === "backups-export" && (
         <BackupsExportPage

@@ -9,7 +9,7 @@
 
 ## Rust
 
-- Format with rustfmt and run Clippy with warnings denied. Forbid unsafe code in application crates; do not enable every pedantic lint by default.
+- Format with rustfmt and run Clippy with warnings denied. Forbid unsafe code in application crates (the one exception is `ticketd-macos-notifications`, which reads Apple's notification settings through a callback pointer; keep its `unsafe` to those reads); do not enable every pedantic lint by default.
 - Return `Result` for expected failures. Avoid `unwrap`, `expect`, and explicit panics in production paths; tests may use them for clear setup and assertions.
 - Use exhaustive matches for domain enums. Prefer owned values and borrowing that keep lifetimes simple; introduce shared mutable state only when required.
 - Keep SQL and Tauri out of domain calculations. Use parameterized SQL and short transactions; test persistence through the core interface.

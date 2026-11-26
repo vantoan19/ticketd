@@ -13,10 +13,9 @@ const preferencesSchema = z.object({
   sidebarCollapsed: z.boolean().catch(false),
   ticketRows: z.enum(["detailed", "simple"]).catch("simple"),
   followCreated: z.boolean().catch(true),
-  notifyReminders: z.boolean().catch(false),
   /** The Experimental Chat switch. The desktop backend is told at startup. */
   chat: z.boolean().catch(false),
-  /** Settings > Agents > Notify me about Chats. On by default. */
+  /** Settings > Attention > Chat notifications. On by default; it takes effect once notifications are allowed. */
   notifyChats: z.boolean().catch(true),
   /** What Documents opens on: the work in progress, or the Documents opened lately. */
   documentsView: z.enum(["current", "recent"]).catch("current"),
@@ -39,7 +38,6 @@ const DEFAULTS: Preferences = {
   sidebarCollapsed: false,
   ticketRows: "simple",
   followCreated: true,
-  notifyReminders: false,
   chat: false,
   notifyChats: true,
   documentsView: "current",

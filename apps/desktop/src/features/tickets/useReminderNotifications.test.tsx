@@ -2,7 +2,7 @@
 import { act, cleanup, renderHook } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { setPreference } from "@/lib/preferences";
+import { resetNotificationPermission } from "@/lib/notification-permission";
 import { notificationClient } from "@/lib/api/notifications";
 import { WorkspaceChangeProvider } from "@/lib/workspace-change";
 import { useReminderNotifications } from "./useReminderNotifications";
@@ -11,8 +11,7 @@ const bridge = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => bridge);
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
-    permitted: vi.fn(),
-    requestPermission: vi.fn(),
+    permission: vi.fn(),
     notify: vi.fn(),
     onClick: vi.fn(),
   },
@@ -33,12 +32,13 @@ const entry = (id: number, kind: string) => ({
 let inbox: ReturnType<typeof entry>[] = [];
 let click: ((reference: string) => void) | null = null;
 const stopListening = vi.fn();
+const allowed = { state: "allowed", reported: true, settings: true } as const;
 
 beforeEach(() => {
   vi.useFakeTimers();
   inbox = [entry(5, "reminder")];
   bridge.invoke.mockImplementation(async () => inbox);
-  vi.mocked(notificationClient.permitted).mockResolvedValue(true);
+  vi.mocked(notificationClient.permission).mockResolvedValue(allowed);
   click = null;
   vi.mocked(notificationClient.onClick).mockImplementation(async (open) => {
     click = open;
@@ -50,6 +50,7 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   vi.clearAllMocks();
+  resetNotificationPermission();
   localStorage.clear();
 });
 
@@ -75,7 +76,6 @@ async function tick() {
 }
 
 test("a reminder that becomes due while open notifies once; earlier ones stay in the inbox", async () => {
-  setPreference("notifyReminders", true);
   const open = vi.fn();
   render(() => useReminderNotifications(open));
   await act(async () => {});
@@ -93,7 +93,6 @@ test("a reminder that becomes due while open notifies once; earlier ones stay in
 });
 
 test("clicking a notification opens its ticket, and regaining focus does not", async () => {
-  setPreference("notifyReminders", true);
   const open = vi.fn();
   render(() => useReminderNotifications(open));
   await act(async () => {});
@@ -112,8 +111,7 @@ test("clicking a notification opens its ticket, and regaining focus does not", a
   expect(open).toHaveBeenCalledWith("T-KQ7");
 });
 
-test("the click listener exists before any notification and stops with the preference", async () => {
-  setPreference("notifyReminders", true);
+test("the click listener exists before any notification and stops when the hook unmounts", async () => {
   const view = render(() => useReminderNotifications(() => {}));
   await act(async () => {});
   expect(notificationClient.onClick).toHaveBeenCalledTimes(1);
@@ -122,7 +120,6 @@ test("the click listener exists before any notification and stops with the prefe
 });
 
 test("reminders still notify after a restore replaced the inbox with lower ids", async () => {
-  setPreference("notifyReminders", true);
   inbox = [entry(40, "reminder")];
   render(() => useReminderNotifications(() => {}));
   await act(async () => {});
@@ -139,7 +136,6 @@ test("reminders still notify after a restore replaced the inbox with lower ids",
 });
 
 test("no change, no inbox read: the hook does not poll", async () => {
-  setPreference("notifyReminders", true);
   render(() => useReminderNotifications(() => {}));
   await act(async () => {});
   bridge.invoke.mockClear();
@@ -149,12 +145,38 @@ test("no change, no inbox read: the hook does not poll", async () => {
   expect(bridge.invoke).not.toHaveBeenCalled();
 });
 
-test("nothing is shown while the preference is off", async () => {
-  const open = vi.fn();
-  render(() => useReminderNotifications(open));
-  inbox = [entry(9, "reminder")];
+test("nothing is shown while the system does not allow notifications", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue({
+    state: "blocked",
+    reported: true,
+    settings: true,
+  });
+  render(() => useReminderNotifications(() => {}));
+  await act(async () => {});
+  inbox = [entry(9, "reminder"), entry(5, "reminder")];
   await tick();
   await tick();
-  expect(bridge.invoke).not.toHaveBeenCalled();
   expect(notificationClient.notify).not.toHaveBeenCalled();
+});
+
+test("a reminder needs no switch: it notifies as soon as the system allows it", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue({
+    state: "not_asked",
+    reported: true,
+    settings: true,
+  });
+  render(() => useReminderNotifications(() => {}));
+  await act(async () => {});
+  inbox = [entry(9, "reminder"), entry(5, "reminder")];
+  await tick();
+  expect(notificationClient.notify).not.toHaveBeenCalled();
+  vi.mocked(notificationClient.permission).mockResolvedValue(allowed);
+  inbox = [entry(10, "reminder"), entry(9, "reminder"), entry(5, "reminder")];
+  await tick();
+  expect(notificationClient.notify).toHaveBeenCalledTimes(1);
+  expect(notificationClient.notify).toHaveBeenCalledWith(
+    "Ticket 10",
+    "T-KQ10: reminder is due",
+    "T-KQ10",
+  );
 });
