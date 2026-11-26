@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DocumentMeta } from "./DocumentMeta";
 import { DocumentDetails } from "./DocumentDetails";
 import { formatDateTime } from "@/lib/format";
@@ -10,9 +10,27 @@ window.ResizeObserver ??= class {
   unobserve() {}
   disconnect() {}
 };
+// "Updated Nov 1" must not depend on today's date, the machine's locale or its time zone.
+const zone = process.env.TZ;
+beforeEach(() => {
+  process.env.TZ = "UTC";
+  vi.useFakeTimers({ toFake: ["Date"] });
+  vi.setSystemTime(new Date("2026-11-20T12:00:00Z"));
+  const inEnglish = Date.prototype.toLocaleDateString;
+  vi.spyOn(Date.prototype, "toLocaleDateString").mockImplementation(function (
+    this: Date,
+    _locale,
+    options,
+  ) {
+    return inEnglish.call(this, "en-US", options);
+  });
+});
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.useRealTimers();
+  if (zone === undefined) delete process.env.TZ;
+  else process.env.TZ = zone;
 });
 
 const props = {
