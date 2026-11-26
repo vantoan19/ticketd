@@ -4,7 +4,11 @@ import type {
   RecordChange,
   TranscriptItem,
 } from "@/features/chats/client";
-import { chatState, createMockChatClient } from "@/features/chats/mock-client";
+import {
+  chatState,
+  createMockChatClient,
+  HARNESS_OPTIONS,
+} from "@/features/chats/mock-client";
 
 const at = "2026-11-10T10:00:00Z";
 const approval: TranscriptItem = {
@@ -213,4 +217,14 @@ test("an idle row says the first sentence of its latest turn's records row, with
   expect(line("c2")).toBe("Posted an update on T-13");
   // Todo -> In progress -> In review, with an update between: the net move leads.
   expect(line("c3")).toBe("Moved T-12 to In review");
+});
+
+test("NAV-03: every permission mode says what it can touch, in one sentence", () => {
+  for (const harness of HARNESS_OPTIONS) {
+    for (const mode of harness.permission?.options ?? []) {
+      expect(mode.description, `${harness.harness_id} ${mode.label}`).toMatch(
+        /^[^.]+\.$/,
+      );
+    }
+  }
 });

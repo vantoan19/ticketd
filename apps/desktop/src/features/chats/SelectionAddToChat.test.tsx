@@ -176,3 +176,37 @@ test("LIVE-19: ⌘L with nothing selected says to select text first", async () =
     );
   });
 });
+
+test("REG-01: a working Chat's menu row keeps its spinner", async () => {
+  const client = createMockChatClient({
+    enabled: true,
+    chats: [
+      {
+        chat: chatState({ id: "busy", title: "Busy", activity: "working" }),
+        updated_at: "2026-11-10T09:50:00Z",
+      },
+      {
+        chat: chatState({ id: "quiet", title: "Quiet" }),
+        updated_at: "2026-11-10T09:00:00Z",
+      },
+    ],
+  });
+  render(
+    <ChatClientContext value={client}>
+      <ChatProvider>
+        <div {...chatSource("Notes", { kind: "ticket", id: "t1" })}>
+          <p>Lock the account after five tries.</p>
+        </div>
+      </ChatProvider>
+    </ChatClientContext>,
+  );
+  await waitFor(() => expect(client.getEnabled()).resolves.toBe(true));
+  act(() => selectText(screen.getByText("Lock the account after five tries.")));
+  fireEvent.keyDown(document, { key: "l", metaKey: true });
+  await screen.findAllByRole("menuitem");
+  const row = (name: RegExp) => screen.getByRole("menuitem", { name });
+  await waitFor(() =>
+    expect(row(/^Busy/).querySelector(".chat-spin")).not.toBeNull(),
+  );
+  expect(row(/^Quiet/).querySelector(".chat-spin")).toBeNull();
+});
