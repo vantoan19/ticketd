@@ -468,6 +468,11 @@ impl HostLifecycle {
         self.retired_permission_runtimes().contains_key(chat_id)
     }
 
+    pub(crate) fn has_runtime_cleanup(&self, chat_id: &str) -> bool {
+        // A late open retires its handle before releasing the pending-open hold.
+        self.has_pending_open_cleanup(chat_id) || self.has_retired_permission_runtime(chat_id)
+    }
+
     pub(crate) fn retire_runtime(
         &self,
         chat_id: &str,
@@ -823,7 +828,6 @@ impl ChatHost {
             if let Some(result) = result {
                 closed |= step == chat_id;
                 unconfirmed |= result.unconfirmed.is_some();
-                self.closing_agents().remove(step);
             }
         }
         (closed, unconfirmed)
@@ -859,13 +863,23 @@ impl ChatHost {
         {
             let _gate = self.begin_take_over(chat_id)?;
             let run = self.workspace()?.take_over_automation_run(chat_id, false)?;
-            if let Some(run) = run
-                && self.finish_take_over(chat_id, run).await.0
-            {
-                return Ok(());
+            if let Some(run) = run {
+                let (closed, unconfirmed) = self.finish_take_over(chat_id, run).await;
+                if unconfirmed {
+                    return Err(HostError::PermissionRestartCleanupUnconfirmed);
+                }
+                if closed {
+                    return Ok(());
+                }
             }
         }
-        self.ask(chat_id, Command::Stop).await
+        self.ask(chat_id, Command::Stop).await?;
+        if self.closing_agents().contains_key(chat_id)
+            && self.inner.lifecycle.has_runtime_cleanup(chat_id)
+        {
+            return Err(HostError::PermissionRestartCleanupUnconfirmed);
+        }
+        Ok(())
     }
 
     /// Closes the agents an Automation run had working in `chat_ids`, because ticketd
@@ -1108,14 +1122,32 @@ impl ChatHost {
             }
         }
         for (chat_id, mut done) in closing {
-            let reason = match done.wait_for(Option::is_some).await {
+            let reported = match done.wait_for(Option::is_some).await {
                 Ok(closed) => closed
                     .as_ref()
                     .and_then(|closed| closed.unconfirmed.clone()),
-                Err(_) => Some("the Automation cleanup did not report completion".to_owned()),
+                Err(_) => {
+                    unconfirmed.push(UnconfirmedCleanup {
+                        chat_id,
+                        reason: "the Automation cleanup did not report completion".to_owned(),
+                    });
+                    continue;
+                }
             };
-            if let Some(reason) = reason {
-                unconfirmed.push(UnconfirmedCleanup { chat_id, reason });
+            if let Some(reason) = reported {
+                if self.inner.lifecycle.has_runtime_cleanup(&chat_id) {
+                    if !unconfirmed.iter().any(|warning| warning.chat_id == chat_id) {
+                        unconfirmed.push(UnconfirmedCleanup { chat_id, reason });
+                    }
+                } else {
+                    let mut closing = self.closing_agents();
+                    if closing
+                        .get(&chat_id)
+                        .is_some_and(|receipt| receipt.same_channel(&done))
+                    {
+                        closing.remove(&chat_id);
+                    }
+                }
             }
         }
         for (_, mut done) in taking_over {

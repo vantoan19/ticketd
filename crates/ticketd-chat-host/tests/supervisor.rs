@@ -1058,6 +1058,122 @@ async fn automation_dispatches_its_prompt_without_draining_older_ordinary_input(
 }
 
 #[tokio::test(start_paused = true)]
+async fn an_unconfirmed_automation_send_takeover_remains_in_shutdown_reports() {
+    automation_takeover_reports_unconfirmed_cleanup(true).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_automation_stop_takeover_is_reported() {
+    automation_takeover_reports_unconfirmed_cleanup(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_unconfirmed_automation_open_is_reported_until_late_close_finishes() {
+    let f = Fixture::new(FakeAdapter::codex());
+    let open = f.fake.hold_next_open();
+    let (chat_id, unattended) = f.automation_chat();
+    let run = tokio::spawn({
+        let host = f.host.clone();
+        let chat_id = chat_id.clone();
+        async move {
+            host.run_unattended(
+                &chat_id,
+                "Agent Prompt",
+                unattended,
+                Duration::from_secs(60),
+            )
+            .await
+        }
+    });
+    settle().await;
+    assert_eq!(
+        f.host.live()[&chat_id].opening,
+        Some(ChatSessionOrigin::New)
+    );
+    f.host
+        .send(&chat_id, None, "Person's reply", SendMode::Auto)
+        .await
+        .unwrap();
+    assert!(matches!(run.await.unwrap(), Ok(TurnEnd::TakenOver)));
+    assert!(f.fake.opens().is_empty());
+    assert_eq!(
+        f.host.stop_all(StopReason::Quit).await,
+        [UnconfirmedCleanup {
+            chat_id,
+            reason: "the harness was still starting".to_owned(),
+        }]
+    );
+
+    open.send(()).unwrap();
+    settle().await;
+    assert!(matches!(f.fake.written().as_slice(), [Written::Close(_)]));
+    assert!(f.host.stop_all(StopReason::Quit).await.is_empty());
+}
+
+async fn automation_takeover_reports_unconfirmed_cleanup(send: bool) {
+    let f = Fixture::new(FakeAdapter::codex());
+    let (chat_id, unattended) = f.automation_chat();
+    let run = tokio::spawn({
+        let host = f.host.clone();
+        let chat_id = chat_id.clone();
+        async move {
+            host.run_unattended(
+                &chat_id,
+                "Agent Prompt",
+                unattended,
+                Duration::from_secs(60),
+            )
+            .await
+        }
+    });
+    settle().await;
+    assert_eq!(f.submits().len(), 1);
+    let reason = "the old process did not exit".to_owned();
+    f.fake.set_close_outcome(CloseOutcome::Unconfirmed {
+        reason: reason.clone(),
+    });
+    if send {
+        let saved = f
+            .host
+            .send(&chat_id, None, "Person's reply", SendMode::Auto)
+            .await
+            .unwrap();
+        assert_eq!(f.core().chat_queue(&chat_id).unwrap()[0].id, saved.id);
+    } else {
+        assert!(matches!(
+            f.host.stop(&chat_id).await,
+            Err(HostError::PermissionRestartCleanupUnconfirmed)
+        ));
+        assert!(matches!(
+            f.host.stop(&chat_id).await,
+            Err(HostError::PermissionRestartCleanupUnconfirmed)
+        ));
+    }
+    assert!(matches!(run.await.unwrap(), Ok(TurnEnd::TakenOver)));
+    assert_eq!(f.fake.opens().len(), 1);
+    // Even when an ordinary supervisor and the detached close both observe
+    // the same unconfirmed exit, they report it only once.
+    assert!(matches!(
+        f.host.resume_queue(&chat_id).await,
+        Err(HostError::PermissionRestartCleanupUnconfirmed)
+    ));
+    for _ in 0..2 {
+        assert_eq!(
+            f.host.stop_all(StopReason::Quit).await,
+            [UnconfirmedCleanup {
+                chat_id: chat_id.clone(),
+                reason: reason.clone()
+            }]
+        );
+    }
+    f.fake
+        .set_close_outcome(CloseOutcome::Confirmed { exit_code: Some(0) });
+    f.host.resume(&chat_id, ResumeMode::Native).await.unwrap();
+    assert_eq!(f.fake.opens().len(), 2);
+    assert!(f.host.stop_all(StopReason::Quit).await.is_empty());
+}
+
+#[tokio::test(start_paused = true)]
 async fn a_saved_takeover_reply_dispatches_after_its_queue_read_recovers() {
     saved_takeover_reply_retries_failed_read(1).await;
 }
@@ -1065,6 +1181,63 @@ async fn a_saved_takeover_reply_dispatches_after_its_queue_read_recovers() {
 #[tokio::test(start_paused = true)]
 async fn a_saved_takeover_reply_dispatches_after_its_chat_read_recovers() {
     saved_takeover_reply_retries_failed_read(2).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_live_queue_retries_a_transient_read_without_another_event() {
+    live_queue_retries_one_failed_read(false).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_live_queue_read_retry_obeys_a_new_pause() {
+    live_queue_retries_one_failed_read(true).await;
+}
+
+async fn live_queue_retries_one_failed_read(pause: bool) {
+    let mut f = Fixture::new(FakeAdapter::codex());
+    let path = f.path.clone();
+    let chat_id = f.chat.id.clone();
+    let waiting = Arc::new(AtomicBool::new(false));
+    let reads_after_end = Arc::new(AtomicUsize::new(0));
+    let reads = reads_after_end.clone();
+    let armed = waiting.clone();
+    f.host = ChatHost::new(
+        Arc::new(move || {
+            let core = WorkspaceSession::for_file(&path)?.workspace()?;
+            if armed.load(Ordering::SeqCst)
+                && core.chat(&chat_id)?.active_turn.is_none()
+                && reads.fetch_add(1, Ordering::SeqCst) == 1
+            {
+                // The first read sees that the live Chat is unpaused. Fail its
+                // next read as pump tries to select a saved queued message.
+                return Err(Error::NoDataDirectory);
+            }
+            Ok(core)
+        }),
+        vec![Arc::new(f.fake.clone())],
+    )
+    .unwrap();
+    f.send("first").await;
+    let queued = f.queue("drain this").await;
+    waiting.store(true, Ordering::SeqCst);
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    assert_eq!(reads_after_end.load(Ordering::SeqCst), 2);
+    assert!(f.message(&queued.id).attempts.is_empty());
+    if pause {
+        f.core().set_chat_queue_paused(&f.chat.id, true).unwrap();
+    }
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    settle().await;
+    assert!(reads_after_end.load(Ordering::SeqCst) > 2);
+    if pause {
+        assert_eq!(f.submits().len(), 1);
+        assert_eq!(f.queued(), ["drain this"]);
+        assert!(f.message(&queued.id).attempts.is_empty());
+    } else {
+        assert_eq!(f.submits().len(), 2);
+        assert_eq!(f.submits()[1].text, "drain this");
+        assert_eq!(f.message(&queued.id).attempts.len(), 1);
+    }
 }
 
 async fn saved_takeover_reply_retries_failed_read(fail_read: usize) {
@@ -2028,6 +2201,20 @@ async fn a_notice_the_harness_repeats_is_kept_once_per_session() {
 
 #[tokio::test(start_paused = true)]
 async fn an_ordinary_linked_attachment_reaches_a_live_session_with_its_context() {
+    linked_attachment_reaches_the_session_with_context(None).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_auto_linked_attachment_waits_for_a_new_turn_with_its_context() {
+    linked_attachment_reaches_the_session_with_context(Some(SendMode::Auto)).await;
+}
+
+#[tokio::test(start_paused = true)]
+async fn send_now_defers_a_linked_attachment_and_leaves_the_paused_queue_alone() {
+    linked_attachment_reaches_the_session_with_context(Some(SendMode::Queue)).await;
+}
+
+async fn linked_attachment_reaches_the_session_with_context(active_mode: Option<SendMode>) {
     let mut f = Fixture::new(FakeAdapter::codex());
     let path = f.path.clone();
     let context_path = path.clone();
@@ -2042,8 +2229,14 @@ async fn an_ordinary_linked_attachment_reaches_a_live_session_with_its_context()
         })),
     )
     .unwrap();
+    if active_mode.is_some() {
+        f.host.stop(&f.chat.id).await.unwrap();
+        f.queue("stay paused").await;
+    }
     f.send("first").await;
-    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    if active_mode.is_none() {
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    }
 
     let link = ChatLink {
         kind: ChatLinkKind::Ticket,
@@ -2052,11 +2245,12 @@ async fn an_ordinary_linked_attachment_reaches_a_live_session_with_its_context()
     let file =
         ChatAttachmentContent::from_data_url("notes.txt", "data:text/plain;base64,bm90ZXM=", 100)
             .unwrap();
-    f.host
+    let attached = f
+        .host
         .send_linking(
             &f.chat.id,
             "Attached",
-            SendMode::Auto,
+            active_mode.unwrap_or(SendMode::Auto),
             vec![file.clone()],
             vec![link],
         )
@@ -2064,10 +2258,30 @@ async fn an_ordinary_linked_attachment_reaches_a_live_session_with_its_context()
         .unwrap();
     settle().await;
 
+    if active_mode == Some(SendMode::Queue) {
+        f.host
+            .send_queued_now(&f.chat.id, &attached.id)
+            .await
+            .unwrap();
+    }
+    let new_turn = if active_mode.is_some() {
+        f.send("ordinary text").await;
+        assert_eq!(f.submits().len(), 2);
+        assert_eq!(f.submits()[1].text, "ordinary text");
+        assert!(matches!(f.submits()[1].kind, SubmissionKind::Steer { .. }));
+        assert!(f.message(&attached.id).attempts.is_empty());
+        f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+        assert_eq!(f.queued(), ["stay paused"]);
+        assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+        2
+    } else {
+        1
+    };
     assert_eq!(f.fake.opens().len(), 1);
     let submissions = f.submits();
-    assert_eq!(submissions[1].text, "linked records: 1\n\nAttached");
-    assert_eq!(submissions[1].attachments, [file]);
+    assert_eq!(submissions[new_turn].kind, SubmissionKind::StartTurn);
+    assert_eq!(submissions[new_turn].text, "linked records: 1\n\nAttached");
+    assert_eq!(submissions[new_turn].attachments, [file]);
 }
 
 /// L4: links changed after the session started reach the agent with the next new turn,

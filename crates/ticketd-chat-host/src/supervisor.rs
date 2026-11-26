@@ -296,6 +296,8 @@ pub(crate) struct Supervisor {
     active: Option<ActiveTurn>,
     /// Input the person sent for immediate dispatch, ahead of the queue.
     direct: VecDeque<(String, DirectSend)>,
+    /// Inputs that just added links. A new turn can carry and record their context.
+    linked_inputs: HashSet<String>,
     /// Prepared edits keep their saved rows. The automatic queue waits for the
     /// composer, while an explicit Send now or Resume may still release them.
     prepared_queue_edits: HashSet<String>,
@@ -442,6 +444,7 @@ impl Supervisor {
             unconfirmed_deadline: None,
             active: None,
             direct: VecDeque::new(),
+            linked_inputs: HashSet::new(),
             prepared_queue_edits: HashSet::new(),
             resend: None,
             preamble: None,
@@ -1111,6 +1114,11 @@ impl Supervisor {
         })?;
         if linked {
             self.refresh_context();
+            if self.context.is_some()
+                && let Some(message) = &receipt.message
+            {
+                self.linked_inputs.insert(message.id.clone());
+            }
         }
         if mode == SendMode::Auto
             && let Some(message) = &receipt.message
@@ -1130,6 +1138,10 @@ impl Supervisor {
 
     fn is_sending(&self, message_id: &str) -> bool {
         self.direct.iter().any(|(id, _)| id == message_id)
+    }
+
+    fn waits_for_new_turn(&self, id: &str, intent: DirectSend) -> bool {
+        intent == DirectSend::AfterTurn || self.linked_inputs.contains(id)
     }
 
     fn schedule_saved(&mut self, message: &ChatMessage, immediate: bool) {
@@ -1647,10 +1659,7 @@ impl Supervisor {
         reply: Option<Reply<()>>,
     ) {
         let readiness = self.lifecycle.serving().and_then(|()| {
-            // Late open cleanup retires its handle before releasing the hold.
-            if self.lifecycle.has_pending_open_cleanup(&self.chat_id)
-                || self.lifecycle.has_retired_permission_runtime(&self.chat_id)
-            {
+            if self.lifecycle.has_runtime_cleanup(&self.chat_id) {
                 return Err(HostError::PermissionRestartCleanupUnconfirmed);
             }
             Ok(())
@@ -2027,8 +2036,7 @@ impl Supervisor {
         self.queue_read_retry_at = None;
         if self.shutting_down
             || self.lifecycle.serving().is_err()
-            || self.lifecycle.has_pending_open_cleanup(&self.chat_id)
-            || self.lifecycle.has_retired_permission_runtime(&self.chat_id)
+            || self.lifecycle.has_runtime_cleanup(&self.chat_id)
             || self.storage_failed.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
@@ -2044,7 +2052,7 @@ impl Supervisor {
             && self
                 .direct
                 .iter()
-                .all(|(_, intent)| *intent == DirectSend::AfterTurn)
+                .all(|(id, intent)| self.waits_for_new_turn(id, *intent))
         {
             // During a turn only steering input can go out, so the workspace is not
             // read for every event of a streaming turn.
@@ -2055,7 +2063,10 @@ impl Supervisor {
             Ok(chat) => chat,
             Err(error) => {
                 if !is_refusal(&error)
-                    && (!self.direct.is_empty() || self.queue_started || self.resend.is_some())
+                    && (!self.direct.is_empty()
+                        || self.queue_started
+                        || self.resend.is_some()
+                        || (idle && self.runtime.is_some() && self.unattended.is_none()))
                 {
                     self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
                 }
@@ -2064,13 +2075,14 @@ impl Supervisor {
         };
         if chat.trashed {
             self.direct.clear();
+            self.linked_inputs.clear();
             self.prepared_queue_edits.clear();
             self.resend = None;
             return;
         }
         if !idle && self.steering().is_none() {
-            self.direct.retain_mut(|(_, intent)| match intent {
-                DirectSend::Auto => false,
+            self.direct.retain_mut(|(id, intent)| match intent {
+                DirectSend::Auto => self.linked_inputs.contains(id),
                 DirectSend::SendNow | DirectSend::AfterTurn => {
                     *intent = DirectSend::AfterTurn;
                     true
@@ -2083,7 +2095,7 @@ impl Supervisor {
             let direct_index = self
                 .direct
                 .iter()
-                .position(|(_, intent)| idle || *intent != DirectSend::AfterTurn);
+                .position(|(id, intent)| idle || !self.waits_for_new_turn(id, *intent));
             let message_id = if let Some(id) = &resend {
                 id.clone()
             } else if let Some(index) = direct_index {
@@ -2097,6 +2109,8 @@ impl Supervisor {
                     Ok(queue) => {
                         self.prepared_queue_edits
                             .retain(|id| queue.iter().any(|message| &message.id == id));
+                        self.linked_inputs
+                            .retain(|id| queue.iter().any(|message| &message.id == id));
                         let Some(message) = queue.into_iter().find(|message| !message.editing)
                         else {
                             self.queue_started = false;
@@ -2108,7 +2122,7 @@ impl Supervisor {
                         message.id
                     }
                     Err(error) => {
-                        if !is_refusal(&error) && self.queue_started {
+                        if !is_refusal(&error) {
                             self.queue_read_retry_at = Some(Instant::now() + QUEUE_READ_RETRY);
                         }
                         return;
@@ -2242,6 +2256,7 @@ impl Supervisor {
                 return DispatchProgress::Finished;
             }
         };
+        self.linked_inputs.remove(message_id);
         if starts_turn {
             // An earlier Stop was about an earlier submission.
             self.stop_when_turn_known = false;
