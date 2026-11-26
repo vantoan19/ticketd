@@ -2653,12 +2653,11 @@ async fn linked_attachment_reaches_the_session_with_context(active_mode: Option<
 /// kept as context like the first delivery; a resumed native session is told only
 /// when its context differs from what it was given.
 #[tokio::test(start_paused = true)]
-async fn a_linked_edit_refreshes_context_captured_during_harness_open() {
+async fn a_linked_edit_during_open_leaves_the_unrelated_first_turn_free_to_start() {
     let mut f = Fixture::new(FakeAdapter::codex());
     let path = f.path.clone();
     let context_path = path.clone();
-    let (read, first_context) = tokio::sync::oneshot::channel();
-    let first_read = std::sync::Mutex::new(Some(read));
+    let (read, mut context_reads) = tokio::sync::mpsc::unbounded_channel();
     f.host = ChatHost::with_context(
         Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
         vec![Arc::new(f.fake.clone()) as Arc<dyn HarnessAdapter>],
@@ -2666,16 +2665,23 @@ async fn a_linked_edit_refreshes_context_captured_during_harness_open() {
             let chat = Workspace::open(&context_path)
                 .and_then(|core| core.chat(chat_id))
                 .map_err(|error| error.to_string())?;
-            if let Some(read) = first_read.lock().unwrap().take() {
-                let _ = read.send(());
+            let count = chat.links.len();
+            let (release, permit) = std::sync::mpsc::channel();
+            if read.send((count, release)).is_err() || permit.recv().is_err() {
+                return Ok(None);
             }
-            Ok(Some(format!("linked records: {}", chat.links.len())))
+            Ok(Some(format!("linked records: {count}")))
         })),
     )
     .unwrap();
+    f.host.stop(&f.chat.id).await.unwrap();
     let open = f.fake.hold_next_open();
     f.send("first").await;
-    first_context.await.unwrap();
+    let (count, first_read) = tokio::time::timeout(Duration::from_secs(10), context_reads.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(count, 0);
     let original = f.queue("Original").await;
     assert!(
         f.host
@@ -2692,13 +2698,14 @@ async fn a_linked_edit_refreshes_context_captured_during_harness_open() {
             .unwrap()
             .id,
     };
-    f.host
+    let edited = f
+        .host
         .send_with_edit(
             &f.chat.id,
             Some("edit"),
             "Edited",
             SendMode::Queue,
-            Vec::new(),
+            vec![saved_file()],
             Some(ChatQueueEdit {
                 replaces: vec![original.id],
                 links: vec![link],
@@ -2706,12 +2713,29 @@ async fn a_linked_edit_refreshes_context_captured_during_harness_open() {
         )
         .await
         .unwrap();
+    first_read.send(()).unwrap();
     open.send(()).unwrap();
-    settle().await;
-    assert_eq!(
-        f.wait_for_submissions(1).await[0].text,
-        "linked records: 1\n\nfirst"
-    );
+    let (count, linked_read) = tokio::time::timeout(Duration::from_secs(10), context_reads.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(count, 1);
+
+    assert_eq!(f.wait_for_submissions(1).await[0].text, "first");
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
+    assert_eq!(f.queued(), ["Edited"]);
+    assert!(f.message(&edited.id).attempts.is_empty());
+
+    linked_read.send(()).unwrap();
+    f.emit(turn_ended(turn_1(), TurnOutcome::Completed)).await;
+    f.host
+        .send_queued_now(&f.chat.id, &edited.id)
+        .await
+        .unwrap();
+    let submissions = f.wait_for_submissions(2).await;
+    assert_eq!(submissions[1].text, "linked records: 1\n\nEdited");
+    assert_eq!(submissions[1].attachments, [saved_file()]);
+    assert!(f.core().chat(&f.chat.id).unwrap().queue_paused);
 }
 
 #[tokio::test(start_paused = true)]

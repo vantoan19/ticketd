@@ -193,7 +193,7 @@ struct Opening {
     origin: ChatSessionOrigin,
     preamble: Option<String>,
     reply: Option<Reply<()>>,
-    context_changed: bool,
+    context_changed: Option<ContextRefreshScope>,
 }
 
 struct Dispatch {
@@ -1031,7 +1031,9 @@ impl Supervisor {
             return;
         };
         if let Some(opening) = &mut self.opening {
-            opening.context_changed = true;
+            if opening.context_changed != Some(ContextRefreshScope::NextTurn) {
+                opening.context_changed = Some(scope);
+            }
             return;
         }
         let Some(runtime) = &self.runtime else {
@@ -1844,7 +1846,7 @@ impl Supervisor {
             origin,
             preamble,
             reply,
-            context_changed: false,
+            context_changed: None,
         });
         let (done, chat_id) = (self.done.clone(), chat.id.clone());
         let open_done = self.open_done.clone();
@@ -2627,8 +2629,10 @@ impl Supervisor {
                         self.schedule_context_retry();
                     }
                 }
-                if opening.context_changed && !self.closing {
-                    self.refresh_context(ContextRefreshScope::NextTurn);
+                if let Some(scope) = opening.context_changed
+                    && !self.closing
+                {
+                    self.refresh_context(scope);
                 }
                 self.problem = None;
                 Ok(())
