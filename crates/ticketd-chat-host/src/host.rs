@@ -791,10 +791,11 @@ impl ChatHost {
                             && !unconfirmed
                             && let Ok(commands) = host.sender_after_take_over(&gate)
                         {
-                            // The reply starts a normal turn before admitting later sends.
+                            // Keep later sends behind the saved reply while waiting for mailbox space.
                             let (reply, scheduled) = oneshot::channel();
-                            let sent =
-                                commands.try_send(Command::ScheduleSaved { message_id, reply });
+                            let sent = commands
+                                .send(Command::ScheduleSaved { message_id, reply })
+                                .await;
                             drop(gate);
                             if sent.is_ok() {
                                 let _ = scheduled.await;
@@ -1552,5 +1553,88 @@ mod tests {
         let _waiting = board.listen("agent");
         board.stop_listening("agent");
         assert!(board.signals().is_empty());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_saved_takeover_reply_waits_for_mailbox_space_before_admitting_later_sends() {
+        use ticketd_core::{
+            AutomationAgentSettings, AutomationDefinition, RunAction, Step, StepAction, Trigger,
+            Workspace, WorkspaceSession,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let mut workspace = Workspace::open(&path).unwrap();
+        let agent = workspace
+            .create_automation_agent(AutomationAgentSettings::default())
+            .unwrap();
+        let automation = workspace
+            .create_automation(AutomationDefinition {
+                name: "Triage".into(),
+                trigger: Some(Trigger::TagAdded {
+                    tag: "triage".into(),
+                }),
+                conditions: Vec::new(),
+                steps: vec![Step {
+                    id: "agent".into(),
+                    action: StepAction::RunAgent {
+                        agent_id: Some(agent.id),
+                        execution_folder: Some(dir.path().to_string_lossy().into_owned()),
+                        on_failure: None,
+                    },
+                }],
+            })
+            .unwrap();
+        workspace
+            .set_automation_enabled(&automation.id, true)
+            .unwrap();
+        let ticket = workspace.create_ticket("To triage").unwrap();
+        workspace.add_tag(&ticket.reference, "triage").unwrap();
+        workspace.queue_automation_runs().unwrap();
+        let run = workspace.start_automation_runs(1).unwrap().remove(0);
+        let RunAction::RunAgent(start) = workspace.advance_automation_run(&run.id, None).unwrap()
+        else {
+            panic!("the run did not start its agent");
+        };
+        drop(workspace);
+
+        let host = ChatHost::new(
+            Arc::new(move || WorkspaceSession::for_file(&path)?.workspace()),
+            Vec::new(),
+        )
+        .unwrap();
+        let chat = start.chat_id;
+        // An ordinary supervisor already has the route, before the run registers.
+        let (sender, mut mailbox) = mpsc::channel(1);
+        assert!(sender.try_send(Command::Changed).is_ok());
+        host.chats().insert(chat.clone(), sender);
+        let sending = tokio::spawn({
+            let host = host.clone();
+            let chat = chat.clone();
+            async move {
+                host.send(&chat, Some("reply"), "Take over", SendMode::Auto)
+                    .await
+            }
+        });
+        // The paused clock moves when the takeover and its detached task are both waiting.
+        tokio::time::sleep(Duration::from_millis(1)).await;
+        assert!(matches!(host.sender(&chat), Err(HostError::Working)));
+        let queue = host.workspace().unwrap().chat_queue(&chat).unwrap();
+        assert_eq!(queue.len(), 1);
+        assert_eq!(queue[0].text, "Take over");
+
+        assert!(matches!(mailbox.recv().await, Some(Command::Changed)));
+        let scheduled = tokio::time::timeout(Duration::from_secs(1), mailbox.recv())
+            .await
+            .unwrap();
+        let Some(Command::ScheduleSaved { message_id, reply }) = scheduled else {
+            panic!("the saved reply was not scheduled");
+        };
+        assert_eq!(message_id, queue[0].id);
+        assert!(host.sender(&chat).is_ok());
+        assert!(!sending.is_finished());
+        // Shutdown can cancel the scheduling acknowledgement after the input was saved.
+        drop(reply);
+        assert_eq!(sending.await.unwrap().unwrap(), queue[0]);
     }
 }
