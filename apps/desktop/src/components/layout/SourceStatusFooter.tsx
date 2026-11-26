@@ -1,3 +1,4 @@
+import { useContext, useEffect } from "react";
 import { StatusDot } from "@/components/ui/status-dot";
 import { Button } from "@/components/ui/button";
 import { Tooltip } from "@/components/ui/tooltip";
@@ -13,6 +14,12 @@ import { SyncStatusLine } from "@/features/sync/SyncStatusLine";
 import { useSyncStatus } from "@/features/sync/sync-status";
 import { usePreferences } from "@/lib/preferences";
 import { useIsMobile } from "@/hooks/use-mobile";
+import {
+  refreshDetailedLogging,
+  useDetailedLogging,
+} from "@/features/settings/detailed-logging";
+import { SettingsNavigation } from "@/lib/settings-navigation";
+import { relativeDateTime } from "@/lib/format";
 
 export function SourceStatusFooter() {
   const now = useNow();
@@ -24,20 +31,56 @@ export function SourceStatusFooter() {
   const isMobile = useIsMobile();
   const folded = sidebarCollapsed && !isMobile;
   const synced = useSyncStatus().status?.connection === "connected";
-  if (sources.length === 0 && !synced) return null;
+  // An open report keeps detailed logging on until it is saved, so the line stays
+  // visible, as a reminder, wherever the person is.
+  const loggingSince = useDetailedLogging();
+  const openSettingsPage = useContext(SettingsNavigation);
+  useEffect(() => {
+    void refreshDetailedLogging();
+  }, []);
+  if (sources.length === 0 && !synced && !loggingSince) return null;
   return (
     <div
       className="sidebar-sources"
       role="group"
       aria-label={
         !synced
-          ? "Ticket sources"
+          ? sources.length > 0
+            ? "Ticket sources"
+            : "Detailed logging"
           : sources.length > 0
             ? "Sync and ticket sources"
             : "Sync"
       }
     >
       {synced && <SyncStatusLine />}
+      {loggingSince && (
+        <div className="sidebar-source">
+          <Tooltip content={folded ? "Detailed logging is on" : null}>
+            <button
+              type="button"
+              className="sidebar-source-line"
+              onClick={() => openSettingsPage?.("diagnostics")}
+              aria-describedby="sidebar-detailed-logging"
+            >
+              <span className="sidebar-source-label">
+                <StatusDot tone="attention" size={10} />
+                Detailed logging is on
+              </span>
+              <small id="sidebar-detailed-logging">
+                Started {relativeDateTime(loggingSince, now)}
+              </small>
+            </button>
+          </Tooltip>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => openSettingsPage?.("diagnostics")}
+          >
+            Save report
+          </Button>
+        </div>
+      )}
       {sources.map((status) => {
         const connection = status.connection_id;
         const row = connection

@@ -117,6 +117,7 @@ beforeEach(() => {
     level: "info",
     debug: false,
     env_override: null,
+    report_started_at: null,
   });
   vi.mocked(diagnosticsClient.recentErrors).mockResolvedValue([]);
   vi.mocked(sourcesClient.list).mockResolvedValue([]);
