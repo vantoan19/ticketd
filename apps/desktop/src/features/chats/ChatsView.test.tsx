@@ -1822,7 +1822,45 @@ test("a finished turn's record changes are one receipt row under it, whose more 
     "Moved T-12 to In review · Posted an update on T-12",
   );
   fireEvent.click(button("1 more"));
+  // The turn's fold and the stretch holding the change both open: no second click.
+  expect(
+    screen.getByRole("group", { name: "Worked for 30s" }).textContent,
+  ).toContain("Created the Document Reset email copy");
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("true");
+  // A reader who then closes the stretch is not overruled.
   openStretch();
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("false");
+});
+
+test("more opens the stretch even when the turn's fold is already open", async () => {
+  await open(
+    one({ id: "receipt-open", title: "Limiter" }, [
+      youSaid,
+      turnTiming("completed", "2026-11-10T10:00:30Z"),
+      inTurn({
+        id: "rec1",
+        at,
+        kind: "records",
+        changes: [
+          { kind: "update", reference: "T-12", excerpt: "Limiter is in" },
+          { kind: "update", reference: "T-13", excerpt: "Tests pass" },
+          { kind: "document", document_id: "d9", title: "Reset email copy" },
+        ],
+      }),
+    ]),
+  );
+  fireEvent.click(button("Worked for 30s"));
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("false");
+  fireEvent.click(button("1 more"));
+  expect(
+    document.querySelector(".chat-stretch-row")?.getAttribute("aria-expanded"),
+  ).toBe("true");
   expect(
     screen.getByRole("group", { name: "Worked for 30s" }).textContent,
   ).toContain("Created the Document Reset email copy");
