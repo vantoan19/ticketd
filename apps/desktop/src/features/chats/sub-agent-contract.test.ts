@@ -89,4 +89,34 @@ describe("the sub-agent view-model contract", () => {
       }
     }
   });
+
+  it("a nested sub-agent's row sits in its parent's run, not the main turn", () => {
+    const { items } = codexChat();
+    const nested = items?.find(
+      (item) => item.kind === "sub_agent" && item.sub_agent === "sa-pay-tests",
+    );
+    expect(nested).toMatchObject({
+      owner: "sa-refunds",
+      turn_id: "sa-refunds:run-1",
+    });
+    // The parent's run is a turn the parent owns, so the row's run exists.
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        kind: "turn",
+        owner: "sa-refunds",
+        turn_id: "sa-refunds:run-1",
+      }),
+    );
+  });
+
+  it("the replied fixture counts as working while sub-agents run with no main turn", async () => {
+    const { replied, finished } = subAgentFixtures();
+    expect(replied.chat).toMatchObject({
+      activity: "working",
+      turn_running: false,
+    });
+    expect(finished.chat.activity).toBe("idle");
+    const client = createMockChatClient({ enabled: true, chats: [replied] });
+    expect((await client.overview()).working).toBe(1);
+  });
 });
