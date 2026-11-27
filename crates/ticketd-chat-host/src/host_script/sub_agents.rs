@@ -763,6 +763,37 @@ mod background {
         // The turn's own stop says it: no separate note.
         assert!(h.notices().is_empty(), "{:?}", h.notices());
     }
+
+    /// A foreground sub-agent is a running tool of the turn: Claude Code answers it with
+    /// the error it gives a tool a Stop cuts off, and says nothing else about it. The
+    /// person pressed Stop, so it was stopped, not failed (LC-08).
+    #[tokio::test(start_paused = true)]
+    async fn stop_in_a_turn_stops_its_foreground_sub_agents_not_fails_them() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_foreground_stop"),
+            ])
+            .start();
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("two foreground sub-agents run").await;
+        assert_eq!(h.live().await.sub_agents, 2);
+
+        h.stop().await;
+        h.play_all().await;
+        h.finish().await;
+
+        assert_eq!(h.turns()[0].state, ChatTurnState::Interrupted);
+        assert_eq!(h.live().await.sub_agents, 0);
+        let records = h.sub_agents();
+        assert_eq!(records.len(), 2);
+        for record in records {
+            let run = record.latest().expect("a run");
+            assert_eq!(run.state, ChatSubAgentState::Stopped, "{}", record.native_id);
+            assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::Person));
+        }
+    }
 }
 
 // --- Background sub-agents: the stored history, pinned for the desktop ---------------------
