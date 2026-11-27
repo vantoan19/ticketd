@@ -1185,6 +1185,7 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + table chat_sub_agent_runs
 + table chat_sub_agents
 + column chat_interactions.sub_agent_id
++ column chat_messages.sub_agent_id
 + column chat_record_writes.call_id
 + column chat_step_windows.activities_end
 + column chat_step_windows.activities_start

@@ -10,8 +10,8 @@ use crate::wire::{capitalized, text};
 
 use crate::{
     AppliesFrom, ContextCategory, ContextUsage, EventKind, FileChange, FileChangeKind,
-    HarnessOptions, HarnessSettings, ModelChoice, NativeItemId, NativeTurnId, Plan, PlanStep,
-    PlanStepStatus, Setting, SettingOption,
+    HarnessOptions, HarnessSettings, ModelChoice, NativeItemId, NativeSubAgentId, NativeTurnId,
+    Plan, PlanStep, PlanStepStatus, Setting, SettingOption,
 };
 
 /// Tools whose calls are the plan, shown as the plan and never as steps.
@@ -62,21 +62,199 @@ enum PlanCall {
     Read,
 }
 
+/// The files one run of a sub-agent changed, by the tool use that changed them.
+#[derive(Debug, Default)]
+struct SubFiles {
+    run: Option<String>,
+    files: Vec<(String, FileChange)>,
+}
+
 #[derive(Debug, Default)]
 pub(super) struct Reports {
     thinking_started: u64,
     thinking: VecDeque<Thinking>,
+    /// A sub-agent's thinking blocks, by task ID.
+    sub_thinking: HashMap<String, VecDeque<Thinking>>,
     plan_calls: HashMap<String, PlanCall>,
     /// Claude Code's task list, which lasts for the session.
     tasks: Vec<Task>,
     /// The files of the open turn, by the tool use that changed them.
     files: Vec<(String, FileChange)>,
+    /// What each sub-agent's run in progress changed, by task ID.
+    sub_files: HashMap<String, SubFiles>,
     model: Option<String>,
     permission_mode: Option<String>,
     effort: Option<String>,
     models: Option<Vec<Value>>,
     /// An Automation run's agent: its settings are the agent's and are not changed.
     unattended: bool,
+}
+
+/// One reasoning item as last known, before it is said for the main agent or a sub-agent.
+struct Reasoning {
+    item: NativeItemId,
+    running: bool,
+    started_at: Option<i64>,
+    ended_at: Option<i64>,
+    text: Option<String>,
+}
+
+impl Reasoning {
+    fn of(thinking: &Thinking) -> Self {
+        Self {
+            item: thinking.item.clone(),
+            running: !thinking.stopped,
+            started_at: thinking.started_at,
+            ended_at: thinking.ended_at,
+            text: thinking.text.clone().filter(|text| !text.is_empty()),
+        }
+    }
+
+    fn main(self, turn: &NativeTurnId) -> EventKind {
+        EventKind::ReasoningUpdated {
+            turn: turn.clone(),
+            item: self.item,
+            running: self.running,
+            started_at: self.started_at,
+            ended_at: self.ended_at,
+            text: self.text,
+            heading: None,
+        }
+    }
+
+    fn sub(self, task: &str, run: Option<&str>) -> EventKind {
+        EventKind::SubAgentReasoningUpdated {
+            sub_agent: NativeSubAgentId::new(task),
+            run: run.map(str::to_owned),
+            item: self.item,
+            running: self.running,
+            started_at: self.started_at,
+            ended_at: self.ended_at,
+            text: self.text,
+        }
+    }
+}
+
+/// A `thinking` frame: a block began or ended.
+fn thinking_frame(
+    queue: &mut VecDeque<Thinking>,
+    started: &mut u64,
+    event: &Value,
+) -> Option<Reasoning> {
+    let index = event["index"].as_i64();
+    let at = event["at"].as_i64();
+    match text(event, "phase") {
+        Some("started") => {
+            *started += 1;
+            queue.push_back(Thinking {
+                index,
+                item: NativeItemId(format!("thinking-{started}")),
+                started_at: at,
+                ended_at: None,
+                stopped: false,
+                // Redacted thinking has no text to wait for.
+                text: (event["redacted"] == true).then(String::new),
+            });
+            queue.back().map(Reasoning::of)
+        }
+        Some("stopped") => {
+            let position = queue
+                .iter()
+                .position(|thinking| thinking.index == index && !thinking.stopped)?;
+            let thinking = &mut queue[position];
+            thinking.stopped = true;
+            thinking.ended_at = at;
+            let update = Reasoning::of(thinking);
+            if thinking.text.is_some() {
+                queue.remove(position);
+            }
+            Some(update)
+        }
+        _ => None,
+    }
+}
+
+/// The final text of the next thinking block that has none.
+fn thinking_block(queue: &mut VecDeque<Thinking>, started: &mut u64, said: &str) -> Reasoning {
+    let said = Some(said.to_owned()).filter(|said| !said.trim().is_empty());
+    let position = match queue.iter().position(|t| t.text.is_none()) {
+        Some(position) => position,
+        None => {
+            *started += 1;
+            queue.push_back(Thinking {
+                index: None,
+                item: NativeItemId(format!("thinking-{started}")),
+                started_at: None,
+                ended_at: None,
+                stopped: true,
+                text: None,
+            });
+            queue.len() - 1
+        }
+    };
+    // An empty text still settles the block, so the next text goes to the next one.
+    queue[position].text = Some(said.unwrap_or_default());
+    let update = Reasoning::of(&queue[position]);
+    if queue[position].stopped {
+        queue.remove(position);
+    }
+    update
+}
+
+/// The file an edit tool call changes, before its result confirms it.
+fn started_file(name: &str, input: &Value) -> Option<FileChange> {
+    if !FILE_TOOLS.contains(&name) {
+        return None;
+    }
+    let path = text(input, "file_path").or_else(|| text(input, "notebook_path"))?;
+    Some(FileChange {
+        path: path.to_owned(),
+        kind: FileChangeKind::Modified,
+        added_lines: None,
+        removed_lines: None,
+        confirmed: false,
+    })
+}
+
+/// An edit tool's result: the file changed, and by how much when it said.
+fn confirm(file: &mut FileChange, outcome: &Value) {
+    file.confirmed = true;
+    if text(outcome, "kind") == Some("file") {
+        if text(outcome, "change") == Some("create") {
+            file.kind = FileChangeKind::Added;
+        }
+        let count = |key: &str| outcome[key].as_u64().and_then(|n| u32::try_from(n).ok());
+        file.added_lines = count("added_lines");
+        file.removed_lines = count("removed_lines");
+    }
+}
+
+/// Each file once; several edits of one file add up, and stay unconfirmed while any of
+/// them is.
+fn listed(edits: &[(String, FileChange)]) -> Vec<FileChange> {
+    let mut files: Vec<FileChange> = Vec::new();
+    for (_, file) in edits {
+        match files.iter_mut().find(|seen| seen.path == file.path) {
+            Some(seen) => {
+                seen.added_lines = seen.added_lines.zip(file.added_lines).map(|(a, b)| a + b);
+                seen.removed_lines = seen
+                    .removed_lines
+                    .zip(file.removed_lines)
+                    .map(|(a, b)| a + b);
+                seen.confirmed &= file.confirmed;
+            }
+            None => files.push(file.clone()),
+        }
+    }
+    files
+}
+
+fn sub_files_changed(task: &str, kept: &SubFiles) -> EventKind {
+    EventKind::SubAgentFilesChanged {
+        sub_agent: NativeSubAgentId::new(task),
+        run: kept.run.clone(),
+        files: listed(&kept.files),
+    }
 }
 
 fn status(name: &str) -> Option<PlanStepStatus> {
@@ -95,86 +273,39 @@ impl Reports {
         if !event["parent_tool_use_id"].is_null() {
             return Vec::new();
         }
-        let index = event["index"].as_i64();
-        let at = event["at"].as_i64();
-        match text(event, "phase") {
-            Some("started") => {
-                self.thinking_started += 1;
-                let item = NativeItemId(format!("thinking-{}", self.thinking_started));
-                self.thinking.push_back(Thinking {
-                    index,
-                    item,
-                    started_at: at,
-                    ended_at: None,
-                    stopped: false,
-                    // Redacted thinking has no text to wait for.
-                    text: (event["redacted"] == true).then(String::new),
-                });
-                let started = self
-                    .thinking
-                    .back()
-                    .map(|thinking| self.update(turn, thinking));
-                started.into_iter().collect()
-            }
-            Some("stopped") => {
-                let Some(position) = self
-                    .thinking
-                    .iter()
-                    .position(|thinking| thinking.index == index && !thinking.stopped)
-                else {
-                    return Vec::new();
-                };
-                let thinking = &mut self.thinking[position];
-                thinking.stopped = true;
-                thinking.ended_at = at;
-                let update = self.update(turn, &self.thinking[position]);
-                if self.thinking[position].text.is_some() {
-                    self.thinking.remove(position);
-                }
-                vec![update]
-            }
-            _ => Vec::new(),
-        }
+        thinking_frame(&mut self.thinking, &mut self.thinking_started, event)
+            .map(|state| state.main(turn))
+            .into_iter()
+            .collect()
     }
 
     /// The final text of a thinking block, in the order the blocks began. A block whose
     /// start was not seen is reported without times.
     pub fn thinking_text(&mut self, turn: &NativeTurnId, said: &str) -> EventKind {
-        let said = Some(said.to_owned()).filter(|said| !said.trim().is_empty());
-        let position = match self.thinking.iter().position(|t| t.text.is_none()) {
-            Some(position) => position,
-            None => {
-                self.thinking_started += 1;
-                self.thinking.push_back(Thinking {
-                    index: None,
-                    item: NativeItemId(format!("thinking-{}", self.thinking_started)),
-                    started_at: None,
-                    ended_at: None,
-                    stopped: true,
-                    text: None,
-                });
-                self.thinking.len() - 1
-            }
-        };
-        // An empty text still settles the block, so the next text goes to the next one.
-        self.thinking[position].text = Some(said.unwrap_or_default());
-        let update = self.update(turn, &self.thinking[position]);
-        if self.thinking[position].stopped {
-            self.thinking.remove(position);
-        }
-        update
+        thinking_block(&mut self.thinking, &mut self.thinking_started, said).main(turn)
     }
 
-    fn update(&self, turn: &NativeTurnId, thinking: &Thinking) -> EventKind {
-        EventKind::ReasoningUpdated {
-            turn: turn.clone(),
-            item: thinking.item.clone(),
-            running: !thinking.stopped,
-            started_at: thinking.started_at,
-            ended_at: thinking.ended_at,
-            text: thinking.text.clone().filter(|text| !text.is_empty()),
-            heading: None,
-        }
+    /// A thinking frame of a sub-agent: its reasoning is its own, a lane apart from the
+    /// main agent's.
+    pub fn sub_agent_thinking(
+        &mut self,
+        task: &str,
+        run: Option<&str>,
+        event: &Value,
+    ) -> Option<EventKind> {
+        let queue = self.sub_thinking.entry(task.to_owned()).or_default();
+        thinking_frame(queue, &mut self.thinking_started, event).map(|state| state.sub(task, run))
+    }
+
+    /// The final text of a thinking block of a sub-agent.
+    pub fn sub_agent_thinking_text(
+        &mut self,
+        task: &str,
+        run: Option<&str>,
+        said: &str,
+    ) -> EventKind {
+        let queue = self.sub_thinking.entry(task.to_owned()).or_default();
+        thinking_block(queue, &mut self.thinking_started, said).sub(task, run)
     }
 
     // -- plan ---------------------------------------------------------------------
@@ -320,20 +451,8 @@ impl Reports {
         name: &str,
         input: &Value,
     ) -> Option<EventKind> {
-        if !FILE_TOOLS.contains(&name) {
-            return None;
-        }
-        let path = text(input, "file_path").or_else(|| text(input, "notebook_path"))?;
-        self.files.push((
-            id.to_owned(),
-            FileChange {
-                path: path.to_owned(),
-                kind: FileChangeKind::Modified,
-                added_lines: None,
-                removed_lines: None,
-                confirmed: false,
-            },
-        ));
+        let file = started_file(name, input)?;
+        self.files.push((id.to_owned(), file));
         Some(self.files_changed(turn))
     }
 
@@ -348,17 +467,8 @@ impl Reports {
         let position = self.files.iter().position(|(tool, _)| tool == id)?;
         if failed {
             self.files.remove(position);
-            return Some(self.files_changed(turn));
-        }
-        let file = &mut self.files[position].1;
-        file.confirmed = true;
-        if text(outcome, "kind") == Some("file") {
-            if text(outcome, "change") == Some("create") {
-                file.kind = FileChangeKind::Added;
-            }
-            let count = |key: &str| outcome[key].as_u64().and_then(|n| u32::try_from(n).ok());
-            file.added_lines = count("added_lines");
-            file.removed_lines = count("removed_lines");
+        } else {
+            confirm(&mut self.files[position].1, outcome);
         }
         Some(self.files_changed(turn))
     }
@@ -366,24 +476,54 @@ impl Reports {
     /// Each file once; several edits of one file add up, and stay unconfirmed while
     /// any of them is.
     fn files_changed(&self, turn: &NativeTurnId) -> EventKind {
-        let mut files: Vec<FileChange> = Vec::new();
-        for (_, file) in &self.files {
-            match files.iter_mut().find(|seen| seen.path == file.path) {
-                Some(seen) => {
-                    seen.added_lines = seen.added_lines.zip(file.added_lines).map(|(a, b)| a + b);
-                    seen.removed_lines = seen
-                        .removed_lines
-                        .zip(file.removed_lines)
-                        .map(|(a, b)| a + b);
-                    seen.confirmed &= file.confirmed;
-                }
-                None => files.push(file.clone()),
-            }
-        }
         EventKind::FilesChanged {
             turn: turn.clone(),
-            files,
+            files: listed(&self.files),
         }
+    }
+
+    /// An edit tool of a sub-agent started: its file is listed in that run's own files.
+    pub fn sub_agent_file_tool(
+        &mut self,
+        task: &str,
+        run: Option<&str>,
+        id: &str,
+        name: &str,
+        input: &Value,
+    ) -> Option<EventKind> {
+        let file = started_file(name, input)?;
+        let kept = self.sub_files.entry(task.to_owned()).or_default();
+        // Another run starts its own list.
+        if kept.run.as_deref() != run {
+            kept.files.clear();
+            kept.run = run.map(str::to_owned);
+        }
+        kept.files.push((id.to_owned(), file));
+        Some(sub_files_changed(task, kept))
+    }
+
+    /// The result of an edit tool, when a sub-agent ran it.
+    pub fn sub_agent_file_result(
+        &mut self,
+        task: &str,
+        id: &str,
+        failed: bool,
+        outcome: &Value,
+    ) -> Option<EventKind> {
+        let kept = self.sub_files.get_mut(task)?;
+        let position = kept.files.iter().position(|(tool, _)| tool == id)?;
+        if failed {
+            kept.files.remove(position);
+        } else {
+            confirm(&mut kept.files[position].1, outcome);
+        }
+        Some(sub_files_changed(task, kept))
+    }
+
+    /// A sub-agent's run ended: what it kept of its reasoning and files is settled.
+    pub fn sub_agent_ended(&mut self, task: &str) {
+        self.sub_thinking.remove(task);
+        self.sub_files.remove(task);
     }
 
     pub fn turn_ended(&mut self) {

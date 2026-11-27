@@ -1545,11 +1545,157 @@ mod sub_agents {
             matches!(&events[1], EventKind::SubAgentToolUpdated { sub_agent, title, .. }
             if sub_agent == &NativeSubAgentId::new("t1") && title == "Read")
         );
-        // Thinking and text of a sub-agent are not the main agent's.
+        // Thinking of a sub-agent is its own reasoning, and opens no turn.
         let (more, _) = session
             .event("thinking", &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}))
             .expect("modeled");
-        assert!(more.is_empty() && session.active_turn().is_none());
+        assert!(
+            matches!(more.as_slice(), [EventKind::SubAgentReasoningUpdated { sub_agent, running: true, .. }]
+            if sub_agent == &NativeSubAgentId::new("t1")),
+            "{more:?}"
+        );
+        assert!(session.active_turn().is_none());
+    }
+
+    fn said(tool_use: &str, block: Value) -> Value {
+        json!({"parent_tool_use_id": tool_use, "model": "claude-haiku-5-5", "blocks": [block]})
+    }
+
+    fn messages(events: &[EventKind]) -> Vec<String> {
+        events
+            .iter()
+            .filter_map(|event| match event {
+                EventKind::SubAgentMessage { text, .. } => Some(text.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_sub_agents_text_is_its_message_and_never_the_main_agents_reply() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said(
+                    "toolu_a",
+                    json!({"type": "text", "text": "Looking at the limiter."}),
+                ),
+            )
+            .expect("modeled");
+        assert_eq!(messages(&events), ["Looking at the limiter."]);
+        assert!(
+            !events.iter().any(|event| matches!(
+                event,
+                EventKind::MessageCompleted { .. } | EventKind::TurnStarted { .. }
+            )),
+            "{events:?}"
+        );
+        // Its stream deltas are not shown: the message comes whole.
+        let (deltas, _) = session
+            .event("delta", &json!({"kind": "text", "text": "Look", "index": 0, "parent_tool_use_id": "toolu_a"}))
+            .expect("modeled");
+        assert!(deltas.is_empty(), "{deltas:?}");
+    }
+
+    #[test]
+    fn a_sub_agents_final_report_is_stored_once_whether_a_message_said_it_or_only_the_notification()
+    {
+        let ended = |summary: &str| json!({"task_id": "t1", "run_id": "r1", "tool_use_id": "toolu_a", "status": "completed", "reason": null, "summary": summary});
+        // A message already said it: the notification repeats it.
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        session.event(
+            "assistant_content",
+            &said(
+                "toolu_a",
+                json!({"type": "text", "text": "The limit is 5."}),
+            ),
+        );
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("The limit is 5.\n"))
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+        // No message said it: the notification is the report.
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event("sub_agent_ended", &ended("The limit is 5."))
+            .expect("modeled");
+        assert_eq!(messages(&events), ["The limit is 5."]);
+        // A failed or stopped run has no report to keep.
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "sub_agent_ended",
+                &json!({"task_id": "t1", "run_id": "r1", "status": "stopped", "reason": null, "summary": "Stopped."}),
+            )
+            .expect("modeled");
+        assert!(messages(&events).is_empty(), "{events:?}");
+    }
+
+    #[test]
+    fn what_a_sub_agent_said_and_thought_before_its_task_is_announced_is_kept_for_it() {
+        let mut session = Session::default();
+        session.event(
+            "thinking",
+            &json!({"phase": "started", "index": 0, "redacted": false, "at": 1, "parent_tool_use_id": "toolu_a"}),
+        );
+        let (held, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_a", json!({"type": "text", "text": "Early words."})),
+            )
+            .expect("modeled");
+        assert!(held.is_empty() && session.active_turn().is_none());
+        let (events, _) = session
+            .event("sub_agent_started", &started("t1", "toolu_a", false))
+            .expect("modeled");
+        assert_eq!(messages(&events), ["Early words."]);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            EventKind::SubAgentReasoningUpdated { running: true, .. }
+        )));
+    }
+
+    #[test]
+    fn a_sub_agents_edits_are_its_runs_files_and_leave_the_turns_alone() {
+        let mut session = Session::default();
+        session.event("sub_agent_started", &started("t1", "toolu_a", false));
+        let (events, _) = session
+            .event(
+                "assistant_content",
+                &said("toolu_a", json!({"type": "tool_use", "id": "toolu_w", "name": "Write", "input": {"file_path": "/work/a.txt", "content": "x"}})),
+            )
+            .expect("modeled");
+        assert!(
+            events.iter().any(|event| matches!(event, EventKind::SubAgentFilesChanged { files, .. } if files.len() == 1)),
+            "{events:?}"
+        );
+        assert!(
+            !events
+                .iter()
+                .any(|event| matches!(event, EventKind::FilesChanged { .. })),
+            "{events:?}"
+        );
+        let (done, _) = session
+            .event(
+                "tool_result",
+                &json!({"tool_use_id": "toolu_w", "parent_tool_use_id": "toolu_a", "is_error": false, "text": "ok", "outcome": {"kind": "file", "change": "create", "added_lines": 1, "removed_lines": 0}}),
+            )
+            .expect("modeled");
+        assert!(
+            done.iter().any(|event| matches!(event, EventKind::SubAgentFilesChanged { files, .. } if files[0].confirmed)),
+            "{done:?}"
+        );
+        assert!(
+            !done
+                .iter()
+                .any(|event| matches!(event, EventKind::FilesChanged { .. })),
+            "{done:?}"
+        );
     }
 
     #[test]
