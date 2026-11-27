@@ -120,6 +120,42 @@ test("sending mid-turn is queued when the harness cannot be steered", async () =
   expect(items.some((item) => item.kind === "user")).toBe(false);
 });
 
+test("with only sub-agents running, Send starts a main turn even when the harness cannot be steered", async () => {
+  const client = working({
+    steering: { available: false },
+    turn_running: false,
+  });
+  await client.send("c1", "also update the docs");
+  const { chat, items } = await client.openChat("c1");
+  expect(chat.queue).toEqual([]);
+  expect(items).toContainEqual(
+    expect.objectContaining({ kind: "user", text: "also update the docs" }),
+  );
+  expect(chat.turn_running).toBeNull();
+});
+
+test("with only sub-agents running, Resume and Send now start the queued message", async () => {
+  for (const how of ["resume", "send now"]) {
+    const client = working({
+      steering: { available: false },
+      turn_running: false,
+      queue_paused: how === "resume",
+    });
+    await client.queue("c1", "then add tests");
+    const queued = (await client.openChat("c1")).chat.queue[0];
+    if (how === "resume") await client.resumeQueue("c1");
+    else await client.sendQueuedNow("c1", queued?.id ?? "");
+    const { chat, items } = await client.openChat("c1");
+    expect(chat.queue, how).toEqual([]);
+    expect(
+      items.some(
+        (item) => item.kind === "user" && item.text === "then add tests",
+      ),
+      how,
+    ).toBe(true);
+  }
+});
+
 const note = {
   name: "notes.txt",
   dataUrl: "data:text/plain;base64,bm90ZXM=",
