@@ -309,6 +309,13 @@ function TextLines({
       offset > stage.scrollTop + height - BAR_CLEARANCE
     )
       stage.scrollTop = Math.max(0, offset - height / 2);
+    // Unwrapped, the match can sit past either edge of a long line.
+    if (!wrap) {
+      const start = gutter + match.start * charWidth;
+      const end = gutter + match.end * charWidth;
+      if (start < stage.scrollLeft || end > stage.scrollLeft + size.width)
+        stage.scrollLeft = Math.max(0, (start + end - size.width) / 2);
+    }
   }
   // A new query scrolls to its first match.
   useEffect(() => {

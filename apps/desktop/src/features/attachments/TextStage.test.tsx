@@ -341,6 +341,33 @@ test("Wrap lines keeps the line at the top of the view instead of the same scrol
   }
 });
 
+test("a match past the right edge of an unwrapped line is scrolled into view sideways", async () => {
+  serve(`${"x".repeat(5000)} needle\nshort\n`);
+  render(<Stage />);
+  await screen.findByRole("document");
+  const stage = screen.getByTestId("stage");
+  // jsdom has no layout: a 300px stage that scrolls sideways as far as the test lets it.
+  Object.defineProperty(stage, "clientWidth", { value: 300 });
+  let left = 0;
+  Object.defineProperty(stage, "scrollLeft", {
+    get: () => left,
+    set: (value: number) => {
+      left = value;
+    },
+  });
+  stage.focus();
+  press("w");
+  await waitFor(() =>
+    expect(screen.getByRole("document").hasAttribute("data-wrap")).toBe(false),
+  );
+  press("/");
+  const field = await screen.findByRole("textbox", {
+    name: "Find in the text",
+  });
+  fireEvent.change(field, { target: { value: "needle" } });
+  await waitFor(() => expect(left).toBeGreaterThan(5000));
+});
+
 test("select all and copy take every line of the log, drawn or not, not the page around it", async () => {
   serve();
   render(<Stage />);
