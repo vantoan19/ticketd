@@ -370,6 +370,7 @@ mod tests {
             read_through: None,
             marked_unread: false,
             muted: false,
+            restart_notice: Vec::new(),
             created_at: String::new(),
         }
     }

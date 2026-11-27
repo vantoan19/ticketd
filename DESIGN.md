@@ -1089,7 +1089,7 @@ An **approval from a sub-agent** keeps the request card's layout; the title begi
 
 A turn the person did not start has no message: one muted 28px line stands in its place, `↳ Started by Claude Code: sub-agent finished · {Title}` or `↳ Started by ticketd: sub-agent finished · {Title}` (a Codex wake), the title opening that sub-agent, 16px above the work line.
 
-After ticketd quit while sub-agents ran, the tray shows one neutral notice (no dot, no buttons): "2 sub-agents lost contact when ticketd quit." and "Your next message tells Claude Code, which can resume them." (Codex: "...tells Codex."). The message sent with the note carries a caption, `ⓘ With a note on 2 lost sub-agents ⌄`, that opens to the exact note, in muted caption text beside a 2px rule, so nothing is sent in the person's name unseen.
+After ticketd quit while sub-agents ran, the tray shows one neutral notice (no dot, no buttons): "2 sub-agents lost contact when ticketd quit." and "Your next message tells Claude Code, which can resume them." (Codex: "...tells Codex."). The message sent with the note carries a caption, `ⓘ With a note on 2 lost sub-agents ⌄`, that opens to the exact note, in muted caption text beside a 2px rule, so nothing is sent in the person's name unseen. The Chats list says it in the row's status word, "2 sub-agents lost contact" (muted, no dot, after what needs the person and what they have not seen), until the message goes: the notice is held once, stored on the Chat, and clears with the message that carries it. A sub-agent the main agent resumes before then leaves the notice.
 
 ### New Chat suggestions
 

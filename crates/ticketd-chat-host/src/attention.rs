@@ -320,6 +320,13 @@ pub fn status(facts: &Facts<'_>) -> Status {
     if let Some(words) = condition {
         return make(Rank::Idle, words, None);
     }
+    // Sub-agents that lost contact when ticketd quit, until the next message tells the
+    // agent: muted, as nothing is wrong with the Chat itself.
+    let lost = facts.chat.restart_notice.len();
+    if lost > 0 {
+        let noun = if lost == 1 { "sub-agent" } else { "sub-agents" };
+        return make(Rank::Idle, &format!("{lost} {noun} lost contact"), None);
+    }
     match outcome {
         Some((Rank::Done, word, Some(line))) => labelled(Rank::Idle, &line, &word, None),
         // A finished turn with nothing to say about it, and a Chat with no turn yet.

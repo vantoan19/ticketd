@@ -138,6 +138,8 @@ mod antigravity_sub_agents;
 #[cfg(test)]
 mod codex_sub_agents;
 #[cfg(test)]
+mod resume;
+#[cfg(test)]
 mod sub_agents;
 #[cfg(test)]
 mod tests;
@@ -465,6 +467,7 @@ impl Builder {
             shared,
             harness_name,
             calls: Vec::new(),
+            earlier: Vec::new(),
         }
     }
 }
@@ -490,6 +493,8 @@ pub(crate) struct HostScript {
     /// Host calls that wait for the harness to answer: they run in the background so
     /// the test can play the fixture meanwhile, and are checked at the next `settle`.
     calls: Vec<(&'static str, JoinHandle<Result<(), HostError>>)>,
+    /// Before a `restart_ticketd`: the hosts that ran then, with the folders they wrote to.
+    earlier: Vec<(TempDir, ChatHost)>,
 }
 
 impl HostScript {
@@ -595,6 +600,52 @@ impl HostScript {
         let (host, chat) = (self.host.clone(), self.chat.id.clone());
         self.call("stop", async move { host.stop(&chat).await })
             .await;
+    }
+
+    /// ticketd quits and starts again over what it stored. Nothing is written on the way
+    /// out, as when the process dies: the new host reads a copy of the Workspace as it was,
+    /// and takes the next `process` for the harness it starts afterwards. The old host keeps
+    /// running on the file it had, unheard.
+    pub async fn restart_ticketd(&mut self) {
+        let copy = tempfile::tempdir().expect("a temporary Workspace folder");
+        let path = copy.path().join("workspace.sqlite3");
+        rusqlite::Connection::open(&self.path)
+            .and_then(|connection| {
+                connection.execute("VACUUM INTO ?1", [path.to_string_lossy().as_ref()])
+            })
+            .expect("a copy of the Workspace as it was");
+        let remaining: Vec<Vec<Fixture>> = self
+            .shared
+            .processes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .drain(..)
+            .collect();
+        let shared = Arc::new(Shared {
+            harness: self.shared.harness,
+            workspace: path.clone(),
+            chat_id: self.chat.id.clone(),
+            processes: Mutex::new(remaining.into()),
+            current: tokio::sync::Mutex::new(None),
+            opens: Mutex::new(Vec::new()),
+            failures: Mutex::new(Vec::new()),
+        });
+        let opener: WorkspaceOpener = {
+            let path = path.clone();
+            Arc::new(move || WorkspaceSession::for_file(&path)?.workspace())
+        };
+        let adapter = ScriptedAdapter {
+            runtime: self.shared.harness.runtime(),
+            shared: Arc::clone(&shared),
+        };
+        let host = ChatHost::new(opener, vec![Arc::new(adapter) as Arc<dyn HarnessAdapter>])
+            .expect("a Chat host");
+        let before = std::mem::replace(&mut self.host, host);
+        self.earlier
+            .push((std::mem::replace(&mut self._dir, copy), before));
+        self.path = path;
+        self.shared = shared;
+        self.settle().await;
     }
 
     /// The harness process exits with `code`, whatever the fixture still holds.

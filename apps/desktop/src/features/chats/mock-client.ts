@@ -282,6 +282,13 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     );
   const condition = problem && !problem.past && CONDITION_WORDS[problem.kind];
   if (condition) return make("idle", condition);
+  // Sub-agents that lost contact when ticketd quit, until the next message tells the agent.
+  const lost = chat.restart_notice?.sub_agents.length ?? 0;
+  if (lost > 0)
+    return make(
+      "idle",
+      `${lost} ${lost === 1 ? "sub-agent" : "sub-agents"} lost contact`,
+    );
   // The list row says what the main agent did, not a sub-agent.
   const main = items.filter((item) => !item.owner);
   const change = firstChange(main);

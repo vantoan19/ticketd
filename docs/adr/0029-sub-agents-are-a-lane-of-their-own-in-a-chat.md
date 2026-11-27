@@ -48,7 +48,10 @@ the sub-agents the harness starts; it does not start them.
   the Turn-ending vocabulary), or contact lost. Sub-agents still running when
   ticketd quit or crashed become contact lost. The next message's context
   carries a factual note naming them, and for Claude says they can be
-  resumed. The person sees the note under their message.
+  resumed. The person sees the note under their message. The Chat holds the
+  notice until a message carries it (it is stored on that message, so a resend
+  repeats it), and a sub-agent the main agent resumes first leaves it. A resume
+  keeps what the sub-agent was first asked.
 - (7) **Content and plan.** Claude frames tagged with a parent tool use (text,
   reasoning, tool calls) go to their sub-agent. Only the main agent's to-do
   list updates the Turn's plan.

@@ -14,9 +14,10 @@ use std::time::Duration;
 
 use ticketd_core::{
     Chat, ChatAttachmentContent, ChatInputChange, ChatInputReceipt, ChatInteractionKind,
-    ChatInteractionState, ChatMessage, ChatObservation, ChatOwner, ChatSessionOrigin,
-    ChatSubAgentState, ChatSubAgentStopper, ChatSubmissionIntent, ChatToolState, ChatTurnOrigin,
-    ChatTurnReceipt, ChatTurnStarter, ChatTurnState, Error, Workspace,
+    ChatInteractionState, ChatMessage, ChatMessageNote, ChatMessageNoteKind, ChatObservation,
+    ChatOwner, ChatRole, ChatSessionOrigin, ChatSubAgent, ChatSubAgentState, ChatSubAgentStopper,
+    ChatSubmissionIntent, ChatToolState, ChatTurnOrigin, ChatTurnReceipt, ChatTurnStarter,
+    ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -309,6 +310,25 @@ struct TextBuffer {
     saved: usize,
 }
 
+/// What ticketd tells the harness along with the person's next message when sub-agents lost
+/// contact (a restart): which ones, and for a harness that can, that they can be resumed.
+pub(crate) fn lost_sub_agents_text(titles: &[String], can_resume: bool) -> String {
+    let (these, were, are, them) = if titles.len() == 1 {
+        ("this sub-agent", "was", "is", "it")
+    } else {
+        ("these sub-agents", "were", "are", "them")
+    };
+    let resume = if can_resume {
+        format!(" You can resume {them}.")
+    } else {
+        String::new()
+    };
+    format!(
+        "From ticketd: {these} {were} running when ticketd quit and {are} not running now: {}.{resume}",
+        titles.join(", ")
+    )
+}
+
 /// Numbers supervisors in the order they start; see `Board::report`.
 static NEXT_SUPERVISOR: AtomicU64 = AtomicU64::new(1);
 
@@ -346,6 +366,9 @@ pub(crate) struct Supervisor {
     /// The sub-agents running in this runtime, by native ID, and whether each runs in the
     /// background. One in the foreground ends with its turn.
     sub_agents: HashMap<String, bool>,
+    /// The run each of them is in, by native ID, for the harness that names runs: a frame of
+    /// an earlier run that arrives after a resume is late.
+    sub_agent_runs: HashMap<String, String>,
     /// While a sub-agent has just finished with no turn running: until when the main agent
     /// is still expected to resume by itself, and the Chat stays working.
     wake_until: Option<Instant>,
@@ -524,6 +547,7 @@ impl Supervisor {
             checkpoint_at: None,
             stop_deadline: None,
             sub_agents: HashMap::new(),
+            sub_agent_runs: HashMap::new(),
             wake_until: None,
             shutting_down: false,
             shut_down_for: None,
@@ -1586,6 +1610,16 @@ impl Supervisor {
         Ok(())
     }
 
+    /// Whether a frame of a sub-agent names a run that sorts before the one it is in: the
+    /// harness orders a task's run IDs by when they opened, and the Chat's history already
+    /// drops such a frame.
+    fn late_sub_agent_run(&self, native: &str, run: &Option<String>) -> bool {
+        matches!(
+            (self.sub_agent_runs.get(native), run),
+            (Some(current), Some(run)) if run < current
+        )
+    }
+
     /// A sub-agent run ended. When it was the last, and no turn runs, the main agent is
     /// expected to resume by itself, and the Chat stays working until it does.
     fn sub_agent_ended(&mut self, native: &str, outcome: &SubAgentOutcome) {
@@ -2262,6 +2296,7 @@ impl Supervisor {
         self.pending_contexts.clear();
         self.interactions.clear();
         self.sub_agents.clear();
+        self.sub_agent_runs.clear();
         self.wake_until = None;
         self.text.clear();
         self.pending_tools.clear();
@@ -2643,11 +2678,13 @@ impl Supervisor {
         } else {
             None
         };
-        // Context and selected history go to the harness with the input; the stored
-        // message stays the person's own words.
+        let note = self.lost_sub_agents_note(&message);
+        // Context, selected history and ticketd's note go to the harness with the input;
+        // the stored message stays the person's own words.
         let text = [
             context.as_deref(),
             preamble.as_deref(),
+            note.as_ref().map(|note| note.text.as_str()),
             (!message.text.is_empty()).then_some(message.text.as_str()),
         ]
         .into_iter()
@@ -2719,6 +2756,38 @@ impl Supervisor {
             let _ = done.send(Done::Dispatched { outcome });
         });
         DispatchProgress::Finished
+    }
+
+    /// The note the person's message carries after sub-agents lost contact: what ticketd
+    /// says to the harness about them, kept on the message so the person sees exactly it,
+    /// and told once. A message that was sent before keeps the note it carried.
+    fn lost_sub_agents_note(&mut self, message: &ChatMessage) -> Option<ChatMessageNote> {
+        if let Some(note) = &message.note {
+            return Some(note.clone());
+        }
+        if self.unattended.is_some() || message.role != ChatRole::User {
+            return None;
+        }
+        let chat = self.chat_id.clone();
+        let lost = self.core(|core| core.chat_restart_notice(&chat)).ok()?;
+        if lost.is_empty() {
+            return None;
+        }
+        let resume = self
+            .adapter
+            .as_ref()
+            .is_some_and(|adapter| adapter.harness().sub_agents.resume);
+        let titles: Vec<String> = lost.iter().map(ChatSubAgent::title).collect();
+        let note = ChatMessageNote {
+            kind: ChatMessageNoteKind::LostSubAgents,
+            sub_agents: lost.into_iter().map(|record| record.native_id).collect(),
+            text: lost_sub_agents_text(&titles, resume),
+        };
+        // Told with this message, whether or not it gets through: a resend carries the
+        // stored note again.
+        self.write(|core| core.record_chat_message_note(&chat, &message.id, &note))
+            .ok()?;
+        Some(note)
     }
 
     // ------------------------------------------------------------------
@@ -3404,6 +3473,10 @@ impl Supervisor {
             EventKind::SubAgentStarted(start) => {
                 self.sub_agents
                     .insert(start.sub_agent.0.clone(), start.background);
+                if let Some(run) = &start.run {
+                    self.sub_agent_runs
+                        .insert(start.sub_agent.0.clone(), run.clone());
+                }
                 // Something runs again: the main agent is not about to resume alone.
                 self.wake_until = None;
                 observations.push(ChatObservation::SubAgentStarted {
@@ -3423,9 +3496,10 @@ impl Supervisor {
                 background,
                 native,
             } => {
-                if let (Some(background), Some(running)) =
-                    (background, self.sub_agents.get_mut(&sub_agent.0))
-                {
+                if let (Some(background), Some(running)) = (
+                    background.filter(|_| !self.late_sub_agent_run(&sub_agent.0, &native_run_id)),
+                    self.sub_agents.get_mut(&sub_agent.0),
+                ) {
                     *running = background;
                 }
                 self.record(vec![ChatObservation::SubAgentUpdated {
@@ -3441,7 +3515,9 @@ impl Supervisor {
                 outcome,
                 detail,
             } => {
-                self.sub_agent_ended(&sub_agent.0, &outcome);
+                if !self.late_sub_agent_run(&sub_agent.0, &native_run_id) {
+                    self.sub_agent_ended(&sub_agent.0, &outcome);
+                }
                 let (state, stopped_by) = match outcome {
                     SubAgentOutcome::Completed => (ChatSubAgentState::Completed, None),
                     SubAgentOutcome::Failed => (ChatSubAgentState::Failed, None),

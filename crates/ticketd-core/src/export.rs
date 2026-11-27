@@ -103,7 +103,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chats",
-        "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, muted, effective_settings, created_at, automation_run_id",
+        "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, muted, effective_settings, created_at, automation_run_id, restart_notice",
     ),
     ("chat_links", "chat_id, kind, target_id"),
     (
@@ -116,7 +116,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_messages",
-        "id, chat_id, position, role, text, complete, turn_id, sub_agent_id, created_at, editing, requires_link_context",
+        "id, chat_id, position, role, text, complete, turn_id, sub_agent_id, created_at, editing, requires_link_context, note",
     ),
     (
         "chat_submission_attempts",
@@ -140,7 +140,7 @@ const EXPORTED: &[(&str, &str)] = &[
     ),
     (
         "chat_sub_agent_runs",
-        "id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, state, stopped_by, stop_reason, detail, started_at, ended_at",
+        "id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, state, stopped_by, stop_reason, detail, started_at, ended_at, tool_id",
     ),
     ("automations", "id, name, definition, trashed, created_at"),
     (
