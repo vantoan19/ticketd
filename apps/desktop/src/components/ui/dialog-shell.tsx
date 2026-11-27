@@ -179,7 +179,10 @@ export function DialogShell({
       size="sm"
       // Ahead of Cancel in the tab order, it is still drawn after it.
       {...(primaryFirst && { className: "order-1" })}
-      disabled={blocked}
+      // A blocked primary during a write in flight (Replacing…) keeps its place,
+      // its width and focus; it does not drop out of the tab order.
+      disabled={blocked && !busy}
+      busy={blocked && busy}
       {...(blocked && { "aria-describedby": reasonId })}
       // Submits here rather than through the form's default action, which an
       // ancestor in the React tree (a rich editor holding the opener) may

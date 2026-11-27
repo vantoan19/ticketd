@@ -87,6 +87,8 @@ const statusSchema = z.object({
   connection: z.enum(["not_connected", "choosing", "connected"]),
   /** The signed-in Google account's email address (an AWS identity for S3). */
   account: z.string().nullable(),
+  /** Where the sign-in is kept; Files uses the same one while this is set. */
+  connection_id: z.string().nullish(),
   /** The storage this Workspace syncs with. Wording that names it follows this. */
   provider: z.enum(["google_drive", "s3"]),
   /** For S3: the bucket and prefix of the Workspace folders and this desktop's AWS CLI profile. */
@@ -99,7 +101,7 @@ const statusSchema = z.object({
     })
     .nullable(),
   /** The Workspace's Drive folder, once connected. */
-  folder: z.object({ name: z.string() }).nullable(),
+  folder: z.object({ id: z.string().optional(), name: z.string() }).nullable(),
   state: z.enum(syncStates),
   /** RFC 3339 time of the last completed sync with Drive. */
   last_synced_at: z.string().nullable(),
@@ -171,6 +173,20 @@ const settingsSchema = z.object({
 export type SyncSettings = z.infer<typeof settingsSchema>;
 export type SyncSettingsChange = Omit<SyncSettings, "device_code">;
 
+/** One computer of the device list: this one, or another that joined the same Workspace. */
+const deviceSchema = z.object({
+  id: z.string(),
+  /** How the computer is named; this one's name is the one in force now. */
+  name: z.string(),
+  /** The two-letter code in the references of tickets made there. */
+  code: z.string(),
+  /** RFC 3339 time of its last uploaded change; `null` before it has uploaded one. */
+  last_synced_at: z.string().nullable(),
+  /** The computer the list is read on. */
+  this: z.boolean(),
+});
+export type SyncDevice = z.infer<typeof deviceSchema>;
+
 const exitReportSchema = z.object({
   /** What still had not uploaded when the flush ended; empty when everything did. */
   pending: z.array(pendingItemSchema),
@@ -194,6 +210,12 @@ export const syncApi = {
    * Leaves a connected Workspace connected, so it also serves to sign in again.
    */
   connect: () => status(invoke("sync_connect")),
+
+  /**
+   * `use_another_google_account`: Google sign-in in the browser with another account,
+   * for Files and Workspace sync together. Nothing changes until the sign-in has finished.
+   */
+  switchAccount: () => status(invoke("use_another_google_account")),
 
   /**
    * `sync_connect_s3`: records S3 as this Workspace's storage, signed in through
@@ -250,6 +272,14 @@ export const syncApi = {
   /** `sync_settings` */
   async settings(): Promise<SyncSettings> {
     return settingsSchema.parse(await invoke("sync_settings"));
+  },
+
+  /**
+   * `sync_devices`: the computers that share this Workspace, this one first. Read
+   * from this computer's copy of the device registry: no sign-in, no network.
+   */
+  async devices(): Promise<SyncDevice[]> {
+    return z.array(deviceSchema).parse(await invoke("sync_devices"));
   },
 
   /** `set_sync_settings`: rejects a poll interval under `SYNC_MIN_POLL_SECS`. */

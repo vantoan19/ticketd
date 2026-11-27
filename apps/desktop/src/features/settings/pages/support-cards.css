@@ -1,0 +1,48 @@
+/* Support ticketd: two cards side by side. Each is a list surface with an
+   icon tile, one line and an outline button. The tints are mixed from
+   existing tokens, so both themes follow: amber is --status-blocked, warm
+   brown is that amber mixed with the foreground. */
+.support-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.support-card {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  padding: 16px;
+}
+.support-card > .ui-icon-tile {
+  align-self: flex-start;
+  box-shadow: none;
+  background: color-mix(in srgb, var(--tint) 14%, var(--surface));
+  color: var(--tint);
+}
+.support-card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding-top: 1px;
+}
+.support-card[data-kind="star"] {
+  --tint: color-mix(in srgb, var(--status-blocked) 88%, var(--foreground));
+}
+.support-card[data-kind="coffee"] {
+  --tint: color-mix(in srgb, var(--status-blocked) 50%, var(--foreground));
+}
+.support-card p {
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui-line);
+  color: var(--muted-foreground);
+}
+
+@media (max-width: 639px) {
+  .support-cards {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

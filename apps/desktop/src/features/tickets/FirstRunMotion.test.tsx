@@ -3,7 +3,9 @@ import { act, cleanup, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { ViewRegion } from "@/components/layout/ViewRegion";
 import { Step, Steps } from "@/components/ui/steps";
+import { SettingsStateProvider } from "@/features/settings/settings-state";
 import { agentSkillsClient } from "@/lib/api/agent-skills";
+import { cliClient, type CliStatus } from "@/lib/api/cli";
 import {
   applyTokens,
   instantTokens,
@@ -19,6 +21,29 @@ import { FirstRunGuide } from "./FirstRunGuide";
 vi.mock("@/lib/api/agent-skills", () => ({
   agentSkillsClient: { list: vi.fn() },
 }));
+vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
+
+const withCommand: CliStatus = {
+  found: true,
+  on_path: true,
+  path: "/usr/local/bin/ticketd",
+  version: "0.2.0",
+  version_matches: true,
+  workspace_path: "/w",
+  workspace_matches: true,
+  app_version: "0.2.0",
+  app_workspace_path: "/w",
+  suggested_directory: "/usr/local/bin",
+  bundled: { platform: "macos", installed: true, in_the_way: null },
+};
+const claudeWith = (state: "installed" | "not_installed") => ({
+  id: "claude",
+  name: "Claude Code",
+  path: "/skills",
+  detected: true,
+  state,
+  error: null,
+});
 
 type Played = {
   element: Element;
@@ -47,6 +72,7 @@ const animate = vi.fn(function (
 let restoreTokens: () => void;
 beforeEach(() => {
   vi.mocked(agentSkillsClient.list).mockResolvedValue([]);
+  vi.mocked(cliClient.check).mockResolvedValue(withCommand);
   played.length = 0;
   animate.mockClear();
   Element.prototype.animate = animate as unknown as Element["animate"];
@@ -71,7 +97,11 @@ function Page({ first }: { first: boolean }) {
   return (
     <main className="content-panel">
       <ViewRegion page={first ? "first-run" : "list"}>
-        {first && <FirstRunGuide disabledReason={null} onCreate={() => {}} />}
+        {first && (
+          <SettingsStateProvider active={false}>
+            <FirstRunGuide disabledReason={null} onCreate={() => {}} />
+          </SettingsStateProvider>
+        )}
         <section className="ticket-list" hidden={first}>
           <header data-arrive="header" />
           <ul>
@@ -219,16 +249,9 @@ test("a step read as not done draws its check when it completes later", () => {
   expect(drawn()).not.toBeNull();
 });
 
-test("the guide shows the skill step done, not drawn, when the skill was installed all along", async () => {
+test("the guide shows the agents step done, not drawn, when the command and skill were there all along", async () => {
   vi.mocked(agentSkillsClient.list).mockResolvedValue([
-    {
-      id: "claude",
-      name: "Claude Code",
-      path: "/skills",
-      detected: true,
-      state: "installed",
-      error: null,
-    },
+    claudeWith("installed"),
   ]);
   render(<Page first />);
   expect(await screen.findByText(/Completed:/)).toBeTruthy();
@@ -236,4 +259,23 @@ test("the guide shows the skill step done, not drawn, when the skill was install
   expect(
     document.querySelector('[data-state="done"] [data-slot="step-number"] svg'),
   ).not.toBeNull();
+});
+
+test("the guide's agents step shares Set up ticketd's state: the skill without the command does not tick it", async () => {
+  vi.mocked(agentSkillsClient.list).mockResolvedValue([
+    claudeWith("installed"),
+  ]);
+  vi.mocked(cliClient.check).mockResolvedValue({
+    ...withCommand,
+    found: false,
+    on_path: false,
+    path: null,
+    version: null,
+    version_matches: null,
+    workspace_matches: null,
+  });
+  render(<Page first />);
+  await act(async () => {});
+  expect(screen.queryByText(/Completed:/)).toBeNull();
+  expect(screen.getByRole("button", { name: "Set up ticketd" })).toBeTruthy();
 });

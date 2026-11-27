@@ -26,7 +26,14 @@ import {
 } from "@/features/documents/navigation";
 import type { DocumentCommands } from "@/features/documents/Documents";
 import type { AttachmentCommands } from "@/features/attachments/AttachmentLibrary";
-import type { SettingsPageId } from "@/features/settings/settings-sections";
+import {
+  initialSettingsPage,
+  navSectionOf,
+  resolveSettingsPage,
+  type LegacySettingsPageId,
+  type SettingsPageId,
+  type SettingsSectionId,
+} from "@/features/settings/settings-sections";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
 import { client, type ContextGraph as GraphData } from "@/lib/api/client";
 import { countsClient, type SidebarCounts } from "@/lib/api/counts";
@@ -40,7 +47,7 @@ import {
   type View,
 } from "@/components/layout/WorkspaceSidebar";
 import { useReminderNotifications } from "@/features/tickets/useReminderNotifications";
-import { usePreferences, useThemeSync } from "@/lib/preferences";
+import { setPreference, usePreferences, useThemeSync } from "@/lib/preferences";
 import { useInputModality } from "@/lib/input-modality";
 import { SidebarProvider } from "@/components/ui/sidebar";
 import { ReturnCrumb, ShellSlotProvider } from "@/components/ui/list-header";
@@ -77,6 +84,10 @@ import { SyncStatusProvider } from "@/features/sync/SyncStatusProvider";
 import { useSyncNavigation } from "@/features/sync/sync-status";
 import { TicketNavigation } from "@/features/tickets/navigation";
 import { SettingsNavigation } from "@/lib/settings-navigation";
+import {
+  SetupActionsContext,
+  type SetupActions,
+} from "@/features/setup/setup-actions";
 import {
   useDraftRecovery,
   useDraftRecoveryGeneration,
@@ -278,8 +289,14 @@ function AppContent() {
   const [newChatRequest, setNewChatRequest] = useState(0);
   // Menus and popovers opened in the content panel stay inside it (P3).
   const [contentPanel, setContentPanel] = useState<HTMLElement | null>(null);
-  const [settingsSection, setSettingsSection] =
+  const [settingsSection, setSettingsPage] =
     useState<SettingsPageId>("appearance");
+  // A page asked for by an old name opens the page that replaced it.
+  const setSettingsSection = useCallback(
+    (page: SettingsPageId | LegacySettingsPageId) =>
+      setSettingsPage(resolveSettingsPage(page)),
+    [],
+  );
   const [projectSource, setProjectSource] = useState<
     | ({ mode: "setup" } & ProjectSourceSetup)
     | {
@@ -329,6 +346,18 @@ function AppContent() {
     useState<DocumentCommands | null>(null);
   const [documentListRequest, setDocumentListRequest] = useState(0);
   const [creatingPlan, setCreatingPlan] = useState(false);
+  // Settings opens on Set up ticketd until it is finished or hidden.
+  const { setupHidden, setupFinished, settingsPage } = usePreferences();
+  const setupPending = !setupHidden && !setupFinished;
+  // The first page with a problem to fix, kept by the Settings state.
+  const needsPageRef = useRef<SettingsSectionId | null>(null);
+  // The page last used comes back when nothing needs the person.
+  useEffect(() => {
+    if (view !== "settings") return;
+    const page = navSectionOf(settingsSection);
+    if (page && page !== "setup" && (page !== "automations" || chat.enabled))
+      setPreference("settingsPage", page);
+  }, [view, settingsSection, chat.enabled]);
   const openView = (next: typeof view) => {
     if (next === "documents") {
       // Sidebar "Documents" returns to the list, not to where a reader came from.
@@ -339,7 +368,14 @@ function AppContent() {
     }
     if (next === "settings" && view !== "settings") {
       setViewBeforeSettings(view);
-      setSettingsSection("appearance");
+      setSettingsSection(
+        initialSettingsPage({
+          setupPending,
+          needs: needsPageRef.current,
+          last: settingsPage,
+          chatsOn: chat.enabled,
+        }),
+      );
     }
     setView(next);
   };
@@ -353,7 +389,7 @@ function AppContent() {
   function setupProjectSource(setup: ProjectSourceSetup) {
     setProjectSource({ mode: "setup", ...setup });
     openView("settings");
-    setSettingsSection("sources");
+    setSettingsSection("ticket-sources");
   }
   useSyncNavigation({
     openSettings: () => {
@@ -900,6 +936,20 @@ function AppContent() {
     // Without it a run's Inbox entry opens its ticket instead.
     <RunNavigation value={chat.enabled ? openRun : null}>
       <ShellNavigation
+        setup={{
+          newTicket: (trigger) => {
+            createTriggerRef.current = trigger;
+            setCreateStatus(undefined);
+            setCreating(true);
+          },
+          startChat: chat.enabled
+            ? () => {
+                setNewChatRequest((count) => count + 1);
+                openView("chats");
+              }
+            : null,
+          newTicketDisabledReason: createDisabledReason,
+        }}
         graph={(id, options) => {
           // A ticket's graph opened from its header or rail starts on its
           // dependencies; anything else shows all connections.
@@ -958,7 +1008,7 @@ function AppContent() {
                     openSettings: (connection) => {
                       openView("settings");
                       setSettingsSection(
-                        connection ? `source-${connection}` : "sources",
+                        connection ? `source-${connection}` : "ticket-sources",
                       );
                     },
                     refreshAll: () => refreshSources(),
@@ -970,6 +1020,7 @@ function AppContent() {
                   <SettingsStateProvider
                     active={view === "settings"}
                     onOpenPage={setSettingsSection}
+                    needsPageRef={needsPageRef}
                   >
                     <SidebarProvider open={!sidebarCollapsed}>
                       <StatusLineSpot>
@@ -986,7 +1037,13 @@ function AppContent() {
                         <WindowBar />
                         <StatusLineRegion
                           host={{ current: contentPanel }}
-                          notice={updateNotice}
+                          notice={
+                            // About already shows the update, and the notice
+                            // would cover its Help list.
+                            view === "settings" && settingsSection === "about"
+                              ? undefined
+                              : updateNotice
+                          }
                         >
                           <PageZoomStatus zoom={pageZoom} />
                           <NewPlanDialog
@@ -1417,10 +1474,9 @@ function AppContent() {
                                         <SettingsView
                                           selected={settingsSection}
                                           onSelect={setSettingsSection}
-                                          onOpenInbox={() => {
-                                            setProjectSource(null);
-                                            setView("inbox");
-                                          }}
+                                          onOpenAutomations={() =>
+                                            setView("automations")
+                                          }
                                           onRestore={replaceWorkspace}
                                           onWorkspaceReplaced={
                                             discardChatWorkspace
@@ -1808,17 +1864,22 @@ function PreferenceFailure({
 function ShellNavigation({
   graph,
   settings,
+  setup,
   children,
 }: {
   graph: ContextType<typeof ContextGraphNavigation>;
   settings: (page: SettingsPageId) => void;
+  /** What Set up ticketd starts outside Settings. */
+  setup: SetupActions;
   children: ReactNode;
 }) {
   return (
     <SettingsNavigation.Provider value={settings}>
-      <ContextGraphNavigation.Provider value={graph}>
-        {children}
-      </ContextGraphNavigation.Provider>
+      <SetupActionsContext.Provider value={setup}>
+        <ContextGraphNavigation.Provider value={graph}>
+          {children}
+        </ContextGraphNavigation.Provider>
+      </SetupActionsContext.Provider>
     </SettingsNavigation.Provider>
   );
 }

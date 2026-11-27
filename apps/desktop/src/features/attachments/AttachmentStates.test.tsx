@@ -5,7 +5,6 @@ import {
   fireEvent,
   render,
   screen,
-  waitFor,
   within,
 } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -86,7 +85,7 @@ test("a missing file is flagged in the library and its preview offers a real way
   fireEvent.click(
     within(pane).getByRole("button", { name: "Restore from a backup…" }),
   );
-  expect(openSettings).toHaveBeenCalledWith("backups");
+  expect(openSettings).toHaveBeenCalledWith("backups-export");
 });
 
 test("plain text previews as text, and other formats say so once without Retry", async () => {
@@ -117,7 +116,7 @@ test("plain text previews as text, and other formats say so once without Retry",
   expect(screen.queryByRole("button", { name: "Retry" })).toBeNull();
 });
 
-test("an upload over the limit says its size and the limit, and offers Change limit instead of Retry", async () => {
+test("an upload over the limit says its size and the limit, and offers Remove instead of Retry", async () => {
   vi.mocked(invoke).mockImplementation(async (command, args) => {
     if (command === "attachment_upload_destination") return { kind: "local" };
     if (command === "begin_attachment_upload")
@@ -127,10 +126,9 @@ test("an upload over the limit says its size and the limit, and offers Change li
     throw new Error(`Unexpected ${command}`);
   });
   const openSettings = vi.fn();
-  const changed = vi.fn();
   render(
     <SettingsNavigation.Provider value={openSettings}>
-      <AttachmentPicker open onOpenChange={changed} onPick={vi.fn()} />
+      <AttachmentPicker open onOpenChange={vi.fn()} onPick={vi.fn()} />
     </SettingsNavigation.Provider>,
   );
   const big = new File(["x"], "recording.mov");
@@ -145,9 +143,11 @@ test("an upload over the limit says its size and the limit, and offers Change li
   );
   expect(within(row).queryByRole("button", { name: "Retry" })).toBeNull();
   expect(within(row).getByRole("button", { name: "Remove" })).toBeTruthy();
-  fireEvent.click(within(row).getByRole("button", { name: "Change limit" }));
-  expect(openSettings).toHaveBeenCalledWith("attachments");
-  await waitFor(() => expect(changed).toHaveBeenCalledWith(false));
+  // The limit is 100 MB and has no setting to change.
+  expect(
+    within(row).queryByRole("button", { name: "Change limit" }),
+  ).toBeNull();
+  expect(openSettings).not.toHaveBeenCalled();
 });
 
 const stored = (name: string, size: number) => ({

@@ -19,8 +19,8 @@ use ticketd_core::{
     },
     sync::{
         AttachmentAvailability, AttachmentDownload, MAX_FILE_BYTES, S3Binding, SetupOptions,
-        SyncChoice, SyncConflict, SyncConnection, SyncItem, SyncNotice, SyncProvider, SyncRecovery,
-        SyncResolution, SyncSettings, SyncStatus,
+        SyncChoice, SyncConflict, SyncConnection, SyncDevice, SyncItem, SyncNotice, SyncProvider,
+        SyncRecovery, SyncResolution, SyncSettings, SyncStatus,
         remote::{RemoteError, RemoteKey, RemoteKind, RemoteRevision, RemoteStorage},
     },
 };
@@ -1097,8 +1097,79 @@ fn woken<T>(outcome: Outcome<T>) -> Outcome<T> {
 // Everything below that reaches Google runs off the UI thread.
 #[tauri::command(async)]
 pub fn sync_connect(app: tauri::AppHandle) -> Outcome<SyncStatus> {
-    let (connection, account) = sign_in(&app)?;
+    // Files and Workspace sync share one Google sign-in: one already made for Files is used
+    // as it is, with no second consent.
+    let known = open_workspace()?
+        .google_sign_in()?
+        .and_then(|known| Some((known.connection_id, known.account?)));
+    let (connection, account) = match known {
+        Some(known) => known,
+        None => sign_in(&app)?,
+    };
     woken(Ok(open_workspace()?.sync_connect(&connection, &account)?))
+}
+
+/// Signs in with another Google account for Files and Workspace sync together. The interface
+/// has said what changes before it asks; nothing changes until the sign-in has finished.
+#[tauri::command(async)]
+pub fn use_another_google_account(app: tauri::AppHandle) -> Outcome<SyncStatus> {
+    let (connection, account) = sign_in(&app)?;
+    let mut workspace = open_workspace()?;
+    workspace.switch_google_account(&connection, &account)?;
+    woken(Ok(workspace.sync_status()?))
+}
+
+/// New files go to the Uploads folder inside the folder Workspace sync uses on Google Drive,
+/// with the sign-in sync holds.
+#[tauri::command(async)]
+pub fn use_sync_uploads_folder() -> Outcome<ticketd_core::AttachmentUploadDestination> {
+    let mut workspace = open_workspace()?;
+    let connection = workspace
+        .sync_binding()?
+        .filter(|binding| binding.provider == SyncProvider::GoogleDrive)
+        .and_then(|binding| binding.connection_id);
+    let Some(connection) = connection else {
+        return rejected("Workspace sync is not on Google Drive");
+    };
+    let remote = drive(&connection);
+    Ok(workspace.use_sync_uploads_folder(remote.as_ref())?)
+}
+
+/// Once sync has a folder on Google Drive, uploads that were going to Drive go inside it. A
+/// failure is left for the next time: uploads keep going where they were chosen to.
+fn follow_uploads(workspace: &mut Workspace) {
+    let connection = workspace
+        .sync_binding()
+        .ok()
+        .flatten()
+        .filter(|binding| binding.provider == SyncProvider::GoogleDrive)
+        .and_then(|binding| binding.connection_id);
+    let Some(connection) = connection else { return };
+    let remote = drive(&connection);
+    if let Err(error) = workspace.follow_sync_uploads(remote.as_ref()) {
+        tracing::warn!(
+            error_kind = error.kind().code(),
+            %error,
+            "could not move uploads into the sync folder"
+        );
+    }
+}
+
+/// [`follow_uploads`] for the Workspace a download has just put in place. The replacement has
+/// already succeeded, and with it the safety copy the person is told about, so a Workspace
+/// another process holds exclusively at this moment (or one that cannot be reopened) is left
+/// for the next time like any other failure to follow: the download is still reported.
+fn follow_uploads_after_replace<W: std::ops::DerefMut<Target = Workspace>>(
+    reopen: impl FnOnce() -> Result<W, ticketd_core::Error>,
+) {
+    match reopen() {
+        Ok(mut workspace) => follow_uploads(&mut workspace),
+        Err(error) => tracing::warn!(
+            error_kind = error.kind().code(),
+            %error,
+            "could not reopen the Workspace to move uploads into the sync folder"
+        ),
+    }
 }
 
 #[tauri::command(async)]
@@ -1113,10 +1184,9 @@ pub fn sync_setup_options() -> Outcome<SetupOptions> {
 pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
     let remote = signed_in(&workspace)?;
-    woken(Ok(workspace.sync_upload_workspace(
-        remote.as_ref(),
-        "ticketd Workspace",
-    )?))
+    let status = workspace.sync_upload_workspace(remote.as_ref(), "ticketd Workspace")?;
+    follow_uploads(&mut workspace);
+    woken(Ok(status))
 }
 
 /// Back to the folder this Workspace synced with before it was disconnected.
@@ -1125,7 +1195,9 @@ pub fn sync_upload_workspace() -> Outcome<SyncStatus> {
 pub fn sync_reconnect() -> Outcome<SyncStatus> {
     let mut workspace = open_workspace()?;
     let remote = signed_in(&workspace)?;
-    woken(Ok(workspace.sync_reconnect(remote.as_ref())?))
+    let status = workspace.sync_reconnect(remote.as_ref())?;
+    follow_uploads(&mut workspace);
+    woken(Ok(status))
 }
 
 /// The status after a download, and where the replaced Workspace was kept.
@@ -1154,6 +1226,9 @@ pub fn sync_download_workspace(
     })?;
     // Let go first, so the run this wakes is not turned away by the hold.
     drop(no_run);
+    // The replaced Workspace starts with its files on this computer, so this is a no-op
+    // until a Drive folder is chosen; the other ways into sync call it the same way.
+    follow_uploads_after_replace(open_workspace);
     woken(Ok(Downloaded {
         status,
         safety_backup: safety_backup.display().to_string(),
@@ -1226,6 +1301,12 @@ pub fn sync_open_folder(app: tauri::AppHandle) -> Outcome<()> {
 #[tauri::command(async)]
 pub fn sync_settings() -> Outcome<SyncSettings> {
     Ok(open_workspace()?.sync_settings()?)
+}
+
+/// The computers that share this Workspace, from this computer's copy of the device registry.
+#[tauri::command(async)]
+pub fn sync_devices() -> Outcome<Vec<SyncDevice>> {
+    Ok(open_workspace()?.sync_devices()?)
 }
 
 #[derive(Debug, Deserialize)]
@@ -2216,6 +2297,22 @@ mod tests {
         assert!(check_folder_id("").is_err());
         assert!(check_folder_id("' or name contains '").is_err());
         assert!(check_attachment_ids(&[String::new()]).is_err());
+    }
+
+    #[test]
+    fn a_workspace_that_cannot_be_reopened_after_a_download_does_not_undo_it() {
+        let mut desks = desks();
+        // Reopening fails: nothing is raised and the folder is not asked about.
+        follow_uploads_after_replace(|| -> Result<&mut Workspace, _> {
+            Err(ticketd_core::Error::Sync("held by another process".into()))
+        });
+        // Reopened, it is followed like every other way into sync (here: nothing to move).
+        let mut reopened = 0;
+        follow_uploads_after_replace(|| -> Result<&mut Workspace, ticketd_core::Error> {
+            reopened += 1;
+            Ok(&mut desks.here)
+        });
+        assert_eq!(reopened, 1);
     }
 
     #[test]

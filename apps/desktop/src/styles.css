@@ -769,7 +769,8 @@
 }
 /* Board H: a blocked dialog primary keeps its #F2F2F2 fill with an inset 1px
    ring and #8F8F8F text. */
-.dialog-shell-footer .ui-button-primary:disabled {
+.dialog-shell-footer .ui-button-primary:disabled,
+.dialog-shell-footer .ui-button-primary[aria-disabled="true"] {
   color: var(--control-boundary);
   box-shadow: inset 0 0 0 1px var(--border);
 }
@@ -2409,6 +2410,13 @@ html[data-hover-held] .sidebar-nav button:hover:not([data-active="true"]) {
 .sidebar[data-collapsed] .sidebar-source > button:not(.sidebar-source-line) {
   width: 36px;
   padding-inline: 0;
+  margin-left: 0;
+}
+/* A word that only opens the line's page (Set up, Open, Sign in) would not fit
+   the 36px rail; the dot's tooltip names it and the line opens the page. Retry
+   fits and acts in place, so it stays, centred under the dots. */
+.sidebar[data-collapsed] .sidebar-source > [data-rail-hidden] {
+  display: none;
 }
 /* One inset, elevated panel holds every view; the canvas shows around it. */
 .content-panel {

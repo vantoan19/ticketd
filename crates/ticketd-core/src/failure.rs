@@ -298,4 +298,16 @@ mod tests {
         );
         assert_eq!(Error::EmptyTitle.kind(), FailureKind::Failed);
     }
+
+    #[test]
+    fn an_upload_over_the_limit_points_to_the_cli_and_a_smaller_file_not_a_settings_control() {
+        let message = Error::UploadLimit { limit: 1_048_576 }.to_string();
+        assert!(message.contains("1 MiB"), "{message}");
+        assert!(
+            message.contains("ticketd attachment limit --bytes <bytes>"),
+            "{message}"
+        );
+        assert!(message.contains("choose a smaller file"), "{message}");
+        assert!(!message.contains("Settings"), "{message}");
+    }
 }

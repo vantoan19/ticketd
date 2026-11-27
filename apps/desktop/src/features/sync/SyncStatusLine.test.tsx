@@ -203,7 +203,7 @@ test("needs review: the line counts the tickets and Review opens them", async ()
   await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
 });
 
-test("an expired sign-in offers Reconnect in the popover; the line stays one target", async () => {
+test("an expired sign-in offers Sign in in the popover; the line stays one target", async () => {
   await footer(
     syncStatus({ state: "needs_attention", recovery: "authorization_expired" }),
   );
@@ -215,13 +215,13 @@ test("an expired sign-in offers Reconnect in the popover; the line stays one tar
   api.recover.mockResolvedValue(syncStatus());
   api.status.mockResolvedValue(syncStatus());
   const dialog = await popover();
-  fireEvent.click(within(dialog).getByRole("button", { name: "Reconnect" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(api.recover).toHaveBeenCalled());
   fireEvent.keyDown(dialog, { key: "Escape" });
   await waitFor(async () =>
     expect((await line()).textContent).toBe("Drive synced1 min ago"),
   );
-  expect(screen.queryByRole("button", { name: "Reconnect" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Sign in" })).toBeNull();
 });
 
 test("an ended AWS session asks quietly on the line and signs in from the popover", async () => {
@@ -247,18 +247,13 @@ test("an ended AWS session asks quietly on the line and signs in from the popove
   const dialog = await popover("S3 sync");
   expect(dialog.textContent).toContain("Sign in to AWS again");
   expect(dialog.textContent).toContain("1 change uploads once you sign in.");
-  expect(
-    within(dialog).queryByRole("button", { name: "Reconnect" }),
-  ).toBeNull();
   fireEvent.click(within(dialog).getByRole("button", { name: "Sign in" }));
   await waitFor(() => expect(api.recover).toHaveBeenCalled());
   expect(
-    (
-      within(dialog).getByRole("button", {
-        name: "Waiting for sign-in…",
-      }) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
+    within(dialog)
+      .getByRole("button", { name: "Waiting for sign-in…" })
+      .getAttribute("aria-disabled"),
+  ).toBe("true");
 
   // Signed in: sync ran again and what waited is uploaded.
   finish(syncStatus({ provider: "s3" }));

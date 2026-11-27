@@ -9,8 +9,7 @@
   padding: 8px 12px 12px;
   overflow-y: auto;
 }
-/* Every entry, Search included, is one 32px row: icon, label, then a key
-   hint or a dot. Hover is --recessed on the canvas, the open page --accent. */
+/* Every entry is one 32px row: icon, label, then an optional dot. Hover is --recessed on the canvas, the open page --accent. */
 .settings-back,
 .settings-nav-row {
   display: flex;
@@ -33,8 +32,19 @@
 .settings-back {
   gap: 8px;
 }
-.settings-search-entry {
+/* The search field above the groups: a field, not a row, as wide as the nav. */
+.settings-nav-search {
+  display: flex;
   margin-top: 8px;
+}
+.settings-nav-search > .ui-search-input {
+  max-width: none;
+}
+.settings-nav-search > .ui-search-input > svg {
+  left: 12px;
+}
+.settings-nav-search > .ui-search-input > input {
+  padding-left: 36px;
 }
 .settings-nav svg {
   flex: none;
@@ -44,6 +54,16 @@
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+/* Set up ticketd: a row above the groups, 12px clear of the search field, with its count at the end. */
+.settings-setup-row {
+  margin-top: 12px;
+}
+.settings-setup-count {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 .settings-nav-dot {
   flex: none;
@@ -79,9 +99,6 @@
   grid-template-columns: 120px minmax(0, 1fr);
   margin: 0;
 }
-.cli-status-slot {
-  display: grid;
-}
 .skill-status-slot {
   display: grid;
 }
@@ -91,26 +108,13 @@
 .skill-status-reserve {
   visibility: hidden;
 }
-.cli-status-slot > * {
-  grid-area: 1 / 1;
-}
-.cli-status-reserve {
-  visibility: hidden;
-}
-.cli-check-feedback {
-  display: grid;
-  padding-top: 8px;
-}
-.cli-check-feedback > * {
-  grid-area: 1 / 1;
-}
-.cli-check-feedback-reserve {
-  visibility: hidden;
-}
 .cli-details dt,
 .cli-details dd {
   margin: 0;
   padding: 12px 20px;
+}
+.cli-details dt {
+  padding-left: 16px;
 }
 .cli-details dd {
   display: flex;

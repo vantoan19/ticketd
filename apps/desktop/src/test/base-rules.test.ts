@@ -90,4 +90,7 @@ it("the settings page keeps its scrollbar gutter, so a longer page does not shif
   );
   const page = /\.settings-page\s*\{([^}]*)\}/.exec(layout)?.[1] ?? "";
   expect(page).toMatch(/scrollbar-gutter:\s*stable/);
+  // WebKit ignores the gutter next to the styled scrollbar; only an always-on
+  // track keeps the column from moving 5px between a short and a long page.
+  expect(page).toMatch(/overflow-y:\s*scroll/);
 });

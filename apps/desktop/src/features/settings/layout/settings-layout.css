@@ -33,16 +33,17 @@
   content: "/";
   margin-right: 8px;
 }
+/* The parent step of a drill-in breadcrumb is a button that looks like text
+   (its look is in the surface roles). */
+.settings-crumb-link {
+  padding: 0;
+  cursor: pointer;
+}
 .settings-panel-bar-end {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-left: auto;
-}
-.settings-applies {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
 }
 
 /* The scroll container around the open page. Focus-driven scrolls stop
@@ -51,9 +52,11 @@
   flex: 1;
   min-height: 0;
   width: 100%;
-  overflow-y: auto;
   /* A classic scrollbar appearing on a longer page (an error, a list) must not
-     narrow the column and shift it sideways. */
+     narrow the column and shift it sideways. The track is always there (empty
+     and invisible when nothing scrolls) because WebKit ignores scrollbar-gutter
+     next to the app's styled scrollbar; Chromium keeps the gutter. */
+  overflow-y: scroll;
   scrollbar-gutter: stable;
   scroll-padding-top: 48px;
 }
@@ -158,6 +161,16 @@
   display: flex;
   align-items: center;
   gap: 8px;
+}
+/* A row that opens something in place: the whole row answers a click, the
+   chevron is the keyboard stop. */
+.settings-list-row[data-openable] {
+  cursor: pointer;
+}
+.settings-row-open {
+  display: inline-flex;
+  padding: 0;
+  cursor: inherit;
 }
 .settings-list-footer {
   display: flex;

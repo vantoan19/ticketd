@@ -1,4 +1,4 @@
-import { useContext, useEffect, useState } from "react";
+import { useContext, useEffect } from "react";
 import { ListTodo } from "lucide-react";
 import { enter } from "@/components/ui/enter";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,9 @@ import { Kbd } from "@/components/ui/kbd";
 import { emptyCopy } from "@/lib/empty-copy";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { SettingsNavigation } from "@/lib/settings-navigation";
-import { agentSkillsClient } from "@/lib/api/agent-skills";
 import { useSyncStatus } from "@/features/sync/sync-status";
+import { useSettingsState } from "@/features/settings/use-settings-state";
+import { setupStep } from "@/features/setup/setup-state";
 import "./first-run.css";
 
 /**
@@ -31,31 +32,14 @@ export function FirstRunGuide({
 }) {
   const settings = useContext(SettingsNavigation);
   const { status } = useSyncStatus();
-  // null until the read is back: a step already done then shows its check
-  // instead of drawing it (Step's `settled`).
-  const [skillInstalled, setSkillInstalled] = useState<boolean | null>(null);
-  useEffect(() => {
-    let live = true;
-    void agentSkillsClient.list().then(
-      (skills) => {
-        if (live)
-          setSkillInstalled(
-            skills.some(
-              (skill) =>
-                skill.state === "installed" ||
-                skill.state === "newer" ||
-                skill.state === "update_available",
-            ),
-          );
-      },
-      () => {
-        if (live) setSkillInstalled(false);
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, []);
+  // The same state as Set up ticketd, so "Let your agents in" ticks only when
+  // the command and every agent's skill are in place. Unread until it is back:
+  // a step already done then shows its check instead of drawing it (Step's `settled`).
+  const { setup, refreshIndicators } = useSettingsState();
+  useEffect(() => refreshIndicators("command-line"), [refreshIndicators]);
+  useEffect(() => refreshIndicators("agent-skills"), [refreshIndicators]);
+  const agents = setup ? setupStep(setup, "agents") : null;
+  const agentsReady = agents?.done ?? false;
   const copy = emptyCopy("workspace-first-run");
   return (
     <div className="first-run-host" data-own-entrance="">
@@ -102,27 +86,23 @@ export function FirstRunGuide({
             }
           />
           <Step
-            {...(skillInstalled && { state: "done" as const })}
-            settled={skillInstalled !== null}
+            {...(agentsReady && { state: "done" as const })}
+            settled={agents?.settled ?? false}
             title={
               <>
                 Let your agents in
-                {skillInstalled && <span className="sr-only"> — Complete</span>}
+                {agentsReady && <span className="sr-only"> — Complete</span>}
               </>
             }
-            description="Install the ticketd skill so Claude Code and Codex can read and update tickets."
+            description="Install the ticketd command and skill so Claude Code and Codex can read and update tickets."
             action={
-              <Tooltip
-                content="Open Agent skills"
-                shortcut={shortcutLabel("go-agent-skills")}
-              >
+              <Tooltip content="Open Set up ticketd">
                 <Button
                   size="compact"
                   variant="outline"
-                  aria-keyshortcuts={ariaKeyShortcuts("go-agent-skills")}
-                  onClick={() => settings?.("agent-skills")}
+                  onClick={() => settings?.("setup")}
                 >
-                  Install skill
+                  Set up ticketd
                 </Button>
               </Tooltip>
             }

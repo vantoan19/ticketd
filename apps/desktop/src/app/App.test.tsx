@@ -1,3 +1,4 @@
+import { updateClient } from "@/features/updates/client";
 import { beaconIcon, beaconSource, githubSource } from "@/test/source-fixtures";
 import { DraftRecoveryProvider } from "@/lib/draft-recovery";
 import type { Ticket } from "@/lib/api/client";
@@ -161,6 +162,92 @@ beforeEach(() => {
   );
 });
 
+/** Settings opens on Set up ticketd until it is hidden: tests about other pages hide it. */
+function hideSetupChecklist() {
+  localStorage.setItem(
+    "ticketd.preferences",
+    JSON.stringify({ documentsView: "recent", setupHidden: true }),
+  );
+}
+
+/** A command line that is set up, so no page needs the person when Settings opens. */
+const healthyCli = {
+  found: true,
+  on_path: true,
+  path: "/usr/local/bin/ticketd",
+  version: "0.1.0",
+  version_matches: true,
+  workspace_path: "/w",
+  workspace_matches: true,
+  app_version: "0.1.0",
+  app_workspace_path: "/w",
+  suggested_directory: "~/.local/bin",
+};
+const withHealthyCli: typeof bridgeDefault = (command, args) =>
+  command === "check_cli" ? healthyCli : bridgeDefault(command, args);
+
+test("Settings opens on Set up ticketd while it is unfinished, and on Appearance once it is hidden", async () => {
+  bridge.invoke.mockImplementation(withHealthyCli);
+  const first = render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Hide checklist" }));
+  first.unmount();
+  render(<App />);
+  fireEvent.click(await screen.findByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Appearance" }),
+  ).toBeTruthy();
+  expect(screen.queryByRole("button", { name: /^Set up ticketd/ })).toBeNull();
+});
+
+test("Settings opens on the page that needs the person, ahead of Set up ticketd, with its mark and its line in the sidebar", async () => {
+  // The default bridge has no ticketd command on this computer.
+  bridge.invoke.mockImplementation(bridgeDefault);
+  render(<App />);
+  await act(async () => {});
+  expect(
+    screen.getByRole("button", { name: "Set up the command line" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Command line" }),
+  ).toBeTruthy();
+  const nav = within(
+    screen.getByRole("navigation", { name: "Settings sections" }),
+  );
+  expect(
+    within(nav.getByRole("button", { name: /^Command line/ })).getByRole(
+      "img",
+      { name: "Needs setup" },
+    ),
+  ).toBeTruthy();
+});
+
+test("with nothing to fix, Settings opens on the page last used", async () => {
+  hideSetupChecklist();
+  bridge.invoke.mockImplementation(withHealthyCli);
+  const first = render(<App />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Appearance" }),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Attention" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Attention" }),
+  ).toBeTruthy();
+  first.unmount();
+  render(<App />);
+  await act(async () => {});
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  expect(
+    await screen.findByRole("heading", { level: 1, name: "Attention" }),
+  ).toBeTruthy();
+});
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -189,7 +276,7 @@ test("Attachments opens from the existing Context navigation without replacing t
   expect(screen.queryByRole("heading", { name: "Attachments" })).toBeNull();
 });
 
-test("Storage settings in the Attachments library opens Settings at Attachments", async () => {
+test("Storage settings in the Attachments library opens Settings at Files", async () => {
   bridge.invoke.mockImplementation(bridgeDefault);
   render(<App />);
   fireEvent.click(await screen.findByRole("button", { name: "Attachments" }));
@@ -204,7 +291,7 @@ test("Storage settings in the Attachments library opens Settings at Attachments"
     name: "Settings sections",
   });
   expect(nav.querySelector("[aria-current=page]")?.textContent).toContain(
-    "Attachments",
+    "Files",
   );
 });
 
@@ -1655,9 +1742,9 @@ test("a Drive download that replaces the Workspace drops the old selection and a
   );
   for (let i = 0; i < 3; i += 1) await turn();
   fireEvent.click(
-    screen.getByRole("radio", { name: /Download “ticketd · other”/ }),
+    screen.getByRole("radio", { name: /Join “ticketd · other”/ }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Download…" }));
+  fireEvent.click(screen.getByRole("button", { name: "Join…" }));
   await turn();
   fireEvent.click(
     within(
@@ -1692,14 +1779,19 @@ test("a restore reads the list once, during the restore", async () => {
       lists += 1;
       return [bulkTicket(1)];
     },
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1714,17 +1806,20 @@ test("a restore reads the list once, during the restore", async () => {
       await vi.advanceTimersByTimeAsync(0);
     });
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  await turn();
+  await act(async () => {
+    await vi.dynamicImportSettled();
+    await vi.advanceTimersByTimeAsync(0);
+  });
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Backups" }),
+    ).getByRole("button", { name: "Backups & export" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
-  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  fireEvent.click(screen.getByRole("button", { name: /^Restore…/ }));
   for (let i = 0; i < 3; i += 1) await turn();
   const before = lists;
-  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  fireEvent.click(screen.getByRole("button", { name: "Replace Workspace" }));
   for (let i = 0; i < 6; i += 1) await turn();
   expect(screen.getByText("Workspace restored")).toBeTruthy();
   expect(lists - before).toBe(1);
@@ -1751,14 +1846,19 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   };
   await renderReplaceable({
     find_tickets: () => [bulkTicket(1)],
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1782,13 +1882,13 @@ test("a restore plays the launch cascade once, after the new Workspace's change 
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Backups" }),
+    ).getByRole("button", { name: "Backups & export" }),
   );
   for (let i = 0; i < 3; i += 1) await turn();
-  fireEvent.click(screen.getByRole("button", { name: `Restore… ${backup}` }));
+  fireEvent.click(screen.getByRole("button", { name: /^Restore…/ }));
   for (let i = 0; i < 3; i += 1) await turn();
   const before = order.length;
-  fireEvent.click(screen.getByRole("button", { name: "Replace workspace" }));
+  fireEvent.click(screen.getByRole("button", { name: "Replace Workspace" }));
   for (let i = 0; i < 6; i += 1) await turn();
   for (let i = 0; i < 6; i += 1) await turn();
   bridge.token.next = nextToken;
@@ -1842,14 +1942,19 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
     failRefresh = reject;
   });
   const handlers: Record<string, unknown> = {
-    safety_backups: [
-      {
-        path: backup,
-        kind: "safety",
-        saved_at: "2026-11-01T00:00:00Z",
-        size_bytes: 1024,
-      },
-    ],
+    restore_points: {
+      points: [
+        {
+          path: backup,
+          kind: "safety",
+          saved_at: "2026-11-01T00:00:00Z",
+          size_bytes: 1024,
+          summary: null,
+          problem: null,
+        },
+      ],
+      total_bytes: 1024,
+    },
     inspect_backup: {
       path: backup,
       current: summary,
@@ -1920,13 +2025,11 @@ test("a completed Workspace restore clears Chat drafts even when recovery cannot
   fireEvent.click(
     within(
       await screen.findByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Backups" }),
+    ).getByRole("button", { name: "Backups & export" }),
   );
+  fireEvent.click(await screen.findByRole("button", { name: /^Restore…/ }));
   fireEvent.click(
-    await screen.findByRole("button", { name: `Restore… ${backup}` }),
-  );
-  fireEvent.click(
-    await screen.findByRole("button", { name: "Replace workspace" }),
+    await screen.findByRole("button", { name: "Replace Workspace" }),
   );
   await waitFor(() => expect(refreshStarted).toBe(true));
   expect(draftOf(client, chatId)).not.toBe(oldDraft);
@@ -2189,6 +2292,7 @@ test("the narrow navigation trigger sits in the view's header and gets focus bac
 });
 
 test("Settings reads fresh data on every visit, checks the CLI at startup and again once opened, and moves focus in and out", async () => {
+  hideSetupChecklist();
   vi.useFakeTimers();
   let tickets = 1;
   const calls: string[] = [];
@@ -2207,7 +2311,6 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
           size_bytes: 4096,
           format_version: 20,
         };
-      if (command === "last_backup") return null;
       if (command === "check_cli") throw new Error("not installed");
       return bridgeDefault(command, args);
     },
@@ -2227,13 +2330,15 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
   expect(document.activeElement).toBe(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
   );
-  fireEvent.click(screen.getByRole("button", { name: "Location" }));
+  fireEvent.click(screen.getByRole("button", { name: "Backups & export" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(
-    screen.getByRole("region", { name: "Contents" }).textContent,
-  ).toContain("Tickets1");
+    screen
+      .getByRole("region", { name: "Location" })
+      .querySelector(".settings-list-footer-text")?.textContent,
+  ).toContain("1 ticket ");
   fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
   expect(document.activeElement).toBe(
     screen.getByRole("button", { name: "Settings" }),
@@ -2244,13 +2349,60 @@ test("Settings reads fresh data on every visit, checks the CLI at startup and ag
   expect(document.documentElement.dataset.hoverHeld).toBeUndefined();
   tickets = 7;
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  fireEvent.click(screen.getByRole("button", { name: "Location" }));
+  fireEvent.click(screen.getByRole("button", { name: "Backups & export" }));
   await act(async () => {
     await vi.advanceTimersByTimeAsync(0);
   });
   expect(
-    screen.getByRole("region", { name: "Contents" }).textContent,
-  ).toContain("Tickets7");
+    screen
+      .getByRole("region", { name: "Location" })
+      .querySelector(".settings-list-footer-text")?.textContent,
+  ).toContain("7 tickets");
+});
+
+test("the update notice stays hidden while About shows the update itself", async () => {
+  bridge.invoke.mockImplementation(
+    async (command: string, args?: { id?: string }) => {
+      if (command === "list_projects" || command === "list_plans") return [];
+      if (command === "find_tickets") return [];
+      if (
+        command.startsWith("plugin:window|") ||
+        command.startsWith("plugin:webview|")
+      )
+        return null;
+      if (command === "check_cli") throw new Error("not installed");
+      return bridgeDefault(command, args);
+    },
+  );
+  // The updater only exists in the packaged app; this is a fake one.
+  const uninstall = installNativeZoomBridge();
+  const listen = vi.spyOn(updateClient, "listen").mockResolvedValue(() => {});
+  const state = vi.spyOn(updateClient, "state").mockResolvedValue({
+    revision: 1,
+    automatic: true,
+    dismissed: false,
+    install_on_quit: false,
+    status: "ready",
+    update: {
+      version: "0.3.0",
+      release_url: "https://github.com/vantoan19/ticketd/releases/tag/v0.3.0",
+      upgrades_workspace: true,
+    },
+  });
+  render(<App />);
+  const notice = () => screen.queryByRole("button", { name: "Dismiss" });
+  await screen.findAllByText("ticketd 0.3.0 is ready");
+  expect(notice()).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Settings" }));
+  fireEvent.click(await screen.findByRole("button", { name: "About" }));
+  await screen.findByRole("heading", { level: 1, name: "ticketd" });
+  expect(screen.getAllByText("ticketd 0.3.0 is ready")).toHaveLength(1);
+  expect(notice()).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
+  await waitFor(() => expect(notice()).toBeTruthy());
+  listen.mockRestore();
+  state.mockRestore();
+  uninstall();
 });
 
 test("a selection ends when the filters change, and the bar can be skipped to", async () => {
@@ -9525,7 +9677,7 @@ test("first run creates through the shared dialog and gives way to the ticket li
   ).toBeNull();
 });
 
-test("first-run Install skill settles successful reads and keeps Settings navigation responsive", async () => {
+test("first-run Set up ticketd settles successful reads and keeps Settings navigation responsive", async () => {
   let reads = 0;
   bridge.invoke.mockImplementation(
     async (command: string, args?: Record<string, unknown>) => {
@@ -9542,12 +9694,14 @@ test("first-run Install skill settles successful reads and keeps Settings naviga
   const guide = await screen.findByRole("region", {
     name: "Your workspace is ready",
   });
-  fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
-  await act(async () => {});
-  expect(reads).toBeLessThanOrEqual(6);
+  fireEvent.click(
+    within(guide).getByRole("button", { name: "Set up ticketd" }),
+  );
   expect(
-    screen.getByText("No supported agent was found on this computer"),
+    await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
   ).toBeTruthy();
+  expect(await screen.findByText("Agents can use ticketd")).toBeTruthy();
+  expect(reads).toBeLessThanOrEqual(6);
   fireEvent.click(screen.getByRole("button", { name: "Appearance" }));
   expect(
     screen.getByRole("heading", { level: 1, name: "Appearance" }),
@@ -9580,6 +9734,16 @@ test("Settings Agent skills settles reads and refreshes its setup dot after inst
         installed = true;
         return { backup: null };
       }
+      if (command === "check_cli") {
+        return {
+          ...(bridgeDefault(command, args) as object),
+          found: true,
+          on_path: true,
+          version: "0.1.0",
+          version_matches: true,
+          workspace_matches: true,
+        };
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -9587,10 +9751,10 @@ test("Settings Agent skills settles reads and refreshes its setup dot after inst
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   const nav = within(
-    screen.getByRole("navigation", { name: "Settings sections" }),
+    await screen.findByRole("navigation", { name: "Settings sections" }),
   );
   fireEvent.click(nav.getByRole("button", { name: /^Agent skills/ }));
-  await act(async () => {});
+  await screen.findByRole("button", { name: "Install for Claude Code" });
   expect(reads).toBeLessThanOrEqual(6);
   const skillNav = () =>
     within(nav.getByRole("button", { name: /^Agent skills/ }));
@@ -9642,6 +9806,16 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
           },
         ];
       }
+      if (command === "check_cli") {
+        return {
+          ...(bridgeDefault(command, args) as object),
+          found: true,
+          on_path: true,
+          version: "0.1.0",
+          version_matches: true,
+          workspace_matches: true,
+        };
+      }
       return bridgeDefault(command, args);
     },
   );
@@ -9651,13 +9825,13 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
     screen.getByRole("navigation", { name: "Settings sections" }),
   );
   await user.click(nav.getByRole("button", { name: /^Agent skills/ }));
-  const skill = screen.getByRole("region", { name: "ticketd skill" });
+  const skill = await screen.findByRole("region", { name: "Skill status" });
   const agents = screen.getByRole("region", {
     name: "Agents on this computer",
   });
   await within(skill).findByText("Installed");
   const codex = within(agents).getByRole("listitem");
-  const check = within(agents).getByRole("button", { name: "Check again" });
+  const check = within(skill).getByRole("button", { name: "Check again" });
   const settled = reads;
   fail = true;
   await user.click(check);
@@ -9676,7 +9850,7 @@ test("Agent skills keeps installed rows and local recovery through a failed refr
   await user.keyboard("{Escape}");
   expect(screen.queryByRole("dialog", { name: "Failure details" })).toBeNull();
   expect(document.activeElement).toBe(details);
-  expect(within(agents).getByRole("button", { name: "Check again" })).toBe(
+  expect(within(skill).getByRole("button", { name: "Check again" })).toBe(
     check,
   );
   fail = false;
@@ -9722,12 +9896,12 @@ test("Settings Command line settles successful checks and Check again updates th
   await act(async () => {});
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   const nav = within(
-    screen.getByRole("navigation", { name: "Settings sections" }),
+    await screen.findByRole("navigation", { name: "Settings sections" }),
   );
   fireEvent.click(nav.getByRole("button", { name: /^Command line/ }));
   await act(async () => {});
   expect(reads).toBeLessThanOrEqual(5);
-  expect(screen.getByText("Not found")).toBeTruthy();
+  expect(await screen.findByText("Not installed")).toBeTruthy();
   const cliNav = () =>
     within(nav.getByRole("button", { name: /^Command line/ }));
   expect(cliNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
@@ -9736,13 +9910,13 @@ test("Settings Command line settles successful checks and Check again updates th
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   await act(async () => {});
   expect(
-    screen.getByText("It matches this app and uses this workspace."),
+    await screen.findByText("Matches this app and uses this Workspace."),
   ).toBeTruthy();
   expect(cliNav().queryByRole("img", { name: "Needs setup" })).toBeNull();
   installed = false;
   fireEvent.click(screen.getByRole("button", { name: "Check again" }));
   await act(async () => {});
-  expect(screen.getByText("Not found")).toBeTruthy();
+  expect(await screen.findByText("Not installed")).toBeTruthy();
   expect(cliNav().getByRole("img", { name: "Needs setup" })).toBeTruthy();
   expect(reads).toBeLessThanOrEqual(9);
   fireEvent.click(nav.getByRole("button", { name: "Appearance" }));
@@ -9754,6 +9928,17 @@ test("Settings Command line settles successful checks and Check again updates th
 test("first run reads completed steps and opens the exact existing Settings sections", async () => {
   bridge.invoke.mockImplementation(
     async (command: string, args?: Record<string, unknown>) => {
+      // The agents step needs the command as well as the skill.
+      if (command === "check_cli")
+        return {
+          ...((await bridgeDefault(command)) as object),
+          found: true,
+          on_path: true,
+          path: "/usr/local/bin/ticketd",
+          version: "0.1.0",
+          version_matches: true,
+          workspace_matches: true,
+        };
       if (command === "agent_skills")
         return [
           {
@@ -9789,9 +9974,11 @@ test("first run reads completed steps and opens the exact existing Settings sect
       .closest('[data-slot="step"]')
       ?.getAttribute("data-state"),
   ).toBe("done");
-  fireEvent.click(within(guide).getByRole("button", { name: "Install skill" }));
+  fireEvent.click(
+    within(guide).getByRole("button", { name: "Set up ticketd" }),
+  );
   expect(
-    await screen.findByRole("heading", { level: 1, name: "Agent skills" }),
+    await screen.findByRole("heading", { level: 1, name: "Set up ticketd" }),
   ).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: /Back to tickets/ }));
   fireEvent.click(
@@ -9839,7 +10026,7 @@ test.each(["ready", "trashed"] as const)(
     expect(
       screen.queryByRole("region", { name: "Your workspace is ready" }),
     ).toBeNull();
-    expect(screen.queryByRole("button", { name: "Install skill" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Set up ticketd" })).toBeNull();
   },
 );
 test("header Follow keeps failures in the pane status line, retries and respects read-only state", async () => {
@@ -10525,7 +10712,7 @@ test("Inbox loading announces its read without guessing urgency, then retains en
   expect(screen.queryByRole("status", { name: "Loading Inbox" })).toBeNull();
 });
 
-test.each(["Command line", "Agent skills"])(
+test.each(["Command line"])(
   "Settings %s keeps its last known setup state when Check again fails",
   async (page) => {
     let fail = false;
@@ -10571,8 +10758,8 @@ test.each(["Command line", "Agent skills"])(
     expect(
       screen
         .getByRole("button", { name: "Checking…" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
+        .getAttribute("aria-disabled"),
+    ).toBe("true");
     await act(async () => release());
     expect(await screen.findByRole("button", { name: "Retry" })).toBeTruthy();
     expect(screen.getByText(known)).toBeTruthy();
@@ -10736,7 +10923,7 @@ test("Export Retry remembers the failed path and asks the save chooser again bef
   fireEvent.click(
     within(
       screen.getByRole("navigation", { name: "Settings sections" }),
-    ).getByRole("button", { name: "Export" }),
+    ).getByRole("button", { name: "Backups & export" }),
   );
   fireEvent.click(screen.getByRole("button", { name: "Export…" }));
   fireEvent.click(await screen.findByRole("button", { name: "Retry" }));
@@ -12791,15 +12978,20 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
             },
           },
         ];
-      if (command === "safety_backups")
-        return [
-          {
-            path: backup,
-            kind: "safety",
-            saved_at: doc.updated_at,
-            size_bytes: 1024,
-          },
-        ];
+      if (command === "restore_points")
+        return {
+          points: [
+            {
+              path: backup,
+              kind: "safety",
+              saved_at: doc.updated_at,
+              size_bytes: 1024,
+              summary: null,
+              problem: null,
+            },
+          ],
+          total_bytes: 1024,
+        };
       if (command === "inspect_backup")
         return {
           path: backup,
@@ -12872,13 +13064,15 @@ test("conditional History, Cleanup and Restore dialogs keep their owner through 
     await vi.waitFor(() => expect(cleanup.isConnected).toBe(false));
     await vi.waitFor(() => expect(document.activeElement).toBe(more));
     await user.click(screen.getByRole("button", { name: "Settings" }));
-    await user.click(await screen.findByRole("button", { name: "Backups" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Backups & export" }),
+    );
     const review = await screen.findByRole("button", {
-      name: `Restore… ${backup}`,
+      name: /^Restore…/,
     });
     await user.click(review);
     const dialog = await screen.findByRole("dialog", {
-      name: "Replace this workspace?",
+      name: "Replace this Workspace?",
     });
     overlay = document.querySelector('[data-slot="dialog-overlay"]')!;
     await user.keyboard("{Escape}");
@@ -12996,11 +13190,13 @@ test("Settings navigation keeps visible focus through narrow and wide replacemen
   const nav = await screen.findByRole("navigation", {
     name: "Settings sections",
   });
-  fireEvent.click(within(nav).getByRole("button", { name: "Location" }));
+  fireEvent.click(
+    within(nav).getByRole("button", { name: "Backups & export" }),
+  );
   within(nav).getByRole("button", { name: "Appearance" }).focus();
   act(() => resizeViewport(true));
   const trigger = screen.getByRole("button", {
-    name: /^Location, Settings sections/,
+    name: /^Backups & export, Settings sections/,
   });
   expect(document.activeElement).toBe(trigger);
   fireEvent.click(trigger);
@@ -13012,11 +13208,15 @@ test("Settings navigation keeps visible focus through narrow and wide replacemen
       screen.getByRole("button", { name: "Appearance" }),
     ),
   );
-  expect(screen.getByRole("heading", { name: "Location" })).toBeTruthy();
+  expect(
+    screen.getByRole("heading", { name: "Backups & export" }),
+  ).toBeTruthy();
   act(() => resizeViewport(true));
   expect(screen.queryByRole("dialog", { name: "Settings" })).toBeNull();
   expect(document.activeElement).toBe(
-    screen.getByRole("button", { name: /^Location, Settings sections/ }),
+    screen.getByRole("button", {
+      name: /^Backups & export, Settings sections/,
+    }),
   );
 });
 
@@ -13187,8 +13387,10 @@ test.each(["MacIntel", "Win32"])(
   },
 );
 
-test("Settings Escape and palette Reset return to visible section navigation without taking newer search focus", async () => {
+test("Settings Escape and palette Reset return to visible section navigation, and the search field gives way to its trigger", async () => {
+  hideSetupChecklist();
   bridge.invoke.mockImplementation((command: string, args: unknown) => {
+    if (command === "check_cli") return healthyCli;
     if (
       command === "plugin:window|set_background_color" ||
       command === "plugin:webview|set_webview_background_color"
@@ -13232,7 +13434,6 @@ test("Settings Escape and palette Reset return to visible section navigation wit
         screen.getByRole("button", { name: "Appearance" }),
       ),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Search settings" }));
     const search = await screen.findByRole("searchbox", {
       name: "Search settings",
     });
@@ -13240,11 +13441,17 @@ test("Settings Escape and palette Reset return to visible section navigation wit
     fireEvent.change(search, {
       target: { value: "retain this settings query" },
     });
+    // The field lives in the nav, which narrow widths fold into the sheet:
+    // focus follows to the sections trigger, and the query stays.
     act(() => resizeViewport(true));
-    expect(document.activeElement).toBe(search);
+    const searchTrigger = screen.getByRole("button", {
+      name: /^Search, Settings sections/,
+    });
+    expect(document.activeElement).toBe(searchTrigger);
     act(() => resizeViewport(false));
-    expect(document.activeElement).toBe(search);
-    expect(search).toHaveProperty("value", "retain this settings query");
+    expect(
+      screen.getByRole("searchbox", { name: "Search settings" }),
+    ).toHaveProperty("value", "retain this settings query");
   } finally {
     uninstall();
   }
@@ -13499,9 +13706,11 @@ test("Settings renders the registered providers' display data as text and an iso
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  await screen.findByRole("button", { name: "GitHub" });
   fireEvent.click(
-    await screen.findByRole("button", { name: /Beacon Tracker/ }),
+    await screen.findByRole("button", { name: "Ticket sources" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Beacon Tracker/ }),
   );
   const heading = await screen.findByRole("heading", {
     name: "Beacon Tracker",
@@ -13544,44 +13753,34 @@ test("a new connection can be configured while the shared source list is refresh
     complete: true,
     issues: [],
   };
-  const readAfterAdd = vi.fn(() => new Promise(() => {}));
-  let added = false;
+  const readAfterSave = vi.fn(() => new Promise(() => {}));
+  let saved = false;
   await renderReviewApp({
-    list_sources: () => (added ? readAfterAdd() : [available]),
+    list_sources: () => (saved ? readAfterSave() : [available]),
     source_check_connection: { account: "demo" },
     source_preview: preview,
-    add_source_connection: () => {
-      added = true;
+    save_source: () => {
+      saved = true;
       return { source, preview };
     },
   });
 
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
-  fireEvent.click(await screen.findByRole("button", { name: "Sources" }));
   fireEvent.click(
-    await screen.findByRole("button", {
-      name: "Add Beacon Tracker connection",
-    }),
+    await screen.findByRole("button", { name: "Ticket sources" }),
   );
-  fireEvent.change(screen.getByRole("textbox", { name: "Connection name" }), {
-    target: { value: source.name },
-  });
+  // A source with no connection yet is a row like any other; its page connects it.
+  fireEvent.click(
+    await screen.findByRole("button", { name: /^Beacon Tracker/ }),
+  );
   fireEvent.change(screen.getByPlaceholderText("e.g. PLATFORM"), {
     target: { value: source.config.team },
   });
   fireEvent.click(screen.getByRole("button", { name: "Preview matches" }));
   await screen.findByText(/No open issues match these rules/);
-  fireEvent.click(screen.getByRole("button", { name: "Add connection" }));
-  expect(
-    (
-      (await screen.findByRole("button", {
-        name: "Add Beacon Tracker connection",
-      })) as HTMLButtonElement
-    ).disabled,
-  ).toBe(true);
-  fireEvent.click(await screen.findByRole("button", { name: "Configure" }));
-  await screen.findByRole("heading", { name: source.name });
-  await waitFor(() => expect(readAfterAdd).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "Save" }));
+  await waitFor(() => expect(readAfterSave).toHaveBeenCalled());
+  expect(await screen.findByText("Saved configuration")).toBeTruthy();
 });
 
 const projectForRemote = {
@@ -13811,16 +14010,11 @@ test("Source refresh and its persisted failure keep raw diagnostics behind Detai
   expect(screen.getByText(raw)).toBeTruthy();
 });
 
-test("Automation settings retain a failed draft and known switch state while Details owns diagnostics", async () => {
-  let fail = true;
+test("Automation settings retain the known switch state while Details owns diagnostics", async () => {
   const raw = "RAW-AUTOMATION-SETTING-0xdead";
   await renderReviewApp({
-    automation_runs_at_once: { runs: 2, default: 2, most: 10 },
     start_at_login: true,
-    set_automation_runs_at_once: () => {
-      if (fail) throw new Error(raw);
-      return null;
-    },
+    automation_list: [],
     set_start_at_login: () => {
       throw new Error(raw);
     },
@@ -13828,28 +14022,20 @@ test("Automation settings retain a failed draft and known switch state while Det
   fireEvent.click(screen.getByRole("button", { name: "Settings" }));
   fireEvent.click(
     within(
-      screen.getByRole("navigation", { name: "Settings sections" }),
+      await screen.findByRole("navigation", { name: "Settings sections" }),
     ).getByRole("button", { name: /^Automations/ }),
   );
-  const input = await screen.findByRole("spinbutton", { name: "Runs at once" });
-  fireEvent.change(input, { target: { value: "4" } });
-  fireEvent.blur(input);
+  const toggle = await screen.findByRole("switch", {
+    name: "Start ticketd when you sign in",
+  });
+  await waitFor(() => expect(toggle.getAttribute("aria-checked")).toBe("true"));
+  fireEvent.click(toggle);
   await act(async () => {});
-  expect(input).toHaveProperty("value", "4");
+  // The refused change leaves the known state, and the raw text waits in Details.
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
   expect(screen.getByRole("alert").textContent).not.toContain(raw);
   fireEvent.click(screen.getByRole("button", { name: "Details" }));
   expect(screen.getByText(raw)).toBeTruthy();
-  fail = false;
-  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
-  await act(async () => {});
-  expect(screen.getByText("Saved")).toBeTruthy();
-  const toggle = screen.getByRole("switch", {
-    name: "Start ticketd when you sign in",
-  });
-  fireEvent.click(toggle);
-  await act(async () => {});
-  expect(toggle.getAttribute("aria-checked")).toBe("true");
-  expect(screen.getByRole("alert").textContent).not.toContain(raw);
 });
 
 test("a ticket run failure retains the run and retries its same action with raw text only in Details", async () => {

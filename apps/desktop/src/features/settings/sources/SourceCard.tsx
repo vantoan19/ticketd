@@ -1,5 +1,6 @@
 import {
   Fragment,
+  type ReactNode,
   useEffect,
   useEffectEvent,
   useMemo,
@@ -21,7 +22,7 @@ import {
 import { StatusDot, type StatusDotTone } from "@/components/ui/status-dot";
 import { StatusLabel } from "@/components/ui/status-label";
 import { SourceIcon } from "./SourceIcon";
-import { SettingsPage } from "@/features/settings/layout/SettingsPage";
+import { SettingsDrillIn } from "@/features/settings/layout/SettingsDrillIn";
 import { SettingsSection } from "@/features/settings/layout/SettingsSection";
 import {
   SettingsList,
@@ -43,6 +44,7 @@ import {
   type Draft,
 } from "@/features/settings/sources/config-values";
 import { SourceRepositoryRoutes } from "@/features/settings/sources/SourceRepositoryRoutes";
+import { SIGNED_OUT } from "@/features/settings/sources/source-rows";
 import { SourceLink } from "@/features/tickets/SourceLink";
 import { useNow } from "@/lib/use-now";
 import { formatDateTime } from "@/lib/format";
@@ -76,12 +78,6 @@ type Account =
   | { status: "settings"; key: string; failure: SourceFailure }
   | { status: "failed"; failure: FailureDescription };
 
-/** The core says these when the account itself is the problem. */
-const SIGNED_OUT: readonly string[] = [
-  "unauthenticated",
-  "not_signed_in",
-  "forbidden",
-];
 const NO_SECRETS: readonly string[] = [];
 const SESSION_NOTICE =
   "The system keyring is unavailable. These credentials last until ticketd closes.";
@@ -297,9 +293,18 @@ export function SourceCard({
   hidden = false,
   adding,
   initialRepository,
+  onBack,
   onProjectLinked,
+  manage,
+  tag,
 }: {
   entry: SourceEntry;
+  /** A tag beside the name that says what kind of source this is (Custom). */
+  tag?: ReactNode;
+  /** What a saved connection offers about itself, after Sync: rename and remove. */
+  manage?: ReactNode;
+  /** Returns to the Ticket sources list (Back and Escape). Adding uses its own `onCancel`. */
+  onBack?: () => void;
   adding?: {
     id: string;
     onAdded: (source: SavedSource) => void;
@@ -771,8 +776,9 @@ export function SourceCard({
     SIGNED_OUT.includes(health.error.code);
 
   return (
-    <SettingsPage
-      group="Connections"
+    <SettingsDrillIn
+      parent="ticket-sources"
+      onBack={adding ? adding.onCancel : (onBack ?? (() => {}))}
       label={
         adding
           ? `Add ${connector.name} connection`
@@ -781,7 +787,11 @@ export function SourceCard({
       icon={CircleDot}
       iconContent={<SourceIcon svg={presentation?.icon_svg} />}
       titleAccessory={
-        entry.development && <Badge variant="experimental">Development</Badge>
+        entry.development ? (
+          <Badge variant="experimental">Development</Badge>
+        ) : (
+          tag
+        )
       }
       lede={`Bring matching ${connector.name} issues into this workspace. Their ${syncedFields} sync inward; ${connector.name} stays the place to edit them.`}
       endSlot={
@@ -1056,6 +1066,7 @@ export function SourceCard({
           </SettingsRow>
         </SettingsList>
       </SettingsSection>
-    </SettingsPage>
+      {saved && !adding && manage}
+    </SettingsDrillIn>
   );
 }

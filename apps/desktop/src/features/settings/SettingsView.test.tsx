@@ -11,8 +11,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { SettingsView } from "@/features/settings/SettingsView";
 import { loadPreferences } from "@/lib/preferences";
 import { workspaceClient } from "@/lib/api/workspace";
-import { client } from "@/lib/api/client";
-import { notificationClient } from "@/lib/api/notifications";
 import { cliClient } from "@/lib/api/cli";
 vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi
@@ -29,11 +27,10 @@ vi.mock("@/lib/api/workspace", () => ({
     info: vi.fn(),
     reveal: vi.fn(),
     openLink: vi.fn(),
-    lastBackup: vi.fn(),
-    chooseSavePath: vi.fn(),
+    restorePoints: vi.fn(),
+    saveRestorePoint: vi.fn(),
     chooseBackupFile: vi.fn(),
     inspectBackup: vi.fn(),
-    safetyBackups: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
@@ -42,14 +39,16 @@ vi.mock("@/lib/api/agent-skills", () => ({
 }));
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
-    permitted: vi.fn(),
-    requestPermission: vi.fn(),
+    permission: vi.fn(async () => ({
+      state: "allowed",
+      reported: true,
+      settings: true,
+    })),
     notify: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/client", () => ({
   client: {
-    backupWorkspace: vi.fn(),
     exportWorkspace: vi.fn(),
     restoreWorkspace: vi.fn(),
   },
@@ -79,11 +78,12 @@ beforeEach(() => {
     suggested_directory: "~/.local/bin",
   });
   vi.mocked(workspaceClient.info).mockResolvedValue(info);
-  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
   vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
   vi.mocked(workspaceClient.openLink).mockResolvedValue(undefined);
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(null);
-  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(null);
+  vi.mocked(workspaceClient.restorePoints).mockResolvedValue({
+    points: [],
+    total_bytes: 0,
+  });
 });
 
 afterEach(() => {
@@ -93,13 +93,7 @@ afterEach(() => {
 });
 
 test("choosing Dark or Full width is stored and exposed as selected", () => {
-  render(
-    <SettingsView
-      selected="appearance"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="appearance" onRestore={async () => {}} />);
   const checked = (name: string | RegExp) =>
     screen.getByRole("radio", { name }).getAttribute("aria-checked");
   expect(checked(/^System/)).toBe("true");
@@ -115,62 +109,30 @@ test("choosing Dark or Full width is stored and exposed as selected", () => {
 
 test("a page opens at its top, not where the previous page was scrolled", () => {
   const view = render(
-    <SettingsView
-      selected="appearance"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
+    <SettingsView selected="appearance" onRestore={async () => {}} />,
   );
   const scroller = view.container.querySelector(".settings-page")!;
   scroller.scrollTop = 600;
-  view.rerender(
-    <SettingsView
-      selected="google-drive"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  view.rerender(<SettingsView selected="files" onRestore={async () => {}} />);
   expect(scroller.scrollTop).toBe(0);
 });
 
-test("Google Drive opens as its own page in the shell", () => {
-  render(
-    <SettingsView
-      selected="google-drive"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  expect(
-    screen.getByRole("heading", { level: 1, name: "Google Drive" }),
-  ).toBeTruthy();
+test("the removed Google Drive page opens Files, where Drive is chosen for new uploads", () => {
+  render(<SettingsView selected="google-drive" onRestore={async () => {}} />);
+  expect(screen.getByRole("heading", { level: 1, name: "Files" })).toBeTruthy();
   expect(screen.queryByRole("region", { name: "Appearance" })).toBeNull();
 });
 
-test("Workspace sync opens as its own page, apart from Google Drive", () => {
-  render(
-    <SettingsView
-      selected="workspace-sync"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+test("Workspace sync opens as its own page, apart from Files", () => {
+  render(<SettingsView selected="workspace-sync" onRestore={async () => {}} />);
   expect(
     screen.getByRole("heading", { level: 1, name: "Workspace sync" }),
   ).toBeTruthy();
-  expect(
-    screen.queryByRole("heading", { level: 1, name: "Google Drive" }),
-  ).toBeNull();
+  expect(screen.queryByRole("heading", { level: 1, name: "Files" })).toBeNull();
 });
 
-test("the Location page shows the path, counts, size, and format version", async () => {
-  render(
-    <SettingsView
-      selected="location"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+test("Backups & export shows the Workspace file, its counts, size and format version", async () => {
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   await screen.findAllByText("workspace.sqlite3");
   // The full path is in the PathText tooltip, not a native title.
   const folder = document.querySelector<HTMLElement>(
@@ -182,12 +144,10 @@ test("the Location page shows the path, counts, size, and format version", async
     "/Users/me/Library/Application Support/ticketd",
   );
   fireEvent.keyDown(document.body, { key: "Escape" });
-  const text = screen.getByRole("region", { name: "Contents" }).textContent;
-  expect(text).toContain("Tickets42");
-  expect(text).toContain("Projects3");
-  expect(text).toContain("Active Plans2");
-  expect(text).toContain("File size2.5 MB");
-  expect(text).toContain("Format version20");
+  const text = screen
+    .getByRole("region", { name: "Location" })
+    .querySelector(".settings-list-footer-text")?.textContent;
+  expect(text).toBe("42 tickets · 0 Documents · 2 Plans · 2.5 MB · format 20");
 });
 
 test("Copy path puts the workspace path on the clipboard", async () => {
@@ -196,26 +156,14 @@ test("Copy path puts the workspace path on the clipboard", async () => {
     configurable: true,
     value: { writeText },
   });
-  render(
-    <SettingsView
-      selected="location"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   fireEvent.click(await screen.findByRole("button", { name: "Copy path" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(info.path));
   expect(await screen.findByText("Copied")).toBeTruthy();
 });
 
 test("Show in the file manager reveals the workspace file", async () => {
-  render(
-    <SettingsView
-      selected="location"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   fireEvent.click(await screen.findByRole("button", { name: /^Show in / }));
   await waitFor(() =>
     expect(workspaceClient.reveal).toHaveBeenCalledWith(info.path),
@@ -224,38 +172,14 @@ test("Show in the file manager reveals the workspace file", async () => {
 
 test("a workspace that cannot be read shows an error instead of counts", async () => {
   vi.mocked(workspaceClient.info).mockRejectedValue(new Error("locked"));
-  render(
-    <SettingsView
-      selected="location"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
   await revealFailureDetails();
   expect(screen.getByRole("alert").textContent).toContain("locked");
   expect(screen.queryByLabelText("Workspace path")).toBeNull();
 });
 
-test("cancelling a save dialog changes nothing and shows no error", async () => {
-  const props = { onRestore: async () => {}, onOpenInbox: () => {} };
-  render(<SettingsView selected="backups" {...props} />);
-  await screen.findByText("No backups yet");
-  fireEvent.click(screen.getByRole("button", { name: "Back up now…" }));
-  await waitFor(() =>
-    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
-  );
-  expect(client.backupWorkspace).not.toHaveBeenCalled();
-  expect(screen.queryByRole("alert")).toBeNull();
-});
-
 test("Follow tickets I create is on by default and the choice persists", () => {
-  render(
-    <SettingsView
-      selected="attention"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
+  render(<SettingsView selected="attention" onRestore={async () => {}} />);
   const follow = screen.getByRole("switch", {
     name: "Follow tickets I create",
   });
@@ -265,69 +189,15 @@ test("Follow tickets I create is on by default and the choice persists", () => {
   expect(loadPreferences().followCreated).toBe(false);
 });
 
-test("turning on reminder notifications asks for permission and keeps the switch on when granted", async () => {
-  vi.mocked(notificationClient.requestPermission).mockResolvedValue(true);
-  render(
-    <SettingsView
-      selected="attention"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  const notify = screen.getByRole("switch", {
-    name: "Notify me when a reminder is due",
-  });
-  expect(notify.getAttribute("aria-checked")).toBe("false");
-  fireEvent.click(notify);
-  await waitFor(() => expect(loadPreferences().notifyReminders).toBe(true));
-  expect(notify.getAttribute("aria-checked")).toBe("true");
-});
-
-test("denied permission leaves the switch off and explains how to allow notifications", async () => {
-  vi.mocked(notificationClient.requestPermission).mockResolvedValue(false);
-  render(
-    <SettingsView
-      selected="attention"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  const notify = screen.getByRole("switch", {
-    name: "Notify me when a reminder is due",
-  });
-  fireEvent.click(notify);
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "notification settings",
-  );
-  expect(notify.getAttribute("aria-checked")).toBe("false");
-  expect(loadPreferences().notifyReminders).toBe(false);
-});
-
-test("the Attention footer opens the inbox", () => {
-  const openInbox = vi.fn();
-  render(
-    <SettingsView
-      selected="attention"
-      onRestore={async () => {}}
-      onOpenInbox={openInbox}
-    />,
-  );
-  fireEvent.click(
-    screen.getByRole("button", { name: "Open the Attention inbox" }),
-  );
-  expect(openInbox).toHaveBeenCalled();
-});
-
-test("workspace stats use short one-line labels", async () => {
-  render(
-    <SettingsView
-      selected="location"
-      onRestore={async () => {}}
-      onOpenInbox={() => {}}
-    />,
-  );
-  await screen.findByText("Documents");
-  const contents = screen.getByRole("region", { name: "Contents" });
-  expect(contents.textContent).toContain("Documents");
-  expect(contents.textContent).not.toContain("including details and Trash");
+test("Location, Backups and Export are one page in that order", async () => {
+  render(<SettingsView selected="backups-export" onRestore={async () => {}} />);
+  await screen.findAllByText("workspace.sqlite3");
+  expect(
+    screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent)
+      .filter((text) =>
+        ["Location", "Restore points", "Export"].includes(text ?? ""),
+      ),
+  ).toEqual(["Location", "Restore points", "Export"]);
 });

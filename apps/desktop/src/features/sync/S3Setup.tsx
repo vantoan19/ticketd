@@ -23,6 +23,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { StatusLabel } from "@/components/ui/status-label";
 import {
   SettingsList,
+  SettingsListFooter,
   SettingsRow,
 } from "@/features/settings/layout/SettingsList";
 import { workspaceClient } from "@/lib/api/workspace";
@@ -64,7 +65,14 @@ type SignIn =
  * bucket and the prefix. Every row is on the page from the start, so nothing
  * moves as the earlier ones are answered.
  */
-export function S3Setup() {
+export function S3Setup({
+  onBack,
+  onBusyChange,
+}: {
+  onBack?: () => void;
+  /** Told while a connect is in flight, so the page can hold the storage choice still. */
+  onBusyChange?: (busy: boolean) => void;
+} = {}) {
   const [cli, setCli] = useState<Cli>(null);
   const [readFailure, setReadFailure] = useState<FailureDescription | null>(
     null,
@@ -85,6 +93,10 @@ export function S3Setup() {
   const [typing, setTyping] = useState(false);
   const [prefix, setPrefix] = useState(DEFAULT_PREFIX);
   const { busy, failure, run, clear } = useCommand({ readable: true });
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
   // A check that started before another one must not put its answer back.
   const generation = useRef(0);
 
@@ -182,17 +194,33 @@ export function S3Setup() {
     await check(started, failure);
   }
 
+  // Where the AWS CLI cannot answer yet, Back is still the way out of this step.
+  const back = onBack && (
+    <div className="sync-footer">
+      <Button variant="ghost" size="sm" onClick={onBack}>
+        Back
+      </Button>
+    </div>
+  );
   if (cli === null) return <SetupSkeleton />;
   if (cli.cli.state !== "ready")
     return (
-      <CliNotice
-        state={cli.cli}
-        onCheckAgain={checkAgain}
-        failure={readFailure}
-      />
+      <>
+        <CliNotice
+          state={cli.cli}
+          onCheckAgain={checkAgain}
+          failure={readFailure}
+        />
+        {back}
+      </>
     );
   if (cli.profiles.length === 0)
-    return <NoProfiles onCheckAgain={checkAgain} failure={readFailure} />;
+    return (
+      <>
+        <NoProfiles onCheckAgain={checkAgain} failure={readFailure} />
+        {back}
+      </>
+    );
 
   const signedIn = signIn.kind === "signed_in";
   const ready = signedIn && bucket.trim() !== "" && !busy;
@@ -204,7 +232,7 @@ export function S3Setup() {
           title={<Label htmlFor="s3-profile">AWS profile</Label>}
           description="From your AWS CLI configuration."
           trailing={
-            <Select value={profile} onValueChange={choose}>
+            <Select value={profile} onValueChange={choose} disabled={busy}>
               <SelectTrigger id="s3-profile" className="w-60">
                 <SelectValue placeholder="Choose a profile" />
               </SelectTrigger>
@@ -239,6 +267,7 @@ export function S3Setup() {
             <BucketField
               buckets={buckets}
               signedIn={signedIn}
+              busy={busy}
               value={bucket}
               typing={typing}
               onChange={(value) => {
@@ -265,7 +294,7 @@ export function S3Setup() {
               id="s3-prefix"
               className="w-60"
               value={prefix}
-              disabled={!signedIn}
+              disabled={!signedIn || busy}
               spellCheck={false}
               autoComplete="off"
               onChange={(event) => {
@@ -285,20 +314,44 @@ export function S3Setup() {
         />
       )}
       <Failure>{failure}</Failure>
-      <div className="sync-footer flex justify-end">
-        <Button
-          size="sm"
-          disabled={!ready}
-          onClick={() =>
-            void run(
-              () =>
-                syncApi.connectS3({ bucket: bucket.trim(), prefix, profile }),
-              "connect S3",
-            )
-          }
-        >
-          Connect S3
-        </Button>
+      <div className="sync-footer">
+        <SettingsList>
+          <SettingsListFooter
+            actions={
+              <>
+                {onBack && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={busy}
+                    onClick={onBack}
+                  >
+                    Back
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  disabled={!ready}
+                  onClick={() =>
+                    void run(
+                      () =>
+                        syncApi.connectS3({
+                          bucket: bucket.trim(),
+                          prefix,
+                          profile,
+                        }),
+                      "connect S3",
+                    )
+                  }
+                >
+                  Connect S3
+                </Button>
+              </>
+            }
+          >
+            ticketd does not encrypt the files it puts in the bucket.
+          </SettingsListFooter>
+        </SettingsList>
       </div>
     </div>
   );
@@ -390,6 +443,7 @@ const OTHER_BUCKET = "\u0000other";
 function BucketField({
   buckets,
   signedIn,
+  busy,
   value,
   typing,
   onChange,
@@ -398,6 +452,8 @@ function BucketField({
 }: {
   buckets: string[] | null | undefined;
   signedIn: boolean;
+  /** A connect is in flight: the bucket it was sent with must stay the one shown. */
+  busy: boolean;
   value: string;
   typing: boolean;
   onChange: (value: string) => void;
@@ -411,6 +467,7 @@ function BucketField({
     return (
       <Select
         value={value}
+        disabled={busy}
         onValueChange={(chosen) =>
           chosen === OTHER_BUCKET ? onOther() : onChange(chosen)
         }
@@ -444,7 +501,7 @@ function BucketField({
       <Input
         id="s3-bucket"
         value={value}
-        disabled={!signedIn}
+        disabled={!signedIn || busy}
         placeholder="my-bucket"
         spellCheck={false}
         autoComplete="off"
@@ -455,6 +512,7 @@ function BucketField({
         <IconButton
           label="Choose from the list"
           className="shrink-0"
+          disabled={busy}
           onClick={onList}
         >
           <ChevronDownIcon />

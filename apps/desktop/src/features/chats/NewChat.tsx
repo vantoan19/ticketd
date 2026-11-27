@@ -72,7 +72,7 @@ import {
   type Pick,
 } from "@/features/chats/harness-pick";
 import type { Project } from "@/lib/api/client";
-import { notificationClient } from "@/lib/api/notifications";
+import { askForNotifications } from "@/lib/notification-permission";
 import { withoutVerbatim } from "@/lib/paths";
 import { loadPreferences } from "@/lib/preferences";
 
@@ -382,9 +382,8 @@ export function NewChat({
   );
   const create = async (pending: PendingCreate, keepDraft = false) => {
     const { request, options, pick, quotes } = pending;
-    // Notifications are asked for with the first Chat message.
-    if (loadPreferences().notifyChats)
-      void notificationClient.requestPermission().catch(() => {});
+    // Notifications are asked for once, with the first Chat message.
+    if (loadPreferences().notifyChats) void askForNotifications();
     try {
       const created = await client.createChat(request);
       if (!draft.belongsToWorkspace()) return;

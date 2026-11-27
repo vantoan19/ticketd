@@ -59,7 +59,7 @@ function downloads(version) {
 | Ubuntu 24.04, x86-64 | \`ticketd_${version}_amd64.deb\` | \`ticketd-cli-${version}-linux-x86_64.tar.gz\` |
 | Windows 11, x86-64 | \`ticketd_${version}_x64_en-US.msi\` | \`ticketd-cli-${version}-windows-x86_64.zip\` |
 
-The desktop includes a \`ticketd\` CLI of the same version: **Settings → Command line → Install command-line tool** puts it on your PATH (the \`.deb\` installs it in \`/usr/bin\`). Check downloads against \`SHA256SUMS\`. Every file has a build-provenance attestation: \`gh attestation verify <file> --repo ${repository}\`.`;
+The desktop includes a \`ticketd\` CLI of the same version: **Settings › Command line → Install command-line tool** puts it on your PATH (the \`.deb\` installs it in \`/usr/bin\`). Check downloads against \`SHA256SUMS\`. Every file has a build-provenance attestation: \`gh attestation verify <file> --repo ${repository}\`.`;
 }
 
 const footerStart = "Full documentation:";

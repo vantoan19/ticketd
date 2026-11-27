@@ -13,11 +13,10 @@ export type FailureDescription = {
   sentence: string;
   /**
    * The next step: `retry` only when retrying can succeed; otherwise the fix
-   * the caller offers (`change_limit`, `reconnect`, `reload`, `choose_another`),
+   * the caller offers (`reconnect`, `reload`, `choose_another`),
    * or nothing when only time or another place can fix it.
    */
-  action:
-    "retry" | "change_limit" | "reconnect" | "reload" | "choose_another" | null;
+  action: "retry" | "reconnect" | "reload" | "choose_another" | null;
   /** The raw message, for Details and Copy details. Never shown in the flow. */
   details: string;
 };
@@ -149,7 +148,8 @@ function plainCause(
 function nextStep(code: FailureCode): FailureDescription["action"] {
   switch (code) {
     case "too_large":
-      return "change_limit";
+      // Retrying cannot help and the Files page has no limit to change: the text says it.
+      return null;
     case "not_signed_in":
     case "unauthenticated":
       return "reconnect";

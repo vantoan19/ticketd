@@ -1,4 +1,5 @@
 import { useId, type ReactNode } from "react";
+import { cn } from "cn";
 import { SectionHeader } from "@/components/ui/section-header";
 
 /**
@@ -10,6 +11,8 @@ export function SettingsSection({
   title,
   caption,
   actions,
+  focusTarget,
+  className,
   children,
 }: {
   title: string;
@@ -17,17 +20,24 @@ export function SettingsSection({
   caption?: ReactNode;
   /** Controls at the end of the heading row. */
   actions?: ReactNode;
+  /** A step of a flow: when its button goes away, focus lands on this heading. */
+  focusTarget?: boolean;
+  className?: string;
   children: ReactNode;
 }) {
   const titleId = useId();
   return (
-    <section className="settings-section" aria-labelledby={titleId}>
+    <section
+      className={cn("settings-section", className)}
+      aria-labelledby={titleId}
+    >
       <SectionHeader
         level={2}
         titleId={titleId}
         title={title}
         caption={caption}
         actions={actions}
+        {...(focusTarget && { focusTarget })}
       />
       {children}
     </section>

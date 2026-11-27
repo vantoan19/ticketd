@@ -9,10 +9,12 @@ mod backup_archive;
 mod restore;
 pub use backup::BackupRecord;
 mod backup_review;
+mod restore_points;
 pub use backup_review::{
     AttachmentBackupContent, BackupCheck, BackupInspection, SafetyBackup, SafetyBackupKind,
     WorkspaceSummary,
 };
+pub use restore_points::{RESTORE_POINTS_KEPT, RestorePoint, RestorePointKind, RestorePointList};
 mod context;
 mod context_graph;
 mod device;
@@ -112,7 +114,7 @@ pub use attachment_previews::{
     PreviewUsage, PreviewUse, TEXT_EXCERPT_BYTES, TEXT_TAIL_BYTES, TEXT_WHOLE_BYTES, TextExcerpt,
     TextScope,
 };
-pub use upload_destination::AttachmentUploadDestination;
+pub use upload_destination::{AttachmentUploadDestination, GoogleSignIn};
 pub use versions::{RecordKind, Version, VersionSummary};
 pub mod drive;
 mod embedded_attachments;
@@ -139,7 +141,8 @@ mod chat_suggestions;
 mod chats;
 mod events;
 pub use activities::{
-    Activity, ActivityFeedEntry, ActivityPatch, LatestUpdate, ReportedUpdate, UpdateBrief,
+    Activity, ActivityFeedEntry, ActivityPatch, AgentUpdate, LatestUpdate, ReportedUpdate,
+    UpdateBrief,
 };
 pub use automation_advance::{AgentStart, RunAction, StartedBy, TicketData};
 pub use automation_agents::{
@@ -569,7 +572,7 @@ fn upload_limit_message(limit: u64) -> String {
         );
     }
     format!(
-        "file exceeds the workspace upload limit of {bound}; change it in Settings > Attachments or `ticketd attachment limit --bytes <bytes>`"
+        "file exceeds the workspace upload limit of {bound}; choose a smaller file, or raise the limit with `ticketd attachment limit --bytes <bytes>`"
     )
 }
 
@@ -716,7 +719,7 @@ impl Workspace {
             if backup::table_exists(&connection, "ticketd_backup_container")?
                 || backup::table_exists(&connection, "ticketd_backup_files")?
             {
-                return Err(Error::Backup("this is an attachment backup container; restore it with `ticketd restore-workspace <backup>` or Settings > Restore from backup".into()));
+                return Err(Error::Backup("this is an attachment backup container; restore it with `ticketd restore-workspace <backup>` or Settings › Backups & export".into()));
             }
             session::configure(&connection)?;
             let version: i64 =
@@ -905,6 +908,11 @@ impl Workspace {
             let id = relationships::id(&self.connection, reference)?;
             activities::latest(&self.connection, &id)
         })
+    }
+
+    /// The first update an agent wrote anywhere in this Workspace, if any.
+    pub fn first_agent_update(&self) -> Result<Option<AgentUpdate>, Error> {
+        self.read(|_| activities::first_by_agent(&self.connection))
     }
 
     pub fn activity_feed(

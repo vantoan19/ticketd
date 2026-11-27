@@ -11,7 +11,7 @@ spans and never install a subscriber. Only the two binaries do, through the
   to `ticketd.YYYY-MM-DD.log` (UTC days) in the app's log folder (on macOS
   `~/Library/Logs/<bundle identifier>/`). It returns a desktop logs handle that the
   desktop keeps in managed state and drops on `RunEvent::Exit`. The handle
-  changes the level at runtime (Debug logging), lists recent errors, keeps the
+  changes the level at runtime (detailed logging while a report is open), lists recent errors, keeps the
   crash-session marker and writes the diagnostics export. Dev builds also print
   readable lines to stderr. If the folder cannot be used, logging falls back to
   stderr and the app keeps running.
@@ -22,7 +22,7 @@ spans and never install a subscriber. Only the two binaries do, through the
   everything else (HTTP clients, which could log URLs carrying Drive file IDs or
   OAuth codes) at `warn`. `ticketd` matches targets by prefix, so it covers every
   `ticketd_*` crate. `TICKETD_LOG` overrides the default for the desktop too, and
-  then wins over the Debug logging switch. A `TICKETD_LOG` that is not a valid filter is
+  then wins over detailed logging. A `TICKETD_LOG` that is not a valid filter is
   ignored, not treated as an override: the default applies, the switch works, and one
   `warn` ("TICKETD_LOG ignored", with the value's length and never the value) says so.
 - **File sink.** One file per day. Each line is written synchronously to the file

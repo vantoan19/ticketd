@@ -36,7 +36,7 @@ does not schedule agents or summarize, prioritize, or decompose tickets by itsel
 
 The desktop checks GitHub for newer stable releases and verifies downloads before
 offering to install them on a restart you confirm. On macOS and Windows, a verified
-update also installs when you quit ticketd, unless it changes the workspace format. In **Settings → About**, you
+update also installs when you quit ticketd, unless it changes the workspace format. In **Settings › About**, you
 can turn off scheduled checks or check on demand. The CLI bundled with the
 desktop updates with it. Standalone CLI copies are updated by hand.
 See [in-app updates](install.md#in-app-updates).
@@ -197,6 +197,24 @@ opens the graph to understand dependency chains.
   Activities submit explicitly, and drafts survive navigation, failed saves, and
   external refresh. If saved content changes beneath a draft, the person chooses to
   reload or save over it; nothing merges automatically.
+
+- **Settings.** One window of pages in five groups, each page opening with its title
+  and one line saying what it is for: **Preferences** (Appearance, Attention),
+  **Workspace** (Workspace sync, Files, Backups & export), **AI** (Command line, Agent
+  skills, Agents, and Automations while Chats are on), **Connections** (Ticket sources)
+  and **Help** (Keyboard shortcuts, Diagnostics, About). A search field above the groups
+  finds a setting by name. Things you can have several of, such as a connection, are rows
+  on their page that open in place with a way back; the sidebar never lists them.
+  **Set up ticketd** sits above the groups until it is finished or hidden, with a progress
+  ring, and Settings opens on it meanwhile. Its five steps tick from real state on this
+  computer, never by hand: agents can use ticketd (the `ticketd` command is on PATH and
+  every agent found has the skill, installed together with one administrator prompt),
+  an agent has written its first update, and, optionally, a ticket source is connected,
+  Workspace sync is on and notifications are allowed. Hiding the checklist, or finishing
+  it, removes the row; searching "set up" still finds the page. Nothing is sent anywhere
+  to know a step is done.
+  Backups & export is one page for where the Workspace file is, the restore points to go
+  back to, and the copies to take elsewhere.
 
 The interface follows [DESIGN.md](../DESIGN.md).
 
@@ -379,7 +397,7 @@ not synchronize with branches, worktrees, or CI.
 
 An **Attachment** is a reusable file identity within one Workspace, stored as an
 immutable local snapshot with its original bytes, filename, size, and a separate
-display name. The default per-file limit is 100 MiB (Settings > Attachments).
+display name. The per-file limit is 100 MiB.
 
 - Files attach to a ticket from its property rail, or insert into any editor as
   Markdown links (`ticketd://attachment/<workspace-id>/<attachment-id>`) by file
@@ -405,13 +423,32 @@ system's secure store.
   Last-known metadata survives offline and provider failures, and each access failure
   has its own recovery. Removing a reference never deletes the Drive file or changes
   sharing. CLI: `attachment drive-add`, `drive-resolve`, `drive-authorize`.
-- **Uploads.** Settings > Attachments sets one upload destination: the local Workspace
-  or a writable Drive folder. Each upload keeps its destination through retry and
-  restart, and a provider failure never silently falls back to local storage. Uploads
-  are durable operations whose retry verifies provenance, size, and digest. An
-  uploaded copy is not an immutable snapshot: ticketd compares its checksum and size
-  and exports its bytes only when they verify. CLI: `attachment destination`,
-  `drive-upload`, `drive-upload-status`.
+- **Uploads.** Settings › Files says where new files go: this computer (works offline,
+  included in backups) or Google Drive (not in backups). Files already attached stay
+  where they are. Each upload keeps its destination through retry and restart, and a
+  provider failure never silently falls back to local storage. Uploads are durable
+  operations whose retry verifies provenance, size, and digest. An uploaded copy is not
+  an immutable snapshot: ticketd compares its checksum and size and exports its bytes
+  only when they verify. CLI: `attachment destination`, `drive-upload`,
+  `drive-upload-status`.
+  - **One Google sign-in.** Files and Workspace sync use the same Google account and the
+    same stored credential, so one consent serves both. The Files page names the account
+    ("`sam.lee@gmail.com`, the one Workspace sync uses") with Use another account…, and
+    Workspace sync's step 3 offers the same. Switching signs both in with the new
+    account, and a dialog says what changes in each before anything does: sync stops on
+    this computer until a Workspace is chosen in the new account, and new files are kept
+    on this computer until Google Drive is chosen again. When the sign-in ends, both show
+    it, and one Sign in again resumes both; it has to be the same account, and another account is
+    refused until Use another account… moves both. Choosing Drive on Files after sync has signed
+    in needs no second consent, and Workspace sync set up after Files used Drive signs in
+    with that account without asking again.
+  - **Where uploads go.** While Workspace sync is on Google Drive, uploads go to an
+    **Uploads** folder inside the sync folder, and the page offers no folder to choose
+    (a Drive folder chosen earlier gives way to it). While sync is off or on S3, the
+    folder is the one chosen in Drive, with Change folder…. Workspace sync treats Uploads
+    as the person's files: it never reads it as Workspace files, and Replace, Disconnect
+    and Reconnect never touch it (their dialogs say so). See
+    [sync file format](sync-file-format.md#files-that-are-not-records).
 - Backups keep remote metadata and operations, never remote bytes or credentials.
 
 ### Ticket sources
@@ -420,9 +457,13 @@ GitHub Issues is built in. Linear ships with the desktop app as a ticket
 source extension. Extensions use the same ticket authority and refresh
 workflows as GitHub. [External ticket authority](adr/0006-external-ticket-authority.md)
 
-Install another extension from a local folder with `ticketd source extension add PATH`.
-Review the program and declared hosts before approving. The provider then
-appears in Settings → Sources. Authors can link their build folder with
+Install another extension from a local folder with `ticketd source extension add PATH`,
+or from Settings › Ticket sources with **Add a custom source**. Both show the
+program, its arguments and its declared hosts, ask once, and leave the same
+registration. A folder that cannot be added (no `ticketd-source.json`, or a
+manifest that needs a newer ticketd) says why before anything is shown. The
+provider then appears in Ticket sources with a Custom tag; if its files change
+it is listed as stopped until it is added again, from the app or the CLI. Authors can link their build folder with
 `ticketd source extension link PATH`. The author guide covers the contract,
 the TypeScript example and conformance. [Write a ticket source extension](ticket-source-extensions.md)
 
@@ -430,8 +471,10 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   a personal API key that can read them. Filter discovery by assignee, labels, or
   project. ticketd syncs the issue's current state and its comments and
   timeline.
-- Add and name source connections under Settings → Sources. Several accounts can
-  connect to the same provider. Connections stay on this device and are excluded
+- Settings › Ticket sources is one table of every source with its status, what it
+  signs in with and what it brings in; selecting a row opens that source's page, where
+  you connect it, rename it or remove it. Several accounts can connect to the same
+  provider. Connections stay on this device and are excluded
   from Workspace sync, portable backups, and JSON exports.
 - Extension credentials go in the system keychain. When a tracker rejects
   authentication, **Needs sign-in** opens the credential fields for that
@@ -446,7 +489,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   imported and refreshed through one connection. When no local connection covers
   a ticket, it shows its last synced content and says the provider isn’t connected
   on this desktop. The ticket carries the provider’s display name and icon.
-  During a manually started refresh, **Cancel sync** is available in Settings → Sources.
+  During a manually started refresh, **Cancel sync** is available in Settings › Ticket sources.
 - An **externally owned** ticket receives its title, description, confirmed closures
   and reopenings from the tracker. Progress on open issues, Plan membership,
   relationships, tags, Activities, and Documents stay in ticketd.
@@ -484,7 +527,7 @@ the TypeScript example and conformance. [Write a ticket source extension](ticket
   [Recover a legacy GitHub issue link](cli.md#recover-a-legacy-github-issue-link)
 - A saved connection remains in Sources when its extension is uninstalled.
   You can rename or remove it while the extension is unavailable.
-- Remove a connection in Settings → Sources or with
+- Remove a connection in Settings › Ticket sources or with
   `ticketd source CONNECTION remove`. Its tickets keep their external identity,
   last synced content, status and local work, and show **Connection removed** on
   this desktop. Discovery of the same issue through a covering connection resumes
@@ -544,14 +587,34 @@ below applies to both unless it names one.
   Attachments are ordinary files. Content is stored unencrypted, and the live SQLite
   database is never synchronized. Inbox read state, checkout paths, credentials, source
   settings, window layout, drafts, and upload queues stay local.
-- **Setup.** Settings > Workspace sync starts with the choice of Google Drive or S3.
-  After connecting, the person uploads this Workspace or downloads an existing one
-  (after a safety backup). Independent Workspaces are never merged
-  automatically. A joining desktop takes a fresh device code when needed so references
-  never clash. Disconnecting deletes nothing, and the same account (or, for S3, the
-  same bucket and prefix) can reconnect to its folder. Restoring a backup disconnects
-  the Workspace from its storage. To move from Drive to S3, disconnect Drive and
-  upload the Workspace to a bucket; there is no migration.
+- **Setup.** Settings › Workspace sync takes four steps. First the person says whether
+  this computer starts a Workspace or joins one; Start is the default when this computer
+  holds tickets or Documents, Join when it is empty, and Join says what it would replace.
+  Then Google Drive or S3, and signing in. Then ticketd reads the storage before it writes
+  anything: when the storage already holds a Workspace, Join is preselected even if this
+  computer holds tickets, with what it holds and what it replaces here, and "Start a
+  separate Workspace" is the second option, never preselected, saying that the two can't
+  be merged later. Joining downloads the Workspace after a safety backup of this
+  computer's. A folder this computer synced before is offered first as Reconnect, which
+  merges both sides and replaces nothing. With nothing in the storage, Start goes
+  straight to the first sync. The first sync shows its progress and has no Back.
+  Independent Workspaces are never merged automatically. A joining desktop takes a fresh
+  device code when needed so references never clash. Disconnecting deletes nothing, and
+  the same account (or, for S3, the same bucket and prefix) can reconnect to its folder.
+  Restoring a backup disconnects the Workspace from its storage, and says so first; afterwards setup offers Reconnect to the folder it used. To move from Drive to S3,
+  disconnect Drive and upload the Workspace to a bucket; there is no migration.
+- **While syncing.** Settings › Workspace sync shows one status row: the state in a
+  word, when sync last checked, and which sign-in it uses. When sync stops (the sign-in
+  ended, the folder is missing, storage is full, offline, slowed down, a changed S3
+  service, a missing AWS CLI, or any other failure) the same row carries the cause, says
+  what is kept meanwhile ("3 changes are saved here and upload after you sign in") and
+  offers the one fix, the same as the sidebar status line. Below it, Computers lists the
+  computers that share the Workspace from the device registry as this computer last read
+  it: this one first, with Rename…, then the others with their last change and ticket
+  codes. A new name reaches the registry on the next run. Options set how often to check
+  for changes (at least 30 seconds, 60 by default) with Check now, and whether files from
+  other computers download automatically or when opened. The last row stops syncing on
+  this computer, which deletes nothing.
 - **When it runs.** While the desktop is open: at launch and reconnect, by polling
   the storage (every minute by default), shortly after a save, and on Sync now. Exit
   makes a bounded attempt to upload pending changes. The CLI never contacts the
@@ -589,7 +652,7 @@ Setup, IAM permissions and the lifecycle rule are in
   CLI. When the CLI is missing or too old, or the machine has no profile, setup says
   what to install or create (`aws configure sso` or `aws configure`), and the person
   can choose the `aws` program when it is not found.
-- **Setup.** In Settings > Workspace sync the person chooses S3, picks a profile,
+- **Setup.** In Settings › Workspace sync the person chooses S3, picks a profile,
   chooses Sign in when the profile needs it (it runs `aws sso login`, or `aws login`
   for a profile set up that way, and opens the browser), then chooses the bucket and a
   key prefix (`ticketd/` by default). The bucket is picked from a list when the
@@ -645,6 +708,19 @@ Setup, IAM permissions and the lifecycle rule are in
 
 ### Backup, restore, and export
 
+**Restore points.** The first time the desktop opens each day it saves a restore point
+of the Workspace in the background, checks it as a restore would, and keeps the last 7
+(Back up now in Settings adds one at once, with no file to choose; it counts among the
+7). They are kept on this computer, in a folder beside the Workspace file, and are never
+synced, never part of the Workspace and never inside a sync folder. The Workspace's
+retained local files are kept once for all the points that hold them, so seven points
+cost about one copy of the files, and deleting an old point never removes a file a newer
+one needs. The copies saved before a restore or before an update that changes the
+Workspace format are listed with them under a label and are kept besides the 7. A point
+that fails its check is listed as one that can't be restored. Writing a point never
+holds up the window, and Back up now does not wait for it. Restoring one goes through
+the same review as restoring a file, which stays available as Restore from a file….
+
 `ticketd backup PATH` saves a consistent backup including every retained local file.
 `ticketd inspect-backup` verifies integrity and checksums without restoring, and
 `ticketd restore-workspace` restores after saving a safety copy (with `--target`, into
@@ -656,10 +732,14 @@ file bytes.
 
 ### Native Chats
 
-Native Chat is experimental and off by default (Settings > Chat). A Chat hosts the
+Native Chat is experimental and off by default (Settings › Agents). A Chat hosts the
 person's own installed Claude Code, Codex or Antigravity harness with its own sign-in. ticketd
 detects the installation and guides the person to the harness's login; it does not
-collect OAuth tokens, proxy model requests, or change billing.
+collect OAuth tokens, proxy model requests, or change billing. Settings › Agents lists
+the agents found on this computer even while Chats are off (it asks each program only
+its version, never its sign-in); with Chats on it shows each one's readiness and the
+one fix a missing sign-in needs, and opening one shows its sign-in, its program and
+what New Chat last started it with.
 
 - **Identity.** A Chat is a standalone Workspace conversation that can start without a
   project or ticket and link to several projects, tickets, and Documents without being
@@ -727,7 +807,9 @@ collect OAuth tokens, proxy model requests, or change billing.
 - **Lifetime.** Execution belongs to the desktop backend, not the view: navigating away
   keeps work running, and explicit Quit stops it. One ranked status per Chat drives
   the list, sidebar count, app-icon count, and system notifications, which can be
-  muted.
+  muted. Settings › Attention holds the one system permission for every
+  notification (due reminders and Chats): ticketd asks once, never again, and shows
+  Allowed, Allow notifications or Blocked where the system reports it.
 - **Durable results.** The records, not the transcript, are the shared context. Agents
   read linked records and write progress back through the CLI as ordinary Activities,
   Documents, evidence, and status changes under native permission rules. Messages never
@@ -754,4 +836,6 @@ and a flow of steps that can branch.
   model, instructions, allowed tools, and turn and time limits, run in its own Chat.
 - **Runs.** A run records its event, steps, outcome, and each agent step's Chat. Runs
   are local to the device that ran them, and an Automation is switched on or off per
-  device.
+  device. Runs go two at once; there is no setting for it. Scheduled Automations run
+  only while ticketd is running, so Settings › Automations offers "Start ticketd when
+  you sign in" and says how many scheduled Automations depend on it.

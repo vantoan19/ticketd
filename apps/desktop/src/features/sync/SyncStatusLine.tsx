@@ -299,7 +299,7 @@ export function SyncStatusLine() {
                     <Button
                       variant="outline"
                       size="sm"
-                      disabled={busy}
+                      busy={busy}
                       onClick={recover}
                     >
                       {busy && recovery?.working
@@ -309,13 +309,13 @@ export function SyncStatusLine() {
                   )}
                 </>
               ) : corrective ? (
-                <Button size="sm" disabled={busy} onClick={recover}>
+                <Button size="sm" busy={busy} onClick={recover}>
                   {busy && recovery?.working ? recovery.working : corrective}
                 </Button>
               ) : (
                 <Button
                   size="sm"
-                  disabled={busy}
+                  busy={busy}
                   onClick={() => void run(syncApi.syncNow, "sync")}
                 >
                   <RefreshCw aria-hidden="true" />

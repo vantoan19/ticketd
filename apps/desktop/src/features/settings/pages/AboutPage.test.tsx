@@ -15,6 +15,8 @@ import { workspaceClient } from "@/lib/api/workspace";
 import { APP_VERSION } from "@/lib/app-version";
 import { AboutPage } from "@/features/settings/pages/AboutPage";
 import { SettingsStateProvider } from "@/features/settings/settings-state";
+import { SyncStatusContext } from "@/features/sync/sync-status";
+import type { SyncStatus } from "@/lib/sync-api";
 
 vi.mock("@/lib/api/workspace", () => ({
   workspaceClient: { openLink: vi.fn() },
@@ -111,21 +113,8 @@ test("a verified update asks before stopping work and upgrading the workspace", 
   expect(install).not.toHaveBeenCalled();
 });
 
-test("three tiles state what ticketd promises", () => {
-  renderPage();
-  const tiles = within(
-    screen.getByRole("list", { name: "How ticketd works" }),
-  ).getAllByRole("listitem");
-  expect(tiles.map((tile) => tile.textContent)).toEqual([
-    "No accountticketd has no account to sign up for.",
-    "Works offlineEverything you do runs on this computer.",
-    "Stays on this computerNo analytics or crash uploads. Only update checks and the integrations you turn on, such as Google Drive or a ticket source, go online.",
-  ]);
-});
-
 test.each([
   ["Documentation", "https://github.com/vantoan19/ticketd#readme"],
-  ["Report an issue", "https://github.com/vantoan19/ticketd/issues"],
   ["Privacy", "https://github.com/vantoan19/ticketd/blob/main/PRIVACY.md"],
   [
     "Third-party notices",
@@ -147,15 +136,165 @@ test("a link that cannot open says so", async () => {
   expect(screen.getByRole("alert").textContent).toContain("no browser");
 });
 
-test("the issue row asks for the version", () => {
+test("Report an issue opens GitHub's bug form with the version and system filled in", async () => {
+  mockIPC((command) => {
+    if (command === "diagnostics_issue_details")
+      return {
+        version: "0.2.0 (commit 361b5938)",
+        environment: "macOS 15.1 aarch64, desktop app",
+      };
+  });
   renderPage();
   expect(
-    screen.getByRole("link", { name: /Include the version above\./ }),
+    screen.getByText("Opens GitHub’s bug form with your version filled in."),
+  ).toBeTruthy();
+  fireEvent.click(screen.getByRole("link", { name: /^Report an issue/ }));
+  await waitFor(() => expect(workspaceClient.openLink).toHaveBeenCalled());
+  const url = new URL(vi.mocked(workspaceClient.openLink).mock.calls[0]![0]);
+  expect(url.origin + url.pathname).toBe(
+    "https://github.com/vantoan19/ticketd/issues/new",
+  );
+  expect(url.searchParams.get("template")).toBe("bug_report.yml");
+  expect(url.searchParams.get("version")).toBe("0.2.0 (commit 361b5938)");
+});
+
+test("the header is the version and one promise line, and Help holds the four links", () => {
+  renderPage();
+  expect(
+    screen.getByText("No account · Works offline · No analytics"),
+  ).toBeTruthy();
+  expect(screen.queryByRole("list", { name: "How ticketd works" })).toBeNull();
+  expect(screen.queryByText(/Keyboard shortcuts/)).toBeNull();
+  expect(
+    screen.queryByRole("heading", { name: "Privacy and notices" }),
+  ).toBeNull();
+  const help = screen
+    .getByRole("heading", { name: "Help" })
+    .closest("section")!;
+  expect(
+    within(help)
+      .getAllByRole("link")
+      .map((link) => link.querySelector(".about-link-title")?.textContent),
+  ).toEqual([
+    "Documentation",
+    "Report an issue",
+    "Privacy",
+    "Third-party notices",
+  ]);
+});
+
+test("About ends with a Support ticketd section that stars the repository", async () => {
+  renderPage();
+  expect(screen.getByRole("heading", { name: "Support ticketd" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Star on GitHub" }));
+  await waitFor(() =>
+    expect(workspaceClient.openLink).toHaveBeenCalledWith(
+      "https://github.com/vantoan19/ticketd",
+    ),
+  );
+});
+
+const update = (upgrades_workspace: boolean) => ({
+  version: "0.3.0",
+  release_url: "https://github.com/vantoan19/ticketd/releases/tag/v0.3.0",
+  upgrades_workspace,
+});
+
+function renderUpdates(snapshot: object, syncing = false) {
+  mockIPC(
+    (command) => {
+      if (command === "updates_state")
+        return {
+          revision: 1,
+          automatic: true,
+          dismissed: false,
+          install_on_quit: false,
+          ...snapshot,
+        };
+    },
+    { shouldMockEvents: true },
+  );
+  const status = syncing
+    ? ({ connection: "connected" } as SyncStatus)
+    : ({ connection: "not_connected" } as SyncStatus);
+  render(
+    <SyncStatusContext
+      value={{
+        status,
+        apply: () => {},
+        refresh: () => Promise.resolve(status),
+        openSettings: () => {},
+        openReview: () => {},
+      }}
+    >
+      <UpdatesProvider beforeInstall={async () => {}}>
+        <SettingsStateProvider active={false} onOpenPage={() => {}}>
+          <AboutPage />
+        </SettingsStateProvider>
+      </UpdatesProvider>
+    </SyncStatusContext>,
+  );
+}
+
+test("up to date says so, when it last checked, and what the automatic check sends", async () => {
+  renderUpdates({
+    status: "up_to_date",
+    checked_at: Math.floor(Date.now() / 1000) - 3600,
+  });
+  expect(
+    await screen.findByText(`ticketd ${APP_VERSION} is up to date`),
+  ).toBeTruthy();
+  expect(screen.getByText(/^Checked /)).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Once a day, from GitHub. Nothing about you or your Workspace is sent.",
+    ),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Check for updates" }),
   ).toBeTruthy();
 });
 
-test("Keyboard shortcuts opens that page", () => {
-  const openPage = renderPage();
-  fireEvent.click(screen.getByRole("button", { name: /^Keyboard shortcuts/ }));
-  expect(openPage).toHaveBeenCalledWith("keyboard-shortcuts");
+test("an ordinary update installs when ticketd restarts and has no warning", async () => {
+  renderUpdates({
+    status: "ready",
+    install_on_quit: true,
+    update: update(false),
+  });
+  expect(await screen.findByText("ticketd 0.3.0 is ready")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Downloaded and checked. It installs when ticketd restarts.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/older versions can’t open it/)).toBeNull();
+  expect(screen.getByRole("link", { name: "What’s new" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Restart to update" }),
+  ).toBeTruthy();
+});
+
+test("an update that raises the format warns first, never installs on quit, and asks to update the other computers while syncing", async () => {
+  renderUpdates(
+    { status: "ready", install_on_quit: true, update: update(true) },
+    true,
+  );
+  expect(
+    await screen.findByText(
+      "It upgrades your Workspace, and older versions can’t open it after. Update your other computers too.",
+    ),
+  ).toBeTruthy();
+  expect(screen.queryByText(/installs when ticketd restarts/)).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Restart to update" }),
+  ).toBeTruthy();
+});
+
+test("without sync, the format warning doesn't ask about other computers", async () => {
+  renderUpdates({ status: "ready", update: update(true) });
+  expect(
+    await screen.findByText(
+      "It upgrades your Workspace, and older versions can’t open it after.",
+    ),
+  ).toBeTruthy();
 });

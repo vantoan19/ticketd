@@ -32,6 +32,8 @@ use ticketd_core::{
 pub struct SelectedUploadFolder {
     destination: DriveUploadDestination,
     folder: DriveFolder,
+    /// The Google account the folder was chosen with, when Google names it.
+    account: Option<String>,
 }
 
 #[tauri::command(async)]
@@ -55,6 +57,7 @@ pub fn begin_attachment_upload(
 #[tauri::command(async)]
 pub fn set_attachment_upload_destination(
     destination: Option<DriveUploadDestination>,
+    account: Option<String>,
 ) -> Result<ticketd_core::AttachmentUploadDestination, BridgeFailure> {
     let mut workspace = open_workspace().map_err(BridgeFailure::from)?;
     match destination {
@@ -66,7 +69,7 @@ pub fn set_attachment_upload_destination(
                 &PlatformCredentialStore,
                 &transport,
             );
-            workspace.set_drive_upload_destination(&destination, &provider)
+            workspace.set_drive_upload_destination_for(&destination, account.as_deref(), &provider)
         }
     }
     .map_err(BridgeFailure::from)
@@ -126,6 +129,7 @@ pub async fn select_drive_upload_folder(
         Ok(SelectedUploadFolder {
             destination,
             folder,
+            account: selection.account,
         })
     })
     .await

@@ -316,3 +316,26 @@ fn context_latest_update_bounds_the_editing_agent_like_every_other_label() {
     assert_eq!(agent["text"].as_str().unwrap().chars().count(), 256);
     assert_eq!(agent["truncated"], true);
 }
+
+#[test]
+fn the_first_update_an_agent_wrote_is_found_without_reading_any_ticket() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("updates.sqlite3")).unwrap();
+    assert!(workspace.first_agent_update().unwrap().is_none());
+    let ticket = workspace.create_ticket("Progress").unwrap();
+    workspace
+        .add_activity(&ticket.reference, "Written by a person", None)
+        .unwrap();
+    assert!(workspace.first_agent_update().unwrap().is_none());
+    let other = workspace.create_ticket("Other").unwrap();
+    let first = workspace
+        .add_activity(&other.reference, "Written by an agent", Some("codex"))
+        .unwrap();
+    workspace
+        .add_activity(&ticket.reference, "Written later", Some("claude-code"))
+        .unwrap();
+    let found = workspace.first_agent_update().unwrap().unwrap();
+    assert_eq!(found.reference, other.reference);
+    assert_eq!(found.editing_agent, "codex");
+    assert_eq!(found.reported_at, first.reported_at);
+}

@@ -1686,7 +1686,7 @@ export function AttachmentPreview({
                     openSettings
                       ? () => {
                           close();
-                          openSettings("backups");
+                          openSettings("backups-export");
                         }
                       : undefined
                   }
@@ -1798,7 +1798,7 @@ export function AttachmentPreviewPane({
           preview={preview}
           onReplace={undefined}
           onRestoreBackup={
-            openSettings ? () => openSettings("backups") : undefined
+            openSettings ? () => openSettings("backups-export") : undefined
           }
           onChanged={onChanged}
         />

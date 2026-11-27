@@ -319,6 +319,20 @@ test("workspace links open the core preflight with affected files and no publica
   ).toBe(false);
 });
 
+test("a source that is not connected sends the person to Settings › Ticket sources", () => {
+  const refused = {
+    ...eligible,
+    eligibility: {
+      kind: "ineligible",
+      reason: "source_not_connected",
+      message: "connect GitHub in Settings › Ticket sources before publishing",
+    },
+  };
+  expect(publicationReason(refused as PublicationPreview)).toBe(
+    "Connect GitHub in Settings › Ticket sources to publish.",
+  );
+});
+
 test("a destination outside the saved list is refused with the core's reason", async () => {
   const message =
     "cannot publish to 'acme/secret-roadmap': this source only publishes to acme/api";
@@ -984,7 +998,8 @@ test("connecting the source in Settings makes a local ticket publishable without
             eligibility: {
               kind: "ineligible",
               reason: "source_not_connected",
-              message: "connect GitHub in Settings before publishing",
+              message:
+                "connect GitHub in Settings › Ticket sources before publishing",
             },
           };
     return [];

@@ -1,0 +1,8 @@
+/* Under the finished list: one quiet line, caption size, muted. */
+.setup-support {
+  margin: 16px 0 0;
+  padding-inline: 2px;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption-line);
+  color: var(--muted-foreground);
+}

@@ -106,7 +106,7 @@ const settings = (client: MockChatClient) =>
       </ChatProvider>
     </ChatClientContext>,
   );
-const chatSwitch = () => screen.getByRole("switch", { name: "Show Chat" });
+const chatSwitch = () => screen.getByRole("switch", { name: /^Chats/ });
 
 test("Chat is off by default and turns on at once", async () => {
   const client = createMockChatClient();
@@ -119,7 +119,7 @@ test("Chat is off by default and turns on at once", async () => {
   expect(await client.getEnabled()).toBe(true);
 });
 
-test("the Show Chat row explains itself and the notice links to About", async () => {
+test("the Chats row is marked Experimental, explains itself, and its footer links to About", async () => {
   const openPage = vi.fn();
   const state: SettingsState = {
     query: "",
@@ -137,22 +137,18 @@ test("the Show Chat row explains itself and the notice links to About", async ()
       </ChatClientContext>
     </SettingsStateContext.Provider>,
   );
-  expect(
-    screen.getByText("Not yet qualified against real subscriptions"),
-  ).toBeTruthy();
+  expect(screen.getByText("Experimental")).toBeTruthy();
   expect(
     screen.getByText(
-      "Adds Chats and Automations to the sidebar, where you start and follow your agents’ work.",
+      "Start your agents from ticketd and follow their work beside your tickets.",
     ),
   ).toBeTruthy();
   expect(
-    screen.getByText(
-      "Turning Chat off hides Chats and Automations and keeps them. Running Chats and runs are stopped first, after you confirm.",
-    ),
+    screen.getByText("Not yet tested with every subscription plan."),
   ).toBeTruthy();
-  fireEvent.click(
-    screen.getByRole("button", { name: "About › Report an issue" }),
-  );
+  // The old callout is gone; its line is the footer now.
+  expect(screen.queryByText(/Not yet qualified/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Report an issue" }));
   expect(openPage).toHaveBeenCalledWith("about");
 });
 

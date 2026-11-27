@@ -577,3 +577,16 @@ test("discovery provenance follows the core's match flag and links to its settin
   fireEvent.click(screen.getByRole("button", { name: "Discovery settings" }));
   expect(openSettings).toHaveBeenCalledOnce();
 });
+
+test("a connection that is missing names the page that adds one", () => {
+  const notice = unavailableNotice(
+    source({
+      unavailable: {
+        code: "not_configured",
+        message: "Not connected on this desktop",
+        since: minutesAgo(1),
+      },
+    }),
+  );
+  expect(notice?.detail).toContain("in Settings › Ticket sources to refresh");
+});

@@ -26,7 +26,7 @@ launch. Follow the [installation instructions for your platform](docs/install.md
 ## Use ticketd with an agent
 
 Make the [command-line tool](docs/install.md#command-line-tool) available in your
-agent's terminal. In **Settings → Agent skills**, install the discovery skill for
+agent's terminal. In **Settings › Agent skills**, install the discovery skill for
 Claude Code or Codex. You can also install it from the terminal.
 
 ```sh

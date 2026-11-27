@@ -667,3 +667,36 @@ fn a_current_backup_missing_one_sync_capture_trigger_is_refused() {
         assert_eq!(workspace.list_tickets().unwrap().len(), 2);
     }
 }
+
+#[test]
+fn a_backup_file_made_on_another_computer_is_checked_and_restored_here() {
+    // "Another computer": its own folder, its own Workspace and device code.
+    let there = tempfile::tempdir().unwrap();
+    let elsewhere = populated(&there.path().join("workspace.sqlite3"));
+    let made_there = there.path().join("ticketd-backup.sqlite3");
+    elsewhere.backup(&made_there).unwrap();
+    let code_there = elsewhere.device_code().unwrap();
+    // The file travels (a drive, a message) to where it is restored.
+    let here = tempfile::tempdir().unwrap();
+    let arrived = here.path().join("from-the-other-mac.sqlite3");
+    std::fs::copy(&made_there, &arrived).unwrap();
+    let path = here.path().join("workspace.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    workspace.create_ticket("Only here").unwrap();
+
+    let inspection = workspace.inspect_backup(&arrived).unwrap();
+    let BackupCheck::Valid { summary, .. } = inspection.check else {
+        panic!(
+            "a file made elsewhere is a valid backup: {:?}",
+            inspection.check
+        );
+    };
+    assert_eq!((summary.tickets, inspection.current.tickets), (2, 1));
+    drop(workspace);
+
+    Workspace::restore(&path, &arrived).unwrap();
+    let restored = Workspace::open(&path).unwrap();
+    assert_eq!(restored.list_tickets().unwrap().len(), 2);
+    // It issues references under a code of its own, never the other computer's.
+    assert_ne!(restored.device_code().unwrap(), code_there);
+}

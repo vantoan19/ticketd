@@ -11,11 +11,11 @@ import {
   SETTINGS_ENTRIES,
   sourceEntries,
 } from "@/features/settings/settings-search";
+import { findSetting } from "@/features/settings/settings-highlight";
 import { SETTINGS_SECTIONS } from "@/features/settings/settings-sections";
 import { agentSkillsClient } from "@/lib/api/agent-skills";
 import { cliClient } from "@/lib/api/cli";
 import { diagnosticsClient } from "@/lib/api/diagnostics";
-import { notificationClient } from "@/lib/api/notifications";
 import { sourcesClient } from "@/lib/api/sources";
 import { workspaceClient } from "@/lib/api/workspace";
 import { syncApi } from "@/lib/sync-api";
@@ -42,11 +42,11 @@ vi.mock("@/lib/api/workspace", () => ({
     info: vi.fn(),
     reveal: vi.fn(),
     openLink: vi.fn(),
-    lastBackup: vi.fn(),
+    restorePoints: vi.fn(),
+    saveRestorePoint: vi.fn(),
     chooseSavePath: vi.fn(),
     chooseBackupFile: vi.fn(),
     inspectBackup: vi.fn(),
-    safetyBackups: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/cli", () => ({ cliClient: { check: vi.fn() } }));
@@ -55,13 +55,16 @@ vi.mock("@/lib/api/agent-skills", () => ({
 }));
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
-    permitted: vi.fn(),
-    requestPermission: vi.fn(),
+    permission: vi.fn(async () => ({
+      state: "allowed",
+      reported: true,
+      settings: true,
+    })),
     notify: vi.fn(),
   },
 }));
 vi.mock("@/lib/api/client", () => ({
-  client: { backupWorkspace: vi.fn(), exportWorkspace: vi.fn() },
+  client: { exportWorkspace: vi.fn() },
 }));
 vi.mock("@/lib/api/diagnostics", async (original) => {
   const actual = await original<typeof import("@/lib/api/diagnostics")>();
@@ -93,12 +96,12 @@ vi.mock("@/lib/sync-api", async (original) => ({
     settings: vi.fn(),
     setSettings: vi.fn(),
     setupOptions: vi.fn(),
+    devices: vi.fn(),
     flushOnExit: vi.fn(),
   },
 }));
 
 beforeEach(() => {
-  vi.mocked(notificationClient.permitted).mockResolvedValue(true);
   vi.mocked(cliClient.check).mockResolvedValue({
     found: false,
     on_path: false,
@@ -116,6 +119,7 @@ beforeEach(() => {
     level: "info",
     debug: false,
     env_override: null,
+    report_started_at: null,
   });
   vi.mocked(diagnosticsClient.recentErrors).mockResolvedValue([]);
   vi.mocked(sourcesClient.list).mockResolvedValue([]);
@@ -128,10 +132,13 @@ beforeEach(() => {
     size_bytes: 10,
     format_version: 20,
   });
-  vi.mocked(workspaceClient.lastBackup).mockResolvedValue(null);
-  vi.mocked(workspaceClient.safetyBackups).mockResolvedValue([]);
+  vi.mocked(workspaceClient.restorePoints).mockResolvedValue({
+    points: [],
+    total_bytes: 0,
+  });
   vi.mocked(syncApi.status).mockResolvedValue(syncStatus());
   vi.mocked(syncApi.settings).mockResolvedValue(syncSettings());
+  vi.mocked(syncApi.devices).mockResolvedValue([]);
 });
 afterEach(() => {
   cleanup();
@@ -157,7 +164,7 @@ const CHAT_ON = {
   requestChat: () => {},
 };
 
-test("Chat settings show harness names only in the catalog", async () => {
+test("Agents show harness names only in the agents list, with Chats off and on", async () => {
   const client = createMockChatClient({
     harnesses: [{ id: "antigravity", name: "Antigravity", status: "ready" }],
   });
@@ -170,7 +177,6 @@ test("Chat settings show harness names only in the catalog", async () => {
               selected="chat"
               onSelect={() => {}}
               onRestore={async () => {}}
-              onOpenInbox={() => {}}
             />
           </SyncStatusProvider>
         </TestReads>
@@ -179,19 +185,23 @@ test("Chat settings show harness names only in the catalog", async () => {
   );
   const harnessNames = /Claude Code|Codex|Antigravity/i;
   const { rerender } = render(page(false));
-  expect(screen.queryByText(harnessNames)).toBeNull();
+  const found = await screen.findByRole("list", { name: "Agents" });
+  expect(screen.getAllByText(harnessNames)).toEqual([
+    within(found).getByText("Antigravity"),
+  ]);
 
   rerender(page(true));
-  const catalog = await screen.findByRole("list", { name: "Harnesses" });
+  await screen.findByText("Ready");
+  const checked = screen.getByRole("list", { name: "Agents" });
   expect(screen.getAllByText(harnessNames)).toEqual([
-    within(catalog).getByText("Antigravity"),
+    within(checked).getByText("Antigravity"),
   ]);
 });
 
 test("every search entry's title and description are on the page it opens", async () => {
   const drifted: string[] = [];
   for (const section of SETTINGS_SECTIONS) {
-    const { unmount } = render(
+    const { unmount, container } = render(
       <ChatFeatureContext value={CHAT_ON}>
         <TestReads>
           <SyncStatusProvider>
@@ -199,7 +209,6 @@ test("every search entry's title and description are on the page it opens", asyn
               selected={section.id}
               onSelect={() => {}}
               onRestore={async () => {}}
-              onOpenInbox={() => {}}
             />
           </SyncStatusProvider>
         </TestReads>
@@ -214,6 +223,14 @@ test("every search entry's title and description are on the page it opens", asyn
     )) {
       if (!page.includes(plain(entry.title)))
         drifted.push(`${section.id}: title "${entry.title}"`);
+      // Search opens the page and shows this element.
+      // (A row that is the page itself, such as Command line, has no element
+      // of its own: Search just opens the page.)
+      if (
+        plain(entry.title) !== plain(section.label) &&
+        !findSetting(container, entry.title)
+      )
+        drifted.push(`${section.id}: title "${entry.title}" is no element`);
       if (!page.includes(plain(entry.description)))
         drifted.push(
           `${section.id}: "${entry.title}" description "${entry.description}"`,
@@ -238,7 +255,6 @@ test("a source page carries the title and description of its search entries", as
             selected="source-github"
             onSelect={() => {}}
             onRestore={async () => {}}
-            onOpenInbox={() => {}}
           />
         </SyncStatusProvider>
       </TestReads>
@@ -248,7 +264,9 @@ test("a source page carries the title and description of its search entries", as
     await new Promise((resolve) => setTimeout(resolve, 100));
   });
   const page = plain(document.body.textContent ?? "");
-  for (const entry of sourceEntries("github", "GitHub")) {
+  for (const entry of sourceEntries("github", "GitHub").filter(
+    (candidate) => candidate.section === "source-github",
+  )) {
     expect(page, entry.title).toContain(plain(entry.title));
     expect(page, entry.description).toContain(plain(entry.description));
   }

@@ -1,115 +1,235 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { notificationClient } from "@/lib/api/notifications";
+import {
+  ChatFeatureContext,
+  type ChatFeature,
+} from "@/features/chats/use-chats";
+import {
+  notificationClient,
+  type NotificationPermission,
+} from "@/lib/api/notifications";
+import { resetNotificationPermission } from "@/lib/notification-permission";
 import { loadPreferences, setPreference } from "@/lib/preferences";
 import { AttentionPage } from "@/features/settings/pages/AttentionPage";
 
 vi.mock("@/lib/api/notifications", () => ({
   notificationClient: {
-    permitted: vi.fn(),
-    requestPermission: vi.fn(),
+    permission: vi.fn(),
+    ask: vi.fn(),
+    openSettings: vi.fn(),
     notify: vi.fn(),
   },
 }));
 
+const ALLOWED: NotificationPermission = {
+  state: "allowed",
+  reported: true,
+  settings: true,
+};
+const NOT_ASKED: NotificationPermission = { ...ALLOWED, state: "not_asked" };
+const BLOCKED: NotificationPermission = { ...ALLOWED, state: "blocked" };
+
+const CHATS_ON = { enabled: true } as ChatFeature;
+const CHATS_OFF = { enabled: false } as ChatFeature;
+
+function page(chats: ChatFeature = CHATS_ON) {
+  return render(
+    <ChatFeatureContext value={chats}>
+      <AttentionPage />
+    </ChatFeatureContext>,
+  );
+}
+
 beforeEach(() => {
-  vi.mocked(notificationClient.permitted).mockResolvedValue(true);
+  vi.mocked(notificationClient.permission).mockResolvedValue(ALLOWED);
+  vi.mocked(notificationClient.openSettings).mockResolvedValue();
 });
 afterEach(() => {
   cleanup();
+  resetNotificationPermission();
   localStorage.clear();
   vi.restoreAllMocks();
   vi.clearAllMocks();
 });
 
-const notifySwitch = () =>
-  screen.getByRole("switch", { name: "Notify me when a reminder is due" });
+const chatSwitch = () =>
+  screen.getByRole("switch", { name: "Chat notifications" });
+const button = (name: string) => screen.queryByRole("button", { name });
 
-test("the page has one list for following and reminders, then the Inbox", () => {
-  render(<AttentionPage onOpenInbox={() => {}} />);
-  for (const name of ["Following and reminders", "Inbox"])
-    expect(screen.getByRole("heading", { level: 2, name })).toBeTruthy();
-  expect(screen.getByText("Changes apply right away")).toBeTruthy();
-});
-
-test("with notifications off there is no preview and no help line", () => {
-  render(<AttentionPage onOpenInbox={() => {}} />);
-  expect(screen.queryByText("What a due reminder looks like")).toBeNull();
+test("the page holds Following and Notifications, with no reminder switch and no Inbox row", async () => {
+  page();
+  await screen.findByText("Allowed");
+  expect(
+    screen
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent),
+  ).toEqual(["Following", "Notifications"]);
+  expect(screen.queryByRole("switch", { name: /reminder/i })).toBeNull();
+  expect(screen.queryByText(/Attention inbox/)).toBeNull();
   expect(screen.queryByText(/No notification\?/)).toBeNull();
 });
 
-test("with notifications on, a preview shows the real body shape and where to allow them", async () => {
-  setPreference("notifyReminders", true);
-  render(<AttentionPage onOpenInbox={() => {}} />);
-  const preview = await screen.findByRole("img", {
-    name: /Example notification: .*T-12: reminder is due/,
-  });
-  expect(screen.getByText("What a due reminder looks like")).toBeTruthy();
-  expect(preview.textContent).toContain("T-12: reminder is due");
+test("allowed: the row says Allowed, offers nothing to press, and Chat notifications are on", async () => {
+  page();
+  await screen.findByText("Allowed");
+  expect(button("Allow notifications")).toBeNull();
+  expect(button("Open System Settings")).toBeNull();
+  expect(chatSwitch().getAttribute("aria-checked")).toBe("true");
+  expect((chatSwitch() as HTMLButtonElement).disabled).toBe(false);
   expect(
     screen.getByText(
-      "No notification? Allow ticketd in System Settings › Notifications.",
+      "Due reminders, and Chats that need you, while ticketd is open.",
     ),
   ).toBeTruthy();
 });
 
-test("the Inbox row opens the Attention inbox", () => {
-  const open = vi.fn();
-  render(<AttentionPage onOpenInbox={open} />);
-  expect(screen.getByText("Attention inbox")).toBeTruthy();
+test("not asked yet: one Allow notifications button asks the system once, and the row then reads Allowed", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue(NOT_ASKED);
+  vi.mocked(notificationClient.ask).mockImplementation(async () => {
+    vi.mocked(notificationClient.permission).mockResolvedValue(ALLOWED);
+    return ALLOWED;
+  });
+  page();
   fireEvent.click(
-    screen.getByRole("button", { name: "Open the Attention inbox" }),
+    await screen.findByRole("button", { name: "Allow notifications" }),
   );
-  expect(open).toHaveBeenCalledTimes(1);
+  await screen.findByText("Allowed");
+  expect(notificationClient.ask).toHaveBeenCalledTimes(1);
+  expect(button("Allow notifications")).toBeNull();
 });
 
-test("denied permission shows the blocked alert and leaves the switch off", async () => {
-  vi.mocked(notificationClient.requestPermission).mockResolvedValue(false);
-  render(<AttentionPage onOpenInbox={() => {}} />);
-  fireEvent.click(notifySwitch());
-  const alert = await screen.findByRole("alert");
-  expect(alert.textContent).toContain("Notifications are blocked for ticketd");
-  expect(alert.textContent).toContain("notification settings");
-  expect(notifySwitch().getAttribute("aria-checked")).toBe("false");
-  expect(loadPreferences().notifyReminders).toBe(false);
+test("the answer to the ask is what the row shows, even when the read after it fails", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue(NOT_ASKED);
+  vi.mocked(notificationClient.ask).mockImplementation(async () => {
+    vi.mocked(notificationClient.permission).mockRejectedValue(
+      new Error("unreadable"),
+    );
+    return ALLOWED;
+  });
+  page();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Allow notifications" }),
+  );
+  await screen.findByText("Allowed");
+  expect(button("Allow notifications")).toBeNull();
+  expect((chatSwitch() as HTMLButtonElement).disabled).toBe(false);
 });
 
-test("permission withdrawn in system settings turns the switch off on opening", async () => {
-  setPreference("notifyReminders", true);
-  vi.mocked(notificationClient.permitted).mockResolvedValue(false);
-  render(<AttentionPage onOpenInbox={() => {}} />);
-  expect((await screen.findByRole("alert")).textContent).toContain(
-    "Notifications are blocked for ticketd",
-  );
-  expect(notifySwitch().getAttribute("aria-checked")).toBe("false");
+test("where the system cannot say, the row does not claim Allowed", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue({
+    ...ALLOWED,
+    reported: false,
+    settings: false,
+  });
+  page();
+  await screen.findByText("Not reported");
+  expect(screen.queryByText("Allowed")).toBeNull();
+  expect(
+    screen.getByText(/doesn’t say whether notifications are on/),
+  ).toBeTruthy();
+  // The delivery fallback stays: Chat notifications still work.
+  expect((chatSwitch() as HTMLButtonElement).disabled).toBe(false);
 });
 
-test("a failed permission request is reported beside Reminders", async () => {
-  vi.mocked(notificationClient.requestPermission).mockRejectedValue(
-    new Error("boom"),
+test("until notifications are allowed Chat notifications read off and cannot change, and the choice comes back once allowed", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue(NOT_ASKED);
+  page();
+  await screen.findByRole("button", { name: "Allow notifications" });
+  expect(chatSwitch().getAttribute("aria-checked")).toBe("false");
+  expect((chatSwitch() as HTMLButtonElement).disabled).toBe(true);
+  // The saved choice was never touched.
+  expect(loadPreferences().notifyChats).toBe(true);
+
+  vi.mocked(notificationClient.permission).mockResolvedValue(ALLOWED);
+  act(() => {
+    window.dispatchEvent(new Event("focus"));
+  });
+  await waitFor(() =>
+    expect(chatSwitch().getAttribute("aria-checked")).toBe("true"),
   );
-  render(<AttentionPage onOpenInbox={() => {}} />);
-  fireEvent.click(notifySwitch());
+});
+
+test("a muted choice stays muted after notifications are allowed", async () => {
+  setPreference("notifyChats", false);
+  page();
+  await screen.findByText("Allowed");
+  expect(chatSwitch().getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(chatSwitch());
+  expect(loadPreferences().notifyChats).toBe(true);
+  expect(chatSwitch().getAttribute("aria-checked")).toBe("true");
+});
+
+test("blocked: the row says Blocked and where to allow it, and Open System Settings opens the system's settings", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue(BLOCKED);
+  page();
+  await screen.findByText("Blocked");
+  expect(
+    screen.getByText("Off for ticketd in System Settings › Notifications."),
+  ).toBeTruthy();
+  expect(button("Allow notifications")).toBeNull();
+  expect((chatSwitch() as HTMLButtonElement).disabled).toBe(true);
+  expect(chatSwitch().getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(screen.getByRole("button", { name: "Open System Settings" }));
+  expect(notificationClient.openSettings).toHaveBeenCalledTimes(1);
+  expect(notificationClient.ask).not.toHaveBeenCalled();
+});
+
+test("blocked on a system with no settings to open offers no button", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue({
+    ...BLOCKED,
+    settings: false,
+  });
+  page();
+  await screen.findByText("Blocked");
+  expect(button("Open System Settings")).toBeNull();
+});
+
+test("blocked, then allowed in System Settings: the row is read again when the window regains focus", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue(BLOCKED);
+  page();
+  await screen.findByText("Blocked");
+  vi.mocked(notificationClient.permission).mockResolvedValue(ALLOWED);
+  act(() => {
+    window.dispatchEvent(new Event("focus"));
+  });
+  await screen.findByText("Allowed");
+  expect(screen.queryByText("Blocked")).toBeNull();
+  expect(chatSwitch().getAttribute("aria-checked")).toBe("true");
+});
+
+test("without Chats the page has no Chat notifications row and the description drops Chats", async () => {
+  page(CHATS_OFF);
+  await screen.findByText("Allowed");
+  expect(screen.queryByText("Chat notifications")).toBeNull();
+  expect(screen.getByText("Due reminders while ticketd is open.")).toBeTruthy();
+});
+
+test("a failed ask is reported in the row", async () => {
+  vi.mocked(notificationClient.permission).mockResolvedValue(NOT_ASKED);
+  vi.mocked(notificationClient.ask).mockRejectedValue(new Error("boom"));
+  page();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Allow notifications" }),
+  );
   expect((await screen.findByRole("alert")).textContent).toContain(
     "Couldn't ask for notification permission",
   );
 });
 
-test("the notify switch is disabled while permission is being asked", () => {
-  vi.mocked(notificationClient.requestPermission).mockReturnValue(
-    new Promise(() => {}),
-  );
-  render(<AttentionPage onOpenInbox={() => {}} />);
-  fireEvent.click(notifySwitch());
-  expect((notifySwitch() as HTMLButtonElement).disabled).toBe(true);
-});
-
-test("a follow preference that cannot be saved says so", () => {
+test("a follow preference that cannot be saved says so", async () => {
+  page();
+  await screen.findByText("Allowed");
   vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
     throw new Error("full");
   });
-  render(<AttentionPage onOpenInbox={() => {}} />);
   fireEvent.click(
     screen.getByRole("switch", { name: "Follow tickets I create" }),
   );

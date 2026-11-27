@@ -181,7 +181,7 @@ const COPY = {
   },
   "settings-search": {
     title: "No settings match “{query}”",
-    sentence: "Try another word, or open a section below.",
+    sentence: "Try another word, such as theme, sync or backup.",
   },
   "settings-shortcuts-search": {
     title: "No shortcuts match “{query}”",
