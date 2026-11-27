@@ -370,15 +370,28 @@ test("a match past the right edge of an unwrapped line is scrolled into view sid
 
 test("a match the estimate puts in view is still scrolled to when tabs draw it past the edge", async () => {
   serve("a\tneedle\nshort\n");
+  // The stage is 300px wide from its first measurement, so the estimate sees the
+  // match in view and only the measured correction can scroll.
+  const width = Object.getOwnPropertyDescriptor(
+    HTMLElement.prototype,
+    "clientWidth",
+  );
+  Object.defineProperty(HTMLElement.prototype, "clientWidth", {
+    configurable: true,
+    get(this: HTMLElement) {
+      return this.dataset.testid === "stage" ? 300 : 0;
+    },
+  });
   render(<Stage />);
   await screen.findByRole("document");
   const stage = screen.getByTestId("stage");
-  Object.defineProperty(stage, "clientWidth", { value: 300 });
+  const writes: number[] = [];
   let left = 0;
   Object.defineProperty(stage, "scrollLeft", {
     get: () => left,
     set: (value: number) => {
       left = value;
+      writes.push(value);
     },
   });
   stage.focus();
@@ -409,10 +422,14 @@ test("a match the estimate puts in view is still scrolled to when tabs draw it p
       name: "Find in the text",
     });
     fireEvent.change(field, { target: { value: "needle" } });
-    // The measured mark centres in the stage: 870 further than wherever the estimate left it.
-    await waitFor(() => expect(left).toBeGreaterThan(870));
+    // The measured mark centres in the stage, and that is the first sideways scroll.
+    // The mark's centre (1020) less half the stage (150): the estimate never scrolled.
+    await waitFor(() => expect(left).toBe(870));
+    expect(writes.filter((value) => value !== 0)).toEqual([870]);
   } finally {
     HTMLElement.prototype.getBoundingClientRect = original;
+    if (width)
+      Object.defineProperty(HTMLElement.prototype, "clientWidth", width);
   }
 });
 
