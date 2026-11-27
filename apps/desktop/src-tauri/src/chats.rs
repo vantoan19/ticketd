@@ -1420,8 +1420,9 @@ impl Chats {
     ) -> Outcome<Summary> {
         #[cfg(test)]
         self.rows_built.fetch_add(1, Ordering::SeqCst);
-        let items = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?.items;
-        let mut tracker = Tracker::from_items(&items);
+        let snapshot = workspace.chat_snapshot(&chat.id, SUMMARY_ITEMS)?;
+        // The sub-agents too: a row names the one that asks for approval.
+        let mut tracker = Tracker::from_snapshot(&snapshot.items, &snapshot.sub_agents);
         // A long turn's own record can lie outside the window; the row still says it.
         if let Some(turn) = workspace.chat_latest_turn(&chat.id)? {
             tracker.note(&ChatItem::Turn(turn));

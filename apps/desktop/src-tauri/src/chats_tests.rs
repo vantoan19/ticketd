@@ -4285,6 +4285,39 @@ async fn a_request_waiting_on_the_person_is_the_agents_approval() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn the_chats_list_row_names_the_sub_agent_that_asks_for_approval() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("approval-1"),
+        turn: None,
+        owner: Some(NativeSubAgentId::new("sa-tests")),
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "npm test -- rate-limit".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+        },
+        detail: None,
+    }))
+    .await;
+
+    let row = f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row.status.word, "Approval needed");
+    assert_eq!(
+        row.status.detail.as_deref(),
+        Some("Check limiter test coverage"),
+        "the sub-agent, not the command it wants to run"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_overview_digest_moves_with_the_set_and_with_a_field() {
     let f = Fixture::new().await;
     let ticket = f.core().create_ticket("Rate limiter").unwrap();
