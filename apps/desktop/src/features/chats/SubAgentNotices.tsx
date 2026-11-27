@@ -22,7 +22,7 @@ export function RestartNotice({
     <section className="chat-restart-notice" role="status">
       <p className="chat-restart-notice-title">
         <Unplug size={16} aria-hidden />
-        <span>{`${agents(n)} lost contact when ticketd quit.`}</span>
+        <span>{`${agents(n)} lost contact when ticketd quit`}</span>
       </p>
       <p className="chat-restart-notice-body">
         {`Your next message tells ${harness}${notice.resume ? `, which can resume ${n === 1 ? "it" : "them"}` : ""}.`}

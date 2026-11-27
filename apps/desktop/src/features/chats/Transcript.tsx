@@ -1396,6 +1396,16 @@ function StopMarker({
 }) {
   const subAgent = useContext(InSubAgent);
   const words = markerText(item, harness, detailShown);
+  // Stop all with no turn: the same quiet row a sub-agent's ending has.
+  if (item.reason === "sub_agents_stopped")
+    return (
+      <p className="chat-line chat-end-marker">
+        <span className="chat-row-icon" aria-hidden="true">
+          <Square size={12} fill="currentColor" className="chat-stop-mark" />
+        </span>
+        <span>{words}</span>
+      </p>
+    );
   return (
     <p className="chat-line">
       {/* Filled, the stop sign does not read as an empty checkbox. */}
@@ -1815,6 +1825,14 @@ export function Transcript({
   // Words are streaming in now: the newest thing in the Chat is a response still arriving.
   const newest = lastOf(items, (item) => item.kind !== "turn");
   const writing = newest?.kind === "response" && newest.state === "streaming";
+  const agentsRun = parts.some(
+    (part) =>
+      part.kind === "turn" &&
+      part.turn.live &&
+      part.turn.rows.some(
+        (row) => row.kind === "sub_agent" && row.item.status === "running",
+      ),
+  );
   const empty = items.length === 0 && !chat.catching_up && !isLive(chat);
   const asking = items.some(
     (item) => item.kind === "request" && item.state === "pending",
@@ -1942,7 +1960,7 @@ export function Transcript({
                         since={chat.doing.since}
                         items={items}
                       />
-                    ) : (
+                    ) : agentsRun ? null : ( // A sub-agent's row spins and the strip counts it: no second line.
                       <WorkingLine label="Working…" />
                     )}
                   </BetweenSteps>

@@ -215,8 +215,12 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     (item): item is Extract<TranscriptItem, { kind: "request" }> =>
       item.kind === "request" && item.state === "pending",
   );
+  // A sub-agent's approval says which one asks.
+  const asker = pending?.owner
+    ? chat.sub_agents.find((agent) => agent.id === pending.owner)
+    : undefined;
   if (pending?.request === "approval")
-    return make("approval", "Approval needed", pending.subject);
+    return make("approval", "Approval needed", asker?.title ?? pending.subject);
   if (pending) return make("question", "Question", pending.subject);
   const problem = chat.problem;
   if (problem?.kind === "uncertain_delivery") {
@@ -229,12 +233,29 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
   }
   if (problem?.kind === "stop_unconfirmed")
     return make("working", "Stop not confirmed");
-  if (chat.activity === "working" || chat.activity === "waiting")
-    return make("working", "Working", chat.opening ? "Starting" : null);
+  if (chat.activity === "working" || chat.activity === "waiting") {
+    const n = chat.sub_agents.filter((one) => one.status === "running").length;
+    return make(
+      "working",
+      "Working",
+      chat.opening
+        ? "Starting"
+        : n > 0
+          ? `${n} ${n === 1 ? "sub-agent" : "sub-agents"}`
+          : null,
+    );
+  }
   const marker = items.at(-1)?.kind === "marker" ? items.at(-1) : undefined;
   const reason = marker?.kind === "marker" ? marker.reason : undefined;
   if (reason === "stopped") return make("idle", "You stopped it");
   if (reason === "quit") return make("idle", "Stopped", "ticketd quit");
+  if (reason === "sub_agents_stopped") {
+    const n = marker?.kind === "marker" ? (marker.count ?? 1) : 1;
+    return make(
+      "idle",
+      `You stopped ${n} ${n === 1 ? "sub-agent" : "sub-agents"}`,
+    );
+  }
   // A failure observed now waits for the person while it holds.
   if (problem?.kind === "failed" && !problem.past)
     return make(

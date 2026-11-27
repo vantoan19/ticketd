@@ -295,7 +295,9 @@ test("a sub-agent just started says it is starting, and a running one has only i
   await screen.findByRole("heading", { name: "Check limiter test coverage" });
   // Only the control row (state and Stop, where the harness can stop it): no request, no composer.
   const tray = document.querySelector(".chat-tray") as HTMLElement;
-  expect(within(tray).getByRole("button", { name: /^Stop Check/ })).toBeTruthy();
+  expect(
+    within(tray).getByRole("button", { name: /^Stop Check/ }),
+  ).toBeTruthy();
   expect(tray.querySelector("[data-request]")).toBeNull();
   expect(within(document.body).queryByRole("textbox")).toBeNull();
 });

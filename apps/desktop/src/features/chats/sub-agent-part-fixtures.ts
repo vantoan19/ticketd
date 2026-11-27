@@ -29,6 +29,8 @@ function vary(
   change: {
     chat?: Partial<ChatState>;
     items?: Item[];
+    /** Items placed right after the first one (the main agent's own work, before its sub-agent rows). */
+    early?: Item[];
     agents?: Record<string, Partial<SubAgent>>;
     /** Rewrites an existing item (a turn that started without the person's message). */
     map?: (item: Item) => Item;
@@ -46,11 +48,30 @@ function vary(
       })),
     },
     items: [
-      ...(base.items ?? []).map(change.map ?? ((item) => item)),
+      ...(base.items ?? [])
+        .map(change.map ?? ((item) => item))
+        .flatMap((item, index) =>
+          index === 1 && change.early ? [...change.early, item] : [item],
+        ),
       ...(change.items ?? []),
     ],
   };
 }
+
+/** The Codex main agent's own work in its first turn, so the turn folds under a work line. */
+const codexWork = (now: number): Item => ({
+  id: "p-s1",
+  at: ago(now, 4 * MIN),
+  turn_id: "t1",
+  kind: "steps",
+  steps: [
+    {
+      kind: "read",
+      target: "src/pay/client.ts",
+      targets: [{ text: "src/pay/client.ts" }, { text: "src/pay/refunds.ts" }],
+    },
+  ],
+});
 
 /** A running plan: the plan pill shares the strip's line. */
 const plan = (now: number): Item => ({
@@ -62,7 +83,11 @@ const plan = (now: number): Item => ({
   steps: [
     { text: "Read the limiter", status: "completed" },
     { text: "Start the reviewers", status: "completed" },
-    { text: "Collect their findings", status: "in_progress", active_label: "Waiting for the reviewers" },
+    {
+      text: "Collect their findings",
+      status: "in_progress",
+      active_label: "Waiting for the reviewers",
+    },
     { text: "Write the summary", status: "pending" },
   ],
 });
@@ -99,6 +124,7 @@ export function subAgentPartFixtures(now = Date.now()) {
         {
           id: "req-tests",
           at: ago(now, 5 * SEC),
+          turn_id: "sa-tests:run-1",
           kind: "request",
           owner: agentOf("tests"),
           request: "approval",
@@ -131,12 +157,61 @@ export function subAgentPartFixtures(now = Date.now()) {
             origin: { by: "harness", sub_agent: agentOf("tests") },
           },
           {
+            id: "h-s2",
+            at: ago(now, 28 * SEC),
+            turn_id: "t2",
+            kind: "steps",
+            steps: [
+              {
+                kind: "run",
+                target: "ticketd show T-KQ29",
+                command: "ticketd show T-KQ29",
+                exit_code: 0,
+                ticketd: [
+                  { verb: "read", words: [{ text: "T-KQ29", code: true }] },
+                ],
+              },
+            ],
+          },
+          {
             id: "h-r2",
             at: ago(now, 6 * SEC),
             kind: "response",
             turn_id: "t2",
-            text: "Both reviews are in. One gap: a request with no API key skips the limiter. The tests now cover it.",
+            text: "All three reviews are in.\n\n- **Bypass:** a request with no `x-api-key` header skipped the limiter. It now counts against the caller's IP (`src/api/rate-limit.ts`).\n- **Tests:** 14 cases passed; the tests reviewer added one for a missing key.\n- **Docs:** two typos fixed in `docs/api.md`.\n\nI moved T-KQ29 to In review.",
             state: "complete",
+          },
+          {
+            id: "h-f2",
+            at: ago(now, 6 * SEC),
+            turn_id: "t2",
+            kind: "files",
+            state: "ended",
+            files: [
+              {
+                path: "src/api/rate-limit.ts",
+                open_path: "/fixture/work/src/api/rate-limit.ts",
+                kind: "modified",
+                added_lines: 6,
+                removed_lines: 1,
+                confirmed: true,
+              },
+            ],
+          },
+          {
+            id: "h-rec2",
+            at: ago(now, 6 * SEC),
+            turn_id: "t2",
+            kind: "records",
+            changes: [
+              {
+                kind: "status",
+                reference: "T-KQ29",
+                title: "Rate limit the public API",
+                from: "In progress",
+                to: "In review",
+              },
+            ],
           },
         ],
       });
@@ -146,6 +221,7 @@ export function subAgentPartFixtures(now = Date.now()) {
       const base = codexChat(now);
       return vary(base, {
         chat: quiet,
+        early: [codexWork(now)],
         agents: {
           "sa-refunds": { status: "completed", ended_at: ago(now, 20 * SEC) },
           "sa-pay-tests": {
@@ -172,7 +248,10 @@ export function subAgentPartFixtures(now = Date.now()) {
       });
     })(),
     /** Codex: three sub-agents, one nested, no turn. */
-    codexNested: vary(codexChat(now), { chat: quiet }),
+    codexNested: vary(codexChat(now), {
+      chat: quiet,
+      early: [codexWork(now)],
+    }),
     /** After Stop all with no turn running: every row says Stopped, and the Chat rests. */
     stoppedAll: vary(fx.stopped, {
       chat: { activity: "idle", unseen: false },

@@ -1915,7 +1915,7 @@
   padding-left: 24px;
 }
 .chat-subagent-list li:hover,
-.chat-subagent-list li:focus-within {
+.chat-subagent-list li:has(:focus-visible) {
   background: var(--accent);
 }
 .chat-subagent-item {
@@ -1938,15 +1938,15 @@
   color: var(--muted-foreground);
   font-variant-numeric: tabular-nums;
 }
-.chat-subagent-list .chat-subagent-stop {
+.chat-subagent-list li > [data-size="icon-row-action"] {
   visibility: hidden;
 }
-.chat-subagent-list li:hover .chat-subagent-stop,
-.chat-subagent-list li:focus-within .chat-subagent-stop {
+.chat-subagent-list li:hover > [data-size="icon-row-action"],
+.chat-subagent-list li:has(:focus-visible) > [data-size="icon-row-action"] {
   visibility: visible;
 }
 @media (hover: none) {
-  .chat-subagent-list .chat-subagent-stop {
+  .chat-subagent-list li > [data-size="icon-row-action"] {
     visibility: visible;
   }
 }
@@ -1996,7 +1996,7 @@
   font-weight: 500;
   color: var(--foreground);
 }
-.chat-restart-notice-body {
+.chat-restart-notice .chat-restart-notice-body {
   margin-left: 24px;
   color: var(--muted-foreground);
   font-size: var(--text-caption);
@@ -2019,4 +2019,19 @@
   font-size: var(--text-caption);
   line-height: 16px;
   -webkit-line-clamp: unset;
+}
+
+/* The tray line that says another agent needs the person. */
+.chat-needs-elsewhere {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  color: var(--foreground);
+}
+.chat-needs-elsewhere .chat-spacer {
+  flex: 1;
+}
+.chat-needs-elsewhere strong {
+  font-weight: 500;
 }

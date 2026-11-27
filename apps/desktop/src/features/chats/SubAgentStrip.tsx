@@ -9,38 +9,18 @@ import {
 } from "@/components/ui/popover";
 import type { SubAgent } from "@/features/chats/client";
 import { duration } from "@/features/chats/model";
+import {
+  runningTree,
+  runningWords,
+  STRIP_OPENER,
+} from "@/features/chats/sub-agents";
 import { useNow } from "@/features/chats/use-now";
-
-/** The `data-sub-agent` value of the pill: going back from a view it opened returns focus here. */
-export const STRIP_OPENER = "strip";
-
-/** The sub-agents that run now, each parent before the ones it started (one level in). */
-export function runningTree(agents: readonly SubAgent[]) {
-  const running = agents.filter((agent) => agent.status === "running");
-  const ids = new Set(running.map((agent) => agent.id));
-  const list: { agent: SubAgent; depth: 0 | 1 }[] = [];
-  for (const agent of running) {
-    if (agent.parent && ids.has(agent.parent)) continue;
-    list.push({ agent, depth: 0 });
-    for (const child of running)
-      if (child.parent === agent.id) list.push({ agent: child, depth: 1 });
-  }
-  // A sub-agent whose chain of parents does not reach a running root still shows.
-  for (const agent of running)
-    if (!list.some((one) => one.agent === agent))
-      list.push({ agent, depth: 1 });
-  return list;
-}
 
 /** How long a running sub-agent has gone, or nothing before a second. */
 function clock(agent: SubAgent, now: number) {
   const elapsed = now - Date.parse(agent.started_at);
   return elapsed >= 1000 ? duration(elapsed) : "";
 }
-
-/** "N sub-agents running". */
-export const runningWords = (count: number) =>
-  `${count} ${count === 1 ? "sub-agent" : "sub-agents"} running`;
 
 /**
  * The strip: one 28px recessed pill in the tray while any sub-agent runs, in or
@@ -129,8 +109,10 @@ export function SubAgentStrip({
       <PopoverContent
         side="top"
         align="start"
+        sideOffset={8}
         aria-label="Running sub-agents"
-        className="chat-subagent-pop w-[360px] p-2"
+        variant="compact-form"
+        className="w-90"
         onKeyDown={move}
       >
         <ul className="chat-subagent-list">
@@ -148,16 +130,13 @@ export function SubAgentStrip({
                   <LoaderCircle size={12} className="chat-spin" />
                 </span>
                 <span className="chat-subagent-title">{agent.title}</span>
-                <span className="chat-subagent-time">
-                  {clock(agent, now)}
-                </span>
+                <span className="chat-subagent-time">{clock(agent, now)}</span>
               </button>
               {agent.capabilities.stop && (
                 <IconButton
                   label={`Stop ${agent.title}`}
                   variant="ghost"
                   size="icon-row-action"
-                  className="chat-subagent-stop"
                   tooltipSide="top"
                   onClick={() => onStop(agent)}
                 >

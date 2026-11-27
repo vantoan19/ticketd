@@ -140,9 +140,10 @@ import { useChat } from "@/features/chats/use-chats";
 import { SubAgentView } from "@/features/chats/SubAgentView";
 import { RestartNotice } from "@/features/chats/SubAgentNotices";
 import { SubAgentTray } from "@/features/chats/SubAgentTray";
-import { STRIP_OPENER, SubAgentStrip } from "@/features/chats/SubAgentStrip";
+import { SubAgentStrip } from "@/features/chats/SubAgentStrip";
 import { backKey } from "@/features/chats/sub-agent-words";
 import {
+  STRIP_OPENER,
   subAgentView,
   viewPath,
   type ViewStep,
@@ -1091,9 +1092,7 @@ function Conversation({
                     strip: (
                       <SubAgentStrip
                         agents={chat.sub_agents}
-                        onOpen={(agent) =>
-                          showSubAgent(agent.id, STRIP_OPENER)
-                        }
+                        onOpen={(agent) => showSubAgent(agent.id, STRIP_OPENER)}
                         onStop={(agent) =>
                           quietly(
                             client.stopSubAgent(id, agent.id),
@@ -1382,8 +1381,7 @@ export function ChatDetail({
   const returning = useRef<string | null>(null);
   /** Opens a sub-agent from the part that names it; from another view it replaces that one. */
   const showSubAgent = useCallback<ShowSubAgent>(
-    (agent, row) =>
-      setSteps((current) => [...current, { agent, row }]),
+    (agent, row) => setSteps((current) => [...current, { agent, row }]),
     [],
   );
   const openSubAgent = useCallback(

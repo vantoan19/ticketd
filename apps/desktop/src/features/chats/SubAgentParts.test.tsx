@@ -167,7 +167,9 @@ test("no strip without a running sub-agent, and none in a Chat without any", asy
 
 test("Stop all says what it stops: the sub-agents alone, or the turn and the sub-agents", async () => {
   await open(fixtures().reply);
-  expect(screen.getByRole("button", { name: "Stop 2 sub-agents" })).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Stop 2 sub-agents" }),
+  ).toBeTruthy();
   cleanup();
   await open(fixtures().inTurn);
   expect(
@@ -217,7 +219,9 @@ test("in its own view the request sits in the tray with the name as plain text",
   const card = await screen.findByRole("group", {
     name: /^Check limiter test coverage wants to run/,
   });
-  expect(within(card).queryByRole("button", { name: /^Check limiter/ })).toBeNull();
+  expect(
+    within(card).queryByRole("button", { name: /^Check limiter/ }),
+  ).toBeNull();
   const answer = vi.spyOn(client, "answer");
   fireEvent.click(within(card).getByRole("button", { name: /Allow once/ }));
   await waitFor(() =>
@@ -248,9 +252,9 @@ test("in another sub-agent's view a line says who needs you, and Review goes the
 });
 
 test("a long sub-agent title is cut at about 40 characters in a request", () => {
-  expect(cutTitle("Review the retry backoff in the webhook sender and queue")).toBe(
-    "Review the retry backoff in the webhook…",
-  );
+  expect(
+    cutTitle("Review the retry backoff in the webhook sender and queue"),
+  ).toBe("Review the retry backoff in the webhook…");
   expect(cutTitle("Find limiter bypasses")).toBe("Find limiter bypasses");
 });
 
@@ -263,7 +267,9 @@ test("Stop in a sub-agent's own view stops it alone and leaves how it ended", as
   await screen.findByRole("heading", { name: "Find limiter bypasses" });
   const status = screen.getByText(/^Working · 2m/).closest("[role=status]");
   expect(status?.getAttribute("aria-live")).toBe("polite");
-  fireEvent.click(screen.getByRole("button", { name: "Stop Find limiter bypasses" }));
+  fireEvent.click(
+    screen.getByRole("button", { name: "Stop Find limiter bypasses" }),
+  );
   expect(stop).toHaveBeenCalledWith("c-limiter", "sa-bypass");
   expect(await screen.findByText("You stopped it.")).toBeTruthy();
   // It ended, so the view has no tray; the other sub-agent still runs in the Chat.
@@ -304,7 +310,7 @@ test("a turn the person started has no such line", async () => {
 test("after a restart the tray says what happens next, neutrally", async () => {
   await open(fixtures().restart);
   const notice = screen
-    .getByText("2 sub-agents lost contact when ticketd quit.")
+    .getByText("2 sub-agents lost contact when ticketd quit")
     .closest("section") as HTMLElement;
   expect(notice.textContent).toContain(
     "Your next message tells Claude Code, which can resume them.",
@@ -328,7 +334,7 @@ test("the restart notice says Codex without resuming, and one sub-agent in the s
     },
   });
   const notice = screen
-    .getByText("1 sub-agent lost contact when ticketd quit.")
+    .getByText("1 sub-agent lost contact when ticketd quit")
     .closest("section") as HTMLElement;
   expect(notice.textContent).toContain("Your next message tells Codex.");
   expect(notice.textContent).not.toContain("resume");
@@ -351,4 +357,37 @@ test("the message sent with the note shows a caption that opens to the exact not
   ).toBeTruthy();
   fireEvent.click(caption);
   expect(screen.queryByText(/^From ticketd:/)).toBeNull();
+});
+
+test("the Chat's one polite status says the work goes on, and a request is announced by its title", async () => {
+  await open(fixtures().reply);
+  const status = () =>
+    [...document.querySelectorAll('.chat-dock .sr-only[aria-live="polite"]')]
+      .map((one) => one.textContent)
+      .filter(Boolean)
+      .join("|");
+  expect(status()).toBe("2 sub-agents running");
+  cleanup();
+  await open(fixtures().approval);
+  await screen.findByRole("group", { name: /wants to run/ });
+  expect(status()).toBe(
+    "Check limiter test coverage wants to run npm test -- rate-limit",
+  );
+});
+
+test("Esc in a sub-agent's view goes back and stops nothing", async () => {
+  const client = await open(fixtures().reply);
+  const stop = vi.spyOn(client, "stop");
+  const stopOne = vi.spyOn(client, "stopSubAgent");
+  const open1 = screen.getByRole("button", {
+    name: /^Sub-agent Find limiter bypasses/,
+  });
+  fireEvent.click(open1);
+  const heading = await screen.findByRole("heading", {
+    name: "Find limiter bypasses",
+  });
+  fireEvent.keyDown(heading, { key: "Escape" });
+  await screen.findByRole("heading", { name: "Review the rate limiter" });
+  expect(stop).not.toHaveBeenCalled();
+  expect(stopOne).not.toHaveBeenCalled();
 });

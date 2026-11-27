@@ -48,8 +48,11 @@ export function viewPath(
 /** The sub-agent's own items split by run, oldest first, in the order each run began. */
 function runsOf(items: TranscriptItem[]) {
   const runs = new Map<string, TranscriptItem[]>();
+  let latest = "";
   for (const item of items) {
-    const key = item.turn_id ?? "";
+    // An item with no run (a request asked outside any turn) belongs to the run going on.
+    const key = item.turn_id ?? latest;
+    latest = key;
     const run = runs.get(key);
     if (run) run.push(item);
     else runs.set(key, [item]);
@@ -142,3 +145,28 @@ export function subAgentView(
     limits: !agent.capabilities.text && !agent.capabilities.end,
   };
 }
+
+/** The `data-sub-agent` value of the pill: going back from a view it opened returns focus here. */
+export const STRIP_OPENER = "strip";
+
+/** The sub-agents that run now, each parent before the ones it started (one level in). */
+export function runningTree(agents: readonly SubAgent[]) {
+  const running = agents.filter((agent) => agent.status === "running");
+  const ids = new Set(running.map((agent) => agent.id));
+  const list: { agent: SubAgent; depth: 0 | 1 }[] = [];
+  for (const agent of running) {
+    if (agent.parent && ids.has(agent.parent)) continue;
+    list.push({ agent, depth: 0 });
+    for (const child of running)
+      if (child.parent === agent.id) list.push({ agent: child, depth: 1 });
+  }
+  // A sub-agent whose chain of parents does not reach a running root still shows.
+  for (const agent of running)
+    if (!list.some((one) => one.agent === agent))
+      list.push({ agent, depth: 1 });
+  return list;
+}
+
+/** "N sub-agents running". */
+export const runningWords = (count: number) =>
+  `${count} ${count === 1 ? "sub-agent" : "sub-agents"} running`;
