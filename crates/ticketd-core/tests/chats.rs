@@ -3948,6 +3948,34 @@ fn a_turn_the_harness_started_says_so_and_a_stop_of_sub_agents_with_no_turn_is_c
 }
 
 #[test]
+fn the_chat_list_shows_a_harness_started_active_turn_with_its_origin() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![ChatObservation::TurnStarted {
+                turn_id: "turn-1".into(),
+                native_turn_id: None,
+                origin: Some(ticketd_core::ChatTurnOrigin {
+                    by: ticketd_core::ChatTurnStarter::Harness,
+                    sub_agent: Some("task_a".into()),
+                }),
+            }],
+        )
+        .unwrap();
+    let summaries = workspace.chat_summaries(ChatListFilter::Active).unwrap();
+    let active = summaries
+        .iter()
+        .find(|summary| summary.chat.id == chat.id)
+        .and_then(|summary| summary.chat.active_turn.as_ref())
+        .expect("the active turn is listed");
+    let origin = active.origin.as_ref().expect("labelled");
+    assert_eq!(origin.by, ticketd_core::ChatTurnStarter::Harness);
+    assert_eq!(origin.sub_agent.as_deref(), Some("task_a"));
+}
+
+#[test]
 fn a_sub_agents_message_has_its_owner_and_may_have_no_turn_and_is_exported_and_backed_up() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
