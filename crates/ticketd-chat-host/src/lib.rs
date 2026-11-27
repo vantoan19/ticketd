@@ -38,6 +38,7 @@ mod tool_steps;
 mod turn_ending;
 mod unattended;
 mod wire;
+mod write_credit;
 
 pub use claude::{BRIDGE_SIDECAR_NAME, ClaudeAdapter, read_claude_steps};
 pub use codex::CodexAdapter;

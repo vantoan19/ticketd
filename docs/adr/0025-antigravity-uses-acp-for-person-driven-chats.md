@@ -43,11 +43,22 @@ persistent choice it offers. Each warning Antigravity supplies for an approval
 choice stays with that choice when the person sees it and if they need to
 retry. ticketd returns the exact choice.
 
+Antigravity's sub-agents are shown from what the Prompt already carries
+([ADR 0029](0029-sub-agents-are-a-lane-of-their-own-in-a-chat.md)). A child's
+tool calls arrive with IDs prefixed by its conversation ID, so they are grouped
+into one sub-agent and kept out of the main agent's Steps. Antigravity reports
+neither a child's messages nor its end, and holds the Prompt open until the
+children finish, so a sub-agent ends with the Prompt and has no Stop of its own;
+the sub-agent's view says so. A write a command makes is credited exactly from
+the tool call ID in `ANTIGRAVITY_SOURCE_METADATA`.
+
 ## Rejected approaches
 
 - Impersonating another client's identity to discover models.
 - Driving the interactive terminal or reading private Antigravity files to
-  reconstruct Sessions.
+  reconstruct Sessions, including a sub-agent's messages.
+- Attaching to a child with `session/load`: it is undocumented and repeats its
+  tool updates.
 - Having ticketd approve native requests to emulate Accept edits or Full
   access. Approval policy belongs to Antigravity and the person.
 

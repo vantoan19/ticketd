@@ -168,7 +168,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-fn record_id(chat_id: &str, native_id: &str) -> String {
+pub(super) fn record_id(chat_id: &str, native_id: &str) -> String {
     format!("{chat_id}:sub-agent:{native_id}")
 }
 

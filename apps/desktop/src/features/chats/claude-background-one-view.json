@@ -296,16 +296,7 @@
     },
     {
       "kind": "response",
-      "id": "00000000-0000-4000-8000-000000000004:task_c:text-1",
-      "at": "2026-11-27T10:00:00.000Z",
-      "text": "Two typos fixed in docs/api.md.",
-      "state": "complete",
-      "turn_id": "task_c:run-1",
-      "owner": "task_c"
-    },
-    {
-      "kind": "response",
-      "id": "00000000-0000-4000-8000-000000000004:text-2",
+      "id": "00000000-0000-4000-8000-000000000004:text-1",
       "at": "2026-11-27T10:00:00.000Z",
       "text": "I started three reviewers. They run in the background, and I'll put their findings together when they finish.",
       "state": "complete",
@@ -382,15 +373,6 @@
           "awaiting": false
         }
       ],
-      "turn_id": "task_b:run-1",
-      "owner": "task_b"
-    },
-    {
-      "kind": "response",
-      "id": "00000000-0000-4000-8000-000000000004:task_b:text-3",
-      "at": "2026-11-27T10:00:00.000Z",
-      "text": "The tests cover the limiter; I added a case for a missing key.",
-      "state": "complete",
       "turn_id": "task_b:run-1",
       "owner": "task_b"
     }

@@ -134,6 +134,8 @@ use ticketd_core::{
 };
 
 #[cfg(test)]
+mod antigravity_sub_agents;
+#[cfg(test)]
 mod codex_sub_agents;
 #[cfg(test)]
 mod codex_wake;
@@ -141,6 +143,8 @@ mod codex_wake;
 mod sub_agents;
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod write_credit;
 
 /// A fixture as the macro [`fixture!`] reads it at compile time.
 #[derive(Clone, Copy)]
@@ -517,6 +521,11 @@ impl HostScript {
 
     pub fn chat_id(&self) -> &str {
         &self.chat.id
+    }
+
+    /// The temporary Workspace's file.
+    pub fn workspace_path(&self) -> &std::path::Path {
+        &self.path
     }
 
     /// A second handle on the Workspace, for reads the helpers do not cover.

@@ -294,15 +294,6 @@
       ],
       "turn_id": "task_c:run-1",
       "owner": "task_c"
-    },
-    {
-      "kind": "response",
-      "id": "00000000-0000-4000-8000-000000000002:task_c:text-1",
-      "at": "2026-11-27T10:00:00.000Z",
-      "text": "Two typos fixed in docs/api.md.",
-      "state": "complete",
-      "turn_id": "task_c:run-1",
-      "owner": "task_c"
     }
   ],
   "cursor": 0
