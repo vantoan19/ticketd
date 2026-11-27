@@ -448,6 +448,42 @@ async fn a_sub_agent_launched_by_a_sub_agent_is_nested_under_it() {
     assert_eq!(state_of(&h, SECOND), ChatSubAgentState::Completed);
 }
 
+/// A sub-agent whose first call is the one that launches another is announced before that
+/// launch is noted: the two launches are then each tied to their own sub-agent.
+#[tokio::test(start_paused = true)]
+async fn a_sub_agent_whose_first_call_launches_another_is_still_the_nested_ones_parent() {
+    let mut h = HostScript::antigravity()
+        .process([fixture!("antigravity", "sub_agent_nested_first_call")])
+        .start();
+    h.send("Audit the session routes with a sub-agent").await;
+    h.play_to("the prompt was written").await;
+    h.play_to("the main agent launched a sub-agent").await;
+    h.play_to("the sub-agent launched one of its own").await;
+    h.play_to("the nested sub-agent ran a command").await;
+
+    let records = h.sub_agents();
+    let find = |id: &str| {
+        records
+            .iter()
+            .find(|record| record.native_id == id)
+            .unwrap()
+    };
+    assert_eq!(find(FIRST).parent, None);
+    assert_eq!(
+        find(FIRST).said("description").as_deref(),
+        Some("Lead Auditor")
+    );
+    assert!(find(FIRST).tool_id.is_some());
+    assert_eq!(find(SECOND).parent.as_deref(), Some(FIRST));
+    assert_eq!(
+        find(SECOND).said("description").as_deref(),
+        Some("Sign-in Checker")
+    );
+    assert!(find(SECOND).tool_id.is_some());
+    h.play_all().await;
+    h.finish().await;
+}
+
 // --- The stored history, pinned for the desktop -----------------------------------------
 
 /// The stored history of `sub_agent.jsonl` once the Prompt ended, with ids and times made

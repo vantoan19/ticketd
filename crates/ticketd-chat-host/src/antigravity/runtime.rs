@@ -503,6 +503,11 @@ impl Session {
                     prompt.flush_message(&mut events);
                     prompt.flush_thought(&mut events);
                 }
+                // The caller is a sub-agent from its first call, so it claims its own launch
+                // before the launch it makes is noted.
+                if let Some(caller) = child_of(&tool.tool_call_id) {
+                    prompt.announce(caller, &mut events);
+                }
                 prompt.note_launch(&tool);
                 let id = tool.tool_call_id.clone();
                 prompt

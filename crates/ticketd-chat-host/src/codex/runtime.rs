@@ -708,11 +708,21 @@ impl CodexRuntime {
         let cleaned = self
             .connection
             .rpc
-            .interrupt(generation, "thread/backgroundTerminals/clean", |_| {
+            .interrupt(generation, "thread/backgroundTerminals/clean", |peer| {
+                peer.session.child_cleanup_asked(thread, turn)?;
                 Ok((params, Call::Plain))
             })
             .await;
-        (outcome, cleaned != InterruptOutcome::Acknowledged)
+        // Skipped because the child began another turn: cleaning the thread would end the
+        // new turn's commands, which the person did not stop.
+        let skipped = matches!(
+            cleaned,
+            InterruptOutcome::NotSent(Refusal::TurnMismatch { .. })
+        );
+        (
+            outcome,
+            !skipped && cleaned != InterruptOutcome::Acknowledged,
+        )
     }
 }
 

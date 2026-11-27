@@ -436,6 +436,15 @@ impl Session {
             .collect()
     }
 
+    /// ticketd is about to clean a child's terminals after interrupting `turn`: cleaning
+    /// reaches the whole thread, so it is refused once the child runs another turn.
+    pub(crate) fn child_cleanup_asked(&self, thread: &str, turn: &str) -> Result<(), Refusal> {
+        match self.child(thread).and_then(|child| child.turn.as_deref()) {
+            Some(current) if current != turn => Err(Refusal::TurnMismatch { active: None }),
+            _ => Ok(()),
+        }
+    }
+
     /// ticketd is about to ask Codex to interrupt a child's turn. Refused when that turn
     /// is over.
     pub(crate) fn child_interrupt_asked(
