@@ -3891,63 +3891,6 @@ fn upgrading_from_format_104_gives_a_chat_no_sub_agents_and_the_tables_take_them
 }
 
 #[test]
-fn a_turn_the_harness_started_says_so_and_a_stop_of_sub_agents_with_no_turn_is_counted() {
-    let dir = tempfile::tempdir().unwrap();
-    let (mut workspace, chat) = workspace_with_chat(&dir);
-    workspace
-        .record_chat_observations(
-            &chat.id,
-            vec![
-                ChatObservation::SubAgentStarted {
-                    native_id: "task_a".into(),
-                    parent: None,
-                    tool_id: None,
-                    turn_id: None,
-                    native_run_id: None,
-                    background: true,
-                    payload: "{}".into(),
-                },
-                ChatObservation::TurnStarted {
-                    turn_id: "turn-1".into(),
-                    native_turn_id: Some("local-turn-1".into()),
-                    origin: Some(ticketd_core::ChatTurnOrigin {
-                        by: ticketd_core::ChatTurnStarter::Harness,
-                        sub_agent: Some("task_a".into()),
-                    }),
-                },
-                ChatObservation::SubAgentsStopped {
-                    notice_id: "stopped-1".into(),
-                    count: 2,
-                },
-            ],
-        )
-        .unwrap();
-    let snapshot = workspace.chat_snapshot(&chat.id, 100).unwrap();
-    let turn = snapshot
-        .items
-        .iter()
-        .find_map(|item| match item {
-            ChatItem::Turn(turn) => Some(turn),
-            _ => None,
-        })
-        .expect("the turn");
-    let origin = turn.origin.as_ref().expect("labelled");
-    assert_eq!(origin.by, ticketd_core::ChatTurnStarter::Harness);
-    assert_eq!(origin.sub_agent.as_deref(), Some("task_a"));
-    let notice = snapshot
-        .items
-        .iter()
-        .find_map(|item| match item {
-            ChatItem::Notice(notice) => Some(notice),
-            _ => None,
-        })
-        .expect("the note");
-    assert_eq!(notice.sub_agents_stopped, Some(2));
-    assert_eq!(notice.text, "You stopped 2 sub-agents.");
-    assert!(!notice.from_harness);
-}
-
-#[test]
 fn a_sub_agents_message_has_its_owner_and_may_have_no_turn_and_is_exported_and_backed_up() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("workspace.sqlite3");
@@ -4009,4 +3952,61 @@ fn a_sub_agents_message_has_its_owner_and_may_have_no_turn_and_is_exported_and_b
     Workspace::restore(&restored_path, &backup).unwrap();
     let restored = Workspace::open(&restored_path).unwrap();
     assert_eq!(restored.chat_snapshot(&chat.id, 500).unwrap(), saved);
+}
+
+#[test]
+fn a_turn_the_harness_started_says_so_and_a_stop_of_sub_agents_with_no_turn_is_counted() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                ChatObservation::SubAgentStarted {
+                    native_id: "task_a".into(),
+                    parent: None,
+                    tool_id: None,
+                    turn_id: None,
+                    native_run_id: None,
+                    background: true,
+                    payload: "{}".into(),
+                },
+                ChatObservation::TurnStarted {
+                    turn_id: "turn-1".into(),
+                    native_turn_id: Some("local-turn-1".into()),
+                    origin: Some(ticketd_core::ChatTurnOrigin {
+                        by: ticketd_core::ChatTurnStarter::Harness,
+                        sub_agent: Some("task_a".into()),
+                    }),
+                },
+                ChatObservation::SubAgentsStopped {
+                    notice_id: "stopped-1".into(),
+                    count: 2,
+                },
+            ],
+        )
+        .unwrap();
+    let snapshot = workspace.chat_snapshot(&chat.id, 100).unwrap();
+    let turn = snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            ChatItem::Turn(turn) => Some(turn),
+            _ => None,
+        })
+        .expect("the turn");
+    let origin = turn.origin.as_ref().expect("labelled");
+    assert_eq!(origin.by, ticketd_core::ChatTurnStarter::Harness);
+    assert_eq!(origin.sub_agent.as_deref(), Some("task_a"));
+    let notice = snapshot
+        .items
+        .iter()
+        .find_map(|item| match item {
+            ChatItem::Notice(notice) => Some(notice),
+            _ => None,
+        })
+        .expect("the note");
+    assert_eq!(notice.sub_agents_stopped, Some(2));
+    assert_eq!(notice.text, "You stopped 2 sub-agents.");
+    assert!(!notice.from_harness);
 }

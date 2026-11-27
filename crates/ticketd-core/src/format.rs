@@ -184,7 +184,8 @@ const LADDER: [(i64, Step); FORMAT_VERSION as usize] = [
     // Native sub-agents (#609): Steps and approvals have an owner and an optional turn.
     (105, |tx, _| {
         chats::migrate_owner_and_optional_turn(tx)?;
-        chats::sub_agents::migrate(tx)
+        chats::sub_agents::migrate(tx)?;
+        chats::migrate_credit(tx)
     }),
 ];
 

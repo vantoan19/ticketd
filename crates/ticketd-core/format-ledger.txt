@@ -1181,12 +1181,21 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column chat_messages.requires_link_context
 
 ## 105
++ table chat_step_windows
 + table chat_sub_agent_runs
 + table chat_sub_agents
 + column chat_interactions.sub_agent_id
 + column chat_messages.note
 + column chat_messages.sub_agent_id
 + column chat_notices.sub_agents_stopped
++ column chat_record_writes.call_id
++ column chat_step_windows.activities_end
++ column chat_step_windows.activities_start
++ column chat_step_windows.chat_id
++ column chat_step_windows.history_end
++ column chat_step_windows.history_start
++ column chat_step_windows.tool_id
++ column chat_step_windows.writes
 + column chat_sub_agent_runs.chat_id
 + column chat_sub_agent_runs.detail
 + column chat_sub_agent_runs.ended_at
