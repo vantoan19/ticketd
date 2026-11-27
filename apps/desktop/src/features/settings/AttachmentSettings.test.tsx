@@ -276,8 +276,14 @@ test("a failed change keeps the choice and says what failed", async () => {
     syncStatus({ connection: "not_connected", account: null, folder: null }),
   );
   await screen.findByText("“Team files”");
+  // The picker answers with another folder, which the host then refuses.
   answer({
     attachment_upload_destination: drive,
+    select_drive_upload_folder: {
+      destination: { ...destination, folder_id: "read-only" },
+      folder: { id: "read-only", name: "Archive", can_add_children: false },
+      account: "sam.lee@gmail.com",
+    },
     set_attachment_upload_destination: new Error(
       "Folder is read-only. Choose a writable folder.",
     ),
@@ -288,6 +294,7 @@ test("a failed change keeps the choice and says what failed", async () => {
   );
   await revealFailureDetails();
   expect(screen.getByText("“Team files”")).toBeTruthy();
+  expect(screen.queryByText(/Archive/)).toBeNull();
   expect((await googleDrive()).getAttribute("data-state")).toBe("checked");
 });
 
@@ -302,4 +309,47 @@ test("an unreadable destination offers Retry", async () => {
   const local = await thisComputer();
   await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
   expect(screen.queryByRole("alert")).toBeNull();
+});
+
+test("with sync on Drive and the destination still elsewhere, the action says it moves new files to the sync Uploads folder", async () => {
+  answer({ attachment_upload_destination: drive });
+  page(syncing());
+  expect(await screen.findByText("“Team files”")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Change folder…" })).toBeNull();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Use sync Uploads folder" }),
+  );
+  expect(
+    await screen.findByText("Uploads, inside your “ticketd” sync folder"),
+  ).toBeTruthy();
+  expect(calls("use_sync_uploads_folder")).toHaveLength(1);
+  expect(calls("select_drive_upload_folder")).toHaveLength(0);
+});
+
+test("a switch that worked but whose destination cannot be read again offers only to read it", async () => {
+  answer({ attachment_upload_destination: uploads });
+  page(syncing());
+  expect(
+    await screen.findByText("Uploads, inside your “ticketd” sync folder"),
+  ).toBeTruthy();
+  answer({ attachment_upload_destination: new Error("offline") });
+  fireEvent.click(screen.getByRole("button", { name: "Use another account…" }));
+  fireEvent.click(
+    within(await screen.findByRole("dialog")).getByRole("button", {
+      name: "Use another account",
+    }),
+  );
+  const alert = await screen.findByRole("alert");
+  expect(alert.textContent).toContain("Couldn't read the upload destination");
+  expect(alert.textContent).not.toContain("use another account");
+  // The old account's folder is not shown as if it were still the destination.
+  expect(screen.queryByText(/sync folder/)).toBeNull();
+  expect(calls("use_another_google_account")).toHaveLength(1);
+
+  answer();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  const local = await thisComputer();
+  await waitFor(() => expect(local.getAttribute("data-state")).toBe("checked"));
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(calls("use_another_google_account")).toHaveLength(1);
 });

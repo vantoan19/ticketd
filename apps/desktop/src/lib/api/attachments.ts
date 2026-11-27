@@ -454,7 +454,7 @@ export const attachments = {
       const limit = await attachments.uploadLimit();
       if (source.size > limit)
         throw new Error(
-          `File exceeds the workspace upload limit of ${formatUploadLimit(limit)}. Change it in Settings › Files.`,
+          `File exceeds the workspace upload limit of ${formatUploadLimit(limit)}. Choose a smaller file.`,
         );
       const bytes = new Uint8Array(await source.arrayBuffer());
       if (bytes.byteLength > limit)

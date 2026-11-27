@@ -149,11 +149,23 @@ export function AttachmentSettings() {
     setBusy(true);
     try {
       apply(await syncApi.switchAccount());
-      // A Drive folder belongs to the account it was chosen with.
-      if (active.current) setDestination(await attachments.uploadDestination());
     } catch (reason) {
-      if (active.current)
+      if (active.current) {
         setFailure(describeFailure(reason, "use another account"));
+        setBusy(false);
+      }
+      return;
+    }
+    // The switch worked. A Drive folder belongs to the account it was chosen with, so the
+    // old one is dropped, and a read that fails offers only to read again.
+    try {
+      const saved = await attachments.uploadDestination();
+      if (active.current) setDestination(saved);
+    } catch (reason) {
+      if (active.current) {
+        setDestination(null);
+        setFailure(describeFailure(reason, "read the upload destination"));
+      }
     } finally {
       if (active.current) setBusy(false);
     }
@@ -261,7 +273,7 @@ export function AttachmentSettings() {
                     disabled={busy}
                     onClick={() => void choose("google_drive")}
                   >
-                    Change folder…
+                    {syncFolder ? "Use sync Uploads folder" : "Change folder…"}
                   </Button>
                 )
               }
