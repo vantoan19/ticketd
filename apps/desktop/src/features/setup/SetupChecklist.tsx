@@ -14,6 +14,7 @@ import {
   useNotificationPermission,
 } from "@/lib/notification-permission";
 import { homeRelative } from "@/lib/paths";
+import { useWorkspaceChange } from "@/lib/workspace-change";
 import { useSettingsState } from "@/features/settings/use-settings-state";
 import { installForAgents } from "@/features/setup/install-agents";
 import { SetupActionsContext } from "@/features/setup/setup-actions";
@@ -65,8 +66,12 @@ function Actions({ children }: { children: ReactNode }) {
   return <span data-slot="step-actions">{children}</span>;
 }
 
-/** The newest Ready ticket, read once, while the step still needs to name one. */
+/**
+ * The newest Ready ticket, while the step still needs to name one. Read again
+ * whenever the Workspace changes, so a ticket made meanwhile is found.
+ */
 function useNewestReadyTicket(needed: boolean) {
+  const version = useWorkspaceChange();
   const [reference, setReference] = useState<string | null | undefined>(
     undefined,
   );
@@ -84,7 +89,7 @@ function useNewestReadyTicket(needed: boolean) {
     return () => {
       live = false;
     };
-  }, [needed]);
+  }, [needed, version]);
   return reference;
 }
 
