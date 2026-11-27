@@ -603,6 +603,9 @@ export function createMockChatClient(
   };
   const live = (chat: ChatState) =>
     chat.activity === "working" || chat.activity === "waiting";
+  /** A main turn is in progress: not when only sub-agents run (`turn_running` false). */
+  const turnRuns = (chat: ChatState) =>
+    live(chat) && chat.turn_running !== false;
   const overview = (): ChatOverview => {
     const all = [...chats.values()].filter(
       (entry) => entry.chat.retention !== "trashed",
@@ -960,7 +963,7 @@ export function createMockChatClient(
     const { chat } = get(id);
     if (chat.retention === "trashed")
       throw new ChatError("failed", "This Chat is in Trash.");
-    if (!live(chat)) startTurn(id, text, files);
+    if (!turnRuns(chat)) startTurn(id, text, files);
     else if (
       canSteer(
         chat,
@@ -1355,7 +1358,7 @@ export function createMockChatClient(
       const { chat } = entry;
       if (chat.retention === "trashed")
         throw new ChatError("failed", "This Chat is in Trash.");
-      const next = live(chat)
+      const next = turnRuns(chat)
         ? undefined
         : chat.queue.find((item) => !item.editing);
       const files = next && filesForQueued(entry, next);
@@ -1376,7 +1379,7 @@ export function createMockChatClient(
       if (!queued)
         throw new ChatError("stale", "This message is no longer queued.");
       if (
-        live(chat) &&
+        turnRuns(chat) &&
         !canSteer(
           chat,
           queued.attachments?.some((file) =>
