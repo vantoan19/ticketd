@@ -92,9 +92,11 @@ export function SyncSettings({
   // Setup is over once this Workspace is connected: a later setup (after Disconnect) asks
   // again. Back from step 3 never reaches here, so it keeps the choice.
   const connected = status?.connection === "connected";
-  useEffect(() => {
+  const [wasConnected, setWasConnected] = useState(false);
+  if (connected !== wasConnected) {
+    setWasConnected(connected);
     if (connected) setIntent(null);
-  }, [connected]);
+  }
   return (
     <div className="settings-sync">
       <Track status={status} />
