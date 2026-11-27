@@ -29,6 +29,7 @@ import {
   LoaderCircle,
   MessageSquareText,
   Pencil,
+  CornerDownRight,
   RotateCcw,
   Search,
   Square,
@@ -56,6 +57,7 @@ import {
   type TranscriptItem,
   type ItemOf,
   type LinkedRecord,
+  type SubAgent,
 } from "@/features/chats/client";
 import {
   FilesSummary,
@@ -1478,6 +1480,46 @@ const Item = memo(function Item({
 });
 
 /**
+ * Where a message would be, when the person did not start the turn: "Started by
+ * Claude Code: sub-agent finished · Title". The title opens that sub-agent.
+ */
+function StartedLine({
+  by,
+  agent,
+  opener,
+  onOpen,
+}: {
+  by: string;
+  agent: SubAgent | undefined;
+  opener: string;
+  onOpen: ShowSubAgent | undefined;
+}) {
+  return (
+    <div className="chat-part" data-kind="started" data-anchor="">
+      <p className="chat-started">
+        <span className="chat-row-icon" aria-hidden="true">
+          <CornerDownRight size={16} />
+        </span>
+        <span>{`Started by ${by}: sub-agent finished`}</span>
+        {agent && (
+          <>
+            <span aria-hidden="true">·</span>
+            <button
+              type="button"
+              className="chat-started-link"
+              data-sub-agent={opener}
+              onClick={() => onOpen?.(agent.id, opener)}
+            >
+              {agent.title}
+            </button>
+          </>
+        )}
+      </p>
+    </div>
+  );
+}
+
+/**
  * The live line: the spinner and what the turn is doing, shown only while no step
  * or reasoning row runs, so a turn has one spinner. `since` counts "Working for 1m 32s" from the turn's start, less the time it waited on the person; `fromShown`
  * counts from when the line appeared, for a phase the host gives no start time for.
@@ -1799,6 +1841,18 @@ export function Transcript({
                         <RotateCcw size={16} aria-hidden />
                         <span>{part.label}</span>
                       </div>
+                    );
+                  if (part.kind === "started")
+                    return (
+                      <StartedLine
+                        key={part.key}
+                        by={part.by === "ticketd" ? "ticketd" : harness}
+                        agent={chat.sub_agents.find(
+                          (one) => one.id === part.subAgent,
+                        )}
+                        opener={part.key}
+                        onOpen={actions.showSubAgent}
+                      />
                     );
                   const marker = newFrom !== undefined &&
                     (part.kind === "turn"

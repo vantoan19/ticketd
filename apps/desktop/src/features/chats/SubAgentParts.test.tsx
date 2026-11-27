@@ -269,3 +269,34 @@ test("Stop in a sub-agent's own view stops it alone and leaves how it ended", as
   // It ended, so the view has no tray; the other sub-agent still runs in the Chat.
   expect(document.querySelector(".chat-tray")).toBeNull();
 });
+
+test("a turn the harness started says so in place of a message, and the title opens the sub-agent", async () => {
+  await open(fixtures().done);
+  const line = screen
+    .getByText("Started by Claude Code: sub-agent finished")
+    .closest("p") as HTMLElement;
+  expect(line.textContent).toMatch(
+    /Started by Claude Code: sub-agent finished\s*·\s*Check limiter test coverage$/,
+  );
+  // It stands where the person's message would: before the turn it started.
+  expect(screen.queryByText(/^You:/)).toBeTruthy(); // the first turn's own message
+  fireEvent.click(
+    within(line).getByRole("button", { name: "Check limiter test coverage" }),
+  );
+  expect(
+    await screen.findByRole("heading", { name: "Check limiter test coverage" }),
+  ).toBeTruthy();
+});
+
+test("a turn ticketd started names ticketd, not the harness", async () => {
+  await open(fixtures().wake);
+  expect(
+    screen.getByText("Started by ticketd: sub-agent finished"),
+  ).toBeTruthy();
+  expect(screen.queryByText(/Started by Codex/)).toBeNull();
+});
+
+test("a turn the person started has no such line", async () => {
+  await open(subAgentPartFixtures().reply);
+  expect(screen.queryByText(/^Started by/)).toBeNull();
+});

@@ -1950,3 +1950,31 @@
     visibility: visible;
   }
 }
+
+/* "Started by ticketd: sub-agent finished · Title": where the person's message would be,
+   16px above the work line it starts, as a message is. */
+.chat-part[data-kind="started"] + * {
+  margin-top: -24px;
+}
+.chat-started {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: var(--text-ui);
+  line-height: 20px;
+}
+.chat-started .chat-row-icon {
+  color: var(--muted-foreground);
+}
+.chat-started-link {
+  color: var(--muted-foreground);
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+}
+.chat-started-link:hover {
+  color: var(--foreground);
+}

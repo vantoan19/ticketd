@@ -613,7 +613,14 @@ export type TranscriptPart =
   | { kind: "item"; item: TranscriptItem }
   | { kind: "turn"; turn: Turn }
   /** A quiet line between a sub-agent's runs ("Resumed by the main agent"). */
-  | { kind: "divider"; key: string; label: string };
+  | { kind: "divider"; key: string; label: string }
+  /** Where the person's message would be: the turn after it was not started by the person. */
+  | {
+      kind: "started";
+      key: string;
+      by: "harness" | "ticketd";
+      subAgent: string | undefined;
+    };
 
 // Fresh history skips attachment-only messages in the desktop command.
 export function canPickHistoryMessage(item: TranscriptItem): boolean {
@@ -866,7 +873,14 @@ export function turns(
   const parts: (TranscriptPart | Segment)[] = [];
   let open: Segment | undefined;
   for (const item of items) {
-    if (item.kind === "turn") continue;
+    if (item.kind === "turn") {
+      // A turn the person did not start has no message to open it: it opens its own segment, even before its first row.
+      if (item.origin && open?.turnId !== item.turn_id) {
+        open = { steer: false, members: [], turnId: item.turn_id };
+        parts.push(open);
+      }
+      continue;
+    }
     if (item.kind === "request" && item.state === "pending") continue;
     if (item.kind === "user" || item.kind === "session") {
       // A steer ends the segment it joined; the turn goes on in a new one.
@@ -905,8 +919,21 @@ export function turns(
   return parts.flatMap((part): TranscriptPart[] => {
     if ("kind" in part) return [part];
     const first = part.members[0];
-    if (first === undefined) return [];
     const timing = part.turnId ? timings.get(part.turnId) : undefined;
+    if (first === undefined) {
+      // Started, and nothing of its work has come yet: only the line that says why.
+      const origin = timing?.origin;
+      return origin
+        ? [
+            {
+              kind: "started",
+              key: `started:${timing.id}`,
+              by: origin.by,
+              subAgent: origin.sub_agent ?? undefined,
+            },
+          ]
+        : [];
+    }
     const active = timing ? timing.outcome === "active" : part === last && live;
     // A segment a steer ended folds while its turn goes on.
     const ongoing = active && !part.until;
@@ -924,9 +951,21 @@ export function turns(
       now: unconfirmed ? now : undefined,
       agent,
     };
+    // A turn the person did not start has a line where the message would be.
+    const origin = !part.steer ? timing?.origin : undefined;
+    const startedBy: TranscriptPart[] = origin
+      ? [
+          {
+            kind: "started",
+            key: `started:${timing?.id ?? first.id}`,
+            by: origin.by,
+            subAgent: origin.sub_agent ?? undefined,
+          },
+        ]
+      : [];
     const cached = builtTurns.get(first);
     if (cached && sameInputs(cached.inputs, inputs))
-      return [{ kind: "turn", turn: cached.turn }];
+      return [...startedBy, { kind: "turn", turn: cached.turn }];
     const { rows, steps, net } = rowsOf(
       part.members,
       !active ? "not_finished" : unconfirmedStop ? "unknown" : "running",
@@ -1026,7 +1065,7 @@ export function turns(
       ids: part.members.map((item) => item.id),
     };
     builtTurns.set(first, { inputs, turn });
-    return [{ kind: "turn", turn }];
+    return [...startedBy, { kind: "turn", turn }];
   });
 }
 
