@@ -164,6 +164,25 @@ Prompt at a time and ends its Turn on the Prompt reply. It applies partial
 tool updates by native tool ID and preserves native approval choice IDs until
 a person responds.
 
+Antigravity's sub-agents are child conversations that make tool calls on the
+main agent's session, with IDs of the form `<childId>:call_...` ([ADR
+0029](adr/0029-sub-agents-are-a-lane-of-their-own-in-a-chat.md)). The adapter
+groups those calls by the prefix: a child becomes a sub-agent at its first
+call, its Steps and approvals belong to it, and it never joins the main agent's
+Steps, text or reasoning. `invoke_subagent`, the main agent's own launch call,
+completes at launch and names no child, so the child's title and brief come from
+it only when exactly one launch call is open when the child appears (several
+parallel launches cannot be told apart, and a wrong brief is worse than none).
+The Chat's model is the sub-agent's. Antigravity holds the Prompt open until the
+children finish and reports neither their messages nor their end, so a
+sub-agent ends with the Prompt (Stopped by the person when the Prompt was
+cancelled) and the descriptor declares no sub-agent text, end or Stop for one.
+Updates that arrive with no Prompt in flight open nothing. The CLI credits a
+write exactly from `ANTIGRAVITY_SOURCE_METADATA`: the descriptor names the
+variable and where the tool call ID is in its JSON, and the Step whose ID ends
+with it is the writer's. Nothing reads Antigravity's files and no child is
+attached with `session/load`.
+
 During ordinary Chat resume, if Antigravity reports missing history for the
 requested Session or an unsupported resume method, the supervisor posts a
 notice and opens an empty Session without replaying the transcript. Other

@@ -5018,6 +5018,14 @@ mod tests {
         env!("CARGO_MANIFEST_DIR"),
         "/../src/features/chats/codex-sub-agent-view.json"
     );
+    const AGY_STORED: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../crates/ticketd-chat-host/tests/fixtures/antigravity/sub_agent.stored.json"
+    );
+    const AGY_VIEW: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../src/features/chats/antigravity-sub-agent-view.json"
+    );
     const VIEW: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../src/features/chats/claude-sub-agent-view.json"
@@ -5195,6 +5203,65 @@ mod tests {
                 .sub_agents
                 .iter()
                 .all(|agent| !agent.capabilities.brief)
+        );
+    }
+
+    #[test]
+    fn the_view_of_an_ended_antigravity_sub_agent_is_the_contract_the_interface_parses() {
+        let stored: ticketd_core::ChatSnapshot = serde_json::from_str(
+            &std::fs::read_to_string(AGY_STORED).expect("the stored history"),
+        )
+        .expect("the stored history reads");
+        let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
+        let live = ChatLive::idle();
+        let state = super::chat_state(&stored.chat, &live, &tracker, &Surroundings::default());
+        let rows: Vec<Item> = stored
+            .items
+            .iter()
+            .flat_map(|record| items(record, &stored.chat, &live, None, &tracker))
+            .collect();
+        let view = serde_json::to_string_pretty(&json!({
+            "chat": state,
+            "items": rows,
+            "cursor": 0,
+        }))
+        .unwrap();
+        if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+            std::fs::write(AGY_VIEW, format!("{view}\n")).expect("the view is written");
+        }
+        let kept = std::fs::read_to_string(AGY_VIEW).expect(
+            "the view; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-desktop --lib chat_view",
+        );
+        assert!(
+            kept.trim_end() == view,
+            "the view changed; if that is intended, regenerate {AGY_VIEW} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+        );
+
+        // Antigravity reports a sub-agent's brief but neither its words nor its end, and
+        // cannot stop it alone: the record says so, and a finished run is "completed".
+        let [agent] = state.sub_agents.as_slice() else {
+            panic!("one sub-agent: {:?}", state.sub_agents);
+        };
+        assert_eq!(agent.title, "Session Auditor");
+        assert_eq!(agent.status, "completed");
+        assert_eq!(agent.model, "gemini-3.1-pro");
+        let capabilities = &agent.capabilities;
+        assert_eq!(
+            (
+                capabilities.brief,
+                capabilities.text,
+                capabilities.end,
+                capabilities.stop,
+                capabilities.resume
+            ),
+            (true, false, false, false, false)
+        );
+        assert!(
+            agent
+                .brief
+                .as_ref()
+                .and_then(|brief| brief.text.as_deref())
+                .is_some_and(|text| text.starts_with("Scan the session routes"))
         );
     }
 }

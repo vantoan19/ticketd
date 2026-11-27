@@ -380,3 +380,48 @@ async fn a_sub_agent_launched_by_a_sub_agent_is_nested_under_it() {
     h.finish().await;
     assert_eq!(state_of(&h, SECOND), ChatSubAgentState::Completed);
 }
+
+// --- The stored history, pinned for the desktop -----------------------------------------
+
+/// The stored history of `sub_agent.jsonl` once the Prompt ended, with ids and times made
+/// stable: the file the desktop's view of it is built from (`apps/desktop/src-tauri/src/
+/// chat_view.rs` reads it and writes the view the interface's tests parse). Regenerated
+/// only with `TICKETD_UPDATE_VIEW_FIXTURES=1`.
+const STORED: &str = concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/tests/fixtures/antigravity/sub_agent.stored.json"
+);
+
+#[tokio::test(start_paused = true)]
+async fn the_stored_history_of_an_ended_antigravity_sub_agent_is_the_file_the_desktop_builds_its_view_from()
+ {
+    let mut h = HostScript::antigravity()
+        .process([fixture!("antigravity", "sub_agent")])
+        .start();
+    h.send("Audit the session routes with a sub-agent").await;
+    h.play_to("the prompt was written").await;
+    h.play_to("the main agent launched a sub-agent that has not shown a step yet")
+        .await;
+    h.play_to("the sub-agent's command asks to run").await;
+    allow(&mut h).await;
+    h.play_all().await;
+    h.finish().await;
+
+    let snapshot = h
+        .core()
+        .chat_snapshot(h.chat_id(), 5_000)
+        .expect("the Chat's history");
+    let stored = super::sub_agents::made_stable(
+        &serde_json::to_string_pretty(&snapshot).expect("it serializes"),
+    );
+    if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+        std::fs::write(STORED, format!("{stored}\n")).expect("the file is written");
+    }
+    let kept = std::fs::read_to_string(STORED).expect(
+        "the stored history; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-chat-host --lib host_script::antigravity_sub_agents",
+    );
+    assert!(
+        kept.trim_end() == stored,
+        "the stored history changed; if that is intended, regenerate {STORED} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+    );
+}
