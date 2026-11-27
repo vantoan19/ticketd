@@ -900,7 +900,10 @@ impl HarnessRuntime for CodexRuntime {
             let (asked, uncleaned) = self
                 .interrupt_child(request.generation, &member, &turn)
                 .await;
-            left_running |= uncleaned;
+            // A sub-agent it started that did not confirm its interrupt may go on, as may
+            // any command left uncleaned.
+            left_running |=
+                uncleaned || (member != thread && matches!(asked, InterruptOutcome::Unconfirmed));
             if member == thread {
                 outcome = match asked {
                     InterruptOutcome::Acknowledged => StopSubAgentOutcome::Asked,
@@ -909,11 +912,11 @@ impl HarnessRuntime for CodexRuntime {
                 };
             }
         }
-        // The turn was asked to stop, but Codex did not end the commands it left running.
-        // Stop again to retry while the sub-agent still shows as running.
+        // The turn was asked to stop, but something it started may still run. Nothing here
+        // can be retried once its turn is over, so the person is told, not asked to retry.
         if left_running && outcome == StopSubAgentOutcome::Asked {
             return StopSubAgentOutcome::Refused {
-                reason: "Codex stopped it but could not end its commands, which may still be running. Stop it again to retry".to_owned(),
+                reason: "Codex stopped it, but could not confirm that the sub-agents it started stopped or that its commands ended. They may still be running".to_owned(),
             };
         }
         outcome
