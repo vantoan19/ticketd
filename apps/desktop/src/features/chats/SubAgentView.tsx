@@ -3,7 +3,12 @@ import { Info, Square, Unplug } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { OverlayBoundary } from "@/components/ui/overlay-boundary";
 import type { TranscriptItem } from "@/features/chats/client";
-import { duration, turnStatus } from "@/features/chats/model";
+import {
+  duration,
+  requestLabel,
+  turnStatus,
+  type PendingRequest,
+} from "@/features/chats/model";
 import { useNow } from "@/features/chats/use-now";
 import { InSubAgent } from "@/features/chats/sub-agent-context";
 import { endingWords } from "@/features/chats/sub-agent-words";
@@ -56,11 +61,6 @@ function Brief({ view }: { view: SubAgentViewData }) {
       </figure>
     </div>
   );
-}
-
-/** The view's tray: only what there is to act on; with nothing, no tray. */
-function Tray({ children }: { children: ReactNode }) {
-  return children ? <div className="chat-tray">{children}</div> : null;
 }
 
 /** "Working · 2m 10s" with Stop, for a sub-agent the harness can stop alone. */
@@ -119,6 +119,12 @@ export function SubAgentView({
   const [body, setBody] = useState<HTMLDivElement | null>(null);
   const { root, content, marker, following, reading, follow, onScroll } =
     useTranscriptScroll(`${chat.id}/${agent.id}`);
+  const ownRequest = items.find(
+    (item): item is PendingRequest =>
+      item.kind === "request" &&
+      item.state === "pending" &&
+      item.owner === agent.id,
+  );
   const ending = view.ending && endingWords(view.ending, chat.harness.name);
   return (
     <OverlayBoundary element={body}>
@@ -184,12 +190,14 @@ export function SubAgentView({
         </div>
         <div className="chat-dock">
           <div className="sr-only" aria-live="polite">
-            {turnStatus(
-              chat,
-              items.filter((item) => item.owner === agent.id),
-            )}
+            {ownRequest
+              ? requestLabel(ownRequest, undefined, agent.title)
+              : turnStatus(
+                  chat,
+                  items.filter((item) => item.owner === agent.id),
+                )}
           </div>
-          <Tray>{tray}</Tray>
+          {tray}
         </div>
       </div>
     </OverlayBoundary>

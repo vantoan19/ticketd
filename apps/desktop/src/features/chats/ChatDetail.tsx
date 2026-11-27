@@ -138,6 +138,7 @@ import {
 } from "@/features/chats/use-transcript-scroll";
 import { useChat } from "@/features/chats/use-chats";
 import { SubAgentView } from "@/features/chats/SubAgentView";
+import { SubAgentTray } from "@/features/chats/SubAgentTray";
 import { STRIP_OPENER, SubAgentStrip } from "@/features/chats/SubAgentStrip";
 import { backKey } from "@/features/chats/sub-agent-words";
 import {
@@ -1397,7 +1398,7 @@ export function ChatDetail({
       if (opener) opener.focus({ preventScroll: true });
       else document.getElementById("chat-heading")?.focus();
     } else if (depth > 0) document.getElementById("chat-heading")?.focus();
-  }, [depth]);
+  }, [depth, open?.agent]);
   const actionsOf = useMemo<TranscriptActions>(
     () => ({
       saveAsDocument: () => {},
@@ -1558,6 +1559,21 @@ export function ChatDetail({
           view={view}
           items={snapshot.items}
           actions={actionsOf}
+          tray={
+            <SubAgentTray
+              view={view}
+              items={snapshot.items}
+              onStop={() =>
+                retain(`stop ${view.agent.title}`, () =>
+                  client.stopSubAgent(id, view.agent.id),
+                )
+              }
+              onReview={(agent) =>
+                setSteps(agent ? [{ agent, row: "needs-you" }] : [])
+              }
+              onLeave={() => document.getElementById("chat-heading")?.focus()}
+            />
+          }
         />
       )}
       {snapshot && !view && (

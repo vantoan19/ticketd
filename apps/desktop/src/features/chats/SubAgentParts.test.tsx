@@ -15,6 +15,7 @@ import {
   createMockChatClient,
   type MockChat,
 } from "@/features/chats/mock-client";
+import { cutTitle } from "@/features/chats/model";
 import { subAgentPartFixtures } from "@/features/chats/sub-agent-part-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
@@ -189,4 +190,82 @@ test("Stop all with no turn stops every sub-agent and leaves a row below the rep
   // Nothing runs: no strip, no Stop, and the box offers a plain message.
   expect(screen.queryByText(/sub-agents? running/)).toBeNull();
   expect(screen.queryByRole("button", { name: /^Stop/ })).toBeNull();
+});
+
+test("an approval from a sub-agent names it, and the name opens its view", async () => {
+  await open(fixtures().approval);
+  const card = await screen.findByRole("group", {
+    name: /^Check limiter test coverage wants to run npm test -- rate-limit/,
+  });
+  const name = within(card).getByRole("button", {
+    name: "Check limiter test coverage",
+  });
+  expect(card.textContent).toContain("wants to run");
+  // The sub-agent asks, so the harness is not named in its place.
+  expect(card.textContent).not.toContain("Claude Code wants");
+  fireEvent.click(name);
+  expect(
+    await screen.findByRole("heading", { name: "Check limiter test coverage" }),
+  ).toBeTruthy();
+});
+
+test("in its own view the request sits in the tray with the name as plain text", async () => {
+  const client = await open(fixtures().approval);
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Sub-agent Check limiter test/ }),
+  );
+  const card = await screen.findByRole("group", {
+    name: /^Check limiter test coverage wants to run/,
+  });
+  expect(within(card).queryByRole("button", { name: /^Check limiter/ })).toBeNull();
+  const answer = vi.spyOn(client, "answer");
+  fireEvent.click(within(card).getByRole("button", { name: /Allow once/ }));
+  await waitFor(() =>
+    expect(answer).toHaveBeenCalledWith("c-limiter", "req-tests", {
+      option_id: "allow",
+    }),
+  );
+});
+
+test("in another sub-agent's view a line says who needs you, and Review goes there", async () => {
+  await open(fixtures().approval);
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Sub-agent Find limiter bypasses/ }),
+  );
+  await screen.findByRole("heading", { name: "Find limiter bypasses" });
+  const line = screen
+    .getByRole("button", { name: "Review" })
+    .closest("section") as HTMLElement;
+  expect(line.textContent).toContain("Check limiter test coverage needs you");
+  expect(screen.queryByRole("group", { name: /wants to run/ })).toBeNull();
+  fireEvent.click(within(line).getByRole("button", { name: "Review" }));
+  expect(
+    await screen.findByRole("heading", { name: "Check limiter test coverage" }),
+  ).toBeTruthy();
+  expect(
+    await screen.findByRole("group", { name: /wants to run/ }),
+  ).toBeTruthy();
+});
+
+test("a long sub-agent title is cut at about 40 characters in a request", () => {
+  expect(cutTitle("Review the retry backoff in the webhook sender and queue")).toBe(
+    "Review the retry backoff in the webhook…",
+  );
+  expect(cutTitle("Find limiter bypasses")).toBe("Find limiter bypasses");
+});
+
+test("Stop in a sub-agent's own view stops it alone and leaves how it ended", async () => {
+  const client = await open(fixtures().reply);
+  const stop = vi.spyOn(client, "stopSubAgent");
+  fireEvent.click(
+    screen.getByRole("button", { name: /^Sub-agent Find limiter bypasses/ }),
+  );
+  await screen.findByRole("heading", { name: "Find limiter bypasses" });
+  const status = screen.getByText(/^Working · 2m/).closest("[role=status]");
+  expect(status?.getAttribute("aria-live")).toBe("polite");
+  fireEvent.click(screen.getByRole("button", { name: "Stop Find limiter bypasses" }));
+  expect(stop).toHaveBeenCalledWith("c-limiter", "sa-bypass");
+  expect(await screen.findByText("You stopped it.")).toBeTruthy();
+  // It ended, so the view has no tray; the other sub-agent still runs in the Chat.
+  expect(document.querySelector(".chat-tray")).toBeNull();
 });
