@@ -472,3 +472,30 @@ test("the working line still shows while the main agent writes, sub-agents or no
     (await screen.findByText("Writing")).closest(".chat-working"),
   ).not.toBeNull();
 });
+
+test("Esc stops a running turn, but with only sub-agents running it does nothing", async () => {
+  // Stopping minutes of background work takes the Stop button, never a stray key.
+  const client = await open(fixtures().reply);
+  const stop = vi.spyOn(client, "stop");
+  const stopButton = screen.getByRole("button", { name: "Stop 2 sub-agents" });
+  expect(stopButton.getAttribute("aria-keyshortcuts")).toBeNull();
+  fireEvent.keyDown(document.querySelector(".chat-scroll") as Element, {
+    key: "Escape",
+  });
+  fireEvent.keyDown(document.querySelector(".chat-scroll") as Element, {
+    key: "Escape",
+  });
+  expect(stop).not.toHaveBeenCalled();
+  cleanup();
+  const turnClient = await open(fixtures().inTurn);
+  const stopTurn = vi.spyOn(turnClient, "stop");
+  expect(
+    screen
+      .getByRole("button", { name: "Stop the turn and 2 sub-agents" })
+      .getAttribute("aria-keyshortcuts"),
+  ).toBe("Escape");
+  fireEvent.keyDown(document.querySelector(".chat-scroll") as Element, {
+    key: "Escape",
+  });
+  expect(stopTurn).toHaveBeenCalledTimes(1);
+});

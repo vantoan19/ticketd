@@ -118,6 +118,7 @@ import {
   isLive,
   runningAgents,
   stopWords,
+  turnRuns,
   problemNotice,
   requestLabel,
   turns,
@@ -675,7 +676,9 @@ function Conversation({
    */
   const onPaneKey = (event: KeyboardEvent<HTMLDivElement>) => {
     if (event.key !== "Escape" || event.nativeEvent.isComposing) return;
-    if (event.defaultPrevented || !stoppable || picked) return;
+    // With only sub-agents running Esc does nothing: stopping them takes Stop.
+    if (event.defaultPrevented || !stoppable || !turnRuns(chat) || picked)
+      return;
     const target = event.target as Element;
     if (target.closest(LAYER) || document.querySelector(LAYER)) return;
     if (performance.now() - layerClosedAt.current < ESC_AFTER_LAYER_MS) return;
@@ -1260,6 +1263,7 @@ function Conversation({
                   })}
                 {...(isLive(chat) && { onStop: stop })}
                 stopLabel={stopWords(chat)}
+                stopKey={turnRuns(chat)}
                 stopping={chat.stopping || unconfirmedStart}
                 leading={
                   <ComposerControls
