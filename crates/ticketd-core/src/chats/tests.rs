@@ -321,3 +321,26 @@ fn a_sub_agent_is_titled_by_one_rule_everywhere() {
     );
     assert_eq!(titled(r#"{}"#), "Sub-agent");
 }
+
+#[test]
+fn the_sub_agent_step_may_run_again_on_a_workspace_that_has_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = Workspace::open(&dir.path().join("workspace.sqlite3")).unwrap();
+    sub_agents::migrate(&workspace.connection).unwrap();
+    sub_agents::migrate(&workspace.connection).unwrap();
+    for (table, column) in [
+        ("chat_messages", "sub_agent_id"),
+        ("chat_turns", "origin_sub_agent"),
+        ("chat_sub_agent_runs", "tool_id"),
+    ] {
+        let columns: i64 = workspace
+            .connection
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+                [table, column],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(columns, 1, "{table}.{column}");
+    }
+}
