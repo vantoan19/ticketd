@@ -640,3 +640,51 @@ fn sub_agents_that_lost_contact_are_a_muted_line_with_no_dot_until_the_next_mess
         "All done. See x."
     );
 }
+
+/// The Chats list row and the sidebar count a working Chat's sub-agents in the words they
+/// show ("Working · 2 sub-agents"), with the singular for one and no count for none, and
+/// the word that names the rank stays "Working" for the one-line summaries.
+#[test]
+fn a_working_row_counts_the_sub_agents_that_run_in_words() {
+    for (count, line, detail) in [
+        (0, "Working", None),
+        (1, "Working · 1 sub-agent", Some("1 sub-agent")),
+        (2, "Working · 2 sub-agents", Some("2 sub-agents")),
+        (11, "Working · 11 sub-agents", Some("11 sub-agents")),
+    ] {
+        let mut live = idle();
+        live.sub_agents = count;
+        // With no turn running, sub-agents alone hold the Chat working ("waiting" is a
+        // turn that waits for a sub-agent).
+        for activity in ["working", "waiting"] {
+            let status = super::status(&Facts {
+                activity,
+                ..facts(&chat(0), &live, None)
+            });
+            assert_eq!(status.rank, Rank::Working, "{count} sub-agents, {activity}");
+            assert_eq!(status.line(), line, "{count} sub-agents, {activity}");
+            assert_eq!(status.word, "Working");
+            assert_eq!(status.label, "Working");
+            assert_eq!(status.detail.as_deref(), detail);
+            assert_eq!(status.notification(), line);
+        }
+    }
+
+    // A Chat that opens its session says so, not how many sub-agents it holds.
+    let mut live = idle();
+    live.sub_agents = 2;
+    let status = super::status(&Facts {
+        activity: "working",
+        opening: true,
+        ..facts(&chat(0), &live, None)
+    });
+    assert_eq!(status.line(), "Working · Starting");
+
+    // Not working: a Chat that rests says nothing of sub-agents it no longer runs.
+    let live = idle();
+    let status = super::status(&Facts {
+        activity: "idle",
+        ..facts(&chat(0), &live, None)
+    });
+    assert!(!status.line().contains("sub-agent"), "{}", status.line());
+}

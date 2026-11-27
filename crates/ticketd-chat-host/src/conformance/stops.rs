@@ -226,11 +226,23 @@ async fn reach(moment: &Moment) -> HostScript {
         moment.running,
         "the sub-agents that run before Stop"
     );
+    // The Chats list says so, in words, whatever the harness is.
+    assert_eq!(
+        h.attention().await.line(),
+        format!("Working · {}", count_of_sub_agents(moment.running))
+    );
     assert!(
         running_steps(&h) >= moment.steps,
         "the Steps under way before Stop"
     );
     h
+}
+
+fn count_of_sub_agents(count: usize) -> String {
+    match count {
+        1 => "1 sub-agent".to_owned(),
+        count => format!("{count} sub-agents"),
+    }
 }
 
 fn running_steps(h: &HostScript) -> usize {
@@ -411,7 +423,10 @@ async fn stop_one_leaves_only_that_one_stopped(declared: Declared) {
                     .and_then(|record| record.latest().map(|run| run.state));
                 assert_eq!(state, Some(ChatSubAgentState::Running), "{other}");
             }
-            assert!(h.attention().await.word.starts_with("Working"));
+            assert_eq!(
+                h.attention().await.line(),
+                format!("Working · {}", count_of_sub_agents(others.len()))
+            );
 
             h.play_all().await;
             h.finish().await;
