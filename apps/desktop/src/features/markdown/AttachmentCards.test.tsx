@@ -1,5 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
 import { MarkdownDocument } from "./MarkdownDocument";
@@ -195,4 +201,29 @@ test("a card stays the same card when Replace rewrites its address, so the viewe
   // The text is saved with the replacement's address while the viewer is still open.
   view.rerender(<MarkdownDocument source={text("report-1")} attachmentCards />);
   expect(screen.getByRole("button", { name: "Run log" })).toBe(card);
+});
+
+test("an open viewer keeps the file it opened on when the text under its card changes", async () => {
+  walkBridge();
+  const text = (id: string) => `[Run log](${uri(id)})`;
+  const view = render(
+    <MarkdownDocument source={text("log-1")} attachmentCards />,
+  );
+  await screen.findByText("Log · 2.4 MB");
+  fireEvent.click(screen.getByRole("button", { name: "Run log" }));
+  const viewer = await screen.findByRole("dialog");
+  await within(viewer).findByText(log.display_name);
+  // The text changes under the open viewer: the card now holds another reference.
+  view.rerender(<MarkdownDocument source={text("report-1")} attachmentCards />);
+  await vi.waitFor(() =>
+    expect(invoke).toHaveBeenCalledWith("resolve_attachment_uri", {
+      uri: uri("report-1"),
+    }),
+  );
+  expect(
+    within(screen.getByRole("dialog")).queryByText(report.display_name),
+  ).toBeNull();
+  expect(
+    within(screen.getByRole("dialog")).getByText(log.display_name),
+  ).toBeTruthy();
 });
