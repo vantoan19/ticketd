@@ -543,7 +543,8 @@ fn a_reply_with_long_spacing_keeps_whole_words_not_a_fragment() {
 }
 
 #[test]
-fn sub_agents_that_lost_contact_are_a_muted_line_with_no_dot_until_the_next_message_tells_the_agent() {
+fn sub_agents_that_lost_contact_are_a_muted_line_with_no_dot_until_the_next_message_tells_the_agent()
+ {
     let live = idle();
     let ended = turn(5, TurnEnding::Completed);
     let mut seen = chat(5);

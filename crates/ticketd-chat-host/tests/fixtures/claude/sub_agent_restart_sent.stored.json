@@ -13,7 +13,7 @@
     "links": [],
     "active_turn": {
       "id": "00000000-0000-4000-8000-000000000002:local-turn-1",
-      "position": 50,
+      "position": 51,
       "native_turn_id": "local-turn-1",
       "state": "active",
       "detail": null,
@@ -30,7 +30,7 @@
     "muted": false,
     "created_at": "2026-11-27T10:00:00.000Z"
   },
-  "sequence": 63,
+  "sequence": 64,
   "items": [
     {
       "kind": "message",
@@ -42,6 +42,9 @@
         "attachments": [],
         "complete": true,
         "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,
@@ -242,13 +245,37 @@
     {
       "kind": "message",
       "value": {
-        "id": "00000000-0000-4000-8000-000000000005:text-1",
-        "position": 30,
+        "id": "00000000-0000-4000-8000-000000000005:task_c:text-1",
+        "position": 29,
+        "role": "assistant",
+        "text": "Two typos fixed in docs/api.md.",
+        "attachments": [],
+        "complete": true,
+        "turn_id": "00000000-0000-4000-8000-000000000005:local-turn-1",
+        "owner": {
+          "kind": "sub_agent",
+          "native_id": "task_c"
+        },
+        "queued": false,
+        "editing": false,
+        "requires_link_context": false,
+        "attempts": [],
+        "created_at": "2026-11-27T10:00:00.000Z"
+      }
+    },
+    {
+      "kind": "message",
+      "value": {
+        "id": "00000000-0000-4000-8000-000000000005:text-2",
+        "position": 31,
         "role": "assistant",
         "text": "I started three reviewers. They run in the background, and I'll put their findings together when they finish.",
         "attachments": [],
         "complete": true,
         "turn_id": "00000000-0000-4000-8000-000000000005:local-turn-1",
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,
@@ -260,7 +287,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000005:toolu_read_a",
-        "position": 34,
+        "position": 35,
         "turn_id": null,
         "owner": {
           "kind": "sub_agent",
@@ -278,7 +305,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000005:toolu_read_b",
-        "position": 37,
+        "position": 38,
         "turn_id": null,
         "owner": {
           "kind": "sub_agent",
@@ -296,12 +323,15 @@
       "kind": "message",
       "value": {
         "id": "00000000-0000-4000-8000-000000000007",
-        "position": 45,
+        "position": 46,
         "role": "user",
         "text": "Pick the two reviews back up.",
         "attachments": [],
         "complete": true,
         "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,
@@ -331,7 +361,7 @@
       "kind": "turn",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002:local-turn-1",
-        "position": 50,
+        "position": 51,
         "native_turn_id": "local-turn-1",
         "state": "active",
         "detail": null,
@@ -347,7 +377,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002:toolu_send_a",
-        "position": 52,
+        "position": 53,
         "turn_id": "00000000-0000-4000-8000-000000000002:local-turn-1",
         "owner": {
           "kind": "main"
@@ -364,7 +394,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002:toolu_send_b",
-        "position": 53,
+        "position": 54,
         "turn_id": "00000000-0000-4000-8000-000000000002:local-turn-1",
         "owner": {
           "kind": "main"
@@ -381,7 +411,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:task_a:run-2",
-        "position": 55,
+        "position": 56,
         "sub_agent": "task_a",
         "run": 2,
         "native_run_id": "run_a_2",
@@ -399,7 +429,7 @@
       "kind": "sub_agent_run",
       "value": {
         "id": "00000000-0000-4000-8000-000000000001:sub-agent:task_b:run-2",
-        "position": 57,
+        "position": 58,
         "sub_agent": "task_b",
         "run": 2,
         "native_run_id": "run_b_2",
@@ -417,7 +447,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002:toolu_read_test",
-        "position": 58,
+        "position": 59,
         "turn_id": "00000000-0000-4000-8000-000000000002:local-turn-1",
         "owner": {
           "kind": "sub_agent",
@@ -435,7 +465,7 @@
       "kind": "tool",
       "value": {
         "id": "00000000-0000-4000-8000-000000000002:toolu_test_run",
-        "position": 60,
+        "position": 61,
         "turn_id": "00000000-0000-4000-8000-000000000002:local-turn-1",
         "owner": {
           "kind": "sub_agent",
@@ -477,7 +507,7 @@
         },
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:task_a:run-2",
-          "position": 55,
+          "position": 56,
           "sub_agent": "task_a",
           "run": 2,
           "native_run_id": "run_a_2",
@@ -517,7 +547,7 @@
         },
         {
           "id": "00000000-0000-4000-8000-000000000001:sub-agent:task_b:run-2",
-          "position": 57,
+          "position": 58,
           "sub_agent": "task_b",
           "run": 2,
           "native_run_id": "run_b_2",

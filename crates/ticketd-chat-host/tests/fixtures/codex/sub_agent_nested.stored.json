@@ -42,6 +42,9 @@
         "attachments": [],
         "complete": true,
         "turn_id": null,
+        "owner": {
+          "kind": "main"
+        },
         "queued": false,
         "editing": false,
         "requires_link_context": false,

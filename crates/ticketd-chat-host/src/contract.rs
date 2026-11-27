@@ -524,6 +524,31 @@ pub enum EventKind {
         output: Option<String>,
         detail: Option<ProviderDetail>,
     },
+    /// One complete message of a sub-agent, its own words and not the main agent's reply:
+    /// said in the turn that is active, if one is, and opening none.
+    SubAgentMessage {
+        sub_agent: NativeSubAgentId,
+        item: NativeItemId,
+        text: String,
+    },
+    /// The latest state of one reasoning item of a sub-agent. Times are milliseconds
+    /// since the Unix epoch. `run` is the harness's ID for the run it belongs to.
+    SubAgentReasoningUpdated {
+        sub_agent: NativeSubAgentId,
+        run: Option<String>,
+        item: NativeItemId,
+        running: bool,
+        started_at: Option<i64>,
+        ended_at: Option<i64>,
+        text: Option<String>,
+    },
+    /// The files a sub-agent's run changed, as of now: its own list, apart from the
+    /// main agent's `FilesChanged`.
+    SubAgentFilesChanged {
+        sub_agent: NativeSubAgentId,
+        run: Option<String>,
+        files: Vec<FileChange>,
+    },
     InteractionRequested(InteractionRequest),
     /// The live request is gone; later answers to it are refused.
     InteractionResolved {

@@ -20,7 +20,7 @@ use ticketd_chat_host::{
 use ticketd_core::harnesses::ResumePolicy;
 use ticketd_core::{
     BackupCheck, Chat, ChatAgentChange, ChatAttachmentContent, ChatCreationReplay, ChatDelivery,
-    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage,
+    ChatInputStanding, ChatItem, ChatLink, ChatLinkKind, ChatListFilter, ChatMessage, ChatOwner,
     ChatQueueEdit, ChatRecord, ChatRole, ChatStartPicks, ChatSubmissionIntent, ChatTurnState,
     MAX_BACKUP_FILE_BYTES, NewChat, Project, Workspace, WorkspaceGuard,
 };
@@ -566,6 +566,7 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
         changes,
         net,
         turn_id,
+        owner,
         ..
     } = item
     else {
@@ -599,6 +600,7 @@ fn with_gone(workspace: &Workspace, item: Item) -> Item {
         changes,
         net,
         turn_id,
+        owner,
     }
 }
 
@@ -861,7 +863,9 @@ fn messages(workspace: &Workspace, chat_id: &str) -> Result<Vec<ChatMessage>, ti
         .items
         .into_iter()
         .filter_map(|item| match item {
-            ChatItem::Message(message) => Some(message),
+            // A sub-agent's words are not the Chat's conversation: a fresh session does
+            // not take them up as history.
+            ChatItem::Message(message) if message.owner == ChatOwner::Main => Some(message),
             _ => None,
         })
         .collect())

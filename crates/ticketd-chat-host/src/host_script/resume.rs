@@ -158,9 +158,18 @@ async fn after_a_restart_the_running_sub_agents_are_lost_and_the_next_message_sa
     assert_eq!(
         lost,
         [
-            ("Find limiter bypasses".to_owned(), Some(ChatSubAgentState::Lost)),
-            ("Check limiter test coverage".to_owned(), Some(ChatSubAgentState::Lost)),
-            ("Proofread the API docs".to_owned(), Some(ChatSubAgentState::Completed)),
+            (
+                "Find limiter bypasses".to_owned(),
+                Some(ChatSubAgentState::Lost)
+            ),
+            (
+                "Check limiter test coverage".to_owned(),
+                Some(ChatSubAgentState::Lost)
+            ),
+            (
+                "Proofread the API docs".to_owned(),
+                Some(ChatSubAgentState::Completed)
+            ),
         ]
     );
     let row = h.attention().await;
@@ -168,7 +177,15 @@ async fn after_a_restart_the_running_sub_agents_are_lost_and_the_next_message_sa
         (row.rank, row.line(), row.unread()),
         (Rank::Idle, "2 sub-agents lost contact".to_owned(), false)
     );
-    assert_eq!(h.core().chat_snapshot(h.chat_id(), 500).unwrap().chat.restart_notice.len(), 2);
+    assert_eq!(
+        h.core()
+            .chat_snapshot(h.chat_id(), 500)
+            .unwrap()
+            .chat
+            .restart_notice
+            .len(),
+        2
+    );
 
     // The person's next message carries one factual note, sent to the harness with it.
     let words = "Pick the two reviews back up.";
@@ -181,7 +198,14 @@ async fn after_a_restart_the_running_sub_agents_are_lost_and_the_next_message_sa
         "From ticketd: these sub-agents were running when ticketd quit and are not running now: Find limiter bypasses, Check limiter test coverage. You can resume them."
     );
     // It was told once: the row is back to what the Chat did, and the next message has no note.
-    assert!(h.core().chat_snapshot(h.chat_id(), 500).unwrap().chat.restart_notice.is_empty());
+    assert!(
+        h.core()
+            .chat_snapshot(h.chat_id(), 500)
+            .unwrap()
+            .chat
+            .restart_notice
+            .is_empty()
+    );
     assert_ne!(h.attention().await.line(), "2 sub-agents lost contact");
     h.play_to("both sub-agents run again").await;
     pinned(&h, "restart_sent");
@@ -204,7 +228,8 @@ async fn after_a_restart_the_running_sub_agents_are_lost_and_the_next_message_sa
 }
 
 #[tokio::test(start_paused = true)]
-async fn after_a_restart_a_codex_chat_is_told_which_sub_agents_were_lost_without_a_way_to_resume_them() {
+async fn after_a_restart_a_codex_chat_is_told_which_sub_agents_were_lost_without_a_way_to_resume_them()
+ {
     let mut h = HostScript::codex()
         .process([
             fixture!("codex", "handshake"),
@@ -244,7 +269,8 @@ async fn after_a_restart_a_codex_chat_is_told_which_sub_agents_were_lost_without
 }
 
 #[tokio::test(start_paused = true)]
-async fn codex_telling_a_child_to_go_on_changes_nothing_until_the_child_starts_a_turn_and_then_it_is_a_second_run() {
+async fn codex_telling_a_child_to_go_on_changes_nothing_until_the_child_starts_a_turn_and_then_it_is_a_second_run()
+ {
     let mut h = HostScript::codex()
         .process([
             fixture!("codex", "handshake"),
@@ -257,7 +283,8 @@ async fn codex_telling_a_child_to_go_on_changes_nothing_until_the_child_starts_a
     assert_eq!(states(&only_sub_agent(&h)), [ChatSubAgentState::Stopped]);
 
     // The main agent asked it to go on: that is not a run yet, and not a change.
-    h.play_to("the main agent asked the sub-agent to go on").await;
+    h.play_to("the main agent asked the sub-agent to go on")
+        .await;
     assert_eq!(states(&only_sub_agent(&h)), [ChatSubAgentState::Stopped]);
     assert_eq!(h.live().await.sub_agents, 0);
 

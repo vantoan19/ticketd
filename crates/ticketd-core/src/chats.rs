@@ -452,6 +452,10 @@ pub struct ChatMessage {
     /// False for assistant text still streaming or cut short by a crash.
     pub complete: bool,
     pub turn_id: Option<String>,
+    /// The agent that wrote it, for assistant text: a sub-agent's words are not the main
+    /// agent's reply (format 105). User input is always the main agent's.
+    #[serde(default)]
+    pub owner: ChatOwner,
     /// User input with no submission that may have reached the harness.
     pub queued: bool,
     /// Kept for draft recovery and excluded from dispatch while the edit is held.
@@ -871,7 +875,12 @@ pub enum ChatObservation {
     /// A checkpoint of an assistant message: `text` replaces what was stored.
     AssistantText {
         message_id: String,
-        turn_id: String,
+        /// The turn it was said in, when one was active. Must be this Chat's.
+        #[serde(default)]
+        turn_id: Option<String>,
+        /// The agent that said it. An existing message keeps the owner it was recorded with.
+        #[serde(default)]
+        owner: ChatOwner,
         text: String,
         complete: bool,
     },
@@ -1205,7 +1214,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
 fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>, Error> {
     let message = connection
         .query_row(
-            "SELECT id, position, role, text, complete, turn_id, created_at, editing, requires_link_context, note FROM chat_messages WHERE id = ?1",
+            "SELECT id, position, role, text, complete, turn_id, created_at, editing, requires_link_context, sub_agent_id, note FROM chat_messages WHERE id = ?1",
             [id],
             |row| {
                 Ok(ChatMessage {
@@ -1220,8 +1229,9 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
                     queued: false,
                     editing: row.get(7)?,
                     requires_link_context: row.get(8)?,
+                    owner: ChatOwner::from_column(row.get(9)?),
                     note: row
-                        .get::<_, Option<String>>(9)?
+                        .get::<_, Option<String>>(10)?
                         .and_then(|text| serde_json::from_str(&text).ok()),
                     attempts: Vec::new(),
                 })
@@ -2116,10 +2126,13 @@ fn observe(
         ChatObservation::AssistantText {
             message_id,
             turn_id,
+            owner,
             text,
             complete,
         } => {
-            require_turn(connection, chat_id, &turn_id)?;
+            if let Some(turn_id) = &turn_id {
+                require_turn(connection, chat_id, turn_id)?;
+            }
             if owned(connection, "chat_messages", chat_id, &message_id)? {
                 let updated = connection.execute(
                     "UPDATE chat_messages SET text = ?2, complete = ?3 WHERE id = ?1 AND role = 'assistant'",
@@ -2134,8 +2147,8 @@ fn observe(
             } else {
                 let position = log(connection, chat_id, "message", &message_id)?;
                 connection.execute(
-                    "INSERT INTO chat_messages (id, chat_id, position, role, text, complete, turn_id) VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6)",
-                    params![message_id, chat_id, position, text, complete, turn_id],
+                    "INSERT INTO chat_messages (id, chat_id, position, role, text, complete, turn_id, sub_agent_id) VALUES (?1, ?2, ?3, 'assistant', ?4, ?5, ?6, ?7)",
+                    params![message_id, chat_id, position, text, complete, turn_id, owner.column()],
                 )?;
             }
             Ok(())
