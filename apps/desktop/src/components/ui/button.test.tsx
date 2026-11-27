@@ -44,3 +44,26 @@ test("an idle button clicks as before", () => {
   fireEvent.click(screen.getByRole("button", { name: "Install" }));
   expect(onClick).toHaveBeenCalledTimes(1);
 });
+
+test("a caller's ref cleanup runs on unmount, and a ref without one still gets null", () => {
+  const cleanup = vi.fn();
+  const withCleanup = vi.fn(() => cleanup);
+  const first = render(<Button ref={withCleanup}>One</Button>);
+  expect(withCleanup).toHaveBeenCalledTimes(1);
+  expect(cleanup).not.toHaveBeenCalled();
+  first.unmount();
+  expect(cleanup).toHaveBeenCalledTimes(1);
+  // React calls the cleanup instead of the ref with null.
+  expect(withCleanup).toHaveBeenCalledTimes(1);
+
+  const plain = vi.fn();
+  const second = render(<Button ref={plain}>Two</Button>);
+  second.unmount();
+  expect(plain).toHaveBeenLastCalledWith(null);
+
+  const object = { current: null as HTMLButtonElement | null };
+  const third = render(<Button ref={object}>Three</Button>);
+  expect(object.current).not.toBeNull();
+  third.unmount();
+  expect(object.current).toBeNull();
+});
