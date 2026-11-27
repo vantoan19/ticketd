@@ -5104,12 +5104,13 @@ mod tests {
     /// `TICKETD_UPDATE_VIEW_FIXTURES=1`.
     #[test]
     fn the_views_of_background_sub_agents_are_the_contract_the_interface_parses() {
-        let moments: [(&str, usize); 5] = [
+        let moments: [(&str, usize); 6] = [
             ("working", 2),
             ("one", 1),
             ("done", 0),
             ("stopped", 0),
             ("in_turn", 2),
+            ("stop_one", 1),
         ];
         for (name, running) in moments {
             let stored_file = format!(
@@ -5161,7 +5162,7 @@ mod tests {
             let line = summary.status.line();
             match name {
                 "working" | "in_turn" => assert_eq!(line, "Working · 2 sub-agents"),
-                "one" => assert_eq!(line, "Working · 1 sub-agent"),
+                "one" | "stop_one" => assert_eq!(line, "Working · 1 sub-agent"),
                 "stopped" => assert_eq!(line, "You stopped 2 sub-agents"),
                 _ => assert!(line.starts_with("Done"), "{line}"),
             }

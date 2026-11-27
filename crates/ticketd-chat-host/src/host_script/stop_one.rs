@@ -50,6 +50,9 @@ mod claude {
         h.stop_sub_agent("task_a").await;
         h.play_to("the person stopped the first sub-agent").await;
 
+        // The stored history now is what the desktop builds the view of "one stopped" from.
+        super::super::sub_agents::background_stored::pinned(&h, "stop_one");
+
         let first = run(&h, "task_a");
         assert_eq!(first.state, ChatSubAgentState::Stopped);
         assert_eq!(first.stopped_by, Some(ChatSubAgentStopper::Person));

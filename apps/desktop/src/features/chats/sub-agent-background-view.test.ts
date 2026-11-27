@@ -115,4 +115,56 @@ describe("the host's view of background sub-agents", () => {
       ),
     ).toMatchObject([{ count: 2 }]);
   });
+
+  it("after the person stops one: it is stopped by them, the other runs on with its Stop, and nothing says several were stopped", () => {
+    const { chat, items } = view("stop_one");
+    expect(chat.activity).toBe("working");
+    expect(chat.turn_running).toBe(false);
+    expect(
+      chat.sub_agents.map((agent) => [
+        agent.title,
+        agent.status,
+        agent.stopped_by,
+        agent.capabilities.stop,
+      ]),
+    ).toEqual([
+      ["Find limiter bypasses", "stopped", "person", false],
+      ["Check limiter test coverage", "running", undefined, true],
+      ["Proofread the API docs", "completed", undefined, false],
+    ]);
+    // The row of the stopped one says so, and the turn is not touched.
+    expect(
+      items
+        .filter((item) => item.kind === "sub_agent")
+        .map((row) => row.status),
+    ).toEqual(["stopped", "running", "completed"]);
+    expect(
+      items.filter((item) => item.kind === "turn" && !item.owner),
+    ).toMatchObject([{ outcome: "completed" }]);
+    expect(
+      items.filter(
+        (item) =>
+          item.kind === "marker" && item.reason === "sub_agents_stopped",
+      ),
+    ).toEqual([]);
+  });
+
+  it("offers Stop only for a sub-agent that runs now", () => {
+    for (const moment of ["working", "in_turn"]) {
+      const { chat } = view(moment);
+      expect(
+        chat.sub_agents.map((agent) => [agent.status, agent.capabilities.stop]),
+      ).toEqual([
+        ["running", true],
+        ["running", true],
+        ["completed", false],
+      ]);
+    }
+    for (const moment of ["done", "stopped"]) {
+      const { chat } = view(moment);
+      expect(chat.sub_agents.some((agent) => agent.capabilities.stop)).toBe(
+        false,
+      );
+    }
+  });
 });
