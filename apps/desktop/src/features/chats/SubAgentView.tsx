@@ -81,7 +81,10 @@ export function SubAgentControl({
         {view.items.some((item) => item.kind !== "turn")
           ? "Working"
           : "Starting"}
-        {elapsed >= 1000 && ` · ${duration(elapsed)}`}
+        {/* The live region says the state; the clock ticks without being read. */}
+        {elapsed >= 1000 && (
+          <span aria-hidden="true"> · {duration(elapsed)}</span>
+        )}
       </span>
       <span className="chat-spacer" />
       <Button

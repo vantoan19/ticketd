@@ -58,6 +58,7 @@ export function Composer({
   onQueue,
   onStop,
   stopLabel = "Stop",
+  stopKey = true,
   stopping = false,
   beforeStop,
   leading,
@@ -99,6 +100,8 @@ export function Composer({
   onStop?: () => void;
   /** What Stop says it stops: "Stop 2 sub-agents". */
   stopLabel?: string;
+  /** Esc stops too, which Stop says; false while only sub-agents run. */
+  stopKey?: boolean;
   /** Stop was asked for and has not finished: Stop waits. */
   stopping?: boolean;
   /** Fixed before Stop, so Send leads: the context count. */
@@ -433,8 +436,8 @@ export function Composer({
               variant="ghost"
               size="icon-compact"
               label={stopLabel}
-              shortcut="Esc"
-              aria-keyshortcuts="Escape"
+              {...(stopKey && { shortcut: "Esc" })}
+              {...(stopKey && { "aria-keyshortcuts": "Escape" })}
               disabled={stopping}
               onClick={onStop}
             >

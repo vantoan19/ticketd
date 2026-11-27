@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { act, cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
@@ -193,4 +195,16 @@ test("a ticket nobody works on has no label", async () => {
   open([]);
   await screen.findByText("ready");
   expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+});
+
+test("an Activity row's credit chip gives way with an ellipsis, so it never sits under the time or Latest", () => {
+  // Every part of the author line keeps its width but the chip (T-UB282, F-A5).
+  const css = readFileSync(join(__dirname, "activity.css"), "utf8");
+  expect(css).toMatch(/\.activity-author > \* \{\s*flex: none/);
+  expect(css).toMatch(
+    /\.activity-author > \.activity-subagent \{\s*flex: 0 1 auto/,
+  );
+  expect(css).toMatch(
+    /\.activity-subagent > span \{[^}]*overflow: hidden;\s*text-overflow: ellipsis;\s*white-space: nowrap/,
+  );
 });
