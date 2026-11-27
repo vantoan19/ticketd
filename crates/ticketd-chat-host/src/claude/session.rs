@@ -217,6 +217,12 @@ impl Session {
         self.pending_inputs.insert(submission.to_owned());
     }
 
+    /// The bridge refused an input and no longer holds it: output with no input behind it
+    /// is the harness's again.
+    pub fn input_refused(&mut self, submission: &str) {
+        self.pending_inputs.remove(submission);
+    }
+
     pub fn interrupt_written(&mut self) {
         if let Some(turn) = self.active_turn().cloned() {
             let _ = self.runtime.mark_interrupt(&turn);
@@ -712,6 +718,10 @@ impl Session {
         agent.running = true;
         agent.stop_asked = false;
         agent.background = background;
+        // A new run has its own report: the last run's last message says nothing of it.
+        if agent.run != run {
+            agent.last_text = None;
+        }
         agent.run.clone_from(&run);
         agent.tool_use = tool_use.map(str::to_owned);
         if let Some(tool_use) = tool_use {
@@ -1264,7 +1274,6 @@ impl Session {
         self.identify(text(event, "session_id"), events);
         let id = self.turn(events);
         let last_error = self.turn_error.take();
-        self.declined.clear();
         self.streams.clear();
         for task in self.sub_agents.turn_ended() {
             // A sub-agent in the foreground was over with the turn, and so was what it asked.
@@ -1277,6 +1286,10 @@ impl Session {
         let sub_agents = &self.sub_agents;
         self.tools
             .retain(|tool, _| sub_agents.owner.contains_key(tool));
+        // The same goes for what the person declined: a main-agent tool's denial ends with
+        // the turn, a background sub-agent's tool may still answer later.
+        self.declined
+            .retain(|tool| sub_agents.owner.contains_key(tool));
         self.reports.turn_ended();
         let subtype = text(event, "subtype").unwrap_or("unknown");
         let failed = event["is_error"] == true || subtype.starts_with("error");
