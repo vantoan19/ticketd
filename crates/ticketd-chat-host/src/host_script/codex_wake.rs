@@ -393,16 +393,18 @@ async fn each_finish_wakes_the_main_agent_once_while_the_other_sub_agent_still_r
     h.play_to("the second woken turn ended").await;
     let turns = h.turns();
     assert_eq!(turns.len(), 3, "{:?}", h.transcript());
-    assert!(turns[1..].iter().all(|turn| turn.origin.is_some()));
-    assert_ne!(
-        turns[1]
-            .origin
+    let whose = |turn: &ticketd_core::ChatTurn| {
+        turn.origin
             .as_ref()
-            .and_then(|origin| origin.sub_agent.clone()),
-        turns[2]
-            .origin
-            .as_ref()
-            .and_then(|origin| origin.sub_agent.clone())
+            .map(|origin| (origin.by, origin.sub_agent.clone()))
+    };
+    assert_eq!(
+        whose(&turns[1]),
+        Some((ChatTurnStarter::Ticketd, Some(CHILD.to_owned())))
+    );
+    assert_eq!(
+        whose(&turns[2]),
+        Some((ChatTurnStarter::Ticketd, Some(SECOND_CHILD.to_owned())))
     );
     h.pass(Duration::from_secs(30)).await;
     h.finish().await;

@@ -896,7 +896,7 @@ pub(super) mod background_stored {
             std::fs::write(&file, format!("{stored}\n")).expect("the file is written");
         }
         let kept = std::fs::read_to_string(&file).expect(
-            "the stored history; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-chat-host --lib host_script::sub_agents",
+            "the stored history; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-chat-host --lib host_script",
         );
         assert!(
             kept.trim_end() == stored,

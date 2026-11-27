@@ -203,11 +203,16 @@ async fn a_lost_process_is_recorded_and_the_next_message_starts_the_next_process
 
     h.send("One").await;
     h.play_to("working").await;
+    let [first] = h.turns().try_into().expect("one turn is working");
+    assert_eq!(first.state, ChatTurnState::Active);
     h.lose_process(1).await;
-    assert!(
-        h.turns()
-            .iter()
-            .all(|turn| turn.state != ChatTurnState::Active)
+    // The same turn stays in the history, as one whose outcome was not observed.
+    let lost = h.turns().into_iter().find(|turn| turn.id == first.id);
+    assert_eq!(
+        lost.map(|turn| turn.state),
+        Some(ChatTurnState::Unknown),
+        "{:?}",
+        h.transcript()
     );
     assert_eq!(h.opens().len(), 1);
 
