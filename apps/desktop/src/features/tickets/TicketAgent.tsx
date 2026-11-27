@@ -120,11 +120,10 @@ export function TicketAgentSession({
         ready,
         // A request waiting for the person always takes the slot, even when the slot
         // was left empty at the opening: its sentence is the point, and the header's
-        // icon alone does not say who asks for what.
+        // icon alone does not say who asks for what. So do working agents that came
+        // later: the label names them.
         reserved:
-          opened &&
-          (Boolean(opening.reserved) ||
-            Boolean(agents?.some((agent) => agent.approval))),
+          opened && (Boolean(opening.reserved) || (agents?.length ?? 0) > 0),
         chat,
         agents: agents ?? [],
         update: ready ? update : (ticket?.progress_summary ?? null),

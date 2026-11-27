@@ -317,6 +317,9 @@ export function ChatsView({
       kind: "chat",
       id: openRequest.request.chat_id,
       notified: true,
+      // Always the Chat itself, even when it is already open on a sub-agent's
+      // view: negative, so it never equals a ticket's ask (they count up from 1).
+      target: { agent: null, n: -openRequest.n },
     });
   }
   // A Chat asked for from a ticket: opened with a crumb back, or New Chat about it.

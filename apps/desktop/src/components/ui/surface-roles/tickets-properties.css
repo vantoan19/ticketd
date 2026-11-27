@@ -156,3 +156,50 @@
 .ticket-agent-copy > span {
   white-space: nowrap;
 }
+
+/* The ticket's label: names that open each agent (DESIGN §7). */
+.ticket-agent-name,
+.ticket-agent-others {
+  font-weight: 600;
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  border-radius: var(--radius-segment);
+}
+.ticket-agent-name {
+  text-decoration-color: transparent;
+}
+.ticket-agent-name:hover,
+.ticket-agent-name:focus-visible {
+  text-decoration-color: currentColor;
+}
+.ticket-agent-others {
+  text-decoration-style: dotted;
+  text-decoration-color: var(--muted-foreground);
+}
+.ticket-agent-name:focus-visible,
+.ticket-agent-others:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+/* The label's clock: figures of one width, so the seconds do not shift the line. */
+.ticket-agent-clock {
+  font-variant-numeric: tabular-nums;
+}
+.ticket-agents-who {
+  line-height: 20px;
+  color: var(--foreground);
+  font-weight: 500;
+}
+.ticket-agents-what {
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  line-height: 16px;
+}
+.ticket-agents-time {
+  line-height: 20px;
+  color: var(--muted-foreground);
+  font-size: var(--text-caption);
+  font-variant-numeric: tabular-nums;
+}

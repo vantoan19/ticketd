@@ -371,8 +371,17 @@ export function chatWith(options: {
     });
     spec.runs.forEach((run, index) => {
       own.push(...runItems(spec.record.id, index + 1, run, now));
+      // A nested sub-agent was started inside its parent's run, not the main turn.
+      const parentRuns = spec.record.parent
+        ? options.agents.find((one) => one.record.id === spec.record.parent)
+            ?.runs.length
+        : undefined;
       const turn =
-        index === 0 ? spec.inTurn : (spec.resumedIn?.[index - 1] ?? null);
+        spec.record.parent && parentRuns
+          ? `${spec.record.parent}:run-${parentRuns}`
+          : index === 0
+            ? spec.inTurn
+            : (spec.resumedIn?.[index - 1] ?? null);
       const row = {
         id: `${spec.record.id}:row-${index + 1}`,
         at: ago(now, run.startedAgo),
@@ -387,7 +396,9 @@ export function chatWith(options: {
         started_at: ago(now, run.startedAgo),
         ...(run.endedAgo !== undefined && { ended_at: ago(now, run.endedAgo) }),
       } as Item;
-      (rows[turn ?? ""] ??= []).push(row);
+      // The parent's own items, not a main-turn row: the main turn never lists it.
+      if (spec.record.parent) own.push(row);
+      else (rows[turn ?? ""] ??= []).push(row);
     });
   }
   const items = [...options.main(rows), ...own];
@@ -460,6 +471,9 @@ export function heroChat(
       index === 0 ? { ...run, work: run.work ?? work } : run,
     ),
   });
+  const background =
+    options.replied !== false &&
+    Object.values(states).some((runs) => runs.at(-1)?.status === "running");
   return chatWith({
     id: "c-limiter",
     title: "Review the rate limiter",
@@ -472,7 +486,11 @@ export function heroChat(
     ],
     chat: {
       activity:
-        options.replied === false || options.resumedIn ? "working" : "idle",
+        options.replied === false || options.resumedIn || background
+          ? "working"
+          : "idle",
+      // The reply is in and only sub-agents run: no main turn is running.
+      ...(background && { turn_running: false }),
     },
     main: (rows) => [
       you("h-u1", ASK, "t1", ago(now, 4 * MIN)),

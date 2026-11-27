@@ -30,9 +30,16 @@ function Brief({ view }: { view: SubAgentViewData }) {
   const [open, setOpen] = useState(false);
   // Four lines, then Show more; only a brief that is cut has the control.
   const [cut, setCut] = useState(false);
+  // Measured again when the pane changes width: a brief that fit can be cut.
   useLayoutEffect(() => {
     const box = text.current;
-    if (box && !open) setCut(box.scrollHeight > box.clientHeight + 1);
+    if (!box || open) return;
+    const measure = () => setCut(box.scrollHeight > box.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(box);
+    return () => observer.disconnect();
   }, [brief.text, open]);
   return (
     <div className="chat-part" data-kind="brief" data-anchor="">

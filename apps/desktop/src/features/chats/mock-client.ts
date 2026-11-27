@@ -807,6 +807,14 @@ export function createMockChatClient(
         if (item.status === "running")
           push(id, { ...item, ...stopped, ended_at: at });
       } else if (
+        item.kind === "request" &&
+        item.state === "pending" &&
+        item.owner &&
+        ids.includes(item.owner)
+      )
+        // Nobody is left to act on what a stopped sub-agent asked.
+        push(id, { ...item, state: "expired" });
+      else if (
         item.kind === "turn" &&
         item.owner &&
         ids.includes(item.owner) &&

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -23,13 +24,20 @@ import {
 } from "@/features/chats/sub-agent-fixtures";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
+const watching = new Map<Element, ResizeObserverCallback>();
 window.ResizeObserver = class {
-  observe() {}
+  constructor(private callback: ResizeObserverCallback) {}
+  observe(element: Element) {
+    watching.set(element, this.callback);
+  }
   unobserve() {}
   disconnect() {}
 };
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  watching.clear();
+});
 
 async function open(chat: MockChat) {
   const client = createMockChatClient({ enabled: true, chats: [chat] });
@@ -142,6 +150,21 @@ test("Enter opens a sub-agent's view: the path back, the brief, its own work and
   expect(screen.queryByRole("textbox")).toBeNull();
   expect(screen.queryByRole("button", { name: "Chat actions" })).toBeNull();
   expect(screen.getByRole("button", { name: "Close Chat" })).toBeTruthy();
+});
+
+test("a brief that the pane later narrows past four lines offers Show more", async () => {
+  await open(subAgentFixtures().finished);
+  fireEvent.click(row(/^Sub-agent Find limiter bypasses/));
+  await screen.findByRole("heading", { name: "Find limiter bypasses" });
+  expect(screen.queryByRole("button", { name: "Show more" })).toBeNull();
+  const box = document.querySelector<HTMLElement>(".chat-brief-text")!;
+  Object.defineProperty(box, "clientHeight", { configurable: true, value: 80 });
+  Object.defineProperty(box, "scrollHeight", {
+    configurable: true,
+    value: 100,
+  });
+  act(() => watching.get(box)?.([], {} as unknown as ResizeObserver));
+  expect(screen.getByRole("button", { name: "Show more" })).toBeTruthy();
 });
 
 test("Back, Esc and Cmd+[ return to the Chat with the row focused, and Esc stops nothing", async () => {

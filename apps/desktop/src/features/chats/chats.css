@@ -1754,10 +1754,6 @@
 
 /* Sub-agents (#609). A sub-agent's row is a step row: [bot] Title · suffix ›.
    The title gives way with an ellipsis; the clock or outcome never does. */
-.chat-subagent {
-  text-align: left;
-  color: var(--muted-foreground);
-}
 .chat-subagent .chat-step-words[data-line] {
   display: inline-flex;
   flex-wrap: nowrap;
@@ -1773,41 +1769,30 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  color: var(--foreground);
 }
 .chat-subagent .chat-step-suffix {
-  font-variant-numeric: tabular-nums;
   flex: none;
   display: inline-flex;
   gap: 0;
   white-space: pre;
 }
-.chat-subagent [data-outcome] {
-  font-weight: 500;
-  color: var(--foreground);
-}
+
 /* Rows stay under a folded turn's work line, like receipts. */
 .chat-subagent-kept {
   padding-left: 16px;
   margin-top: 4px;
 }
+
 /* A sub-agent's view: the brief the main agent gave it, in place of a message. */
 .chat-brief {
   margin: 0;
   padding: 2px 0 2px 12px;
-  border-left: 2px solid var(--border);
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.chat-brief-source {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
-}
 .chat-brief-text {
   margin: 0;
-  color: var(--foreground);
   display: -webkit-box;
   -webkit-line-clamp: 4;
   -webkit-box-orient: vertical;
@@ -1817,15 +1802,10 @@
   -webkit-line-clamp: unset;
   display: block;
 }
-.chat-brief-text[data-unreported] {
-  color: var(--muted-foreground);
-}
 .chat-brief-more {
   align-self: flex-start;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
+
 /* The header's bot mark sits where a Chat's harness mark does. */
 .chat-subagent-mark {
   display: inline-flex;
@@ -1834,23 +1814,23 @@
   justify-content: center;
   width: 16px;
   height: 16px;
-  color: var(--muted-foreground);
 }
 .ui-return-crumb + .ui-return-crumb {
   margin-left: -4px;
 }
+
 /* ticketd's own note under the brief, and how a sub-agent ended: step-style rows. */
 .chat-subagent-note {
   margin: 0;
 }
 .chat-end-marker {
   min-height: 28px;
-  color: var(--muted-foreground);
 }
 .chat-end-marker .chat-stop-mark {
   width: 10px;
   height: 10px;
 }
+
 /* The quiet line between a sub-agent's runs. */
 .chat-run-divider {
   align-items: center;
@@ -1860,6 +1840,7 @@
 .chat-run-divider > svg {
   margin-top: 0;
 }
+
 /* A sub-agent's view, in the composer's place: one 44px line, its state then Stop. */
 .chat-subagent-foot {
   display: flex;
@@ -1867,10 +1848,8 @@
   gap: 8px;
   min-height: 44px;
   padding: 0 8px 0 16px;
-  color: var(--muted-foreground);
 }
 .chat-subagent-foot-words {
-  font-variant-numeric: tabular-nums;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1889,6 +1868,7 @@
 .chat-run-divider + .chat-turn-unit {
   margin-top: -9px;
 }
+
 /* How a sub-agent ended sits 12px under its last words, as the end of a turn's parts do. */
 .chat-turn-unit + .chat-end {
   margin-top: -28px;
@@ -1900,18 +1880,11 @@
   flex-wrap: wrap;
   gap: 8px;
 }
-.chat-subagent-pill .chat-plan-pill-count {
-  color: var(--foreground);
-}
-.chat-subagent-pill .chat-plan-pill-now {
-  font-variant-numeric: tabular-nums;
-}
 
 /* The strip's list: 32px rows, nested ones 16px in; Stop shows on hover or focus. */
 .chat-subagent-list {
   margin: 0;
   padding: 0;
-  list-style: none;
   display: flex;
   flex-direction: column;
 }
@@ -1920,15 +1893,10 @@
   align-items: center;
   gap: 4px;
   min-height: 32px;
-  border-radius: var(--radius);
   padding: 0 4px 0 8px;
 }
 .chat-subagent-list li[data-depth="1"] {
   padding-left: 24px;
-}
-.chat-subagent-list li:hover,
-.chat-subagent-list li:has(:focus-visible) {
-  background: var(--accent);
 }
 .chat-subagent-item {
   display: flex;
@@ -1937,8 +1905,6 @@
   flex: 1;
   min-width: 0;
   height: 32px;
-  text-align: left;
-  color: var(--foreground);
 }
 .chat-subagent-item .chat-subagent-title {
   flex: 0 1 auto;
@@ -1947,20 +1913,6 @@
   flex: none;
   margin-left: auto;
   padding-left: 12px;
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
-.chat-subagent-list li > [data-size="icon-row-action"] {
-  visibility: hidden;
-}
-.chat-subagent-list li:hover > [data-size="icon-row-action"],
-.chat-subagent-list li:focus-within > [data-size="icon-row-action"] {
-  visibility: visible;
-}
-@media (hover: none) {
-  .chat-subagent-list li > [data-size="icon-row-action"] {
-    visibility: visible;
-  }
 }
 
 /* "Started by ticketd: sub-agent finished · Title": where the person's message would be,
@@ -1974,21 +1926,6 @@
   gap: 8px;
   min-height: 28px;
   margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-ui);
-  line-height: 20px;
-}
-.chat-started .chat-row-icon {
-  color: var(--muted-foreground);
-}
-.chat-started-link {
-  color: var(--muted-foreground);
-  text-decoration: underline;
-  text-decoration-color: var(--border);
-  text-underline-offset: 3px;
-}
-.chat-started-link:hover {
-  color: var(--foreground);
 }
 
 /* The tray's neutral notice after a restart: nothing waits for the person. */
@@ -2005,14 +1942,9 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-weight: 500;
-  color: var(--foreground);
 }
 .chat-restart-notice .chat-restart-notice-body {
   margin-left: 24px;
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
 }
 
 /* A sent message's caption: what ticketd added to it, and the note opened under it. */
@@ -2020,16 +1952,12 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: var(--muted-foreground);
 }
 .chat-note-sent {
   max-width: 82%;
   margin-top: 6px;
 }
 .chat-note-sent .chat-brief-text {
-  color: var(--muted-foreground);
-  font-size: var(--text-caption);
-  line-height: 16px;
   -webkit-line-clamp: unset;
 }
 
@@ -2039,11 +1967,7 @@
   align-items: center;
   gap: 8px;
   padding: 10px 16px;
-  color: var(--foreground);
 }
 .chat-needs-elsewhere .chat-spacer {
   flex: 1;
-}
-.chat-needs-elsewhere strong {
-  font-weight: 500;
 }
