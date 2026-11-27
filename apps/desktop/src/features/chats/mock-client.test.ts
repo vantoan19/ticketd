@@ -9,6 +9,7 @@ import {
   createMockChatClient,
   HARNESS_OPTIONS,
 } from "@/features/chats/mock-client";
+import { subAgentPartFixtures } from "@/features/chats/sub-agent-part-fixtures";
 
 const at = "2026-11-10T10:00:00Z";
 const approval: TranscriptItem = {
@@ -867,4 +868,37 @@ test("NAV-03: every permission mode says what it can touch, in one sentence", ()
       );
     }
   }
+});
+
+test.each(["stop all", "stop one"])(
+  "%s expires what a stopped sub-agent asked and answering it changes nothing",
+  async (how) => {
+    const chat = subAgentPartFixtures().approval;
+    const client = createMockChatClient({ enabled: true, chats: [chat] });
+    const id = chat.chat.id;
+    if (how === "stop all") await client.stop(id);
+    else await client.stopSubAgent(id, "sa-tests");
+    const { chat: after, items } = await client.openChat(id);
+    expect(items.find((item) => item.id === "req-tests")).toMatchObject({
+      state: "expired",
+    });
+    const activity = after.activity;
+    await expect(
+      client.answer(id, "req-tests", { option_id: "allow" }),
+    ).rejects.toMatchObject({ code: "stale" });
+    expect((await client.openChat(id)).chat.activity).toBe(activity);
+    expect(
+      (await client.openChat(id)).items.find((item) => item.id === "req-tests"),
+    ).toMatchObject({ state: "expired" });
+  },
+);
+
+test("stopping one sub-agent leaves another's request pending", async () => {
+  const chat = subAgentPartFixtures().approval;
+  const client = createMockChatClient({ enabled: true, chats: [chat] });
+  await client.stopSubAgent(chat.chat.id, "sa-bypass");
+  const { items } = await client.openChat(chat.chat.id);
+  expect(items.find((item) => item.id === "req-tests")).toMatchObject({
+    state: "pending",
+  });
 });
