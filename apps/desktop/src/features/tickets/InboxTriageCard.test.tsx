@@ -54,7 +54,13 @@ function card(selected: Entry, record: Ticket): ReactNode {
   return (
     <TestReads primed={{ ticket: record }}>
       <AgentContext
-        value={{ reserved: false, ready: true, chat: undefined, update: null }}
+        value={{
+          reserved: false,
+          ready: true,
+          chat: undefined,
+          agents: [],
+          update: null,
+        }}
       >
         <InboxTriageContext
           value={{

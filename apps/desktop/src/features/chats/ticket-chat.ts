@@ -18,6 +18,8 @@ export type ChatRequest =
       retention: Retention;
       /** The ticket it was opened from: its crumb goes back there. */
       from?: string;
+      /** A sub-agent of that Chat whose view opens inside it (its Back returns to the Chat). */
+      subAgent?: string;
     }
   | { kind: "new"; start?: TicketStart };
 

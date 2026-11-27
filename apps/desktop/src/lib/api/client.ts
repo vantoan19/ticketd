@@ -5,6 +5,7 @@ import { plainLabel } from "@/lib/plain-text";
 import { invoke, structured } from "@/lib/api/bridge-failure";
 import { publicationAttemptSchema } from "@/lib/api/publication";
 import { ticketStatuses } from "@/lib/statuses";
+import { creditedSubAgentSchema } from "@/lib/api/credit";
 
 export type { PublicationAttempt } from "@/lib/api/publication";
 
@@ -373,6 +374,7 @@ const activitySchema = lazySchema(() =>
     updated_at: z.string(),
     editing_agent: z.string().nullable(),
     supporting_document_id: z.string().nullable().optional(),
+    credited_to: creditedSubAgentSchema.nullish(),
   }),
 );
 const activityFeedSchema = lazySchema(() =>
@@ -387,6 +389,7 @@ const activityFeedSchema = lazySchema(() =>
         to_value: z.string(),
         timestamp: z.string(),
         editing_agent: z.string().nullable(),
+        credited_to: creditedSubAgentSchema.nullish(),
       }),
     }),
   ]),

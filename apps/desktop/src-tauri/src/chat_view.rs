@@ -3749,17 +3749,12 @@ mod tests {
     }
 
     /// The marker names are a closed set shared with the frontend, which keeps its own
-    /// copy (`client.ts` validates them, `Transcript.tsx` words each). A reason added on
+    /// copy (`client.ts` validates them, `model.ts` words each for the transcript). A reason added on
     /// one side only would reach the transcript as an unreadable marker.
     #[test]
     fn the_frontends_markers_are_the_ones_ticketd_stops_a_turn_with() {
         let client = include_str!("../../src/features/chats/client.ts");
-        // The wording moved from Transcript.tsx to model.ts with the sub-agent view.
-        let transcript = [
-            include_str!("../../src/features/chats/Transcript.tsx"),
-            include_str!("../../src/features/chats/model.ts"),
-        ]
-        .join("\n");
+        let transcript = include_str!("../../src/features/chats/model.ts");
         let list = client
             .split("reason: z.enum([")
             .nth(1)
@@ -3771,7 +3766,14 @@ mod tests {
             .flat_map(|line| line.split('"').skip(1).step_by(2))
             .collect();
         // Said by the harness or by the turn's ending, not by a reason ticketd stopped it.
-        let others = ["stopped", "stop_unconfirmed", "failed", "note", "warning"];
+        let others = [
+            "stopped",
+            "stop_unconfirmed",
+            "failed",
+            "note",
+            "warning",
+            "sub_agents_stopped",
+        ];
         let ticketd: std::collections::BTreeSet<&str> = StopReason::ALL
             .iter()
             .map(|reason| reason.marker())
@@ -3785,7 +3787,7 @@ mod tests {
         for marker in &ticketd {
             assert!(
                 transcript.contains(&format!("case \"{marker}\":")),
-                "Transcript.tsx and model.ts have no wording for {marker}"
+                "model.ts has no wording for {marker}"
             );
         }
     }

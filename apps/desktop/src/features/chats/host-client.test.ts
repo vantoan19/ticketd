@@ -236,6 +236,24 @@ describe("the desktop Chat client", () => {
     });
   });
 
+  it("stops one sub-agent through its own command, and reports a refusal in the backend's words", async () => {
+    const stub = stubBridge({
+      chat_stop_sub_agent: {
+        code: "stale",
+        message: "that sub-agent is no longer running",
+      },
+    });
+    const client = createHostChatClient(stub.bridge);
+
+    await expect(client.stopSubAgent("c1", "sa-bypass")).rejects.toEqual(
+      new ChatError("stale", "that sub-agent is no longer running"),
+    );
+    expect(stub.invoke).toHaveBeenCalledWith("chat_stop_sub_agent", {
+      chatId: "c1",
+      subAgent: "sa-bypass",
+    });
+  });
+
   it("keeps the Experimental choice and tells the backend, which starts with Chat off", async () => {
     const stub = stubBridge();
     const client = createHostChatClient(stub.bridge);

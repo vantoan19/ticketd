@@ -29,6 +29,11 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { canSteer, changeLine } from "@/features/chats/model";
+import {
+  ticketAgentsSchema,
+  type TicketAgent,
+  type TicketAgentInput,
+} from "@/features/chats/ticket-agents";
 import { plainText } from "@/features/documents/graph-text";
 import {
   captureChatAttachment,
@@ -215,8 +220,12 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
     (item): item is Extract<TranscriptItem, { kind: "request" }> =>
       item.kind === "request" && item.state === "pending",
   );
+  // A sub-agent's approval says which one asks.
+  const asker = pending?.owner
+    ? chat.sub_agents.find((agent) => agent.id === pending.owner)
+    : undefined;
   if (pending?.request === "approval")
-    return make("approval", "Approval needed", pending.subject);
+    return make("approval", "Approval needed", asker?.title ?? pending.subject);
   if (pending) return make("question", "Question", pending.subject);
   const problem = chat.problem;
   if (problem?.kind === "uncertain_delivery") {
@@ -229,12 +238,29 @@ function mockStatus(chat: ChatState, items: TranscriptItem[]): ChatStatus {
   }
   if (problem?.kind === "stop_unconfirmed")
     return make("working", "Stop not confirmed");
-  if (chat.activity === "working" || chat.activity === "waiting")
-    return make("working", "Working", chat.opening ? "Starting" : null);
+  if (chat.activity === "working" || chat.activity === "waiting") {
+    const n = chat.sub_agents.filter((one) => one.status === "running").length;
+    return make(
+      "working",
+      "Working",
+      chat.opening
+        ? "Starting"
+        : n > 0
+          ? `${n} ${n === 1 ? "sub-agent" : "sub-agents"}`
+          : null,
+    );
+  }
   const marker = items.at(-1)?.kind === "marker" ? items.at(-1) : undefined;
   const reason = marker?.kind === "marker" ? marker.reason : undefined;
   if (reason === "stopped") return make("idle", "You stopped it");
   if (reason === "quit") return make("idle", "Stopped", "ticketd quit");
+  if (reason === "sub_agents_stopped") {
+    const n = marker?.kind === "marker" ? (marker.count ?? 1) : 1;
+    return make(
+      "idle",
+      `You stopped ${n} ${n === 1 ? "sub-agent" : "sub-agents"}`,
+    );
+  }
   // A failure observed now waits for the person while it holds.
   if (problem?.kind === "failed" && !problem.past)
     return make(
@@ -363,6 +389,8 @@ export type MockChatClient = ChatClient & {
   runsGoing: number;
   /** As if the person clicked the Chat's system notification. */
   requestOpen(request: OpenRequest): void;
+  /** Sets the agents at work on a ticket, as the host would after a change; an empty list is none. */
+  setTicketAgents(ticketId: string, agents: TicketAgentInput[]): void;
   /** What Notify me about Chats was last set to. */
   notify: boolean;
   /** Whether Quit was confirmed. */
@@ -518,6 +546,8 @@ export function createMockChatClient(
     logLimit?: number;
     /** Whole step outputs by tool id, for steps that carry only their end. */
     outputs?: Record<string, string>;
+    /** The agents at work on each ticket, by ticket id. */
+    ticketAgents?: Record<string, TicketAgentInput[]>;
   } = {},
 ): MockChatClient {
   const now = seed.now ?? "2026-11-10T10:00:00Z";
@@ -534,6 +564,12 @@ export function createMockChatClient(
   const openListeners = new Set<(request: OpenRequest) => void>();
   const quitListeners = new Set<(stopping: Stopping) => void>();
   const chats = new Map<string, Stored>();
+  const ticketAgents = new Map<string, TicketAgent[]>(
+    Object.entries(seed.ticketAgents ?? {}).map(([ticket, agents]) => [
+      ticket,
+      ticketAgentsSchema.parse(agents),
+    ]),
+  );
   /** Chats the person marked unread: as the host, they keep their seen words. */
   const marked = new Set<string>();
   const store = (entry: MockChat) =>
@@ -751,6 +787,44 @@ export function createMockChatClient(
       unseen: get(id).chat.unseen,
     });
   };
+  /**
+   * The person stopped these running sub-agents: each record, its rows and its
+   * active run turns say so, as the host will write them.
+   */
+  const stopAgents = (id: string, ids: readonly string[]) => {
+    const entry = get(id);
+    const at = new Date().toISOString();
+    const stopped = { status: "stopped", stopped_by: "person" } as const;
+    for (const item of [...entry.items]) {
+      if (item.kind === "sub_agent" && ids.includes(item.sub_agent)) {
+        if (item.status === "running")
+          push(id, { ...item, ...stopped, ended_at: at });
+      } else if (
+        item.kind === "turn" &&
+        item.owner &&
+        ids.includes(item.owner) &&
+        item.outcome === "active"
+      )
+        push(id, { ...item, outcome: "stopped", ended_at: at });
+    }
+    patch(id, {
+      sub_agents: entry.chat.sub_agents.map((agent) =>
+        ids.includes(agent.id) && agent.status === "running"
+          ? { ...agent, ...stopped, ended_at: at }
+          : agent,
+      ),
+    });
+  };
+  const runningAgents = (id: string) =>
+    get(id)
+      .chat.sub_agents.filter((agent) => agent.status === "running")
+      .map((agent) => agent.id);
+  /** With nothing left running, the Chat is at rest. */
+  const restIfQuiet = (id: string) => {
+    const { chat } = get(id);
+    if (chat.turn_running === false && runningAgents(id).length === 0)
+      patch(id, { activity: "idle", turn_running: null, doing: null });
+  };
   const startTurn = (
     id: string,
     text: string,
@@ -767,6 +841,7 @@ export function createMockChatClient(
     patch(id, {
       activity: "working",
       problem: null,
+      turn_running: null,
       doing: { label: "Working", since: now },
     });
   };
@@ -1000,6 +1075,14 @@ export function createMockChatClient(
     requestOpen(request) {
       for (const listener of [...openListeners]) listener(request);
     },
+    setTicketAgents(ticketId, agents) {
+      ticketAgents.set(ticketId, ticketAgentsSchema.parse(agents));
+      const counts = overview();
+      enqueueNotification(() => {
+        for (const listener of [...overviewListeners])
+          if (overviewListeners.has(listener)) notify(listener, counts);
+      });
+    },
     requestQuit() {
       const stopping = { chats: overview().working, runs: client.runsGoing };
       for (const listener of [...quitListeners]) listener(stopping);
@@ -1187,6 +1270,7 @@ export function createMockChatClient(
     async exportAttachment() {},
     queue: (id, text, links = [], files, edit) =>
       saveDraft(queue, id, text, links, files, edit),
+    ticketAgents: async (ticketId) => ticketAgents.get(ticketId) ?? [],
     linkedTo: async (link) =>
       [...chats.values()]
         .filter(
@@ -1288,7 +1372,35 @@ export function createMockChatClient(
     },
     async stop(id) {
       const entry = get(id);
-      if (live(entry.chat)) commit(entry, () => halt(id, "stopped"));
+      if (!live(entry.chat)) return;
+      commit(entry, () => {
+        const agents = runningAgents(id);
+        if (entry.chat.turn_running === false) {
+          // Only sub-agents run: Stop all ends them and says so below the reply.
+          stopAgents(id, agents);
+          push(id, {
+            id: nextId("marker"),
+            at: now,
+            kind: "marker",
+            reason: "sub_agents_stopped",
+            count: Math.max(1, agents.length),
+          });
+          restIfQuiet(id);
+        } else {
+          stopAgents(id, agents);
+          halt(id, "stopped");
+        }
+      });
+    },
+    async stopSubAgent(id, subAgent) {
+      const entry = get(id);
+      const record = entry.chat.sub_agents.find((one) => one.id === subAgent);
+      if (record?.status !== "running")
+        throw new ChatError("stale", "That sub-agent is no longer running.");
+      commit(entry, () => {
+        stopAgents(id, [subAgent]);
+        restIfQuiet(id);
+      });
     },
     async answer(id, requestId, answer) {
       const request = get(id).items.find((item) => item.id === requestId);

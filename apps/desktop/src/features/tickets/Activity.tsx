@@ -82,6 +82,8 @@ import { changeSummary, historySentence } from "./history-sentence";
 import type { Entry } from "@/lib/api/history";
 import { historyIcon } from "./history-icon";
 import { attribution } from "./ticket-source";
+import type { CreditedSubAgent } from "@/lib/api/credit";
+import { useChatFeature } from "@/features/chats/use-chats";
 import { formatDateTime } from "@/lib/format";
 import { ariaKeyShortcuts, shortcutLabel } from "@/lib/shortcuts";
 import { revealInDetail } from "./detail-scroll";
@@ -1122,6 +1124,10 @@ function RecoveredActivity({
                   // One line: who · when · edited, then Latest (DB-12, DB-18).
                   <span className="activity-author">
                     <strong>{item.note.editing_agent ?? "You"}</strong>
+                    <SubAgentCredit
+                      credit={item.note.credited_to}
+                      reference={reference}
+                    />
                     <span aria-hidden="true">·</span>
                     <Time value={item.note.reported_at} />
                     {item.note.updated_at !== item.note.reported_at && (
@@ -1220,9 +1226,16 @@ function RecoveredActivity({
                     time={<Time value={entry.timestamp} format="compact" />}
                     meta={
                       entry.editing_agent && (
-                        <span className="activity-agent">
-                          {attribution(entry.editing_agent, sources)}
-                        </span>
+                        <>
+                          <span className="activity-agent">
+                            {attribution(entry.editing_agent, sources)}
+                          </span>
+                          <SubAgentCredit
+                            credit={entry.credited_to}
+                            reference={reference}
+                            after
+                          />
+                        </>
                       )
                     }
                   >
@@ -1242,6 +1255,46 @@ function RecoveredActivity({
         />
       )}
     </section>
+  );
+}
+
+/**
+ * "bot {sub-agent title}" after an author: the sub-agent a change is credited
+ * to, which opens its view in its Chat. Only where the host knows the Chat (it
+ * is on this computer) and Chat is on.
+ */
+function SubAgentCredit({
+  credit,
+  reference,
+  after = false,
+}: {
+  credit: CreditedSubAgent | null | undefined;
+  reference: string;
+  /** In a recorded change's meta, where the separator is spaced text rather than a flex gap. */
+  after?: boolean;
+}) {
+  const { enabled, requestChat } = useChatFeature();
+  if (!credit || !enabled) return null;
+  return (
+    <>
+      <span aria-hidden="true">{after ? " · " : "·"}</span>
+      <button
+        type="button"
+        className="activity-subagent"
+        onClick={() =>
+          requestChat({
+            kind: "open",
+            chatId: credit.chat_id,
+            retention: credit.retention,
+            from: reference,
+            subAgent: credit.sub_agent,
+          })
+        }
+      >
+        <Bot aria-hidden="true" />
+        <span>{credit.title}</span>
+      </button>
+    </>
   );
 }
 

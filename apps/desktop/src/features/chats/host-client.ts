@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { z } from "zod";
+import { ticketAgentsSchema } from "@/features/chats/ticket-agents";
 import {
   ChatError,
   chatChangeSchema,
@@ -368,6 +369,8 @@ export function createHostChatClient(
       }),
     linkedTo: async (link) =>
       z.array(chatSummarySchema).parse(await call("chat_linked_to", { link })),
+    ticketAgents: async (ticketId) =>
+      ticketAgentsSchema.parse(await call("chat_ticket_agents", { ticketId })),
     folderFiles: async (folder, query) =>
       z
         .array(folderFileSchema)
@@ -407,6 +410,8 @@ export function createHostChatClient(
     sendQueuedNow: (id, queuedId) =>
       run("chat_send_queued_now", { chatId: id, queuedId }),
     stop: (id) => run("chat_stop", { chatId: id }),
+    stopSubAgent: (id, subAgent) =>
+      run("chat_stop_sub_agent", { chatId: id, subAgent }),
     answer: (id, requestId, answer) =>
       run("chat_answer", { chatId: id, requestId, answer }),
     resolveUncertain: (id, messageId, decision) =>
