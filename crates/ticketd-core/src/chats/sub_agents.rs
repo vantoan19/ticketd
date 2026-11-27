@@ -397,9 +397,11 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
                     params![record, chat_id, native_id, parent, tool_id, background, payload],
                 )?;
             } else {
+                // A sub-agent announced after its own frames were seen was first stored
+                // without whose it is: the announcement fills in what was not known.
                 connection.execute(
-                    "UPDATE chat_sub_agents SET background = ?2, payload = ?3 WHERE id = ?1",
-                    params![record, background, payload],
+                    "UPDATE chat_sub_agents SET background = ?2, payload = ?3, parent_native_id = COALESCE(parent_native_id, ?4), tool_id = COALESCE(tool_id, ?5) WHERE id = ?1",
+                    params![record, background, payload, parent, tool_id],
                 )?;
             }
             // The record first: a follower that reads a run knows whose it is.

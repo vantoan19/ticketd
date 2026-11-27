@@ -31,8 +31,12 @@ pub(super) struct Child {
     thread: String,
     /// The child thread that started it; `None` when the Chat's own thread did.
     parent: Option<String>,
+    /// The tool call (a Step) that started it, when its announcement named one.
+    tool: Option<String>,
     /// The turn it runs now.
     turn: Option<String>,
+    /// The latest turn it began, running or over: the run a late announcement is about.
+    run: Option<String>,
     /// The turn ticketd asked Codex to interrupt: how that turn ended is then the
     /// person's doing.
     stopping: Option<String>,
@@ -90,7 +94,27 @@ impl Session {
         tool: Option<&str>,
         native: Value,
     ) -> Vec<EventKind> {
-        if self.child(thread).is_some() {
+        if let Some(child) = self.child_mut(thread) {
+            // Its own frames came first, so it was taken for the Chat's own child with no
+            // launching Step: the announcement says whose it is. The run it already has
+            // is named, so this opens no other.
+            let parent_known = parent.is_some() && child.parent.is_none();
+            let tool_known = tool.is_some() && child.tool.is_none();
+            if parent_known || tool_known {
+                if parent_known {
+                    child.parent = parent;
+                }
+                if tool_known {
+                    child.tool = tool.map(str::to_owned);
+                }
+                let child = &*child;
+                return vec![started(
+                    child,
+                    child.run.clone(),
+                    child.tool.as_deref(),
+                    native,
+                )];
+            }
             return vec![EventKind::SubAgentUpdated {
                 sub_agent: NativeSubAgentId::new(thread),
                 run: None,
@@ -101,7 +125,9 @@ impl Session {
         let child = Child {
             thread: thread.to_owned(),
             parent,
+            tool: tool.map(str::to_owned),
             turn: None,
+            run: None,
             stopping: None,
             stopped: None,
             tools: HashMap::new(),
@@ -125,7 +151,9 @@ impl Session {
         let child = Child {
             thread: thread.to_owned(),
             parent: None,
+            tool: None,
             turn: turn.map(str::to_owned),
+            run: turn.map(str::to_owned),
             stopping: None,
             stopped: None,
             tools: HashMap::new(),
@@ -184,6 +212,7 @@ impl Session {
             return Vec::new();
         }
         child.turn = Some(turn.to_owned());
+        child.run = Some(turn.to_owned());
         child.stopping = None;
         let child = &*child;
         vec![started(child, Some(turn.to_owned()), None, native)]
@@ -216,6 +245,11 @@ impl Session {
         };
         if child.stopping.as_deref() == Some(id) {
             child.stopped = child.stopping.take();
+        }
+        // The end of an older turn than the one it runs now is history: the commands and
+        // approvals of the current turn stay. Core ignores an older run's end the same way.
+        if child.turn.as_deref().is_some_and(|current| current != id) {
+            return Vec::new();
         }
         if child.turn.as_deref() == Some(id) {
             child.turn = None;
