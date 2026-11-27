@@ -179,11 +179,13 @@ function WorkingLine({
             className="ticket-agent-others"
             aria-haspopup="menu"
           >
-            {many.length} others
+            {`${many.length} others`}
           </button>
         </DropdownMenuTrigger>
         <DropdownMenuContent
           align="start"
+          alignOffset={-12}
+          sideOffset={6}
           className="w-80 p-2"
           aria-label="Agents working on this ticket"
         >
