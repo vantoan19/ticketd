@@ -979,11 +979,7 @@ function Row({
     case "sub_agent":
       return (
         <Arrives id={row.key}>
-          <SubAgentRow
-            item={row.item}
-            live={live}
-            onOpen={actions.openSubAgent}
-          />
+          <SubAgentRow item={row.item} onOpen={actions.openSubAgent} />
         </Arrives>
       );
     case "warnings":

@@ -32,18 +32,17 @@ function tooltipOf(row: ItemOf<"sub_agent">, record: SubAgent | undefined) {
  */
 export const SubAgentRow = memo(function SubAgentRow({
   item,
-  live,
   onOpen,
 }: {
   item: ItemOf<"sub_agent">;
-  live: boolean;
   onOpen:
     ((item: ItemOf<"sub_agent">, origin: HTMLElement) => void) | undefined;
 }) {
   const record = useContext(SubAgentsContext).find(
     (one) => one.id === item.sub_agent,
   );
-  const running = item.status === "running" && live;
+  // A running sub-agent spins whether or not its parent turn has ended.
+  const running = item.status === "running";
   const now = useNow(running);
   const title = record?.title ?? "Sub-agent";
   const suffix = subAgentSuffix(item, record, now);
