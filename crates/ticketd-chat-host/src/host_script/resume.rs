@@ -228,6 +228,58 @@ async fn after_a_restart_the_running_sub_agents_are_lost_and_the_next_message_sa
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_message_whose_restart_note_cannot_be_kept_is_not_sent() {
+    let mut h = HostScript::claude()
+        .process([
+            fixture!("claude", "handshake"),
+            fixture!("claude", "sub_agent_restart_before"),
+        ])
+        .process([fixture!("claude", "handshake_resume")])
+        .start();
+    h.send("Before I merge, review the rate limiter on this branch. In parallel: look for ways around it, check that the tests cover the edge cases, and proofread the API docs.")
+        .await;
+    h.play_to("the SDK took the input").await;
+    h.play_to("the turn ended").await;
+    h.play_to("a sub-agent works after the turn ended").await;
+    h.play_to("both sub-agents work").await;
+    h.core().mark_chat_seen(h.chat_id()).unwrap();
+    h.restart_ticketd().await;
+
+    // Storage refuses the note the message would carry.
+    rusqlite::Connection::open(h.workspace_path())
+        .unwrap()
+        .execute_batch(
+            "CREATE TRIGGER refuse_note BEFORE UPDATE OF note ON chat_messages
+             BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+        )
+        .unwrap();
+    let words = "Pick the two reviews back up.";
+    h.send(words).await;
+    h.play_all().await;
+
+    // It never reached the harness: the fixture holds no input for it, and the stored
+    // attempt says so instead of leaving the message as possibly sent.
+    let message = h
+        .items()
+        .into_iter()
+        .find_map(|item| match item {
+            ChatItem::Message(message) if message.text == words => Some(message),
+            _ => None,
+        })
+        .expect("the message");
+    assert_eq!(message.note, None);
+    assert_eq!(
+        message
+            .attempts
+            .iter()
+            .map(|attempt| attempt.delivery)
+            .collect::<Vec<_>>(),
+        [ticketd_core::ChatDelivery::NotDelivered]
+    );
+    h.finish().await;
+}
+
+#[tokio::test(start_paused = true)]
 async fn after_a_restart_a_codex_chat_is_told_which_sub_agents_were_lost_without_a_way_to_resume_them()
  {
     let mut h = HostScript::codex()
