@@ -176,6 +176,7 @@ export function prepareReport(source: string): PreparedReport {
     scripts,
     external: outside,
     // Empty, only stylesheets that are not part of the attachment, or markup that never settled.
-    unusable: srcdoc === null || !visible || (stylesheets && !styled && outside),
+    unusable:
+      srcdoc === null || !visible || (stylesheets && !styled && outside),
   };
 }

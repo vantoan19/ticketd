@@ -174,5 +174,5 @@ export function useStill(file: Attachment, wanted: boolean): Still | null {
       current = false;
     };
   }, [wanted, kind, file.id]);
-  return kind && still?.id === file.id ? still : null;
+  return wanted && kind && still?.id === file.id ? still : null;
 }

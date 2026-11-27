@@ -443,3 +443,27 @@ test("a picture card asks for its file's facts once, not once for the still and 
   expect(asked("attachment_preview")).toHaveLength(1);
   expect(asked("attachment_workspace_id")).toHaveLength(1);
 });
+
+test("a loaded still goes away while the file is not in this computer's storage, and returns with it", async () => {
+  const arrive = viewport();
+  vi.mocked(invoke).mockImplementation(async (command) => {
+    if (command === "attachment_workspace_id") return "workspace";
+    return info(stored("shot", "shot.png"));
+  });
+  const card = (state: "downloaded" | "not_downloaded") => (
+    <AttachmentCard
+      file={stored("shot", "shot.png")}
+      storage={{ id: "shot", state, progress: null }}
+      onOpen={() => {}}
+    />
+  );
+  const view = render(card("downloaded"));
+  arrive();
+  await waitFor(() =>
+    expect(document.querySelector("img.file-card-still")).not.toBeNull(),
+  );
+  view.rerender(card("not_downloaded"));
+  expect(document.querySelector("img.file-card-still")).toBeNull();
+  view.rerender(card("downloaded"));
+  expect(document.querySelector("img.file-card-still")).not.toBeNull();
+});
