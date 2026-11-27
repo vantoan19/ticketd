@@ -438,7 +438,8 @@ system's secure store.
     account, and a dialog says what changes in each before anything does: sync stops on
     this computer until a Workspace is chosen in the new account, and new files are kept
     on this computer until Google Drive is chosen again. When the sign-in ends, both show
-    it, and one Sign in again resumes both. Choosing Drive on Files after sync has signed
+    it, and one Sign in again resumes both; it has to be the same account, and another account is
+    refused until Use another account… moves both. Choosing Drive on Files after sync has signed
     in needs no second consent, and Workspace sync set up after Files used Drive signs in
     with that account without asking again.
   - **Where uploads go.** While Workspace sync is on Google Drive, uploads go to an

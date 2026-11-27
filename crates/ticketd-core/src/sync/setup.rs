@@ -294,6 +294,15 @@ pub struct S3Binding {
     pub endpoint: Option<String>,
 }
 
+/// Why a sign-in as another Google account is refused while Files or Workspace sync is
+/// already on one.
+pub(crate) fn other_google_account() -> Error {
+    Error::Sync(
+        "Workspace sync and Files are signed in to another Google account; sign in with that account, or use another Google account for both in Settings › Files"
+            .into(),
+    )
+}
+
 /// What a person is told when a profile reaches another S3 service than the one the
 /// Workspace's bucket was connected through. The endpoints are as [`S3Binding::endpoint`]
 /// keeps them.
@@ -689,6 +698,28 @@ pub(super) fn remember_replaced_folder(
         (Ok(replaced), Ok(restored)) => replaced == restored,
         _ => false,
     };
+    // The backup may be of a format before these columns.
+    migrate_last_folder(restored)?;
+    migrate_provider(restored)?;
+    migrate_endpoint(restored)?;
+    // The sign-in and the settings belong to this computer, not to the Workspace's content:
+    // they stay whatever the backup is of and wherever it was made.
+    restored.execute(
+        "UPDATE sync_state SET connection = ?1, account = ?2, provider = ?3, s3_bucket = ?4, s3_prefix = ?5, aws_profile = ?6, aws_cli_path = ?7, s3_endpoint = ?8, device_name = ?9, poll_interval_secs = ?10, attachment_download = ?11",
+        params![
+            was.connection,
+            was.account,
+            label(was.provider)?,
+            was.s3_bucket,
+            was.s3_prefix,
+            was.aws_profile,
+            was.aws_cli_path,
+            was.s3_endpoint,
+            was.device_name,
+            was.poll_interval_secs,
+            label(was.attachment_download)?,
+        ],
+    )?;
     if !same_workspace {
         return Ok(());
     }
@@ -711,31 +742,9 @@ pub(super) fn remember_replaced_folder(
             was.last_prefix.clone(),
         )
     };
-    // The backup may be of a format before these columns.
-    migrate_last_folder(restored)?;
-    migrate_provider(restored)?;
-    migrate_endpoint(restored)?;
-    // The sign-in and the settings belong to this computer, not to the Workspace's content.
     restored.execute(
-        "UPDATE sync_state SET last_folder = ?1, last_account = ?2, last_provider = ?3, last_bucket = ?4, last_prefix = ?5, connection = ?6, account = ?7, provider = ?8, s3_bucket = ?9, s3_prefix = ?10, aws_profile = ?11, aws_cli_path = ?12, s3_endpoint = ?13, device_name = ?14, poll_interval_secs = ?15, attachment_download = ?16",
-        params![
-            folder,
-            account,
-            label(provider)?,
-            bucket,
-            prefix,
-            was.connection,
-            was.account,
-            label(was.provider)?,
-            was.s3_bucket,
-            was.s3_prefix,
-            was.aws_profile,
-            was.aws_cli_path,
-            was.s3_endpoint,
-            was.device_name,
-            was.poll_interval_secs,
-            label(was.attachment_download)?,
-        ],
+        "UPDATE sync_state SET last_folder = ?1, last_account = ?2, last_provider = ?3, last_bucket = ?4, last_prefix = ?5",
+        params![folder, account, label(provider)?, bucket, prefix],
     )?;
     Ok(())
 }
@@ -912,7 +921,23 @@ impl Workspace {
 
     /// Remember the storage sign-in, before a folder is chosen. Both values are
     /// the desktop's own: the core only keeps them with the Workspace.
+    ///
+    /// Files and Workspace sync share one Google account, so the sign-in has to be the one
+    /// the Files folder already uses, and, once a folder is bound, the one that folder was
+    /// made with: signing in again as another account would leave the two on different
+    /// accounts. [`Workspace::switch_google_account`] is how both move together.
     pub fn sync_connect(
+        &mut self,
+        connection_id: &str,
+        account: &str,
+    ) -> Result<SyncStatus, Error> {
+        self.refuse_other_files_google_sign_in(connection_id)?;
+        self.connect_google(connection_id, account)
+    }
+
+    /// [`Workspace::sync_connect`] without the shared-account check on the Files folder, for
+    /// the caller that moves the Files destination along with the sign-in.
+    pub(crate) fn connect_google(
         &mut self,
         connection_id: &str,
         account: &str,
@@ -927,6 +952,14 @@ impl Workspace {
                     "this Workspace syncs with {}; disconnect it before connecting to Google Drive",
                     state.provider.name()
                 )));
+            }
+            if state.folder.is_some()
+                && state
+                    .connection
+                    .as_deref()
+                    .is_some_and(|held| held != connection_id)
+            {
+                return Err(other_google_account());
             }
             scope.execute(
                 "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, s3_endpoint = NULL, connection = ?1, account = ?2",

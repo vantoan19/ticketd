@@ -327,15 +327,30 @@ fn lock(folder: &Path, wait: bool) -> Result<Option<File>, Error> {
     Ok(None)
 }
 
-/// The finished points as (file stem, record), newest first. A record that cannot be read
-/// leaves its point out of the list and out of the retention, so it is never deleted.
-fn records(folder: &Path) -> Result<Vec<(String, Record)>, Error> {
+/// The points in a folder: those with a readable record, and those whose record is there but
+/// cannot be read.
+struct Found {
+    /// (file stem, record), newest first.
+    points: Vec<(String, Record)>,
+    /// Stems of points whose record is damaged. They were finished once, so they are not
+    /// cleared as unfinished and what they need is not pruned; they are not listed, as
+    /// nothing is known about them.
+    unreadable: BTreeSet<String>,
+}
+
+fn scan(folder: &Path) -> Result<Found, Error> {
     let entries = match fs::read_dir(folder) {
         Ok(entries) => entries,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(Found {
+                points: Vec::new(),
+                unreadable: BTreeSet::new(),
+            });
+        }
         Err(error) => return Err(io(error)),
     };
-    let mut found = Vec::new();
+    let mut points = Vec::new();
+    let mut unreadable = BTreeSet::new();
     for entry in entries {
         let path = entry.map_err(io)?.path();
         let Some(stem) = path
@@ -346,23 +361,38 @@ fn records(folder: &Path) -> Result<Vec<(String, Record)>, Error> {
         else {
             continue;
         };
-        let Ok(record) = fs::read(&path)
+        if !point_file(folder, stem).is_file() {
+            continue;
+        }
+        match fs::read(&path)
             .map_err(Error::from)
             .and_then(|bytes| Ok(serde_json::from_slice::<Record>(&bytes)?))
-        else {
-            continue;
-        };
-        if point_file(folder, stem).is_file() {
-            found.push((stem.to_owned(), record));
+        {
+            Ok(record) => points.push((stem.to_owned(), record)),
+            Err(_) => {
+                unreadable.insert(stem.to_owned());
+            }
         }
     }
-    found.sort_by(|a, b| b.1.saved_at.cmp(&a.1.saved_at).then(b.0.cmp(&a.0)));
-    Ok(found)
+    points.sort_by(|a, b| b.1.saved_at.cmp(&a.1.saved_at).then(b.0.cmp(&a.0)));
+    Ok(Found { points, unreadable })
+}
+
+/// The finished points as (file stem, record), newest first. A record that cannot be read
+/// leaves its point out of the list and out of the retention, so it is never deleted.
+fn records(folder: &Path) -> Result<Vec<(String, Record)>, Error> {
+    Ok(scan(folder)?.points)
 }
 
 /// Removes what an interrupted save left: staged files and points that were never recorded.
 fn clear_unfinished(folder: &Path) -> Result<(), Error> {
-    let finished: BTreeSet<String> = records(folder)?.into_iter().map(|(stem, _)| stem).collect();
+    let found = scan(folder)?;
+    let finished: BTreeSet<String> = found
+        .points
+        .into_iter()
+        .map(|(stem, _)| stem)
+        .chain(found.unreadable)
+        .collect();
     for entry in fs::read_dir(folder).map_err(io)? {
         let path = entry.map_err(io)?.path();
         let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
@@ -386,19 +416,29 @@ fn clear_unfinished(folder: &Path) -> Result<(), Error> {
 }
 
 /// Keeps the newest seven daily and saved-by-you points, then deletes the attachment files
-/// that none of the rest needs.
+/// that none of the rest needs. A point whose record cannot be read still needs its files:
+/// they are read from the point itself, and when even that fails none are deleted.
 fn prune(folder: &Path) -> Result<(), Error> {
-    let all = records(folder)?;
+    let Found {
+        points: all,
+        unreadable,
+    } = scan(folder)?;
     for (stem, _) in all.iter().skip(RESTORE_POINTS_KEPT) {
         // The record goes first: a point without one is cleared as unfinished.
         fs::remove_file(record_file(folder, stem)).map_err(io)?;
         let _ = fs::remove_file(point_file(folder, stem));
     }
-    let needed: BTreeSet<&str> = all
+    let mut needed: BTreeSet<String> = all
         .iter()
         .take(RESTORE_POINTS_KEPT)
-        .flat_map(|(_, record)| record.files.iter().map(String::as_str))
+        .flat_map(|(_, record)| record.files.iter().cloned())
         .collect();
+    for stem in &unreadable {
+        match shared_hashes(&point_file(folder, stem)) {
+            Ok(hashes) => needed.extend(hashes),
+            Err(_) => return Ok(()),
+        }
+    }
     let Ok(entries) = fs::read_dir(folder.join(SHARED_FILES_FOLDER)) else {
         return Ok(());
     };

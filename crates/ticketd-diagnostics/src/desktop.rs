@@ -157,10 +157,10 @@ impl DesktopLogs {
             dir: dir.as_ref().to_path_buf(),
         };
         // A report left open by the last run goes on: detailed logging resumes before the
-        // first event of this run, so a problem at startup is caught.
-        if !logs.pinned
-            && let Some(marker) = ReportMarker::read(dir.as_ref())
-        {
+        // first event of this run, so a problem at startup is caught. A `TICKETD_LOG` filter
+        // still decides the level (`set_debug` leaves it alone), but the report stays open,
+        // so it can be saved or cancelled and does not come back at a later launch.
+        if let Some(marker) = ReportMarker::read(dir.as_ref()) {
             logs.set_debug(true);
             logs.set_report(Some(marker));
         }

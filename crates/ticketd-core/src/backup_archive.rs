@@ -229,7 +229,7 @@ pub(crate) fn pack_external(
             )));
         }
         let shared = store.join(&hash);
-        if fs::metadata(&shared).is_ok_and(|kept| kept.len() == size) {
+        if kept_unchanged(&shared, size, &hash) {
             // The same bytes are already kept for an earlier point.
         } else {
             input.seek(SeekFrom::Start(0))?;
@@ -258,6 +258,20 @@ pub(crate) fn pack_external(
     tx.commit()?;
     sync_directory(store)?;
     validate(connection)
+}
+
+/// Whether `shared` already holds these bytes: the right length is not enough, as a file
+/// damaged in place would be reused by every later point and fail each one's check. One
+/// that cannot be read counts as not kept, and is written again.
+fn kept_unchanged(shared: &Path, size: u64, hash: &str) -> bool {
+    let Ok(mut kept) = File::open(shared) else {
+        return false;
+    };
+    if kept.metadata().is_ok_and(|metadata| metadata.len() != size) {
+        return false;
+    }
+    transfer(&mut kept, &mut std::io::sink())
+        .is_ok_and(|(read, found)| read == size && found == hash)
 }
 
 /// The folder a restore point keeps its attachment files in: `files`, beside the point.

@@ -19,6 +19,7 @@ pub use engine::{
     SyncChoice, SyncConflict, SyncConflictField, SyncNotice, SyncNoticeKind, SyncResolution,
 };
 pub(crate) use engine::{migrate_source_state_conflicts, removed_by_sync};
+pub(crate) use setup::other_google_account;
 pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, S3Binding,
     SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDevice, SyncDirection, SyncFolder,

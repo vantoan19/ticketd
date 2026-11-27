@@ -321,6 +321,106 @@ fn a_save_that_was_interrupted_leaves_nothing_in_the_list_and_is_cleared_next_ti
     assert_eq!(names.len(), 3, "{names:?}"); // point, record, lock
 }
 
+/// A record that cannot be read is not the same as no record: the point it belongs to was
+/// finished, so the next save neither deletes it nor the attachment files it needs.
+#[test]
+fn a_point_whose_record_cannot_be_read_is_kept_with_its_attachment_files() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = open(dir.path());
+    let file = dir.path().join("first.txt");
+    fs::write(&file, b"the first file").unwrap();
+    workspace.import_attachment("one", &file, None).unwrap();
+    let point = workspace
+        .save_daily_restore_point_at(day(10))
+        .unwrap()
+        .unwrap();
+    let files_before = shared_files(&workspace);
+    assert_eq!(files_before, 2);
+    let database = std::path::PathBuf::from(&point.path);
+    let record = database.with_extension("json");
+    fs::write(&record, b"{ not json").unwrap();
+
+    // The next saves are where unfinished points are cleared and old files pruned.
+    workspace.save_daily_restore_point_at(day(11)).unwrap();
+    for number in 12..20 {
+        workspace.save_daily_restore_point_at(day(number)).unwrap();
+    }
+
+    assert!(database.is_file(), "the point was deleted");
+    assert_eq!(fs::read(&record).unwrap(), b"{ not json");
+    // Its attachment files outlive the seven newer points that do not need them.
+    assert_eq!(shared_files(&workspace), files_before);
+    assert_eq!(
+        workspace.restore_points().unwrap().points.len(),
+        RESTORE_POINTS_KEPT
+    );
+}
+
+/// When neither the record nor the point can say which attachment files it needs, no shared
+/// file is deleted: they may all be needed.
+#[test]
+fn shared_files_stay_while_a_point_that_cannot_be_read_may_need_them() {
+    let dir = tempfile::tempdir().unwrap();
+    let workspace = open(dir.path());
+    let point = workspace
+        .save_daily_restore_point_at(day(10))
+        .unwrap()
+        .unwrap();
+    let database = std::path::PathBuf::from(&point.path);
+    fs::write(database.with_extension("json"), b"").unwrap();
+    fs::write(&database, b"not a database").unwrap();
+    let store = workspace.restore_points_folder().unwrap().join("files");
+    fs::create_dir_all(&store).unwrap();
+    fs::write(store.join("unknown-owner"), b"x").unwrap();
+
+    workspace.save_daily_restore_point_at(day(11)).unwrap();
+
+    assert!(database.is_file());
+    assert!(store.join("unknown-owner").is_file());
+}
+
+/// A shared file damaged without changing its length is not reused: the next point writes
+/// the healthy bytes over it, so one bad file does not stop every later point.
+#[test]
+fn a_shared_file_whose_bytes_changed_is_replaced_from_the_healthy_attachment() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = open(dir.path());
+    let file = dir.path().join("first.txt");
+    fs::write(&file, b"the first file").unwrap();
+    let attachment = workspace.import_attachment("one", &file, None).unwrap();
+    workspace.save_daily_restore_point_at(day(10)).unwrap();
+    let store = workspace.restore_points_folder().unwrap().join("files");
+    let healthy: Vec<_> = fs::read_dir(&store)
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .map(|path| (fs::read(&path).unwrap(), path))
+        .collect();
+    for (bytes, path) in &healthy {
+        fs::write(path, vec![0xAA; bytes.len()]).unwrap();
+    }
+
+    let next = workspace
+        .save_daily_restore_point_at(day(11))
+        .unwrap()
+        .unwrap();
+
+    assert_eq!(next.problem, None);
+    for (bytes, path) in &healthy {
+        assert_eq!(&fs::read(path).unwrap(), bytes, "{}", path.display());
+    }
+    let inspection = workspace.inspect_backup(&next.path).unwrap();
+    assert!(matches!(inspection.check, BackupCheck::Valid { .. }));
+    drop(workspace);
+    let target = dir.path().join("restored.sqlite3");
+    Workspace::restore(&target, &next.path).unwrap();
+    let output = dir.path().join("out");
+    Workspace::open(&target)
+        .unwrap()
+        .export_attachment(&attachment.id, &output)
+        .unwrap();
+    assert_eq!(fs::read(output).unwrap(), b"the first file");
+}
+
 #[test]
 fn a_backup_saved_to_a_path_is_still_a_standalone_file_that_restores_anywhere() {
     let dir = tempfile::tempdir().unwrap();

@@ -241,6 +241,36 @@ fn a_filter_override_wins_over_the_debug_switch() {
     assert_eq!(lines(&log_files(dir.path())[0]).len(), 1);
 }
 
+/// A report left open stays open under a `TICKETD_LOG` launch: the filter still decides the
+/// level, and cancelling the report there means the next plain launch does not resume it.
+#[test]
+fn a_report_left_open_can_be_cancelled_in_a_launch_that_a_filter_override_decides() {
+    let dir = tempfile::tempdir().unwrap();
+    let logs = open(dir.path());
+    logs.start_report();
+    let started = logs.log_level().report_started_at.unwrap();
+    drop(logs);
+
+    let pinned = DesktopLogs::open(
+        dir.path(),
+        Config {
+            filter_override: Some("ticketd=trace".into()),
+            ..Config::default()
+        },
+    );
+    let level = pinned.log_level();
+    assert_eq!(level.report_started_at.as_deref(), Some(started.as_str()));
+    // The override decides the level; the report does not turn detailed logging on.
+    assert_eq!(level.level, "ticketd=trace");
+    assert!(!level.debug);
+    pinned.end_report();
+    assert_eq!(pinned.log_level().report_started_at, None);
+    drop(pinned);
+
+    let later = open(dir.path()).log_level();
+    assert_eq!((later.debug, later.report_started_at), (false, None));
+}
+
 #[test]
 fn the_level_reports_the_default_debug_and_the_environment_override() {
     let dir = tempfile::tempdir().unwrap();

@@ -1155,6 +1155,23 @@ fn follow_uploads(workspace: &mut Workspace) {
     }
 }
 
+/// [`follow_uploads`] for the Workspace a download has just put in place. The replacement has
+/// already succeeded, and with it the safety copy the person is told about, so a Workspace
+/// another process holds exclusively at this moment (or one that cannot be reopened) is left
+/// for the next time like any other failure to follow: the download is still reported.
+fn follow_uploads_after_replace<W: std::ops::DerefMut<Target = Workspace>>(
+    reopen: impl FnOnce() -> Result<W, ticketd_core::Error>,
+) {
+    match reopen() {
+        Ok(mut workspace) => follow_uploads(&mut workspace),
+        Err(error) => tracing::warn!(
+            error_kind = error.kind().code(),
+            %error,
+            "could not reopen the Workspace to move uploads into the sync folder"
+        ),
+    }
+}
+
 #[tauri::command(async)]
 pub fn sync_setup_options() -> Outcome<SetupOptions> {
     let workspace = open_workspace()?;
@@ -1211,7 +1228,7 @@ pub fn sync_download_workspace(
     drop(no_run);
     // The replaced Workspace starts with its files on this computer, so this is a no-op
     // until a Drive folder is chosen; the other ways into sync call it the same way.
-    follow_uploads(&mut *open_workspace()?);
+    follow_uploads_after_replace(open_workspace);
     woken(Ok(Downloaded {
         status,
         safety_backup: safety_backup.display().to_string(),
@@ -2280,6 +2297,22 @@ mod tests {
         assert!(check_folder_id("").is_err());
         assert!(check_folder_id("' or name contains '").is_err());
         assert!(check_attachment_ids(&[String::new()]).is_err());
+    }
+
+    #[test]
+    fn a_workspace_that_cannot_be_reopened_after_a_download_does_not_undo_it() {
+        let mut desks = desks();
+        // Reopening fails: nothing is raised and the folder is not asked about.
+        follow_uploads_after_replace(|| -> Result<&mut Workspace, _> {
+            Err(ticketd_core::Error::Sync("held by another process".into()))
+        });
+        // Reopened, it is followed like every other way into sync (here: nothing to move).
+        let mut reopened = 0;
+        follow_uploads_after_replace(|| -> Result<&mut Workspace, ticketd_core::Error> {
+            reopened += 1;
+            Ok(&mut desks.here)
+        });
+        assert_eq!(reopened, 1);
     }
 
     #[test]
