@@ -109,6 +109,18 @@ describe("the sub-agent view-model contract", () => {
     );
   });
 
+  it("a resumed main turn is a running main turn, even while a sub-agent runs", () => {
+    const { resumed } = subAgentFixtures();
+    expect(
+      resumed.items?.some(
+        (item) =>
+          item.kind === "turn" && item.outcome === "active" && !item.owner,
+      ),
+    ).toBe(true);
+    expect(resumed.chat.activity).toBe("working");
+    expect(resumed.chat.turn_running).not.toBe(false);
+  });
+
   it("the replied fixture counts as working while sub-agents run with no main turn", async () => {
     const { replied, finished } = subAgentFixtures();
     expect(replied.chat).toMatchObject({
