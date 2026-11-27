@@ -102,7 +102,7 @@ impl Facts {
                     .filter(|run| run.state == ChatSubAgentState::Running)?;
                 (
                     run.started_at.clone(),
-                    sub_agent_model(record, &self.live),
+                    sub_agent_model(record, &chat.harness, &self.live),
                     record.title(),
                     None,
                 )

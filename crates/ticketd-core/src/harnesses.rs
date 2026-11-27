@@ -169,10 +169,16 @@ pub struct HarnessDescriptor {
 /// (ADR 0022). A view offers only what is declared here.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubAgentSupport {
+    /// It starts sub-agents ticketd can show. When false, nothing below is offered.
+    pub supported: bool,
     /// It reports what a sub-agent was asked.
     pub brief: bool,
-    /// It reports a sub-agent's own messages and reasoning.
+    /// It reports a sub-agent's own messages.
     pub text: bool,
+    /// It reports a sub-agent's own reasoning.
+    pub reasoning: bool,
+    /// It reports the model a sub-agent runs on; when false the view names the harness.
+    pub model: bool,
     /// It reports when a sub-agent finishes.
     pub end: bool,
     /// One sub-agent can be stopped without the others, while it runs in the background
@@ -252,8 +258,11 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
     ],
     // Stop one goes through the SDK's `stopTask`, for sub-agents in the background only.
     sub_agents: SubAgentSupport {
+        supported: true,
         brief: true,
         text: true,
+        reasoning: true,
+        model: true,
         end: true,
         stop: true,
         resume: true,
@@ -312,8 +321,12 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
     // Codex does not report what a child was asked.
     // Stop one interrupts the child's own turn and cleans its terminals.
     sub_agents: SubAgentSupport {
+        supported: true,
         brief: false,
         text: true,
+        // A child's reasoning items are not mapped; only its messages are.
+        reasoning: false,
+        model: true,
         end: true,
         stop: true,
         resume: false,
@@ -384,10 +397,14 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
             is_default: false,
         },
     ],
-    // Antigravity reports neither a sub-agent's messages nor when it ends.
+    // Antigravity reports neither a sub-agent's messages or reasoning nor when it ends. It
+    // names no model for a sub-agent, which runs with the Chat's: ticketd records that one.
     sub_agents: SubAgentSupport {
+        supported: true,
         brief: true,
         text: false,
+        reasoning: false,
+        model: true,
         end: false,
         // `session/cancel` ends everything; there is no stop for one child.
         stop: false,

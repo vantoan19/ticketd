@@ -57,6 +57,8 @@
         "capabilities": {
           "brief": true,
           "text": true,
+          "reasoning": true,
+          "model": true,
           "end": true,
           "stop": false,
           "resume": true
@@ -80,6 +82,8 @@
         "capabilities": {
           "brief": true,
           "text": true,
+          "reasoning": true,
+          "model": true,
           "end": true,
           "stop": false,
           "resume": true
