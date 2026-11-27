@@ -416,9 +416,9 @@ fn clear_unfinished(folder: &Path) -> Result<(), Error> {
 }
 
 /// Keeps the newest seven daily and saved-by-you points, then deletes the attachment files
-/// that none of the rest needs. A point whose record cannot be read still needs its files:
-/// they are read from the point itself, and when that fails or its inventory is not the one
-/// its container vouches for, none are deleted.
+/// that none of the rest needs. What a point needs is its record's list and the inventory of
+/// the point itself, which counts only when it is the one its container vouches for; when a
+/// point's inventory cannot be read or verified, no file is deleted.
 fn prune(folder: &Path) -> Result<(), Error> {
     let Found {
         points: all,
@@ -434,7 +434,14 @@ fn prune(folder: &Path) -> Result<(), Error> {
         .take(RESTORE_POINTS_KEPT)
         .flat_map(|(_, record)| record.files.iter().cloned())
         .collect();
-    for stem in &unreadable {
+    // A record can parse and still name the wrong files, so every retained point's own
+    // verified inventory counts too.
+    let retained = all
+        .iter()
+        .take(RESTORE_POINTS_KEPT)
+        .map(|(stem, _)| stem)
+        .chain(&unreadable);
+    for stem in retained {
         match trusted_shared_hashes(&point_file(folder, stem)) {
             Ok(hashes) => needed.extend(hashes),
             Err(_) => return Ok(()),
@@ -501,6 +508,13 @@ fn read_shared_hashes(path: &Path, verify: bool) -> Result<Vec<String>, Error> {
         OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
     )?;
     if !crate::backup::table_exists(&connection, "ticketd_backup_files")? {
+        // A packaged point (it has a container header) that lost its inventory is damaged,
+        // not empty. One with neither table never held attachment files.
+        if verify && crate::backup::table_exists(&connection, "ticketd_backup_container")? {
+            return Err(Error::Backup(
+                "the file inventory of a restore point is missing".into(),
+            ));
+        }
         return Ok(Vec::new());
     }
     if verify && !crate::backup_archive::inventory_is_intact(&connection)? {

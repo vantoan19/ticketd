@@ -572,7 +572,7 @@ fn upload_limit_message(limit: u64) -> String {
         );
     }
     format!(
-        "file exceeds the workspace upload limit of {bound}; change it in Settings › Files or `ticketd attachment limit --bytes <bytes>`"
+        "file exceeds the workspace upload limit of {bound}; choose a smaller file, or raise the limit with `ticketd attachment limit --bytes <bytes>`"
     )
 }
 

@@ -397,6 +397,64 @@ fn a_point_without_a_record_whose_inventory_lost_a_row_deletes_no_shared_file() 
     assert_eq!(shared_files(&workspace), files_before);
 }
 
+/// A packaged point that lost its whole inventory table is damaged, not empty: it may need
+/// files nothing else names, so none are deleted.
+#[test]
+fn a_packaged_point_that_lost_its_inventory_table_deletes_no_shared_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let (workspace, database) = damaged_record_point_alone_needs_a_file(dir.path());
+    let files_before = shared_files(&workspace);
+    {
+        let point = Connection::open(&database).unwrap();
+        point
+            .execute("DROP TABLE ticketd_backup_files", [])
+            .unwrap();
+    }
+
+    save_more_than_seven_points(&workspace);
+
+    assert!(database.is_file());
+    assert_eq!(shared_files(&workspace), files_before);
+}
+
+/// A retained point's record can still parse and name the wrong files: what the point needs
+/// is read from its own verified inventory too, so a wrong record deletes nothing it needs.
+#[test]
+fn a_retained_point_whose_record_names_a_wrong_hash_keeps_the_files_its_database_needs() {
+    let dir = tempfile::tempdir().unwrap();
+    let (workspace, database) = damaged_record_point_alone_needs_a_file(dir.path());
+    let files_before = shared_files(&workspace);
+    assert_eq!(files_before, 2);
+    let record = database.with_extension("json");
+    fs::write(
+        &record,
+        serde_json::json!({
+            "kind": "daily",
+            "saved_at": "2026-11-10T08:52:00+10:00",
+            "local_date": "2026-11-10",
+            "summary": null,
+            "problem": null,
+            "files": ["0000000000000000000000000000000000000000000000000000000000000000"],
+        })
+        .to_string(),
+    )
+    .unwrap();
+
+    // Six newer points: the one with the wrong record is still among the seven kept.
+    for number in 11..17 {
+        workspace.save_daily_restore_point_at(day(number)).unwrap();
+    }
+
+    // The record parses, so the point is listed (an unreadable one would not be).
+    let list = workspace.restore_points().unwrap().points;
+    assert_eq!(list.len(), RESTORE_POINTS_KEPT);
+    assert_eq!(
+        list[RESTORE_POINTS_KEPT - 1].path,
+        database.to_string_lossy()
+    );
+    assert_eq!(shared_files(&workspace), files_before);
+}
+
 /// When neither the record nor the point can say which attachment files it needs, no shared
 /// file is deleted: they may all be needed.
 #[test]

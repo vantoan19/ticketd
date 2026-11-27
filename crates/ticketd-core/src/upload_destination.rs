@@ -90,10 +90,25 @@ pub(crate) fn refuse_other_files_google_sign_in(
     }
 }
 
+/// The Google account the Files folder of `connection` is in, when it is on Google Drive.
+/// A Workspace of a format before Files had destinations has none.
+pub(crate) fn files_google_connection(connection: &Connection) -> Result<Option<String>, Error> {
+    if !crate::backup::table_exists(connection, "attachment_upload_destination")? {
+        return Ok(None);
+    }
+    Ok(match files_destination(connection)? {
+        AttachmentUploadDestination::GoogleDrive { destination, .. } => {
+            Some(destination.connection_id)
+        }
+        AttachmentUploadDestination::Local => None,
+    })
+}
+
 /// A restore keeps this computer's Google sign-in (`kept`, the connection id) in the
 /// restored Workspace. A Files folder in another account than that one would leave Files
 /// and sync on two accounts, so it goes back to this computer, as when the account is
-/// switched. Without a sign-in kept, the folder is the only one there is.
+/// switched. Without a sign-in kept (neither sync's nor a Files folder's), the restored
+/// folder is the only one there is.
 pub(crate) fn follow_kept_google_sign_in(
     restored: &Connection,
     kept: Option<&str>,
@@ -310,7 +325,6 @@ impl Workspace {
                     .into(),
             ));
         };
-        let account = self.sync_google_sign_in()?.and_then(|(_, account)| account);
         let folder = uploads
             .uploads_folder(&binding.folder_id)
             .map_err(|error| Error::Sync(error.to_string()))?;
@@ -319,15 +333,31 @@ impl Workspace {
                 "the Uploads folder in Google Drive cannot receive files".into(),
             ));
         }
-        self.save_upload_destination(AttachmentUploadDestination::GoogleDrive {
-            destination: DriveUploadDestination {
-                connection_id,
-                folder_id: folder.id,
-                resource_key: None,
-            },
-            folder_name: folder.name,
-            account,
-            sync_folder: Some(binding.folder_id),
+        // The sign-in is read again where the folder is saved, under one write lock: another
+        // handle on this Workspace file could have signed sync in to another account while
+        // Drive was asked, and the folder belongs to the account it was found with.
+        crate::write_scope::run(&self.connection, |scope| {
+            let account = match crate::sync::google_sign_in_of(scope)? {
+                Some((current, account)) if current == connection_id => account,
+                _ => {
+                    return Err(Error::Attachment(
+                        "Workspace sync is signed in to another Google account now; try again"
+                            .into(),
+                    ));
+                }
+            };
+            let chosen = AttachmentUploadDestination::GoogleDrive {
+                destination: DriveUploadDestination {
+                    connection_id: connection_id.clone(),
+                    folder_id: folder.id.clone(),
+                    resource_key: None,
+                },
+                folder_name: folder.name.clone(),
+                account,
+                sync_folder: Some(binding.folder_id.clone()),
+            };
+            write_destination(scope, &chosen)?;
+            Ok(chosen)
         })
     }
 

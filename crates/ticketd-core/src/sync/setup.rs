@@ -601,9 +601,26 @@ fn from_label<T: DeserializeOwned>(text: Option<String>) -> Option<T> {
     serde_json::from_value(serde_json::Value::String(text?)).ok()
 }
 
+/// What [`state`] reads, in the order it reads them.
+const STATE_COLUMNS: &str = "connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account, provider, s3_bucket, s3_prefix, aws_profile, aws_cli_path, last_provider, last_bucket, last_prefix, s3_endpoint";
+
+/// Whether the sync state is there with every column [`state`] reads: a Workspace of an
+/// older format has none of them or only the first of them.
+fn has_state(connection: &Connection) -> Result<bool, Error> {
+    if !crate::backup::table_exists(connection, "sync_state")? {
+        return Ok(false);
+    }
+    for column in STATE_COLUMNS.split(", ") {
+        if !has_column(connection, "sync_state", column)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn state(connection: &Connection) -> Result<State, Error> {
     Ok(connection.query_row(
-        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account, provider, s3_bucket, s3_prefix, aws_profile, aws_cli_path, last_provider, last_bucket, last_prefix, s3_endpoint FROM sync_state",
+        &format!("SELECT {STATE_COLUMNS} FROM sync_state"),
         [],
         |row| {
             Ok(State {
@@ -697,10 +714,12 @@ pub(super) fn remember_replaced_folder(
     restored: &Connection,
     replaced: &Connection,
 ) -> Result<(), Error> {
-    // A replaced Workspace of an older format has nothing to remember.
-    let Ok(was) = state(replaced) else {
+    // A replaced Workspace of an older format has nothing to remember. Any other failure to
+    // read it stops the restore here, before the live Workspace changes.
+    if !has_state(replaced)? {
         return Ok(());
-    };
+    }
+    let was = state(replaced)?;
     // The folder belongs to one Workspace: a backup of another one is not offered it.
     let same_workspace = match (
         crate::embedded_attachments::workspace_id(replaced),
@@ -731,11 +750,14 @@ pub(super) fn remember_replaced_folder(
             label(was.attachment_download)?,
         ],
     )?;
-    // Files and sync share the sign-in kept above: a Files folder in another account goes.
+    // Files and sync share one Google sign-in on this computer: sync's, otherwise the one
+    // the replaced Workspace's Files folder uses. A Files folder in another account goes.
+    let files_sign_in = crate::upload_destination::files_google_connection(replaced)?;
     let kept = was
         .connection
         .as_deref()
-        .filter(|_| was.provider == SyncProvider::GoogleDrive);
+        .filter(|_| was.provider == SyncProvider::GoogleDrive)
+        .or(files_sign_in.as_deref());
     crate::upload_destination::follow_kept_google_sign_in(restored, kept)?;
     if !same_workspace {
         return Ok(());

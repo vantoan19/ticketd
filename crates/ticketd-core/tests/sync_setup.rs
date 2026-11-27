@@ -1148,6 +1148,61 @@ fn a_backup_of_another_workspace_is_not_offered_the_folder_of_the_replaced_one()
     assert_eq!(a.sync_binding().unwrap(), None);
 }
 
+/// A replaced Workspace of a format before sync's columns (or before sync) has no sign-in
+/// to keep: the restore goes ahead. Any other reason its sync state cannot be read stops it.
+#[test]
+fn restoring_over_a_workspace_of_an_older_format_has_nothing_to_keep_and_goes_ahead() {
+    let desks = desks();
+    let other = desks.desk("Other Mac");
+    let backup = desks.directory.path().join("other.sqlite3");
+    other.backup(&backup).unwrap();
+    drop(other);
+    // 57 has no sync state at all; 64 has it without the last-synced columns.
+    for format in [57, 64] {
+        let path = desks.directory.path().join(format!("old-{format}.sqlite3"));
+        ticketd_core::create_workspace_at_format_version(&path, format).unwrap();
+
+        Workspace::restore(&path, &backup).unwrap();
+
+        let restored = Workspace::open(&path).unwrap();
+        // Nothing of this computer's was kept over it: the backup's own sign-in stands.
+        assert_eq!(
+            restored.sync_status().unwrap().connection_id.as_deref(),
+            Some("connection-1")
+        );
+    }
+}
+
+#[test]
+fn a_sync_state_that_cannot_be_read_stops_a_restore_before_the_workspace_changes() {
+    let desks = desks();
+    let path = desks.directory.path().join("Desk A");
+    let mut a = desks.desk("Desk A");
+    a.sync_connect("connection-1", "person@example.com")
+        .unwrap();
+    let other = desks.desk("Other Mac");
+    let backup = desks.directory.path().join("other.sqlite3");
+    other.backup(&backup).unwrap();
+    drop((a, other));
+    // A value the sync state cannot be read with: not a missing table or column.
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute("UPDATE sync_state SET poll_interval_secs = 'soon'", [])
+        .unwrap();
+    let before = std::fs::read(&path).unwrap();
+    let files_before = std::fs::read_dir(desks.directory.path()).unwrap().count();
+
+    let error = Workspace::restore(&path, &backup).unwrap_err();
+
+    assert!(!error.to_string().is_empty());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    // No safety copy was made either: nothing was replaced.
+    assert_eq!(
+        std::fs::read_dir(desks.directory.path()).unwrap().count(),
+        files_before
+    );
+}
+
 /// ADR 0011: the sign-in and sync settings are this computer's, whatever the backup is of.
 /// A backup of another Workspace (or from another computer) names a sign-in that is not here.
 #[test]
