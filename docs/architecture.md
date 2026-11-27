@@ -213,6 +213,13 @@ monitors, ambient and transcript-less tasks are not sub-agents) and tags every f
 the tool use that started the task. The adapter routes a tagged frame to its
 sub-agent; a frame that arrives before its task is announced waits for it. A sub-agent's
 to-do list is one of its own Steps: only the main agent's plan is the turn's.
+A sub-agent's words are its own too: an assistant message has the same optional owner
+(`chat_messages.sub_agent_id`), and so do the reasoning and files records the host keeps
+for a run (a sub-agent's edits are its run's files, never the turn's). Its messages come
+whole, not streamed, and never become the Chat's last response, the Chat list's preview
+or history a fresh session carries. Its final report is its last message: Claude Code's
+task notification repeats it, so the host stores the notification's summary only when no
+message said it.
 
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat

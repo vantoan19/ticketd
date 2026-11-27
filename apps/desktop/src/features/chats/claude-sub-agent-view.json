@@ -286,7 +286,25 @@
     },
     {
       "kind": "response",
-      "id": "00000000-0000-4000-8000-000000000004:text-1",
+      "id": "00000000-0000-4000-8000-000000000004:task_b:text-1",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "The tests cover the limit.",
+      "state": "complete",
+      "turn_id": "task_b:run-1",
+      "owner": "task_b"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:task_a:text-2",
+      "at": "2026-11-27T10:00:00.000Z",
+      "text": "The limiter allows 5.",
+      "state": "complete",
+      "turn_id": "task_a:run-1",
+      "owner": "task_a"
+    },
+    {
+      "kind": "response",
+      "id": "00000000-0000-4000-8000-000000000004:text-3",
       "at": "2026-11-27T10:00:00.000Z",
       "text": "The limiter allows 5 requests and its tests cover it.",
       "state": "complete",

@@ -1217,7 +1217,8 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
             vec![
                 ChatObservation::AssistantText {
                     message_id: "reply-1".into(),
-                    turn_id: "turn-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ticketd_core::ChatOwner::Main,
                     text: "Looking".into(),
                     complete: false,
                 },
@@ -1247,7 +1248,8 @@ fn saved_input_possible_submission_acknowledgment_processing_and_outcome_are_sep
                 },
                 ChatObservation::AssistantText {
                     message_id: "reply-1".into(),
-                    turn_id: "turn-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ticketd_core::ChatOwner::Main,
                     text: "Looking. Fixed.".into(),
                     complete: true,
                 },
@@ -1393,7 +1395,8 @@ fn losing_contact_marks_work_uncertain_and_keeps_the_queue_without_dispatching()
             vec![
                 ChatObservation::AssistantText {
                     message_id: "reply-1".into(),
-                    turn_id: "turn-1".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ticketd_core::ChatOwner::Main,
                     text: "Partial".into(),
                     complete: false,
                 },
@@ -1501,7 +1504,8 @@ fn a_failed_observation_rolls_back_the_whole_batch_and_its_change_entries() {
         vec![
             ChatObservation::AssistantText {
                 message_id: "reply-1".into(),
-                turn_id: "turn-1".into(),
+                turn_id: Some("turn-1".into()),
+                owner: ticketd_core::ChatOwner::Main,
                 text: "Half".into(),
                 complete: false,
             },
@@ -1618,7 +1622,8 @@ fn a_view_reads_a_bounded_snapshot_then_follows_ordered_changes_and_resyncs_on_a
     let checkpoints = (0..CHAT_CHANGE_TAIL + 10)
         .map(|index| ChatObservation::AssistantText {
             message_id: "reply-1".into(),
-            turn_id: "turn-1".into(),
+            turn_id: Some("turn-1".into()),
+            owner: ticketd_core::ChatOwner::Main,
             text: format!("checkpoint {index}"),
             complete: false,
         })
@@ -3639,4 +3644,68 @@ fn upgrading_from_format_104_gives_a_chat_no_sub_agents_and_the_tables_take_them
         )
         .unwrap();
     assert_eq!(sub_agents(&workspace, &chat).len(), 1);
+}
+
+#[test]
+fn a_sub_agents_message_has_its_owner_and_may_have_no_turn_and_is_exported_and_backed_up() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let chat = workspace.create_chat(None, new_chat()).unwrap();
+    start_turn(&mut workspace, &chat, "First", "turn-1");
+    let said = |id: &str, turn: Option<&str>, owner: ChatOwner, text: &str| {
+        ChatObservation::AssistantText {
+            message_id: id.into(),
+            turn_id: turn.map(str::to_owned),
+            owner,
+            text: text.into(),
+            complete: true,
+        }
+    };
+    let agent = || ChatOwner::SubAgent {
+        native_id: "agent-1".into(),
+    };
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                said("main-said", Some("turn-1"), ChatOwner::Main, "Reply"),
+                said("sub-said", Some("turn-1"), agent(), "Looking"),
+            ],
+        )
+        .unwrap();
+    end_turn(&mut workspace, &chat, "turn-1");
+    // After the turn: nothing owns it but the sub-agent.
+    workspace
+        .record_chat_observations(&chat.id, vec![said("sub-late", None, agent(), "Done")])
+        .unwrap();
+
+    let of = |workspace: &Workspace, id: &str| message(workspace, &chat, id);
+    assert_eq!(of(&workspace, "main-said").owner, ChatOwner::Main);
+    assert_eq!(of(&workspace, "sub-said").owner, agent());
+    let late = of(&workspace, "sub-late");
+    assert_eq!((late.owner, late.turn_id), (agent(), None));
+
+    let export = workspace.export().unwrap();
+    let row = |id: &str| {
+        export["chat_messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["id"] == id)
+            .unwrap()
+            .clone()
+    };
+    assert_eq!(row("sub-said")["sub_agent_id"], "agent-1");
+    assert!(row("main-said")["sub_agent_id"].is_null());
+    assert!(row("sub-late")["turn_id"].is_null());
+
+    let saved = workspace.chat_snapshot(&chat.id, 500).unwrap();
+    workspace.backup(&backup).unwrap();
+    drop(workspace);
+    let restored_path = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored_path, &backup).unwrap();
+    let restored = Workspace::open(&restored_path).unwrap();
+    assert_eq!(restored.chat_snapshot(&chat.id, 500).unwrap(), saved);
 }

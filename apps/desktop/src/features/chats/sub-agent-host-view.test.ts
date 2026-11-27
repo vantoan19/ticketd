@@ -71,7 +71,12 @@ describe("the host's view of a Claude sub-agent", () => {
   it("builds each sub-agent's view, with the path to it", () => {
     const view = subAgentView(chat, items, "task_b", Date.now());
     expect(view?.ancestors.map((agent) => agent.id)).toEqual(["task_a"]);
-    expect(view?.items.map((item) => item.kind)).toEqual(["turn", "steps"]);
+    // Its Step, then its report: the notification's summary, as no message said it.
+    expect(view?.items.map((item) => item.kind)).toEqual([
+      "turn",
+      "steps",
+      "response",
+    ]);
     expect(view?.brief.text).toBe("Read the limiter tests.");
     const outer = subAgentView(chat, items, "task_a", Date.now());
     expect(outer?.items.map((item) => item.kind)).toEqual([
@@ -79,6 +84,7 @@ describe("the host's view of a Claude sub-agent", () => {
       "steps",
       "steps",
       "sub_agent",
+      "response",
     ]);
   });
 
@@ -89,5 +95,52 @@ describe("the host's view of a Claude sub-agent", () => {
     });
     const opened = await client.openChat(chat.id);
     expect(opened.items).toHaveLength(items.length);
+  });
+});
+
+/**
+ * A Claude sub-agent that thinks, speaks, edits a file and reports: the view built from
+ * the stored history of `sub_agent_messages.jsonl`.
+ */
+const spoke = JSON.parse(
+  readFileSync(
+    new URL("./claude-sub-agent-messages-view.json", import.meta.url),
+    "utf8",
+  ),
+) as unknown;
+
+describe("the host's view of a Claude sub-agent that speaks", () => {
+  const { chat, items } = chatSnapshotSchema.parse(spoke);
+
+  it("shows its reasoning, messages, steps, files and final report in order", () => {
+    const view = subAgentView(chat, items, "task_a1", Date.now());
+    expect(view?.items.map((item) => item.kind)).toEqual([
+      "turn",
+      "reasoning",
+      "response",
+      "steps",
+      "steps",
+      "files",
+      "response",
+    ]);
+    const said = view?.items.flatMap((item) =>
+      item.kind === "response" ? [item.text] : [],
+    );
+    expect(said).toEqual([
+      "I will read README.txt for the limit.",
+      "The limit is 5 requests per second. I wrote it to limit-note.txt.",
+    ]);
+  });
+
+  it("leaves the main transcript with its own reply and files only", () => {
+    const main = items.filter((item) => !item.owner);
+    expect(
+      main.flatMap((item) => (item.kind === "response" ? [item.text] : [])),
+    ).toEqual(["The sub-agent found a limit of 5 requests per second."]);
+    expect(main.some((item) => item.kind === "reasoning")).toBe(false);
+    const files = main.flatMap((item) =>
+      item.kind === "files" ? item.files.map((file) => file.path) : [],
+    );
+    expect(files).toEqual(["summary.txt"]);
   });
 });
