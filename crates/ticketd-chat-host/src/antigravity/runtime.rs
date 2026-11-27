@@ -183,7 +183,10 @@ impl Prompt {
     /// child's own calls show it exists.
     fn note_launch(&mut self, call: &acp::ToolCall) {
         if call.name.as_deref() != Some(LAUNCH_TOOL)
-            || self.launches.iter().any(|launch| launch.item == call.tool_call_id)
+            || self
+                .launches
+                .iter()
+                .any(|launch| launch.item == call.tool_call_id)
         {
             return;
         }
@@ -685,12 +688,17 @@ impl Session {
         } else {
             SubAgentOutcome::Completed
         };
-        events.extend(prompt.children.iter().map(|child| EventKind::SubAgentEnded {
-            sub_agent: NativeSubAgentId::new(&child.id),
-            run: Some(turn.0.clone()),
-            outcome: ended,
-            detail: None,
-        }));
+        events.extend(
+            prompt
+                .children
+                .iter()
+                .map(|child| EventKind::SubAgentEnded {
+                    sub_agent: NativeSubAgentId::new(&child.id),
+                    run: Some(turn.0.clone()),
+                    outcome: ended,
+                    detail: None,
+                }),
+        );
         let outcome = match (prompt_outcome(reply), prompt.quota_diagnostic) {
             (TurnOutcome::Completed, Some(diagnostic)) => {
                 TurnOutcome::Failed(problem(ProblemKind::QuotaExhausted, diagnostic))
