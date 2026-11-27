@@ -136,6 +136,7 @@ import { SubAgentView } from "@/features/chats/SubAgentView";
 import { backKey } from "@/features/chats/sub-agent-words";
 import {
   subAgentView,
+  targetSteps,
   viewPath,
   type ViewStep,
 } from "@/features/chats/sub-agents";
@@ -1285,6 +1286,9 @@ function Conversation({
   );
 }
 
+/** Where a request from outside (a ticket's label) wants the pane: a sub-agent's view, or the Chat itself (`agent` null). `n` rises with each ask. */
+export type ViewTarget = { agent: string | null; n: number };
+
 /** One open Chat: its header, linked records, conversation and composer. */
 export function ChatDetail({
   id,
@@ -1298,6 +1302,7 @@ export function ChatDetail({
   focusRequest = false,
   onRequestsAnswered,
   title,
+  target,
 }: {
   id: string;
   /** The title to show until the Chat is read, when the opener knows it. */
@@ -1317,6 +1322,8 @@ export function ChatDetail({
   focusRequest?: boolean;
   /** Inbox triage resumes after this view answers its final pending request. */
   onRequestsAnswered?: () => void;
+  /** Asked from outside: open this sub-agent's view, or leave any view for the Chat. */
+  target?: ViewTarget;
 }) {
   const client = useChatClient();
   const { snapshot, error, retry } = useChat(id);
@@ -1326,6 +1333,13 @@ export function ChatDetail({
   // The sub-agent views open on top of the Chat, outermost first, each with the
   // row that opened it so going back returns focus there.
   const [steps, setSteps] = useState<ViewStep[]>([]);
+  // An ask from outside is taken once, as soon as the Chat is read: its views
+  // open outermost first, with no row to return focus to.
+  const [taken, setTaken] = useState(0);
+  if (target && chat && taken !== target.n) {
+    setTaken(target.n);
+    setSteps(target.agent ? targetSteps(chat, target.agent) : []);
+  }
   const path = chat ? viewPath(chat, steps) : [];
   const open = path.at(-1);
   const view =
@@ -1350,11 +1364,15 @@ export function ChatDetail({
   useLayoutEffect(() => {
     const row = returning.current;
     returning.current = null;
-    if (row) {
-      [...document.querySelectorAll<HTMLElement>("[data-sub-agent]")]
-        .find((one) => one.dataset.subAgent === row)
-        ?.focus({ preventScroll: true });
-    } else if (depth > 0) document.getElementById("chat-heading")?.focus();
+    // A view opened from outside has no row: going back lands on the heading.
+    const found =
+      row &&
+      [...document.querySelectorAll<HTMLElement>("[data-sub-agent]")].find(
+        (one) => one.dataset.subAgent === row,
+      );
+    if (found) found.focus({ preventScroll: true });
+    else if (depth > 0 || row === "")
+      document.getElementById("chat-heading")?.focus();
   }, [depth]);
   const actionsOf = useMemo<TranscriptActions>(
     () => ({

@@ -34,6 +34,25 @@ export type SubAgentViewData = {
   limits: boolean;
 };
 
+/** The path into a sub-agent's view from outside: its parents outermost first, then it; none when the Chat does not know it. */
+export function targetSteps(
+  chat: Pick<ChatState, "sub_agents">,
+  agent: string,
+): ViewStep[] {
+  const chain: string[] = [];
+  for (
+    let one = chat.sub_agents.find((other) => other.id === agent);
+    one && chain.length < 16;
+    one = one.parent
+      ? chat.sub_agents.find((other) => other.id === one?.parent)
+      : undefined
+  )
+    chain.unshift(one.id);
+  return chain[chain.length - 1] === agent
+    ? chain.map((id) => ({ agent: id, row: "" }))
+    : [];
+}
+
 /** The sub-agents whose view is open, in order, dropping any the Chat no longer knows. */
 export function viewPath(
   chat: Pick<ChatState, "sub_agents">,

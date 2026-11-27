@@ -1,6 +1,7 @@
 import { createContext, useContext } from "react";
 import { z } from "zod";
 import { attachmentSchema } from "@/lib/api/attachments";
+import type { TicketAgent } from "@/features/chats/ticket-agents";
 import type { ChatAttachmentInput } from "@/features/chats/composer-attachments";
 
 /**
@@ -1036,6 +1037,11 @@ export interface ChatClient {
   ): Promise<void>;
   /** The Chats outside the trash linked to one record. Refetch on `revision`. */
   linkedTo(link: LinkRef): Promise<ChatSummary[]>;
+  /**
+   * The agents at work on one ticket, in display order (T-UB271 reads it,
+   * T-UB238 supplies it). Refetch on `revision`; an empty list is no agent at work.
+   */
+  ticketAgents(ticketId: string): Promise<TicketAgent[]>;
   /** Files and folders under `folder` matching `query`, for the composer's `@` menu. */
   folderFiles(folder: string, query: string): Promise<FolderFile[]>;
   removeQueued(id: string, queuedId: string): Promise<void>;
