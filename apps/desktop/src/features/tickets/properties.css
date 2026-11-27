@@ -371,6 +371,11 @@
   outline-offset: 2px;
 }
 
+/* The label's clock: figures of one width, so the seconds do not shift the line. */
+.ticket-agent-clock {
+  font-variant-numeric: tabular-nums;
+}
+
 /* The agents menu: one row per agent at work: mark, model, clock, then what it does. */
 .ticket-agents-menu {
   box-sizing: content-box;

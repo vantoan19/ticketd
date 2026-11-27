@@ -239,4 +239,39 @@ mod codex {
             Some(ChatSubAgentStopper::Person)
         );
     }
+
+    /// F-X5: Codex completes the command a Stop cut off as failed (exit code -1) after it
+    /// reports the child's turn interrupted. The Stop did that: no Step of the stopped
+    /// sub-agent is stored as failed.
+    #[tokio::test(start_paused = true)]
+    async fn a_command_the_stop_cut_off_is_not_stored_as_failed_even_when_it_completes_last() {
+        let mut h = HostScript::codex()
+            .process([
+                fixture!("codex", "handshake"),
+                fixture!("codex", "sub_agent_stop_one_late_failure"),
+            ])
+            .start();
+        h.send(ASK).await;
+        h.play_to("two sub-agents run commands").await;
+        let first = h
+            .sub_agents()
+            .into_iter()
+            .map(|record| record.native_id)
+            .min()
+            .unwrap();
+
+        h.stop_sub_agent(&first).await;
+        h.play_to("the first sub-agent was stopped").await;
+
+        let failed = h
+            .items()
+            .into_iter()
+            .filter(|item| {
+                matches!(item, ChatItem::Tool(tool)
+                    if tool.state == ChatToolState::Failed
+                        && tool.owner == ChatOwner::SubAgent { native_id: first.clone() })
+            })
+            .count();
+        assert_eq!(failed, 0);
+    }
 }

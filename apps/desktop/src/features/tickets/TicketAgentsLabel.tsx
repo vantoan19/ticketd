@@ -27,7 +27,10 @@ function useElapsed(started: string) {
 /** "· 2m 10s", hidden from assistive technology. */
 export function Elapsed({ started }: { started: string }) {
   return (
-    <span aria-hidden="true" className="text-muted-foreground">
+    <span
+      aria-hidden="true"
+      className="ticket-agent-clock text-muted-foreground"
+    >
       {" "}
       · {useElapsed(started)}
     </span>

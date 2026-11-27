@@ -191,6 +191,22 @@ test("the label goes when the work ends, and comes back with new work", async ()
   );
 });
 
+test("a request that arrives while the ticket is open takes the slot, so its sentence shows and Review request opens the sub-agent", async () => {
+  const user = userEvent.setup();
+  const client = open([]);
+  await screen.findByText("ready");
+  expect(screen.queryByRole("status", { name: "Ticket agent" })).toBeNull();
+  await act(async () =>
+    client.setTicketAgents(ticket.id, ticketAgentFixtures().approval),
+  );
+  const strip = await label();
+  expect(strip.textContent).toContain("wants to run");
+  await user.click(
+    within(strip).getByRole("button", { name: "Review request" }),
+  );
+  expect(asked().subAgent).toBe("sa-tests");
+});
+
 test("a ticket nobody works on has no label", async () => {
   open([]);
   await screen.findByText("ready");
@@ -206,5 +222,16 @@ test("an Activity row's credit chip gives way with an ellipsis, so it never sits
   );
   expect(css).toMatch(
     /\.activity-subagent > span \{[^}]*overflow: hidden;\s*text-overflow: ellipsis;\s*white-space: nowrap/,
+  );
+});
+
+test("the label's own clock uses tabular figures, like every other sub-agent clock", async () => {
+  open(ticketAgentFixtures().one);
+  const strip = await label();
+  const clock = strip.querySelector('[aria-hidden="true"].ticket-agent-clock');
+  expect(clock?.textContent).toMatch(/· 1m \d+s/);
+  const css = readFileSync(join(__dirname, "properties.css"), "utf8");
+  expect(css).toMatch(
+    /\.ticket-agent-clock \{[^}]*font-variant-numeric: tabular-nums/,
   );
 });

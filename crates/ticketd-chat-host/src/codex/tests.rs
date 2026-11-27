@@ -1487,6 +1487,49 @@ fn a_command_that_failed_after_a_stop_is_reported_as_such() {
     );
 }
 
+/// F-X5 (live Codex run): Stop on a sub-agent cuts its command off, and Codex reports the
+/// command failed (exit code -1). That is the Stop, not a failure, whichever frame comes
+/// first: the command's completion or its turn's end as interrupted.
+#[test]
+fn a_sub_agents_command_cut_off_by_its_stop_is_not_a_failure_in_either_order() {
+    let command = |status: &str| json!({"threadId": "thr_c", "turnId": "turn_c", "item": {"id": "cmd_c", "type": "commandExecution", "command": "sleep 161", "status": status, "processId": "42", "exitCode": -1}});
+    let ended = json!({"threadId": "thr_c", "turn": {"id": "turn_c", "status": "interrupted", "items": [], "error": null}});
+    for command_first in [true, false] {
+        let mut session = Session::default();
+        session.reply(
+            &super::mapping::Call::OpenThread,
+            &Ok(json!({"thread": {"id": "thr_1"}})),
+            false,
+        );
+        session.notification(
+            "turn/started",
+            &json!({"threadId": "thr_c", "turn": {"id": "turn_c", "rootTurnId": "turn_1"}}),
+        );
+        session.notification("item/started", &command("inProgress"));
+        session.child_interrupt_asked("thr_c", "turn_c").unwrap();
+        let mut events = Vec::new();
+        if command_first {
+            events.extend(session.notification("item/completed", &command("failed")));
+            events.extend(session.notification("turn/completed", &ended));
+        } else {
+            events.extend(session.notification("turn/completed", &ended));
+            events.extend(session.notification("item/completed", &command("failed")));
+        }
+        let statuses: Vec<_> = events
+            .iter()
+            .filter_map(|event| match event {
+                EventKind::SubAgentToolUpdated { status, .. } => Some(*status),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            statuses,
+            [crate::ToolStatus::FailedAfterInterrupt],
+            "command first: {command_first}"
+        );
+    }
+}
+
 fn unattended(edit_files: bool, use_web: bool) -> crate::Unattended {
     crate::Unattended {
         run_id: "run-1".into(),

@@ -118,7 +118,13 @@ export function TicketAgentSession({
     <AgentContext
       value={{
         ready,
-        reserved: opened && Boolean(opening.reserved),
+        // A request waiting for the person always takes the slot, even when the slot
+        // was left empty at the opening: its sentence is the point, and the header's
+        // icon alone does not say who asks for what.
+        reserved:
+          opened &&
+          (Boolean(opening.reserved) ||
+            Boolean(agents?.some((agent) => agent.approval))),
         chat,
         agents: agents ?? [],
         update: ready ? update : (ticket?.progress_summary ?? null),

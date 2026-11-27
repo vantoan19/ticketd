@@ -36,6 +36,10 @@ pub(super) struct Child {
     /// The turn ticketd asked Codex to interrupt: how that turn ended is then the
     /// person's doing.
     stopping: Option<String>,
+    /// The last turn ticketd asked Codex to interrupt that has since ended: Codex can
+    /// complete the command the Stop cut off after it reports the turn interrupted, and
+    /// that command is still the Stop's doing, not a failure.
+    stopped: Option<String>,
     /// Its tool calls that have not finished, for their live output.
     tools: HashMap<String, ToolProgress>,
 }
@@ -99,6 +103,7 @@ impl Session {
             parent,
             turn: None,
             stopping: None,
+            stopped: None,
             tools: HashMap::new(),
         };
         let event = started(&child, None, tool, native);
@@ -122,6 +127,7 @@ impl Session {
             parent: None,
             turn: turn.map(str::to_owned),
             stopping: None,
+            stopped: None,
             tools: HashMap::new(),
         };
         let event = started(&child, turn.map(str::to_owned), None, native);
@@ -208,6 +214,9 @@ impl Session {
             ),
             _ => return Vec::new(),
         };
+        if child.stopping.as_deref() == Some(id) {
+            child.stopped = child.stopping.take();
+        }
         if child.turn.as_deref() == Some(id) {
             child.turn = None;
             child.stopping = None;
@@ -270,7 +279,8 @@ impl Session {
         completed: bool,
     ) -> Option<EventKind> {
         let child = self.child_mut(thread)?;
-        let cut_off = turn.is_some() && child.stopping.as_deref() == turn;
+        let cut_off = turn.is_some()
+            && (child.stopping.as_deref() == turn || child.stopped.as_deref() == turn);
         let status = item_status(item, completed, cut_off);
         let output = item_output(item);
         let detail = item_detail(kind, item);
