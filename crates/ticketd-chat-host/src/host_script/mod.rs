@@ -136,6 +136,8 @@ use ticketd_core::{
 #[cfg(test)]
 mod codex_sub_agents;
 #[cfg(test)]
+mod write_credit;
+#[cfg(test)]
 mod sub_agents;
 #[cfg(test)]
 mod tests;
@@ -515,6 +517,11 @@ impl HostScript {
 
     pub fn chat_id(&self) -> &str {
         &self.chat.id
+    }
+
+    /// The temporary Workspace's file.
+    pub fn workspace_path(&self) -> &std::path::Path {
+        &self.path
     }
 
     /// A second handle on the Workspace, for reads the helpers do not cover.
