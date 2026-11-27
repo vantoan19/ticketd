@@ -4441,10 +4441,7 @@ async fn a_sub_agent_asking_after_the_main_turn_ended_still_puts_its_ticket_in_t
     );
     let digest = f.chats.ticket_agents_digest().unwrap();
     assert_eq!(
-        digest
-            .iter()
-            .map(|(id, _)| id.as_str())
-            .collect::<Vec<_>>(),
+        digest.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
         [ticket.id.as_str()],
         "the watcher can track what the direct read shows"
     );
