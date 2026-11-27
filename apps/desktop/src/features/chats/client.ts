@@ -395,7 +395,11 @@ export const subAgentStatusSchema = z.enum([
 export type SubAgentStatus = z.infer<typeof subAgentStatusSchema>;
 
 /** Who ended a stopped sub-agent. */
-export const subAgentStopperSchema = z.enum(["person", "main_agent"]);
+export const subAgentStopperSchema = z.enum([
+  "person",
+  "ticketd",
+  "main_agent",
+]);
 
 /** What the Chat's harness lets ticketd show of its sub-agents. Defaults are a full-featured harness. */
 export const subAgentCapabilitiesSchema = z.object({
@@ -433,6 +437,12 @@ export const subAgentSchema = z.object({
   status: subAgentStatusSchema,
   /** Who stopped it, when `status` is `stopped`. */
   stopped_by: subAgentStopperSchema.nullish(),
+  /**
+   * Why ticketd stopped it (`stopped_by` is `ticketd`): the host's StopReason
+   * key, such as `turned_off`, `restore`, `time_limit`, `run_ended`, `trashed`,
+   * `explicit_resume` or `storage_failed`. Absent: no reason is said.
+   */
+  stop_reason: z.string().nullish(),
   started_at: z.string(),
   ended_at: z.string().nullish(),
   /** How many runs it has had: 2 or more once it was resumed. */
@@ -636,6 +646,7 @@ export const transcriptItemSchema = z.discriminatedUnion("kind", [
     /** Where this run stands. */
     status: subAgentStatusSchema,
     stopped_by: subAgentStopperSchema.nullish(),
+    stop_reason: z.string().nullish(),
     started_at: z.string(),
     ended_at: z.string().nullish(),
   }),

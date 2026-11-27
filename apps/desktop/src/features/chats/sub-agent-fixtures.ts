@@ -50,7 +50,8 @@ export type Run = {
   startedAgo: number;
   /** When it ended, in ms before now; absent while it runs. */
   endedAgo?: number;
-  stoppedBy?: "person" | "main_agent";
+  stoppedBy?: "person" | "ticketd" | "main_agent";
+  stopReason?: string;
   /** The run's own items, without owner or turn: the builder sets both. */
   work?: ((turn: string) => TranscriptItem)[];
 };
@@ -106,12 +107,10 @@ export const DEMO = {
   },
 };
 
-const steps = (
-  id: string,
-  list: Extract<Item, { kind: "steps" }>["steps"],
-  at: string,
-) => (turn: string) =>
-  ({ id, at, turn_id: turn, kind: "steps", steps: list }) as Item;
+const steps =
+  (id: string, list: Extract<Item, { kind: "steps" }>["steps"], at: string) =>
+  (turn: string) =>
+    ({ id, at, turn_id: turn, kind: "steps", steps: list }) as Item;
 const text = (id: string, body: string, at: string) => (turn: string) =>
   ({
     id,
@@ -241,7 +240,9 @@ function runItems(agent: string, number: number, run: Run, now: number) {
       ...(ended && { ended_at: ended }),
       outcome,
     } as Item,
-    ...(run.work ?? []).map((make) => ({ ...make(turn), owner: agent }) as Item),
+    ...(run.work ?? []).map(
+      (make) => ({ ...make(turn), owner: agent }) as Item,
+    ),
   ];
 }
 
@@ -273,6 +274,7 @@ export function chatWith(options: {
       ...spec.record,
       status: last.status,
       stopped_by: last.stoppedBy ?? null,
+      ...(last.stopReason && { stop_reason: last.stopReason }),
       started_at: ago(now, last.startedAgo),
       ended_at: last.endedAgo === undefined ? null : ago(now, last.endedAgo),
       runs: spec.runs.length,
@@ -280,7 +282,8 @@ export function chatWith(options: {
     });
     spec.runs.forEach((run, index) => {
       own.push(...runItems(spec.record.id, index + 1, run, now));
-      const turn = index === 0 ? spec.inTurn : (spec.resumedIn?.[index - 1] ?? null);
+      const turn =
+        index === 0 ? spec.inTurn : (spec.resumedIn?.[index - 1] ?? null);
       const row = {
         id: `${spec.record.id}:row-${index + 1}`,
         at: ago(now, run.startedAgo),
@@ -291,6 +294,7 @@ export function chatWith(options: {
         run: index + 1,
         status: run.status,
         ...(run.stoppedBy && { stopped_by: run.stoppedBy }),
+        ...(run.stopReason && { stop_reason: run.stopReason }),
         started_at: ago(now, run.startedAgo),
         ...(run.endedAgo !== undefined && { ended_at: ago(now, run.endedAgo) }),
       } as Item;
@@ -414,7 +418,12 @@ export function heroChat(
           ]),
       ...(options.resumedIn
         ? [
-            you("h-u2", "Pick the two reviews back up.", options.resumedIn, ago(now, 40 * SEC)),
+            you(
+              "h-u2",
+              "Pick the two reviews back up.",
+              options.resumedIn,
+              ago(now, 40 * SEC),
+            ),
             mainTurn(options.resumedIn, ago(now, 40 * SEC), null, "active"),
             ...(rows[options.resumedIn] ?? []),
           ]
@@ -488,12 +497,34 @@ export function subAgentFixtures(now = Date.now()) {
       },
       { now },
     ),
+    /** ticketd stopped them: with a reason, and with none. */
+    stoppedByTicketd: heroChat(
+      {
+        bypass: [
+          {
+            status: "stopped",
+            stoppedBy: "ticketd",
+            stopReason: "turned_off",
+            startedAgo: 3 * MIN,
+            endedAgo: 60 * SEC,
+          },
+        ],
+        tests: [
+          {
+            status: "stopped",
+            stoppedBy: "ticketd",
+            startedAgo: 3 * MIN,
+            endedAgo: 50 * SEC,
+          },
+        ],
+        docs: [docs],
+      },
+      { now },
+    ),
     /** ticketd quit while they ran. */
     lost: heroChat(
       {
-        bypass: [
-          { status: "lost", startedAgo: 16 * MIN, endedAgo: 15 * MIN },
-        ],
+        bypass: [{ status: "lost", startedAgo: 16 * MIN, endedAgo: 15 * MIN }],
         tests: [{ status: "lost", startedAgo: 16 * MIN, endedAgo: 15 * MIN }],
         docs: [docs],
       },
@@ -598,10 +629,20 @@ export function failedChat(now = Date.now()): MockChat {
       },
     ],
     main: (rows) => [
-      you("w-u1", "Review the retry backoff in the webhook handler.", "t1", ago(now, 30 * MIN)),
+      you(
+        "w-u1",
+        "Review the retry backoff in the webhook handler.",
+        "t1",
+        ago(now, 30 * MIN),
+      ),
       mainTurn("t1", ago(now, 30 * MIN), ago(now, 24 * MIN)),
       ...(rows["t1"] ?? []),
-      reply("w-r1", "The retry review failed; the rest looks fine.", "t1", ago(now, 24 * MIN)),
+      reply(
+        "w-r1",
+        "The retry review failed; the rest looks fine.",
+        "t1",
+        ago(now, 24 * MIN),
+      ),
     ],
   });
 }
@@ -675,10 +716,20 @@ export function codexChat(now = Date.now()): MockChat {
       },
     ],
     main: (rows) => [
-      you("p-u1", "Upgrade the payment client to v5. Split the refund calls and the webhook handler between two agents.", "t1", ago(now, 4 * MIN)),
+      you(
+        "p-u1",
+        "Upgrade the payment client to v5. Split the refund calls and the webhook handler between two agents.",
+        "t1",
+        ago(now, 4 * MIN),
+      ),
       mainTurn("t1", ago(now, 4 * MIN), ago(now, 3 * MIN)),
       ...(rows["t1"] ?? []),
-      reply("p-r1", "Two agents are on it: one for the refund calls, one for the webhook handler.", "t1", ago(now, 3 * MIN)),
+      reply(
+        "p-r1",
+        "Two agents are on it: one for the refund calls, one for the webhook handler.",
+        "t1",
+        ago(now, 3 * MIN),
+      ),
     ],
   });
 }
@@ -723,7 +774,9 @@ export function antigravityChat(now = Date.now()): MockChat {
                   {
                     kind: "search",
                     target: "session.regenerate",
-                    targets: [{ text: "session.regenerate", scope: "src/auth" }],
+                    targets: [
+                      { text: "session.regenerate", scope: "src/auth" },
+                    ],
                   },
                 ],
                 ago(now, 8 * MIN),
@@ -734,10 +787,20 @@ export function antigravityChat(now = Date.now()): MockChat {
       },
     ],
     main: (rows) => [
-      you("g-u1", "Review the auth module for session fixation. Use a sub-agent for the session routes.", "t1", ago(now, 9 * MIN)),
+      you(
+        "g-u1",
+        "Review the auth module for session fixation. Use a sub-agent for the session routes.",
+        "t1",
+        ago(now, 9 * MIN),
+      ),
       mainTurn("t1", ago(now, 9 * MIN), ago(now, 7 * MIN)),
       ...(rows["t1"] ?? []),
-      reply("g-r1", "No session fixation: the session id is regenerated after sign-in in both routes.", "t1", ago(now, 7 * MIN)),
+      reply(
+        "g-r1",
+        "No session fixation: the session id is regenerated after sign-in in both routes.",
+        "t1",
+        ago(now, 7 * MIN),
+      ),
     ],
   });
 }
