@@ -284,12 +284,32 @@ async fn what_a_child_does_is_stored_with_its_owner_and_opens_no_turn() {
         .items()
         .into_iter()
         .filter(|item| {
-            matches!(item, ChatItem::Tool(tool)
-                if tool.owner == ChatOwner::SubAgent { native_id: child.clone() })
+            let owner = match item {
+                ChatItem::Tool(tool) => &tool.owner,
+                ChatItem::Message(message) => &message.owner,
+                _ => return false,
+            };
+            *owner
+                == ChatOwner::SubAgent {
+                    native_id: child.clone(),
+                }
         })
         .count();
     assert_eq!(owned, 3);
     assert_eq!(h.turns().len(), 1);
+    // Its words are messages it owns: the main transcript does not show them.
+    let words = h.sub_agent_transcript(&child);
+    assert!(
+        words.iter().any(|line| line.starts_with("agent: ")),
+        "{words:?}"
+    );
+    assert!(
+        !h.transcript().iter().any(|line| words
+            .iter()
+            .any(|own| own.starts_with("agent: ") && own == line)),
+        "{:?}",
+        h.transcript()
+    );
 }
 
 #[tokio::test(start_paused = true)]

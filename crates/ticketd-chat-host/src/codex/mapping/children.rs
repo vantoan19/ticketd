@@ -21,7 +21,6 @@ use super::{
     delta, item_detail, item_output, item_status, progress_output, text, tool_title,
 };
 use crate::contract::{SubAgentOutcome, SubAgentStart, SubAgentStopper};
-use crate::records::MESSAGE_RECORD_NAME;
 
 /// The multi-agent v1 tool that starts a child.
 const SPAWN: &str = "spawnAgent";
@@ -223,13 +222,10 @@ impl Session {
         match kind {
             "agentMessage" if completed => {
                 if let Some(words) = text(item, &["text"]).filter(|words| !words.is_empty()) {
-                    events.push(EventKind::SubAgentToolUpdated {
+                    events.push(EventKind::SubAgentMessage {
                         sub_agent: NativeSubAgentId::new(thread),
                         item: NativeItemId::new(id),
-                        title: MESSAGE_RECORD_NAME.to_owned(),
-                        status: ToolStatus::Succeeded,
-                        output: Some(words.to_owned()),
-                        detail: None,
+                        text: words.to_owned(),
                     });
                 }
             }

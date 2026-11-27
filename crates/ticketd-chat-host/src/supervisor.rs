@@ -55,10 +55,11 @@ use crate::{
     ApprovalDecision, AutomationPromptAdmission, Capabilities, CloseOutcome, DeliveryEvidence,
     DispatchOutcome, EventKind, HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind,
     InteractionRequest, InteractionResolution, InteractionResponse, InterruptOutcome,
-    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
-    OpenRequest, OpenedRuntime, Problem, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent,
-    RuntimeGeneration, SessionStart, SubAgentOutcome, SubAgentStopper, Submission, SubmissionId,
-    SubmissionKind, Subscription, ToolStatus, TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter,
+    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeSubAgentId,
+    NativeTurnId, NoticeKind, OpenRequest, OpenedRuntime, Problem, ProviderDetail, Refusal,
+    RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart, SubAgentOutcome,
+    SubAgentStopper, Submission, SubmissionId, SubmissionKind, Subscription, ToolStatus,
+    TurnEvidence, TurnOrigin, TurnOutcome, TurnStarter,
 };
 
 /// How long a Chat whose last sub-agent just finished with no turn running stays working,
@@ -677,7 +678,8 @@ impl Supervisor {
                 buffer.saved = buffer.text.len();
                 batch.push(ChatObservation::AssistantText {
                     message_id: buffer.message_id.clone(),
-                    turn_id: buffer.turn_id.clone(),
+                    turn_id: Some(buffer.turn_id.clone()),
+                    owner: ChatOwner::Main,
                     text: buffer.text.clone(),
                     complete: false,
                 });
@@ -3278,7 +3280,8 @@ impl Supervisor {
                 self.text.retain(|buffer| buffer.message_id != message_id);
                 observations.push(ChatObservation::AssistantText {
                     message_id,
-                    turn_id,
+                    turn_id: Some(turn_id),
+                    owner: ChatOwner::Main,
                     text,
                     complete: true,
                 });
@@ -3330,6 +3333,72 @@ impl Supervisor {
                     output,
                     detail,
                     observations,
+                );
+            }
+            EventKind::SubAgentMessage {
+                sub_agent,
+                item,
+                text,
+            } => {
+                // Said in the turn that is active, if one is; it opens none.
+                let turn_id = self.active.as_ref().map(|active| active.turn_id.clone());
+                observations.push(ChatObservation::AssistantText {
+                    message_id: format!("{run}:{}:{}", sub_agent.0, item.0),
+                    turn_id,
+                    owner: ChatOwner::SubAgent {
+                        native_id: sub_agent.0,
+                    },
+                    text,
+                    complete: true,
+                });
+                self.record(observations);
+            }
+            EventKind::SubAgentReasoningUpdated {
+                sub_agent,
+                run: native_run,
+                item,
+                running,
+                started_at,
+                ended_at,
+                text,
+            } => {
+                let record = ReasoningRecord {
+                    running,
+                    started_at,
+                    ended_at,
+                    text,
+                    heading: None,
+                };
+                let state = if running {
+                    ChatToolState::Running
+                } else {
+                    ChatToolState::Completed
+                };
+                let id = format!(
+                    "{run}:reasoning:{}:{}:{}",
+                    sub_agent.0,
+                    native_run.as_deref().unwrap_or("-"),
+                    item.0
+                );
+                self.sub_agent_record(sub_agent, id, REASONING_RECORD_NAME, &record, state);
+            }
+            EventKind::SubAgentFilesChanged {
+                sub_agent,
+                run: native_run,
+                files,
+            } => {
+                let id = format!(
+                    "{run}:files:{}:{}",
+                    sub_agent.0,
+                    native_run.as_deref().unwrap_or("-")
+                );
+                let record = FilesRecord::from(files.as_slice());
+                self.sub_agent_record(
+                    sub_agent,
+                    id,
+                    FILES_RECORD_NAME,
+                    &record,
+                    ChatToolState::Completed,
                 );
             }
             EventKind::SubAgentStarted(start) => {
@@ -3449,7 +3518,8 @@ impl Supervisor {
                 observations.extend(ended.into_iter().map(|buffer: TextBuffer| {
                     ChatObservation::AssistantText {
                         message_id: buffer.message_id,
-                        turn_id: buffer.turn_id,
+                        turn_id: Some(buffer.turn_id),
+                        owner: ChatOwner::Main,
                         text: buffer.text,
                         complete: true,
                     }
@@ -3700,6 +3770,32 @@ impl Supervisor {
             output: None,
         });
         self.record(observations);
+    }
+
+    /// Records a sub-agent's reasoning or files as the tool record that keeps it, owned by
+    /// it. Like its Steps, it belongs to the turn that is active, if one is, and opens none.
+    fn sub_agent_record<T: serde::Serialize>(
+        &mut self,
+        sub_agent: NativeSubAgentId,
+        tool_id: String,
+        name: &str,
+        record: &T,
+        state: ChatToolState,
+    ) {
+        let Ok(input) = serde_json::to_string(record) else {
+            return;
+        };
+        self.record(vec![ChatObservation::Tool {
+            tool_id,
+            turn_id: self.active.as_ref().map(|active| active.turn_id.clone()),
+            owner: ChatOwner::SubAgent {
+                native_id: sub_agent.0,
+            },
+            name: name.to_owned(),
+            input,
+            state,
+            output: None,
+        }]);
     }
 
     fn record_if_any(&mut self, observations: Vec<ChatObservation>) {
