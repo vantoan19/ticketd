@@ -29,6 +29,11 @@ import {
   type TranscriptItem,
 } from "@/features/chats/client";
 import { canSteer, changeLine } from "@/features/chats/model";
+import {
+  ticketAgentsSchema,
+  type TicketAgent,
+  type TicketAgentInput,
+} from "@/features/chats/ticket-agents";
 import { plainText } from "@/features/documents/graph-text";
 import {
   captureChatAttachment,
@@ -363,6 +368,8 @@ export type MockChatClient = ChatClient & {
   runsGoing: number;
   /** As if the person clicked the Chat's system notification. */
   requestOpen(request: OpenRequest): void;
+  /** Sets the agents at work on a ticket, as the host would after a change; an empty list is none. */
+  setTicketAgents(ticketId: string, agents: TicketAgentInput[]): void;
   /** What Notify me about Chats was last set to. */
   notify: boolean;
   /** Whether Quit was confirmed. */
@@ -518,6 +525,8 @@ export function createMockChatClient(
     logLimit?: number;
     /** Whole step outputs by tool id, for steps that carry only their end. */
     outputs?: Record<string, string>;
+    /** The agents at work on each ticket, by ticket id. */
+    ticketAgents?: Record<string, TicketAgentInput[]>;
   } = {},
 ): MockChatClient {
   const now = seed.now ?? "2026-11-10T10:00:00Z";
@@ -534,6 +543,12 @@ export function createMockChatClient(
   const openListeners = new Set<(request: OpenRequest) => void>();
   const quitListeners = new Set<(stopping: Stopping) => void>();
   const chats = new Map<string, Stored>();
+  const ticketAgents = new Map<string, TicketAgent[]>(
+    Object.entries(seed.ticketAgents ?? {}).map(([ticket, agents]) => [
+      ticket,
+      ticketAgentsSchema.parse(agents),
+    ]),
+  );
   /** Chats the person marked unread: as the host, they keep their seen words. */
   const marked = new Set<string>();
   const store = (entry: MockChat) =>
@@ -1000,6 +1015,14 @@ export function createMockChatClient(
     requestOpen(request) {
       for (const listener of [...openListeners]) listener(request);
     },
+    setTicketAgents(ticketId, agents) {
+      ticketAgents.set(ticketId, ticketAgentsSchema.parse(agents));
+      const counts = overview();
+      enqueueNotification(() => {
+        for (const listener of [...overviewListeners])
+          if (overviewListeners.has(listener)) notify(listener, counts);
+      });
+    },
     requestQuit() {
       const stopping = { chats: overview().working, runs: client.runsGoing };
       for (const listener of [...quitListeners]) listener(stopping);
@@ -1187,6 +1210,7 @@ export function createMockChatClient(
     async exportAttachment() {},
     queue: (id, text, links = [], files, edit) =>
       saveDraft(queue, id, text, links, files, edit),
+    ticketAgents: async (ticketId) => ticketAgents.get(ticketId) ?? [],
     linkedTo: async (link) =>
       [...chats.values()]
         .filter(
