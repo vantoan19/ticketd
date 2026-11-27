@@ -658,21 +658,31 @@ fn forget(connection: &Connection, chat_id: &str, native_id: &str) -> Result<(),
     Ok(())
 }
 
+/// What a sub-agent is called, from what the harness said about it: the first line of its
+/// description, failing that the kind of sub-agent it is, each trimmed. The one rule the
+/// row, the view, a ticket's label and what ticketd tells the main agent all follow.
+pub fn sub_agent_title(native: &Value) -> Option<String> {
+    let said = |key: &str| {
+        native
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|said| !said.is_empty())
+    };
+    said("description")
+        .and_then(|description| description.lines().next())
+        .or_else(|| said("subagent_type"))
+        .map(|title| title.trim().to_owned())
+}
+
 impl ChatSubAgent {
-    /// What the harness called the work (the first line of its description); failing that
-    /// the kind of sub-agent it is.
+    /// What the harness called the work; see [`sub_agent_title`]. "Sub-agent" when it said
+    /// nothing.
     pub fn title(&self) -> String {
-        let said = |key: &str| self.said(key).filter(|said| !said.trim().is_empty());
-        said("description")
-            .map(|description| {
-                description
-                    .trim()
-                    .lines()
-                    .next()
-                    .unwrap_or_default()
-                    .to_owned()
-            })
-            .or_else(|| said("subagent_type"))
+        serde_json::from_str(&self.payload)
+            .ok()
+            .as_ref()
+            .and_then(sub_agent_title)
             .unwrap_or_else(|| "Sub-agent".to_owned())
     }
 }

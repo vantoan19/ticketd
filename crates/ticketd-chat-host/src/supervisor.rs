@@ -257,22 +257,6 @@ fn is_wake(attempt: &str) -> bool {
     attempt.starts_with("wake-")
 }
 
-/// What a sub-agent is called: what the harness called its work, else the kind of
-/// sub-agent it is. The same rule as the sub-agent's row.
-fn sub_agent_title(native: &serde_json::Value) -> Option<String> {
-    let said = |key: &str| {
-        native
-            .get(key)
-            .and_then(serde_json::Value::as_str)
-            .map(str::trim)
-            .filter(|said| !said.is_empty())
-    };
-    said("description")
-        .and_then(|description| description.lines().next())
-        .or_else(|| said("subagent_type"))
-        .map(str::to_owned)
-}
-
 struct ContextTransfer {
     attempt_id: String,
     text: Arc<str>,
@@ -3921,7 +3905,7 @@ impl Supervisor {
                         report: None,
                     });
                 note.parent = start.parent.as_ref().map(|parent| parent.0.clone());
-                if let Some(title) = sub_agent_title(&start.native) {
+                if let Some(title) = ticketd_core::sub_agent_title(&start.native) {
                     note.title = title;
                 }
                 observations.push(ChatObservation::SubAgentStarted {
@@ -3948,7 +3932,7 @@ impl Supervisor {
                     *running = background;
                 }
                 if let (Some(title), Some(note)) = (
-                    native.as_ref().and_then(sub_agent_title),
+                    native.as_ref().and_then(ticketd_core::sub_agent_title),
                     self.sub_agent_notes.get_mut(&sub_agent.0),
                 ) {
                     note.title = title;

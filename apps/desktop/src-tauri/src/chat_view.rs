@@ -2270,11 +2270,6 @@ pub(crate) fn running_words(tool: &ChatTool, chat: &Chat) -> Option<String> {
     })
 }
 
-/// What the harness called a sub-agent's work; failing that, the kind of sub-agent it is.
-pub(crate) fn sub_agent_title(record: &ChatSubAgent) -> String {
-    record.title()
-}
-
 /// A sub-agent as the screens read it, or `None` when it has no run yet.
 fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option<SubAgentView> {
     let latest = record.latest()?;
@@ -2301,7 +2296,7 @@ fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option
         },
     );
     let said = |key: &str| record.said(key).filter(|said| !said.trim().is_empty());
-    let title = sub_agent_title(record);
+    let title = record.title();
     let prompt = said("prompt");
     Some(SubAgentView {
         id: record.native_id.clone(),

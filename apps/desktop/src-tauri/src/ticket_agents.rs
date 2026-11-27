@@ -25,7 +25,7 @@ use ticketd_core::{
 
 use crate::chat_view::{
     Item, Summary, Tracker, harness_name, items, main_agent_model, retention, running_words,
-    sub_agent_model, sub_agent_title,
+    sub_agent_model,
 };
 use crate::chats::{Outcome, SUMMARY_ITEMS};
 
@@ -103,7 +103,7 @@ impl Facts {
                 (
                     run.started_at.clone(),
                     sub_agent_model(record, &self.live),
-                    sub_agent_title(record),
+                    record.title(),
                     None,
                 )
             }

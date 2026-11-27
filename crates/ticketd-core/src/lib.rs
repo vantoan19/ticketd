@@ -170,7 +170,7 @@ pub use chats::{
     ChatSubAgentState, ChatSubAgentStopper, ChatSubmissionAttempt, ChatSubmissionIntent,
     ChatSummary, ChatTool, ChatToolState, ChatTurn, ChatTurnOrigin, ChatTurnReceipt,
     ChatTurnStarter, ChatTurnState, ChatWriteCredit, FolderChat, NewChat, PreparedChatInput,
-    TicketWriteCredits, TicketWritingAgent,
+    TicketWriteCredits, TicketWritingAgent, sub_agent_title,
 };
 pub use events::{AUTOMATION_RUN_ID_VARIABLE, WorkspaceActor, WorkspaceEvent, WorkspaceEventType};
 pub use history::{HistoryEntry, Status};
