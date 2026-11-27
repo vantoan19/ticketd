@@ -41,7 +41,12 @@ it("a command wraps instead of scrolling inside its box, and its copy button cop
 });
 
 it("a skill folder is the board's 12px regular mono caption", () => {
-  const settings = src("features", "settings", "settings.css");
+  const settings = src(
+    "components",
+    "ui",
+    "surface-roles",
+    "settings-settings.css",
+  );
   const rule = block(settings, ".agent-skill-path .ui-path-text");
   expect(rule).toMatch(/font-size: var\(--text-caption\);/);
   expect(rule).toMatch(/font-weight: 400;/);
