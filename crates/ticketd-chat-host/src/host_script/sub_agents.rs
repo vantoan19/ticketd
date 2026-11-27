@@ -102,6 +102,31 @@ async fn a_foreground_sub_agent_is_one_row_in_the_turn_and_its_steps_are_its_own
     assert!(run.ended_at.is_some());
 }
 
+/// The model a sub-agent reports is its id ("claude-haiku-5-5"); the session lists the
+/// models by alias with the name Claude Code gives each. The name is kept with the
+/// sub-agent, so it still reads as the name once ticketd restarted and nothing lists
+/// models (LC-18).
+#[tokio::test(start_paused = true)]
+async fn the_name_the_harness_gives_a_sub_agents_model_is_kept_with_it() {
+    let mut h = HostScript::claude()
+        .process([
+            fixture!("claude", "handshake"),
+            fixture!("claude", "sub_agent_models"),
+        ])
+        .start();
+    h.send(PROMPT).await;
+    h.play_all().await;
+    h.finish().await;
+
+    let record = &h.sub_agents()[0];
+    assert_eq!(record.said("model").as_deref(), Some("claude-haiku-5-5"));
+    assert_eq!(record.said("model_name").as_deref(), Some("Haiku 5.5"));
+
+    h.restart_ticketd().await;
+    let record = &h.sub_agents()[0];
+    assert_eq!(record.said("model_name").as_deref(), Some("Haiku 5.5"));
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_nested_sub_agent_shows_under_its_parent_and_a_sub_agents_to_do_list_is_not_the_plan() {
     let mut h = HostScript::claude()
@@ -807,6 +832,42 @@ mod background {
         }
         // The turn's own stop says it: no separate note.
         assert!(h.notices().is_empty(), "{:?}", h.notices());
+    }
+
+    /// A foreground sub-agent is a running tool of the turn: Claude Code answers it with
+    /// the error it gives a tool a Stop cuts off, and says nothing else about it. The
+    /// person pressed Stop, so it was stopped, not failed (LC-08).
+    #[tokio::test(start_paused = true)]
+    async fn stop_in_a_turn_stops_its_foreground_sub_agents_not_fails_them() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "sub_agent_foreground_stop"),
+            ])
+            .start();
+        h.send(PROMPT).await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("two foreground sub-agents run").await;
+        assert_eq!(h.live().await.sub_agents, 2);
+
+        h.stop().await;
+        h.play_all().await;
+        h.finish().await;
+
+        assert_eq!(h.turns()[0].state, ChatTurnState::Interrupted);
+        assert_eq!(h.live().await.sub_agents, 0);
+        let records = h.sub_agents();
+        assert_eq!(records.len(), 2);
+        for record in records {
+            let run = record.latest().expect("a run");
+            assert_eq!(
+                run.state,
+                ChatSubAgentState::Stopped,
+                "{}",
+                record.native_id
+            );
+            assert_eq!(run.stopped_by, Some(ChatSubAgentStopper::Person));
+        }
     }
 }
 

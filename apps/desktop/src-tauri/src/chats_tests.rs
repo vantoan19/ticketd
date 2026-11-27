@@ -222,6 +222,7 @@ async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_runn
 
 fn offered(id: &str, is_default: bool) -> ticketd_chat_host::SettingOption {
     ticketd_chat_host::SettingOption {
+        resolved: None,
         id: id.to_owned(),
         label: id.to_uppercase(),
         description: None,
@@ -2413,10 +2414,12 @@ async fn an_attachment_only_first_message_is_saved_and_replayed_once() {
         current: Some("ask".into()),
         options: vec![
             ticketd_chat_host::SettingOption {
+                resolved: None,
                 permission: Some(PermissionKind::Ask),
                 ..offered("ask", true)
             },
             ticketd_chat_host::SettingOption {
+                resolved: None,
                 permission: Some(PermissionKind::FullAccess),
                 ..offered("full", false)
             },
@@ -4282,6 +4285,120 @@ async fn a_request_waiting_on_the_person_is_the_agents_approval() {
 }
 
 #[tokio::test(start_paused = true)]
+async fn a_sub_agents_own_view_lists_the_records_it_changed() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    let chat_id = f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.sub_agent_writes(&chat_id, "sa-tests", &ticket.reference);
+    f.end_sub_agent("sa-tests").await;
+
+    let (opened, _) = f.open(&chat_id).await;
+    let items = serde_json::to_value(&opened.snapshot.items).unwrap();
+    let records: Vec<&Value> = items
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|item| item["kind"] == "records" && item["owner"] == "sa-tests")
+        .collect();
+    assert_eq!(records.len(), 1, "{items:#}");
+    assert_eq!(
+        records[0]["net"],
+        json!([{
+            "kind": "update",
+            "reference": ticket.reference,
+            "excerpt": "Added a case for a request with no key.",
+        }])
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_sub_agents_approval_is_its_own_entry_on_the_ticket_before_it_writes_anything() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({
+            "description": "Check limiter test coverage",
+            "model": "claude-sonnet-5-5",
+            "model_name": "Claude Sonnet 5.5",
+        }),
+    )
+    .await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("approval-1"),
+        turn: None,
+        owner: Some(NativeSubAgentId::new("sa-tests")),
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "npm test -- rate-limit".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+        },
+        detail: None,
+    }))
+    .await;
+
+    let agents = f.agents(&ticket.id);
+    let asking = agents
+        .iter()
+        .find(|agent| agent.sub_agent.as_deref() == Some("sa-tests"))
+        .unwrap_or_else(|| panic!("the sub-agent's own entry: {agents:?}"));
+    assert_eq!(asking.model.as_deref(), Some("Claude Sonnet 5.5"));
+    assert_eq!(
+        asking
+            .approval
+            .as_ref()
+            .map(|approval| approval.summary.as_str()),
+        Some("npm test -- rate-limit")
+    );
+    let main = agents.iter().find(|agent| agent.sub_agent.is_none());
+    assert_eq!(
+        main.and_then(|main| main.approval.as_ref()),
+        None,
+        "the main agent asks nothing"
+    );
+}
+
+#[tokio::test(start_paused = true)]
+async fn the_chats_list_row_names_the_sub_agent_that_asks_for_approval() {
+    let f = Fixture::new().await;
+    let ticket = f.core().create_ticket("Rate limiter").unwrap();
+    f.linked_chat(&ticket.id).await;
+    f.start_sub_agent(
+        "sa-tests",
+        json!({ "description": "Check limiter test coverage" }),
+    )
+    .await;
+    f.emit(EventKind::InteractionRequested(InteractionRequest {
+        request: NativeRequestId::new("approval-1"),
+        turn: None,
+        owner: Some(NativeSubAgentId::new("sa-tests")),
+        item: None,
+        kind: InteractionKind::Approval {
+            description: "npm test -- rate-limit".to_owned(),
+            reason: None,
+            decisions: vec![ApprovalDecision::Allow, ApprovalDecision::Deny],
+        },
+        detail: None,
+    }))
+    .await;
+
+    let row = f.chats.list(ChatListFilter::Active).unwrap().remove(0);
+    assert_eq!(row.status.word, "Approval needed");
+    assert_eq!(
+        row.status.detail.as_deref(),
+        Some("Check limiter test coverage"),
+        "the sub-agent, not the command it wants to run"
+    );
+}
+
+#[tokio::test(start_paused = true)]
 async fn the_overview_digest_moves_with_the_set_and_with_a_field() {
     let f = Fixture::new().await;
     let ticket = f.core().create_ticket("Rate limiter").unwrap();
@@ -4395,6 +4512,7 @@ async fn the_command_sends_what_the_desktops_label_reads() {
             options: models
                 .iter()
                 .map(|(id, label)| ticketd_chat_host::SettingOption {
+                    resolved: None,
                     label: (*label).to_owned(),
                     ..offered(id, false)
                 })

@@ -508,7 +508,43 @@ fn end_run(
     // The record first: a follower that reads the run knows whose it is.
     touch_record(connection, chat_id, record)?;
     log(connection, chat_id, "sub_agent_run", run)?;
-    Ok(())
+    capture_changes(connection, chat_id, record, run)
+}
+
+/// What the run changed in tickets, kept as the run's own record (as a turn keeps its
+/// changes): the writes credited to this sub-agent by the Steps of this run.
+fn capture_changes(
+    connection: &Connection,
+    chat_id: &str,
+    record: &str,
+    run: &str,
+) -> Result<(), Error> {
+    let (native_id, from, until): (String, i64, Option<i64>) = connection.query_row(
+        "SELECT a.native_id, r.position,
+                (SELECT MIN(o.position) FROM chat_sub_agent_runs o WHERE o.sub_agent_id = r.sub_agent_id AND o.run > r.run)
+         FROM chat_sub_agent_runs r JOIN chat_sub_agents a ON a.id = r.sub_agent_id
+         WHERE r.id = ?1 AND a.id = ?2",
+        params![run, record],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    let changes = super::credit::sub_agent_changes(connection, chat_id, &native_id, from, until)?;
+    if changes.is_empty() {
+        return Ok(());
+    }
+    super::observe(
+        connection,
+        chat_id,
+        super::ChatObservation::Tool {
+            tool_id: format!("{run}:ticketd-changes"),
+            turn_id: None,
+            owner: super::ChatOwner::SubAgent { native_id },
+            name: super::AGENT_CHANGES_RECORD_NAME.to_owned(),
+            input: serde_json::to_string(&changes)?,
+            state: super::ChatToolState::Completed,
+            output: None,
+        },
+        None,
+    )
 }
 
 /// A turn ended: the foreground sub-agent runs it started that still run end with it,

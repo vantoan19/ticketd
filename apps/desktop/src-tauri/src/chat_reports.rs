@@ -451,6 +451,7 @@ mod tests {
 
     fn option(id: &str, permission: Option<PermissionKind>) -> SettingOption {
         SettingOption {
+            resolved: None,
             id: id.to_owned(),
             label: id.to_owned(),
             description: None,

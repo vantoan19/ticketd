@@ -649,6 +649,7 @@ impl Reports {
             if !options.iter().any(|option| &option.id == mode) {
                 // A mode ticketd does not offer is shown as what is in effect.
                 options.push(SettingOption {
+                    resolved: None,
                     id: mode.clone(),
                     // Named as the SDK's `PermissionMode` describes each (#387 M15).
                     label: match mode.as_str() {
@@ -682,7 +683,11 @@ impl Reports {
 /// A model the bridge listed, as `supportedModels()` describes it.
 fn model_option(entry: &Value) -> Option<SettingOption> {
     let id = text(entry, "value")?.to_owned();
+    let resolved = text(entry, "resolved_model")
+        .filter(|resolved| *resolved != id)
+        .map(str::to_owned);
     Some(SettingOption {
+        resolved,
         label: text(entry, "display_name").unwrap_or(&id).to_owned(),
         description: text(entry, "description")
             .filter(|text| !text.is_empty())
@@ -703,6 +708,7 @@ fn effort_options(entry: &Value) -> Vec<SettingOption> {
         .flatten()
         .filter_map(Value::as_str)
         .map(|level| SettingOption {
+            resolved: None,
             id: level.to_owned(),
             label: capitalized(level),
             description: None,

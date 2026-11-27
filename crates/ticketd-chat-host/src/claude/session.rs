@@ -830,6 +830,7 @@ impl Session {
         &mut self,
         tool_use: &str,
         failed: bool,
+        after_interrupt: bool,
         events: &mut Vec<EventKind>,
     ) {
         let Some(task) = self.sub_agents.by_tool_use.get(tool_use) else {
@@ -848,7 +849,10 @@ impl Session {
         events.push(EventKind::SubAgentEnded {
             sub_agent: NativeSubAgentId::new(task),
             run,
-            outcome: if failed {
+            // The error a Stop gives the tool is the person's Stop, not a failure.
+            outcome: if failed && after_interrupt {
+                SubAgentOutcome::Stopped(SubAgentStopper::Person)
+            } else if failed {
                 SubAgentOutcome::Failed
             } else {
                 SubAgentOutcome::Completed
@@ -974,7 +978,7 @@ impl Session {
             }
             (None, None) => {}
         }
-        self.foreground_agent_returned(tool_use, failed, events);
+        self.foreground_agent_returned(tool_use, failed, after_interrupt, events);
     }
 
     fn permission_request(&mut self, event: &Value, events: &mut Vec<EventKind>) {

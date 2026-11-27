@@ -453,6 +453,7 @@ impl HarnessAdapter for FakeAdapter {
             .and_then(|text| serde_json::from_str::<serde_json::Value>(text).ok())
             .and_then(|value| value["permission"].as_str().map(str::to_owned));
         let option = |id: &str, permission| crate::SettingOption {
+            resolved: None,
             id: id.to_owned(),
             label: id.to_owned(),
             description: None,

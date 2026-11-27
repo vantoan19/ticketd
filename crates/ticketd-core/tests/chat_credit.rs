@@ -3,8 +3,9 @@
 //! by commit order, from the window each shell Step was open in.
 
 use ticketd_core::{
-    Chat, ChatObservation, ChatOwner, ChatPlannedWrite, ChatPlannedWriteKind, ChatToolState,
-    ChatWriteCredit, NewChat, Status, TicketPatch, Workspace,
+    AGENT_CHANGES_RECORD_NAME, Chat, ChatAgentChange, ChatItem, ChatObservation, ChatOwner,
+    ChatPlannedWrite, ChatPlannedWriteKind, ChatSubAgentState, ChatToolState, ChatWriteCredit,
+    NewChat, Status, TicketPatch, Workspace,
 };
 
 struct Setup {
@@ -422,4 +423,80 @@ fn a_ticket_id_names_its_reference() {
         Some(setup.reference.as_str())
     );
     assert_eq!(setup.host.ticket_reference_of("nope").unwrap(), None);
+}
+
+fn ends(id: &str, state: ChatSubAgentState) -> ChatObservation {
+    ChatObservation::SubAgentEnded {
+        native_id: id.into(),
+        native_run_id: None,
+        state,
+        stopped_by: None,
+        stop_reason: None,
+        detail: None,
+    }
+}
+
+/// The records a sub-agent's runs kept as changed, oldest run first.
+#[allow(clippy::unwrap_used)]
+fn records_changed(setup: &Setup, native_id: &str) -> Vec<Vec<ChatAgentChange>> {
+    setup
+        .host
+        .chat_snapshot(&setup.chat.id, 1_000)
+        .unwrap()
+        .items
+        .into_iter()
+        .filter_map(|item| match item {
+            ChatItem::Tool(tool)
+                if tool.name == AGENT_CHANGES_RECORD_NAME && tool.owner == sub_agent(native_id) =>
+            {
+                Some(serde_json::from_str(&tool.input).unwrap())
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn a_sub_agent_keeps_the_records_it_changed_when_its_run_ends() {
+    let mut setup = setup();
+    let reference = setup.reference.clone();
+    setup.observe(vec![start_sub_agent("sa-a"), start_sub_agent("sa-b")]);
+    // One sub-agent writes inside its Step; the other's write is the Chat's alone.
+    open(&mut setup, "run-1:bash-a", sub_agent("sa-a"), vec![]);
+    setup.activity(None, "Added a case for a request with no key.");
+    setup.move_to(None, Status::InProgress);
+    close(&mut setup, "run-1:bash-a", sub_agent("sa-a"));
+    setup.activity(None, "After every Step ended.");
+    assert!(
+        records_changed(&setup, "sa-a").is_empty(),
+        "kept when the run ends"
+    );
+
+    setup.observe(vec![
+        ends("sa-a", ChatSubAgentState::Completed),
+        ends("sa-b", ChatSubAgentState::Completed),
+    ]);
+
+    let kept = records_changed(&setup, "sa-a");
+    assert_eq!(kept.len(), 1, "one record for its one run");
+    // The order is the writes' own: two within the same millisecond have no other.
+    for change in [
+        ChatAgentChange::Update {
+            reference: reference.clone(),
+            excerpt: "Added a case for a request with no key.".into(),
+        },
+        ChatAgentChange::Status {
+            reference,
+            title: "Reset email".into(),
+            from: "Todo".into(),
+            to: "In progress".into(),
+        },
+    ] {
+        assert!(kept[0].contains(&change), "{change:?} in {:?}", kept[0]);
+    }
+    assert_eq!(kept[0].len(), 2, "not the write outside every Step");
+    assert!(
+        records_changed(&setup, "sa-b").is_empty(),
+        "it changed nothing"
+    );
 }
