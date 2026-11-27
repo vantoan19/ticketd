@@ -312,7 +312,9 @@ test("a command that cannot be read does not change the skill status", async () 
 
 test("an older command check that answers last does not replace the newer one", async () => {
   bridge([[{ ...claude, ...installed }]]);
-  const base = invoke.getMockImplementation() as (c: string) => Promise<unknown>;
+  const base = invoke.getMockImplementation() as (
+    c: string,
+  ) => Promise<unknown>;
   let answerFirst: (value: object) => void = () => {};
   let checks = 0;
   invoke.mockImplementation(async (command: string) => {

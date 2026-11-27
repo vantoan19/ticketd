@@ -489,9 +489,9 @@ test("Open New Chat leaves Settings for New Chat, starting with this agent", asy
   fireEvent.click(await screen.findByRole("button", { name: "Open New Chat" }));
   expect(localStorage.getItem("ticketd.chat-harness")).toBe("claude-code");
   // And it asks the app for New Chat, which is what leaves Settings.
-  expect(JSON.parse(screen.getByTestId("chat-request").textContent ?? "")).toEqual(
-    { kind: "new" },
-  );
+  expect(
+    JSON.parse(screen.getByTestId("chat-request").textContent ?? ""),
+  ).toEqual({ kind: "new" });
 });
 
 test("the Agents page has no notifications row; they live on Attention", async () => {
