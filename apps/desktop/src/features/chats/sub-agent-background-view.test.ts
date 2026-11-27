@@ -79,7 +79,9 @@ describe("the host's view of background sub-agents", () => {
     const { chat, items } = view("done");
     expect(chat.activity).toBe("idle");
     expect(chat.turn_running).toBeUndefined();
-    const turns = items.filter((item) => item.kind === "turn" && !item.owner);
+    const turns = items.flatMap((item) =>
+      item.kind === "turn" && !item.owner ? [item] : [],
+    );
     expect(turns).toHaveLength(2);
     expect(turns[0]?.origin).toBeUndefined();
     expect(turns[1]?.origin).toEqual({
