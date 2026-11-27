@@ -30,6 +30,8 @@ pub const TEXT_TAIL_BYTES: u64 = 5 * 1024 * 1024;
 const TEXT_LINE_START_WINDOW: usize = 64 * 1024;
 /// A PDF's `%PDF-` marker may follow stray bytes, but only within this many.
 const PDF_MARKER_WINDOW: usize = 1024;
+/// The length of `%PDF-1.7`.
+const PDF_HEADER_BYTES: usize = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -213,7 +215,11 @@ impl Workspace {
                         .into(),
                 );
             } else {
-                html = text_excerpt.as_ref().is_some_and(|excerpt| !excerpt.lossy);
+                // The viewer renders the whole report, so an excerpt that is valid UTF-8 is
+                // not enough when the report goes on: a later invalid byte keeps it text.
+                html = text_excerpt.as_ref().is_some_and(|excerpt| {
+                    !excerpt.lossy && (!excerpt.truncated || self.is_utf8(&attachment))
+                });
             }
         }
         let mut pdf = false;
@@ -277,11 +283,7 @@ impl Workspace {
     /// terminal escape sequences are removed and a stray control character becomes U+FFFD.
     pub fn attachment_text(&self, workspace: &str, id: &str) -> Result<String, Error> {
         let attachment = self.preview_attachment(workspace, id)?;
-        if self.text_excerpt(&attachment).is_none() {
-            return Err(Error::Attachment("This file is not plain text.".into()));
-        }
-        let (_, file) = open_snapshot(&self.connection, &attachment)
-            .map_err(|failure| Error::Attachment(failure.message))?;
+        let file = self.open_text(&attachment)?;
         read_text_window(file, TEXT_WHOLE_BYTES, TEXT_TAIL_BYTES)
     }
 
@@ -290,12 +292,21 @@ impl Workspace {
     /// log's end as the file does.
     pub fn attachment_text_first_line(&self, workspace: &str, id: &str) -> Result<u64, Error> {
         let attachment = self.preview_attachment(workspace, id)?;
-        if self.text_excerpt(&attachment).is_none() {
-            return Err(Error::Attachment("This file is not plain text.".into()));
-        }
-        let (_, file) = open_snapshot(&self.connection, &attachment)
-            .map_err(|failure| Error::Attachment(failure.message))?;
+        let file = self.open_text(&attachment)?;
         text_window_first_line(file, TEXT_WHOLE_BYTES, TEXT_TAIL_BYTES)
+    }
+
+    /// Whether the whole of a stored local file (read up to the HTML preview limit) is valid
+    /// UTF-8, as `attachment_html` requires. A file that cannot be read is not.
+    fn is_utf8(&self, attachment: &Attachment) -> bool {
+        let Ok((_, file)) = open_snapshot(&self.connection, attachment) else {
+            return false;
+        };
+        let mut bytes = Vec::new();
+        file.take(HTML_PREVIEW_BYTES)
+            .read_to_end(&mut bytes)
+            .is_ok()
+            && std::str::from_utf8(&bytes).is_ok()
     }
 
     /// Whether a stored local file starts like a PDF. A file that cannot be read is not.
@@ -304,7 +315,7 @@ impl Workspace {
             return false;
         };
         let mut head = Vec::new();
-        file.take(PDF_MARKER_WINDOW as u64 + 5)
+        file.take((PDF_MARKER_WINDOW + PDF_HEADER_BYTES) as u64)
             .read_to_end(&mut head)
             .is_ok()
             && has_pdf_marker(&head)
@@ -340,21 +351,19 @@ impl Workspace {
     /// including a file that cannot be read now.
     fn text_excerpt(&self, attachment: &Attachment) -> Option<TextExcerpt> {
         let (_, file) = open_snapshot(&self.connection, attachment).ok()?;
-        let length = file.metadata().ok()?.len();
-        let mut bytes = Vec::new();
-        file.take(TEXT_EXCERPT_BYTES as u64)
-            .read_to_end(&mut bytes)
-            .ok()?;
-        let truncated = length > bytes.len() as u64;
-        let lossy = match std::str::from_utf8(&bytes) {
-            Ok(_) => false,
-            Err(error) => !(truncated && error.error_len().is_none()),
-        };
-        text_of(&bytes, truncated).map(|text| TextExcerpt {
-            text,
-            truncated,
-            lossy,
-        })
+        text_excerpt_of(&file)
+    }
+
+    /// Opens a stored file's checked snapshot for a text read. A snapshot that cannot be
+    /// opened is the storage's error, with how to recover; one that opens but does not read
+    /// as text is `This file is not plain text.`
+    fn open_text(&self, attachment: &Attachment) -> Result<File, Error> {
+        let (_, file) = open_snapshot(&self.connection, attachment)
+            .map_err(|failure| Error::Attachment(failure.message))?;
+        if text_excerpt_of(&file).is_none() {
+            return Err(Error::Attachment("This file is not plain text.".into()));
+        }
+        Ok(file)
     }
 
     /// Whether a kept local file's stored copy is gone or cut short on this
@@ -485,10 +494,32 @@ impl Workspace {
     }
 }
 
-/// `%PDF-` within the first kilobyte, which is where readers look for it.
+/// The start of an open file when it reads as text; None for anything else.
+fn text_excerpt_of(file: &File) -> Option<TextExcerpt> {
+    let length = file.metadata().ok()?.len();
+    let mut bytes = Vec::new();
+    file.take(TEXT_EXCERPT_BYTES as u64)
+        .read_to_end(&mut bytes)
+        .ok()?;
+    let truncated = length > bytes.len() as u64;
+    let lossy = match std::str::from_utf8(&bytes) {
+        Ok(_) => false,
+        Err(error) => !(truncated && error.error_len().is_none()),
+    };
+    text_of(&bytes, truncated).map(|text| TextExcerpt {
+        text,
+        truncated,
+        lossy,
+    })
+}
+
+/// A PDF version header (`%PDF-1.7`) within the first kilobyte, which is where readers look
+/// for it. The bare token is not enough: a log that quotes `%PDF-` is still text.
 fn has_pdf_marker(bytes: &[u8]) -> bool {
-    let window = &bytes[..bytes.len().min(PDF_MARKER_WINDOW + 5)];
-    window.windows(5).any(|w| w == b"%PDF-")
+    let window = &bytes[..bytes.len().min(PDF_MARKER_WINDOW + PDF_HEADER_BYTES)];
+    window.windows(PDF_HEADER_BYTES).any(|w| {
+        w.starts_with(b"%PDF-") && w[5].is_ascii_digit() && w[6] == b'.' && w[7].is_ascii_digit()
+    })
 }
 
 fn is_html_name(name: &str) -> bool {
@@ -509,7 +540,11 @@ fn text_of(bytes: &[u8], truncated: bool) -> Option<String> {
         _ => bytes,
     };
     let text = String::from_utf8_lossy(bytes);
-    let invalid = text.chars().filter(|c| *c == '\u{fffd}').count();
+    // Count the bytes that were not UTF-8, not an authored U+FFFD, which is valid text.
+    let invalid = bytes
+        .utf8_chunks()
+        .filter(|chunk| !chunk.invalid().is_empty())
+        .count();
     if invalid > 1 + text.len() / INVALID_BYTES_PER_TEXT {
         return None;
     }
@@ -533,10 +568,15 @@ fn is_stray_control(c: char) -> bool {
 fn read_text_window(mut file: File, whole: u64, tail: u64) -> Result<String, Error> {
     let length = file.metadata()?.len();
     let start = if length > whole { length - tail } else { 0 };
-    file.seek(SeekFrom::Start(start))?;
+    // A tail also reads the byte before it, to tell whether it begins on a row.
+    let read_from = start.saturating_sub(1);
+    file.seek(SeekFrom::Start(read_from))?;
     let mut bytes = Vec::new();
-    file.take(length - start).read_to_end(&mut bytes)?;
-    let from = if start > 0 { window_skip(&bytes) } else { 0 };
+    file.take(length - read_from).read_to_end(&mut bytes)?;
+    let from = match bytes.split_first() {
+        Some((before, rest)) if start > 0 => 1 + window_skip(*before, rest),
+        _ => 0,
+    };
     let text = String::from_utf8_lossy(&bytes[from..]);
     let text = strip_terminal_escapes(&text);
     Ok(if text.chars().any(is_stray_control) {
@@ -553,15 +593,28 @@ fn read_text_window(mut file: File, whole: u64, tail: u64) -> Result<String, Err
 const ESCAPE_STRING_LIMIT: usize = 4096;
 
 /// How many bytes of a tail window to skip so it starts on a character boundary and, when
-/// a line break is near, at the start of the next line.
-fn window_skip(bytes: &[u8]) -> usize {
+/// a line break is near, at the start of the next line. `before` is the byte just before
+/// the window: a window that already starts a row (after LF, CR or CRLF) keeps it, and a
+/// row cut in the middle is skipped to its LF, CR or CRLF.
+fn window_skip(before: u8, bytes: &[u8]) -> usize {
     let mut from = 0;
     while bytes.get(from).is_some_and(|b| b & 0xc0 == 0x80) {
         from += 1;
     }
+    if from == 0 {
+        match (before, bytes.first()) {
+            // The cut fell between the CR and LF of one break: the row starts after it.
+            (b'\r', Some(b'\n')) => return 1,
+            (b'\n' | b'\r', _) => return 0,
+            _ => {}
+        }
+    }
     let near = &bytes[from..bytes.len().min(from + TEXT_LINE_START_WINDOW)];
-    if let Some(line_break) = near.iter().position(|b| *b == b'\n') {
+    if let Some(line_break) = near.iter().position(|b| matches!(b, b'\n' | b'\r')) {
         from += line_break + 1;
+        if near[line_break] == b'\r' && bytes.get(from) == Some(&b'\n') {
+            from += 1;
+        }
     }
     from
 }
@@ -574,12 +627,15 @@ fn text_window_first_line(mut file: File, whole: u64, tail: u64) -> Result<u64, 
         return Ok(1);
     }
     let start = length - tail;
-    file.seek(SeekFrom::Start(start))?;
+    file.seek(SeekFrom::Start(start - 1))?;
     let mut head = Vec::new();
     (&mut file)
-        .take(4 + TEXT_LINE_START_WINDOW as u64)
+        .take(5 + TEXT_LINE_START_WINDOW as u64)
         .read_to_end(&mut head)?;
-    let shown_from = start + window_skip(&head) as u64;
+    let skip = head
+        .split_first()
+        .map_or(0, |(before, rest)| 1 + window_skip(*before, rest));
+    let shown_from = start - 1 + skip as u64;
     file.seek(SeekFrom::Start(0))?;
     let mut remaining = shown_from;
     let mut breaks = 0u64;
@@ -607,7 +663,7 @@ fn text_window_first_line(mut file: File, whole: u64, tail: u64) -> Result<u64, 
 
 /// Removes ANSI/VT escape sequences (colours, cursor moves, titles) and the bell and
 /// backspace, so a coloured log reads as plain text. A sequence that is cut short (it
-/// meets a line break, a byte that cannot belong to it, or runs past
+/// meets a line break (LF or CR), a byte that cannot belong to it, or runs past
 /// `ESCAPE_STRING_LIMIT`) ends there and the text after it is kept.
 fn strip_terminal_escapes(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
@@ -626,7 +682,7 @@ fn strip_terminal_escapes(text: &str) -> String {
                 // they never do, at the next line break.
                 Some(']' | 'P' | 'X' | '^' | '_') => {
                     let mut length = 0;
-                    while let Some(c) = chars.next_if(|c| *c != '\n') {
+                    while let Some(c) = chars.next_if(|c| !matches!(*c, '\n' | '\r')) {
                         length += 1;
                         if c == '\u{7}' {
                             break;
@@ -648,7 +704,7 @@ fn strip_terminal_escapes(text: &str) -> String {
                     chars.next_if(|c| ('0'..='~').contains(c));
                 }
                 // An escape at the end of a line keeps its line break.
-                Some('\n') => out.push('\n'),
+                Some(c @ ('\n' | '\r')) => out.push(c),
                 // Any other two-character sequence (ESC c, ESC 7).
                 Some(_) | None => {}
             },
@@ -1027,8 +1083,10 @@ mod tests {
         };
         // Lone CRs end lines: the tail begins on line 5, not 1.
         assert_eq!(first_line(b"a\rb\rc\rd\rtail", 11, 4), 5);
-        // \r\n is one break, and \n alone still counts.
-        assert_eq!(first_line(b"a\r\nb\r\nc\nd\n", 8, 4), 4);
+        // \r\n is one break, and \n alone still counts. The cut just after a break keeps
+        // the row it starts.
+        assert_eq!(first_line(b"a\r\nb\r\nc\nd\n", 8, 4), 3);
+        assert_eq!(first_line(b"a\r\nb\r\nc\nd\n", 8, 3), 4);
         // A whole file starts at line 1.
         assert_eq!(first_line(b"a\rb\rc\r", 100, 4), 1);
     }
@@ -1052,5 +1110,59 @@ mod tests {
         assert_eq!(read("é".repeat(20).as_bytes(), 20, 7), "ééé");
         // Invalid bytes never hide the log.
         assert_eq!(read(b"a\xffb\x01c", 100, 10), "a\u{fffd}b\u{fffd}c");
+    }
+
+    #[test]
+    fn a_tail_that_already_starts_a_row_keeps_it_and_cr_ends_rows_too() {
+        let dir = tempfile::tempdir().unwrap();
+        let read = |content: &[u8], whole, tail| {
+            let path = dir.path().join("log");
+            fs::write(&path, content).unwrap();
+            read_text_window(File::open(path).unwrap(), whole, tail).unwrap()
+        };
+        // The cut falls just after a line break: the row there is whole, so it stays.
+        assert_eq!(read(b"aaaa\nbbbb\ncccc\n", 12, 5), "cccc\n");
+        assert_eq!(read(b"aaaa\rbbbb\rcccc\r", 12, 5), "cccc\r");
+        assert_eq!(read(b"aaaa\r\nbbbb\r\ncccc\r\n", 14, 6), "cccc\r\n");
+        // Inside a row of a CR-only log, the row is skipped to its CR, and to a CRLF's LF.
+        assert_eq!(read(b"aaaa\rbbbb\rcccc\r", 12, 7), "cccc\r");
+        assert_eq!(read(b"aaaa\r\nbbbb\r\ncccc\r\n", 14, 8), "cccc\r\n");
+        // A cut between the CR and LF of one break starts after the LF.
+        assert_eq!(read(b"aaaa\r\nbbbb\r\ncccc", 10, 11), "bbbb\r\ncccc");
+        let first_line = |content: &[u8], whole, tail| {
+            let path = dir.path().join("log");
+            fs::write(&path, content).unwrap();
+            text_window_first_line(File::open(path).unwrap(), whole, tail).unwrap()
+        };
+        assert_eq!(first_line(b"aaaa\nbbbb\ncccc\n", 12, 5), 3);
+        assert_eq!(first_line(b"aaaa\rbbbb\rcccc\r", 12, 7), 3);
+        assert_eq!(first_line(b"aaaa\r\nbbbb\r\ncccc", 10, 11), 2);
+    }
+
+    #[test]
+    fn a_cr_ends_an_unfinished_escape_and_stays_a_line_break() {
+        assert_eq!(
+            strip_terminal_escapes("one\r\u{1b}]0;never closed\rtwo\r\u{1b}\rthree"),
+            "one\r\rtwo\r\rthree"
+        );
+    }
+
+    #[test]
+    fn only_a_pdf_version_header_marks_a_pdf() {
+        assert!(has_pdf_marker(b"%PDF-1.7\n"));
+        assert!(has_pdf_marker(b"\xef\xbb\xbfjunk %PDF-2.0\n"));
+        // A log that quotes the token, or a header cut off, is not a PDF.
+        assert!(!has_pdf_marker(b"build failed: missing %PDF- marker\n"));
+        assert!(!has_pdf_marker(b"%PDF-1"));
+        assert!(!has_pdf_marker(b"%PDF-x.y"));
+    }
+
+    #[test]
+    fn an_authored_replacement_character_is_text_but_many_bad_bytes_are_not() {
+        assert_eq!(
+            text_of("unavailable: \u{fffd}\u{fffd}\n".as_bytes(), false).unwrap(),
+            "unavailable: \u{fffd}\u{fffd}\n"
+        );
+        assert!(text_of(&[0xff; 8], false).is_none());
     }
 }

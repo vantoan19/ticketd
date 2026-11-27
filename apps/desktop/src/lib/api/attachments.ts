@@ -250,7 +250,11 @@ const driveConfigurationSchema = lazySchema(() =>
 );
 export type DriveConfiguration = z.infer<typeof driveConfigurationSchema>;
 
-/** A raw IPC response arrives as bytes or an ArrayBuffer (compared by tag, not by realm). */
+/**
+ * A raw IPC response arrives as bytes or an ArrayBuffer (compared by tag, not by realm). When
+ * Tauri's custom protocol fails it retries through postMessage, which delivers the same bytes
+ * as a plain array of integers from 0 to 255; anything else in an array is not bytes.
+ */
 function rawBytes(value: unknown, what: string): Uint8Array {
   if (
     value instanceof Uint8Array ||
@@ -259,6 +263,11 @@ function rawBytes(value: unknown, what: string): Uint8Array {
     return value as Uint8Array;
   if (Object.prototype.toString.call(value) === "[object ArrayBuffer]")
     return new Uint8Array(value as ArrayBuffer);
+  if (
+    Array.isArray(value) &&
+    value.every((byte) => Number.isInteger(byte) && byte >= 0 && byte <= 255)
+  )
+    return Uint8Array.from(value as number[]);
   throw new Error(`The ${what} did not arrive as bytes.`);
 }
 

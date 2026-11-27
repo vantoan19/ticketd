@@ -506,7 +506,7 @@ impl Workspace {
                 let reason: Option<String> = self
                     .connection
                     .query_row(
-                        "SELECT json_extract(notice, '$.reason') FROM sync_notices WHERE cause LIKE 'attachment:' || ?1 || ':%' OR cause LIKE 'attachment-fetch:' || ?1 || ':%' ORDER BY rowid DESC LIMIT 1",
+                        "SELECT json_extract(notice, '$.reason') FROM sync_notices WHERE cause = 'attachment-save:' || ?1 OR cause LIKE 'attachment:' || ?1 || ':%' OR cause LIKE 'attachment-fetch:' || ?1 || ':%' ORDER BY rowid DESC LIMIT 1",
                         [id],
                         |row| row.get(0),
                     )

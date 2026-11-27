@@ -410,3 +410,70 @@ fn an_unfinished_escape_sequence_never_swallows_the_lines_after_it() {
         .unwrap();
     assert!(excerpt.text.contains("five"));
 }
+
+#[test]
+fn an_html_report_with_a_bad_byte_past_its_excerpt_stays_text() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    // Valid UTF-8 for the whole excerpt, then an invalid byte past it.
+    let mut report = b"<p>".to_vec();
+    report.resize(TEXT_EXCERPT_BYTES + 16 * 1024, b'a');
+    report.push(0xff);
+    let file = workspace
+        .import_attachment_bytes("late", "late.html", &report, |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert!(!preview.html);
+    assert!(preview.text_excerpt.is_some() && preview.text.is_some());
+    assert!(workspace.attachment_html(&identity, &file.id).is_err());
+}
+
+#[test]
+fn a_log_that_quotes_the_pdf_token_is_text_not_a_pdf() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let file = workspace
+        .import_attachment_bytes("log", "build.log", b"missing %PDF- marker\n", |_, _| true)
+        .unwrap();
+    let preview = workspace.attachment_preview(&identity, &file.id).unwrap();
+    assert!(!preview.pdf && preview.text.is_some());
+}
+
+#[test]
+fn a_text_read_of_a_missing_stored_copy_reports_the_storage_not_a_format() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut workspace = Workspace::open(dir.path().join("workspace.sqlite3")).unwrap();
+    let identity = workspace.attachment_workspace_id().unwrap();
+    let file = workspace
+        .import_attachment_bytes("log", "run.log", b"hello\n", |_, _| true)
+        .unwrap();
+    let binary = workspace
+        .import_attachment_bytes("bin", "bin.dat", &[0u8; 64], |_, _| true)
+        .unwrap();
+    std::fs::remove_file(
+        dir.path()
+            .join("workspace.sqlite3.attachments")
+            .join(&file.locator),
+    )
+    .unwrap();
+    for failure in [
+        workspace
+            .attachment_text(&identity, &file.id)
+            .unwrap_err()
+            .to_string(),
+        workspace
+            .attachment_text_first_line(&identity, &file.id)
+            .unwrap_err()
+            .to_string(),
+    ] {
+        assert!(!failure.contains("not plain text"), "{failure}");
+    }
+    // A readable file that is not text still gets the format error.
+    let failure = workspace
+        .attachment_text(&identity, &binary.id)
+        .unwrap_err()
+        .to_string();
+    assert!(failure.contains("not plain text"), "{failure}");
+}
