@@ -162,7 +162,10 @@ function fixFooter(
   if (installation?.outcome === "declined")
     return "A link in your own folder needs no password.";
   if (installation?.next_step === "add_to_path")
-    return `Add ${USER_BIN} to your PATH, then open a new terminal.`;
+    // A copy left in the way still wins on PATH unless the new folder comes first.
+    return status.bundled?.in_the_way
+      ? `Put ${USER_BIN} ahead of the older ticketd on your PATH, then open a new terminal and restart your agents.`
+      : `Add ${USER_BIN} to your PATH, then open a new terminal.`;
   if (installation?.next_step === "restart_terminals")
     return "Restart terminals and agents to pick it up.";
   const platform = status.bundled?.platform;
@@ -264,11 +267,16 @@ export function CommandLineCard({
   );
   const [installFailure, setInstallFailure] =
     useState<FailureDescription | null>(null);
+  // Which install failed, so Retry repeats it: a failure in the folder that
+  // needs no password must not send the person back to the password route.
+  const [failedInUserBin, setFailedInUserBin] = useState(false);
   /** `quiet` re-reads when the window comes back: no flicker, no failure. */
   const load = (refreshPath = false, quiet = false) => {
     void cliClient.check(refreshPath).then(
       (status) => {
         setCheck({ phase: "done", status });
+        // A check that now succeeds outdates an earlier failed one, whichever path ran it.
+        setFailure(null);
         setChecking(false);
         onChecked?.();
       },
@@ -329,6 +337,7 @@ export function CommandLineCard({
         load(true);
       }
     } catch (reason) {
+      setFailedInUserBin(inUserBin);
       setInstallFailure(
         describeFailure(reason, "install the command-line tool"),
       );
@@ -488,7 +497,7 @@ export function CommandLineCard({
             size="compact"
             className="mt-3"
             failure={installFailure}
-            onRetry={() => void apply(false)}
+            onRetry={() => void apply(failedInUserBin)}
           />
         )}
       </section>
