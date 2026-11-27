@@ -4035,6 +4035,50 @@ fn a_resumed_sub_agent_is_accepted_in_arrival_order_whatever_its_run_ids_sort_li
 }
 
 #[test]
+fn a_name_the_harness_gives_a_running_run_later_is_kept_to_recognise_its_late_end() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    // The first start names no run; a second start names the same running run.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                start_sub_agent("agent-1", None, None),
+                start_sub_agent("agent-1", Some("run-a"), None),
+                end_sub_agent("agent-1", Some("run-a"), ChatSubAgentState::Completed),
+                start_sub_agent("agent-1", Some("run-b"), None),
+            ],
+        )
+        .unwrap();
+    let runs = |workspace: &Workspace| {
+        sub_agents(workspace, &chat)[0]
+            .runs
+            .iter()
+            .map(|run| (run.run, run.native_run_id.clone(), run.state))
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        runs(&workspace),
+        [
+            (1, Some("run-a".to_owned()), ChatSubAgentState::Completed),
+            (2, Some("run-b".to_owned()), ChatSubAgentState::Running)
+        ]
+    );
+    // The first run's end repeated: it must not end the newer run.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![end_sub_agent(
+                "agent-1",
+                Some("run-a"),
+                ChatSubAgentState::Failed,
+            )],
+        )
+        .unwrap();
+    assert_eq!(runs(&workspace)[1].2, ChatSubAgentState::Running);
+}
+
+#[test]
 fn an_older_runs_start_does_not_change_what_the_record_says_of_the_current_run() {
     let dir = tempfile::tempdir().unwrap();
     let (mut workspace, chat) = workspace_with_chat(&dir);

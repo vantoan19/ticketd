@@ -407,7 +407,17 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
             // The record first: a follower that reads a run knows whose it is.
             touch_record(connection, chat_id, &record)?;
             match latest {
-                Some(latest) if same_run(&latest, &native_run_id) => {}
+                Some(latest) if same_run(&latest, &native_run_id) => {
+                    // A run that began unnamed learns its name: keep it, so a repeated end
+                    // of this run is still recognised as late once a newer run starts. A
+                    // name already stored is never replaced.
+                    if latest.native_run_id.is_none() && native_run_id.is_some() {
+                        connection.execute(
+                            "UPDATE chat_sub_agent_runs SET native_run_id = ?2 WHERE id = ?1 AND native_run_id IS NULL",
+                            params![latest.id, native_run_id],
+                        )?;
+                    }
+                }
                 latest => {
                     let run = latest.map_or(1, |latest| latest.run + 1);
                     let id = format!("{record}:run-{run}");
