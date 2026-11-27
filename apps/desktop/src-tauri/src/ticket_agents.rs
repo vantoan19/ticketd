@@ -365,6 +365,7 @@ mod tests {
                 origin: None,
                 started_at: String::new(),
                 ended_at: None,
+                origin: None,
             }),
             seen_through: 0,
             read_through: None,
