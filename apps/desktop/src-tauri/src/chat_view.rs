@@ -4922,6 +4922,73 @@ mod tests {
         assert!(tracker.first_change().is_none(), "not the turn's records");
     }
 
+    #[test]
+    fn a_codex_sub_agent_has_its_name_and_model_and_no_brief() {
+        let chat = chat(None);
+        let said = json!({
+            "description": "Refund calls",
+            "agentPath": "/root/refund_calls",
+            "model": "gpt-test",
+            "reasoningEffort": "low",
+            // A v1 spawn call names its prompt; the descriptor says Codex reports no brief.
+            "prompt": "Update the refund calls.",
+        });
+        let record = sub_agent_record(
+            "thr-a",
+            None,
+            said,
+            vec![sub_agent_run("thr-a", 1, 10, ChatSubAgentState::Running)],
+        );
+        let tracker = Tracker::from_snapshot(&[], std::slice::from_ref(&record));
+        let view = &tracker.sub_agent_views(&chat, &ChatLive::idle())[0];
+        assert_eq!(view.title, "Refund calls");
+        assert_eq!(view.kind, None);
+        assert_eq!(view.model, "gpt-test");
+        assert!(!view.capabilities.brief && view.capabilities.text && view.capabilities.end);
+        assert!(!view.capabilities.resume);
+        let brief = view.brief.as_ref().expect("a brief entry for its source");
+        assert_eq!((brief.text.as_deref(), brief.source), (None, "main_agent"));
+    }
+
+    #[test]
+    fn what_a_sub_agent_said_is_a_response_of_its_own_run() {
+        let chat = chat(None);
+        let record = sub_agent_record(
+            "a",
+            None,
+            json!({}),
+            vec![
+                sub_agent_run("a", 1, 10, ChatSubAgentState::Completed),
+                sub_agent_run("a", 2, 20, ChatSubAgentState::Running),
+            ],
+        );
+        let said =
+            |id: &str, position, text: &str| ChatItem::Message(said_by("a", id, position, text));
+        let first = said("m1", 11, "The first findings.");
+        let second = said("m2", 21, "More findings.");
+        let tracker = Tracker::from_snapshot(
+            &[first.clone(), second.clone()],
+            std::slice::from_ref(&record),
+        );
+        let shown = |item: &ChatItem| view_of(item, &tracker, &chat);
+        let (one, two) = (shown(&first), shown(&second));
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0]["kind"], "response");
+        assert_eq!(one[0]["text"], "The first findings.");
+        assert_eq!(one[0]["state"], "complete");
+        assert_eq!(
+            (one[0]["owner"].as_str(), one[0]["turn_id"].as_str()),
+            (Some("a"), Some("a:run-1"))
+        );
+        // A resumed sub-agent's words belong to the run they were written in.
+        assert_eq!(two[0]["turn_id"], "a:run-2");
+        // The main agent's last response and everything it keeps stay its own.
+        let mut main = Tracker::default();
+        main.note(&first);
+        assert_eq!(main.last_response, None);
+        assert!(main.dependents().is_empty());
+    }
+
     /// The stored history of the nested fixture (the chat host's test writes it) and the view
     /// built from it, which the interface's tests parse with its own schemas
     /// (`sub-agent-host-view.test.ts`). Regenerated only with
@@ -4937,6 +5004,14 @@ mod tests {
     const VIEW_MESSAGES: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../src/features/chats/claude-sub-agent-messages-view.json"
+    );
+    const CODEX_STORED: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../crates/ticketd-chat-host/tests/fixtures/codex/sub_agent_nested.stored.json"
+    );
+    const CODEX_VIEW: &str = concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../src/features/chats/codex-sub-agent-view.json"
     );
     const VIEW: &str = concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -5050,5 +5125,71 @@ mod tests {
         assert_eq!(of("files", None).len(), 1);
         assert_eq!(of("reasoning", None).len(), 0);
         assert_eq!(state.sub_agents.len(), 1);
+    }
+
+    #[test]
+    fn the_view_of_nested_codex_sub_agents_is_the_contract_the_interface_parses() {
+        let stored: ticketd_core::ChatSnapshot = serde_json::from_str(
+            &std::fs::read_to_string(CODEX_STORED).expect("the stored history"),
+        )
+        .expect("the stored history reads");
+        let tracker = Tracker::from_snapshot(&stored.items, &stored.sub_agents);
+        let live = ChatLive::idle();
+        let state = super::chat_state(&stored.chat, &live, &tracker, &Surroundings::default());
+        let rows: Vec<Item> = stored
+            .items
+            .iter()
+            .flat_map(|record| items(record, &stored.chat, &live, None, &tracker))
+            .collect();
+        let view = serde_json::to_string_pretty(&json!({
+            "chat": state,
+            "items": rows,
+            "cursor": 0,
+        }))
+        .unwrap();
+        if std::env::var_os("TICKETD_UPDATE_VIEW_FIXTURES").is_some() {
+            std::fs::write(CODEX_VIEW, format!("{view}\n")).expect("the view is written");
+        }
+        let kept = std::fs::read_to_string(CODEX_VIEW).expect(
+            "the view; regenerate it with TICKETD_UPDATE_VIEW_FIXTURES=1 cargo test -p ticketd-desktop --lib chat_view",
+        );
+        assert!(
+            kept.trim_end() == view,
+            "the view changed; if that is intended, regenerate {CODEX_VIEW} with TICKETD_UPDATE_VIEW_FIXTURES=1"
+        );
+
+        // The main transcript holds one row, for the direct sub-agent, and none of the
+        // sub-agents' own Steps or words; the nested one is in its parent's view.
+        let all: Vec<serde_json::Value> = rows
+            .iter()
+            .map(|row| serde_json::to_value(row).unwrap())
+            .collect();
+        let main: Vec<&serde_json::Value> = all
+            .iter()
+            .filter(|row| row.get("owner").is_none())
+            .collect();
+        let kind_of =
+            |value: &serde_json::Value| value["kind"].as_str().unwrap_or_default().to_owned();
+        assert_eq!(
+            main.iter()
+                .filter(|row| kind_of(row) == "sub_agent")
+                .count(),
+            1
+        );
+        assert!(main.iter().all(|row| {
+            kind_of(row) != "response"
+                || row["turn_id"].is_null()
+                || !row["turn_id"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains(":run-")
+        }));
+        assert_eq!(state.sub_agents.len(), 2);
+        assert!(
+            state
+                .sub_agents
+                .iter()
+                .all(|agent| !agent.capabilities.brief)
+        );
     }
 }

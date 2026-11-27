@@ -323,7 +323,7 @@ const STORED_MESSAGES: &str = concat!(
 /// `text` with each distinct identifier the host chose (`8-4-4-4-12` hex) replaced by
 /// `00000000-0000-4000-8000-<n>` in order of appearance, and every time (which is when the
 /// test ran) by one steady time.
-fn made_stable(text: &str) -> String {
+pub(super) fn made_stable(text: &str) -> String {
     let bytes = text.as_bytes();
     let hex = |i: usize| bytes.get(i).is_some_and(u8::is_ascii_hexdigit);
     let digit = |i: usize| bytes.get(i).is_some_and(u8::is_ascii_digit);

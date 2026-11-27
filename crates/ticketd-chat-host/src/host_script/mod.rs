@@ -134,6 +134,8 @@ use ticketd_core::{
 };
 
 #[cfg(test)]
+mod codex_sub_agents;
+#[cfg(test)]
 mod sub_agents;
 #[cfg(test)]
 mod tests;

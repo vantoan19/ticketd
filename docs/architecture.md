@@ -221,6 +221,18 @@ or history a fresh session carries. Its final report is its last message: Claude
 task notification repeats it, so the host stores the notification's summary only when no
 message said it.
 
+For Codex a sub-agent is a child thread of the Chat's thread, announced by a
+`subAgentActivity` item (multi-agent v2) or a `spawnAgent` call (v1). The adapter routes
+every notification by its `threadId`: a child's `turn/started` starts a run of its record
+(a later one is the next run), its `turn/completed` ends it as completed, failed or
+stopped, and none of it is a turn of the Chat or touches the thread's active turn. Codex
+children run on when their parent's turn ends or is interrupted, so they are background
+sub-agents and Stop interrupts the Chat's turn and then each child's live turn through
+`HarnessRuntime::interrupt_sub_agents`, also when no turn runs. A child's messages are
+owned assistant messages, as a Claude sub-agent's are, so nothing that reads the Chat's
+own messages takes them for the main agent's. Codex reports no brief, and a
+child's own approval is not offered yet.
+
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
 tables do not move the workspace change token, so streaming a turn does not make

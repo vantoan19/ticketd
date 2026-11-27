@@ -1560,6 +1560,8 @@ impl Supervisor {
             self.stop_when_turn_known = true;
             self.stop = Some(StopState::Requested);
             self.stop_deadline = Some(Instant::now() + INTERRUPT_TIMEOUT);
+        } else {
+            self.interrupt_sub_agents();
         }
         Ok(())
     }
@@ -1635,7 +1637,19 @@ impl Supervisor {
                 generation,
                 outcome,
             });
+            // The sub-agents run on when their parent's turn is interrupted (Codex): ask
+            // each to stop too, after the turn, in one order.
+            handle.interrupt_sub_agents(generation).await;
         });
+    }
+
+    /// Stop with no turn running: only the sub-agents the harness still runs can be stopped.
+    fn interrupt_sub_agents(&mut self) {
+        let Some(runtime) = &self.runtime else {
+            return;
+        };
+        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+        tokio::spawn(async move { handle.interrupt_sub_agents(generation).await });
     }
 
     /// Only a request in the live registry, issued by the current runtime and not yet
