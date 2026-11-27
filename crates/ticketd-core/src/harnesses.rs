@@ -179,6 +179,11 @@ pub struct SubAgentSupport {
     pub stop: bool,
     /// A sub-agent that was lost can be resumed.
     pub resume: bool,
+    /// The environment variable the harness sets on each command it runs, naming that one
+    /// command (Codex's `CODEX_TOOL_CALL_ID`, which is the command Step's item ID). The CLI
+    /// records it with a write, so the write is credited to the exact agent that ran the
+    /// command. `None`: the harness gives no such key.
+    pub call_variable: Option<&'static str>,
 }
 
 pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
@@ -245,6 +250,9 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
         end: true,
         stop: false,
         resume: true,
+        // Claude Code gives a sub-agent's command no key of its own: its writes are
+        // credited by commit order.
+        call_variable: None,
     },
 };
 
@@ -299,6 +307,7 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
         end: true,
         stop: false,
         resume: false,
+        call_variable: Some("CODEX_TOOL_CALL_ID"),
     },
 };
 
@@ -370,10 +379,20 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         end: false,
         stop: false,
         resume: false,
+        // `ANTIGRAVITY_SOURCE_METADATA` carries the tool call ID inside JSON; reading it
+        // lands with Antigravity's sub-agents.
+        call_variable: None,
     },
 };
 
 pub static HARNESS_DESCRIPTORS: &[&HarnessDescriptor] = &[&CLAUDE_CODE, &CODEX, &ANTIGRAVITY];
+
+/// The per-command variables the harnesses declare, in catalog order.
+pub fn call_variables() -> impl Iterator<Item = &'static str> {
+    HARNESS_DESCRIPTORS
+        .iter()
+        .filter_map(|descriptor| descriptor.sub_agents.call_variable)
+}
 
 pub fn descriptor(key: &str) -> Option<&'static HarnessDescriptor> {
     find_descriptor(HARNESS_DESCRIPTORS, key)

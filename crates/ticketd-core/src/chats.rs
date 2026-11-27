@@ -18,6 +18,11 @@ use crate::{Error, Workspace};
 
 pub(crate) mod attachments;
 pub use attachments::{ChatAttachment, ChatAttachmentContent};
+pub(crate) use credit::migrate as migrate_credit;
+mod credit;
+pub use credit::{
+    ChatPlannedWrite, ChatPlannedWriteKind, ChatWriteCredit, TicketWriteCredits, TicketWritingAgent,
+};
 mod receipt;
 pub(crate) mod sub_agents;
 pub use receipt::ChatTurnReceipt;
@@ -872,6 +877,14 @@ pub enum ChatObservation {
         input: String,
         state: ChatToolState,
         output: Option<String>,
+    },
+    /// The Step `tool_id` (recorded before this, or in the same batch) runs a shell command.
+    /// Writes the Chat's agents commit while it runs may be its owner's (see
+    /// `ChatWriteCredit`); `writes` is what the plain `ticketd` calls it names would write.
+    ShellStep {
+        tool_id: String,
+        #[serde(default)]
+        writes: Vec<ChatPlannedWrite>,
     },
     InteractionRequested {
         interaction_id: String,
@@ -2143,6 +2156,9 @@ fn observe(
                     "UPDATE chat_tools SET name = ?2, input = ?3, state = ?4, output = ?5, output_truncated = ?6 WHERE id = ?1",
                     params![tool_id, tool_name, input, name(state)?, output, truncated],
                 )?;
+                if state != ChatToolState::Running {
+                    credit::close_window(connection, &tool_id)?;
+                }
                 log(connection, chat_id, "tool", &tool_id)?;
             } else {
                 let position = log(connection, chat_id, "tool", &tool_id)?;
@@ -2152,6 +2168,9 @@ fn observe(
                 )?;
             }
             Ok(())
+        }
+        ChatObservation::ShellStep { tool_id, writes } => {
+            credit::open_window(connection, chat_id, &tool_id, &writes)
         }
         ChatObservation::InteractionRequested {
             interaction_id,
@@ -2468,6 +2487,7 @@ fn lose_contact(
         )?;
         log(connection, chat_id, "tool", &id)?;
     }
+    credit::close_windows(connection, chat_id)?;
     expire_interactions(connection, chat_id, None)?;
     sub_agents::lose_contact(connection, chat_id)?;
     for id in ids(
@@ -2491,6 +2511,7 @@ pub(crate) fn delete_where(connection: &Connection, filter: &str) -> Result<(), 
         "chat_changes",
         "chat_sub_agent_runs",
         "chat_sub_agents",
+        "chat_step_windows",
         "chat_notices",
         "chat_interactions",
         "chat_tools",
@@ -3774,7 +3795,65 @@ impl Workspace {
     /// records are credited to that Chat. Connection-scoped like `act_as_local_person`;
     /// TEMP triggers keep every write path unchanged.
     pub fn act_for_chat(&mut self, chat_id: &str) -> Result<(), Error> {
-        receipt::prepare_writer(&self.connection, chat_id)
+        self.act_for_chat_call(chat_id, None)
+    }
+
+    /// Like [`Self::act_for_chat`], for a harness that names each command it runs:
+    /// `call_id` (blank counts as none) is kept with every write, and tells exactly which
+    /// Step, so which agent, made it.
+    pub fn act_for_chat_call(&mut self, chat_id: &str, call_id: Option<&str>) -> Result<(), Error> {
+        let call_id = call_id.map(str::trim).filter(|id| !id.is_empty());
+        receipt::prepare_writer(&self.connection, chat_id, call_id)
+    }
+
+    /// The agent each tagged status move and Activity on a ticket is credited to, as far as
+    /// it can be told exactly: see `ChatWriteCredit`.
+    pub fn ticket_write_credits(&self, reference: &str) -> Result<TicketWriteCredits, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)
+        })
+    }
+
+    /// A ticket's history with the agent each status move is credited to: see
+    /// [`Self::ticket_write_credits`]. Other entries carry none.
+    pub fn ticket_history_credits(
+        &self,
+        reference: &str,
+    ) -> Result<Vec<(crate::HistoryEntry, Option<ChatWriteCredit>)>, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            let entries = crate::history::read(&self.connection, &ticket.id)?;
+            let numbers = crate::history::numbers(&self.connection, &ticket.id)?;
+            let mut credits =
+                credit::ticket_credits(&self.connection, &ticket.id, &ticket.reference)?;
+            Ok(entries
+                .into_iter()
+                .zip(numbers)
+                .map(|(entry, number)| (entry, credits.statuses.remove(&number)))
+                .collect())
+        })
+    }
+
+    /// One sub-agent of a Chat, by the harness's own ID for it, with its runs.
+    pub fn chat_sub_agent(
+        &self,
+        chat_id: &str,
+        native_id: &str,
+    ) -> Result<Option<ChatSubAgent>, Error> {
+        self.read(|_| {
+            sub_agents::read_record(&self.connection, &sub_agents::record_id(chat_id, native_id))
+        })
+    }
+
+    /// The agents of Chats on this computer with a credited write on the ticket, and
+    /// whether each is running now (a sub-agent's latest run is; the main agent has an
+    /// active turn): the label "{model} is working on this ticket" reads this.
+    pub fn ticket_writing_agents(&self, reference: &str) -> Result<Vec<TicketWritingAgent>, Error> {
+        self.read(|_| {
+            let ticket = self.show_ticket(reference)?;
+            credit::writing_agents(&self.connection, &ticket.id, &ticket.reference)
+        })
     }
 
     /// What the Chat's agent changed in tickets during the Turn, oldest first.

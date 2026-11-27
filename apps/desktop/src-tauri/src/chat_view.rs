@@ -2175,6 +2175,15 @@ fn model_name(reported: Option<&str>, live: &ChatLive, harness: &str) -> String 
     listed.map_or_else(|| reported.to_owned(), |option| option.label.clone())
 }
 
+/// What the harness called a sub-agent's work; failing that, the kind of sub-agent it is.
+pub(crate) fn sub_agent_title(record: &ChatSubAgent) -> String {
+    let said = |key: &str| record.said(key).filter(|said| !said.trim().is_empty());
+    said("description")
+        .map(|description| first_line_of(&description).unwrap_or(description))
+        .or_else(|| said("subagent_type"))
+        .unwrap_or_else(|| "Sub-agent".to_owned())
+}
+
 /// A sub-agent as the screens read it, or `None` when it has no run yet.
 fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option<SubAgentView> {
     let latest = record.latest()?;
@@ -2197,11 +2206,7 @@ fn sub_agent_view(record: &ChatSubAgent, chat: &Chat, live: &ChatLive) -> Option
         },
     );
     let said = |key: &str| record.said(key).filter(|said| !said.trim().is_empty());
-    // What the harness called the work; failing that, the kind of sub-agent it is.
-    let title = said("description")
-        .map(|description| first_line_of(&description).unwrap_or(description))
-        .or_else(|| said("subagent_type"))
-        .unwrap_or_else(|| "Sub-agent".to_owned());
+    let title = sub_agent_title(record);
     let prompt = said("prompt");
     Some(SubAgentView {
         id: record.native_id.clone(),

@@ -21,6 +21,7 @@ mod s3_commands;
 mod s3_storage;
 mod sync_commands;
 mod sync_scheduler;
+mod ticket_credit;
 mod updates;
 mod wake;
 mod webview_report;
@@ -29,11 +30,10 @@ mod workspace_session;
 use ticketd_core::{
     Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
     ContextGraphPage, CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
-    DocumentSummary, Evidence, EvidenceInput, HistoryEntry, InboxEntry, LatestUpdate,
-    MetadataSelection, Plan, PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange,
-    SafetyBackup, SidebarCounts, Status, StatusCounts, Ticket, TicketChange, TicketFilter,
-    TicketPatch, Workspace, WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest,
-    WriteResult,
+    DocumentSummary, Evidence, EvidenceInput, InboxEntry, LatestUpdate, MetadataSelection, Plan,
+    PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange, SafetyBackup, SidebarCounts,
+    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
+    WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
     source::{ExtensionRegistry, RefreshControl, RefreshProgress},
 };
 
@@ -936,9 +936,9 @@ fn change_ticket(
 }
 
 #[tauri::command(async)]
-fn ticket_history(reference: String) -> Result<Vec<HistoryEntry>, BridgeFailure> {
+fn ticket_history(reference: String) -> Result<Vec<serde_json::Value>, BridgeFailure> {
     open_workspace()
-        .and_then(|workspace| workspace.ticket_history(&reference))
+        .and_then(|workspace| ticket_credit::credited_history(&workspace, &reference))
         .map_err(BridgeFailure::from)
 }
 
@@ -1015,9 +1015,12 @@ fn activity_feed(
     reference: String,
     limit: u32,
     offset: u32,
-) -> Result<Vec<ticketd_core::ActivityFeedEntry>, BridgeFailure> {
+) -> Result<Vec<serde_json::Value>, BridgeFailure> {
     open_workspace()
-        .and_then(|workspace| workspace.activity_feed(&reference, limit, offset))
+        .and_then(|workspace| {
+            let feed = workspace.activity_feed(&reference, limit, offset)?;
+            ticket_credit::credited_feed(&workspace, &reference, feed)
+        })
         .map_err(BridgeFailure::from)
 }
 #[tauri::command(async)]

@@ -1458,6 +1458,9 @@ fn describe(command: clap::Command, parents: &[String]) -> clap::Command {
 struct Origin {
     chat_id: Option<String>,
     automation_run_id: Option<String>,
+    /// The key the harness gave the command that ran this one, under the name its
+    /// descriptor declares. It tells the host which agent ran the command.
+    call_id: Option<String>,
 }
 
 impl Origin {
@@ -1471,6 +1474,7 @@ impl Origin {
         Self {
             chat_id: read(ticketd_core::CHAT_ID_VARIABLE),
             automation_run_id: read(ticketd_core::AUTOMATION_RUN_ID_VARIABLE),
+            call_id: ticketd_core::harnesses::call_variables().find_map(read),
         }
     }
 }
@@ -1604,7 +1608,7 @@ fn run(output: &mut impl Write, origin: &Origin) -> Result<(), Box<dyn std::erro
     tracing::debug!("workspace opened");
     // Run by a Chat's harness: what this command writes is credited to that Chat.
     if let Some(chat) = &origin.chat_id {
-        workspace.act_for_chat(chat)?;
+        workspace.act_for_chat_call(chat, origin.call_id.as_deref())?;
     }
     // Run inside an Automation run: what this command writes cannot trigger Automations.
     if origin.automation_run_id.is_some() {
