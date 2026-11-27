@@ -1179,3 +1179,7 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 
 ## 104
 + column chat_messages.requires_link_context
+
+## 105
++ column chat_interactions.sub_agent_id
++ column chat_tools.sub_agent_id

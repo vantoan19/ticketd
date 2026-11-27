@@ -14,8 +14,8 @@ use std::time::Duration;
 
 use ticketd_core::{
     Chat, ChatAttachmentContent, ChatInputChange, ChatInputReceipt, ChatInteractionKind,
-    ChatInteractionState, ChatMessage, ChatObservation, ChatSessionOrigin, ChatSubmissionIntent,
-    ChatToolState, ChatTurnReceipt, ChatTurnState, Error, Workspace,
+    ChatInteractionState, ChatMessage, ChatObservation, ChatOwner, ChatSessionOrigin,
+    ChatSubmissionIntent, ChatToolState, ChatTurnReceipt, ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -3037,7 +3037,8 @@ impl Supervisor {
             runtime.link_context = Some(transfer.text.clone());
             observations.push(ChatObservation::Tool {
                 tool_id: format!("{turn_id}:ticketd-context"),
-                turn_id: turn_id.clone(),
+                turn_id: Some(turn_id.clone()),
+                owner: ChatOwner::Main,
                 name: CONTEXT_RECORD_NAME.to_owned(),
                 input: transfer.text.to_string(),
                 state: ChatToolState::Completed,
@@ -3172,7 +3173,8 @@ impl Supervisor {
                 let state = tool_state(status);
                 let tool = ChatObservation::Tool {
                     tool_id: tool_id.clone(),
-                    turn_id,
+                    turn_id: Some(turn_id),
+                    owner: ChatOwner::Main,
                     name: title,
                     input: detail.map(|d| d.payload().to_owned()).unwrap_or_default(),
                     state,
@@ -3440,7 +3442,8 @@ impl Supervisor {
         };
         observations.push(ChatObservation::Tool {
             tool_id,
-            turn_id,
+            turn_id: Some(turn_id),
+            owner: ChatOwner::Main,
             name: name.to_owned(),
             input,
             state,
@@ -3500,7 +3503,8 @@ impl Supervisor {
         };
         observations.push(ChatObservation::InteractionRequested {
             interaction_id: interaction_id.clone(),
-            turn_id: turn_id.clone(),
+            turn_id: Some(turn_id.clone()),
+            owner: ChatOwner::Main,
             kind,
             native_request_id: Some(request.request.0.clone()),
             prompt,
