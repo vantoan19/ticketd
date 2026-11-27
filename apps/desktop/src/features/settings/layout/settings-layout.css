@@ -33,13 +33,10 @@
   content: "/";
   margin-right: 8px;
 }
-/* The parent step of a drill-in breadcrumb is a button that looks like text. */
+/* The parent step of a drill-in breadcrumb is a button that looks like text
+   (its look is in the surface roles). */
 .settings-crumb-link {
   padding: 0;
-  border: 0;
-  background: none;
-  font: inherit;
-  color: inherit;
   cursor: pointer;
 }
 .settings-panel-bar-end {
@@ -170,21 +167,10 @@
 .settings-list-row[data-openable] {
   cursor: pointer;
 }
-.settings-list-row[data-openable]:hover {
-  background: var(--hover);
-}
 .settings-row-open {
   display: inline-flex;
   padding: 0;
-  border: 0;
-  border-radius: var(--radius-segment);
-  background: none;
-  color: var(--disabled-foreground);
   cursor: inherit;
-}
-.settings-row-open:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 .settings-list-footer {
   display: flex;

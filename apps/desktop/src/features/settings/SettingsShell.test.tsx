@@ -378,6 +378,46 @@ test("Command line and Agent skills carry a Needs setup dot until they are set u
   expect(within(navItem("Attention")).queryByRole("img")).toBeNull();
 });
 
+test("an older reading of the command line or the skills that answers last does not replace the newer one", async () => {
+  let lateCli: (status: CliStatus) => void = () => {};
+  let lateSkills: (agents: never) => void = () => {};
+  vi.mocked(cliClient.check)
+    .mockReturnValueOnce(
+      new Promise<CliStatus>((resolve) => {
+        lateCli = resolve;
+      }),
+    )
+    .mockResolvedValue(installed);
+  vi.mocked(agentSkillsClient.list)
+    .mockReturnValueOnce(
+      new Promise((resolve) => {
+        lateSkills = resolve as (agents: never) => void;
+      }),
+    )
+    .mockResolvedValue([]);
+  render(<Settings />);
+  await act(async () => {});
+  // The window regains focus: a second reading, which answers first.
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+  });
+  // The first one answers last, with what was true before.
+  await act(async () => {
+    lateCli({ ...installed, found: false });
+    lateSkills([
+      {
+        id: "claude",
+        name: "Claude Code",
+        detected: true,
+        state: "not_installed",
+        path: "/s",
+      },
+    ] as never);
+  });
+  expect(within(navItem("Command line")).queryByRole("img")).toBeNull();
+  expect(within(navItem("Agent skills")).queryByRole("img")).toBeNull();
+});
+
 test("a set-up command line shows no dot", async () => {
   render(<Settings />);
   await act(async () => {});
@@ -435,6 +475,28 @@ test("elsewhere only Ctrl+F focuses the search field; the Windows key does not",
   expect(document.activeElement).not.toBe(field());
   fireEvent.keyDown(window, { key: "f", ctrlKey: true });
   expect(document.activeElement).toBe(field());
+});
+
+test("below 768px Cmd+F opens the nav sheet and focuses the search field in it", async () => {
+  onPlatform("MacIntel");
+  vi.spyOn(window, "matchMedia").mockImplementation(
+    (query: string) =>
+      ({
+        matches: query === "(max-width: 767px)",
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }) as unknown as MediaQueryList,
+  );
+  render(<Settings initial="about" />);
+  await act(async () => {});
+  // The field lives in the sheet, which is closed.
+  expect(screen.queryByRole("searchbox")).toBeNull();
+  fireEvent.keyDown(window, { key: "f", metaKey: true });
+  const sheet = await screen.findByRole("dialog", { name: "Settings" });
+  await vi.waitFor(() =>
+    expect(document.activeElement).toBe(within(sheet).getByRole("searchbox")),
+  );
 });
 
 test("typing in the search field shows the results in place of the page and selects no entry", async () => {

@@ -79,6 +79,8 @@ export function SettingsStateProvider({
   const [agentUpdate, setAgentUpdate] = useState<
     AgentUpdate | null | undefined
   >(undefined);
+  // The newest reading of each wins: the native checks answer in any order.
+  const latest = useRef({ cli: 0, skills: 0 });
   const chats = useChatClient();
   const { enabled: chatEnabled } = useChatFeature();
   const refreshIndicators = useCallback(
@@ -92,28 +94,36 @@ export function SettingsStateProvider({
         });
       const reads = (key: SettingsRead) =>
         section === undefined || section === key;
-      if (reads("command-line"))
+      if (reads("command-line")) {
+        const mine = ++latest.current.cli;
         void cliClient.check(options?.refreshPath).then(
           (status) => {
+            if (mine !== latest.current.cli) return;
             setCli(status);
             set("command-line", cliNeedsSetup(status));
           },
           () => {
+            if (mine !== latest.current.cli) return;
             setCli(null);
             set("command-line", undefined);
           },
         );
-      if (reads("agent-skills"))
+      }
+      if (reads("agent-skills")) {
+        const mine = ++latest.current.skills;
         void agentSkillsClient.list().then(
           (agents) => {
+            if (mine !== latest.current.skills) return;
             setSkills(agents);
             set("agent-skills", skillsNeedSetup(agents));
           },
           () => {
+            if (mine !== latest.current.skills) return;
             setSkills(null);
             set("agent-skills", undefined);
           },
         );
+      }
       if (reads("agent-update"))
         void (async () => {
           try {

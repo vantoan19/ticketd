@@ -334,6 +334,26 @@ test("with no ticket yet, step 2 offers New ticket, and Start a Chat while Chats
   expect(startChat).toHaveBeenCalledTimes(1);
 });
 
+test("a Ready ticket created while step 2 is open replaces New ticket with the prompt", async () => {
+  vi.mocked(client.findTicketRows).mockResolvedValue([]);
+  const { rerender } = render(<Settings revision={0} />);
+  await settle();
+  const second = () => step("An agent has picked up a ticket");
+  expect(
+    within(second()).queryByRole("button", { name: "Copy the prompt" }),
+  ).toBeNull();
+  vi.mocked(client.findTicketRows).mockResolvedValue([
+    { reference: "T-KQ28" },
+  ] as never);
+  rerender(<Settings revision={1} />);
+  await settle();
+  expect(
+    within(second()).getByText(
+      "Use ticketd to pick up T-KQ28, then post an update on it.",
+    ),
+  ).toBeTruthy();
+});
+
 test("step 2 ticks on the first update an agent writes, while Settings is open", async () => {
   const { rerender } = render(<Settings revision={0} />);
   await settle();

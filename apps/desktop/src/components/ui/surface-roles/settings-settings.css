@@ -71,3 +71,37 @@
   font-family: var(--font-mono);
   font-size: var(--text-code);
 }
+.settings-setup-count {
+  font-size: var(--text-caption);
+  line-height: 16px;
+  color: var(--muted-foreground);
+}
+/* The board's skill folder is a plain 12px mono caption, not the 13px/500 path. */
+.agent-skill-path .ui-path-text {
+  font-size: var(--text-caption);
+  font-weight: 400;
+  line-height: var(--text-caption-line);
+}
+
+/* The setting a Search result opened. The page holds the attribute for 3
+   seconds: the fill stays, then fades out over the last of them. Reduced motion
+   keeps the fill still until the attribute goes. */
+[data-found] {
+  background-color: var(--hover);
+  border-radius: var(--radius);
+  animation: settings-found calc(var(--dur-arrival) * 2.5) linear forwards;
+}
+@keyframes settings-found {
+  0%,
+  70% {
+    background-color: var(--hover);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-found] {
+    animation: none;
+  }
+}

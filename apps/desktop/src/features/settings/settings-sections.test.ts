@@ -44,6 +44,9 @@ test("current names, Search and a connection stay as they are; a name nobody kno
   expect(resolveSettingsPage("search")).toBe("search");
   expect(resolveSettingsPage("source-github-2")).toBe("source-github-2");
   expect(resolveSettingsPage("nonsense")).toBe("appearance");
+  // Names every object inherits are not pages either.
+  for (const name of ["constructor", "toString", "__proto__", "hasOwnProperty"])
+    expect(resolveSettingsPage(name)).toBe("appearance");
 });
 
 test("a connection selects Ticket sources in the sidebar, an agent selects Agents, and Search selects nothing", () => {

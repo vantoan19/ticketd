@@ -252,9 +252,10 @@ test("Declining the password changes nothing, says so, and offers the folder tha
     screen.getByRole("button", { name: "Use ~/.local/bin instead" }),
   );
 
+  // The older copy is still on PATH: the new folder has to come before it.
   expect(
     await screen.findByText(
-      "Add ~/.local/bin to your PATH, then open a new terminal.",
+      "Put ~/.local/bin ahead of the older ticketd on your PATH, then open a new terminal and restart your agents.",
     ),
   ).toBeTruthy();
   expect(commands()).toEqual([
@@ -381,6 +382,47 @@ test("a failed install says why and offers Retry", async () => {
     "Couldn't install the command-line tool.",
   );
   expect(within(alert).getByRole("button", { name: "Retry" })).toBeTruthy();
+});
+
+test("Retry after a failed install in ~/.local/bin tries that folder again, not the password route", async () => {
+  bridge([olderFirst], {
+    install_cli: {
+      outcome: "declined",
+      directory: "~/.local/bin",
+      next_step: null,
+    },
+    install_cli_in_user_bin: new Error("Permission denied"),
+  });
+  render(<CommandLineCard />);
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Use this app’s ticketd" }),
+  );
+  fireEvent.click(
+    await screen.findByRole("button", { name: "Use ~/.local/bin instead" }),
+  );
+  const alert = await screen.findByRole("alert");
+  fireEvent.click(within(alert).getByRole("button", { name: "Retry" }));
+  await waitFor(() =>
+    expect(commands()).toEqual([
+      "check_cli",
+      "install_cli",
+      "install_cli_in_user_bin",
+      "install_cli_in_user_bin",
+    ]),
+  );
+});
+
+test("a failed first check stops showing once a later check on return finds the tool", async () => {
+  invoke.mockRejectedValueOnce(new Error("shell failed"));
+  render(<CommandLineCard />);
+  expect(await screen.findByRole("alert")).toBeTruthy();
+
+  invoke.mockResolvedValueOnce(matching);
+  await act(async () => {
+    window.dispatchEvent(new Event("focus"));
+  });
+  expect(await screen.findByText("Installed")).toBeTruthy();
+  expect(screen.queryByRole("alert")).toBeNull();
 });
 
 test("a failed check keeps the page and offers Check again", async () => {

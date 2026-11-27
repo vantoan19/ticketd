@@ -54,12 +54,20 @@ export async function askForNotifications(): Promise<NotificationPermission | nu
   try {
     const before = await refreshNotificationPermission();
     if (before?.state !== "not_asked") return before;
-    const after = await notificationClient.ask();
-    publish(after);
-    return after;
+    return await requestNotificationPermission();
   } catch {
     return refreshNotificationPermission();
   }
+}
+
+/**
+ * Shows the system's prompt and publishes its answer, so the app knows it
+ * without a second read that could fail. Throws when the request itself fails.
+ */
+export async function requestNotificationPermission(): Promise<NotificationPermission> {
+  const after = await notificationClient.ask();
+  publish(after);
+  return after;
 }
 
 /** True when the system lets ticketd show a notification now. */

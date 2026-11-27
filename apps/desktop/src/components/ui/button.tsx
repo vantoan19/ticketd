@@ -86,8 +86,17 @@ function Button({
   const setRef = React.useCallback(
     (node: HTMLButtonElement | null) => {
       own.current = node;
-      if (typeof ref === "function") ref(node);
+      let cleanup: ReturnType<React.RefCallback<HTMLButtonElement>>;
+      if (typeof ref === "function") cleanup = ref(node);
       else if (ref) ref.current = node;
+      // Returning a cleanup makes React skip the null call, so forward both:
+      // the caller's own cleanup when it gave one, the null call when not.
+      return () => {
+        own.current = null;
+        if (typeof cleanup === "function") cleanup();
+        else if (typeof ref === "function") ref(null);
+        else if (ref) ref.current = null;
+      };
     },
     [ref],
   );

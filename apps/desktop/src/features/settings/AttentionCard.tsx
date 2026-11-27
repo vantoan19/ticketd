@@ -2,7 +2,7 @@ import { useState } from "react";
 import { failureText } from "@/lib/api/describe-failure";
 import { notificationClient } from "@/lib/api/notifications";
 import {
-  refreshNotificationPermission,
+  requestNotificationPermission,
   useNotificationPermission,
 } from "@/lib/notification-permission";
 import { setPreference, usePreferences } from "@/lib/preferences";
@@ -49,8 +49,7 @@ export function AttentionCard() {
     setPermissionFailure("");
     setAsking(true);
     try {
-      await notificationClient.ask();
-      await refreshNotificationPermission();
+      await requestNotificationPermission();
     } catch (reason) {
       setPermissionFailure(
         failureText(reason, "ask for notification permission"),
@@ -70,6 +69,9 @@ export function AttentionCard() {
   }
 
   const blocked = permission?.state === "blocked";
+  // Windows and Linux cannot read the system's setting: "allowed" is then a
+  // fallback (ticketd tries to notify), not an answer from the system.
+  const unreported = allowed && !permission.reported;
   const what = chatsOn
     ? "Due reminders, and Chats that need you, while ticketd is open."
     : "Due reminders while ticketd is open.";
@@ -111,11 +113,17 @@ export function AttentionCard() {
             description={
               blocked
                 ? "Off for ticketd in System Settings › Notifications."
-                : what
+                : unreported
+                  ? `${what} This system doesn’t say whether notifications are on.`
+                  : what
             }
             trailing={
               permission === null ? null : permission.state === "allowed" ? (
-                <StatusLabel tone="positive">Allowed</StatusLabel>
+                permission.reported ? (
+                  <StatusLabel tone="positive">Allowed</StatusLabel>
+                ) : (
+                  <StatusLabel tone="neutral">Not reported</StatusLabel>
+                )
               ) : permission.state === "not_asked" ? (
                 <Button
                   type="button"

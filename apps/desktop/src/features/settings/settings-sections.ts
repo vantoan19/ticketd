@@ -212,7 +212,8 @@ export type LegacySettingsPageId = keyof typeof LEGACY_PAGES;
 
 /** The current page for an id that may be an old name; an unknown id opens Appearance. */
 export function resolveSettingsPage(page: string): SettingsPageId {
-  if (page in LEGACY_PAGES) return LEGACY_PAGES[page as LegacySettingsPageId];
+  if (Object.hasOwn(LEGACY_PAGES, page))
+    return LEGACY_PAGES[page as LegacySettingsPageId];
   if (
     page === "search" ||
     page.startsWith("source-") ||

@@ -71,7 +71,12 @@ export function SettingsRow({
       {...(onOpen && {
         onClick: (event: React.MouseEvent<HTMLElement>) => {
           const target = event.target as Element;
-          if (!target.closest("button, a, input, [role='switch']")) onOpen();
+          if (
+            !target.closest(
+              "button, a, input, select, textarea, label, summary, [role='switch'], [contenteditable]",
+            )
+          )
+            onOpen();
         },
       })}
     >

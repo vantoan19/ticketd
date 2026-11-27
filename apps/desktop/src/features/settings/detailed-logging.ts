@@ -7,18 +7,24 @@ import { diagnosticsClient } from "@/lib/api/diagnostics";
  * ends or is read; the sidebar reads it once when it opens.
  */
 let startedAt: string | null = null;
+/** Counts every change, so a read that was started before one can tell it is stale. */
+let revision = 0;
 const listeners = new Set<() => void>();
 
 export function setDetailedLogging(next: string | null) {
   if (next === startedAt) return;
   startedAt = next;
+  revision += 1;
   for (const listener of listeners) listener();
 }
 
 /** Reads the state from the app. A read that fails leaves what is shown as it was. */
 export async function refreshDetailedLogging() {
+  const asked = revision;
   try {
-    setDetailedLogging((await diagnosticsClient.logLevel()).report_started_at);
+    const { report_started_at } = await diagnosticsClient.logLevel();
+    // A report that started or ended while this read was out is newer than it.
+    if (revision === asked) setDetailedLogging(report_started_at);
   } catch {
     // The status line is only a reminder; Diagnostics reports a failed read itself.
   }
