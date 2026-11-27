@@ -156,7 +156,7 @@ test("a query matches the beginnings of words, never the middle of one", () => {
     searchSettings(query, SETTINGS_ENTRIES).map((hit) => hit.title);
   // "rows" sits inside "browser" and "board" inside "keyboard".
   expect(titles("rows")).not.toContain("Report an issue");
-  expect(titles("board")).toEqual(["Lists"]);
+  expect(titles("board")).toEqual(["Lists", "Ticket"]);
   expect(titles("key")).toContain("Everywhere");
   expect(titles("back")).toContain("Restore points");
 });
