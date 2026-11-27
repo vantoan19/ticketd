@@ -176,20 +176,11 @@
   align-items: center;
   gap: 4px;
   min-width: 0;
-  color: var(--muted-foreground);
-  border-radius: var(--radius-segment);
 }
 .activity-subagent svg {
   width: 14px;
   height: 14px;
   flex-shrink: 0;
-}
-.activity-subagent:hover {
-  color: var(--foreground);
-}
-.activity-subagent:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
 }
 
 /* In the timeline a picture stops at 240px tall; a click opens the viewer. */

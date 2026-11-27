@@ -49,6 +49,10 @@ async function open(chat: MockChat) {
 }
 
 const chatsCss = readFileSync(join(__dirname, "chats.css"), "utf8");
+const chatsRoles = readFileSync(
+  join(__dirname, "../../components/ui/surface-roles/chats-chats.css"),
+  "utf8",
+);
 const fixtures = () => subAgentPartFixtures();
 
 test("while sub-agents run after the reply, one pill counts them in the tray", async () => {
@@ -575,7 +579,7 @@ test("a pill that leaves under focus hands focus to the message box", async () =
 test("Stop one in the strip list shows on hover or while anything in its row has focus", () => {
   // visibility:hidden ignores a focus that arrives in the same instant, so Tab
   // never reached it (FL-P2-3): the row must show it for :focus-within.
-  expect(chatsCss).toMatch(
+  expect(chatsRoles).toMatch(
     /\.chat-subagent-list li:focus-within > \[data-size="icon-row-action"\]/,
   );
 });
@@ -586,7 +590,7 @@ test("clocks use tabular figures", () => {
     /\.chat-subagent-foot-words \{[^}]*font-variant-numeric: tabular-nums/,
     /\.chat-subagent-pill \.chat-plan-pill-now \{[^}]*font-variant-numeric: tabular-nums/,
   ])
-    expect(chatsCss).toMatch(selector);
+    expect(chatsRoles).toMatch(selector);
 });
 
 test("the view's status says the state; its ticking clock is not read", async () => {

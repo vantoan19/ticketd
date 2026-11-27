@@ -242,7 +242,10 @@ test("the label's own clock uses tabular figures, like every other sub-agent clo
   const strip = await label();
   const clock = strip.querySelector('[aria-hidden="true"].ticket-agent-clock');
   expect(clock?.textContent).toMatch(/· 1m \d+s/);
-  const css = readFileSync(join(__dirname, "properties.css"), "utf8");
+  const css = readFileSync(
+    join(__dirname, "../../components/ui/surface-roles/tickets-properties.css"),
+    "utf8",
+  );
   expect(css).toMatch(
     /\.ticket-agent-clock \{[^}]*font-variant-numeric: tabular-nums/,
   );
