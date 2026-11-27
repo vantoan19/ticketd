@@ -324,6 +324,10 @@ pub struct Chat {
     pub marked_unread: bool,
     /// The person turned this Chat's notifications off.
     pub muted: bool,
+    /// The native IDs of the sub-agents that lost contact and that the next message has not
+    /// told the harness about yet: ticketd holds a note for it. Empty when there is none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub restart_notice: Vec<String>,
     pub created_at: String,
 }
 
@@ -456,8 +460,28 @@ pub struct ChatMessage {
     /// User input needs linked-record context before dispatch.
     #[serde(default)]
     pub requires_link_context: bool,
+    /// What ticketd added to this message for the harness, besides the person's words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub note: Option<ChatMessageNote>,
     pub attempts: Vec<ChatSubmissionAttempt>,
     pub created_at: String,
+}
+
+/// What ticketd told the harness along with a message, kept as it was said.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ChatMessageNote {
+    pub kind: ChatMessageNoteKind,
+    /// The native IDs of the sub-agents it is about.
+    pub sub_agents: Vec<String>,
+    /// Exactly the text that was added.
+    pub text: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ChatMessageNoteKind {
+    /// Sub-agents lost contact when ticketd quit.
+    LostSubAgents,
 }
 
 /// A saved request can outlive its queued message.
@@ -1101,7 +1125,7 @@ const TURN: &str = "SELECT id, position, native_turn_id, state, detail, started_
 /// A Chat's own columns, for `FROM chats`, in the order [`chat_from_row`] reads them.
 const CHAT_COLUMNS: &str = "id, title, harness, execution_folder, folder_managed, archived, trashed, queue_paused, created_at, effective_settings,
     (SELECT native_session_id FROM chat_sessions WHERE chat_id = chats.id ORDER BY position DESC LIMIT 1),
-    seen_through, muted, read_through, marked_unread";
+    seen_through, muted, read_through, marked_unread, restart_notice";
 
 /// A Chat from [`CHAT_COLUMNS`], without its links and active turn.
 fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<Chat> {
@@ -1121,6 +1145,10 @@ fn chat_from_row(row: &Row<'_>) -> rusqlite::Result<Chat> {
         muted: row.get(12)?,
         read_through: row.get(13)?,
         marked_unread: row.get(14)?,
+        restart_notice: row
+            .get::<_, Option<String>>(15)?
+            .and_then(|text| serde_json::from_str(&text).ok())
+            .unwrap_or_default(),
         links: Vec::new(),
         active_turn: None,
     })
@@ -1177,7 +1205,7 @@ fn read_chat(connection: &Connection, id: &str) -> Result<Chat, Error> {
 fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>, Error> {
     let message = connection
         .query_row(
-            "SELECT id, position, role, text, complete, turn_id, created_at, editing, requires_link_context FROM chat_messages WHERE id = ?1",
+            "SELECT id, position, role, text, complete, turn_id, created_at, editing, requires_link_context, note FROM chat_messages WHERE id = ?1",
             [id],
             |row| {
                 Ok(ChatMessage {
@@ -1192,6 +1220,9 @@ fn read_message(connection: &Connection, id: &str) -> Result<Option<ChatMessage>
                     queued: false,
                     editing: row.get(7)?,
                     requires_link_context: row.get(8)?,
+                    note: row
+                        .get::<_, Option<String>>(9)?
+                        .and_then(|text| serde_json::from_str(&text).ok()),
                     attempts: Vec::new(),
                 })
             },
@@ -3812,6 +3843,48 @@ impl Workspace {
                 earlier: page.earlier,
                 sub_agents: sub_agents::read_all(transaction, chat_id)?,
             })
+        })
+    }
+
+    /// The sub-agents the next message has to tell the harness about: the ones that lost
+    /// contact and are still lost, oldest first. Empty when there is nothing to tell.
+    pub fn chat_restart_notice(&self, chat_id: &str) -> Result<Vec<ChatSubAgent>, Error> {
+        crate::read_scope::run(&self.connection, |connection| {
+            read_chat(connection, chat_id)?;
+            let kept = sub_agents::notice(connection, chat_id)?;
+            let mut lost = Vec::new();
+            for native_id in kept {
+                let record = sub_agents::read_record(
+                    connection,
+                    &sub_agents::record_id(chat_id, &native_id),
+                )?;
+                lost.extend(record.filter(|record| {
+                    record.latest().map(|run| run.state) == Some(ChatSubAgentState::Lost)
+                }));
+            }
+            Ok(lost)
+        })
+    }
+
+    /// Keeps `note` as what ticketd added to the person's message `message_id` for the
+    /// harness, and clears the Chat's notice: it has been told.
+    pub fn record_chat_message_note(
+        &mut self,
+        chat_id: &str,
+        message_id: &str,
+        note: &ChatMessageNote,
+    ) -> Result<(), Error> {
+        let stored = serde_json::to_string(note)?;
+        self.chat_write(|connection| {
+            let changed = connection.execute(
+                "UPDATE chat_messages SET note = ?3 WHERE id = ?2 AND chat_id = ?1 AND role = 'user'",
+                params![chat_id, message_id, stored],
+            )?;
+            if changed == 0 {
+                return Err(invalid("the message the note belongs to is missing"));
+            }
+            log(connection, chat_id, "message", message_id)?;
+            sub_agents::set_notice(connection, chat_id, &[])
         })
     }
 

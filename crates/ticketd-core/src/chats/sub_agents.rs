@@ -144,6 +144,10 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
         ("chat_turns", "origin_by", "TEXT"),
         ("chat_turns", "origin_sub_agent", "TEXT"),
         ("chat_notices", "sub_agents_stopped", "INTEGER"),
+        // The sub-agents that lost contact and the next message has not told the harness
+        // about (a JSON array of native IDs), and what a message told it.
+        ("chats", "restart_notice", "TEXT"),
+        ("chat_messages", "note", "TEXT"),
     ] {
         let has: bool = connection.query_row(
             "SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name = ?2)",
@@ -159,7 +163,7 @@ pub(crate) fn migrate(connection: &Connection) -> Result<(), Error> {
     Ok(())
 }
 
-fn record_id(chat_id: &str, native_id: &str) -> String {
+pub(super) fn record_id(chat_id: &str, native_id: &str) -> String {
     format!("{chat_id}:sub-agent:{native_id}")
 }
 
@@ -374,6 +378,8 @@ pub(super) fn observe(connection: &Connection, chat_id: &str, change: Change) ->
                         "INSERT INTO chat_sub_agent_runs (id, chat_id, sub_agent_id, position, run, native_run_id, turn_id, state) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, 'running')",
                         params![id, chat_id, record, position, run, native_run_id, turn_id],
                     )?;
+                    // Resumed before the person wrote: there is nothing to tell about it.
+                    forget(connection, chat_id, &native_id)?;
                 }
             }
             Ok(())
@@ -535,17 +541,25 @@ pub(super) fn end_turn(
     Ok(())
 }
 
-/// Contact with the harness was lost: nothing says whether a sub-agent still runs.
+/// Contact with the harness was lost: nothing says whether a sub-agent still runs. The Chat
+/// then holds a notice for the next message to tell the harness which ones.
 pub(super) fn lose_contact(connection: &Connection, chat_id: &str) -> Result<(), Error> {
     let mut statement = connection.prepare(
-        "SELECT id, sub_agent_id FROM chat_sub_agent_runs WHERE chat_id = ?1 AND state = 'running'",
+        "SELECT r.id, r.sub_agent_id, a.native_id FROM chat_sub_agent_runs r JOIN chat_sub_agents a ON a.id = r.sub_agent_id
+         WHERE r.chat_id = ?1 AND r.state = 'running' ORDER BY r.position",
     )?;
     let running = statement
         .query_map([chat_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
         })?
         .collect::<Result<Vec<_>, _>>()?;
-    for (run, record) in running {
+    drop(statement);
+    let mut lost = Vec::new();
+    for (run, record, native_id) in running {
         end_run(
             connection,
             chat_id,
@@ -553,6 +567,74 @@ pub(super) fn lose_contact(connection: &Connection, chat_id: &str) -> Result<(),
             &run,
             (ChatSubAgentState::Lost, None, None, None),
         )?;
+        if !lost.contains(&native_id) {
+            lost.push(native_id);
+        }
+    }
+    if lost.is_empty() {
+        return Ok(());
+    }
+    let mut notice = notice(connection, chat_id)?;
+    notice.retain(|kept| !lost.contains(kept));
+    // What was lost earlier and not told yet stays first.
+    notice.extend(lost);
+    set_notice(connection, chat_id, &notice)
+}
+
+/// The native IDs of the sub-agents the Chat holds a notice for, oldest first.
+pub(super) fn notice(connection: &Connection, chat_id: &str) -> Result<Vec<String>, Error> {
+    let kept: Option<String> = connection
+        .query_row(
+            "SELECT restart_notice FROM chats WHERE id = ?1",
+            [chat_id],
+            |row| row.get(0),
+        )
+        .optional()?
+        .flatten();
+    Ok(kept
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default())
+}
+
+pub(super) fn set_notice(
+    connection: &Connection,
+    chat_id: &str,
+    native_ids: &[String],
+) -> Result<(), Error> {
+    let text = (!native_ids.is_empty()).then(|| Value::from(native_ids).to_string());
+    connection.execute(
+        "UPDATE chats SET restart_notice = ?2 WHERE id = ?1",
+        params![chat_id, text],
+    )?;
+    log(connection, chat_id, "chat", chat_id)?;
+    Ok(())
+}
+
+/// The sub-agent is not lost any more: the notice stops naming it.
+fn forget(connection: &Connection, chat_id: &str, native_id: &str) -> Result<(), Error> {
+    let kept = notice(connection, chat_id)?;
+    if kept.iter().any(|id| id == native_id) {
+        let kept: Vec<String> = kept.into_iter().filter(|id| id != native_id).collect();
+        set_notice(connection, chat_id, &kept)?;
     }
     Ok(())
+}
+
+impl ChatSubAgent {
+    /// What the harness called the work (the first line of its description); failing that
+    /// the kind of sub-agent it is.
+    pub fn title(&self) -> String {
+        let said = |key: &str| self.said(key).filter(|said| !said.trim().is_empty());
+        said("description")
+            .map(|description| {
+                description
+                    .trim()
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .to_owned()
+            })
+            .or_else(|| said("subagent_type"))
+            .unwrap_or_else(|| "Sub-agent".to_owned())
+    }
 }

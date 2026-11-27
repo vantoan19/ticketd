@@ -3512,6 +3512,162 @@ fn a_resumed_sub_agent_adds_a_run_and_a_late_frame_of_the_earlier_run_is_dropped
     assert_eq!(run_rows(&workspace, &chat).len(), 2);
 }
 
+// --- Restart: sub-agents lost, and the note the next message carries ---------------------
+
+#[test]
+fn contact_lost_in_a_chat_where_no_turn_ran_loses_its_running_sub_agents_and_holds_a_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    // A background sub-agent from an earlier session, a finished one, and one running now:
+    // no turn is active, none ever had a Step running.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                start_sub_agent("done", Some("run-a"), None),
+                end_sub_agent("done", Some("run-a"), ChatSubAgentState::Completed),
+                start_sub_agent("agent-1", Some("run-b"), None),
+                start_sub_agent("agent-2", Some("run-c"), None),
+            ],
+        )
+        .unwrap();
+    assert!(workspace.chat_restart_notice(&chat.id).unwrap().is_empty());
+
+    let lost = workspace
+        .mark_chat_contact_lost(None, "ticketd was restarted", "contact_lost")
+        .unwrap();
+    assert_eq!(lost, [chat.id.clone()]);
+
+    let states: Vec<_> = sub_agents(&workspace, &chat)
+        .iter()
+        .map(|record| (record.native_id.clone(), record.latest().unwrap().state))
+        .collect();
+    assert_eq!(
+        states,
+        [
+            ("done".to_owned(), ChatSubAgentState::Completed),
+            ("agent-1".to_owned(), ChatSubAgentState::Lost),
+            ("agent-2".to_owned(), ChatSubAgentState::Lost),
+        ]
+    );
+    // The Chat holds a notice naming the two lost ones, in the view's data and by the reader.
+    let snapshot = workspace.chat_snapshot(&chat.id, 500).unwrap();
+    assert_eq!(snapshot.chat.restart_notice, ["agent-1", "agent-2"]);
+    let told: Vec<_> = workspace
+        .chat_restart_notice(&chat.id)
+        .unwrap()
+        .into_iter()
+        .map(|record| record.native_id)
+        .collect();
+    assert_eq!(told, ["agent-1", "agent-2"]);
+
+    // Nothing running was lost the second time: the notice stays as it was.
+    workspace
+        .mark_chat_contact_lost(None, "again", "contact_lost")
+        .unwrap();
+    assert_eq!(
+        workspace.chat_snapshot(&chat.id, 500).unwrap().chat.restart_notice,
+        ["agent-1", "agent-2"]
+    );
+}
+
+#[test]
+fn a_lost_sub_agent_the_main_agent_resumes_leaves_the_notice_as_a_new_run() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                start_sub_agent("agent-1", Some("run-a"), None),
+                start_sub_agent("agent-2", Some("run-b"), None),
+            ],
+        )
+        .unwrap();
+    workspace
+        .mark_chat_contact_lost(None, "quit", "contact_lost")
+        .unwrap();
+    // Claude resumes agent-1 by itself before the person writes: a second run.
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![start_sub_agent("agent-1", Some("run-d"), None)],
+        )
+        .unwrap();
+    let records = sub_agents(&workspace, &chat);
+    assert_eq!(
+        records[0].runs.iter().map(|run| run.state).collect::<Vec<_>>(),
+        [ChatSubAgentState::Lost, ChatSubAgentState::Running]
+    );
+    let told: Vec<_> = workspace
+        .chat_restart_notice(&chat.id)
+        .unwrap()
+        .into_iter()
+        .map(|record| record.native_id)
+        .collect();
+    assert_eq!(told, ["agent-2"], "only what is still lost is told");
+    assert_eq!(
+        workspace.chat_snapshot(&chat.id, 500).unwrap().chat.restart_notice,
+        ["agent-2"]
+    );
+}
+
+#[test]
+fn the_note_is_stored_on_the_message_that_carries_it_and_clears_the_notice() {
+    let dir = tempfile::tempdir().unwrap();
+    let (mut workspace, chat) = workspace_with_chat(&dir);
+    workspace
+        .record_chat_observations(&chat.id, vec![start_sub_agent("agent-1", None, None)])
+        .unwrap();
+    workspace
+        .mark_chat_contact_lost(None, "quit", "contact_lost")
+        .unwrap();
+    let input = workspace
+        .save_chat_input(None, &chat.id, "Pick the review back up")
+        .unwrap();
+    let note = ticketd_core::ChatMessageNote {
+        kind: ticketd_core::ChatMessageNoteKind::LostSubAgents,
+        sub_agents: vec!["agent-1".into()],
+        text: "From ticketd: this sub-agent was lost.".into(),
+    };
+    let since = workspace.chat_change_sequence().unwrap();
+    workspace
+        .record_chat_message_note(&chat.id, &input.id, &note)
+        .unwrap();
+
+    assert_eq!(message(&workspace, &chat, &input.id).note, Some(note.clone()));
+    let snapshot = workspace.chat_snapshot(&chat.id, 500).unwrap();
+    assert!(snapshot.chat.restart_notice.is_empty());
+    assert!(workspace.chat_restart_notice(&chat.id).unwrap().is_empty());
+    // The sub-agent itself is still lost; only the telling is done.
+    assert_eq!(
+        sub_agents(&workspace, &chat)[0].latest().unwrap().state,
+        ChatSubAgentState::Lost
+    );
+    // A follower learns of both: the Chat (its notice) and the message (its note).
+    let ChatCatchUp::Changes { changes, .. } =
+        workspace.chat_changes(&chat.id, since, 100).unwrap()
+    else {
+        panic!("expected changes");
+    };
+    assert!(
+        changes
+            .iter()
+            .any(|change| matches!(&change.record, ChatRecord::Chat(chat) if chat.restart_notice.is_empty()))
+    );
+    assert!(changes.iter().any(|change| matches!(
+        &change.record,
+        ChatRecord::Item(ChatItem::Message(message)) if message.note == Some(note.clone())
+    )));
+
+    // A message that is not there is refused.
+    assert!(
+        workspace
+            .record_chat_message_note(&chat.id, "no-such-message", &note)
+            .is_err()
+    );
+}
+
 #[test]
 fn a_stopped_run_records_who_stopped_it_and_an_ended_run_stays_ended() {
     let dir = tempfile::tempdir().unwrap();
