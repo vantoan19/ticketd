@@ -891,6 +891,18 @@ describe("permissions and questions", () => {
     });
   });
 
+  it("names the sub-agent that asks a native question", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.askPermission(
+      "AskUserQuestion",
+      { questions: [{ question: "Which format?", options: [] }] },
+      { agentID: "task_1" },
+    );
+    await settle();
+    expect(h.named("question_request")).toMatchObject([{ agent_id: "task_1" }]);
+  });
+
   it("carries a native question to the host and the answers back", async () => {
     const h = harness();
     const fake = await h.open();
@@ -909,7 +921,11 @@ describe("permissions and questions", () => {
     await settle();
     expect(h.named("permission_request")).toHaveLength(0);
     const [request] = h.named("question_request");
-    expect(request).toMatchObject({ generation: 1, questions });
+    expect(request).toMatchObject({
+      generation: 1,
+      questions,
+      agent_id: null,
+    });
 
     // A question cannot be answered as if it were a tool approval.
     await h.send({
