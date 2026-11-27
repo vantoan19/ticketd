@@ -44,9 +44,13 @@ pub(crate) enum SubAgentFrames {
     /// The adapter tells a sub-agent's activity apart from the turn's: a sub-agent that
     /// starts, works and ends while no turn runs opens no turn (Claude Code).
     Separate,
-    /// The adapter does not model sub-agents yet (Codex until its sub-agent ticket,
-    /// Antigravity until its own, and the fake): the property asserts nothing for it, and
-    /// moves to `Separate` when the adapter does.
+    /// A sub-agent exists only inside a prompt and ends with it, and the harness says
+    /// nothing of one at rest (Antigravity): a sub-agent's late frames, with no prompt in
+    /// flight, open and show nothing.
+    EndWithThePrompt,
+    /// The adapter does not model sub-agents yet (Codex until its sub-agent ticket and the
+    /// fake): the property asserts nothing for it, and moves to `Separate` when the
+    /// adapter does.
     NotModelled,
 }
 
@@ -115,10 +119,12 @@ pub(crate) trait Provider: Send {
         SubAgentFrames::NotModelled
     }
 
-    /// Plays a sub-agent that starts, runs a tool and ends while no turn runs. Only called
-    /// for a provider that declares [`SubAgentFrames::Separate`].
+    /// Plays a sub-agent that starts, runs a tool and ends while no turn runs (for a
+    /// provider that declares [`SubAgentFrames::EndWithThePrompt`]: the frames of a
+    /// sub-agent's tool call, arriving with no prompt in flight). Only called for a
+    /// provider that declares [`SubAgentFrames::Separate`] or `EndWithThePrompt`.
     async fn play_sub_agent_at_rest(&mut self) {
-        unimplemented!("declared SubAgentFrames::Separate without playing a sub-agent")
+        unimplemented!("declared a sub-agent's frames without playing them")
     }
 
     /// Submits a new turn and plays the provider's usual reply to it.
@@ -330,6 +336,15 @@ async fn a_sub_agents_frames_never_open_a_turn(p: &mut dyn Provider) {
     p.play_sub_agent_at_rest().await;
 
     let shown = drain(p.events()).await;
+    if p.sub_agent_frames() == SubAgentFrames::EndWithThePrompt {
+        // A sub-agent lives only in a prompt: with none in flight there is nothing to show.
+        assert!(
+            shown.is_empty(),
+            "a sub-agent's late frames showed something with no prompt in flight: {shown:?}"
+        );
+        p.assert_nothing_else_written().await;
+        return;
+    }
     assert!(
         shown
             .iter()

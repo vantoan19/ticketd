@@ -1896,7 +1896,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
-use crate::conformance::{NewTurn, Provider};
+use crate::conformance::{NewTurn, Provider, SubAgentFrames};
 use crate::{EventStream, HarnessRuntime, NativeRequestId, NativeTurnId, RuntimeGeneration};
 
 struct AcpProvider {
@@ -1950,6 +1950,26 @@ impl Provider for AcpProvider {
 
     fn events(&mut self) -> &mut EventStream {
         &mut self.opened.events
+    }
+
+    fn sub_agent_frames(&self) -> SubAgentFrames {
+        SubAgentFrames::EndWithThePrompt
+    }
+
+    async fn play_sub_agent_at_rest(&mut self) {
+        // The frames of a sub-agent's tool call, named by its prefix, after the prompt
+        // that held it has ended: nothing of it is a turn or a sub-agent.
+        for frame in [
+            json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{
+                "sessionUpdate":"tool_call","toolCallId":"child_1:call_1","title":"Read rate-limit.ts",
+                "kind":"read","status":"in_progress","rawInput":{"AbsolutePath":"/work/chat-1/src/rate-limit.ts"}
+            }}}),
+            json!({"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-1","update":{
+                "sessionUpdate":"tool_call_update","toolCallId":"child_1:call_1","status":"completed"
+            }}}),
+        ] {
+            send(&mut self.peer, &frame).await;
+        }
     }
 
     async fn start_turn(&mut self, id: &str) -> DispatchOutcome {
