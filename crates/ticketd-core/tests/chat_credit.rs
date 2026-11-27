@@ -207,7 +207,7 @@ fn a_scoped_lookup_credits_only_the_writes_it_is_asked_about_exactly_as_the_full
 
     let page = setup
         .host
-        .ticket_write_credits_for(&setup.reference, &[outside.clone()], &[number])
+        .ticket_write_credits_for(&setup.reference, std::slice::from_ref(&outside), &[number])
         .unwrap();
     assert_eq!(page.activities.get(&outside), full.activities.get(&outside));
     assert_eq!(page.statuses.get(&number), full.statuses.get(&number));
