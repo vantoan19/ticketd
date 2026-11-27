@@ -65,7 +65,14 @@ type SignIn =
  * bucket and the prefix. Every row is on the page from the start, so nothing
  * moves as the earlier ones are answered.
  */
-export function S3Setup({ onBack }: { onBack?: () => void } = {}) {
+export function S3Setup({
+  onBack,
+  onBusyChange,
+}: {
+  onBack?: () => void;
+  /** Told while a connect is in flight, so the page can hold the storage choice still. */
+  onBusyChange?: (busy: boolean) => void;
+} = {}) {
   const [cli, setCli] = useState<Cli>(null);
   const [readFailure, setReadFailure] = useState<FailureDescription | null>(
     null,
@@ -86,6 +93,10 @@ export function S3Setup({ onBack }: { onBack?: () => void } = {}) {
   const [typing, setTyping] = useState(false);
   const [prefix, setPrefix] = useState(DEFAULT_PREFIX);
   const { busy, failure, run, clear } = useCommand({ readable: true });
+  useEffect(() => {
+    onBusyChange?.(busy);
+    return () => onBusyChange?.(false);
+  }, [busy, onBusyChange]);
   // A check that started before another one must not put its answer back.
   const generation = useRef(0);
 

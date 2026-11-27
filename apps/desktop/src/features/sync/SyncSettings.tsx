@@ -89,6 +89,12 @@ export function SyncSettings({
   const [safetyBackup, setSafetyBackup] = useState("");
   // What step 1 of setup said, kept while the person signs in and chooses.
   const [intent, setIntent] = useState<SetupIntent | null>(null);
+  // Setup is over once this Workspace is connected: a later setup (after Disconnect) asks
+  // again. Back from step 3 never reaches here, so it keeps the choice.
+  const connected = status?.connection === "connected";
+  useEffect(() => {
+    if (connected) setIntent(null);
+  }, [connected]);
   return (
     <div className="settings-sync">
       <Track status={status} />
@@ -102,6 +108,8 @@ export function SyncSettings({
           <SyncSetup intent={intent} onIntent={setIntent} />
         ) : status.connection === "choosing" ? (
           <Choose
+            // Another account has other storage: nothing read, chosen or confirmed for the old one stays.
+            key={`${status.provider}:${status.account}`}
             status={status}
             intent={intent}
             onDownloaded={setSafetyBackup}

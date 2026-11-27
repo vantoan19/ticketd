@@ -579,9 +579,9 @@ test("a fix that fails says so under the status row", async () => {
   const row = await screen.findByRole("alert");
   fireEvent.click(within(row).getByRole("button", { name: "Retry" }));
   await waitFor(() => expect(api.recover).toHaveBeenCalled());
-  const failed = await screen.findAllByRole("alert");
-  expect(failed).toHaveLength(2);
-  expect(failed[1]?.textContent).toMatch(/sync/i);
+  // The storage-full alert is already there: wait for the rejection to render beside it.
+  await waitFor(() => expect(screen.getAllByRole("alert")).toHaveLength(2));
+  expect(screen.getAllByRole("alert")[1]?.textContent).toMatch(/sync/i);
 });
 
 test("records changed on two computers are reviewed from the status row", async () => {
@@ -615,4 +615,30 @@ test("a first sync that stopped shows why on the status row, with its fix and Di
   expect(screen.getByRole("button", { name: "Disconnect…" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Retry" }));
   expect(api.recover).toHaveBeenCalled();
+});
+
+test("disconnecting a Workspace set up on this page starts the next setup at Start or join", async () => {
+  api.status.mockResolvedValue(notConnected());
+  // Nothing in the storage: choosing Start goes straight on to the first sync.
+  api.setupOptions.mockResolvedValue({ ...options, existing: [] });
+  api.connect.mockResolvedValue(choosing());
+  api.uploadWorkspace.mockResolvedValue(syncStatus());
+  api.disconnect.mockResolvedValue(notConnected());
+  show();
+  fireEvent.click(
+    await screen.findByRole("radio", { name: /Start with this/ }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+  fireEvent.click(
+    await screen.findByRole("button", { name: /Connect Google Drive/ }),
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Disconnect…" }));
+  const dialog = await screen.findByRole("dialog", {
+    name: "Disconnect this computer?",
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Disconnect" }));
+  // The earlier choice belongs to the setup that finished: ask again.
+  expect(
+    await screen.findByRole("radiogroup", { name: "Start or join" }),
+  ).toBeTruthy();
 });
