@@ -13,10 +13,9 @@ const preferencesSchema = z.object({
   sidebarCollapsed: z.boolean().catch(false),
   ticketRows: z.enum(["detailed", "simple"]).catch("simple"),
   followCreated: z.boolean().catch(true),
-  notifyReminders: z.boolean().catch(false),
   /** The Experimental Chat switch. The desktop backend is told at startup. */
   chat: z.boolean().catch(false),
-  /** Settings > Chat > Notify me about Chats. On by default. */
+  /** Settings > Attention > Chat notifications. On by default; it takes effect once notifications are allowed. */
   notifyChats: z.boolean().catch(true),
   /** The viewer's Details panel (I, or "…" > Show details), kept between files. */
   attachmentDetails: z.boolean().catch(false),
@@ -28,6 +27,12 @@ const preferencesSchema = z.object({
   documentsSort: z.enum(["opened", "updated", "title"]).catch("opened"),
   /** Which Current work groups are open, by Plan id or `finished`; unset follows the default. */
   documentGroups: z.record(z.string(), z.boolean()).catch({}),
+  /** Set up ticketd was hidden from its panel bar. The page stays findable by search. */
+  setupHidden: z.boolean().catch(false),
+  /** Every Set up ticketd step was ticked once; nothing comes back to Settings after that. */
+  setupFinished: z.boolean().catch(false),
+  /** The Settings page last used; Settings opens on it when nothing needs the person. */
+  settingsPage: z.string().catch("appearance"),
 });
 
 export type Preferences = z.infer<typeof preferencesSchema>;
@@ -43,7 +48,6 @@ const DEFAULTS: Preferences = {
   sidebarCollapsed: false,
   ticketRows: "simple",
   followCreated: true,
-  notifyReminders: false,
   chat: false,
   notifyChats: true,
   attachmentDetails: false,
@@ -51,6 +55,9 @@ const DEFAULTS: Preferences = {
   documentsView: "current",
   documentsSort: "opened",
   documentGroups: {},
+  setupHidden: false,
+  setupFinished: false,
+  settingsPage: "appearance",
 };
 const DARK_QUERY = "(prefers-color-scheme: dark)";
 

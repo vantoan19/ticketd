@@ -1,6 +1,6 @@
-//! What Settings → Diagnostics asks of the desktop: the log level and Debug logging switch,
-//! the logs folder, the recent kinds of error, a summary to paste into an issue, and the
-//! redacted export.
+//! What Settings → Diagnostics asks of the desktop: the open report (detailed logging that
+//! outlasts a restart until the report is saved or cancelled), the logs folder, the recent
+//! kinds of error, the version and system for the bug form, and the redacted report file.
 //!
 //! The logging crate knows the logs; this module knows the app. It gathers the facts the
 //! logs cannot give (versions, sync state, Harnesses, the Workspace's health) and hands
@@ -12,27 +12,41 @@ use tauri::{AppHandle, State};
 use tauri_plugin_opener::OpenerExt;
 use ticketd_core::sync::{SyncConnection, SyncProvider};
 use ticketd_diagnostics::{
-    ErrorGroup, Export, Facts, HarnessVersion, KnownValues, LogLevel, WorkspaceHealth,
+    ErrorGroup, Export, Facts, HarnessVersion, IssueDetails, KnownValues, LogLevel, WorkspaceHealth,
 };
 
 use crate::Logs;
 use crate::chat_commands::{ChatBridge, chat_harnesses};
 
-/// The log level, whether Debug logging is on, and the `TICKETD_LOG` filter that overrides it.
+/// The log level, whether detailed logging is on, when the open report started, and the
+/// `TICKETD_LOG` filter that overrides all of it.
 #[tauri::command]
 pub fn diagnostics_log_level(logs: State<'_, Logs>) -> Result<LogLevel, String> {
     with_logs(&logs, |logs| logs.log_level())
 }
 
-/// Turns Debug logging on or off for the rest of this run and returns the resulting level.
-/// It is off again at the next launch. Does nothing while `TICKETD_LOG` decides the level.
+/// Opens a report: detailed logging goes on, and stays on across a restart until the report
+/// is saved or cancelled. Does nothing while `TICKETD_LOG` decides the level.
 #[tauri::command]
-pub fn diagnostics_set_debug(logs: State<'_, Logs>, enabled: bool) -> Result<LogLevel, String> {
+pub fn diagnostics_start_report(logs: State<'_, Logs>) -> Result<LogLevel, String> {
     with_logs(&logs, |logs| {
-        logs.set_debug(enabled);
+        logs.start_report();
         let level = logs.log_level();
-        tracing::info!(debug = level.debug, "debug logging changed");
+        tracing::info!(
+            reporting = level.report_started_at.is_some(),
+            "report started"
+        );
         level
+    })
+}
+
+/// Cancels the open report: detailed logging goes off.
+#[tauri::command]
+pub fn diagnostics_cancel_report(logs: State<'_, Logs>) -> Result<LogLevel, String> {
+    with_logs(&logs, |logs| {
+        logs.end_report();
+        tracing::info!("report cancelled");
+        logs.log_level()
     })
 }
 
@@ -62,33 +76,36 @@ pub fn diagnostics_export_file_name() -> String {
     ticketd_diagnostics::export_file_name()
 }
 
-/// The short description of this app and machine that goes at the top of a bug report.
+/// The version and system that go into GitHub's bug form. Quick: it asks nothing slow, so
+/// the issue can open at once.
 #[tauri::command]
-pub async fn diagnostics_summary(
-    bridge: State<'_, ChatBridge>,
-    logs: State<'_, Logs>,
-) -> Result<String, String> {
-    let facts = gather(&bridge).await;
-    with_logs(&logs, |logs| logs.summary(&facts))
+pub fn diagnostics_issue_details() -> IssueDetails {
+    IssueDetails::of(&Facts {
+        app_version: env!("CARGO_PKG_VERSION").to_string(),
+        commit: option_env!("TICKETD_COMMIT")
+            .unwrap_or("unknown")
+            .to_string(),
+        build: build_kind().to_string(),
+        os: os_name(),
+        arch: std::env::consts::ARCH.to_string(),
+        ..Facts::default()
+    })
 }
 
-/// Writes the redacted bundle to `destination`, the file the person chose in the save
-/// dialog, and shows it in the file manager.
+/// Writes the redacted report to `destination`, the file the person chose in the save
+/// dialog, then ends the report: detailed logging goes off. A report that could not be
+/// written stays open, so the person can try again. Nothing is sent anywhere.
 #[tauri::command]
-pub async fn diagnostics_export(
-    app: AppHandle,
+pub async fn diagnostics_save_report(
     bridge: State<'_, ChatBridge>,
     logs: State<'_, Logs>,
     destination: String,
 ) -> Result<Export, String> {
     let facts = gather(&bridge).await;
     let exported = with_logs(&logs, |logs| logs.export(&destination, &facts))?
-        .map_err(|error| format!("Could not write the diagnostics: {error}"))?;
+        .map_err(|error| format!("Could not write the report: {error}"))?;
     tracing::info!(bytes = exported.bytes, "diagnostics exported");
-    // The file is written; failing to show it is not a failed export.
-    if let Err(error) = app.opener().reveal_item_in_dir(&exported.path) {
-        tracing::warn!(%error, "could not show the diagnostics export");
-    }
+    with_logs(&logs, |logs| logs.end_report())?;
     Ok(exported)
 }
 
@@ -120,12 +137,7 @@ async fn gather(bridge: &State<'_, ChatBridge>) -> Facts {
         commit: option_env!("TICKETD_COMMIT")
             .unwrap_or("unknown")
             .to_string(),
-        build: if cfg!(debug_assertions) {
-            "debug"
-        } else {
-            "release"
-        }
-        .to_string(),
+        build: build_kind().to_string(),
         os: os_name(),
         arch: std::env::consts::ARCH.to_string(),
         webview: tauri::webview_version().unwrap_or_else(|_| "unknown".to_string()),
@@ -134,6 +146,14 @@ async fn gather(bridge: &State<'_, ChatBridge>) -> Facts {
         workspace: health,
         known: KnownValues::from_environment(path.as_deref(), drive_email.as_deref())
             .with_aws_identity(aws_identity.as_deref()),
+    }
+}
+
+fn build_kind() -> &'static str {
+    if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
     }
 }
 

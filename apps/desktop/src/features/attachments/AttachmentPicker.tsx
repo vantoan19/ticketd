@@ -55,7 +55,7 @@ function plainFailure(
 
 /**
  * A file over the workspace limit, said as the row reads it: "Too large:
- * 101 MB. The limit is 100 MB." The fix is the limit, never Retry (P8).
+ * 101 MB. The limit is 100 MB." Retry cannot help and there is no limit to change here (P8).
  */
 function tooLarge(size: number | null, limit: number | null) {
   return plainFailure(
@@ -63,7 +63,7 @@ function tooLarge(size: number | null, limit: number | null) {
     limit === null
       ? "It is over the upload limit."
       : `The limit is ${formatSize(limit)}.`,
-    "change_limit",
+    null,
     "too_large",
   );
 }
@@ -489,7 +489,7 @@ export function AttachmentPicker({
   }
   /** Settings, from inside the dialog: close it first, then open the page. */
   const openSettings = openSettingsPage
-    ? (page: "attachments" | "google-drive") => () => {
+    ? (page: "files") => () => {
         changeOpen(false);
         openSettingsPage(page);
       }
@@ -763,7 +763,7 @@ export function AttachmentPicker({
             {folderConfiguration && (
               <DriveSetupNotice
                 configuration={folderConfiguration}
-                onOpenSettings={openSettings?.("google-drive")}
+                onOpenSettings={openSettings?.("files")}
               />
             )}
             {dropFailure && (
@@ -814,7 +814,6 @@ export function AttachmentPicker({
                           ),
                         )
                     }
-                    onChangeLimit={openSettings?.("attachments")}
                   />
                 ))}
               </ul>
@@ -828,7 +827,7 @@ export function AttachmentPicker({
               busy={busy}
               onBusyChange={setBusy}
               onFailure={setError}
-              onOpenSettings={openSettings?.("google-drive")}
+              onOpenSettings={openSettings?.("files")}
             />
           )
         ) : (
@@ -863,7 +862,6 @@ function UploadRow({
   onCheckDrive,
   onUploadLocally,
   onOpenDrive,
-  onChangeLimit,
 }: {
   row: UploadAttempt;
   store: boolean;
@@ -874,7 +872,6 @@ function UploadRow({
   onCheckDrive: () => void;
   onUploadLocally: () => void;
   onOpenDrive: () => void;
-  onChangeLimit: (() => void) | undefined;
 }) {
   const stopped = row.state === "failed" || row.state === "canceled";
   const total = row.stored?.size_bytes ?? (row.progress.total || null);
@@ -939,16 +936,6 @@ function UploadRow({
       <div className="attachment-upload-actions">
         {stopped && (
           <>
-            {failure?.action === "change_limit" && onChangeLimit && (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={onChangeLimit}
-              >
-                Change limit
-              </Button>
-            )}
             {row.destination && !row.stored && (
               <>
                 <Button

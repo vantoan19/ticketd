@@ -449,6 +449,15 @@ pub fn chat_harness_catalog(bridge: State<'_, ChatBridge>) -> Vec<crate::chats::
     bridge.chats.harness_catalog()
 }
 
+/// Which harness programs are installed, and their versions, even when Chat is off.
+/// Checks no sign-in: that is `chat_harnesses`, which needs Chat on.
+#[tauri::command]
+pub async fn chat_installed_harnesses(
+    bridge: State<'_, ChatBridge>,
+) -> Outcome<Vec<crate::chats::HarnessInstallation>> {
+    Ok(bridge.chats.installed_harnesses().await)
+}
+
 /// What one harness offers before a session: models, efforts and permission modes.
 #[tauri::command]
 pub async fn chat_harness_options(

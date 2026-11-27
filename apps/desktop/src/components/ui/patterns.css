@@ -880,11 +880,45 @@
   align-self: center;
   justify-self: end;
 }
+/* Two actions share the one end cell. */
+[data-slot="steps"][data-variant="settings"] [data-slot="step-actions"] {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  align-self: center;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+/* A step with a block under its description: the number sits at the top, and the block spans both columns. */
+[data-slot="steps"][data-variant="settings"]
+  > [data-slot="step"]:has([data-slot="step-extra"]) {
+  align-items: start;
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-slot="step"]
+  [data-slot="step-description"] {
+  grid-column: 1;
+}
+[data-slot="steps"][data-variant="settings"]
+  [data-slot="step"]
+  [data-slot="step-extra"] {
+  grid-column: 1 / -1;
+}
 @media (max-width: 640px) {
   [data-slot="steps"][data-variant="settings"]
     [data-slot="step"]
     > span:last-child {
     grid-template-columns: minmax(0, 1fr);
+  }
+  [data-slot="steps"][data-variant="settings"] [data-slot="step-actions"] {
+    grid-column: 1;
+    grid-row: 3;
+    justify-self: start;
+    margin-top: 8px;
+  }
+  [data-slot="steps"][data-variant="settings"] [data-slot="step-extra"] button {
+    margin-top: 0;
   }
   [data-slot="steps"][data-variant="settings"] [data-slot="step"] button {
     grid-column: 1;

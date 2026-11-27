@@ -3,6 +3,7 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use chrono::{SecondsFormat, Utc};
@@ -15,6 +16,7 @@ use tracing_subscriber::{EnvFilter, Registry, fmt, reload};
 use crate::crash::{SessionMarker, UncleanExit};
 use crate::errors::{self, ErrorGroup};
 use crate::export::{self, Export, Facts};
+use crate::report::ReportMarker;
 use crate::sink::{Limits, Sink, SinkWriter};
 use crate::{Requested, Timestamp, filter};
 
@@ -56,7 +58,7 @@ impl Default for Config {
     }
 }
 
-/// The level the Diagnostics page shows, and whether its Debug logging switch does anything.
+/// The level the Diagnostics page shows, and whether a report can turn detailed logging on.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct LogLevel {
     /// `info`, `debug` while Debug logging is on, or the `TICKETD_LOG` filter itself.
@@ -65,6 +67,10 @@ pub struct LogLevel {
     pub debug: bool,
     /// The `TICKETD_LOG` filter that overrides the switch, if one was set at launch.
     pub env_override: Option<String>,
+    /// When the open report started, as an RFC 3339 time, while a report is open: detailed
+    /// logging has been on since then and stays on, across a restart, until the report is
+    /// saved or cancelled.
+    pub report_started_at: Option<String>,
 }
 
 /// The desktop's logs: JSON lines in a daily file, with the level changeable at runtime.
@@ -81,6 +87,7 @@ pub struct DesktopLogs {
     /// Removes the session marker when the handle is dropped.
     _session: Option<SessionMarker>,
     debug: AtomicBool,
+    report: Mutex<Option<ReportMarker>>,
     filter_override: Option<String>,
     max_export_bytes: u64,
     dir: PathBuf,
@@ -144,10 +151,19 @@ impl DesktopLogs {
             opened_at,
             _session: session,
             debug: AtomicBool::new(false),
+            report: Mutex::new(None),
             filter_override: override_spec,
             max_export_bytes: config.max_export_bytes,
             dir: dir.as_ref().to_path_buf(),
         };
+        // A report left open by the last run goes on: detailed logging resumes before the
+        // first event of this run, so a problem at startup is caught. A `TICKETD_LOG` filter
+        // still decides the level (`set_debug` leaves it alone), but the report stays open,
+        // so it can be saved or cancelled and does not come back at a later launch.
+        if let Some(marker) = ReportMarker::read(dir.as_ref()) {
+            logs.set_debug(true);
+            logs.set_report(Some(marker));
+        }
         logs.with_default(|| requested.report_if_invalid());
         if let Some(exit) = &logs.unclean_exit {
             let started_at = exit
@@ -206,7 +222,45 @@ impl DesktopLogs {
                 .unwrap_or_else(|| if debug { "debug" } else { "info" }.to_string()),
             debug,
             env_override: self.filter_override.clone(),
+            report_started_at: self.report_started_at(),
         }
+    }
+
+    fn report_started_at(&self) -> Option<String> {
+        self.report
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .map(|marker| marker.started_at().to_string())
+    }
+
+    fn set_report(&self, marker: Option<ReportMarker>) {
+        *self.report.lock().unwrap_or_else(PoisonError::into_inner) = marker;
+    }
+
+    /// Opens a report: detailed logging goes on and stays on, across a restart, until
+    /// [`end_report`](Self::end_report). A report that is already open keeps its start.
+    /// Does nothing while `TICKETD_LOG` overrides the level.
+    pub fn start_report(&self) {
+        if self.pinned || self.report_started_at().is_some() {
+            return;
+        }
+        self.set_debug(true);
+        self.set_report(Some(ReportMarker::write(&self.dir)));
+    }
+
+    /// Closes the open report, once it is saved or cancelled: detailed logging goes off and
+    /// the next launch starts at the default level.
+    pub fn end_report(&self) {
+        if let Some(marker) = self
+            .report
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .take()
+        {
+            marker.remove();
+        }
+        self.set_debug(false);
     }
 
     /// The level as the summary states it: `info`, `debug` while Debug logging is on, or the

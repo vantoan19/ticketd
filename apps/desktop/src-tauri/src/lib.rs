@@ -15,6 +15,8 @@ mod cli_status;
 mod diagnostics_commands;
 mod drive_commands;
 mod folder_probe;
+mod notification_permission;
+mod restore_points;
 #[cfg(test)]
 mod runtime_trace;
 mod s3_commands;
@@ -29,12 +31,12 @@ mod webview_report;
 mod workspace_session;
 
 use ticketd_core::{
-    Activity, ActivityPatch, BackupInspection, BackupRecord, BatchOperation, ContextGraph,
-    ContextGraphPage, CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult,
-    DocumentSummary, Evidence, EvidenceInput, InboxEntry, LatestUpdate, MetadataSelection, Plan,
-    PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange, SafetyBackup, SidebarCounts,
-    Status, StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace,
-    WorkspaceGraph, WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
+    Activity, ActivityPatch, BackupInspection, BatchOperation, ContextGraph, ContextGraphPage,
+    CurrentWork, DependencyGraph, Document, DocumentPatch, DocumentSearchResult, DocumentSummary,
+    Evidence, EvidenceInput, InboxEntry, LatestUpdate, MetadataSelection, Plan,
+    PlanView, Project, ProjectArchiveOutcome, ProjectRemoteChange, SidebarCounts, Status,
+    StatusCounts, Ticket, TicketChange, TicketFilter, TicketPatch, Workspace, WorkspaceGraph,
+    WorkspaceGraphRequest, WorkspaceInfo, WriteRequest, WriteResult,
     source::{ExtensionRegistry, RefreshControl, RefreshProgress},
 };
 
@@ -1012,6 +1014,13 @@ fn latest_update(reference: String) -> Result<Option<LatestUpdate>, BridgeFailur
 }
 
 #[tauri::command(async)]
+fn first_agent_update() -> Result<Option<ticketd_core::AgentUpdate>, BridgeFailure> {
+    open_workspace()
+        .and_then(|workspace| workspace.first_agent_update())
+        .map_err(BridgeFailure::from)
+}
+
+#[tauri::command(async)]
 fn activity_feed(
     reference: String,
     limit: u32,
@@ -1450,19 +1459,6 @@ fn set_plan(reference: String, plan: Option<String>) -> Result<Ticket, BridgeFai
         .map_err(BridgeFailure::from)
 }
 
-/// Saves a backup. Returns whether it was also recorded as the last backup.
-#[tauri::command(async)]
-fn backup_workspace(path: String) -> Result<bool, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.backup(&path))
-        .map_err(BridgeFailure::from)
-}
-#[tauri::command(async)]
-fn last_backup() -> Result<Option<BackupRecord>, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.last_backup())
-        .map_err(BridgeFailure::from)
-}
 /// Where the workspace file is, read without opening it: the startup recovery
 /// screen names the file even when it cannot be opened.
 #[tauri::command(async)]
@@ -1481,12 +1477,6 @@ fn workspace_info() -> Result<WorkspaceInfo, BridgeFailure> {
 fn inspect_backup(path: String) -> Result<BackupInspection, BridgeFailure> {
     open_workspace()
         .and_then(|w| w.inspect_backup(path))
-        .map_err(BridgeFailure::from)
-}
-#[tauri::command(async)]
-fn safety_backups() -> Result<Vec<SafetyBackup>, BridgeFailure> {
-    open_workspace()
-        .and_then(|w| w.safety_backups())
         .map_err(BridgeFailure::from)
 }
 
@@ -1521,6 +1511,25 @@ impl From<ticketd_core::Error> for SourceFailure {
     }
 }
 
+impl From<ticketd_core::source::AddError> for SourceFailure {
+    fn from(error: ticketd_core::source::AddError) -> Self {
+        use ticketd_core::source::AddError;
+        match error {
+            AddError::Refused(refusal) => Self {
+                code: refusal.code(),
+                message: refusal.to_string(),
+                fields: Vec::new(),
+            },
+            AddError::Expired => Self {
+                code: "expired",
+                message: error.to_string(),
+                fields: Vec::new(),
+            },
+            AddError::Source(source) => source.into(),
+        }
+    }
+}
+
 impl From<ticketd_core::source::SourceError> for SourceFailure {
     fn from(error: ticketd_core::source::SourceError) -> Self {
         ticketd_core::Error::from(error).into()
@@ -1537,6 +1546,9 @@ struct SourceEntry {
     saved: Option<ticketd_core::source::SavedSource>,
     #[serde(skip_serializing_if = "Option::is_none")]
     next_id: Option<String>,
+    /// The program behind a source a person added: what it runs and where from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extension: Option<ticketd_core::source::ExtensionState>,
 }
 
 type SourceRegistry = std::sync::Arc<ExtensionRegistry>;
@@ -1563,11 +1575,18 @@ fn list_sources(
     let workspace = open_workspace()?;
     let engine = sources.engine()?;
     let saved = workspace.saved_sources()?;
+    let extensions = sources.states()?;
     let mut entries = Vec::new();
     for connector in engine.descriptions() {
         let provider = &connector.descriptor.provider;
         let next_id = workspace.next_source_connection_id(provider)?;
         let development = sources.is_development(provider);
+        // A source whose files changed stays listed, stopped, until it is added again.
+        let extension = extensions
+            .iter()
+            .find(|state| &state.extension.id == provider && !state.bundled)
+            .cloned();
+        let unavailable = extension.as_ref().is_some_and(|state| state.stopped);
         let first = entries.len();
         entries.extend(
             saved
@@ -1575,19 +1594,21 @@ fn list_sources(
                 .filter(|source| &source.provider == provider)
                 .map(|source| SourceEntry {
                     development,
-                    unavailable: false,
+                    unavailable,
                     connector: connector.clone(),
                     saved: Some(source.clone()),
                     next_id: Some(next_id.clone()),
+                    extension: extension.clone(),
                 }),
         );
         if entries.len() == first {
             entries.push(SourceEntry {
                 development,
-                unavailable: false,
+                unavailable,
                 connector,
                 saved: None,
                 next_id: Some(next_id),
+                extension,
             });
         }
     }
@@ -1599,10 +1620,54 @@ fn list_sources(
                 connector: workspace.unavailable_source_description(&source.provider)?,
                 saved: Some(source),
                 next_id: None,
+                extension: None,
             });
         }
     }
     Ok(entries)
+}
+
+/// A folder to add as a source, copied and read but not run: what the person
+/// is asked to approve. A folder that cannot be added fails here with the reason.
+#[tauri::command(async)]
+fn source_extension_prepare(
+    path: String,
+    sources: tauri::State<'_, SourceRegistry>,
+    pending: tauri::State<'_, std::sync::Arc<ticketd_core::source::PendingExtensions>>,
+) -> Result<ticketd_core::source::PendingConsent, SourceFailure> {
+    pending
+        .prepare(&sources, std::path::Path::new(&path))
+        .map_err(SourceFailure::from)
+}
+
+/// Approves what `source_extension_prepare` showed, as `ticketd source extension add` does.
+#[tauri::command(async)]
+fn source_extension_add(
+    token: String,
+    sources: tauri::State<'_, SourceRegistry>,
+    pending: tauri::State<'_, std::sync::Arc<ticketd_core::source::PendingExtensions>>,
+) -> Result<ticketd_core::source::RegisteredExtension, SourceFailure> {
+    pending
+        .approve(&sources, &token)
+        .map_err(SourceFailure::from)
+}
+
+/// Drops a prepared folder the person did not approve.
+#[tauri::command(async)]
+fn source_extension_cancel(
+    token: String,
+    pending: tauri::State<'_, std::sync::Arc<ticketd_core::source::PendingExtensions>>,
+) {
+    pending.cancel(&token);
+}
+
+/// Removes the program of a source a person added. Its connections stay saved, stopped.
+#[tauri::command(async)]
+fn source_extension_remove(
+    id: String,
+    sources: tauri::State<'_, SourceRegistry>,
+) -> Result<(), SourceFailure> {
+    sources.remove(&id).map_err(SourceFailure::from)
 }
 #[tauri::command(async)]
 fn source_repository_routes(
@@ -2279,6 +2344,9 @@ pub fn run() -> Result<(), tauri::Error> {
             },
         )
         .manage(drive_commands::DrivePickerOperations::default())
+        .manage(std::sync::Arc::new(
+            ticketd_core::source::PendingExtensions::default(),
+        ))
         .manage(Refresher(
             std::sync::Arc::clone(&coordinator),
             ActiveRefreshes::default(),
@@ -2376,8 +2444,10 @@ pub fn run() -> Result<(), tauri::Error> {
             tauri::Manager::manage(app, chat);
             chat_commands::on_notification_click(app.handle());
             updates::start(app.handle());
+            agent_skills::refresh_at_launch();
             start_periodic_refresh(coordinator, refresh_registry);
             start_reminder_timer(open_workspace);
+            restore_points::start(open_workspace);
             sync_commands::publish_status(app.handle().clone());
             sync.start(started, sync_commands::at_launch);
             if cfg!(target_os = "macos") {
@@ -2506,8 +2576,13 @@ pub fn run() -> Result<(), tauri::Error> {
             document_version,
             open_document,
             save_document,
-            backup_workspace,
+            restore_points::restore_points,
+            restore_points::save_restore_point,
             list_sources,
+            source_extension_prepare,
+            source_extension_add,
+            source_extension_cancel,
+            source_extension_remove,
             source_repository_routes,
             link_source_repository_project,
             create_source_repository_project,
@@ -2529,12 +2604,10 @@ pub fn run() -> Result<(), tauri::Error> {
             update_source_credentials,
             rename_source_connection,
             remove_source_connection,
-            last_backup,
             workspace_info,
             workspace_location,
             chat_commands::restore_workspace,
             inspect_backup,
-            safety_backups,
             export_workspace,
             list_plans,
             show_plan,
@@ -2547,7 +2620,10 @@ pub fn run() -> Result<(), tauri::Error> {
             set_plan,
             cli_status::check_cli,
             cli_status::install_cli,
-            cli_status::remove_older_cli,
+            cli_status::install_cli_in_user_bin,
+            notification_permission::notification_permission,
+            notification_permission::request_notification_permission,
+            notification_permission::open_notification_settings,
             agent_skills::agent_skills,
             agent_skills::install_agent_skill,
             list_projects,
@@ -2595,6 +2671,7 @@ pub fn run() -> Result<(), tauri::Error> {
             source_conversation,
             latest_update,
             activity_feed,
+            first_agent_update,
             get_activity,
             add_activity,
             add_activity_with_details,
@@ -2626,6 +2703,7 @@ pub fn run() -> Result<(), tauri::Error> {
             chat_commands::chat_list,
             chat_commands::chat_harnesses,
             chat_commands::chat_harness_catalog,
+            chat_commands::chat_installed_harnesses,
             chat_commands::chat_harness_options,
             chat_commands::chat_harness_skills,
             chat_commands::chat_folder_use,
@@ -2675,7 +2753,8 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::sync_flush_on_exit,
             sync_commands::sync_status,
             diagnostics_commands::diagnostics_log_level,
-            diagnostics_commands::diagnostics_set_debug,
+            diagnostics_commands::diagnostics_start_report,
+            diagnostics_commands::diagnostics_cancel_report,
             updates::updates_state,
             updates::updates_set_automatic,
             updates::updates_check,
@@ -2685,9 +2764,11 @@ pub fn run() -> Result<(), tauri::Error> {
             diagnostics_commands::diagnostics_open_logs_folder,
             diagnostics_commands::diagnostics_recent_errors,
             diagnostics_commands::diagnostics_export_file_name,
-            diagnostics_commands::diagnostics_summary,
-            diagnostics_commands::diagnostics_export,
+            diagnostics_commands::diagnostics_issue_details,
+            diagnostics_commands::diagnostics_save_report,
             sync_commands::sync_connect,
+            sync_commands::use_another_google_account,
+            sync_commands::use_sync_uploads_folder,
             s3_commands::s3_profiles,
             s3_commands::s3_choose_cli,
             s3_commands::s3_identity,
@@ -2704,6 +2785,7 @@ pub fn run() -> Result<(), tauri::Error> {
             sync_commands::sync_disconnect,
             sync_commands::sync_open_folder,
             sync_commands::sync_settings,
+            sync_commands::sync_devices,
             sync_commands::set_sync_settings,
             sync_commands::attachment_availability,
             sync_commands::download_attachment

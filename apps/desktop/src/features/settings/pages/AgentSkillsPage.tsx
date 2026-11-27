@@ -6,10 +6,7 @@ import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 export function AgentSkillsPage() {
   const { refreshIndicators } = useSettingsState();
   return (
-    <SettingsPage
-      {...sectionMeta("agent-skills")}
-      lede="Teaches your coding agents to use the ticketd command line. It is installed for your user, so it works in every project."
-    >
+    <SettingsPage {...sectionMeta("agent-skills")}>
       <AgentSkillsCard onChanged={() => refreshIndicators("agent-skills")} />
     </SettingsPage>
   );

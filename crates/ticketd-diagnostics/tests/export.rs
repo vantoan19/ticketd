@@ -9,7 +9,7 @@ use std::path::Path;
 use chrono::{Duration, Utc};
 use serde_json::{Value, json};
 use ticketd_diagnostics::{
-    Config, DesktopLogs, Facts, HarnessVersion, KnownValues, WorkspaceHealth,
+    Config, DesktopLogs, Facts, HarnessVersion, IssueDetails, KnownValues, WorkspaceHealth,
 };
 
 /// `n` days before today (UTC), as the log files name them.
@@ -341,4 +341,27 @@ fn the_bundle_includes_source_log_counts_without_extension_text() {
         assert!(!text.contains("old stderr"));
     }
     assert!(!names(&files).contains(&"logs/sources/example-tracker.lock"));
+}
+
+#[test]
+fn issue_details_fill_the_bug_forms_version_and_system_fields() {
+    let details = IssueDetails::of(&Facts {
+        os: "macos 15.1".into(),
+        ..facts()
+    });
+    assert_eq!(details.version, "0.1.0 (commit abc1234)");
+    assert_eq!(details.environment, "macOS 15.1 aarch64, desktop app");
+
+    // A build without a commit gives the version alone; a debug build says so.
+    let details = IssueDetails::of(&Facts {
+        commit: "unknown".into(),
+        build: "debug".into(),
+        os: "linux".into(),
+        ..facts()
+    });
+    assert_eq!(details.version, "0.1.0");
+    assert_eq!(
+        details.environment,
+        "linux aarch64, desktop app, debug build"
+    );
 }

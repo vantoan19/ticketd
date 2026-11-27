@@ -5,8 +5,11 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
 } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { IconButton } from "@/components/ui/icon-button";
 import { Tooltip, TooltipProvider } from "@/components/ui/tooltip";
 
 window.ResizeObserver = class {
@@ -165,4 +168,48 @@ test("a label held shut never opens the next one at once", () => {
   } finally {
     vi.useRealTimers();
   }
+});
+
+test("one Escape closes a dialog whose Close button is focused with the keyboard", async () => {
+  const closed = vi.fn();
+  render(
+    <Dialog open onOpenChange={(open) => !open && closed()}>
+      <DialogContent showCloseButton={false}>
+        <DialogTitle>Restore</DialogTitle>
+        <IconButton label="Close">x</IconButton>
+      </DialogContent>
+    </Dialog>,
+  );
+  const close = screen.getByRole("button", { name: "Close" });
+  // The dialog focuses its first control on opening; Tab arrives from elsewhere.
+  act(() => close.blur());
+  tabTo(close);
+  // No label over the dialog: it would be the layer that takes the Escape.
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(document.querySelector('[data-slot="tooltip-content"]')).toBeNull();
+  const keydowns: KeyboardEvent[] = [];
+  document.addEventListener("keydown", (event) => keydowns.push(event), true);
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  expect(closed).toHaveBeenCalledTimes(1);
+  // One key, one event: nothing re-dispatches Escape.
+  expect(keydowns.filter((event) => event.key === "Escape")).toHaveLength(1);
+});
+
+test("Escape on a label outside any dialog closes just that label", async () => {
+  const escaped = vi.fn();
+  render(
+    <div onKeyDown={(event) => event.key === "Escape" && escaped()}>
+      <Tooltip content="Archive">
+        <button type="button">Archive</button>
+      </Tooltip>
+    </div>,
+  );
+  tabTo(screen.getByRole("button", { name: "Archive" }));
+  await waitFor(() => expect(screen.getByRole("tooltip")).not.toBeNull());
+  fireEvent.keyDown(document.activeElement ?? document.body, {
+    key: "Escape",
+  });
+  await waitFor(() => expect(screen.queryByRole("tooltip")).toBeNull());
 });

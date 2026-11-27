@@ -21,8 +21,8 @@ use crate::source::{
     CONTRACT_VERSION, ConfigValues, ConformanceOptions, ConformanceReport, Engine, conformance,
 };
 
-const MANIFEST: &str = "ticketd-source.json";
-const MANIFEST_LIMIT: u64 = 16 * 1024;
+pub(super) const MANIFEST: &str = "ticketd-source.json";
+pub(super) const MANIFEST_LIMIT: u64 = 16 * 1024;
 const RECORD_LIMIT: u64 = 1024 * 1024;
 const PACKAGE_PREFIX: &str = ".source-package-";
 const STAGING_PREFIX: &str = ".source-stage-";
@@ -30,17 +30,33 @@ const PACKAGE_DIR: &str = "package";
 const OWNERSHIP_MARKER: &str = ".ticketd-source-install";
 
 /// A device-local extension registration. Connections keep their own settings.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct RegisteredExtension {
     pub id: String,
     pub version: String,
     pub path: PathBuf,
     pub development: bool,
     pub hosts: Vec<String>,
+    /// The program and arguments as the manifest names them, such as `node dist/index.js`.
+    pub command: String,
+    /// The folder an installed extension was added from, when it is known.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub origin: Option<PathBuf>,
+}
+
+/// An installed extension and whether it still matches what was approved.
+#[derive(Serialize, Clone)]
+pub struct ExtensionState {
+    #[serde(flatten)]
+    pub extension: RegisteredExtension,
+    /// Its files changed or are missing, so it stays stopped until it is added again.
+    pub stopped: bool,
+    /// Installed with the app itself rather than added by a person.
+    pub bundled: bool,
 }
 
 /// The program and arguments given to the OS after consent.
-#[derive(Serialize)]
+#[derive(Serialize, Clone)]
 pub struct ExtensionConsent {
     pub extension: RegisteredExtension,
     pub executable: PathBuf,
@@ -138,7 +154,21 @@ impl Manifest {
         Ok(())
     }
 
-    fn read(folder: &Path) -> Result<Self, SourceError> {
+    /// The program and its arguments in one line, quoting any that hold a space.
+    fn command_line(&self) -> String {
+        std::iter::once(self.executable.display().to_string())
+            .chain(self.args.iter().map(|arg| {
+                if arg.is_empty() || arg.contains(char::is_whitespace) {
+                    format!("{arg:?}")
+                } else {
+                    arg.clone()
+                }
+            }))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    pub(super) fn read(folder: &Path) -> Result<Self, SourceError> {
         let manifest: Self = serde_json::from_slice(
             &read_limited(&folder.join(MANIFEST), MANIFEST_LIMIT).map_err(storage_error)?,
         )
@@ -172,6 +202,9 @@ enum LaunchMode {
         executable: PathBuf,
         #[serde(default, skip_serializing_if = "std::ops::Not::not")]
         bundled: bool,
+        /// The folder the person added it from, shown on its page.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        origin: Option<PathBuf>,
     },
 }
 
@@ -193,6 +226,11 @@ impl Launch {
             path: self.folder.clone(),
             development: self.is_development(),
             hosts: self.manifest.hosts.clone(),
+            command: self.manifest.command_line(),
+            origin: match &self.mode {
+                LaunchMode::Installed { origin, .. } => origin.clone(),
+                LaunchMode::Development => None,
+            },
         }
     }
 
@@ -505,6 +543,7 @@ impl ExtensionRegistry {
                 hash: folder_digest(&package).map_err(storage_error)?,
                 executable: executable.clone(),
                 bundled: false,
+                origin: Some(source.clone()),
             },
         };
         let consent = ExtensionConsent {
@@ -576,8 +615,12 @@ impl ExtensionRegistry {
         })?;
         fs::write(original.path().join(MANIFEST), manifest).map_err(storage_error)?;
         let mut prepared = self.prepare_add(original.path())?;
-        if let LaunchMode::Installed { bundled, .. } = &mut prepared.launch.mode {
+        if let LaunchMode::Installed {
+            bundled, origin, ..
+        } = &mut prepared.launch.mode
+        {
             *bundled = true;
+            *origin = None;
         }
         let hello = Description {
             contract_versions: vec![CONTRACT_VERSION],
@@ -660,6 +703,24 @@ impl ExtensionRegistry {
                         .launch
                         .registration(),
                 )
+            })
+            .collect()
+    }
+
+    /// Every registered extension and whether it still matches what was approved.
+    /// An installed folder is hashed, so this reads its files.
+    pub fn states(&self) -> Result<Vec<ExtensionState>, SourceError> {
+        registry_files(&self.folder)?
+            .into_iter()
+            .map(|(path, bytes)| {
+                let launch =
+                    decode_record(path.file_stem().and_then(OsStr::to_str), &bytes)?.launch;
+                let bundled = matches!(launch.mode, LaunchMode::Installed { bundled: true, .. });
+                Ok(ExtensionState {
+                    stopped: !bundled && launch.verify_trust().is_err(),
+                    bundled,
+                    extension: launch.registration(),
+                })
             })
             .collect()
     }
@@ -839,7 +900,7 @@ fn storage_error(error: io::Error) -> SourceError {
     ))
 }
 
-fn read_limited(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
+pub(super) fn read_limited(path: &Path, limit: u64) -> io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     File::open(path)?.take(limit + 1).read_to_end(&mut bytes)?;
     if bytes.len() as u64 > limit {
@@ -1031,7 +1092,7 @@ fn copy_package(from: &Path, to: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn folder_digest(folder: &Path) -> io::Result<String> {
+pub(super) fn folder_digest(folder: &Path) -> io::Result<String> {
     fn visit(path: &Path, digest: &mut Sha256) -> io::Result<()> {
         let metadata = fs::symlink_metadata(path)?;
         package_entry(&metadata)?;

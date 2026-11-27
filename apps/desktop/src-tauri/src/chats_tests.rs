@@ -192,7 +192,8 @@ fn turn() -> NativeTurnId {
 async fn chat_does_nothing_while_the_switch_is_off_and_turning_it_off_stops_running_chats() {
     let f = Fixture::new().await;
     f.chats.set_enabled(false).await;
-    assert!(f.chats.create(f.input("first")).await.is_err());
+    let refused = f.chats.create(f.input("first")).await.unwrap_err();
+    assert_eq!(refused.message, "Chat is turned off in Settings › Agents.");
     assert_eq!(f.chats.working(), 0);
     assert_eq!(
         close_action(f.chats.enabled(), f.chats.stopping(), false),

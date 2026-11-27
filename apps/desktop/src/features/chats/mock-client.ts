@@ -1117,6 +1117,15 @@ export function createMockChatClient(
         .map(summary)
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at)),
     harnesses: async () => harnesses,
+    installedHarnesses: async () =>
+      harnesses.map(({ id, name, mark_id, status, version, path }) => ({
+        id,
+        name,
+        mark_id: mark_id ?? id,
+        installed: status !== "not_installed",
+        version: version ?? null,
+        path: path ?? null,
+      })),
     harnessCatalog: async () =>
       seed.catalog ??
       harnesses.map(({ id, name, mark_id }) => ({

@@ -294,6 +294,31 @@ pub struct S3Binding {
     pub endpoint: Option<String>,
 }
 
+/// [`Workspace::sync_google_sign_in`] on a connection, for a check made inside a write lock.
+pub(crate) fn google_sign_in_of(
+    connection: &Connection,
+) -> Result<Option<(String, Option<String>)>, Error> {
+    let state = state(connection)?;
+    Ok(match (state.provider, state.connection) {
+        (SyncProvider::GoogleDrive, Some(connection)) => Some((connection, state.account)),
+        _ => None,
+    })
+}
+
+/// The folder Workspace sync uses now, if any.
+pub(crate) fn sync_folder_of(connection: &Connection) -> Result<Option<String>, Error> {
+    Ok(state(connection)?.folder)
+}
+
+/// Why a sign-in as another Google account is refused while Files or Workspace sync is
+/// already on one.
+pub(crate) fn other_google_account() -> Error {
+    Error::Sync(
+        "Workspace sync and Files are signed in to another Google account; sign in with that account, or use another Google account for both in Settings › Files"
+            .into(),
+    )
+}
+
 /// What a person is told when a profile reaches another S3 service than the one the
 /// Workspace's bucket was connected through. The endpoints are as [`S3Binding::endpoint`]
 /// keeps them.
@@ -334,6 +359,19 @@ pub struct SyncSettings {
     pub device_code: String,
     pub poll_interval_secs: u64,
     pub attachment_download: AttachmentDownload,
+}
+
+/// One computer of the device registry, as Settings lists the computers that share this Workspace.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SyncDevice {
+    pub id: String,
+    pub name: String,
+    /// The two-letter code in the references of tickets made on that computer.
+    pub code: String,
+    /// When that computer last uploaded a change; `None` until it has.
+    pub last_synced_at: Option<String>,
+    /// Whether this is the computer the list is read on.
+    pub this: bool,
 }
 
 /// A record or Attachment named in the status.
@@ -568,9 +606,26 @@ fn from_label<T: DeserializeOwned>(text: Option<String>) -> Option<T> {
     serde_json::from_value(serde_json::Value::String(text?)).ok()
 }
 
+/// What [`state`] reads, in the order it reads them.
+const STATE_COLUMNS: &str = "connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account, provider, s3_bucket, s3_prefix, aws_profile, aws_cli_path, last_provider, last_bucket, last_prefix, s3_endpoint";
+
+/// Whether the sync state is there with every column [`state`] reads: a Workspace of an
+/// older format has none of them or only the first of them.
+fn has_state(connection: &Connection) -> Result<bool, Error> {
+    if !crate::backup::table_exists(connection, "sync_state")? {
+        return Ok(false);
+    }
+    for column in STATE_COLUMNS.split(", ") {
+        if !has_column(connection, "sync_state", column)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
 fn state(connection: &Connection) -> Result<State, Error> {
     Ok(connection.query_row(
-        "SELECT connection, account, folder, folder_name, device_id, device_name, poll_interval_secs, attachment_download, last_synced_at, recovery, first_sync, first_total, recovery_message, run_token, run_previous, run_due, last_folder, last_account, provider, s3_bucket, s3_prefix, aws_profile, aws_cli_path, last_provider, last_bucket, last_prefix, s3_endpoint FROM sync_state",
+        &format!("SELECT {STATE_COLUMNS} FROM sync_state"),
         [],
         |row| {
             Ok(State {
@@ -657,6 +712,83 @@ pub(super) fn forget_folder(connection: &Connection) -> Result<(), Error> {
     }
     connection.execute_batch(GIVE_UP_DOWNLOADS)?;
     forget_synced(connection)
+}
+
+/// See [`super::remember_replaced_folder`].
+pub(super) fn remember_replaced_folder(
+    restored: &Connection,
+    replaced: &Connection,
+) -> Result<(), Error> {
+    // A replaced Workspace of an older format has nothing to remember. Any other failure to
+    // read it stops the restore here, before the live Workspace changes.
+    if !has_state(replaced)? {
+        return Ok(());
+    }
+    let was = state(replaced)?;
+    // The folder belongs to one Workspace: a backup of another one is not offered it.
+    let same_workspace = match (
+        crate::embedded_attachments::workspace_id(replaced),
+        crate::embedded_attachments::workspace_id(restored),
+    ) {
+        (Ok(replaced), Ok(restored)) => replaced == restored,
+        _ => false,
+    };
+    // The backup may be of a format before these columns.
+    migrate_last_folder(restored)?;
+    migrate_provider(restored)?;
+    migrate_endpoint(restored)?;
+    // The sign-in and the settings belong to this computer, not to the Workspace's content:
+    // they stay whatever the backup is of and wherever it was made.
+    restored.execute(
+        "UPDATE sync_state SET connection = ?1, account = ?2, provider = ?3, s3_bucket = ?4, s3_prefix = ?5, aws_profile = ?6, aws_cli_path = ?7, s3_endpoint = ?8, device_name = ?9, poll_interval_secs = ?10, attachment_download = ?11",
+        params![
+            was.connection,
+            was.account,
+            label(was.provider)?,
+            was.s3_bucket,
+            was.s3_prefix,
+            was.aws_profile,
+            was.aws_cli_path,
+            was.s3_endpoint,
+            was.device_name,
+            was.poll_interval_secs,
+            label(was.attachment_download)?,
+        ],
+    )?;
+    // Files and sync share one Google sign-in on this computer: sync's, otherwise the one
+    // the replaced Workspace's Files folder uses. A Files folder in another account goes.
+    let sync_sign_in = was
+        .connection
+        .as_deref()
+        .filter(|_| was.provider == SyncProvider::GoogleDrive);
+    crate::upload_destination::follow_kept_google_sign_in(restored, replaced, sync_sign_in)?;
+    if !same_workspace {
+        return Ok(());
+    }
+    let syncing = was.folder.is_some();
+    let Some(folder) = was.folder.clone().or_else(|| was.last_folder.clone()) else {
+        return Ok(());
+    };
+    let (account, provider, bucket, prefix) = if syncing {
+        (
+            was.account.clone(),
+            was.provider,
+            was.s3_bucket.clone(),
+            was.s3_prefix.clone(),
+        )
+    } else {
+        (
+            was.last_account.clone(),
+            was.last_provider,
+            was.last_bucket.clone(),
+            was.last_prefix.clone(),
+        )
+    };
+    restored.execute(
+        "UPDATE sync_state SET last_folder = ?1, last_account = ?2, last_provider = ?3, last_bucket = ?4, last_prefix = ?5",
+        params![folder, account, label(provider)?, bucket, prefix],
+    )?;
+    Ok(())
 }
 
 /// The folder a disconnected Workspace can go back to: the one it last synced
@@ -762,6 +894,58 @@ impl Workspace {
         self.sync_settings()
     }
 
+    /// The computers that share this Workspace: this one first, with its name as it is now
+    /// (the registry gets a new name by the next run), then the others as the registry
+    /// stood when this computer last read it, the most recent change first. Reads only this
+    /// Workspace's copy of the registry, so it needs no sign-in and no network; before the
+    /// first run it lists this computer alone.
+    pub fn sync_devices(&self) -> Result<Vec<SyncDevice>, Error> {
+        let state = state(&self.connection)?;
+        let cached: Option<String> = self
+            .connection
+            .query_row(
+                "SELECT content FROM sync_files WHERE kind = 'devices' AND id = ?1",
+                [REGISTRY],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .optional()?
+            .flatten();
+        let registry: Registry = match cached {
+            Some(content) => read_shared(content.as_bytes())?,
+            None => Registry::default(),
+        };
+        let mine = state.device_id.as_deref();
+        let this = |id: &str, device: Option<&RegisteredDevice>| SyncDevice {
+            id: id.to_owned(),
+            name: state.device_name.clone().unwrap_or_else(computer_name),
+            code: self.device_code().unwrap_or_default(),
+            last_synced_at: device.and_then(|device| device.last_synced_at.clone()),
+            this: true,
+        };
+        let mut others: Vec<SyncDevice> = registry
+            .devices
+            .iter()
+            .filter(|(id, _)| Some(id.as_str()) != mine)
+            .map(|(id, device)| SyncDevice {
+                id: id.clone(),
+                name: device.name.clone(),
+                code: device.code.clone(),
+                last_synced_at: device.last_synced_at.clone(),
+                this: false,
+            })
+            .collect();
+        others.sort_by(|a, b| {
+            b.last_synced_at
+                .cmp(&a.last_synced_at)
+                .then_with(|| a.name.cmp(&b.name))
+        });
+        let first = match mine {
+            Some(id) => this(id, registry.devices.get(id)),
+            None => this("", None),
+        };
+        Ok(std::iter::once(first).chain(others).collect())
+    }
+
     /// The `aws` program this desktop's person chose, if any. Unlike the bucket, it is kept
     /// before a connection exists and after one ends: it belongs to this desktop.
     pub fn sync_aws_cli_path(&self) -> Result<Option<String>, Error> {
@@ -779,21 +963,58 @@ impl Workspace {
 
     /// Remember the storage sign-in, before a folder is chosen. Both values are
     /// the desktop's own: the core only keeps them with the Workspace.
+    ///
+    /// Files and Workspace sync share one Google account, so the sign-in has to be the one
+    /// the Files folder already uses, and, once a folder is bound, the one that folder was
+    /// made with: signing in again as another account would leave the two on different
+    /// accounts. [`Workspace::switch_google_account`] is how both move together.
     pub fn sync_connect(
         &mut self,
         connection_id: &str,
         account: &str,
     ) -> Result<SyncStatus, Error> {
+        self.bind_google(connection_id, account, true)
+    }
+
+    /// [`Workspace::sync_connect`] without the shared-account check on the Files folder, for
+    /// the caller that moves the Files destination along with the sign-in.
+    pub(crate) fn connect_google(
+        &mut self,
+        connection_id: &str,
+        account: &str,
+    ) -> Result<SyncStatus, Error> {
+        self.bind_google(connection_id, account, false)
+    }
+
+    fn bind_google(
+        &mut self,
+        connection_id: &str,
+        account: &str,
+        files_must_match: bool,
+    ) -> Result<SyncStatus, Error> {
         // Read, checked and written under one write lock, as `sync_connect_s3` does: another
         // connection to this Workspace file could bind an S3 folder in between otherwise, and
         // this update would keep that folder while clearing the S3 settings.
+        // The Files folder is checked in the same lock: a Files folder chosen through another
+        // handle in between would otherwise end up on another account than this sign-in.
         crate::write_scope::run(&self.connection, |scope| {
+            if files_must_match {
+                crate::upload_destination::refuse_other_files_google_sign_in(scope, connection_id)?;
+            }
             let state = state(scope)?;
             if state.folder.is_some() && state.provider != SyncProvider::GoogleDrive {
                 return Err(Error::Sync(format!(
                     "this Workspace syncs with {}; disconnect it before connecting to Google Drive",
                     state.provider.name()
                 )));
+            }
+            if state.folder.is_some()
+                && state
+                    .connection
+                    .as_deref()
+                    .is_some_and(|held| held != connection_id)
+            {
+                return Err(other_google_account());
             }
             scope.execute(
                 "UPDATE sync_state SET provider = 'google_drive', s3_bucket = NULL, s3_prefix = NULL, aws_profile = NULL, s3_endpoint = NULL, connection = ?1, account = ?2",
@@ -922,6 +1143,12 @@ impl Workspace {
             device_name: state.device_name.unwrap_or_else(computer_name),
             poll_secs: state.poll_interval_secs,
         }))
+    }
+
+    /// The Google sign-in Workspace sync holds, with the account it shows: a connection
+    /// id and an email address. `None` while sync is not signed in to Google Drive.
+    pub(crate) fn sync_google_sign_in(&self) -> Result<Option<(String, Option<String>)>, Error> {
+        google_sign_in_of(&self.connection)
     }
 
     /// How many records in review and notices are unread.

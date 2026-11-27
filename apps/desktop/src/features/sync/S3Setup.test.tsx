@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -215,6 +216,59 @@ test("a profile signed in lists its buckets and connects with the chosen bucket 
       profile: "work",
     }),
   );
+});
+
+test("the profile, bucket and prefix are locked while Connect S3 waits, and free again after", async () => {
+  s3.profiles.mockResolvedValue(ready("work", "personal"));
+  s3.identity.mockResolvedValue(signedIn);
+  s3.buckets.mockResolvedValue(["alpha", "team-ticketd"]);
+  let answer: (status: ReturnType<typeof syncStatus>) => void = () => {};
+  let refuse: (reason: unknown) => void = () => {};
+  sync.connectS3.mockImplementationOnce(
+    () =>
+      new Promise((resolve, reject) => {
+        answer = resolve;
+        refuse = reject;
+      }),
+  );
+  show();
+  await choose(
+    await screen.findByRole("combobox", { name: "AWS profile" }),
+    "work",
+  );
+  await choose(
+    await screen.findByRole("combobox", { name: "Bucket" }),
+    "team-ticketd",
+  );
+  const fields = () => [
+    screen.getByRole("combobox", { name: "AWS profile" }),
+    screen.getByRole("combobox", { name: "Bucket" }),
+    screen.getByLabelText("Prefix"),
+  ];
+  const locked = () =>
+    fields().map((field) => (field as HTMLButtonElement).disabled);
+  expect(locked()).toEqual([false, false, false]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Connect S3" }));
+  await waitFor(() => expect(locked()).toEqual([true, true, true]));
+
+  // A refusal frees them, and the connect can be tried again.
+  await act(async () => refuse(hostFailure("Refused")));
+  await waitFor(() => expect(locked()).toEqual([false, false, false]));
+  sync.connectS3.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        answer = resolve;
+      }),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Connect S3" }));
+  await waitFor(() => expect(locked()).toEqual([true, true, true]));
+  await act(async () =>
+    answer(
+      syncStatus({ connection: "choosing", provider: "s3", folder: null }),
+    ),
+  );
+  await waitFor(() => expect(locked()).toEqual([false, false, false]));
 });
 
 test("a bucket the list does not show can be typed instead", async () => {

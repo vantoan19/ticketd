@@ -818,3 +818,26 @@ fn document_lists_carry_each_rows_plans_tickets_and_unopened_state() {
         assert_eq!(row["opened"], true);
     }
 }
+
+/// A file that holds an attachment backup is not a Workspace; the message sends the person to
+/// the page that restores one.
+#[test]
+fn opening_a_backup_container_as_the_workspace_names_where_to_restore_it() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    rusqlite::Connection::open(&path)
+        .unwrap()
+        .execute_batch("CREATE TABLE ticketd_backup_container (id INTEGER)")
+        .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_ticketd"))
+        .args(["list"])
+        .env("HOME", dir.path())
+        .env("XDG_DATA_HOME", dir.path())
+        .env("TICKETD_TEST_WORKSPACE", &path)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    let error = String::from_utf8_lossy(&output.stderr);
+    assert!(error.contains("restore-workspace"), "{error}");
+    assert!(error.contains("Settings › Backups & export"), "{error}");
+}

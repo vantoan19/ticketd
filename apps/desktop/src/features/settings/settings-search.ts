@@ -1,4 +1,10 @@
-import type { SettingsPageId } from "@/features/settings/settings-sections";
+import { BUY_ME_A_COFFEE_URL } from "@/lib/support-links";
+import {
+  SETTINGS_SECTIONS,
+  navSectionOf,
+  type SettingsPageId,
+  type SettingsSectionId,
+} from "@/features/settings/settings-sections";
 
 /** One setting row, as Search finds it. */
 export interface SettingsEntry {
@@ -22,6 +28,14 @@ export interface SettingsEntry {
  */
 export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   {
+    title: "Set up ticketd",
+    description:
+      "Finish the few things that make ticketd useful with your agents.",
+    keywords:
+      "set up setup checklist onboarding getting started first run steps agents hide",
+    section: "setup",
+  },
+  {
     title: "Theme",
     description: "System follows your operating system",
     keywords: "dark mode light colour color appearance system",
@@ -35,120 +49,77 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Follow tickets I create",
-    description: "Tickets you create in ticketd become followed tickets.",
+    description:
+      "Changes to them reach your Inbox. Tickets agents create aren’t followed.",
     keywords: "follow following inbox",
     section: "attention",
   },
   {
-    title: "Notify me when a reminder is due",
+    title: "System notifications",
     description:
-      "Shows a system notification while ticketd is open. Reminders that come due while it is closed appear only in the inbox.",
-    keywords: "notification notifications reminder alert permission",
+      "Due reminders, and Chats that need you, while ticketd is open.",
+    keywords:
+      "notification notifications reminder alert permission allow blocked system settings",
     section: "attention",
   },
   {
-    title: "Attention inbox",
+    title: "Chat notifications",
     description:
-      "Followed tickets and due reminders collect here. Follows and reminders belong to the person on this computer.",
-    keywords: "inbox follows reminders open",
+      "Approvals, questions, failures and finished turns. Mute one Chat from its menu.",
+    keywords: "chat notification notifications alert sound badge dock mute",
     section: "attention",
+    needsChat: true,
   },
   {
-    title: "Workspace file",
+    title: "Location",
     description:
-      "The desktop app and the ticketd command line read and write this workspace.",
-    keywords: "path folder sqlite database finder show copy location",
-    section: "location",
-  },
-  {
-    title: "One file, two ways in",
-    description:
-      "Changes made by you in the app and by agents through the command line land in the same file.",
-    keywords: "desktop app command line agents reads writes",
-    section: "location",
-  },
-  {
-    title: "Contents",
-    description: "Format version",
-    keywords: "size tickets documents projects plans format version count",
-    section: "location",
-  },
-  {
-    title: "Upload destination",
-    description:
-      "Applies to new uploads only. Queued uploads and retries keep their original destination.",
+      "The app and the ticketd command both read and write this file.",
     keywords:
-      "files drive local storage uploads attachments on this computer included in backups",
-    section: "attachments",
+      "workspace file path folder sqlite database finder show copy format version size tickets documents plans count where",
+    section: "backups-export",
   },
   {
-    title: "Upload folder",
-    description: "Writable when selected. Checked again before each upload.",
-    keywords: "drive change folder",
-    section: "attachments",
-  },
-  {
-    title: "Upload limit",
-    description: "Per file, for future uploads. All file types are accepted.",
-    keywords: "largest file size mib maximum default",
-    section: "attachments",
-  },
-  {
-    title: "Back up now",
-    description:
-      "Saves a checked copy to a new file you choose. It never replaces an existing file.",
-    keywords: "backup copy save last backup",
-    section: "backups",
-  },
-  {
-    title: "What a backup contains",
-    description: "Tickets, Documents, Plans, Projects, activity and evidence",
+    title: "New files",
+    description: "Files you already attached stay where they are.",
     keywords:
-      "includes contents local attachment files integrity check google drive not included",
-    section: "backups",
+      "files drive local storage uploads attachments this computer included in backups works offline google drive attach picker folder change folder uploads sync folder",
+    section: "files",
   },
   {
-    title: "Restore from a backup",
-    description:
-      "Replaces this workspace after a review. A safety backup of it is saved first.",
-    keywords: "restore recover replace workspace choose backup",
-    section: "backups",
+    title: "Google account",
+    description: "The one Workspace sync uses.",
+    keywords:
+      "files drive sign in signed out another account switch email google",
+    section: "files",
   },
   {
-    title: "Safety backups",
+    title: "Restore points",
     description:
-      "Saved next to the workspace before a restore or a format upgrade, with every retained local attachment file. Restore one to undo.",
-    keywords: "undo backup automatic",
-    section: "backups",
+      "Copies to come back to, saved on this computer every day. The last 7 are kept.",
+    keywords:
+      "backup back up now copy save daily restore recover replace undo safety file earlier version",
+    section: "backups-export",
   },
   {
-    title: "Export as JSON",
+    title: "Workspace as JSON",
     description:
-      "One readable snapshot of the workspace, including Trash. It cannot be imported back.",
-    keywords: "json snapshot download trash",
-    section: "export",
+      "Every ticket, Document and Plan, Trash included, in one file.",
+    keywords: "export json snapshot download trash",
+    section: "backups-export",
   },
   {
     title: "A ticket or Document as Markdown",
-    description:
-      "Portable Markdown with its referenced files and a manifest, written to a new ticketd-export folder.",
+    description: "With its files, from the command line.",
     keywords:
-      "export command line cli terminal export-markdown same export json manifest folder",
-    section: "export",
+      "export command line cli terminal export-markdown manifest folder portable",
+    section: "backups-export",
   },
   {
-    title: "Export or back up?",
+    title: "Command line",
     description:
-      "Readable copies of your work for other tools. To keep a copy you can restore, use Backups.",
-    keywords: "difference compare restore",
-    section: "export",
-  },
-  {
-    title: "Status",
-    description:
-      "Agents and terminals run ticketd by name to read and write the same workspace as this app.",
+      "Lets your agents and terminals run ticketd on this Workspace.",
     keywords:
-      "command-line tool path terminal install cli check again executable",
+      "command-line tool path terminal install cli check again executable password administrator replace older",
     section: "command-line",
   },
   {
@@ -159,82 +130,61 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "command-line",
   },
   {
-    title: "ticketd skill",
-    description: "Teaches your coding agents to use the ticketd command line.",
+    title: "Agent skills",
+    description:
+      "Teaches the agents on this computer to use ticketd without being told.",
     keywords: "claude code codex agent install update skill",
     section: "agent-skills",
   },
   {
     title: "Agents on this computer",
     description:
-      "ticketd installs only for agents it finds. A copy that was edited or not written by ticketd is left alone until you choose Replace.",
+      "The skill calls the ticketd command from Command line. To run these agents inside ticketd, see Agents.",
     keywords: "claude codex detected replace check again",
     section: "agent-skills",
   },
   {
-    title: "Show Chat",
+    title: "Chats",
     description:
-      "Adds Chats and Automations to the sidebar, where you start and follow your agents’ work.",
+      "Start your agents from ticketd and follow their work beside your tickets.",
     keywords:
-      "chat claude codex ai experimental sidebar conversations automations",
-    section: "chat",
+      "show chat claude codex ai experimental beta preview not yet tested subscription plan sidebar conversations automations",
+    section: "agents",
   },
   {
-    title: "Experimental",
+    title: "On this computer",
     description:
-      "Work in ticketd with the coding tools installed on this computer.",
+      "To let them use ticketd in their own terminal, see Agent skills.",
     keywords:
-      "beta preview not yet qualified against real subscriptions claude codex ai",
-    section: "chat",
-  },
-  {
-    title: "Harnesses",
-    description: "Each harness runs on this computer with its own sign-in.",
-    keywords:
-      "harness claude code codex installed detected signed in check again copy command",
-    section: "chat",
-    needsChat: true,
-  },
-  {
-    title: "Notify me about Chats",
-    description: "Approvals, questions, failures and finished turns.",
-    keywords: "chat notification notifications alert sound badge dock mute",
-    section: "chat",
-    needsChat: true,
-  },
-  {
-    title: "Experimental",
-    description:
-      "Run agents and steps on tickets without starting each one by hand. Open Automations from the sidebar to set them up.",
-    keywords: "automation automations beta preview agents steps",
-    section: "automations",
-  },
-  {
-    title: "Runs at once",
-    description:
-      "Runs beyond this wait in a queue, in the order their events happened.",
-    keywords: "automation automations concurrency parallel limit queue agents",
-    section: "automations",
+      "agents harness claude code codex antigravity installed detected version signed in check again copy command",
+    section: "agents",
   },
   {
     title: "Start ticketd when you sign in",
-    description: "Automations run only while ticketd is running.",
+    description: "Scheduled Automations run only while ticketd is running.",
     keywords:
-      "automation automations login startup autostart launch background tray boot",
+      "automation automations login startup autostart launch background tray boot schedule",
+    section: "automations",
+  },
+  {
+    title: "Open Automations",
+    description: "Build them, and choose which ones run on this computer.",
+    keywords:
+      "automation automations build schedule agents steps experimental beta preview",
     section: "automations",
   },
   {
     title: "Workspace sync",
-    description:
-      "Keep this workspace in sync between your desktops, through a folder in your own Google Drive or an S3 bucket.",
+    description: "Keep this Workspace the same on your other computers.",
     keywords:
       "sync cloud connect account desktops folder storage google drive s3 aws bucket profile prefix sso sign in",
     section: "workspace-sync",
   },
   {
-    title: "Name",
-    description: "New tickets here are numbered",
-    keywords: "this desktop device ticket code",
+    title: "Computers",
+    description: "This computer",
+    keywords:
+      "rename name this computer desktop device ticket code last change",
     section: "workspace-sync",
   },
   {
@@ -244,44 +194,30 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "workspace-sync",
   },
   {
-    title: "Attachments",
+    title: "Files from your other computers",
     description: "Download when opened",
     keywords:
-      "download automatically every file works offline saves disk space files",
+      "attachments download automatically every file works offline saves disk space files",
     section: "workspace-sync",
   },
   {
-    title: "Disconnect this desktop",
-    description:
-      "Stops syncing here. Your files stay in Drive and on this computer.",
+    title: "Stop syncing on this computer",
+    description: "Your files stay in Drive and on this computer.",
     keywords:
       "disconnect google drive s3 sign out account remove unlink stop syncing",
     section: "workspace-sync",
   },
   {
-    title: "Google Drive",
-    description:
-      "Attach files from your Google Drive, or keep new uploads there. ticketd only sees the files you choose.",
-    keywords: "drive account sign in google attach files",
-    section: "google-drive",
-  },
-  {
-    title: "Attach from Drive",
-    description:
-      "Choose Google Drive in the attachment picker. You sign in with Google the first time.",
-    keywords: "picker reference link file google",
-    section: "google-drive",
-  },
-  {
-    title: "Sources",
-    description:
-      "Connect accounts on this desktop to discover and refresh tickets.",
-    keywords: "source connection provider account discovery refresh settings",
-    section: "sources",
+    title: "Ticket sources",
+    description: "Bring issues from your other trackers in as tickets.",
+    keywords:
+      "source sources connection connections provider account discovery refresh github linear jira issues import",
+    section: "ticket-sources",
   },
   {
     title: "Everywhere",
-    description: "These work wherever you are in ticketd.",
+    description:
+      "Letter keys pause while you type or while a dialog or menu is open.",
     keywords:
       "keyboard shortcuts keys hotkeys capture new chat add settings find",
     section: "keyboard-shortcuts",
@@ -296,7 +232,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Ticket",
-    description: "On the open ticket.",
+    description: "On the open ticket, or the focused one in a list or board.",
     keywords:
       "keyboard shortcuts keys hotkeys edit description new ticket create",
     section: "keyboard-shortcuts",
@@ -315,36 +251,29 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     section: "keyboard-shortcuts",
   },
   {
-    title: "Debug logging",
-    description: "Records more detail until ticketd restarts.",
-    keywords: "diagnostics log level verbose troubleshoot ticketd_log",
+    title: "Detailed logging",
+    description:
+      "Turn it on, repeat what went wrong, then save a report to attach to a GitHub issue.",
+    keywords:
+      "diagnostics debug log level verbose troubleshoot ticketd_log report bug issue support export zip start save",
     section: "diagnostics",
   },
   {
     title: "Log files",
-    description:
-      "One file per day, and the oldest are removed automatically. They stay on this computer.",
+    description: "Kept for 7 days on this computer.",
     keywords: "diagnostics logs folder open finder",
     section: "diagnostics",
   },
   {
-    title: "Export diagnostics",
-    description:
-      "A small .zip of redacted logs and Workspace health to attach to a bug report.",
-    keywords: "diagnostics bug report issue support summary copy zip logs",
-    section: "diagnostics",
-  },
-  {
     title: "Recent errors",
-    description:
-      "The last kinds of warning and error ticketd logged, from the files still kept.",
+    description: "From the last 7 days of logs.",
     keywords: "diagnostics crash failure warning unexpected quit",
     section: "diagnostics",
   },
   {
     title: "Check for updates automatically",
     description:
-      "Once a day, ticketd asks GitHub for the newest release. Nothing about you or your workspace is sent.",
+      "Once a day, from GitHub. Nothing about you or your Workspace is sent.",
     keywords: "version upgrade download install restart check",
     section: "about",
   },
@@ -356,8 +285,7 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
   },
   {
     title: "Report an issue",
-    description:
-      "Opens the issue tracker in your browser. Include the version above.",
+    description: "Opens GitHub’s bug form with your version filled in.",
     keywords: "about version bug feedback tracker help",
     section: "about",
   },
@@ -374,16 +302,52 @@ export const SETTINGS_ENTRIES: readonly SettingsEntry[] = [
     keywords: "licenses open source libraries fonts",
     section: "about",
   },
+  {
+    title: "Star on GitHub",
+    description: "Helps other people find ticketd.",
+    keywords: "support sponsor donate star favourite repository",
+    section: "about",
+  },
 ];
 
-/** The rows every source page has, for a source the build offers. */
+/**
+ * Rows that About shows only sometimes. The Buy me a coffee card appears once
+ * the maintainer's page is known, so Search lists it only then.
+ */
+export function supportEntries(
+  coffeeUrl: string | null = BUY_ME_A_COFFEE_URL,
+): SettingsEntry[] {
+  return coffeeUrl
+    ? [
+        {
+          title: "Buy me a coffee",
+          description: "Helps one maintainer keep ticketd going.",
+          keywords: "support sponsor donate tip",
+          section: "about",
+        },
+      ]
+    : [];
+}
+
+/**
+ * What a connection adds to Search: its row in the Ticket sources table, then
+ * the rows its own page has. `label` is the name the table shows (a saved
+ * connection may be renamed); `name` is the source's.
+ */
 export function sourceEntries(
   connection: string,
   name: string,
   fields: string[] = [],
+  label: string = name,
 ): SettingsEntry[] {
   const section: SettingsPageId = `source-${connection}`;
   return [
+    {
+      title: label,
+      description: `Issues from ${name}, brought in as tickets.`,
+      keywords: `${name} source sources connection account ${connection}`,
+      section: "ticket-sources",
+    },
     {
       title: "Connection",
       description: `ticketd uses your own ${name} permissions.`,
@@ -418,35 +382,69 @@ function matchesWords(text: string | undefined, terms: readonly string[]) {
   return terms.every((term) => found.some((word) => word.startsWith(term)));
 }
 
+/** Other names a page answers to, besides its title: what it was called before, and what people say. */
+const PAGE_NAMES: Partial<Record<SettingsSectionId, string>> = {
+  files: "attachments",
+  "ticket-sources": "sources",
+};
+
+const SECTIONS_BY_ID = new Map<string, (typeof SETTINGS_SECTIONS)[number]>(
+  SETTINGS_SECTIONS.map((section) => [section.id, section]),
+);
+
+/** Where the page sits in the sidebar; a connection or an agent follows the page it opens under. */
+function sidebarPosition(page: SettingsPageId) {
+  const section = navSectionOf(page);
+  return section === null
+    ? Number.MAX_SAFE_INTEGER
+    : SETTINGS_SECTIONS.findIndex((candidate) => candidate.id === section);
+}
+
+/** The text a page is known by: its title, then the other names it answers to. */
+function pageNameOf(page: SettingsPageId) {
+  const section = SECTIONS_BY_ID.get(page);
+  return section ? `${section.label} ${PAGE_NAMES[section.id] ?? ""}` : "";
+}
+
 /**
- * The entries that match `query`, best first: title matches, then description,
- * then keywords and the page name, then queries whose words are spread over
- * several of those. A query matches by word beginnings, never inside a word,
- * and every word of it must match. Equal ranks keep registry order. An empty
- * query matches nothing.
+ * The entries that match `query`, best first:
+ * 1. the page's own title (a search for "files" lists the Files page's rows
+ *    before any row that only mentions files elsewhere),
+ * 2. the row's title, 3. its description, 4. its keywords,
+ * 5. words spread over those and the page title.
+ * A query matches by word beginnings, never inside a word, and every word of
+ * it must match. Equal ranks keep the sidebar's order of pages, then the
+ * registry's order of rows. An empty query matches nothing.
  */
 export function searchSettings<T extends SettingsEntry>(
   query: string,
   entries: readonly T[],
-  pageName?: (entry: T) => string,
 ): T[] {
   const terms = words(query);
   if (terms.length === 0) return [];
-  const ranked: { entry: T; rank: number; index: number }[] = [];
+  const ranked: { entry: T; rank: number; page: number; index: number }[] = [];
   entries.forEach((entry, index) => {
-    const aside = `${entry.keywords ?? ""} ${pageName?.(entry) ?? ""}`;
-    const rank = matchesWords(entry.title, terms)
+    const pageName = pageNameOf(entry.section);
+    const rank = matchesWords(pageName, terms)
       ? 0
-      : matchesWords(entry.description, terms)
+      : matchesWords(entry.title, terms)
         ? 1
-        : matchesWords(aside, terms)
+        : matchesWords(entry.description, terms)
           ? 2
-          : matchesWords(`${entry.title} ${entry.description} ${aside}`, terms)
+          : matchesWords(entry.keywords, terms)
             ? 3
-            : -1;
-    if (rank >= 0) ranked.push({ entry, rank, index });
+            : matchesWords(
+                  `${entry.title} ${entry.description} ${entry.keywords ?? ""} ${pageName}`,
+                  terms,
+                )
+              ? 4
+              : -1;
+    if (rank >= 0)
+      ranked.push({ entry, rank, page: sidebarPosition(entry.section), index });
   });
-  ranked.sort((a, b) => a.rank - b.rank || a.index - b.index);
+  ranked.sort(
+    (a, b) => a.rank - b.rank || a.page - b.page || a.index - b.index,
+  );
   return ranked.map(({ entry }) => entry);
 }
 
@@ -454,34 +452,32 @@ export function searchSettings<T extends SettingsEntry>(
 const chatOnly = (entry: SettingsEntry) =>
   entry.section === "automations" || entry.needsChat === true;
 
-/** Stands in for Chat-only rows while Chat is off: the Chat page is where it is turned on. */
+/** Stands in for Chat-only rows while Chat is off: the Agents page is where it is turned on. */
 const CHAT_PAGE_ENTRY: SettingsEntry = {
-  title: "Chat",
+  title: "Agents",
   description:
-    "Turn on Chat to set up harnesses, notifications and Automations.",
-  section: "chat",
+    "Turn on Chats to see how each agent signs in, and to use Automations.",
+  section: "agents",
 };
 
 /**
  * `searchSettings` for the person's current Chat setting. While Chat is on every
  * entry is searched. While it is off the Chat-only rows stay hidden, but a query
- * that matches only them finds the Chat page entry instead, so the way to them
+ * that matches only them finds the Agents page entry instead, so the way to them
  * is not a dead end.
  */
 export function searchSettingsFor<T extends SettingsEntry>(
   query: string,
   entries: readonly T[],
   chatEnabled: boolean,
-  pageName?: (entry: T) => string,
 ): (T | SettingsEntry)[] {
-  if (chatEnabled) return searchSettings(query, entries, pageName);
+  if (chatEnabled) return searchSettings(query, entries);
   const hits: (T | SettingsEntry)[] = searchSettings(
     query,
     entries.filter((entry) => !chatOnly(entry)),
-    pageName,
   );
-  if (hits.some((hit) => hit.section === "chat")) return hits;
-  const hidden = searchSettings(query, entries.filter(chatOnly), pageName);
+  if (hits.some((hit) => hit.section === "agents")) return hits;
+  const hidden = searchSettings(query, entries.filter(chatOnly));
   return hidden.length > 0 ? [...hits, CHAT_PAGE_ENTRY] : hits;
 }
 

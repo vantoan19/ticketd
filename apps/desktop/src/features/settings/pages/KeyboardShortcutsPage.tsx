@@ -52,10 +52,7 @@ export function KeyboardShortcutsPage() {
   })).filter((group) => group.shortcuts.length > 0);
   const none = emptyCopy("settings-shortcuts-search", { query: query.trim() });
   return (
-    <SettingsPage
-      {...sectionMeta("keyboard-shortcuts")}
-      lede="Keys that work across ticketd."
-    >
+    <SettingsPage {...sectionMeta("keyboard-shortcuts")}>
       <div className="shortcut-filter">
         <SearchInput
           size="default"
@@ -81,7 +78,11 @@ export function KeyboardShortcutsPage() {
                 {...(item.note ? { description: item.note } : {})}
                 trailing={
                   <span className="shortcut-keys">
-                    <KeyChords keys={item.keys} sequences={item.sequences} />
+                    <KeyChords
+                      keys={item.shown ?? item.keys}
+                      spoken={item.keys}
+                      sequences={item.sequences}
+                    />
                   </span>
                 }
               />

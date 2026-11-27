@@ -6,15 +6,7 @@ import { SettingsPage } from "@/features/settings/layout/SettingsPage";
 export function CommandLinePage() {
   const { refreshIndicators } = useSettingsState();
   return (
-    <SettingsPage
-      {...sectionMeta("command-line")}
-      lede={
-        <>
-          Agents and terminals run <code className="font-mono">ticketd</code> by
-          name to read and write the same workspace as this app.
-        </>
-      }
-    >
+    <SettingsPage {...sectionMeta("command-line")}>
       <CommandLineCard onChecked={() => refreshIndicators("command-line")} />
     </SettingsPage>
   );

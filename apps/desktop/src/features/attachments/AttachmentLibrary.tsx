@@ -374,9 +374,7 @@ function Library({
                   </DropdownMenuItem>
                 )}
                 {openSettings && (
-                  <DropdownMenuItem
-                    onSelect={() => openSettings("attachments")}
-                  >
+                  <DropdownMenuItem onSelect={() => openSettings("files")}>
                     Storage settings
                   </DropdownMenuItem>
                 )}

@@ -15,6 +15,20 @@
   font-weight: 500;
   color: var(--foreground);
 }
+.settings-crumb-link {
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+}
+.settings-crumb-link:hover {
+  color: var(--foreground);
+}
+.settings-crumb-link:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+  border-radius: var(--radius);
+}
 .settings-panel-bar-end {
   font-size: var(--text-caption);
   line-height: var(--text-caption-line);
@@ -86,4 +100,17 @@
 .settings-link:disabled {
   color: var(--disabled-foreground);
   cursor: not-allowed;
+}
+.settings-list-row[data-openable]:hover {
+  background: var(--hover);
+}
+.settings-row-open {
+  border: 0;
+  border-radius: var(--radius-segment);
+  background: none;
+  color: var(--disabled-foreground);
+}
+.settings-row-open:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
 }

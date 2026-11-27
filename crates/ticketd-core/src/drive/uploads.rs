@@ -283,6 +283,8 @@ impl Workspace {
             Some(crate::AttachmentUploadDestination::GoogleDrive {
                 destination: destination.clone(),
                 folder_name: destination.folder_id.clone(),
+                account: None,
+                sync_folder: None,
             }),
         )?;
         // Cross-process ownership has no lease expiry during a slow network request.

@@ -65,6 +65,41 @@ fn describe(agent: &'static Agent, home: &Path) -> AgentSkill {
     }
 }
 
+/// Rewrites the copies ticketd installed and nobody edited, so an update never
+/// leaves an agent with an old skill. Runs once per launch, in the background;
+/// edited copies and agents without a copy are left alone.
+pub fn refresh_at_launch() {
+    tauri::async_runtime::spawn_blocking(|| {
+        let Ok(home) = agent_skills::user_home() else {
+            return;
+        };
+        for refreshed in refresh_in(&home, cfg!(debug_assertions), harness_env) {
+            match refreshed.result {
+                Ok(()) => tracing::info!(agent = refreshed.agent.name, "updated the ticketd skill"),
+                Err(error) => tracing::warn!(
+                    agent = refreshed.agent.name,
+                    %error,
+                    "could not update the ticketd skill"
+                ),
+            }
+        }
+    });
+}
+
+/// A development build (`cargo run`, a worktree's build) does nothing here: its skill text is
+/// not a release's, and it would rewrite the person's real, unedited skill with it, which the
+/// installed app then rewrites back.
+fn refresh_in(
+    home: &Path,
+    debug_build: bool,
+    env: impl Fn(&str) -> Option<OsString>,
+) -> Vec<agent_skills::Refreshed> {
+    if debug_build {
+        return Vec::new();
+    }
+    agent_skills::refresh_unedited(home, env)
+}
+
 /// Reports the ticketd skill's state for every supported agent.
 #[tauri::command]
 pub async fn agent_skills() -> Result<Vec<AgentSkill>, String> {
@@ -103,6 +138,30 @@ pub async fn install_agent_skill(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn a_development_build_leaves_the_skills_alone_and_a_release_looks_at_them() {
+        use std::os::unix::fs::PermissionsExt;
+        // A skill file that cannot be read is reported by a refresh that looks at it, and
+        // by nothing else, so this tells a refresh that ran from one that did not.
+        // The environment is empty so that no real agent folder is looked at.
+        let unset = |_: &str| None;
+        let home = tempfile::tempdir().unwrap();
+        let claude = Agent::find("claude-code").unwrap();
+        let directory = claude.skill_directory(home.path(), unset);
+        std::fs::create_dir_all(&directory).unwrap();
+        let skill = directory.join("SKILL.md");
+        std::fs::write(&skill, "older ticketd skill").unwrap();
+        std::fs::set_permissions(&skill, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        assert!(refresh_in(home.path(), true, unset).is_empty());
+        assert!(
+            refresh_in(home.path(), false, unset)
+                .iter()
+                .any(|refreshed| refreshed.agent.name == claude.name)
+        );
+    }
 
     #[test]
     fn the_home_folder_is_shortened_except_on_windows() {

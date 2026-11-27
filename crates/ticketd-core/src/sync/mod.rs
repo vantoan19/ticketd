@@ -21,10 +21,11 @@ pub use engine::{
 pub(crate) use engine::{migrate_source_state_conflicts, removed_by_sync};
 pub use setup::{
     AttachmentDownload, ExistingWorkspace, FirstSync, MIN_POLL_INTERVAL_SECS, S3Binding,
-    SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDirection, SyncFolder, SyncItem,
-    SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
+    SetupOptions, SyncBinding, SyncConnection, SyncCounts, SyncDevice, SyncDirection, SyncFolder,
+    SyncItem, SyncProvider, SyncRecovery, SyncRecoveryAction, SyncSettings, SyncState, SyncStatus,
     s3_service_changed,
 };
+pub(crate) use setup::{google_sign_in_of, other_google_account, sync_folder_of};
 
 pub(crate) fn migrate(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     capture::migrate(connection)?;
@@ -62,6 +63,16 @@ pub(crate) fn migrate_setup(connection: &rusqlite::Connection) -> Result<(), cra
 /// was just restored from a backup of any format version that has sync.
 pub(crate) fn forget_folder(connection: &rusqlite::Connection) -> Result<(), crate::Error> {
     setup::forget_folder(connection)
+}
+
+/// After a restore: remember the folder the replaced Workspace synced with, so that Workspace
+/// sync can offer to go back to it. The restored Workspace still syncs nowhere; it keeps this
+/// computer's own sign-in. Nothing is remembered from a backup of another Workspace.
+pub(crate) fn remember_replaced_folder(
+    restored: &rusqlite::Connection,
+    replaced: &rusqlite::Connection,
+) -> Result<(), crate::Error> {
+    setup::remember_replaced_folder(restored, replaced)
 }
 
 /// Format version 60.

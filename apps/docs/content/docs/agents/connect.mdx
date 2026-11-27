@@ -38,7 +38,7 @@ ticketd project register PROJECT_ID /path/to/another/checkout
 
 ## 3. Give the agent the CLI guide
 
-From **Settings → Agent skills**, install the discovery skill for your harness. You can also install it from a terminal:
+From **Settings › Set up ticketd**, choose **Install for** your agents. It installs the `ticketd` command and the discovery skill together, asking for your password once, and ticks itself when an agent can use ticketd. You can also install the skill from a terminal:
 
 ```sh
 ticketd skills install --harness claude-code,codex
@@ -54,7 +54,7 @@ Tell your agent which ticket to pick up and when you want a review. Give it the 
 
 ## Work with an agent inside ticketd
 
-In **Settings → Chat**, turn on **Show Chat**. This experimental feature uses the Claude Code or Codex installation and sign-in on your computer. Open **Chats → New Chat**, choose the harness and a folder to work in, and link the ticket or Document the agent needs. The agent can write its update and evidence back to the ticket through the same CLI.
+In **Settings › Agents**, turn on **Show Chat**. This experimental feature uses the Claude Code or Codex installation and sign-in on your computer. Open **Chats → New Chat**, choose the harness and a folder to work in, and link the ticket or Document the agent needs. The agent can write its update and evidence back to the ticket through the same CLI.
 
 To get a notification when a ticket is ready for review, open **Automations → New Automation**. Choose **Status changed**, set the destination status to **In review**, and add a **Notify me** step that opens the ticket. Save and switch on the Automation on the computer that should run it. You can inspect its runs there.
 

@@ -40,20 +40,22 @@ Open ticketd and [create your first ticket](first-ticket.md).
 ## Command-line tool
 
 The bundled CLI updates with the desktop. On macOS and Windows, open
-**Settings → Command line** and choose **Install command-line tool** to make
+**Settings › Command line** and choose **Install command-line tool** to make
 `ticketd` available on your PATH.
 
 - **On macOS**, approve the administrator prompt to create a link in
-  `/usr/local/bin`. If you decline, ticketd creates the link in `~/.local/bin`.
-  Add that directory to PATH and open a new terminal. If you move the app, use
-  **Install command-line tool** again to repair the link.
+  `/usr/local/bin`. If you decline, nothing changes; choose **Use ~/.local/bin
+  instead** for a link that needs no password, add that directory to PATH and
+  open a new terminal. If you move the app, use **Install command-line tool**
+  again to repair the link.
 - **On Ubuntu**, the `.deb` already installs `ticketd` in `/usr/bin`.
 - **On Windows**, ticketd adds the app's folder to your user PATH. Restart terminals
   and agent harnesses so they inherit the change.
 
-If an older standalone `ticketd` comes first on PATH, **Settings → Command line**
-shows its version and path. Choose **Remove it** and confirm to remove that file
-or link, or choose **Keep it**. Use **Check again** to confirm which copy is found.
+If an older, newer or different standalone `ticketd` comes first on PATH,
+**Settings › Command line** shows its version and path. Choose **Use this app's
+ticketd**: one administrator prompt removes that copy and links this app's
+copy. Use **Check again** (or return to the window) to confirm which copy is found.
 
 On machines without the desktop, download the standalone archive for your
 platform (`ticketd-cli-*-macos-arm64.tar.gz`, `ticketd-cli-*-linux-x86_64.tar.gz`,
@@ -81,15 +83,19 @@ By default, the desktop checks for updates about ten seconds after launch and
 every 24 hours while it is open. It downloads and verifies a newer stable release
 in the background. Choose **What's new** to open the release notes, or
 **Restart to update** and then **Restart now** to install it. You can return to
-**Settings → About** to restart after dismissing the status-line notice. On
+**Settings › About** to restart after dismissing the status-line notice. On
 macOS and Windows, quitting with a verified update ready installs it for the
 next launch. On Linux, choose **Restart to update** to install it.
 
 The restart prompt shows any running Chats and Automation runs that will stop.
 Interrupted Automation runs are marked as needing attention when ticketd reopens.
-If the release raises the Workspace format version, the prompt warns you before
-installing, and quitting doesn't install it: choose **Restart to update** when
-you're ready. ticketd makes a backup before migrating the Workspace. Update any
+If the release raises the Workspace format version, **Settings › About** says so
+on the update ("It upgrades your Workspace, and older versions can't open it
+after"), and with Workspace sync on it asks you to update your other computers
+too. The prompt warns you again before installing, and quitting doesn't install
+it: choose **Restart to update** when you're ready. The release publishes its
+Workspace format version in `latest.json` as `format_version`. If a release's
+`latest.json` has none, ticketd assumes the update raises the format and warns. ticketd saves a safety copy before migrating the Workspace. Update any
 older copies that need to open the migrated Workspace, including other Sync
 devices and standalone CLI installations.
 
@@ -99,7 +105,7 @@ the package manually. If a download or signature check fails, About offers
 **Try again** and a link to the release.
 
 To stop scheduled checks, turn off **Check for updates automatically** in
-**Settings → About**. Turning it off also cancels any check or download in
+**Settings › About**. Turning it off also cancels any check or download in
 progress. Use **Check for updates** in About to check once. Builds without
 an updater public key skip checks and show this in About.
 
@@ -113,8 +119,10 @@ checks run in the desktop app only.
 
 Use desktop and CLI from the same version. Run `ticketd workspace` to inspect the
 path and supported format without changing data. Most other workspace commands
-may create or migrate the database. Back up before upgrading; an older binary
-may refuse a newer workspace, and downgrade compatibility is not guaranteed.
+may create or migrate the database. The desktop saves a restore point every day
+and a safety copy before it migrates the Workspace, so there is one to go back to;
+`ticketd backup PATH` saves a standalone copy anywhere. An older binary may refuse a newer workspace, and
+downgrade compatibility is not guaranteed.
 Close both desktop and CLI processes before replacing binaries or restoring a backup.
 See [Back up and restore your workspace](workspace-tasks.md#back-up-and-restore-your-workspace).
 
@@ -123,7 +131,8 @@ CLI link if you installed it. On Windows, remove the app folder's entry from you
 user PATH if you added it through Settings. On Ubuntu, removing the package also
 removes its CLI. Remove any standalone CLI executable separately. The workspace
 is stored separately in the user's application-data directory and is retained.
-Keep a backup before uninstalling or upgrading.
+Keep a backup before uninstalling: the restore points live beside the workspace and
+stay with it.
 
 ## Agent CLI skill
 
@@ -141,7 +150,7 @@ sources, workspace operations, and working from a ticketd Chat (`chat`). Command
 reference. All `skills` commands work without opening, creating, or migrating the
 ticket workspace.
 
-Install the small discovery skill for your user from Settings → Agent skills in
+Install the small discovery skill for your user from Settings › Agent skills in
 the desktop app, or with the CLI:
 
 ```sh
@@ -159,7 +168,7 @@ was started from the Finder or Dock.
 ticketd writes a `.ticketd-managed` marker beside each `SKILL.md` it installs,
 holding the hash of what it wrote and its version. Re-running installation updates a
 copy an older or the same ticketd wrote and nobody changed, and leaves an identical
-one, or one a newer ticketd wrote, alone. A copy edited after installation, or one ticketd did not
+one, or one a newer ticketd wrote, alone. The desktop app does this on its own each time it starts, for every agent that already has a copy ticketd wrote and nobody changed (the marker's hash still matches the file); it never installs into an agent that has no copy yet. A copy edited after installation, or one ticketd did not
 write, is reported and left intact. Review it, then choose Replace in Settings or
 pass `--replace`: the existing `SKILL.md` is saved beside the new one as
 `SKILL.md.backup-<seconds>`. Adjacent files and project instructions are preserved.
@@ -181,8 +190,9 @@ organize it. Installing this skill does not change those choices.
 
 Distribution builds include ticketd's Google app registration. In the attachment
 picker, choose **Google Drive > Choose in Google Drive**, sign in in your default
-browser, and select the files to authorize. To upload new copies, choose a writable
-Drive folder in **Settings > Attachments**. Users do not need a Google Cloud project,
+browser, and select the files to authorize. To upload new copies, choose Google Drive in
+**Settings › Files**: with Workspace sync on Google Drive they go to an Uploads folder
+inside the sync folder and use the same sign-in; otherwise choose a writable Drive folder. Users do not need a Google Cloud project,
 a configuration file, or environment variables. Local attachments also work
 without signing in. A source build without a registration keeps Drive disabled
 and explains that a build with Drive enabled is needed.
@@ -223,7 +233,7 @@ What you need:
   buckets or change their settings. Use a general purpose bucket: S3 directory buckets
   have no Versioning.
 
-In **Settings > Workspace sync**, choose **S3**, pick the profile, and choose **Sign
+In **Settings › Workspace sync**, choose **S3**, pick the profile, and choose **Sign
 in** if the profile needs it. Then choose the bucket (a list when the profile may list
 buckets, otherwise type its name) and a prefix (`ticketd/` by default). Before the
 first sync, ticketd checks the bucket and refuses one that cannot sync safely, saying
@@ -243,7 +253,7 @@ confirmed. Cloudflare R2 (no Versioning) and the Google Cloud Storage XML API (i
 ignores the conditional headers) do not work. The bucket check, not this list, decides
 for any other service. A Workspace stays with the service its bucket was connected
 through: if you edit the profile to reach another endpoint, sync stops with a message.
-To move the bucket on purpose, Disconnect in Settings > Workspace sync, then connect again.
+To move the bucket on purpose, Disconnect in Settings › Workspace sync, then connect again.
 
 ### IAM permissions
 

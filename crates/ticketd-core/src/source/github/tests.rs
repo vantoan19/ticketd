@@ -3451,7 +3451,7 @@ fn credential_failures_end_in_a_sentence_and_take_the_hint_of_their_surface() {
         assert!(!terminal.contains("Settings"), "{terminal}");
         let desktop = error.message_for(Surface::Desktop);
         assert!(
-            desktop.ends_with(". Then choose Check connection in Settings."),
+            desktop.ends_with(". Then choose Check connection in Settings › Ticket sources."),
             "{desktop}"
         );
         assert!(!desktop.contains("TICKETD_GITHUB_TOKEN"), "{desktop}");

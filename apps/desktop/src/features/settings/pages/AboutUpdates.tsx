@@ -17,6 +17,7 @@ import {
   describeFailure,
   type FailureDescription,
 } from "@/lib/api/describe-failure";
+import { useSyncStatus } from "@/features/sync/sync-status";
 import { workspaceClient } from "@/lib/api/workspace";
 import { APP_VERSION } from "@/lib/app-version";
 import { relativeDateTime } from "@/lib/format";
@@ -24,6 +25,7 @@ import { relativeDateTime } from "@/lib/format";
 export function AboutUpdates() {
   const updates = useUpdates();
   const state = updates?.snapshot ?? initialUpdateState;
+  const syncing = useSyncStatus().status?.connection === "connected";
   const [saving, setSaving] = useState(false);
   const [failure, setFailure] = useState<FailureDescription | null>(null);
   const switchId = useId();
@@ -83,8 +85,13 @@ export function AboutUpdates() {
       break;
     case "ready":
       title = `ticketd ${state.update.version} is ready`;
-      description =
-        state.install_on_quit && !state.update.upgrades_workspace
+      // A format change never installs on quit (ADR 0019): the row says what
+      // it does to the Workspace, and leaves the moment to the person.
+      description = state.update.upgrades_workspace
+        ? `It upgrades your Workspace, and older versions can’t open it after.${
+            syncing ? " Update your other computers too." : ""
+          }`
+        : state.install_on_quit
           ? "Downloaded and checked. It installs when ticketd restarts."
           : "Downloaded and checked. It installs when you choose Restart to update.";
       releaseLink = { label: "What’s new", url: state.update.release_url };
@@ -96,6 +103,7 @@ export function AboutUpdates() {
     <SettingsSection title="Updates">
       <SettingsList>
         <SettingsRow
+          variant={state.status === "ready" ? "top" : "center"}
           title={
             <span className="flex items-center gap-2" role="status">
               {state.status === "ready" && <StatusDot tone="unread" />}
@@ -153,10 +161,11 @@ export function AboutUpdates() {
         />
         {state.status !== "unavailable" && (
           <SettingsRow
+            variant="top"
             title={
               <label htmlFor={switchId}>Check for updates automatically</label>
             }
-            description="Once a day, ticketd asks GitHub for the newest release. Nothing about you or your workspace is sent."
+            description="Once a day, from GitHub. Nothing about you or your Workspace is sent."
             descriptionId={descriptionId}
             trailing={
               <Switch

@@ -139,6 +139,41 @@ impl KnownValues {
     }
 }
 
+/// What the bug form's own fields take: the version and the system. The desktop turns them
+/// into the address of the form, so nothing is typed and nothing is sent.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct IssueDetails {
+    /// For the form's "Version or commit".
+    pub version: String,
+    /// For the form's "Operating system and installation method".
+    pub environment: String,
+}
+
+impl IssueDetails {
+    /// The version and system `facts` describe, in the words the form asks for.
+    pub fn of(facts: &Facts) -> Self {
+        let commit = facts.commit.trim();
+        let version = match commit {
+            "" | "unknown" => facts.app_version.clone(),
+            commit => format!("{} (commit {commit})", facts.app_version),
+        };
+        let os = match facts.os.split_once(' ') {
+            Some(("macos", rest)) => format!("macOS {rest}"),
+            _ if facts.os == "macos" => "macOS".to_string(),
+            _ => facts.os.clone(),
+        };
+        let build = if facts.build == "debug" {
+            ", debug build"
+        } else {
+            ""
+        };
+        Self {
+            version,
+            environment: format!("{os} {}, desktop app{build}", facts.arch),
+        }
+    }
+}
+
 /// What an export wrote.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Export {

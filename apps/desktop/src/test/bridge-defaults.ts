@@ -65,13 +65,13 @@ export function bridgeDefault(
     case "search_attachments":
     case "ticket_backlinks":
     case "inbox":
-    case "safety_backups":
     case "search_tags":
     case "source_conversation":
     case "source_repository_routes":
     case "project_source_candidates":
     case "sync_conflicts": // without sync: nothing to review, every file local
     case "sync_notices":
+    case "sync_devices": // without sync: no other computers
     case "attachment_availability":
     case "list_trash":
     case "source_configuration_summary":
@@ -132,9 +132,10 @@ export function bridgeDefault(
     case "detect_project_remote":
       return { suggested: null, candidates: [] };
     case "reminder":
-    case "last_backup":
     case "project_icon": // no favicon: the letter tile
       return null;
+    case "restore_points":
+      return { points: [], total_bytes: 0 };
     case "current_work_documents":
       return { groups: [], finished: 0, unlinked: 0, trashed: 0 };
     case "workspace_info":
@@ -147,6 +148,10 @@ export function bridgeDefault(
         size_bytes: 4096,
         format_version: 26,
       };
+    case "first_agent_update":
+      return null;
+    case "find_ticket_rows":
+      return [];
     case "check_cli":
       return {
         found: false,
@@ -160,8 +165,17 @@ export function bridgeDefault(
         app_workspace_path: null,
         suggested_directory: "~/.local/bin",
       };
+    case "notification_permission":
+      return { state: "allowed", reported: false, settings: false };
     case "agent_skills":
       return [];
+    case "diagnostics_log_level":
+      return {
+        level: "info",
+        debug: false,
+        env_override: null,
+        report_started_at: null,
+      };
     case "show_plan":
       return {
         plan: { id: args?.id ?? "", name: "Plan", archived: false },

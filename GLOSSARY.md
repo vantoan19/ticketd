@@ -19,7 +19,11 @@ A local snapshot of an image or file attached to a draft, queued, or sent messag
 
 **Harness**:
 The person's own installed agent program, such as Claude Code or Codex, that a Chat runs in. It owns authentication, billing, its settings and its native session; ticketd starts, supervises and answers it but never signs in for it or changes how it bills.
-_Avoid_: Provider, model, agent (for the program itself)
+_Avoid_: Provider, model
+
+**Agent**:
+The interface's word for the program a harness runs, such as Claude Code or Codex, as the person meets it on Settings › Agents and in a Chat's picker. "Harness" stays the word in code, the CLI and these definitions for the same program. An Automation agent is a different thing, a saved definition of who runs a step; it and the Editing agent keep their own entries.
+_Avoid_: Bot, assistant
 
 **Model**:
 The AI model a harness runs, as the harness reports it, such as Claude Opus 5.5. It names the agent on tickets. When the harness reports none, the harness name stands in. It is distinct from the Harness: one harness can run several models, and a sub-agent can run a different model from the main agent.
@@ -96,6 +100,10 @@ A short, workspace-unique label for a ticket: `T-`, the device code of the Works
 
 **Device code**:
 Two uppercase letters identifying one Workspace installation in the Ticket references it issues, so desktops sharing a Workspace do not issue the same reference (a hand-copied Workspace file is the exception until sync detects it, see [ADR 0011](docs/adr/0011-markdown-file-sync-through-google-drive.md#identity)). It is random by default. A restored Workspace takes a fresh one, as does a desktop joining a sync folder where its code is held or was given up, and a file copy of a Workspace once sync detects that the original also syncs.
+
+**Restore point**:
+A copy of the Workspace the desktop keeps on this computer to go back to: one saved the first time ticketd opens each day, and one for each Back up now, with the last 7 kept. It sits in a folder beside the Workspace file, is checked after it is written, and shares its attachment files with the other restore points, so it restores only here. A copy saved before a restore or before an update that changes the Workspace format (a safety copy) is listed with the restore points under a label and is kept besides the 7. It differs from a backup file, which `ticketd backup PATH` writes as one standalone file that restores anywhere, and from a Version, which is an earlier state of one ticket or Document.
+_Avoid_: Snapshot, auto-backup
 
 **Version**:
 An earlier state of a ticket or Document (title, body, status, trash), saved locally on the device whenever a local edit or an incoming sync replaces it. Versions are kept 30 days; the record itself is the current version and is always kept. Restoring a version is an ordinary edit.
@@ -193,7 +201,9 @@ An Attachment uploaded by ticketd to an explicitly selected remote folder. Its
 operation, remote identity, input digest and observed checksum/version are retained
 for recovery. The provider can change the content independently; an uploaded copy
 does not promise preserved original bytes. A revision uses a new upload operation
-and attachment identity. Cancellation and removal never delete the remote file.
+and attachment identity. Cancellation and removal never delete the remote file. While
+Workspace sync is on Google Drive the folder is the **Uploads** folder inside the sync
+folder: the person's own files, which sync never reads, replaces or removes.
 
 **Purged Attachment**:
 A local Attachment whose quarantined bytes were permanently removed by explicit

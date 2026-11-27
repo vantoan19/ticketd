@@ -236,6 +236,10 @@ export const attachmentUploadDestinationSchema = lazySchema(() =>
       kind: z.literal("google_drive"),
       destination: driveDestinationSchema,
       folder_name: z.string(),
+      /** The Google account the folder was chosen with, when it is known. */
+      account: z.string().nullish(),
+      /** The Workspace folder whose Uploads folder this is, while it is one. */
+      sync_folder: z.string().nullish(),
     }),
   ]),
 );
@@ -290,9 +294,24 @@ export const attachments = {
       await invoke("attachment_upload_destination"),
     );
   },
-  async setUploadDestination(destination: DriveUploadDestination | null) {
+  async setUploadDestination(
+    destination: DriveUploadDestination | null,
+    account: string | null = null,
+  ) {
     return attachmentUploadDestinationSchema.parse(
-      await invoke("set_attachment_upload_destination", { destination }),
+      await invoke("set_attachment_upload_destination", {
+        destination,
+        account,
+      }),
+    );
+  },
+  /**
+   * `use_sync_uploads_folder`: new files go to the Uploads folder inside the
+   * folder Workspace sync uses on Google Drive, with sync's own sign-in.
+   */
+  async useSyncUploadsFolder() {
+    return attachmentUploadDestinationSchema.parse(
+      await invoke("use_sync_uploads_folder"),
     );
   },
   async beginUpload(
@@ -353,6 +372,7 @@ export const attachments = {
           name: z.string(),
           can_add_children: z.boolean(),
         }),
+        account: z.string().nullish(),
       })
       .parse(await invoke("select_drive_upload_folder", { operationId }));
   },
@@ -492,7 +512,7 @@ export const attachments = {
       const limit = await attachments.uploadLimit();
       if (source.size > limit)
         throw new Error(
-          `File exceeds the workspace upload limit of ${formatUploadLimit(limit)}. Change it in Settings > Attachments.`,
+          `File exceeds the workspace upload limit of ${formatUploadLimit(limit)}. Choose a smaller file.`,
         );
       const bytes = new Uint8Array(await source.arrayBuffer());
       if (bytes.byteLength > limit)

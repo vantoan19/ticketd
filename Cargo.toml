@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics", "crates/ticketd-source-sdk", "crates/ticketd-source-linear", "apps/desktop/src-tauri"]
+members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics", "crates/ticketd-source-sdk", "crates/ticketd-source-linear", "crates/ticketd-macos-notifications", "apps/desktop/src-tauri"]
 default-members = ["crates/ticketd-core", "crates/ticketd-cli", "crates/ticketd-chat-host", "crates/ticketd-automation-runner", "crates/ticketd-diagnostics", "crates/ticketd-source-sdk", "crates/ticketd-source-linear"]
 resolver = "3"
 
@@ -17,9 +17,10 @@ ticketd-core = { path = "crates/ticketd-core" }
 ticketd-chat-host = { path = "crates/ticketd-chat-host" }
 ticketd-automation-runner = { path = "crates/ticketd-automation-runner" }
 ticketd-diagnostics = { path = "crates/ticketd-diagnostics" }
+ticketd-macos-notifications = { path = "crates/ticketd-macos-notifications" }
 tracing = "0.1"
 # Only the pieces the two binaries install: the filter, the JSON and text formatters, and
-# the reload handle behind the Debug logging switch.
+# the reload handle behind detailed logging.
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "registry", "fmt", "json", "env-filter", "smallvec", "tracing-log"] }
 tracing-log = "0.2"
 clap = { version = "4", features = ["derive"] }

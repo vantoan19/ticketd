@@ -1,0 +1,146 @@
+import { revealFailureDetails } from "@/test/failure-details";
+// @vitest-environment jsdom
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
+import { client } from "@/lib/api/client";
+import { workspaceClient } from "@/lib/api/workspace";
+import { fileManagerName } from "@/lib/platform";
+import { ExportSection } from "@/features/settings/pages/ExportSection";
+import { SettingsStateProvider } from "@/features/settings/settings-state";
+
+vi.mock("@/lib/api/workspace", () => ({
+  workspaceClient: { chooseSavePath: vi.fn(), reveal: vi.fn() },
+}));
+vi.mock("@/lib/api/client", () => ({ client: { exportWorkspace: vi.fn() } }));
+// Settings reads the CLI for its nav dot at startup; these pages ignore it.
+vi.mock("@/lib/api/cli", () => ({
+  cliClient: { check: vi.fn(() => new Promise(() => {})) },
+}));
+vi.mock("@/lib/api/agent-skills", () => ({
+  agentSkillsClient: { list: vi.fn(async () => []) },
+}));
+
+const writeText = vi.fn();
+
+beforeEach(() => {
+  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue("/tmp/out.json");
+  vi.mocked(workspaceClient.reveal).mockResolvedValue(undefined);
+  vi.mocked(client.exportWorkspace).mockResolvedValue(undefined);
+  writeText.mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+});
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+function renderPage(onOpenPage = vi.fn()) {
+  render(
+    <SettingsStateProvider active={false} onOpenPage={onOpenPage}>
+      <ExportSection />
+    </SettingsStateProvider>,
+  );
+  return onOpenPage;
+}
+
+test("Export… saves to the chosen file and the footer names it with a way to show it", async () => {
+  renderPage();
+  expect(screen.queryByText(/Export saved to/)).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  // A check and the words, then the file as PathText; the full path is spoken.
+  const status = await screen.findByText("Export saved");
+  expect(status.textContent).toBe("Export saved to /tmp/out.json");
+  expect(workspaceClient.chooseSavePath).toHaveBeenCalledWith(
+    expect.objectContaining({ filterName: "JSON", extension: "json" }),
+  );
+  expect(client.exportWorkspace).toHaveBeenCalledWith("/tmp/out.json");
+  fireEvent.click(
+    screen.getByRole("button", { name: `Show in ${fileManagerName()}` }),
+  );
+  await waitFor(() =>
+    expect(workspaceClient.reveal).toHaveBeenCalledWith("/tmp/out.json"),
+  );
+});
+
+test("cancelling the save dialog writes nothing and shows no error", async () => {
+  vi.mocked(workspaceClient.chooseSavePath).mockResolvedValue(null);
+  renderPage();
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  await waitFor(() =>
+    expect(workspaceClient.chooseSavePath).toHaveBeenCalledTimes(1),
+  );
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Export…" }).hasAttribute("disabled"),
+    ).toBe(false),
+  );
+  expect(client.exportWorkspace).not.toHaveBeenCalled();
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByText(/Export saved to/)).toBeNull();
+});
+
+test("a failed export says why and keeps the button usable", async () => {
+  vi.mocked(client.exportWorkspace).mockRejectedValue("disk full");
+  renderPage();
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("disk full");
+  expect(screen.queryByText(/Export saved to/)).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Export…" }).hasAttribute("disabled"),
+  ).toBe(false);
+});
+
+test("a save dialog that cannot open is reported", async () => {
+  vi.mocked(workspaceClient.chooseSavePath).mockRejectedValue("no window");
+  renderPage();
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("no window");
+});
+
+test("a file manager that cannot show the file is reported", async () => {
+  vi.mocked(workspaceClient.reveal).mockRejectedValue("gone");
+  renderPage();
+  fireEvent.click(screen.getByRole("button", { name: "Export…" }));
+  fireEvent.click(
+    await screen.findByRole("button", {
+      name: `Show in ${fileManagerName()}`,
+    }),
+  );
+  await revealFailureDetails();
+  expect(screen.getByRole("alert").textContent).toContain("gone");
+});
+
+test("the ticket export command can be copied with its placeholders in place", async () => {
+  renderPage();
+  fireEvent.click(
+    screen.getByRole("button", { name: "Copy the Markdown export command" }),
+  );
+  await waitFor(() =>
+    expect(writeText).toHaveBeenLastCalledWith(
+      "ticketd export-markdown --ticket TICKET --output FOLDER",
+    ),
+  );
+});
+
+test("exports are captioned as copies that can't be restored, with no table to compare them", () => {
+  renderPage();
+  const section = screen.getByRole("region", { name: "Export" });
+  expect(section.textContent).toContain(
+    "Copies to take your work elsewhere, as readable files. An export can't be restored.",
+  );
+  expect(screen.getByText("Workspace as JSON")).toBeTruthy();
+  expect(screen.getByText("A ticket or Document as Markdown")).toBeTruthy();
+  expect(screen.queryByRole("table")).toBeNull();
+});

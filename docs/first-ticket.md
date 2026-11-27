@@ -19,9 +19,11 @@ the desktop steps without connecting an agent, GitHub, or Google Drive.
 
 ## Ask an agent to post an update
 
-1. Make the [CLI available](install.md#command-line-tool). For Claude Code or
-   Codex, open **Settings → Agent skills** and [install the discovery skill](install.md#agent-cli-skill).
-   Start a fresh agent session so it can discover the skill and the executable.
+1. Open **Settings › Set up ticketd** and choose **Install for** your agents.
+   It makes the [CLI available](install.md#command-line-tool) and
+   [installs the discovery skill](install.md#agent-cli-skill) for Claude Code,
+   Codex and the other agents it finds, asking for your password once. Start a
+   fresh agent session so it can discover the skill and the executable.
 2. On the ticket, choose **Copy reference**. Send the prompt below to your
    agent, replacing `TICKET_REFERENCE` with the reference you copied.
 
@@ -37,7 +39,7 @@ In this example, **T-IR1** at the top of the right pane is the reference to copy
 Under **Activity**, **You** and **docs-agent** identify who posted each update.
 
 If the agent cannot find your ticket, have it run `ticketd workspace` in its
-own terminal. Compare the path with the workspace under **Settings → Location** and
+own terminal. Compare the path with the workspace under **Settings › Backups & export** and
 check that both run as the same OS user. [CLI setup](install.md#command-line-tool)
 
 To try the same exchange yourself in a terminal, follow the
