@@ -96,24 +96,6 @@ export function AttachmentSettings() {
     ? (drive?.account ?? null)
     : (onDriveDestination?.account ?? null);
 
-  // A Drive folder chosen before sync was set up gives way to the Uploads folder inside the
-  // sync folder: there is one place in Drive for one Workspace.
-  const followed = useRef<string | null>(null);
-  useEffect(() => {
-    if (!syncFolderId || !onDriveDestination || inSyncFolder) return;
-    if (followed.current === syncFolderId) return;
-    followed.current = syncFolderId;
-    attachments
-      .useSyncUploadsFolder()
-      .then((saved) => {
-        if (active.current) setDestination(saved);
-      })
-      .catch((reason: unknown) => {
-        if (active.current)
-          setFailure(describeFailure(reason, "use the Uploads folder"));
-      });
-  }, [syncFolderId, onDriveDestination, inSyncFolder]);
-
   async function choose(kind: string) {
     setFailure(null);
     setBusy(true);

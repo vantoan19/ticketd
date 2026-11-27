@@ -338,8 +338,11 @@ export function CommandLineCard({
   };
   const kind = status ? commandLineKind(status) : null;
   const declined = installation?.outcome === "declined";
+  // The footer belongs to a fix still to run, or to what a run left to do (a declined
+  // password, a PATH step, a restart); after a clean install the Installed state stands alone.
+  const aftermath = declined || !!installation?.next_step;
   const footer =
-    status && kind && (fix || installation)
+    status && kind && (fix || aftermath)
       ? fixFooter(status, installation)
       : null;
   const view = status && kind ? describe(kind, status, fix !== null) : null;

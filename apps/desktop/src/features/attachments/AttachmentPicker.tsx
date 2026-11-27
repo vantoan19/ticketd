@@ -55,7 +55,7 @@ function plainFailure(
 
 /**
  * A file over the workspace limit, said as the row reads it: "Too large:
- * 101 MB. The limit is 100 MB." The fix is the limit, never Retry (P8).
+ * 101 MB. The limit is 100 MB." Retry cannot help and there is no limit to change here (P8).
  */
 function tooLarge(size: number | null, limit: number | null) {
   return plainFailure(
@@ -63,7 +63,7 @@ function tooLarge(size: number | null, limit: number | null) {
     limit === null
       ? "It is over the upload limit."
       : `The limit is ${formatSize(limit)}.`,
-    "change_limit",
+    null,
     "too_large",
   );
 }

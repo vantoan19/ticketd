@@ -44,11 +44,11 @@ describe("describeFailure", () => {
     expect(failure.sentence).toBe("The disk is full, so nothing changed.");
   });
 
-  it("offers the fix instead of a Retry that cannot succeed", () => {
+  it("offers no Retry for a file that is too large, and no button for a limit that cannot be changed", () => {
     expect(
       describeFailure({ code: "too_large", message: "x" }, "attach report.pdf")
         .action,
-    ).toBe("change_limit");
+    ).toBeNull();
   });
 });
 

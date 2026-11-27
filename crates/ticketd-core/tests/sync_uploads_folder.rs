@@ -333,3 +333,27 @@ fn files_remember_their_account_for_sync_to_use_without_a_second_consent() {
     assert_eq!(status.connection_id.as_deref(), Some(CONNECTION));
     assert_eq!(status.account.as_deref(), Some(ACCOUNT));
 }
+
+/// Joining a Workspace through Replace starts from an empty Workspace, so a Drive folder
+/// chosen on this computer before is not carried over: new files stay on this computer
+/// until Drive is chosen again. There is nothing to move, so following the sync folder
+/// afterwards (which the desktop does at the end of every join) makes no call to Drive.
+#[test]
+fn joining_through_replace_leaves_uploads_on_this_computer_and_asks_drive_nothing() {
+    let sim = DriveSim::default();
+    let (_dir, _a, _) = synced(&sim);
+    let (_b_dir, mut b) = desk("Desk B");
+    chosen_folder(&sim, &mut b);
+    let folder = b.sync_setup_options(&remote(&sim)).unwrap().existing[0]
+        .folder_id
+        .clone();
+    let (mut b, _safety) = b.sync_download_workspace(&remote(&sim), &folder).unwrap();
+    assert_eq!(
+        b.attachment_upload_destination().unwrap(),
+        AttachmentUploadDestination::Local
+    );
+
+    let seen = sim.requests().len();
+    assert!(!b.follow_sync_uploads(&remote(&sim)).unwrap());
+    assert_eq!(sim.requests().len(), seen);
+}
