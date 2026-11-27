@@ -8,6 +8,7 @@ import type {
   RecordChange,
   Step,
   StepTarget,
+  SubAgent,
   TicketdCall,
   TranscriptItem,
   ItemOf,
@@ -558,6 +559,8 @@ export type TurnRow =
       items: ItemOf<"marker">[];
       kept?: false;
     }
+  /** One run of a direct sub-agent, kept visible under a folded turn like a receipt. */
+  | { kind: "sub_agent"; key: string; item: ItemOf<"sub_agent">; kept: true }
   /** #367: a reasoning row, and a plan that finished every step. */
   | { kind: "reasoning"; key: string; item: ItemOf<"reasoning">; kept?: false }
   | { kind: "plan"; key: string; item: ItemOf<"plan">; kept?: false };
@@ -607,7 +610,10 @@ export type Turn = {
 export type { Stretch, TurnBlock } from "@/features/chats/stretch";
 
 export type TranscriptPart =
-  { kind: "item"; item: TranscriptItem } | { kind: "turn"; turn: Turn };
+  | { kind: "item"; item: TranscriptItem }
+  | { kind: "turn"; turn: Turn }
+  /** A quiet line between a sub-agent's runs ("Resumed by the main agent"). */
+  | { kind: "divider"; key: string; label: string };
 
 // Fresh history skips attachment-only messages in the desktop command.
 export function canPickHistoryMessage(item: TranscriptItem): boolean {
@@ -649,6 +655,18 @@ const TURN_WORDS = {
   failed: ["Failed after", "Failed"],
   unconfirmed: ["Stop not confirmed after", "Stop not confirmed"],
 } as const;
+
+/** A sub-agent view's work line: contact lost reads as such, not as "Stopped". */
+export const SUB_AGENT_WORDS = {
+  lost: ["Contact lost after", "Contact lost"],
+} as const;
+/** The same, for a harness that never says when a sub-agent finishes (Antigravity). */
+export const SUB_AGENT_ENDS_WITH_TURN = {
+  lost: SUB_AGENT_WORDS.lost,
+  ended: ["Ended with the turn after", "Ended with the turn"],
+} as const;
+export type SubAgentWords =
+  typeof SUB_AGENT_WORDS | typeof SUB_AGENT_ENDS_WITH_TURN;
 
 const PROBLEM_COUNTS = [
   ["failed", "failed"],
@@ -746,7 +764,9 @@ function rowsOf(members: TranscriptItem[], running: Step["state"]) {
     flush();
     // The host told the decision on the step it was asked for.
     if (item.kind === "request" && item.folded) continue;
-    if (item.kind === "response")
+    if (item.kind === "sub_agent")
+      rows.push({ kind: "sub_agent", key: item.id, item, kept: true });
+    else if (item.kind === "response")
       rows.push({ kind: "response", key: item.id, item });
     else if (item.kind === "reasoning") {
       if (reasoningShown(item))
@@ -837,6 +857,7 @@ export function turns(
   items: TranscriptItem[],
   chat: Pick<ChatState, "activity" | "problem">,
   now = Date.now(),
+  agent?: SubAgentWords,
 ): TranscriptPart[] {
   const timings = new Map<string, ItemOf<"turn">>();
   for (const item of items)
@@ -898,6 +919,7 @@ export function turns(
       until: part.until,
       // Only an unconfirmed stop is measured against now.
       now: unconfirmed ? now : undefined,
+      agent,
     };
     const cached = builtTurns.get(first);
     if (cached && sameInputs(cached.inputs, inputs))
@@ -953,11 +975,15 @@ export function turns(
       ? TURN_WORDS.unconfirmed
       : outcome === "failed"
         ? TURN_WORDS.failed
-        : outcome === "stopped" || outcome === "quit" || outcome === "lost"
-          ? TURN_WORDS.stopped
-          : part.steer
-            ? TURN_WORDS.continued
-            : TURN_WORDS.worked;
+        : outcome === "lost" && agent
+          ? agent.lost
+          : outcome === "stopped" || outcome === "quit" || outcome === "lost"
+            ? TURN_WORDS.stopped
+            : outcome === "completed" && agent && "ended" in agent
+              ? agent.ended
+              : part.steer
+                ? TURN_WORDS.continued
+                : TURN_WORDS.worked;
     const counts = PROBLEM_COUNTS.flatMap(([state, word]) => {
       // A count already said by the row's own outcome is not said again.
       if (state === "failed" && words === TURN_WORDS.failed) return [];
@@ -1011,6 +1037,7 @@ type TurnInputs = {
   started: string | undefined;
   until: string | undefined;
   now: number | undefined;
+  agent: SubAgentWords | undefined;
 };
 
 const sameInputs = (a: TurnInputs, b: TurnInputs) =>
@@ -1021,6 +1048,7 @@ const sameInputs = (a: TurnInputs, b: TurnInputs) =>
   a.started === b.started &&
   a.until === b.until &&
   a.now === b.now &&
+  a.agent === b.agent &&
   a.members.length === b.members.length &&
   a.members.every((item, index) => item === b.members[index]);
 
@@ -1566,3 +1594,79 @@ export const plainOutput = (output: string) => output.replace(ANSI, "");
 
 /** The word naming a Chat's rank, for one-line summaries such as a ticket's Chats line. */
 export const statusLabel = (status: ChatStatus) => status.label ?? status.word;
+
+/** The main agent's own items: everything no sub-agent owns. */
+export const mainItems = (items: TranscriptItem[]) =>
+  items.some((item) => item.owner)
+    ? items.filter((item) => !item.owner)
+    : items;
+
+/** How a sub-agent run reads aloud and in a row's suffix, by its status. */
+const SUB_AGENT_STATE_WORDS = {
+  running: "working",
+  completed: "finished",
+  failed: "failed",
+  stopped: "stopped",
+  lost: "contact lost",
+} as const;
+
+type RunLike = Pick<
+  ItemOf<"sub_agent">,
+  "status" | "run" | "started_at" | "ended_at"
+>;
+
+/** What a row's suffix says after the title, in order; outcome words weigh 500. */
+export function subAgentSuffix(
+  run: RunLike,
+  record: Pick<SubAgent, "capabilities"> | undefined,
+  now: number,
+): { text: string; outcome?: boolean }[] {
+  const parts: { text: string; outcome?: boolean }[] = [];
+  if (run.run > 1) parts.push({ text: "Resumed" });
+  const clock = subAgentClock(run, now);
+  switch (run.status) {
+    case "failed":
+      parts.push({ text: "Failed", outcome: true });
+      break;
+    case "stopped":
+      parts.push({ text: "Stopped", outcome: true });
+      break;
+    case "lost":
+      parts.push({ text: "Contact lost", outcome: true });
+      break;
+    case "completed":
+      if (record && !record.capabilities.end)
+        parts.push({ text: "Ended with the turn" });
+      else if (clock) parts.push({ text: clock });
+      break;
+    case "running":
+      if (clock) parts.push({ text: clock });
+      break;
+  }
+  return parts;
+}
+
+/** The run's clock: how long it has run, or how long it ran; nothing before a second. */
+export function subAgentClock(run: RunLike, now: number) {
+  const from = time(run.started_at);
+  const to = run.status === "running" ? now : time(run.ended_at ?? undefined);
+  return from !== undefined && to !== undefined && to - from >= 1000
+    ? duration(to - from)
+    : undefined;
+}
+
+/** "Sub-agent Find limiter bypasses, working, 2m 10s": a row's accessible name. */
+export function subAgentLabel(
+  title: string,
+  run: RunLike,
+  record: Pick<SubAgent, "capabilities"> | undefined,
+  now: number,
+) {
+  const ended =
+    run.status === "completed" && record && !record.capabilities.end;
+  const word = ended
+    ? "ended with the turn"
+    : SUB_AGENT_STATE_WORDS[run.status];
+  const clock = subAgentClock(run, now);
+  return `Sub-agent ${title}, ${word}${clock && !ended ? `, ${clock}` : ""}`;
+}

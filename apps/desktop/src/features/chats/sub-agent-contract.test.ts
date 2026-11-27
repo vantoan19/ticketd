@@ -73,7 +73,10 @@ describe("the sub-agent view-model contract", () => {
       antigravityChat(),
     ];
     for (const { chat, items } of all) {
-      const client = createMockChatClient({ enabled: true, chats: [{ chat, items }] });
+      const client = createMockChatClient({
+        enabled: true,
+        chats: [{ chat, items: items ?? [] }],
+      });
       const snapshot = await client.openChat(chat.id);
       expect(chatSnapshotSchema.parse(snapshot).items).toHaveLength(
         items?.length ?? 0,

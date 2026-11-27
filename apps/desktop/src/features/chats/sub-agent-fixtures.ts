@@ -368,7 +368,7 @@ export function heroChat(
     inTurn: "t1",
     ...(options.resumedIn && { resumedIn: [options.resumedIn] }),
     runs: states[key].map((run, index) =>
-      index === 0 ? { ...run, work: run.work ?? work } : run,
+      index === 0 ? { ...run, work: [...work, ...(run.work ?? [])] } : run,
     ),
   });
   return chatWith({

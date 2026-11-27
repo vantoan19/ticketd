@@ -1,5 +1,6 @@
 import {
   Fragment,
+  useCallback,
   useContext,
   useEffect,
   useEffectEvent,
@@ -14,6 +15,7 @@ import {
 import {
   ArrowLeft,
   ArrowUpRight,
+  Bot,
   ChevronDown,
   Maximize2,
   Minimize2,
@@ -65,6 +67,7 @@ import {
   type QueueEditSave,
   type QueueEditStatus,
   type RequestAnswer,
+  type ItemOf,
   type TranscriptItem,
 } from "@/features/chats/client";
 import { ChatActionsMenu } from "@/features/chats/ChatActionsMenu";
@@ -107,6 +110,7 @@ import {
   composerControls,
   composerPlaceholder,
   firstNew,
+  mainItems,
   unseenFrom,
   asStarting,
   isLive,
@@ -128,6 +132,13 @@ import {
   useTranscriptScroll,
 } from "@/features/chats/use-transcript-scroll";
 import { useChat } from "@/features/chats/use-chats";
+import { SubAgentView, backKey } from "@/features/chats/SubAgentView";
+import {
+  subAgentView,
+  viewPath,
+  type ViewStep,
+} from "@/features/chats/sub-agents";
+import { ReturnCrumb } from "@/components/ui/list-header";
 
 /**
  * Sets `code spans` of a notice's sentence in mono. A span that is `path` reads
@@ -394,14 +405,18 @@ function Conversation({
   focusRequest,
   onRequestsAnswered,
   notice,
+  openSubAgent,
 }: {
   snapshot: ChatSnapshot;
   focusRequest: boolean;
   onRequestsAnswered?: () => void;
   notice?: ReactNode;
+  openSubAgent: (item: ItemOf<"sub_agent">, origin: HTMLElement) => void;
 }) {
   const client = useChatClient();
-  const { chat: reported, items } = snapshot;
+  const { chat: reported, items: all } = snapshot;
+  // The transcript is the main agent's; a sub-agent's work is in its own view.
+  const items = useMemo(() => mainItems(all), [all]);
   const id = reported.id;
   const harness = reported.harness.name;
   // Why text was carried into this Chat: a written sentence, said once.
@@ -460,8 +475,9 @@ function Conversation({
         }),
       openFile: (path) => client.openFile(id, path),
       exportAttachment: (file) => client.exportAttachment(id, file),
+      openSubAgent,
     }),
-    [client, id],
+    [client, id, openSubAgent],
   );
   // A message just sent shows its turn starting at once (LIVE-6).
   const chat = asStarting(reported, items);
@@ -540,7 +556,8 @@ function Conversation({
       harness,
     ],
   );
-  const pending = items.filter(
+  // A sub-agent's request is answered here too until its view takes it.
+  const pending = all.filter(
     (item): item is PendingRequest =>
       item.kind === "request" && item.state === "pending",
   );
@@ -553,7 +570,7 @@ function Conversation({
     if (
       !answered ||
       answered === handledAnswer.current ||
-      !items.some(
+      !all.some(
         (item) =>
           item.id === answered.id &&
           item.kind === "request" &&
@@ -572,7 +589,7 @@ function Conversation({
     if (pending.length) {
       dock.current?.querySelector<HTMLElement>(".chat-request-title")?.focus();
     } else onRequestsAnswered?.();
-  }, [answered, items, pending.length, onRequestsAnswered]);
+  }, [answered, all, pending.length, onRequestsAnswered]);
   // Opened from a notification: the request waiting then takes focus, once.
   const [notifiedRequest] = useState(() =>
     focusRequest ? pending[0]?.id : undefined,
@@ -590,11 +607,11 @@ function Conversation({
   const independentAnswer = questionDraft && !questionDraft.inComposer;
   useEffect(() => {
     if (!questionDrafts.snapshot().size) return;
-    for (const item of items) {
+    for (const item of all) {
       if (item.kind === "request" && item.state !== "pending")
         questionDrafts.close(item.id);
     }
-  }, [items, questionDrafts]);
+  }, [all, questionDrafts]);
   const {
     text: draftText,
     items: draftFiles,
@@ -1305,6 +1322,52 @@ export function ChatDetail({
   const [failure, setFailure] = useState<ChatFailureNotice | null>(null);
   const [linking, setLinking] = useState(false);
   const chat = snapshot?.chat;
+  // The sub-agent views open on top of the Chat, outermost first, each with the
+  // row that opened it so going back returns focus there.
+  const [steps, setSteps] = useState<ViewStep[]>([]);
+  const path = chat ? viewPath(chat, steps) : [];
+  const open = path.at(-1);
+  const view = useMemo(
+    () =>
+      chat && snapshot && open
+        ? subAgentView(chat, snapshot.items, open.agent)
+        : undefined,
+    [chat, snapshot, open],
+  );
+  const returning = useRef<string | null>(null);
+  const openSubAgent = useCallback(
+    (item: ItemOf<"sub_agent">) =>
+      setSteps((current) => [
+        ...current,
+        { agent: item.sub_agent, row: item.id },
+      ]),
+    [],
+  );
+  /** Goes back to the view (or Chat) at depth `to`; focus returns to the row that opened what was left. */
+  const back = (to: number) => {
+    returning.current = path[to]?.row ?? null;
+    setSteps(path.slice(0, to));
+  };
+  const depth = path.length;
+  useLayoutEffect(() => {
+    const row = returning.current;
+    returning.current = null;
+    if (row) {
+      [...document.querySelectorAll<HTMLElement>("[data-sub-agent]")]
+        .find((one) => one.dataset.subAgent === row)
+        ?.focus({ preventScroll: true });
+    } else if (depth > 0) document.getElementById("chat-heading")?.focus();
+  }, [depth]);
+  const actionsOf = useMemo<TranscriptActions>(
+    () => ({
+      saveAsDocument: () => {},
+      savePlan: () => {},
+      openFile: (path) => client.openFile(id, path),
+      exportAttachment: (file) => client.exportAttachment(id, file),
+      openSubAgent,
+    }),
+    [client, id, openSubAgent],
+  );
   const retain = (name: string, action: () => Promise<void>): void =>
     void action().then(
       () => setFailure(null),
@@ -1316,36 +1379,69 @@ export function ChatDetail({
       className="ticket-detail chat-pane"
       aria-labelledby="chat-heading"
       data-expanded={expanded ? "" : undefined}
+      onKeyDown={
+        view ? (event) => backKey(event, () => back(depth - 1)) : undefined
+      }
     >
       <div className="detail-header">
         <div className="detail-title-group">
-          {crumb}
-          {!crumb && single && !expanded && (
-            <IconButton label="Back to Chats" onClick={onReturn}>
-              <ArrowLeft aria-hidden />
-            </IconButton>
-          )}
-          {chat && (
-            <HarnessMark
-              harness={chat.harness.id}
-              name={chat.harness.name}
-              className="chat-head-mark"
-            />
-          )}
-          {/* The full title, only while the header cuts it. */}
-          <Tooltip content={chat?.title ?? (title || "Chat")} overflowOnly>
-            <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
-              {chat?.title ?? (title || "Chat")}
-            </h2>
-          </Tooltip>
-          {chat && (
-            <ChatContext chat={chat} asOf={lastAsk(snapshot?.items ?? [])} />
+          {view && chat ? (
+            // A sub-agent's view: the path back through the Chat and any parent,
+            // then its own mark and name. No folder, links or Chat actions.
+            <>
+              {[chat.title, ...view.ancestors.map((one) => one.title)].map(
+                (origin, index) => (
+                  <ReturnCrumb
+                    key={index}
+                    origin={origin}
+                    arrow={index === 0}
+                    onReturn={() => back(index)}
+                  />
+                ),
+              )}
+              <span className="chat-subagent-mark" aria-hidden="true">
+                <Bot size={16} />
+              </span>
+              <Tooltip content={view.agent.title} overflowOnly>
+                <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
+                  {view.agent.title}
+                </h2>
+              </Tooltip>
+            </>
+          ) : (
+            <>
+              {crumb}
+              {!crumb && single && !expanded && (
+                <IconButton label="Back to Chats" onClick={onReturn}>
+                  <ArrowLeft aria-hidden />
+                </IconButton>
+              )}
+              {chat && (
+                <HarnessMark
+                  harness={chat.harness.id}
+                  name={chat.harness.name}
+                  className="chat-head-mark"
+                />
+              )}
+              {/* The full title, only while the header cuts it. */}
+              <Tooltip content={chat?.title ?? (title || "Chat")} overflowOnly>
+                <h2 id="chat-heading" className="chat-head-title" tabIndex={-1}>
+                  {chat?.title ?? (title || "Chat")}
+                </h2>
+              </Tooltip>
+              {chat && (
+                <ChatContext
+                  chat={chat}
+                  asOf={lastAsk(snapshot?.items ?? [])}
+                />
+              )}
+            </>
           )}
         </div>
         <div className="detail-actions">
           {/* Bringing a Chat back is the pane's one primary, archived or
               trashed alike (CH-07). */}
-          {chat?.retention === "archived" && (
+          {!view && chat?.retention === "archived" && (
             <Button
               size="sm"
               onClick={() =>
@@ -1355,7 +1451,7 @@ export function ChatDetail({
               Unarchive
             </Button>
           )}
-          {chat?.retention === "trashed" && (
+          {!view && chat?.retention === "trashed" && (
             <Button
               size="sm"
               onClick={() =>
@@ -1365,7 +1461,7 @@ export function ChatDetail({
               Restore
             </Button>
           )}
-          {chat && chat.retention !== "trashed" && (
+          {!view && chat && chat.retention !== "trashed" && (
             <>
               <ChatActionsMenu
                 chat={chat}
@@ -1415,13 +1511,22 @@ export function ChatDetail({
           Opening the Chat…
         </p>
       )}
-      {snapshot && (
+      {snapshot && view && (
+        <SubAgentView
+          key={`${id}/${view.agent.id}`}
+          view={view}
+          items={snapshot.items}
+          actions={actionsOf}
+        />
+      )}
+      {snapshot && !view && (
         <Conversation
           key={id}
           snapshot={snapshot}
           focusRequest={focusRequest}
           {...(onRequestsAnswered && { onRequestsAnswered })}
           notice={notice}
+          openSubAgent={openSubAgent}
         />
       )}
     </section>
