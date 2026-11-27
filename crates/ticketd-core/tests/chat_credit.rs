@@ -375,3 +375,51 @@ fn evidence_is_not_credited() {
     assert!(credits.activities.is_empty());
     assert!(credits.statuses.is_empty());
 }
+
+#[test]
+fn tickets_with_a_running_writer_are_found_without_reading_every_ticket() {
+    let mut setup = setup();
+    let other = setup.host.create_ticket("Unrelated").unwrap();
+    setup.observe(vec![start_sub_agent("sa-tests")]);
+    open(&mut setup, "run-1:bash-1", sub_agent("sa-tests"), vec![]);
+    setup.activity(None, "Progress.");
+    close(&mut setup, "run-1:bash-1", sub_agent("sa-tests"));
+
+    let running = setup.host.tickets_with_running_writers().unwrap();
+    assert_eq!(
+        running.iter().map(|t| t.1.as_str()).collect::<Vec<_>>(),
+        vec![setup.reference.as_str()]
+    );
+    assert!(running.iter().all(|t| t.1 != other.reference));
+
+    setup.observe(vec![ChatObservation::SubAgentEnded {
+        native_id: "sa-tests".into(),
+        native_run_id: None,
+        state: ticketd_core::ChatSubAgentState::Completed,
+        stopped_by: None,
+        stop_reason: None,
+        detail: None,
+    }]);
+    assert!(
+        setup
+            .host
+            .tickets_with_running_writers()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_ticket_id_names_its_reference() {
+    let setup = setup();
+    let ticket = setup.host.show_ticket(&setup.reference).unwrap();
+    assert_eq!(
+        setup
+            .host
+            .ticket_reference_of(&ticket.id)
+            .unwrap()
+            .as_deref(),
+        Some(setup.reference.as_str())
+    );
+    assert_eq!(setup.host.ticket_reference_of("nope").unwrap(), None);
+}

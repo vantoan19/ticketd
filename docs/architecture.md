@@ -383,6 +383,24 @@ device-local, because Chats do not sync: the interface's `credited_to` is filled
 only where the Chat is on the computer, and only for a sub-agent.
 `ticket_write_credits` and `ticket_writing_agents` read it.
 
+**The ticket label.** The desktop command `chat_ticket_agents` answers who is at
+work on a ticket: the main agent of a Chat linked to the ticket while its turn
+runs (waiting for sub-agents or for the person counts as running), and any main
+agent or sub-agent with a credited write on the ticket while it runs, even from
+a Chat not linked to it. Finished, stopped and lost sub-agents and Chats at rest
+never count. The list comes in the order the label reads it: an agent waiting for
+approval first, then Chat by Chat (the most recently active first), each Chat's
+main agent before its sub-agents, the oldest start first. A sub-agent's model is
+the one its own frames reported (Claude's `message.model`, Codex's
+`subAgentActivity.model`) in the session's own words; a main agent's is the
+model its live session reports; with none the interface names the harness. A main
+agent's `doing` is its running Step in words, else "Waiting for N sub-agents". An
+`approval` is a pending request the host still holds, read by the agent that asked.
+The desktop's watcher compares every ticket's list with the last one it announced
+and fires the overview event when the set or a field changes, on a Chat's change
+and on a change of the Workspace (a credited write from the CLI), so a label
+appears, changes and goes without a refresh.
+
 A harness process started for an Automation run also gets the run's ID in
 `TICKETD_AUTOMATION_RUN_ID`. A CLI that inherits a non-blank value logs every ticket
 change it makes as a Workspace event with actor `automation`, and such events never

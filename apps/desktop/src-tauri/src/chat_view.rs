@@ -2153,9 +2153,13 @@ fn sub_agent_run_items(run: &ChatSubAgentRun, chat: &Chat, tracker: &Tracker) ->
 /// How the model a sub-agent reported reads: the harness's own name for it when the live
 /// session lists it, else the id as reported, else the harness.
 fn model_name(reported: Option<&str>, live: &ChatLive, harness: &str) -> String {
-    let Some(reported) = reported.filter(|model| !model.is_empty()) else {
-        return harness.to_owned();
-    };
+    model_label(reported, live).unwrap_or_else(|| harness.to_owned())
+}
+
+/// The model as the live session names it, else the id as reported; `None` when none
+/// was reported.
+fn model_label(reported: Option<&str>, live: &ChatLive) -> Option<String> {
+    let reported = reported.filter(|model| !model.is_empty())?;
     let options = live
         .settings
         .as_deref()
@@ -2172,7 +2176,49 @@ fn model_name(reported: Option<&str>, live: &ChatLive, harness: &str) -> String 
                 .filter(|option| option.id.len() > 3 && reported.starts_with(option.id.as_str()))
                 .max_by_key(|option| option.id.len())
         });
-    listed.map_or_else(|| reported.to_owned(), |option| option.label.clone())
+    Some(listed.map_or_else(|| reported.to_owned(), |option| option.label.clone()))
+}
+
+/// The model a sub-agent's own frames reported, as the ticket's label names it.
+pub(crate) fn sub_agent_model(record: &ChatSubAgent, live: &ChatLive) -> Option<String> {
+    model_label(record.said("model").as_deref(), live)
+}
+
+/// The model the Chat's live session reports for the main agent, as the session names it.
+pub(crate) fn main_agent_model(live: &ChatLive) -> Option<String> {
+    let model = live.settings.as_deref()?.reported.model.as_ref()?;
+    let id = model.answered_by.as_deref().or(model.current.as_deref());
+    model_label(id, live)
+}
+
+/// What a running Step is doing in a few words ("Running npm test -- rate-limit"), for a
+/// line that says what an agent does now.
+pub(crate) fn running_words(tool: &ChatTool, chat: &Chat) -> Option<String> {
+    const LIMIT: usize = 60;
+    let harness = harness_name(&chat.harness);
+    let step = steps_while(tool, harness, chat, None, true)
+        .into_iter()
+        .next()?;
+    if step.ticketd.is_some() {
+        return Some(cut_at_word(&step.target, LIMIT));
+    }
+    let what = step
+        .command
+        .clone()
+        .or_else(|| step.targets.first().map(|target| target.text.clone()))
+        .filter(|what| !what.is_empty())
+        .unwrap_or_else(|| step.target.clone());
+    let what = cut_at_word(first_line_of(&what).as_deref().unwrap_or(&what), LIMIT);
+    Some(match step.kind {
+        "run" => format!("Running {what}"),
+        "read" => format!("Reading {what}"),
+        "search" => format!("Searching {what}"),
+        "edit" => format!("Editing {what}"),
+        "create" => format!("Creating {what}"),
+        "delete" => format!("Deleting {what}"),
+        "web" => format!("Browsing {what}"),
+        _ => format!("Using {what}"),
+    })
 }
 
 /// What the harness called a sub-agent's work; failing that, the kind of sub-agent it is.

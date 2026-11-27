@@ -3856,6 +3856,43 @@ impl Workspace {
         })
     }
 
+    /// The tickets (ID and reference) that a Chat with something running now has a
+    /// credited write on: where a ticket label may be showing or about to. Reading each
+    /// ticket's [`Self::ticket_writing_agents`] says exactly who runs.
+    pub fn tickets_with_running_writers(&self) -> Result<Vec<(String, String)>, Error> {
+        self.read(|_| {
+            let mut statement = self.connection.prepare(
+                "WITH running AS (
+                     SELECT id FROM chats WHERE trashed = 0 AND (
+                         EXISTS (SELECT 1 FROM chat_turns WHERE chat_id = chats.id AND state = 'active')
+                      OR EXISTS (SELECT 1 FROM chat_sub_agent_runs WHERE chat_id = chats.id AND state = 'running')))
+                 SELECT DISTINCT t.id, t.reference FROM tickets t WHERE t.id IN (
+                     SELECT a.ticket_id FROM activities a JOIN chat_record_writes w ON w.activity_id = a.id
+                     WHERE w.chat_id IN (SELECT id FROM running)
+                     UNION
+                     SELECT h.ticket_id FROM ticket_history h JOIN chat_record_writes w ON w.history_number = h.number
+                     WHERE h.kind = 'status' AND w.chat_id IN (SELECT id FROM running))
+                 ORDER BY t.reference",
+            )?;
+            let tickets = statement
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+            Ok(tickets)
+        })
+    }
+
+    /// The reference of the ticket with this ID, if there is one.
+    pub fn ticket_reference_of(&self, id: &str) -> Result<Option<String>, Error> {
+        self.read(|_| {
+            Ok(self
+                .connection
+                .query_row("SELECT reference FROM tickets WHERE id = ?1", [id], |row| {
+                    row.get(0)
+                })
+                .optional()?)
+        })
+    }
+
     /// What the Chat's agent changed in tickets during the Turn, oldest first.
     /// New writes with this Chat's identity count in durable commit order, from its
     /// first correlated submission or observed Turn start, whichever came first.
