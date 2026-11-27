@@ -502,4 +502,68 @@ mod tests {
             }
         }
     }
+
+    /// What each harness declares of its sub-agents, in one place (ADR 0022, ADR 0029): a
+    /// view and the write credit offer only what is declared here, so a changed value is
+    /// a decision to make on purpose, with the table.
+    #[test]
+    fn the_three_harnesses_declare_what_they_report_and_allow_of_sub_agents() {
+        // support, brief, text, reasoning, model, end, stop one, resume, wake
+        type Flags = (bool, bool, bool, bool, bool, bool, bool, bool, bool);
+        let flags = |support: &SubAgentSupport| -> Flags {
+            (
+                support.supported,
+                support.brief,
+                support.text,
+                support.reasoning,
+                support.model,
+                support.end,
+                support.stop,
+                support.resume,
+                support.wake,
+            )
+        };
+        let declared = |key: &str| &descriptor(key).expect("a harness").sub_agents;
+
+        // Claude Code reports everything, stops a background sub-agent through the SDK, and
+        // resumes the main agent by itself, so ticketd never wakes it; its commands carry
+        // no per-call key.
+        let claude = declared("claude-code");
+        assert_eq!(
+            flags(claude),
+            (true, true, true, true, true, true, true, true, false)
+        );
+        assert_eq!(
+            (claude.call_variable, claude.call_key_path),
+            (None, &[][..])
+        );
+
+        // Codex does not say what a child was asked or its reasoning, cannot resume a lost
+        // one, never resumes an idle main agent (ticketd wakes it), and names the command.
+        let codex = declared("codex");
+        assert_eq!(
+            flags(codex),
+            (true, false, true, false, true, true, true, false, true)
+        );
+        assert_eq!(
+            (codex.call_variable, codex.call_key_path),
+            (Some("CODEX_TOOL_CALL_ID"), &[][..])
+        );
+
+        // Antigravity says what a child was asked and its model (the Chat's own), and
+        // nothing of its words, reasoning or end; it cannot stop one alone; the key of a
+        // command is inside a JSON value.
+        let antigravity = declared("antigravity");
+        assert_eq!(
+            flags(antigravity),
+            (true, true, false, false, true, false, false, false, false)
+        );
+        assert_eq!(
+            (antigravity.call_variable, antigravity.call_key_path),
+            (
+                Some("ANTIGRAVITY_SOURCE_METADATA"),
+                &["tool", "toolCall", "id"][..]
+            )
+        );
+    }
 }

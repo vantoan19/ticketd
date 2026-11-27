@@ -695,6 +695,51 @@ mod background {
         assert!(!h.core().chat(h.chat_id()).expect("the Chat").queue_paused);
     }
 
+    /// A command or a monitor the main agent started in the background is a Step, not a
+    /// sub-agent: when the turn ends the Chat is Done, and what the command and the monitor
+    /// do after that neither holds the Chat working nor opens a turn nor says anything.
+    #[tokio::test(start_paused = true)]
+    async fn a_background_command_or_monitor_does_not_hold_done() {
+        let mut h = HostScript::claude()
+            .process([
+                fixture!("claude", "handshake"),
+                fixture!("claude", "background_command"),
+            ])
+            .start();
+        h.send("Run the limiter tests in the background and watch their log")
+            .await;
+        h.play_to("the SDK took the input").await;
+        h.play_to("the turn ended with a command and a monitor in the background")
+            .await;
+
+        let done = h.attention().await;
+        assert_eq!((done.rank, done.word.as_str()), (Rank::Done, "Done"));
+        let live = h.live().await;
+        assert_eq!(live.sub_agents, 0);
+        assert_eq!(live.activity, crate::Activity::Idle);
+        assert!(h.sub_agents().is_empty());
+        let transcript = h.transcript();
+        assert!(
+            transcript.contains(&"tool Bash completed".to_owned())
+                && transcript.contains(&"tool Monitor completed".to_owned()),
+            "{transcript:?}"
+        );
+        assert_eq!(h.turns().len(), 1);
+
+        // They go on after the turn: nothing changes, Done is still Done.
+        h.play_to("the command and the monitor work after the turn ended")
+            .await;
+        h.play_to("the command and the monitor ended").await;
+        h.finish().await;
+        assert_eq!(h.attention().await, done);
+        assert_eq!(h.live().await.sub_agents, 0);
+        assert!(h.sub_agents().is_empty());
+        assert_eq!(h.turns().len(), 1);
+        assert_eq!(h.turns()[0].state, ChatTurnState::Completed);
+        assert_eq!(h.transcript(), transcript);
+        assert!(h.notices().is_empty(), "{:?}", h.notices());
+    }
+
     #[tokio::test(start_paused = true)]
     async fn stop_with_no_turn_stops_the_sub_agents_and_ends_the_harness() {
         let mut h = HostScript::claude()

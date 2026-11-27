@@ -4010,3 +4010,131 @@ fn a_sub_agents_message_has_its_owner_and_may_have_no_turn_and_is_exported_and_b
     let restored = Workspace::open(&restored_path).unwrap();
     assert_eq!(restored.chat_snapshot(&chat.id, 500).unwrap(), saved);
 }
+
+#[test]
+fn a_chat_with_sub_agents_runs_and_their_work_is_exported_and_survives_backup_and_restore() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("workspace.sqlite3");
+    let backup = dir.path().join("backup.sqlite3");
+    let mut workspace = Workspace::open(&path).unwrap();
+    let chat = workspace.create_chat(None, new_chat()).unwrap();
+    start_turn(&mut workspace, &chat, "Review the rate limiter", "turn-1");
+    let nested = |parent: &str| ChatObservation::SubAgentStarted {
+        native_id: "agent-2".into(),
+        parent: Some(parent.to_owned()),
+        tool_id: None,
+        turn_id: Some("turn-1".into()),
+        native_run_id: Some("run-2a".into()),
+        background: true,
+        payload: r#"{"description":"Read the tests"}"#.into(),
+    };
+    let mut work = start_sub_agent("agent-1", Some("run-1a"), Some("turn-1"));
+    if let ChatObservation::SubAgentStarted { background, .. } = &mut work {
+        *background = true;
+    }
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                work,
+                nested("agent-1"),
+                ChatObservation::SubAgentUpdated {
+                    native_id: "agent-1".into(),
+                    native_run_id: Some("run-1a".into()),
+                    background: None,
+                    payload: Some(r#"{"model":"claude-haiku-5-5"}"#.into()),
+                },
+                ChatObservation::AssistantText {
+                    message_id: "agent-1-said".into(),
+                    turn_id: Some("turn-1".into()),
+                    owner: ChatOwner::SubAgent {
+                        native_id: "agent-1".into(),
+                    },
+                    text: "Reading the limiter".into(),
+                    complete: true,
+                },
+            ],
+        )
+        .unwrap();
+    end_turn(&mut workspace, &chat, "turn-1");
+    // After the turn: the first sub-agent finishes, runs again (a resume), and a request of
+    // the second waits; the second is stopped by ticketd, with its reason.
+    record_turnless_sub_agent_work(&mut workspace, &chat);
+    workspace
+        .record_chat_observations(
+            &chat.id,
+            vec![
+                end_sub_agent("agent-1", Some("run-1a"), ChatSubAgentState::Completed),
+                ChatObservation::SubAgentStarted {
+                    native_id: "agent-1".into(),
+                    parent: None,
+                    tool_id: None,
+                    turn_id: None,
+                    native_run_id: Some("run-1b".into()),
+                    background: true,
+                    payload: "{}".into(),
+                },
+                ChatObservation::SubAgentEnded {
+                    native_id: "agent-2".into(),
+                    native_run_id: Some("run-2a".into()),
+                    state: ChatSubAgentState::Stopped,
+                    stopped_by: Some(ChatSubAgentStopper::Ticketd),
+                    stop_reason: Some("turned_off".into()),
+                    detail: None,
+                },
+            ],
+        )
+        .unwrap();
+
+    // What a person would see of them, before anything is copied.
+    let saved = workspace.chat_snapshot(&chat.id, 500).unwrap();
+    let find = |native_id: &str| {
+        saved
+            .sub_agents
+            .iter()
+            .find(|record| record.native_id == native_id)
+            .unwrap()
+            .clone()
+    };
+    let first = find("agent-1");
+    assert_eq!(first.runs.len(), 2);
+    assert_eq!(first.runs[0].state, ChatSubAgentState::Completed);
+    assert_eq!(first.runs[1].state, ChatSubAgentState::Running);
+    assert_eq!(first.said("model").as_deref(), Some("claude-haiku-5-5"));
+    let second = find("agent-2");
+    assert_eq!(second.parent.as_deref(), Some("agent-1"));
+    let run = second.latest().unwrap();
+    assert_eq!(
+        (run.state, run.stopped_by, run.stop_reason.as_deref()),
+        (
+            ChatSubAgentState::Stopped,
+            Some(ChatSubAgentStopper::Ticketd),
+            Some("turned_off")
+        )
+    );
+
+    // Both tables are exported, with their rows and their parent link.
+    let export = workspace.export().unwrap();
+    let rows = |table: &str| export[table].as_array().unwrap().clone();
+    assert_eq!(rows("chat_sub_agents").len(), 2);
+    assert_eq!(rows("chat_sub_agent_runs").len(), 3);
+    assert!(
+        rows("chat_sub_agents")
+            .iter()
+            .any(|row| row["native_id"] == "agent-2" && row["parent_native_id"] == "agent-1")
+    );
+    assert!(
+        rows("chat_sub_agent_runs")
+            .iter()
+            .any(|row| row["state"] == "stopped" && row["stop_reason"] == "turned_off")
+    );
+
+    workspace.backup(&backup).unwrap();
+    drop(workspace);
+    let restored_path = dir.path().join("restored.sqlite3");
+    Workspace::restore(&restored_path, &backup).unwrap();
+    let restored = Workspace::open(&restored_path).unwrap();
+    let after = restored.chat_snapshot(&chat.id, 500).unwrap();
+    assert_eq!(after.sub_agents, saved.sub_agents);
+    assert_eq!(after, saved);
+}

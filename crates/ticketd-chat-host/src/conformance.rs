@@ -9,7 +9,12 @@
 //! legitimately does differently is declared by the provider, not tolerated by the
 //! property: how a harness answers a new turn is [`NewTurn`].
 //!
+//! "Stop leaves nothing running" cannot be told from the adapter's frames alone, so it
+//! runs through the Chat host, one declaration per harness: see `stops`.
+//!
 //! The adapters' own tests keep what is specific to their protocol.
+
+mod stops;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -49,9 +54,8 @@ pub(crate) enum SubAgentFrames {
     /// nothing of one at rest (Antigravity): a sub-agent's late frames, with no prompt in
     /// flight, open and show nothing.
     EndWithThePrompt,
-    /// The adapter does not model sub-agents yet (Codex until its sub-agent ticket and the
-    /// fake): the property asserts nothing for it, and moves to `Separate` when the
-    /// adapter does.
+    /// The adapter does not model sub-agents (the fake): the property asserts nothing for
+    /// it.
     NotModelled,
 }
 

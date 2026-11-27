@@ -231,6 +231,54 @@ async fn a_sub_agent_that_finishes_while_the_persons_message_is_on_its_way_wakes
     assert_eq!(turns[1].origin, None, "the person started it");
 }
 
+/// The main agent is busy with a command of its own, the person queues a message, and the
+/// sub-agent finishes meanwhile. The turn that runs sees the finish itself, so ticketd
+/// sends no continuation for it: the person's message goes out alone when the turn ends,
+/// as the next turn, and nothing follows it.
+#[tokio::test(start_paused = true)]
+async fn a_queued_message_goes_out_alone_when_the_sub_agent_finished_while_the_main_agent_was_busy()
+{
+    let mut h = HostScript::codex()
+        .process([
+            fixture!("codex", "handshake"),
+            fixture!("codex", "sub_agent_wake_while_busy"),
+        ])
+        .start();
+    h.send(PROMPT).await;
+    h.play_to("the parent runs its own command while the sub-agent runs")
+        .await;
+    h.queue("What did it find?").await;
+    // Busy: nothing is written for the message yet (the fixture would fail on a write).
+    assert_eq!(h.turns().len(), 1);
+    assert_eq!(h.turns()[0].state, ChatTurnState::Active);
+
+    h.play_to("the sub-agent finished while the parent is busy")
+        .await;
+    assert_eq!(h.live().await.sub_agents, 0);
+    // The turn is still the main agent's: nothing starts for the finish.
+    assert_eq!(h.turns().len(), 1);
+    h.pass(Duration::from_secs(30)).await;
+    assert_eq!(h.turns().len(), 1);
+
+    // The turn ends, and the queued message is the next turn, in the person's own words
+    // (the fixture holds the exact text written to Codex: no note, no continuation).
+    h.play_to("the parent's turn ended").await;
+    h.play_to("the person's turn ended").await;
+    h.pass(Duration::from_secs(30)).await;
+    h.finish().await;
+    let turns = h.turns();
+    assert_eq!(turns.len(), 2, "{:?}", h.transcript());
+    assert_eq!(turns[0].origin, None);
+    assert_eq!(turns[1].origin, None, "the person started it");
+    assert!(
+        h.transcript()
+            .iter()
+            .any(|line| line == "you: What did it find?"),
+        "{:?}",
+        h.transcript()
+    );
+}
+
 #[tokio::test(start_paused = true)]
 async fn a_wake_turn_that_fails_shows_failed_and_notifies_but_leaves_the_queue_alone() {
     let mut h = HostScript::codex()
