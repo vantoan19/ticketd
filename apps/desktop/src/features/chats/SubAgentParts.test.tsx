@@ -294,6 +294,13 @@ test("a turn the harness started says so in place of a message, and the title op
   ).toBeTruthy();
 });
 
+test("a turn the harness started with no sub-agent finished only says who started it", async () => {
+  await open(fixtures().startedAlone);
+  const line = screen.getByText("Started by Claude Code").closest("p");
+  expect(line?.textContent).toBe("Started by Claude Code");
+  expect(screen.queryByText(/sub-agent finished/)).toBeNull();
+});
+
 test("a turn ticketd started names ticketd, not the harness", async () => {
   await open(fixtures().wake);
   expect(
