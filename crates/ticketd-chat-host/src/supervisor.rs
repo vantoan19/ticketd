@@ -68,6 +68,14 @@ use crate::{
 /// before the turn that follows, which would notify a second time.
 const WAKE_GRACE: Duration = Duration::from_secs(10);
 
+/// How long ticketd waits after a direct sub-agent finishes at rest before it wakes the
+/// main agent (Codex never resumes by itself), so sub-agents that finish together are
+/// covered by one message.
+const WAKE_SETTLE: Duration = Duration::from_millis(500);
+
+/// The most of a sub-agent's last message that the person's next message carries.
+const FINISHED_REPORT_LIMIT: usize = 1_500;
+
 const QUEUE_READ_RETRY: Duration = Duration::from_millis(250);
 const LINK_CONTEXT_RETRY: Duration = Duration::from_secs(1);
 const MAX_PENDING_CONTEXTS: usize = 64;
@@ -215,6 +223,48 @@ struct Dispatch {
     starts_turn: bool,
     early_rejection: Option<String>,
     preamble: Option<String>,
+    /// The sub-agents that finished since the person's last message, which this input
+    /// tells the main agent about: back in `finished` if it is not accepted.
+    finished: Vec<Finished>,
+}
+
+/// A direct sub-agent that finished while the main agent was idle, and has not been told
+/// to it yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct Finished {
+    native: String,
+    failed: bool,
+}
+
+/// What the Chat keeps of a sub-agent of this session, for the words ticketd says about it.
+struct SubAgentNote {
+    /// The sub-agent that started it; `None` when the main agent did.
+    parent: Option<String>,
+    title: String,
+    /// What it said last.
+    report: Option<String>,
+}
+
+/// Submissions ticketd itself makes to wake the main agent are named `wake-N`; the
+/// person's messages are named by a UUID.
+fn is_wake(attempt: &str) -> bool {
+    attempt.starts_with("wake-")
+}
+
+/// What a sub-agent is called: what the harness called its work, else the kind of
+/// sub-agent it is. The same rule as the sub-agent's row.
+fn sub_agent_title(native: &serde_json::Value) -> Option<String> {
+    let said = |key: &str| {
+        native
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|said| !said.is_empty())
+    };
+    said("description")
+        .and_then(|description| description.lines().next())
+        .or_else(|| said("subagent_type"))
+        .map(str::to_owned)
 }
 
 struct ContextTransfer {
@@ -349,6 +399,19 @@ pub(crate) struct Supervisor {
     /// While a sub-agent has just finished with no turn running: until when the main agent
     /// is still expected to resume by itself, and the Chat stays working.
     wake_until: Option<Instant>,
+    /// What the Chat remembers of this session's sub-agents, by native ID.
+    sub_agent_notes: HashMap<String, SubAgentNote>,
+    /// Direct sub-agents that finished with no turn running and have not been told to the
+    /// main agent, for a harness that never resumes it by itself.
+    unreported: Vec<Finished>,
+    /// From when ticketd may wake the main agent for them: a moment after the first
+    /// finished, so those finishing together are covered by one message.
+    wake_after: Option<Instant>,
+    /// The message that wakes the main agent is on its way; the turn it starts is the
+    /// first turn seen next. Names the sub-agent whose finish it follows.
+    wake_sent: Option<Option<NativeSubAgentId>>,
+    /// How many wake messages this Chat has sent, which names the next.
+    wakes: u32,
     /// Input the person sent for immediate dispatch, ahead of the queue.
     direct: VecDeque<(PendingInput, DirectSend)>,
     /// Prepared edits keep their saved rows. The automatic queue waits for the
@@ -525,6 +588,11 @@ impl Supervisor {
             stop_deadline: None,
             sub_agents: HashMap::new(),
             wake_until: None,
+            sub_agent_notes: HashMap::new(),
+            unreported: Vec::new(),
+            wake_after: None,
+            wake_sent: None,
+            wakes: 0,
             shutting_down: false,
             shut_down_for: None,
             queue_started: false,
@@ -551,6 +619,7 @@ impl Supervisor {
                 self.unconfirmed_deadline,
                 self.queue_read_retry_at,
                 self.wake_until,
+                self.wake_after.filter(|at| *at > Instant::now()),
                 self.context_retry_at(),
             ]
             .into_iter()
@@ -1572,6 +1641,9 @@ impl Supervisor {
         self.write(|core| core.set_chat_queue_paused(&chat, true))?;
         self.clear_direct();
         self.resend = None;
+        // Nothing is to be told to the main agent after a Stop.
+        self.unreported.clear();
+        self.wake_after = None;
         if self.active.is_some() {
             self.interrupt();
         } else if self.unconfirmed_start.is_some()
@@ -1590,6 +1662,33 @@ impl Supervisor {
     /// expected to resume by itself, and the Chat stays working until it does.
     fn sub_agent_ended(&mut self, native: &str, outcome: &SubAgentOutcome) {
         self.sub_agents.remove(native);
+        if self.wakes_main_agent_for_sub_agents() {
+            // This harness never resumes the main agent by itself. A direct sub-agent that
+            // finished while the main agent is idle is told to it, in one message a moment
+            // from now. A nested one is its parent's business, and a turn that runs now
+            // sees the finish itself.
+            let direct = self
+                .sub_agent_notes
+                .get(native)
+                .is_none_or(|note| note.parent.is_none());
+            if direct
+                && self.unattended.is_none()
+                && self.active.is_none()
+                && matches!(
+                    outcome,
+                    SubAgentOutcome::Completed | SubAgentOutcome::Failed
+                )
+            {
+                self.unreported.retain(|finished| finished.native != native);
+                self.unreported.push(Finished {
+                    native: native.to_owned(),
+                    failed: *outcome == SubAgentOutcome::Failed,
+                });
+                self.wake_after
+                    .get_or_insert_with(|| Instant::now() + WAKE_SETTLE);
+            }
+            return;
+        }
         if self.active.is_none()
             && self.sub_agents.is_empty()
             && matches!(
@@ -1598,6 +1697,175 @@ impl Supervisor {
             )
         {
             self.wake_until = Some(Instant::now() + WAKE_GRACE);
+        }
+    }
+
+    /// The harness never resumes the main agent when a sub-agent finishes (Codex), so
+    /// ticketd does.
+    fn wakes_main_agent_for_sub_agents(&self) -> bool {
+        self.adapter
+            .as_ref()
+            .is_some_and(|adapter| adapter.harness().sub_agents.wake)
+    }
+
+    /// What a sub-agent is called in what ticketd says to the main agent.
+    fn title_of(&self, native: &str) -> String {
+        self.sub_agent_notes
+            .get(native)
+            .map_or("Sub-agent", |note| note.title.as_str())
+            .to_owned()
+    }
+
+    /// Sends the main agent the one message that tells it which sub-agents finished, when
+    /// there are some, a moment has passed and nothing else is going on. The person's
+    /// own input is always sent first (it carries the same news), so this runs only when
+    /// the pump found none.
+    fn wake_if_due(&mut self, chat: &Chat) {
+        let due = self.wake_after.is_some_and(|at| at <= Instant::now());
+        if !due
+            || self.unreported.is_empty()
+            || chat.queue_paused
+            || self.unattended.is_some()
+            || self.shutting_down
+            || self.active.is_some()
+            || self.dispatching.is_some()
+            || self.opening.is_some()
+            || self.unconfirmed_start.is_some()
+            || self.wake_sent.is_some()
+            || self.problem.is_some()
+            || self.stop.is_some()
+            || !self.direct.is_empty()
+            || self.resend.is_some()
+            || !self.wakes_main_agent_for_sub_agents()
+        {
+            return;
+        }
+        let Some(runtime) = &self.runtime else {
+            return;
+        };
+        let (handle, generation) = (runtime.handle.clone(), runtime.generation);
+        let finished = std::mem::take(&mut self.unreported);
+        self.wake_after = None;
+        self.wakes += 1;
+        let attempt = format!("wake-{}", self.wakes);
+        let text = self.wake_text(&finished);
+        self.wake_sent = Some(
+            finished
+                .first()
+                .map(|finished| NativeSubAgentId::new(&finished.native)),
+        );
+        self.dispatching = Some(Dispatch {
+            attempt: attempt.clone(),
+            generation,
+            starts_turn: true,
+            early_rejection: None,
+            preamble: None,
+            finished: Vec::new(),
+        });
+        let submission = Submission {
+            submission: SubmissionId(attempt),
+            generation,
+            kind: SubmissionKind::StartTurn,
+            text,
+            attachments: Vec::new(),
+        };
+        let done = self.done.clone();
+        tokio::spawn(async move {
+            let outcome = handle.submit_with_admission(submission, None).await;
+            let _ = done.send(Done::Dispatched { outcome });
+        });
+    }
+
+    /// What ticketd says to wake the main agent: which sub-agents finished, and to go on.
+    fn wake_text(&self, finished: &[Finished]) -> String {
+        let name = |finished: &Finished| format!("\"{}\"", self.title_of(&finished.native));
+        match finished {
+            [one] if one.failed => format!("Sub-agent {} failed. Please continue.", name(one)),
+            [one] => format!("Sub-agent {} finished. Please continue.", name(one)),
+            many => {
+                let named: Vec<String> = many
+                    .iter()
+                    .map(|finished| {
+                        if finished.failed {
+                            format!("{} (failed)", name(finished))
+                        } else {
+                            name(finished)
+                        }
+                    })
+                    .collect();
+                format!(
+                    "Sub-agents finished: {}. Please continue.",
+                    named.join(", ")
+                )
+            }
+        }
+    }
+
+    /// What goes ahead of the person's message when sub-agents finished since their last:
+    /// the news and what each said last, so the message does not need ticketd's own to
+    /// follow it.
+    fn finished_note(&self, finished: &[Finished]) -> Option<String> {
+        if finished.is_empty() {
+            return None;
+        }
+        let mut lines = vec!["Sub-agents finished since your last message:".to_owned()];
+        for finished in finished {
+            let verb = if finished.failed {
+                "failed"
+            } else {
+                "finished"
+            };
+            let mut line = format!("- \"{}\" {verb}.", self.title_of(&finished.native));
+            let report = self
+                .sub_agent_notes
+                .get(&finished.native)
+                .and_then(|note| note.report.as_deref())
+                .map(str::trim)
+                .filter(|report| !report.is_empty());
+            if let Some(report) = report {
+                let cut = report.chars().count() > FINISHED_REPORT_LIMIT;
+                let said: String = report.chars().take(FINISHED_REPORT_LIMIT).collect();
+                line.push_str(&format!(
+                    " Its last message: {said}{}",
+                    if cut { "…" } else { "" }
+                ));
+            }
+            lines.push(line);
+        }
+        Some(lines.join("\n"))
+    }
+
+    /// The message that wakes the main agent was not delivered. It is not the person's
+    /// message: the queue is left alone, nothing is retried, and the Chat says so.
+    fn wake_failed(&mut self, detail: &str) {
+        self.wake_sent = None;
+        self.notice(format!(
+            "ticketd could not wake the main agent after a sub-agent finished: {detail}"
+        ));
+    }
+
+    /// The wake message's own answers from the adapter. Its turn, when it starts, is the
+    /// one turn that is labelled as ticketd's.
+    fn on_wake_dispatched(&mut self, attempt: String, current: bool, outcome: DispatchOutcome) {
+        match outcome {
+            DispatchOutcome::NotSent(refusal) => self.wake_failed(refusal.reason()),
+            DispatchOutcome::Rejected { reason } => self.wake_failed(&reason),
+            DispatchOutcome::Written => {
+                if current && self.active.is_none() && self.wake_sent.is_some() {
+                    self.unconfirmed_start = Some(attempt);
+                    self.unconfirmed_deadline =
+                        Some(Instant::now() + DELIVERY_CONFIRMATION_TIMEOUT);
+                }
+            }
+            DispatchOutcome::Acknowledged { turn } => {
+                if current {
+                    let mut observations = Vec::new();
+                    self.turn(&turn, &mut observations);
+                    self.record_if_any(observations);
+                }
+            }
+            // The loss itself is handled as one; nothing of the person's was in flight.
+            DispatchOutcome::UnknownAfterLoss => self.wake_sent = None,
         }
     }
 
@@ -1644,6 +1912,8 @@ impl Supervisor {
             return;
         }
         self.wake_until = None;
+        self.unreported.clear();
+        self.wake_after = None;
         if self.sub_agents.is_empty() {
             return;
         }
@@ -1701,6 +1971,10 @@ impl Supervisor {
     /// harness has it stays unknown, so it is recorded as uncertain for the person to
     /// decide about; later evidence from this runtime can still settle it.
     fn delivery_unconfirmed(&mut self, attempt_id: String) {
+        if is_wake(&attempt_id) {
+            self.wake_failed("the harness did not confirm receiving it in time");
+            return;
+        }
         self.record(vec![ChatObservation::SubmissionUncertain {
             attempt_id,
             detail: Some("the harness did not confirm receiving it in time".to_owned()),
@@ -2262,6 +2536,10 @@ impl Supervisor {
         self.pending_contexts.clear();
         self.interactions.clear();
         self.sub_agents.clear();
+        self.sub_agent_notes.clear();
+        self.unreported.clear();
+        self.wake_after = None;
+        self.wake_sent = None;
         self.wake_until = None;
         self.text.clear();
         self.pending_tools.clear();
@@ -2475,6 +2753,8 @@ impl Supervisor {
                         let Some(message) = queue.into_iter().find(|message| !message.editing)
                         else {
                             self.queue_started = false;
+                            // Nothing of the person's to send: tell the main agent what finished.
+                            self.wake_if_due(&chat);
                             return;
                         };
                         if self.prepared_queue_edits.contains(&message.id) {
@@ -2493,6 +2773,7 @@ impl Supervisor {
                 if chat.queue_paused {
                     self.queue_started = false;
                 }
+                self.wake_if_due(&chat);
                 return;
             };
             // A run's supervisor may only send its own Prompt. This also holds
@@ -2643,11 +2924,23 @@ impl Supervisor {
         } else {
             None
         };
+        // What finished since their last message goes ahead of this one, in place of the
+        // message ticketd would have sent.
+        let finished = if self.unattended.is_none() {
+            std::mem::take(&mut self.unreported)
+        } else {
+            Vec::new()
+        };
+        if !finished.is_empty() {
+            self.wake_after = None;
+        }
+        let finished_note = self.finished_note(&finished);
         // Context and selected history go to the harness with the input; the stored
         // message stays the person's own words.
         let text = [
             context.as_deref(),
             preamble.as_deref(),
+            finished_note.as_deref(),
             (!message.text.is_empty()).then_some(message.text.as_str()),
         ]
         .into_iter()
@@ -2677,6 +2970,7 @@ impl Supervisor {
             starts_turn,
             early_rejection: None,
             preamble,
+            finished,
         });
         if let Some(refusal) = self.attachment_refusal(&submission.attachments) {
             self.on_dispatched(DispatchOutcome::NotSent(refusal));
@@ -2994,6 +3288,10 @@ impl Supervisor {
             }
             (outcome, _) => outcome,
         };
+        if is_wake(&attempt_id) {
+            self.on_wake_dispatched(attempt_id, current, outcome);
+            return;
+        }
         match outcome {
             DispatchOutcome::NotSent(refusal) => {
                 let detail = refusal.reason().to_owned();
@@ -3060,6 +3358,11 @@ impl Supervisor {
         if dispatch.preamble.is_some() {
             self.preamble = dispatch.preamble;
         }
+        if !dispatch.finished.is_empty() && self.unreported.is_empty() {
+            self.unreported = dispatch.finished;
+            self.wake_after
+                .get_or_insert_with(|| Instant::now() + WAKE_SETTLE);
+        }
         self.restore_rejected_context(&dispatch.attempt);
         if dispatch.starts_turn {
             self.stop_when_turn_known = false;
@@ -3119,6 +3422,13 @@ impl Supervisor {
         if self.active.is_some() {
             return None;
         }
+        // The first turn after ticketd's wake message is the one that message started.
+        let origin = origin.or_else(|| {
+            self.wake_sent.take().map(|sub_agent| TurnOrigin {
+                by: TurnStarter::Ticketd,
+                sub_agent,
+            })
+        });
         runtime.turns.insert(native.0.clone());
         observations.push(ChatObservation::TurnStarted {
             turn_id: turn_id.clone(),
@@ -3153,6 +3463,10 @@ impl Supervisor {
         turn_id: String,
         observations: &mut Vec<ChatObservation>,
     ) {
+        if is_wake(&attempt_id) {
+            // ticketd's own message has no stored message to settle.
+            return;
+        }
         if let Some(index) = self
             .pending_contexts
             .iter()
@@ -3212,6 +3526,22 @@ impl Supervisor {
                 let unconfirmed = self.unconfirmed_start.as_ref() == Some(&attempt_id);
                 if unconfirmed {
                     self.unconfirmed_start = None;
+                }
+                if is_wake(&attempt_id) {
+                    // ticketd's own message: no stored message to settle, only its turn.
+                    match evidence {
+                        DeliveryEvidence::Acknowledged { turn }
+                        | DeliveryEvidence::Processing { turn } => {
+                            self.turn(&turn, &mut observations);
+                            self.record_if_any(observations);
+                        }
+                        DeliveryEvidence::Rejected { reason } => {
+                            if self.active.is_none() {
+                                self.wake_failed(&reason);
+                            }
+                        }
+                    }
+                    return;
                 }
                 match evidence {
                     DeliveryEvidence::Acknowledged { turn } => {
@@ -3340,6 +3670,9 @@ impl Supervisor {
                 item,
                 text,
             } => {
+                if let Some(note) = self.sub_agent_notes.get_mut(&sub_agent.0) {
+                    note.report = Some(text.clone());
+                }
                 // Said in the turn that is active, if one is; it opens none.
                 let turn_id = self.active.as_ref().map(|active| active.turn_id.clone());
                 observations.push(ChatObservation::AssistantText {
@@ -3404,8 +3737,26 @@ impl Supervisor {
             EventKind::SubAgentStarted(start) => {
                 self.sub_agents
                     .insert(start.sub_agent.0.clone(), start.background);
-                // Something runs again: the main agent is not about to resume alone.
+                // Something runs again: the main agent is not about to resume alone, and a
+                // sub-agent that runs again has nothing to be told yet.
                 self.wake_until = None;
+                self.unreported
+                    .retain(|finished| finished.native != start.sub_agent.0);
+                if self.unreported.is_empty() {
+                    self.wake_after = None;
+                }
+                let note = self
+                    .sub_agent_notes
+                    .entry(start.sub_agent.0.clone())
+                    .or_insert_with(|| SubAgentNote {
+                        parent: None,
+                        title: "Sub-agent".to_owned(),
+                        report: None,
+                    });
+                note.parent = start.parent.as_ref().map(|parent| parent.0.clone());
+                if let Some(title) = sub_agent_title(&start.native) {
+                    note.title = title;
+                }
                 observations.push(ChatObservation::SubAgentStarted {
                     native_id: start.sub_agent.0,
                     parent: start.parent.map(|parent| parent.0),
@@ -3427,6 +3778,12 @@ impl Supervisor {
                     (background, self.sub_agents.get_mut(&sub_agent.0))
                 {
                     *running = background;
+                }
+                if let (Some(title), Some(note)) = (
+                    native.as_ref().and_then(sub_agent_title),
+                    self.sub_agent_notes.get_mut(&sub_agent.0),
+                ) {
+                    note.title = title;
                 }
                 self.record(vec![ChatObservation::SubAgentUpdated {
                     native_id: sub_agent.0,
@@ -3959,6 +4316,8 @@ impl Supervisor {
         let working = self.active.is_some()
             || !self.sub_agents.is_empty()
             || self.wake_until.is_some()
+            || !self.unreported.is_empty()
+            || self.wake_sent.is_some()
             || self.dispatching.is_some()
             || self.opening.is_some()
             || self.unconfirmed_start.is_some();
@@ -3972,7 +4331,9 @@ impl Supervisor {
             },
             running: self.runtime.is_some(),
             sub_agents: self.sub_agents.len(),
-            waking: self.wake_until.is_some(),
+            waking: self.wake_until.is_some()
+                || !self.unreported.is_empty()
+                || self.wake_sent.is_some(),
             // Until the session's first turn starts, whatever the process is doing.
             opening: match (&self.opening, &self.runtime) {
                 _ if !working => None,
@@ -4262,6 +4623,85 @@ mod tests {
             .unwrap()
             .unwrap();
         assert!(fake.opens().is_empty());
+    }
+
+    /// The main agent's sub-agent finishes, at rest, in a Chat the supervisor serves.
+    async fn sub_agent_finishes_at_rest(
+        supervisor: &mut Supervisor,
+        generation: RuntimeGeneration,
+    ) {
+        for kind in [
+            EventKind::SubAgentStarted(crate::SubAgentStart {
+                sub_agent: NativeSubAgentId::new("child"),
+                run: None,
+                parent: None,
+                tool: None,
+                background: true,
+                native: serde_json::json!({"description": "Slow check"}),
+            }),
+            EventKind::SubAgentEnded {
+                sub_agent: NativeSubAgentId::new("child"),
+                run: None,
+                outcome: SubAgentOutcome::Completed,
+                detail: None,
+            },
+        ] {
+            supervisor.on_event(Some(RuntimeEvent { generation, kind }));
+        }
+        tokio::time::advance(WAKE_SETTLE).await;
+        supervisor.on_timer();
+        supervisor.pump();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn ticketd_wakes_the_main_agent_for_a_finished_sub_agent_but_never_in_an_automation() {
+        let dir = tempfile::tempdir().unwrap();
+        let (mut attended, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        let generation = open(&mut attended, &chat).await;
+        sub_agent_finishes_at_rest(&mut attended, generation).await;
+        let wake = attended
+            .dispatching
+            .as_ref()
+            .expect("the main agent is woken");
+        assert_eq!(wake.attempt, "wake-1");
+
+        let dir = tempfile::tempdir().unwrap();
+        let (mut automation, chat) = supervisor(dir.path().join("workspace.sqlite3"));
+        automation.unattended = Some(UnattendedChat::new(
+            crate::Unattended {
+                run_id: "run-1".to_owned(),
+                model: None,
+                tools: ticketd_core::AutomationAgentTools {
+                    read_files: true,
+                    edit_files: false,
+                    run_commands: true,
+                    any_command: true,
+                    allowed_commands: Vec::new(),
+                    use_web: false,
+                },
+                turn_limit: 1,
+            },
+            Arc::new(tokio::sync::Mutex::new(())),
+        ));
+        let generation = open(&mut automation, &chat).await;
+        sub_agent_finishes_at_rest(&mut automation, generation).await;
+        assert!(automation.dispatching.is_none());
+        assert!(automation.unreported.is_empty());
+        assert!(automation.wake_sent.is_none());
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn a_harness_that_resumes_the_main_agent_itself_is_not_woken() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("workspace.sqlite3");
+        let (mut supervisor, chat) = supervisor(path);
+        supervisor.adapter = Some(Arc::new(FakeAdapter::claude()));
+        let generation = open(&mut supervisor, &chat).await;
+        sub_agent_finishes_at_rest(&mut supervisor, generation).await;
+        assert!(supervisor.dispatching.is_none());
+        assert!(supervisor.unreported.is_empty());
+        // Claude Code's own wake is waited for instead.
+        assert!(supervisor.wake_until.is_some());
     }
 
     #[tokio::test(start_paused = true)]

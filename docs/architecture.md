@@ -248,6 +248,36 @@ does not pause the person's queue. Stop with no turn running ends the running su
 stopped by the person, notes how many (a Chat notice carrying `sub_agents_stopped`) and ends
 the harness process; Stop during a turn interrupts it and stops every sub-agent with it.
 
+Codex never resumes the main agent when a sub-agent finishes, so ticketd does (the
+descriptor's `sub_agents.wake`). When a direct sub-agent (not a nested one) finishes or fails
+while no turn runs, the supervisor remembers it and, half a second later (`WAKE_SETTLE`, so
+sub-agents finishing together are covered by one message), sends the main agent one message as
+a new turn that is not stored as a message of the person's: the Chat's own
+`wake-N` submission. The turn it starts is recorded with origin `ticketd` and the sub-agent
+whose finish it follows, so it reads "Started by ticketd: sub-agent finished", and a failure
+of it shows and notifies but does not pause the person's queue (the same rule as for a
+harness-started turn). One wake is outstanding at a time: sub-agents that finish while it is on
+its way wait for the next. The person's own input always goes first: a message they send
+before the wake went out starts the turn instead and carries what finished ahead of its text,
+and nothing else is sent. No wake follows a Stop, a paused queue, a Chat with a problem, a
+nested sub-agent's finish, a sub-agent stopped by the person or the main agent, a finish that
+happens during a turn (the main agent is there to see it), or any Chat of an Automation run.
+A wake that cannot be delivered leaves a Chat notice and is not retried. The words are
+ticketd's own and short. For one sub-agent they are
+
+    Sub-agent "Slow check" finished. Please continue.
+
+(`failed` in place of `finished` when it failed), and for several
+
+    Sub-agents finished: "Slow check", "Review docs" (failed). Please continue.
+
+where a sub-agent is called what its row calls it. The person's message carries instead
+
+    Sub-agents finished since your last message:
+    - "Slow check" finished. Its last message: {what it said last, at most 1,500 characters}
+
+ahead of their words, in the text sent to the harness; the stored message stays theirs.
+
 The storage half of this design exists: the core's Chat workflows
 (`crates/ticketd-core/src/chats.rs`) own these records and the change log. Chat
 tables do not move the workspace change token, so streaming a turn does not make

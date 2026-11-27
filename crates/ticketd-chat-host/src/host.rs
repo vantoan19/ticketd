@@ -194,8 +194,8 @@ pub struct ChatLive {
     /// How many sub-agents run now (nested ones too). With no turn they hold the Chat
     /// working: `activity` is `Working` and the person's Stop stops them.
     pub sub_agents: usize,
-    /// The last sub-agent just finished with no turn running, and the harness is expected
-    /// to resume the main agent by itself: still working, with no turn yet.
+    /// The last sub-agent just finished with no turn running, and the main agent is about to
+    /// resume, by itself or because ticketd tells it so: still working, with no turn yet.
     pub waking: bool,
     /// Work waits on a harness session that has not started a turn yet, and how that
     /// session opens. A process alone is not a working session: the harness can take

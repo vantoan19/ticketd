@@ -179,6 +179,9 @@ pub struct SubAgentSupport {
     pub stop: bool,
     /// A sub-agent that was lost can be resumed.
     pub resume: bool,
+    /// The harness never resumes the main agent when a sub-agent finishes, so ticketd
+    /// sends the message that does.
+    pub wake: bool,
 }
 
 pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
@@ -245,6 +248,7 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
         end: true,
         stop: false,
         resume: true,
+        wake: false,
     },
 };
 
@@ -299,6 +303,7 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
         end: true,
         stop: false,
         resume: false,
+        wake: true,
     },
 };
 
@@ -370,6 +375,7 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
         end: false,
         stop: false,
         resume: false,
+        wake: false,
     },
 };
 
