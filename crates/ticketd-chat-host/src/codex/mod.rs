@@ -130,9 +130,11 @@ fn allows_shell(tools: &AutomationAgentTools) -> bool {
 /// servers, plugins (which bring servers and skills of their own) or ChatGPT apps
 /// start, and everything else a config override can switch off is off too: hooks (a
 /// `PermissionRequest` hook could allow what the session declines), the `notify`
-/// program, project AGENTS.md, memories, sub-agents (every Codex version of them), computer and browser use, the
-/// bundled skills and the skills list in the prompt (#387 L5, D4). Every key is in
-/// Codex's config schema from 0.162.1 to 0.169.
+/// program, project AGENTS.md, memories, sub-agents (every Codex version of them),
+/// computer and browser use, the bundled skills and the skills list in the prompt
+/// (#387 L5, D4). Every key is in Codex's config schema from 0.162.1 to 0.169, except
+/// the sub-agent keys `agents.enabled` and `features.multi_agent_v2` (#612), which are
+/// newer; Codex ignores an unknown override key with a warning unless strict config is on.
 /// Still applying, because no override reaches them: the person's rules, global
 /// AGENTS.md and the skills in `~/.agents/skills`.
 /// `config` is the person's configuration (`config/read`), which names their servers;
