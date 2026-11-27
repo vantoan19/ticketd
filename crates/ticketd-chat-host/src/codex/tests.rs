@@ -671,6 +671,8 @@ async fn unknown_traffic_is_reported_and_unknown_requests_are_never_approved() {
             "unknown future/approval/request",
             "unknown item/holoDeck",
             "unknown turn/completed",
+            // Another thread's turn is a sub-agent's, not unknown traffic and not the Chat's turn.
+            "sub-agent-started thr_other run Some(\"turn_x\") parent None tool None background true {\"root_turn\":null}",
             "unknown a line that is not JSON-RPC",
         ]
     );

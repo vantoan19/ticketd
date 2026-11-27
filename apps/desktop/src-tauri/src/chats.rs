@@ -2044,6 +2044,7 @@ impl Chats {
                             text: delta,
                             state: "streaming",
                             turn_id: Some(turn_id),
+                            owner: None,
                         };
                         json!({ "kind": "item", "item": item })
                     } else {

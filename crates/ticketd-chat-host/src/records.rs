@@ -12,6 +12,11 @@ pub const REASONING_RECORD_NAME: &str = "ticketd reasoning";
 pub const PLAN_RECORD_NAME: &str = "ticketd plan";
 /// The name of the tool record that keeps the files a turn changed (`FilesRecord`).
 pub const FILES_RECORD_NAME: &str = "ticketd files";
+/// The name of the tool record that keeps one message a sub-agent wrote: its text is the
+/// record's output. A Chat's own messages are messages; a sub-agent's are owned records, so
+/// nothing that reads the Chat's messages (a fresh session's history, the last response)
+/// ever takes them for the main agent's.
+pub const MESSAGE_RECORD_NAME: &str = "ticketd message";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReasoningRecord {
