@@ -161,6 +161,24 @@ pub struct HarnessDescriptor {
     pub resume: ResumePolicy,
     pub unattended: UnattendedSupport,
     pub permissions: &'static [PermissionChoice],
+    /// What the harness lets ticketd show and do of the sub-agents it starts.
+    pub sub_agents: SubAgentSupport,
+}
+
+/// What a harness reports about the sub-agents it starts, and what ticketd can do to them
+/// (ADR 0022). A view offers only what is declared here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SubAgentSupport {
+    /// It reports what a sub-agent was asked.
+    pub brief: bool,
+    /// It reports a sub-agent's own messages and reasoning.
+    pub text: bool,
+    /// It reports when a sub-agent finishes.
+    pub end: bool,
+    /// One sub-agent can be stopped without the others.
+    pub stop: bool,
+    /// A sub-agent that was lost can be resumed.
+    pub resume: bool,
 }
 
 pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
@@ -220,6 +238,14 @@ pub static CLAUDE_CODE: HarnessDescriptor = HarnessDescriptor {
             is_default: false,
         },
     ],
+    // Stop for one sub-agent (`stopTask`, background only) is added with its command.
+    sub_agents: SubAgentSupport {
+        brief: true,
+        text: true,
+        end: true,
+        stop: false,
+        resume: true,
+    },
 };
 
 pub static CODEX: HarnessDescriptor = HarnessDescriptor {
@@ -266,6 +292,14 @@ pub static CODEX: HarnessDescriptor = HarnessDescriptor {
             is_default: false,
         },
     ],
+    // Codex does not report what a child was asked.
+    sub_agents: SubAgentSupport {
+        brief: false,
+        text: true,
+        end: true,
+        stop: false,
+        resume: false,
+    },
 };
 
 pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
@@ -329,6 +363,14 @@ pub static ANTIGRAVITY: HarnessDescriptor = HarnessDescriptor {
             is_default: false,
         },
     ],
+    // Antigravity reports neither a sub-agent's messages nor when it ends.
+    sub_agents: SubAgentSupport {
+        brief: true,
+        text: false,
+        end: false,
+        stop: false,
+        resume: false,
+    },
 };
 
 pub static HARNESS_DESCRIPTORS: &[&HarnessDescriptor] = &[&CLAUDE_CODE, &CODEX, &ANTIGRAVITY];

@@ -15,7 +15,8 @@ use std::time::Duration;
 use ticketd_core::{
     Chat, ChatAttachmentContent, ChatInputChange, ChatInputReceipt, ChatInteractionKind,
     ChatInteractionState, ChatMessage, ChatObservation, ChatOwner, ChatSessionOrigin,
-    ChatSubmissionIntent, ChatToolState, ChatTurnReceipt, ChatTurnState, Error, Workspace,
+    ChatSubAgentState, ChatSubAgentStopper, ChatSubmissionIntent, ChatToolState, ChatTurnReceipt,
+    ChatTurnState, Error, Workspace,
 };
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
@@ -54,9 +55,10 @@ use crate::{
     ApprovalDecision, AutomationPromptAdmission, Capabilities, CloseOutcome, DeliveryEvidence,
     DispatchOutcome, EventKind, HarnessAdapter, HarnessRuntime, InteractionAnswer, InteractionKind,
     InteractionRequest, InteractionResolution, InteractionResponse, InterruptOutcome,
-    InterruptRequest, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind, OpenRequest,
-    OpenedRuntime, Problem, Refusal, RespondOutcome, RuntimeEvent, RuntimeGeneration, SessionStart,
-    Submission, SubmissionId, SubmissionKind, Subscription, TurnEvidence, TurnOutcome,
+    InterruptRequest, NativeItemId, NativeRequestId, NativeSessionId, NativeTurnId, NoticeKind,
+    OpenRequest, OpenedRuntime, Problem, ProviderDetail, Refusal, RespondOutcome, RuntimeEvent,
+    RuntimeGeneration, SessionStart, SubAgentOutcome, SubAgentStopper, Submission, SubmissionId,
+    SubmissionKind, Subscription, ToolStatus, TurnEvidence, TurnOutcome,
 };
 
 const QUEUE_READ_RETRY: Duration = Duration::from_millis(250);
@@ -3169,32 +3171,93 @@ impl Supervisor {
                 let Some(turn_id) = self.turn(&turn, &mut observations) else {
                     return;
                 };
-                let tool_id = format!("{run}:{}", item.0);
-                let state = tool_state(status);
-                let tool = ChatObservation::Tool {
-                    tool_id: tool_id.clone(),
-                    turn_id: Some(turn_id),
-                    owner: ChatOwner::Main,
-                    name: title,
-                    input: detail.map(|d| d.payload().to_owned()).unwrap_or_default(),
-                    state,
+                self.on_tool(
+                    &run,
+                    Some(turn_id),
+                    ChatOwner::Main,
+                    item,
+                    title,
+                    status,
                     output,
+                    detail,
+                    observations,
+                );
+            }
+            EventKind::SubAgentToolUpdated {
+                sub_agent,
+                item,
+                title,
+                status,
+                output,
+                detail,
+            } => {
+                // A sub-agent's Step belongs to the turn that is active, if one is, and
+                // opens none.
+                let turn_id = self.active.as_ref().map(|active| active.turn_id.clone());
+                self.on_tool(
+                    &run,
+                    turn_id,
+                    ChatOwner::SubAgent {
+                        native_id: sub_agent.0,
+                    },
+                    item,
+                    title,
+                    status,
+                    output,
+                    detail,
+                    observations,
+                );
+            }
+            EventKind::SubAgentStarted(start) => {
+                observations.push(ChatObservation::SubAgentStarted {
+                    native_id: start.sub_agent.0,
+                    parent: start.parent.map(|parent| parent.0),
+                    tool_id: start.tool.map(|item| format!("{run}:{}", item.0)),
+                    turn_id: self.active.as_ref().map(|active| active.turn_id.clone()),
+                    native_run_id: start.run,
+                    background: start.background,
+                    payload: start.native.to_string(),
+                });
+                self.record(observations);
+            }
+            EventKind::SubAgentUpdated {
+                sub_agent,
+                run: native_run_id,
+                background,
+                native,
+            } => {
+                self.record(vec![ChatObservation::SubAgentUpdated {
+                    native_id: sub_agent.0,
+                    native_run_id,
+                    background,
+                    payload: native.map(|native| native.to_string()),
+                }]);
+            }
+            EventKind::SubAgentEnded {
+                sub_agent,
+                run: native_run_id,
+                outcome,
+                detail,
+            } => {
+                let (state, stopped_by) = match outcome {
+                    SubAgentOutcome::Completed => (ChatSubAgentState::Completed, None),
+                    SubAgentOutcome::Failed => (ChatSubAgentState::Failed, None),
+                    SubAgentOutcome::Stopped(by) => (
+                        ChatSubAgentState::Stopped,
+                        Some(match by {
+                            SubAgentStopper::Person => ChatSubAgentStopper::Person,
+                            SubAgentStopper::MainAgent => ChatSubAgentStopper::MainAgent,
+                        }),
+                    ),
                 };
-                self.pending_tools.retain(|(id, _)| *id != tool_id);
-                let first = self
-                    .runtime
-                    .as_mut()
-                    .is_some_and(|runtime| runtime.tools.insert(tool_id.clone()));
-                if first || state != ChatToolState::Running {
-                    observations.push(tool);
-                    self.record(observations);
-                } else {
-                    // Progress of a running tool is saved with the next checkpoint.
-                    self.record_if_any(observations);
-                    self.pending_tools.push((tool_id, tool));
-                    self.checkpoint_at
-                        .get_or_insert(Instant::now() + TEXT_CHECKPOINT_INTERVAL);
-                }
+                self.record(vec![ChatObservation::SubAgentEnded {
+                    native_id: sub_agent.0,
+                    native_run_id,
+                    state,
+                    stopped_by,
+                    stop_reason: None,
+                    detail,
+                }]);
             }
             EventKind::InteractionRequested(request) => {
                 self.on_interaction(&run, generation, request, observations);
@@ -3420,6 +3483,49 @@ impl Supervisor {
                 }
             }
             EventKind::Unknown { summary, .. } => self.harness_notice(summary),
+        }
+    }
+
+    /// A tool item's latest state: recorded at once when it is new or finished, and with
+    /// the next checkpoint while it only reports progress.
+    #[allow(clippy::too_many_arguments)]
+    fn on_tool(
+        &mut self,
+        run: &str,
+        turn_id: Option<String>,
+        owner: ChatOwner,
+        item: NativeItemId,
+        title: String,
+        status: ToolStatus,
+        output: Option<String>,
+        detail: Option<ProviderDetail>,
+        mut observations: Vec<ChatObservation>,
+    ) {
+        let tool_id = format!("{run}:{}", item.0);
+        let state = tool_state(status);
+        let tool = ChatObservation::Tool {
+            tool_id: tool_id.clone(),
+            turn_id,
+            owner,
+            name: title,
+            input: detail.map(|d| d.payload().to_owned()).unwrap_or_default(),
+            state,
+            output,
+        };
+        self.pending_tools.retain(|(id, _)| *id != tool_id);
+        let first = self
+            .runtime
+            .as_mut()
+            .is_some_and(|runtime| runtime.tools.insert(tool_id.clone()));
+        if first || state != ChatToolState::Running {
+            observations.push(tool);
+            self.record(observations);
+        } else {
+            // Progress of a running tool is saved with the next checkpoint.
+            self.record_if_any(observations);
+            self.pending_tools.push((tool_id, tool));
+            self.checkpoint_at
+                .get_or_insert(Instant::now() + TEXT_CHECKPOINT_INTERVAL);
         }
     }
 

@@ -19,7 +19,9 @@ use crate::{Error, Workspace};
 pub(crate) mod attachments;
 pub use attachments::{ChatAttachment, ChatAttachmentContent};
 mod receipt;
+pub(crate) mod sub_agents;
 pub use receipt::ChatTurnReceipt;
+pub use sub_agents::{ChatSubAgent, ChatSubAgentRun, ChatSubAgentState, ChatSubAgentStopper};
 #[cfg(test)]
 mod tests;
 
@@ -761,6 +763,8 @@ pub enum ChatItem {
     Tool(ChatTool),
     Interaction(ChatInteraction),
     Notice(ChatNotice),
+    /// One run of a sub-agent, where it began in the Chat's history.
+    SubAgentRun(ChatSubAgentRun),
 }
 
 /// Something the host observed from the harness. Record only what was actually seen:
@@ -849,6 +853,54 @@ pub enum ChatObservation {
         /// For an approval, the tool call it is about, when the harness said.
         tool_id: Option<String>,
     },
+    /// A sub-agent started or was resumed: a run begins. The first sighting makes its
+    /// record; a resume (a new `native_run_id`) adds a run to it.
+    SubAgentStarted {
+        /// The harness's ID for the sub-agent, unique within the Chat.
+        native_id: String,
+        /// The native ID of the sub-agent that started it; `None` for the main agent.
+        #[serde(default)]
+        parent: Option<String>,
+        /// The Step (a tool record of this Chat) that started it.
+        #[serde(default)]
+        tool_id: Option<String>,
+        /// The turn the run began in, when one was active. Must be this Chat's.
+        #[serde(default)]
+        turn_id: Option<String>,
+        #[serde(default)]
+        native_run_id: Option<String>,
+        #[serde(default)]
+        background: bool,
+        /// A JSON object of what the harness said (`description`, `subagent_type`,
+        /// `prompt`, `model`), merged over what is kept.
+        payload: String,
+    },
+    /// More is known of a sub-agent: its words, or that it runs in the background.
+    /// Ignored for a sub-agent never seen, and for a run an earlier one than the latest.
+    SubAgentUpdated {
+        native_id: String,
+        #[serde(default)]
+        native_run_id: Option<String>,
+        #[serde(default)]
+        background: Option<bool>,
+        #[serde(default)]
+        payload: Option<String>,
+    },
+    /// A run ended. `state` is anything but `Running`. Ignored when the run already ended
+    /// or an earlier run than the latest is meant.
+    SubAgentEnded {
+        native_id: String,
+        #[serde(default)]
+        native_run_id: Option<String>,
+        state: ChatSubAgentState,
+        #[serde(default)]
+        stopped_by: Option<ChatSubAgentStopper>,
+        #[serde(default)]
+        stop_reason: Option<String>,
+        /// What the harness said went wrong, for a run that failed.
+        #[serde(default)]
+        detail: Option<String>,
+    },
     /// `state` is `Answered` or `Expired`.
     InteractionResolved {
         interaction_id: String,
@@ -880,6 +932,10 @@ pub struct ChatSnapshot {
     /// The latest history, oldest first.
     pub items: Vec<ChatItem>,
     pub earlier: bool,
+    /// Every sub-agent of the Chat, oldest first, whatever part of the history `items`
+    /// holds: a row in the history names one whose record is older than the page.
+    #[serde(default)]
+    pub sub_agents: Vec<ChatSubAgent>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -890,6 +946,9 @@ pub struct ChatSnapshot {
 pub enum ChatRecord {
     Chat(Chat),
     Item(ChatItem),
+    /// A sub-agent and its runs. It is not an entry of the Chat's history (each run is);
+    /// a follower is told when the record changed.
+    SubAgent(ChatSubAgent),
 }
 
 /// The current state of a record that changed, at the sequence of its latest change.
@@ -1204,6 +1263,7 @@ fn read_item(connection: &Connection, kind: &str, id: &str) -> Result<Option<Cha
             )
             .optional()?
             .map(ChatItem::Notice),
+        "sub_agent_run" => sub_agents::read_run(connection, id)?.map(ChatItem::SubAgentRun),
         _ => None,
     })
 }
@@ -1221,7 +1281,8 @@ fn read_history(
              UNION ALL SELECT position, 'turn', id, chat_id FROM chat_turns
              UNION ALL SELECT position, 'tool', id, chat_id FROM chat_tools
              UNION ALL SELECT position, 'interaction', id, chat_id FROM chat_interactions
-             UNION ALL SELECT position, 'notice', id, chat_id FROM chat_notices)
+             UNION ALL SELECT position, 'notice', id, chat_id FROM chat_notices
+             UNION ALL SELECT position, 'sub_agent_run', id, chat_id FROM chat_sub_agent_runs)
          WHERE chat_id = ?1 AND position < ?2 ORDER BY position DESC LIMIT ?3",
     )?;
     let mut subjects = statement
@@ -1940,6 +2001,7 @@ fn observe(
                     ended_at
                 ],
             )?;
+            sub_agents::end_turn(connection, chat_id, &turn_id, state, ending.as_deref())?;
             expire_interactions(connection, chat_id, Some(&turn_id))
         }
         ChatObservation::CaptureAgentChanges { turn_id } => {
@@ -2045,6 +2107,61 @@ fn observe(
             )?;
             Ok(())
         }
+        ChatObservation::SubAgentStarted {
+            native_id,
+            parent,
+            tool_id,
+            turn_id,
+            native_run_id,
+            background,
+            payload,
+        } => sub_agents::observe(
+            connection,
+            chat_id,
+            sub_agents::Change::Started {
+                native_id,
+                parent,
+                tool_id,
+                turn_id,
+                native_run_id,
+                background,
+                payload,
+            },
+        ),
+        ChatObservation::SubAgentUpdated {
+            native_id,
+            native_run_id,
+            background,
+            payload,
+        } => sub_agents::observe(
+            connection,
+            chat_id,
+            sub_agents::Change::Updated {
+                native_id,
+                native_run_id,
+                background,
+                payload,
+            },
+        ),
+        ChatObservation::SubAgentEnded {
+            native_id,
+            native_run_id,
+            state,
+            stopped_by,
+            stop_reason,
+            detail,
+        } => sub_agents::observe(
+            connection,
+            chat_id,
+            sub_agents::Change::Ended {
+                native_id,
+                native_run_id,
+                state,
+                stopped_by,
+                stop_reason,
+                detail,
+            },
+        ),
         ChatObservation::InteractionResolved {
             interaction_id,
             state,
@@ -2265,6 +2382,7 @@ fn lose_contact(
         log(connection, chat_id, "tool", &id)?;
     }
     expire_interactions(connection, chat_id, None)?;
+    sub_agents::lose_contact(connection, chat_id)?;
     for id in ids(
         "SELECT DISTINCT message_id FROM chat_submission_attempts WHERE chat_id = ?1 AND delivery = 'possible' AND turn_id IS NULL",
     )? {
@@ -2284,6 +2402,8 @@ pub(crate) fn delete_where(connection: &Connection, filter: &str) -> Result<(), 
     for table in [
         "chat_record_writes",
         "chat_changes",
+        "chat_sub_agent_runs",
+        "chat_sub_agents",
         "chat_notices",
         "chat_interactions",
         "chat_tools",
@@ -3548,6 +3668,7 @@ impl Workspace {
                      EXISTS (SELECT 1 FROM chat_turns WHERE chat_id = chats.id AND state = 'active')
                   OR EXISTS (SELECT 1 FROM chat_tools WHERE chat_id = chats.id AND state = 'running')
                   OR EXISTS (SELECT 1 FROM chat_interactions WHERE chat_id = chats.id AND state = 'pending')
+                  OR EXISTS (SELECT 1 FROM chat_sub_agent_runs WHERE chat_id = chats.id AND state = 'running')
                   OR EXISTS (SELECT 1 FROM chat_submission_attempts WHERE chat_id = chats.id AND delivery = 'possible' AND turn_id IS NULL))
                  ORDER BY rowid",
             )?;
@@ -3615,6 +3736,7 @@ impl Workspace {
                 sequence,
                 items: page.items,
                 earlier: page.earlier,
+                sub_agents: sub_agents::read_all(transaction, chat_id)?,
             })
         })
     }
@@ -3705,6 +3827,8 @@ impl Workspace {
             for (kind, id, sequence) in subjects {
                 let record = if kind == "chat" {
                     Some(ChatRecord::Chat(read_chat(transaction, &id)?))
+                } else if kind == "sub_agent" {
+                    sub_agents::read_record(transaction, &id)?.map(ChatRecord::SubAgent)
                 } else {
                     read_item(transaction, &kind, &id)?.map(ChatRecord::Item)
                 };

@@ -1181,5 +1181,28 @@ TICKETD_UPDATE_FORMAT_LEDGER=1 cargo test -p ticketd-core --lib format::
 + column chat_messages.requires_link_context
 
 ## 105
++ table chat_sub_agent_runs
++ table chat_sub_agents
 + column chat_interactions.sub_agent_id
++ column chat_sub_agent_runs.chat_id
++ column chat_sub_agent_runs.detail
++ column chat_sub_agent_runs.ended_at
++ column chat_sub_agent_runs.id
++ column chat_sub_agent_runs.native_run_id
++ column chat_sub_agent_runs.position
++ column chat_sub_agent_runs.run
++ column chat_sub_agent_runs.started_at
++ column chat_sub_agent_runs.state
++ column chat_sub_agent_runs.stop_reason
++ column chat_sub_agent_runs.stopped_by
++ column chat_sub_agent_runs.sub_agent_id
++ column chat_sub_agent_runs.turn_id
++ column chat_sub_agents.background
++ column chat_sub_agents.chat_id
++ column chat_sub_agents.created_at
++ column chat_sub_agents.id
++ column chat_sub_agents.native_id
++ column chat_sub_agents.parent_native_id
++ column chat_sub_agents.payload
++ column chat_sub_agents.tool_id
 + column chat_tools.sub_agent_id

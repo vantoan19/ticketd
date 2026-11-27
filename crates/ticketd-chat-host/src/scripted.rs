@@ -300,6 +300,44 @@ pub(crate) fn brief(kind: &EventKind) -> String {
             output,
             ..
         } => format!("tool {} {title:?} {status:?} {output:?}", item.0),
+        EventKind::SubAgentStarted(start) => format!(
+            "sub-agent-started {} run {:?} parent {:?} tool {:?} background {} {}",
+            start.sub_agent.0,
+            start.run,
+            start.parent.as_ref().map(|parent| parent.0.as_str()),
+            start.tool.as_ref().map(|tool| tool.0.as_str()),
+            start.background,
+            start.native
+        ),
+        EventKind::SubAgentUpdated {
+            sub_agent,
+            run,
+            background,
+            native,
+        } => format!(
+            "sub-agent-updated {} run {run:?} background {background:?} {native:?}",
+            sub_agent.0
+        ),
+        EventKind::SubAgentEnded {
+            sub_agent,
+            run,
+            outcome,
+            detail,
+        } => format!(
+            "sub-agent-ended {} run {run:?} {outcome:?} {detail:?}",
+            sub_agent.0
+        ),
+        EventKind::SubAgentToolUpdated {
+            sub_agent,
+            item,
+            title,
+            status,
+            output,
+            ..
+        } => format!(
+            "sub-agent-tool {} {} {title:?} {status:?} {output:?}",
+            sub_agent.0, item.0
+        ),
         EventKind::InteractionRequested(request) => match &request.kind {
             InteractionKind::Approval {
                 description,

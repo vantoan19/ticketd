@@ -1428,6 +1428,214 @@ describe("reasoning, files, context and settings", () => {
   });
 });
 
+describe("sub-agents", () => {
+  const started = (extra: Record<string, unknown> = {}) => ({
+    type: "system",
+    subtype: "task_started",
+    task_id: "agent-1",
+    run_id: "run-a",
+    tool_use_id: "toolu_agent",
+    description: "Find limiter bypasses",
+    subagent_type: "Explore",
+    task_type: "local_agent",
+    is_backgrounded: false,
+    spawn_depth: 1,
+    prompt: "Find every way a request could get past the rate limiter.",
+    ...extra,
+  });
+
+  it("forwards an agent task as typed events from its start to its end", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started());
+    fake.push({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "agent-1",
+      run_id: "run-a",
+      patch: { is_backgrounded: true, status: "running" },
+    });
+    fake.push({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "agent-1",
+      run_id: "run-a",
+      tool_use_id: "toolu_agent",
+      status: "completed",
+      output_file: "/ignored",
+      summary: 'Agent "Find limiter bypasses" finished',
+    });
+    await settle();
+    expect(h.named("sdk_message_unmapped")).toHaveLength(0);
+    expect(h.named("sub_agent_started")).toMatchObject([
+      {
+        generation: 1,
+        task_id: "agent-1",
+        run_id: "run-a",
+        tool_use_id: "toolu_agent",
+        parent_task_id: null,
+        description: "Find limiter bypasses",
+        subagent_type: "Explore",
+        background: false,
+        prompt: "Find every way a request could get past the rate limiter.",
+        prompt_truncated: false,
+        spawn_depth: 1,
+      },
+    ]);
+    expect(h.named("sub_agent_updated")).toMatchObject([
+      {
+        task_id: "agent-1",
+        run_id: "run-a",
+        status: "running",
+        background: true,
+        description: null,
+        error: null,
+      },
+    ]);
+    expect(h.named("sub_agent_ended")).toMatchObject([
+      {
+        task_id: "agent-1",
+        run_id: "run-a",
+        tool_use_id: "toolu_agent",
+        status: "completed",
+        reason: null,
+        summary: 'Agent "Find limiter bypasses" finished',
+      },
+    ]);
+  });
+
+  it("names the sub-agent that started a nested one", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started({ task_id: "agent-2", parent_task_id: "agent-1" }));
+    await settle();
+    expect(h.named("sub_agent_started")).toMatchObject([
+      { task_id: "agent-2", parent_task_id: "agent-1" },
+    ]);
+  });
+
+  it("keeps shells, monitors, ambient and transcript-less tasks out", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push({
+      type: "system",
+      subtype: "task_started",
+      task_id: "shell-1",
+      description: "npm test",
+      task_type: "local_bash",
+    });
+    fake.push(started({ task_id: "ambient-1", ambient: true }));
+    fake.push(started({ task_id: "quiet-1", skip_transcript: true }));
+    // Neither a shell's later frames nor an unknown task's name a sub-agent.
+    fake.push({
+      type: "system",
+      subtype: "task_updated",
+      task_id: "shell-1",
+      patch: { status: "completed" },
+    });
+    fake.push({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "shell-1",
+      status: "completed",
+      output_file: "/x",
+      summary: "done",
+    });
+    await settle();
+    expect(h.named("sub_agent_started")).toHaveLength(0);
+    expect(h.named("sub_agent_updated")).toHaveLength(0);
+    expect(h.named("sub_agent_ended")).toHaveLength(0);
+    expect(h.named("sdk_message_unmapped")).toHaveLength(5);
+  });
+
+  it("takes a task with no type for a sub-agent only when it carries a prompt", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started({ task_id: "plain-1", task_type: undefined }));
+    fake.push(
+      started({
+        task_id: "bare-1",
+        task_type: undefined,
+        subagent_type: undefined,
+        prompt: undefined,
+      }),
+    );
+    await settle();
+    expect(h.named("sub_agent_started")).toMatchObject([
+      { task_id: "plain-1" },
+    ]);
+    expect(h.named("sdk_message_unmapped")).toHaveLength(1);
+  });
+
+  it("forwards the whole prompt up to a bound, and says when it cut it", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started({ prompt: "p".repeat(70_000) }));
+    await settle();
+    const [event] = h.named("sub_agent_started");
+    expect(event?.prompt?.length).toBe(65_536);
+    expect(event?.prompt_truncated).toBe(true);
+  });
+
+  it("reports a resumed run under the same task with its own run id", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push(started());
+    fake.push(started({ run_id: "run-b", is_backgrounded: true }));
+    fake.push({
+      type: "system",
+      subtype: "task_notification",
+      task_id: "agent-1",
+      run_id: "run-b",
+      status: "stopped",
+      reason: "worker_restart",
+      output_file: "/x",
+      summary: "stopped",
+    });
+    await settle();
+    expect(h.named("sub_agent_started")).toMatchObject([
+      { run_id: "run-a", background: false },
+      { run_id: "run-b", background: true },
+    ]);
+    expect(h.named("sub_agent_ended")).toMatchObject([
+      { run_id: "run-b", status: "stopped", reason: "worker_restart" },
+    ]);
+  });
+
+  it("keeps the tag and the model on a sub-agent's frames", async () => {
+    const h = harness();
+    const fake = await h.open();
+    fake.push({
+      type: "assistant",
+      uuid: "a-1",
+      parent_tool_use_id: "toolu_agent",
+      message: {
+        id: "msg_1",
+        model: "claude-haiku-test",
+        content: [
+          {
+            type: "tool_use",
+            id: "toolu_read",
+            name: "Read",
+            input: { file_path: "a" },
+          },
+        ],
+      },
+    });
+    fake.push({
+      type: "assistant",
+      uuid: "a-2",
+      parent_tool_use_id: null,
+      message: { id: "msg_2", content: [{ type: "text", text: "hi" }] },
+    });
+    await settle();
+    expect(h.named("assistant_content")).toMatchObject([
+      { parent_tool_use_id: "toolu_agent", model: "claude-haiku-test" },
+      { parent_tool_use_id: null, model: null },
+    ]);
+  });
+});
+
 describe("output backpressure", () => {
   it("reads no further SDK output until the host has taken what was written", async () => {
     let drain = () => {};

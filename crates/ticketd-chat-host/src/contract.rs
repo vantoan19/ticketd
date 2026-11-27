@@ -5,6 +5,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use serde_json::Value;
 use tokio::sync::{Mutex, OwnedMutexGuard, mpsc};
 
 /// Capacity of a runtime's event channel. The supervisor keeps receiving while
@@ -48,6 +49,11 @@ string_id!(
 string_id!(
     /// A live approval or question awaiting an answer in the current runtime.
     NativeRequestId
+);
+string_id!(
+    /// A sub-agent as the harness identifies it, unique within the Chat (Claude's task
+    /// ID, Codex's child thread ID, Antigravity's child conversation ID).
+    NativeSubAgentId
 );
 
 /// Identifies one provider process owned by a Chat. The supervisor assigns a new
@@ -484,6 +490,36 @@ pub enum EventKind {
         output: Option<String>,
         detail: Option<ProviderDetail>,
     },
+    /// A sub-agent began, or was resumed for another run. It opens no turn: the run is
+    /// recorded in the turn that is active, if one is. A sub-agent seen again with the
+    /// same `run` changes nothing; one with another `run` is a resume.
+    SubAgentStarted(SubAgentStart),
+    /// More is known of a sub-agent: its words, or that it moved to the background.
+    SubAgentUpdated {
+        sub_agent: NativeSubAgentId,
+        run: Option<String>,
+        background: Option<bool>,
+        /// A JSON object merged over what the Chat keeps of what the harness said.
+        native: Option<Value>,
+    },
+    /// A run of a sub-agent ended. It never ends a turn.
+    SubAgentEnded {
+        sub_agent: NativeSubAgentId,
+        run: Option<String>,
+        outcome: SubAgentOutcome,
+        /// What the harness said went wrong, for a run that failed.
+        detail: Option<String>,
+    },
+    /// The latest state of one tool item of a sub-agent: a Step it owns. It belongs to
+    /// no turn of its own, so it opens none.
+    SubAgentToolUpdated {
+        sub_agent: NativeSubAgentId,
+        item: NativeItemId,
+        title: String,
+        status: ToolStatus,
+        output: Option<String>,
+        detail: Option<ProviderDetail>,
+    },
     InteractionRequested(InteractionRequest),
     /// The live request is gone; later answers to it are refused.
     InteractionResolved {
@@ -555,6 +591,37 @@ pub enum EventKind {
         summary: String,
         detail: ProviderDetail,
     },
+}
+
+/// A sub-agent run beginning.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubAgentStart {
+    pub sub_agent: NativeSubAgentId,
+    /// The harness's ID for this run, when it names runs.
+    pub run: Option<String>,
+    /// The sub-agent that started this one; `None` when the main agent did.
+    pub parent: Option<NativeSubAgentId>,
+    /// The tool item (a Step) that started it.
+    pub tool: Option<NativeItemId>,
+    pub background: bool,
+    /// What the harness said about it, as one JSON object (`description`,
+    /// `subagent_type`, `prompt`, `model`): stored as given and read when a view is built.
+    pub native: Value,
+}
+
+/// How a sub-agent run ended, as the harness said.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubAgentOutcome {
+    Completed,
+    Failed,
+    /// Stopped, and by whom as far as the harness can tell.
+    Stopped(SubAgentStopper),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SubAgentStopper {
+    Person,
+    MainAgent,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
